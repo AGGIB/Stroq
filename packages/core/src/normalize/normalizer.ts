@@ -38,7 +38,7 @@ const HOMOGLYPHS: Readonly<Record<string, string>> = {
 
 const BASE64_TOKEN = /[A-Za-z0-9+/]{24,}={0,2}/g;
 const HEX_TOKEN = /\b(?:[0-9a-fA-F]{2}){16,}\b/g;
-const URL_ENCODED = /(?:%[0-9A-Fa-f]{2})/;
+const URL_ENCODED = /%[0-9A-Fa-f]{2}[\s\S]*?%[0-9A-Fa-f]{2}/;
 const MAX_TOKENS_PER_LAYER = 50;
 
 function foldToken(token: string): string {
@@ -59,7 +59,8 @@ function looksLikeText(s: string): boolean {
   for (const ch of s) {
     total += 1;
     const c = ch.codePointAt(0) ?? 0;
-    if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127) || c >= 160) printable += 1;
+    if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127) || (c >= 160 && c !== 0xfffd))
+      printable += 1;
   }
   return printable / total >= 0.9 && /[A-Za-zЀ-ӿ]{3}/.test(s);
 }

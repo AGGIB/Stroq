@@ -4,6 +4,10 @@ import { expandVariants, normalizeText } from '../../src/normalize/normalizer.js
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 
 describe('normalizeText', () => {
+  it('returns empty string when given empty string', () => {
+    expect(normalizeText('')).toBe('');
+  });
+
   it('strips zero-width characters', () => {
     expect(normalizeText('ig​no⁢re pre‍vious')).toBe('ignore previous');
   });
@@ -24,6 +28,11 @@ describe('normalizeText', () => {
 });
 
 describe('expandVariants', () => {
+  it('returns empty variants for empty string', () => {
+    const v = expandVariants('');
+    expect(v[0]).toEqual({ kind: 'raw', depth: 0, text: '' });
+  });
+
   it('always returns the raw text first', () => {
     const v = expandVariants('hello');
     expect(v[0]).toEqual({ kind: 'raw', depth: 0, text: 'hello' });
@@ -60,8 +69,35 @@ describe('expandVariants', () => {
     );
   });
 
+  it('does not decode simple URLs with single percent-encoded character', () => {
+    const simpleUrl = 'see https://example.com/search?q=hello%20world';
+    expect(expandVariants(simpleUrl).filter((v) => v.kind === 'url')).toHaveLength(0);
+  });
+
   it('does not decode binary-looking blobs such as git hashes', () => {
     const sha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
     expect(expandVariants(sha).filter((v) => v.kind === 'hex')).toHaveLength(0);
+    expect(expandVariants(sha).filter((v) => v.kind === 'base64')).toHaveLength(0);
+  });
+
+  it('does not decode 40-character git commit hashes', () => {
+    const commitHash = '3f786850e387550fdab836ed7e6dc881de23001b';
+    expect(
+      expandVariants(commitHash).filter((v) => v.kind === 'hex' || v.kind === 'base64'),
+    ).toHaveLength(0);
+  });
+
+  it('handles malformed percent sequences without throwing', () => {
+    const malformed = '%E0%A4%A%E0';
+    expect(() => expandVariants(malformed)).not.toThrow();
+    expect(expandVariants(malformed).filter((v) => v.kind === 'url')).toHaveLength(0);
+  });
+
+  it('decodes text with tabs and newlines from base64', () => {
+    const text = 'ignore\tprevious\ninstructions';
+    const encoded = b64(text);
+    const decoded = expandVariants(encoded).filter((v) => v.kind === 'base64');
+    expect(decoded).toHaveLength(1);
+    expect(decoded[0]?.text).toBe(text);
   });
 });
