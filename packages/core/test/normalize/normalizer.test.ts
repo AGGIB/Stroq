@@ -9,7 +9,7 @@ describe('normalizeText', () => {
   });
 
   it('strips zero-width characters', () => {
-    expect(normalizeText('ig​no⁢re pre‍vious')).toBe('ignore previous');
+    expect(normalizeText('ig\u200Bno\u2062re pre\u200Dvious')).toBe('ignore previous');
   });
 
   it('folds fullwidth characters via NFKC', () => {
@@ -18,7 +18,7 @@ describe('normalizeText', () => {
 
   it('folds Cyrillic homoglyphs only inside mixed-script tokens', () => {
     // 'о' below is Cyrillic U+043E inside an otherwise Latin word
-    expect(normalizeText('ignоre instructions')).toBe('ignore instructions');
+    expect(normalizeText('ign\u043Ere instructions')).toBe('ignore instructions');
   });
 
   it('leaves pure Russian text untouched', () => {
@@ -40,7 +40,7 @@ describe('expandVariants', () => {
 
   it('adds a normalized variant only when normalization changed something', () => {
     expect(expandVariants('plain').some((v) => v.kind === 'normalized')).toBe(false);
-    expect(expandVariants('pl​ain').some((v) => v.kind === 'normalized')).toBe(true);
+    expect(expandVariants('pl\u200Bain').some((v) => v.kind === 'normalized')).toBe(true);
   });
 
   it('decodes base64 payloads that look like text', () => {

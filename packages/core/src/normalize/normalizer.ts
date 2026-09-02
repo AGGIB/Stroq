@@ -6,8 +6,8 @@ export interface Variant {
   readonly text: string;
 }
 
-const ZERO_WIDTH = /[­​-‏⁠-⁤﻿]/g;
-const CYRILLIC = /[Ѐ-ӿ]/;
+const ZERO_WIDTH = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+const CYRILLIC = /[\u0400-\u04FF]/;
 const LATIN = /[A-Za-z]/;
 const HOMOGLYPHS: Readonly<Record<string, string>> = {
   а: 'a',
@@ -62,7 +62,7 @@ function looksLikeText(s: string): boolean {
     if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127) || (c >= 160 && c !== 0xfffd))
       printable += 1;
   }
-  return printable / total >= 0.9 && /[A-Za-zЀ-ӿ]{3}/.test(s);
+  return printable / total >= 0.9 && /[A-Za-z\u0400-\u04FF]{3}/.test(s);
 }
 
 function decodeBase64(token: string): string | null {
