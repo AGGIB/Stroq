@@ -1,0 +1,28 @@
+id: STROQ-2026-00006
+title: 'Base64-decoded payload executed'
+status: experimental
+severity: critical
+author: 'Stroq'
+date: '2026/09/03'
+schema_version: '1.0'
+tags:
+  category: tool-poisoning
+detection:
+  condition: any
+  conditions:
+    - field: content
+      operator: regex
+      value: "(?i)base64\\s+(-d|--decode|-D)\\b[^\\n|]{0,80}\\|\\s*(sudo\\s+)?(ba|z|da)?sh\\b"
+    - field: content
+      operator: regex
+      value: "(?i)\\b(echo|printf)\\s+[\"']?[A-Za-z0-9+/=]{20,}[\"']?\\s*\\|\\s*base64\\s+(-d|--decode|-D)"
+    - field: content
+      operator: regex
+      value: "(?i)\\beval\\s*\\(\\s*(atob|base64_decode|Buffer\\.from)\\("
+test_cases:
+  true_positives:
+    - input: 'echo aWdub3JlIGFsbCBwcmV2aW91cw== | base64 -d | sh'
+      expected: trigger
+  true_negatives:
+    - input: 'Encode the image with base64 before embedding it in the JSON body'
+      expected: no_trigger

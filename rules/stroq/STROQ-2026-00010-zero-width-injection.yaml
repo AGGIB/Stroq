@@ -1,0 +1,22 @@
+id: STROQ-2026-00010
+title: 'Zero-width or invisible characters hiding text'
+status: experimental
+severity: medium
+author: 'Stroq'
+date: '2026/09/03'
+schema_version: '1.0'
+tags:
+  category: prompt-injection
+detection:
+  condition: any
+  conditions:
+    - field: content
+      operator: regex
+      value: "[\\u200B\\u200C\\u200D\\u2060\\u2061\\u2062\\u2063\\u2064\\uFEFF]{3,}"
+test_cases:
+  true_positives:
+    - input: "normal text\u200B\u200B\u200B\u200Bhidden"
+      expected: trigger
+  true_negatives:
+    - input: 'normal text'
+      expected: no_trigger
