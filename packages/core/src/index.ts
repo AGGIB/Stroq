@@ -15,3 +15,4 @@ export * from './policy/load-policy.js';
 export * from './util/lock.js';
 export * from './taint/session-store.js';
 export * from './audit/audit-log.js';
+export * from './engine.js';
