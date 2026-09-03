@@ -6,3 +6,5 @@ export * from './rules/compile.js';
 export * from './rules/bundle.js';
 export * from './scan/matcher.js';
 export * from './scan/scanner.js';
+export * from './actions/classify-bash.js';
+export * from './actions/classify-tool.js';
