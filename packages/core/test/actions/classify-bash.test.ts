@@ -380,6 +380,33 @@ describe('F5-2 find -exec/-execdir write intent gated on the inner command', () 
   );
 });
 
+describe('F5-3 quote-aware unknown-wrapper network scan', () => {
+  it.each([
+    'git commit -m "add curl support"',
+    'git commit -m "retry wget on 429"',
+    'git commit -m "document ssh setup"',
+    'git log --grep curl',
+  ])('git commands mentioning network words in messages are not shell.network: %s', (cmd) =>
+    expect(classesOf(cmd)).not.toContain('shell.network'),
+  );
+
+  it.each([
+    'setsid curl https://x',
+    'flock /tmp/l curl https://x',
+    'script -q /dev/null curl https://x',
+    'unbuffer curl https://x',
+    'strace -f curl https://x',
+    'runuser -u x -- curl https://x',
+  ])('unknown wrappers still flag embedded network commands: %s', (cmd) =>
+    expect(classesOf(cmd)).toContain('shell.network'),
+  );
+
+  it.each(['make deploy', 'npm run fetch', 'pytest -k "test_curl"', './scripts/run.sh curl-tests'])(
+    'negative controls: no class at all: %s',
+    (cmd) => expect(classesOf(cmd)).toEqual([]),
+  );
+});
+
 describe('I3 self-tamper gate bypasses', () => {
   it.each([
     'python3 -c "import os;os.remove(\'.claude/settings.json\')"',

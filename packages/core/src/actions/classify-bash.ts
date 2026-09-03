@@ -166,13 +166,16 @@ function hasNetworkSubcommand(seg: string, word: string): boolean {
 /**
  * True when `word` is a command we already have a specific, deliberate
  * verdict for elsewhere (a known network command, a shell, a self-config
- * reader/writer, or a command whose args are inert data). Only a command
- * word outside all of those categories is "unknown" enough to warrant
- * scanning its argument list for an embedded network command — otherwise
- * `grep curl notes.txt` or `npm install` would be misread as running curl.
+ * reader/writer, a command whose args are inert data, or `git` — whose
+ * network behaviour is already covered by the push/remote rules). Only a
+ * command word outside all of those categories is "unknown" enough to
+ * warrant scanning its argument list for an embedded network command —
+ * otherwise `grep curl notes.txt` or `npm install` would be misread as
+ * running curl.
  */
 function isClassifiedElsewhere(word: string): boolean {
   return (
+    word === 'git' ||
     NETWORK_COMMANDS.has(word) ||
     SHELLS.has(word) ||
     NETWORK_SUBCOMMANDS[word] !== undefined ||
@@ -190,6 +193,19 @@ function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
   });
 }
 
+// Quoted spans (single or double) are inert data — a network-command word
+// sitting inside one (a commit message, a `-k "test_curl"` filter, …) is
+// text, not an invocation. Stripped before tokenizing the unknown-wrapper
+// scan below so `git commit -m "add curl support"` isn't misread as running
+// curl. `-m <value>` / `--message=<value>` is also stripped for the
+// unquoted form of the same argument.
+const QUOTED_SPAN = /"[^"]*"|'[^']*'/g;
+const MESSAGE_ARG = /--message(=\S+|\s+\S+)|(^|\s)-m\s+\S+/g;
+
+function stripQuotedAndMessageArgs(segment: string): string {
+  return segment.replace(QUOTED_SPAN, ' ').replace(MESSAGE_ARG, ' ');
+}
+
 // Unlisted single-word wrappers (`setsid`, `flock`, `script`, `unbuffer`,
 // `strace`, `runuser`, …) run an arbitrary trailing command but are not
 // themselves in PREFIX_WORDS, so `commandWord` returns the wrapper itself
@@ -198,7 +214,7 @@ function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
 // tokens are scanned for an embedded network command word.
 function isUnknownWrapperNetworkCall(seg: string, word: string): boolean {
   if (word === '' || isClassifiedElsewhere(word)) return false;
-  const tokens = tokenize(seg).filter((t) => t !== '--');
+  const tokens = tokenize(stripQuotedAndMessageArgs(seg)).filter((t) => t !== '--');
   return hasEmbeddedNetworkToken(tokens);
 }
 
