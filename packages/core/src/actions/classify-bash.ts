@@ -17,7 +17,11 @@ const PREFIX_WORDS = new Set([
   'env',
   'nice',
 ]);
-const VALUE_FLAGS = new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-T', '-U', '-n']);
+const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-T', '-U']),
+  nice: new Set(['-n']),
+  env: new Set(['-u', '-C']),
+};
 const SHELLS = new Set([
   'sh',
   'bash',
@@ -112,12 +116,16 @@ export function splitSegments(command: string): string[] {
 
 export function commandWord(segment: string): string {
   const tokens = segment.split(/\s+/);
+  let wrapper = '';
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
     if (token === '' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
-    if (PREFIX_WORDS.has(token)) continue;
+    if (PREFIX_WORDS.has(token)) {
+      wrapper = token;
+      continue;
+    }
     if (token.startsWith('-')) {
-      if (VALUE_FLAGS.has(token)) i += 1;
+      if (WRAPPER_VALUE_FLAGS[wrapper]?.has(token)) i += 1;
       continue;
     }
     return token.replace(/^.*\//, '');

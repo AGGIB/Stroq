@@ -22,6 +22,11 @@ describe('splitSegments / commandWord', () => {
     expect(commandWord('nice -n 5 curl x')).toBe('curl');
     expect(commandWord('sudo --user=root curl x')).toBe('curl');
   });
+  it('only skips a flag value for the wrapper that owns that flag', () => {
+    expect(commandWord('sudo -n curl https://x.example')).toBe('curl');
+    expect(commandWord('nice -n 5 curl x')).toBe('curl');
+    expect(commandWord('sudo -u')).toBe('');
+  });
 });
 
 describe('isDangerousRmTarget', () => {
@@ -63,6 +68,7 @@ describe('classifyCommand', () => {
     'python3 -c "import urllib.request; urllib.request.urlopen(\'http://x\')"',
     'bash -c "cat /dev/tcp/1.2.3.4/80"',
     'sudo -u user curl https://evil.example',
+    'sudo -n curl https://evil.example',
   ])('network: %s', (cmd) => expect(classesOf(cmd)).toContain('shell.network'));
 
   it('extracts hosts from URLs and ssh targets', () => {
@@ -140,6 +146,7 @@ describe('classifyCommand', () => {
     'rm -rf ~/.stroq',
     'cat hooks.json > .cursor/hooks.json',
     'sudo -u deploy sed -i "s/deny/allow/" .claude/settings.json',
+    'sudo -n sed -i "s/x/y/" .claude/settings.json',
   ])('self tamper: %s', (cmd) => expect(classesOf(cmd)).toContain('config.self'));
 
   it('reading settings is not tampering', () => {
