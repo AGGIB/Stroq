@@ -1,5 +1,10 @@
 import type { ActionClass } from '../types.js';
 import { commandWord, firstArgAfter, splitSegments, tokenize } from './shell-segments.js';
+import {
+  SELF_CONFIG_READ_COMMANDS,
+  SELF_CONFIG_WRITE_COMMANDS,
+  selfTamperSignals,
+} from './self-config.js';
 
 export interface CommandClassification {
   readonly classes: readonly ActionClass[];
@@ -128,97 +133,6 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
 const PUSH_EXTERNAL =
   /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
-// `.claude` and `.stroq` are matched as bare directories (like `find .claude
-// -name settings.json -delete`, where the filename never appears adjacent to
-// the directory in the same token) — not just the specific
-// `.claude/settings.json` path. `.cursor` stays scoped to its one protected
-// file since nothing else under it is agent-security-relevant today.
-const SELF_CONFIG = /(\.claude(\/|\b)|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
-// Self-tamper gate: a segment that mentions a protected path is classified
-// into one of three buckets:
-//   - `config.self` (deny)       — clear write intent against the path
-//   - no class                   — a known read-only command, no redirection
-//   - `config.self_touch` (ask)  — everything else (unknown commands,
-//                                  editors, interpreters without inline code)
-// This replaces the previous deny-unless-read gate, which denied harmless
-// references (`git add`, `echo`, `mkdir ~/.stroq`, …) alongside real tamper
-// attempts.
-const SELF_CONFIG_READ_COMMANDS = new Set([
-  'cat',
-  'less',
-  'more',
-  'head',
-  'tail',
-  'grep',
-  'rg',
-  'jq',
-  'diff',
-  'stat',
-  'ls',
-  'wc',
-  'bat',
-  'file',
-  'echo',
-  'printf',
-  'test',
-  '[',
-  'du',
-  'find',
-  'mkdir',
-]);
-// Writers/editors/deleters: mentioning the protected path alongside one of
-// these command words is always write intent, regardless of `>`.
-const SELF_CONFIG_WRITE_COMMANDS = new Set([
-  'rm',
-  'mv',
-  'cp',
-  'tee',
-  'sed',
-  'sponge',
-  'truncate',
-  'chmod',
-  'chown',
-  'ln',
-  'dd',
-  'install',
-  'touch',
-  'shred',
-]);
-// Interpreters are write intent only when invoked with inline code
-// (`-c`/`-e`, including combined short flags like `perl -pi -e` or
-// `perl -pe`); a bare `python3 -m json.tool file` is not write intent.
-const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
-const GIT_WRITE_SUBCOMMAND = /^git\s+(checkout|restore|reset|clean|rm|stash)\b/;
-const GIT_READ_SUBCOMMAND = /^git\s+(status|diff|log|show|add|blame)\b/;
-// `find` is read-only by default (in SELF_CONFIG_READ_COMMANDS), but any of
-// these primaries give it write/delete intent regardless of the path
-// mentioned, e.g. `find ~/.stroq -delete` or `find . -exec rm -rf {} \;`.
-const FIND_WRITE_PRIMARIES = /-(delete|exec|execdir|ok|okdir|fprint|fprintf)\b/;
-
-function isInlineCodeToken(token: string): boolean {
-  if (!/^-[A-Za-z]+$/.test(token)) return false;
-  return /[ec]/.test(token.slice(1));
-}
-
-function hasInlineCode(segment: string): boolean {
-  return segment.split(/\s+/).some(isInlineCodeToken);
-}
-
-function isSelfConfigWriteIntent(segment: string, word: string): boolean {
-  if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
-  if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
-  if (segment.includes('>')) return true;
-  if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;
-  if (word === 'find' && FIND_WRITE_PRIMARIES.test(segment)) return true;
-  return false;
-}
-
-function isSelfConfigReadOnly(segment: string, word: string): boolean {
-  if (SELF_CONFIG_READ_COMMANDS.has(word)) return true;
-  if (word === 'git' && GIT_READ_SUBCOMMAND.test(segment)) return true;
-  if (SELF_CONFIG_INTERPRETERS.has(word) && !hasInlineCode(segment)) return true;
-  return false;
-}
 
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
@@ -327,50 +241,6 @@ function secretSignals(segments: readonly string[]): string[] {
     );
     return ENV_DUMP.test(seg) ? [...signals, 'env-dump'] : signals;
   });
-}
-
-type SelfConfigVerdict = 'deny' | 'ask' | null;
-
-function classifySelfConfigSegment(segment: string): SelfConfigVerdict {
-  if (!SELF_CONFIG.test(segment)) return null;
-  const word = commandWord(segment);
-  if (isSelfConfigWriteIntent(segment, word)) return 'deny';
-  if (isSelfConfigReadOnly(segment, word)) return null;
-  return 'ask';
-}
-
-interface SelfConfigSignals {
-  readonly deny: readonly string[];
-  readonly ask: readonly string[];
-}
-
-// Our segment splitter is not quote-aware (see shell-segments.ts): a `;`
-// inside an interpreter's inline-code string (`python3 -c "import os;os...`)
-// splits the payload away from its `-c`/`-e` flag, so the fragment that
-// actually mentions the protected path can no longer see the flag on its
-// own. When some sibling segment of the same command IS an interpreter
-// invocation with inline code, an otherwise-ambiguous sibling that mentions
-// the path is still write intent, not a mere reference.
-function anySegmentIsInterpreterInlineCode(segments: readonly string[]): boolean {
-  return segments.some((seg) => {
-    const word = commandWord(seg);
-    return SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(seg);
-  });
-}
-
-function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {
-  const interpreterInlineElsewhere = anySegmentIsInterpreterInlineCode(segments);
-  const deny: string[] = [];
-  const ask: string[] = [];
-  for (const segment of segments) {
-    const verdict = classifySelfConfigSegment(segment);
-    if (verdict === 'deny' || (verdict === 'ask' && interpreterInlineElsewhere)) {
-      deny.push('self-config-write');
-    } else if (verdict === 'ask') {
-      ask.push('self-config-touch');
-    }
-  }
-  return { deny, ask };
 }
 
 function hostsOf(command: string): string[] {

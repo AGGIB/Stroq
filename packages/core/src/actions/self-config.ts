@@ -1,0 +1,206 @@
+/**
+ * Self-tamper gate: classifies whether a shell segment touching Stroq's own
+ * security config is a benign reference, an editor-style touch, or clear
+ * write intent. Shared between the Bash classifier (classify-bash.ts) and
+ * used to keep classify-tool.ts's MCP/Write/Edit path check aligned on the
+ * same protected-file regex.
+ */
+import { commandWord } from './shell-segments.js';
+
+/**
+ * Protected agent-security files: the only paths whose write/edit/delete
+ * makes a command or tool call `config.self`.
+ *
+ * Deliberately narrow to specific files, not the bare `.claude`/`.cursor`
+ * directories: an earlier, wider version matched bare `.claude`, which
+ * denied routine edits like `echo "# notes" > .claude/CLAUDE.md` or
+ * `vim .claude/rules/style.md` — those files are not agent security config
+ * and touching them is not self-tampering. `.stroq` stays a directory match
+ * (`.stroq` or `.stroq/...`) since everything under it is Stroq's own state
+ * (audit log, session data) and nothing else belongs there.
+ */
+export const SELF_CONFIG_FILE =
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
+
+/**
+ * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
+ * shell word. Deliberately NOT part of the general self-tamper gate above —
+ * `cd .claude`, `tar czf backup.tgz .claude` or `vim .claude/CLAUDE.md` do
+ * not mention a protected FILE and are not self-tampering. Used only by the
+ * `find` write-intent check below, since `find`'s directory argument and a
+ * `-name` filename argument are separate shell tokens, e.g.
+ * `find .claude -name 'settings.json' -delete` never has the literal
+ * substring `.claude/settings.json` anywhere in the command text.
+ */
+export const PROTECTED_DIRS = /\.(claude|cursor|stroq)(\/|$|\s)/;
+
+export const SELF_CONFIG_READ_COMMANDS = new Set([
+  'cat',
+  'less',
+  'more',
+  'head',
+  'tail',
+  'grep',
+  'rg',
+  'jq',
+  'diff',
+  'stat',
+  'ls',
+  'wc',
+  'bat',
+  'file',
+  'echo',
+  'printf',
+  'test',
+  '[',
+  'du',
+  'find',
+  'mkdir',
+]);
+
+// Writers/editors/deleters: mentioning the protected path alongside one of
+// these command words is always write intent, regardless of `>`.
+export const SELF_CONFIG_WRITE_COMMANDS = new Set([
+  'rm',
+  'mv',
+  'cp',
+  'tee',
+  'sed',
+  'sponge',
+  'truncate',
+  'chmod',
+  'chown',
+  'ln',
+  'dd',
+  'install',
+  'touch',
+  'shred',
+]);
+
+// Interpreters are write intent only when invoked with inline code
+// (`-c`/`-e`, including combined short flags like `perl -pi -e` or
+// `perl -pe`); a bare `python3 -m json.tool file` is not write intent.
+const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
+const GIT_WRITE_SUBCOMMAND = /^git\s+(checkout|restore|reset|clean|rm|stash)\b/;
+const GIT_READ_SUBCOMMAND = /^git\s+(status|diff|log|show|add|blame)\b/;
+
+// `find`'s own write/delete primaries, excluding `-exec`/`-execdir` (handled
+// separately below, since those two run an arbitrary inner command whose own
+// verb determines intent — see findExecIsWriteIntent).
+const FIND_DELETE_PRIMARIES = /-(delete|ok|okdir|fprint|fprintf)\b/;
+const FIND_EXEC_PRIMARY = /-exec(?:dir)?\s+(\S+)/;
+// Writer/deleter verbs that make a `find ... -exec <verb> ...` write intent.
+// A reader (`cat`, `grep`, `ls`, `head`, …) is not — `find . -exec cat {} \;`
+// only reads the matched files.
+const FIND_EXEC_WRITE_WORDS = new Set([
+  'rm',
+  'mv',
+  'cp',
+  'tee',
+  'sed',
+  'perl',
+  'chmod',
+  'chown',
+  'ln',
+  'truncate',
+  'shred',
+]);
+
+function isInlineCodeToken(token: string): boolean {
+  if (!/^-[A-Za-z]+$/.test(token)) return false;
+  return /[ec]/.test(token.slice(1));
+}
+
+function hasInlineCode(segment: string): boolean {
+  return segment.split(/\s+/).some(isInlineCodeToken);
+}
+
+function findExecIsWriteIntent(segment: string): boolean {
+  const match = FIND_EXEC_PRIMARY.exec(segment);
+  if (!match) return false;
+  const word = (match[1] ?? '').replace(/^.*\//, '');
+  return FIND_EXEC_WRITE_WORDS.has(word);
+}
+
+function isFindWriteIntent(segment: string): boolean {
+  if (FIND_DELETE_PRIMARIES.test(segment)) return true;
+  return findExecIsWriteIntent(segment);
+}
+
+/**
+ * True when `segment` mentions a protected path at all — either one of the
+ * specific protected FILES (any command), or, for `find` only, a bare
+ * protected DIRECTORY (since `find`'s write intent can apply to the whole
+ * directory even when no protected filename is in the same token).
+ */
+function touchesSelfConfig(segment: string, word: string): boolean {
+  if (SELF_CONFIG_FILE.test(segment)) return true;
+  return word === 'find' && PROTECTED_DIRS.test(segment);
+}
+
+function isSelfConfigWriteIntent(segment: string, word: string): boolean {
+  if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
+  if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
+  if (segment.includes('>')) return true;
+  if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;
+  if (word === 'find') return isFindWriteIntent(segment);
+  return false;
+}
+
+function isSelfConfigReadOnly(segment: string, word: string): boolean {
+  if (SELF_CONFIG_READ_COMMANDS.has(word)) return true;
+  if (word === 'git' && GIT_READ_SUBCOMMAND.test(segment)) return true;
+  if (SELF_CONFIG_INTERPRETERS.has(word) && !hasInlineCode(segment)) return true;
+  return false;
+}
+
+export type SelfConfigVerdict = 'deny' | 'ask' | null;
+
+/**
+ * Classifies one segment against the self-tamper gate:
+ *   - `deny`  — clear write intent against a protected path
+ *   - `null`  — no protected path mentioned, or a known read-only command
+ *   - `ask`   — a protected path is mentioned by something else (unknown
+ *               commands, editors, interpreters without inline code)
+ */
+export function classifySelfConfigSegment(segment: string): SelfConfigVerdict {
+  const word = commandWord(segment);
+  if (!touchesSelfConfig(segment, word)) return null;
+  if (isSelfConfigWriteIntent(segment, word)) return 'deny';
+  if (isSelfConfigReadOnly(segment, word)) return null;
+  return 'ask';
+}
+
+export interface SelfConfigSignals {
+  readonly deny: readonly string[];
+  readonly ask: readonly string[];
+}
+
+// Our segment splitter is not quote-aware (see shell-segments.ts): a `;`
+// inside an interpreter's inline-code string (`python3 -c "import os;os...`)
+// splits the payload away from its `-c`/`-e` flag, so the fragment that
+// actually mentions the protected path can no longer see the flag on its
+// own. When some sibling segment of the same command IS an interpreter
+// invocation with inline code, an otherwise-ambiguous sibling that mentions
+// the path is still write intent, not a mere reference.
+function anySegmentIsInterpreterInlineCode(segments: readonly string[]): boolean {
+  return segments.some((seg) => {
+    const word = commandWord(seg);
+    return SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(seg);
+  });
+}
+
+export function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {
+  const interpreterInlineElsewhere = anySegmentIsInterpreterInlineCode(segments);
+  const deny: string[] = [];
+  const ask: string[] = [];
+  for (const segment of segments) {
+    const verdict = classifySelfConfigSegment(segment);
+    if (verdict === 'deny' || (verdict === 'ask' && interpreterInlineElsewhere)) {
+      deny.push('self-config-write');
+    } else if (verdict === 'ask') {
+      ask.push('self-config-touch');
+    }
+  }
+  return { deny, ask };
+}

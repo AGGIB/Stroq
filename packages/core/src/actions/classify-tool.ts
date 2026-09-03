@@ -1,11 +1,11 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
+import { SELF_CONFIG_FILE } from './self-config.js';
 
 export interface ToolClassification extends CommandClassification {
   readonly mcp?: { readonly server: string; readonly tool: string };
 }
 
-const SELF_CONFIG_PATH = /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|$))/;
 const SECRET_PATH =
   /(\/\.ssh\/|\bid_(rsa|ed25519|ecdsa|dsa)\b|\/\.aws\/|(^|\/)\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|\/\.(npmrc|netrc|pgpass|git-credentials)$|\/\.kube\/config$|\/\.config\/gcloud\/|\/etc\/(shadow|passwd)$)/;
 const SIDE_EFFECT_TOOL =
@@ -36,7 +36,7 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
 function classifyPath(path: string, write: boolean): ToolClassification {
   const classes: ActionClass[] = [];
   const signals: string[] = [];
-  if (write && SELF_CONFIG_PATH.test(path)) {
+  if (write && SELF_CONFIG_FILE.test(path)) {
     classes.push('config.self');
     signals.push('self-config-write');
   }
@@ -56,9 +56,9 @@ function classifyPath(path: string, write: boolean): ToolClassification {
 function touchesSelfConfigPathLikeKey(toolInput: Readonly<Record<string, unknown>>): boolean {
   return Object.entries(toolInput).some(([key, value]) => {
     if (!PATH_LIKE_KEY.test(key)) return false;
-    if (typeof value === 'string') return SELF_CONFIG_PATH.test(value);
+    if (typeof value === 'string') return SELF_CONFIG_FILE.test(value);
     if (Array.isArray(value)) {
-      return value.some((v) => typeof v === 'string' && SELF_CONFIG_PATH.test(v));
+      return value.some((v) => typeof v === 'string' && SELF_CONFIG_FILE.test(v));
     }
     return false;
   });
