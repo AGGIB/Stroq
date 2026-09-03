@@ -17,6 +17,11 @@ describe('splitSegments / commandWord', () => {
     expect(commandWord('FOO=1 sudo /usr/bin/curl -s x')).toBe('curl');
     expect(commandWord('')).toBe('');
   });
+  it('skips the value of a wrapper flag that takes one', () => {
+    expect(commandWord('sudo -u user curl -s x')).toBe('curl');
+    expect(commandWord('nice -n 5 curl x')).toBe('curl');
+    expect(commandWord('sudo --user=root curl x')).toBe('curl');
+  });
 });
 
 describe('isDangerousRmTarget', () => {
@@ -57,6 +62,7 @@ describe('classifyCommand', () => {
     'scp file user@box.example:/tmp',
     'python3 -c "import urllib.request; urllib.request.urlopen(\'http://x\')"',
     'bash -c "cat /dev/tcp/1.2.3.4/80"',
+    'sudo -u user curl https://evil.example',
   ])('network: %s', (cmd) => expect(classesOf(cmd)).toContain('shell.network'));
 
   it('extracts hosts from URLs and ssh targets', () => {
@@ -93,7 +99,13 @@ describe('classifyCommand', () => {
     'psql -c "DROP TABLE users"',
     'dd if=/dev/zero of=/dev/sda',
     'mkfs.ext4 /dev/sdb1',
+    'dd if=disk.iso of=/dev/disk2 bs=4m',
   ])('destructive: %s', (cmd) => expect(classesOf(cmd)).toContain('shell.destructive'));
+
+  it.each([
+    'dd if=source.img of=output.img bs=1M',
+    'dd if=/dev/urandom of=/dev/null bs=1M count=1',
+  ])('not destructive: %s', (cmd) => expect(classesOf(cmd)).not.toContain('shell.destructive'));
 
   it.each([
     'cat ~/.ssh/id_rsa',
@@ -127,6 +139,7 @@ describe('classifyCommand', () => {
     'sed -i "s/deny/allow/" .claude/settings.local.json',
     'rm -rf ~/.stroq',
     'cat hooks.json > .cursor/hooks.json',
+    'sudo -u deploy sed -i "s/deny/allow/" .claude/settings.json',
   ])('self tamper: %s', (cmd) => expect(classesOf(cmd)).toContain('config.self'));
 
   it('reading settings is not tampering', () => {

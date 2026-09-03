@@ -17,6 +17,7 @@ const PREFIX_WORDS = new Set([
   'env',
   'nice',
 ]);
+const VALUE_FLAGS = new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-T', '-U', '-n']);
 const SHELLS = new Set([
   'sh',
   'bash',
@@ -66,7 +67,7 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bgit\s+branch\s+-D\b/, 'git-destructive'],
   [/\b(DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE)\b/i, 'sql-destructive'],
   [/\bmkfs(\.\w+)?\b/, 'disk-destructive'],
-  [/\bdd\s+if=/, 'disk-destructive'],
+  [/\bdd\b[^\n]*\bof=\/dev\/(?!null\b|zero\b)/, 'disk-destructive'],
   [/\bshred\b/, 'disk-destructive'],
   [/\bwipefs\b/, 'disk-destructive'],
   [/\bchmod\s+-R\s+777\s+\//, 'chmod-root'],
@@ -110,9 +111,15 @@ export function splitSegments(command: string): string[] {
 }
 
 export function commandWord(segment: string): string {
-  for (const token of segment.split(/\s+/)) {
+  const tokens = segment.split(/\s+/);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] ?? '';
     if (token === '' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
-    if (PREFIX_WORDS.has(token) || token.startsWith('-')) continue;
+    if (PREFIX_WORDS.has(token)) continue;
+    if (token.startsWith('-')) {
+      if (VALUE_FLAGS.has(token)) i += 1;
+      continue;
+    }
     return token.replace(/^.*\//, '');
   }
   return '';
