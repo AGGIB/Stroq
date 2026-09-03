@@ -12,3 +12,5 @@ export * from './policy/policy-types.js';
 export * from './policy/default-policy.js';
 export * from './policy/evaluate.js';
 export * from './policy/load-policy.js';
+export * from './util/lock.js';
+export * from './taint/session-store.js';
