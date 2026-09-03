@@ -27,14 +27,53 @@ export interface AuditEntry extends AuditEntryInput {
 
 export const GENESIS_HASH = '0'.repeat(64);
 const MAX_SUMMARY = 300;
-const SECRET_PATTERNS: readonly RegExp[] = [
-  /\bsk-[A-Za-z0-9_-]{10,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
-  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+const PRIVATE_FILE_MODE = 0o600;
+const PRIVATE_DIR_MODE = 0o700;
+
+interface RedactionRule {
+  readonly re: RegExp;
+  readonly replace: string;
+}
+
+// Applied in order: vendor-specific token shapes first, then structural
+// patterns (labelled credentials, basic-auth flags, URL userinfo), and
+// finally the long-opaque-token guard. Each pattern's own replacement
+// keeps any surrounding label/scheme so the audit trail stays readable.
+const STRUCTURAL_REDACTIONS: readonly RedactionRule[] = [
+  { re: /\bsk-[A-Za-z0-9_-]{10,}/g, replace: '[REDACTED]' },
+  { re: /\bAKIA[0-9A-Z]{16}\b/g, replace: '[REDACTED]' },
+  { re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, replace: '[REDACTED]' },
+  { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, replace: '[REDACTED]' },
+  { re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, replace: '[REDACTED]' },
+  { re: /\bAIza[0-9A-Za-z_-]{30,}\b/g, replace: '[REDACTED]' },
+  // Authorization: Bearer|Basic|Token <value> — keep the scheme.
+  { re: /(authorization\s*:\s*)(bearer|basic|token)\s+\S+/gi, replace: '$1$2 [REDACTED]' },
+  // Labelled credentials: x-api-key / api-key / token / secret / password / pwd = or : value.
+  {
+    re: /((?:x-api-key|api[-_]?key|token|secret|password|passwd|pwd)\s*[:=]\s*)\S+/gi,
+    replace: '$1[REDACTED]',
+  },
+  // `curl -u user:pass` / `--user user:pass` — drop the whole flag+value.
+  { re: /(-u|--user)\s+\S+:\S+/g, replace: '[REDACTED]' },
+  // URL userinfo: scheme://user:pass@host
+  { re: /:\/\/[^\s/:@]+:[^\s/@]+@/g, replace: '://[REDACTED]@' },
 ];
+
+// Guard applied last: a standalone opaque token of 32+ chars (letters,
+// digits, `.`/`-`/`_`, no spaces or slashes) that mixes letters and digits.
+// Pure-hex tokens up to 64 chars are exempt (git SHAs are not secrets), and
+// the charset excludes `/` so file paths and URLs are never matched.
+const LONG_TOKEN = /(?<![A-Za-z0-9._-])[A-Za-z0-9._-]{32,}(?![A-Za-z0-9._-])/g;
+const isPureHex = (token: string): boolean => /^[0-9a-fA-F]+$/.test(token);
+const hasLetterAndDigit = (token: string): boolean => /[A-Za-z]/.test(token) && /[0-9]/.test(token);
+
+function redactLongTokens(text: string): string {
+  return text.replace(LONG_TOKEN, (token) => {
+    if (isPureHex(token) && token.length <= 64) return token;
+    if (!hasLetterAndDigit(token)) return token;
+    return '[REDACTED]';
+  });
+}
 
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {
@@ -51,7 +90,11 @@ export function stableStringify(value: unknown): string {
 }
 
 export function redact(text: string): string {
-  return SECRET_PATTERNS.reduce((acc, re) => acc.replace(re, '[REDACTED]'), text);
+  const structural = STRUCTURAL_REDACTIONS.reduce(
+    (acc, { re, replace }) => acc.replace(re, replace),
+    text,
+  );
+  return redactLongTokens(structural);
 }
 
 export function hashEntry(entry: Omit<AuditEntry, 'hash'>): string {
@@ -84,7 +127,7 @@ export class AuditLog {
   }
 
   async append(input: AuditEntryInput): Promise<AuditEntry> {
-    await mkdir(dirname(this.file), { recursive: true });
+    await mkdir(dirname(this.file), { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file}.lock`, async () => {
       const entries = await this.readAll();
       const last = entries[entries.length - 1];
@@ -97,7 +140,10 @@ export class AuditLog {
         prevHash: last?.hash ?? GENESIS_HASH,
       };
       const entry: AuditEntry = { ...unhashed, hash: hashEntry(unhashed) };
-      await appendFile(this.file, `${JSON.stringify(entry)}\n`, 'utf8');
+      await appendFile(this.file, `${JSON.stringify(entry)}\n`, {
+        encoding: 'utf8',
+        mode: PRIVATE_FILE_MODE,
+      });
       return entry;
     });
   }

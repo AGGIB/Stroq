@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -35,6 +35,40 @@ describe('redact', () => {
     ['-----BEGIN RSA PRIVATE KEY-----', '[REDACTED]'],
     ['plain text', 'plain text'],
   ])('%s → %s', (raw, expected) => expect(redact(raw)).toBe(expected));
+
+  it('redacts an Authorization: Bearer header but keeps the scheme', () => {
+    const raw = 'curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc123def456.xyz789"';
+    const out = redact(raw);
+    expect(out).toContain('Authorization: Bearer [REDACTED]');
+    expect(out).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+  });
+
+  it('redacts curl -u user:pass basic auth entirely', () => {
+    const out = redact('curl -u admin:hunter2 https://api.example/x');
+    expect(out).not.toContain('hunter2');
+    expect(out).not.toContain('admin');
+  });
+
+  it('redacts URL userinfo credentials', () => {
+    const out = redact('export DATABASE_URL=postgres://user:s3cr3tpw@db.example/prod');
+    expect(out).not.toContain('s3cr3tpw');
+    expect(out).toContain('://[REDACTED]@db.example/prod');
+  });
+
+  it('redacts an X-Api-Key header value but keeps the label', () => {
+    const out = redact('curl -H "X-Api-Key: 9f8e7d6c5b4a39281706f5e4d3c2b1a0"');
+    expect(out).not.toContain('9f8e7d6c5b4a39281706f5e4d3c2b1a0');
+    expect(out).toContain('X-Api-Key: [REDACTED]');
+  });
+
+  it('does not touch an ordinary command', () => {
+    expect(redact('ls -la src/components')).toBe('ls -la src/components');
+  });
+
+  it('does not redact a 40-char git SHA (pure hex is exempt)', () => {
+    const sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    expect(redact(`git show ${sha}`)).toBe(`git show ${sha}`);
+  });
 });
 
 describe('AuditLog', () => {
@@ -110,4 +144,16 @@ describe('AuditLog', () => {
     writeFileSync(file, lines.slice(0, 2).join('\n') + '\n');
     expect(await log.verify()).toEqual({ ok: true, count: 2, brokenAt: null });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'creates a new STROQ_HOME dir with 0700 and audit.jsonl with 0600',
+    async () => {
+      const home = join(mkdtempSync(join(tmpdir(), 'stroq-audit-')), 'stroq-home');
+      const file = join(home, 'audit.jsonl');
+      const log = new AuditLog(file);
+      await log.append(input(1));
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(statSync(home).mode & 0o777).toBe(0o700);
+    },
+  );
 });

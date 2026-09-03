@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,4 +74,15 @@ describe('FileSessionStore', () => {
     expect(sessionKey('abc')).toMatch(/^[0-9a-f]{16}$/);
     expect(sessionKey('abc')).toBe(sessionKey('abc'));
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'creates the sessions dir with 0700 and session files with 0600',
+    async () => {
+      const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
+      const store = new FileSessionStore(dir);
+      await store.markSuspect('s1', src('Read'));
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, `${sessionKey('s1')}.json`)).mode & 0o777).toBe(0o600);
+    },
+  );
 });

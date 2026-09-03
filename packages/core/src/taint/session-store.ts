@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import type { SessionState, TaintSource } from '../types.js';
 import { withLock } from '../util/lock.js';
 
+const PRIVATE_FILE_MODE = 0o600;
+const PRIVATE_DIR_MODE = 0o700;
+
 export interface SessionStore {
   get(sessionId: string): Promise<SessionState>;
   markSuspect(sessionId: string, source: TaintSource): Promise<SessionState>;
@@ -56,10 +59,10 @@ export class FileSessionStore implements SessionStore {
   }
 
   private async write(state: SessionState): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     const target = this.file(state.sessionId);
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, JSON.stringify(state), 'utf8');
+    await writeFile(tmp, JSON.stringify(state), { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
     await rename(tmp, target);
   }
 
@@ -68,7 +71,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async markSuspect(sessionId: string, source: TaintSource): Promise<SessionState> {
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
       const next = addSource(await this.read(sessionId), source, this.now().toISOString());
       await this.write(next);
@@ -77,7 +80,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async clear(sessionId: string): Promise<void> {
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
       await rm(this.file(sessionId), { force: true });
     });
