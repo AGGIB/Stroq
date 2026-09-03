@@ -40,16 +40,32 @@ function classifyPath(path: string, write: boolean): ToolClassification {
   return { classes, hosts: [], signals };
 }
 
-function classifyMcp(toolName: string): ToolClassification {
+/** Scans every string value in `toolInput` (one level deep, plus arrays of strings). */
+function touchesSelfConfig(toolInput: Readonly<Record<string, unknown>>): boolean {
+  return Object.values(toolInput).some((value) => {
+    if (typeof value === 'string') return SELF_CONFIG_PATH.test(value);
+    if (Array.isArray(value)) {
+      return value.some((v) => typeof v === 'string' && SELF_CONFIG_PATH.test(v));
+    }
+    return false;
+  });
+}
+
+function classifyMcp(
+  toolName: string,
+  toolInput: Readonly<Record<string, unknown>>,
+): ToolClassification {
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return EMPTY;
   const sideEffect = SIDE_EFFECT_TOOL.test(mcp.tool);
-  return {
-    classes: sideEffect ? ['mcp.call', 'mcp.side_effect'] : ['mcp.call'],
-    hosts: [],
-    signals: sideEffect ? ['mcp-side-effect-name'] : [],
-    mcp,
-  };
+  const selfConfig = touchesSelfConfig(toolInput);
+  const classes: ActionClass[] = ['mcp.call'];
+  if (sideEffect) classes.push('mcp.side_effect');
+  if (selfConfig) classes.push('config.self');
+  const signals: string[] = [];
+  if (sideEffect) signals.push('mcp-side-effect-name');
+  if (selfConfig) signals.push('self-config-write');
+  return { classes, hosts: [], signals, mcp };
 }
 
 function classifyFetch(toolInput: Readonly<Record<string, unknown>>): ToolClassification {
@@ -70,6 +86,6 @@ export function classifyTool(
   if (WRITE_TOOLS.has(toolName)) return classifyPath(pathOf(toolInput), true);
   if (toolName === 'Read') return classifyPath(pathOf(toolInput), false);
   if (toolName === 'WebFetch') return classifyFetch(toolInput);
-  if (toolName.startsWith('mcp__')) return classifyMcp(toolName);
+  if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput);
   return EMPTY;
 }

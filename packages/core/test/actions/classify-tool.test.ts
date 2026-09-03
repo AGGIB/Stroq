@@ -60,4 +60,21 @@ describe('classifyTool', () => {
   it('returns no classes for unknown tools', () => {
     expect(classifyTool('Glob', { pattern: '*' }, cwd).classes).toEqual([]);
   });
+
+  it('flags an MCP tool writing to the protected config as config.self', () => {
+    expect(
+      classifyTool('mcp__fs__write_file', { path: '.claude/settings.json' }, cwd).classes,
+    ).toContain('config.self');
+  });
+  it('does not flag an MCP tool touching an unrelated path', () => {
+    expect(
+      classifyTool('mcp__fs__read_file', { path: 'src/index.ts' }, cwd).classes,
+    ).not.toContain('config.self');
+  });
+  it('scans array-of-string MCP tool inputs one level deep', () => {
+    expect(
+      classifyTool('mcp__fs__write_files', { paths: ['a.ts', '.claude/settings.json'] }, cwd)
+        .classes,
+    ).toContain('config.self');
+  });
 });
