@@ -8,6 +8,9 @@ export const ClaudeHookInputSchema = z.looseObject({
   tool_input: z.record(z.string(), z.unknown()).default({}),
   cwd: z.string().default(''),
   tool_result: z.unknown().optional(),
+  // Real Claude Code (v2.1.226) sends the tool output as `tool_response`;
+  // `tool_result` is kept as a fallback for other agents/older payloads.
+  tool_response: z.unknown().optional(),
 });
 export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
 
@@ -21,16 +24,40 @@ export interface HookOutput {
 
 export const NO_OUTPUT: HookOutput = { stdout: '', exitCode: 0 };
 
+const clip = (s: string): string => s.slice(0, MAX_RESULT_CHARS);
+
+/** Read/Write responses nest the file body under `file.content`. */
+function fileContentOf(obj: Record<string, unknown>): string | null {
+  const file = obj['file'];
+  if (!file || typeof file !== 'object') return null;
+  const content = (file as Record<string, unknown>)['content'];
+  return typeof content === 'string' ? content : null;
+}
+
+/** Bash responses carry `stdout`/`stderr` instead of a single text field. */
+function streamsOf(obj: Record<string, unknown>): string | null {
+  const parts = [obj['stdout'], obj['stderr']].filter(
+    (p): p is string => typeof p === 'string' && p.length > 0,
+  );
+  if (typeof obj['stdout'] !== 'string' && typeof obj['stderr'] !== 'string') return null;
+  return parts.join('\n');
+}
+
+function objectToText(obj: Record<string, unknown>): string {
+  if (typeof obj['text'] === 'string') return obj['text'];
+  const file = fileContentOf(obj);
+  if (file !== null) return file;
+  const streams = streamsOf(obj);
+  if (streams !== null) return streams;
+  if (Array.isArray(obj['content'])) return toolResultToText(obj['content']);
+  return JSON.stringify(obj);
+}
+
 export function toolResultToText(result: unknown): string {
-  if (typeof result === 'string') return result.slice(0, MAX_RESULT_CHARS);
-  if (Array.isArray(result))
-    return result.map(toolResultToText).join('\n').slice(0, MAX_RESULT_CHARS);
-  if (result && typeof result === 'object') {
-    const obj = result as Record<string, unknown>;
-    if (typeof obj['text'] === 'string') return obj['text'].slice(0, MAX_RESULT_CHARS);
-    if (Array.isArray(obj['content'])) return toolResultToText(obj['content']);
-    return JSON.stringify(obj).slice(0, MAX_RESULT_CHARS);
-  }
+  if (typeof result === 'string') return clip(result);
+  if (Array.isArray(result)) return clip(result.map(toolResultToText).join('\n'));
+  if (result && typeof result === 'object')
+    return clip(objectToText(result as Record<string, unknown>));
   return result === undefined || result === null ? '' : String(result);
 }
 
@@ -69,7 +96,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const result = await engine.post({
     ...base,
-    toolResultText: toolResultToText(input.tool_result),
+    toolResultText: toolResultToText(input.tool_response ?? input.tool_result),
   });
   if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
   const ruleIds = [...new Set(result.scan.matches.map((m) => m.ruleId))];
