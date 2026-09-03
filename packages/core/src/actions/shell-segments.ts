@@ -155,24 +155,67 @@ function extractFindExecCommands(command: string): string[] {
   return results;
 }
 
+// `eval <arg>…`: eval's argument is itself a command to run, e.g.
+// `eval "curl https://x"` or the unquoted `eval curl https://x`. Like the
+// `sh -c` extractor, a quoted first argument contributes its contents;
+// otherwise the remaining tokens up to the next chain/pipe delimiter are
+// taken as the argument. The dynamic form (`eval "$(curl ...)"`) is also
+// matched here, but its network signal already comes from the
+// `$(...)`-substitution extraction above — this extraction only adds
+// coverage for the static forms that substitution extraction can't see.
+const EVAL_ARG = /\beval\s+/g;
+
+function extractEvalArguments(command: string): string[] {
+  const results: string[] = [];
+  EVAL_ARG.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = EVAL_ARG.exec(command)) !== null) {
+    const rest = command.slice(match.index + match[0].length);
+    const quote = rest[0];
+    if (quote === '"' || quote === "'") {
+      const end = rest.indexOf(quote, 1);
+      if (end !== -1) results.push(rest.slice(1, end));
+      continue;
+    }
+    const stop = rest.search(/[;\n|&]/);
+    results.push(stop === -1 ? rest : rest.slice(0, stop));
+  }
+  return results;
+}
+
 /**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
  * the (further-split) inner text of any process/command substitutions,
- * backtick expressions, `sh -c '...'` string bodies and `find -exec ... \;`
- * commands found anywhere in the command.
+ * backtick expressions, `sh -c '...'` string bodies, `find -exec ... \;`
+ * commands and `eval <arg>` arguments found anywhere in the command.
  */
 export function splitSegments(command: string): string[] {
   const substitutions = extractSubstitutions(command).flatMap(splitTop);
   const shCStrings = extractShCStrings(command).flatMap(splitTop);
   const findExecCommands = extractFindExecCommands(command).flatMap(splitTop);
-  return [...splitTop(command), ...substitutions, ...shCStrings, ...findExecCommands];
+  const evalArguments = extractEvalArguments(command).flatMap(splitTop);
+  return [
+    ...splitTop(command),
+    ...substitutions,
+    ...shCStrings,
+    ...findExecCommands,
+    ...evalArguments,
+  ];
 }
 
 function stripBackslashes(token: string): string {
   return token.replace(/\\/g, '');
 }
 
-function tokenize(segment: string): string[] {
+/**
+ * Splits a segment into whitespace-delimited tokens, stripping empty quote
+ * pairs and backslashes from each token first. Shared by every detector that
+ * needs to inspect a segment's raw argument list (command-word resolution,
+ * the `rm` target check, the unknown-wrapper network scan) so a
+ * backslash-escaped command name (`\rm`, `cu\rl`) is recognised the same way
+ * everywhere.
+ */
+export function tokenize(segment: string): string[] {
   return segment.split(/\s+/).map(stripEmptyQuotePairs).map(stripBackslashes);
 }
 

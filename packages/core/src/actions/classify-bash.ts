@@ -1,5 +1,5 @@
 import type { ActionClass } from '../types.js';
-import { commandWord, firstArgAfter, splitSegments } from './shell-segments.js';
+import { commandWord, firstArgAfter, splitSegments, tokenize } from './shell-segments.js';
 
 export interface CommandClassification {
   readonly classes: readonly ActionClass[];
@@ -56,6 +56,29 @@ const NETWORK_SUBCOMMANDS: Readonly<Record<string, ReadonlySet<string>>> = {
   twine: new Set(['upload']),
   cargo: new Set(['publish']),
 };
+// Command words whose arguments are inert data, never an invocation of
+// another command — `echo curl https://x` prints a string, it does not run
+// curl. These are excluded from the unknown-wrapper network scan below.
+const TERMINAL_DATA_COMMANDS = new Set([
+  'echo',
+  'printf',
+  'grep',
+  'rg',
+  'man',
+  'which',
+  'type',
+  'help',
+  'alias',
+  'unalias',
+  'export',
+  'set',
+  'unset',
+  'read',
+  'test',
+  '[',
+  'true',
+  'false',
+]);
 const URL_HOST = /https?:\/\/([^\s/'"`:]+)/g;
 const SSH_TARGET = /\b[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g;
 const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-r)\b/;
@@ -208,7 +231,7 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
 }
 
 function rmIsDangerous(segment: string, cwd: string): boolean {
-  const tokens = segment.split(/\s+/);
+  const tokens = tokenize(segment);
   const rmIndex = tokens.findIndex((t) => t.replace(/^.*\//, '') === 'rm');
   if (rmIndex < 0) return false;
   const args = tokens.slice(rmIndex + 1);
@@ -226,13 +249,53 @@ function hasNetworkSubcommand(seg: string, word: string): boolean {
   return subcommands !== undefined && subcommands.has(firstArgAfter(seg));
 }
 
+/**
+ * True when `word` is a command we already have a specific, deliberate
+ * verdict for elsewhere (a known network command, a shell, a self-config
+ * reader/writer, or a command whose args are inert data). Only a command
+ * word outside all of those categories is "unknown" enough to warrant
+ * scanning its argument list for an embedded network command — otherwise
+ * `grep curl notes.txt` or `npm install` would be misread as running curl.
+ */
+function isClassifiedElsewhere(word: string): boolean {
+  return (
+    NETWORK_COMMANDS.has(word) ||
+    SHELLS.has(word) ||
+    NETWORK_SUBCOMMANDS[word] !== undefined ||
+    SELF_CONFIG_READ_COMMANDS.has(word) ||
+    SELF_CONFIG_WRITE_COMMANDS.has(word) ||
+    TERMINAL_DATA_COMMANDS.has(word)
+  );
+}
+
+function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
+  return tokens.some((token, i) => {
+    if (NETWORK_COMMANDS.has(token)) return true;
+    const subcommands = NETWORK_SUBCOMMANDS[token];
+    return subcommands !== undefined && subcommands.has(tokens[i + 1] ?? '');
+  });
+}
+
+// Unlisted single-word wrappers (`setsid`, `flock`, `script`, `unbuffer`,
+// `strace`, `runuser`, …) run an arbitrary trailing command but are not
+// themselves in PREFIX_WORDS, so `commandWord` returns the wrapper itself
+// rather than skipping to the wrapped command. Rather than maintaining an
+// ever-growing wrapper allowlist, an unknown command word's remaining
+// tokens are scanned for an embedded network command word.
+function isUnknownWrapperNetworkCall(seg: string, word: string): boolean {
+  if (word === '' || isClassifiedElsewhere(word)) return false;
+  const tokens = tokenize(seg).filter((t) => t !== '--');
+  return hasEmbeddedNetworkToken(tokens);
+}
+
 function isNetwork(seg: string): boolean {
   const word = commandWord(seg);
   if (NETWORK_COMMANDS.has(word)) return true;
   if (hasNetworkSubcommand(seg, word)) return true;
   if (/\bpython3?\s+-m\s+http\.server\b/.test(seg)) return true;
   if (INLINE_INTERP.test(seg) && INLINE_NETWORK.test(seg)) return true;
-  return /\/dev\/tcp\//.test(seg);
+  if (/\/dev\/tcp\//.test(seg)) return true;
+  return isUnknownWrapperNetworkCall(seg, word);
 }
 
 function encodedExecSignals(segments: readonly string[]): string[] {
