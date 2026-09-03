@@ -20,7 +20,9 @@ export const SEVERITY_WEIGHT: Readonly<Record<Severity, number>> = {
 
 const DEFAULT_THRESHOLD = 0.6;
 const DEFAULT_MAX_CHARS = 200_000;
-const DEFAULT_BUDGET_MS = 200;
+// 500 ms, not 200 ms: a spurious fail-closed (timedOut → suspect) on a
+// slow/loaded machine is worse than a scan that occasionally takes longer.
+export const DEFAULT_BUDGET_MS = 500;
 const ENCODED_FLOOR = 0.7;
 
 /** Synthetic match reported when the scan budget runs out. */

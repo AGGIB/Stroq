@@ -67,9 +67,9 @@ describe('classifyTool', () => {
     ).toContain('config.self');
   });
   it('does not flag an MCP tool touching an unrelated path', () => {
-    expect(
-      classifyTool('mcp__fs__read_file', { path: 'src/index.ts' }, cwd).classes,
-    ).not.toContain('config.self');
+    expect(classifyTool('mcp__fs__read_file', { path: 'src/index.ts' }, cwd).classes).not.toContain(
+      'config.self',
+    );
   });
   it('scans array-of-string MCP tool inputs one level deep', () => {
     expect(

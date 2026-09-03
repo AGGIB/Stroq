@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseRule } from '../../src/rules/atr-loader.js';
 import { compileRules, type CompiledRule } from '../../src/rules/compile.js';
 import { matchRules } from '../../src/scan/matcher.js';
-import { scanContent } from '../../src/scan/scanner.js';
+import { DEFAULT_BUDGET_MS, scanContent } from '../../src/scan/scanner.js';
 
 const critical = parseRule(
   `
@@ -181,5 +181,9 @@ describe('scanContent budget', () => {
 
   it('leaves timedOut unset for a scan that finishes within budget', () => {
     expect(scanContent(compiled, 'plain text').timedOut).toBeUndefined();
+  });
+
+  it('defaults to a 500 ms budget (raised from 200 ms to avoid fail-closed on slow machines)', () => {
+    expect(DEFAULT_BUDGET_MS).toBe(500);
   });
 });

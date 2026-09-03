@@ -2,16 +2,18 @@ import { runDoctor } from './commands/doctor.js';
 import { readStdin, runHook } from './commands/hook.js';
 import { runInit } from './commands/init.js';
 import { runLog } from './commands/log.js';
+import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 
 const USAGE = `stroq <command>
 
 Commands:
-  init [--user] [--dry-run]   install Claude Code hooks (project .claude/settings.json by default)
-  hook claude-code            hook entrypoint: reads the event JSON on stdin, prints a decision
-  doctor                      check the installation
-  log [--count 20]            show recent audit entries
-  verify                      verify the audit hash chain
+  init [--user] [--dry-run]          install Claude Code hooks (project .claude/settings.json by default)
+  hook claude-code                   hook entrypoint: reads the event JSON on stdin, prints a decision
+  doctor                             check the installation
+  log [--count 20]                   show recent audit entries
+  verify                             verify the audit hash chain
+  untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -30,6 +32,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runLog(rest);
     case 'verify':
       return runVerify();
+    case 'untaint':
+      return runUntaint(rest);
     default:
       process.stdout.write(USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;

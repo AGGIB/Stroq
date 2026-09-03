@@ -34,7 +34,9 @@ describe('log and verify', () => {
       });
     }
     const entry = (await log.readAll())[0]!;
-    expect(formatEntry(entry)).toMatch(/pre\s+Bash\s+deny\(r\)\s+\[shell\.network\]\s+cmd 1/);
+    expect(formatEntry(entry)).toMatch(
+      /pre\s+Bash\s+\[s\]\s+deny\(r\)\s+\[shell\.network\]\s+cmd 1/,
+    );
     const out = capture();
     expect(await runLog(['--count', '2'])).toBe(0);
     out.restore();

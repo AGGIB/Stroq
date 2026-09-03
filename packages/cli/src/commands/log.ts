@@ -7,7 +7,7 @@ export function formatEntry(entry: AuditEntry): string {
     ? `${entry.decision.effect}(${entry.decision.ruleId ?? 'default'})`
     : `${entry.scan?.verdict ?? '-'}(${(entry.scan?.score ?? 0).toFixed(2)})`;
   const classes = entry.classes && entry.classes.length > 0 ? ` [${entry.classes.join(',')}]` : '';
-  return `${entry.ts} #${entry.seq} ${entry.phase.padEnd(4)} ${entry.tool.padEnd(10)} ${outcome}${classes} ${entry.summary}`;
+  return `${entry.ts} #${entry.seq} ${entry.phase.padEnd(4)} ${entry.tool.padEnd(10)} [${entry.sessionId}] ${outcome}${classes} ${entry.summary}`;
 }
 
 export async function runLog(args: readonly string[]): Promise<number> {

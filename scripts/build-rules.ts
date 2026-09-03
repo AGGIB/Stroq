@@ -57,6 +57,7 @@ const benign = existsSync(benignDir)
   : [];
 const disabled = new Map<string, string>();
 const slowOurs: string[] = [];
+const falsePositiveOurs: string[] = [];
 let slowCount = 0;
 for (const rule of compiled) {
   const slow = slowReason(rule);
@@ -69,10 +70,14 @@ for (const rule of compiled) {
     }
     continue;
   }
-  if (rule.id.startsWith('STROQ-')) continue;
   for (const fixture of benign) {
     if (scanContent([rule], fixture.text, { threshold: 0, budgetMs: 5_000 }).matches.length > 0) {
-      disabled.set(rule.id, fixture.name);
+      // Our own rules are held to the same benign-corpus bar as vendored
+      // ones, but a false positive is a bug to fix, not something to
+      // silently disable — fail the build instead.
+      if (rule.id.startsWith('STROQ-'))
+        falsePositiveOurs.push(`${rule.id} — fires on ${fixture.name}`);
+      else disabled.set(rule.id, fixture.name);
       break;
     }
   }
@@ -80,6 +85,11 @@ for (const rule of compiled) {
 if (slowOurs.length > 0) {
   console.error(`performance gate failed for ${slowOurs.length} Stroq rule(s):`);
   for (const line of slowOurs) console.error(`  ${line}`);
+  process.exit(1);
+}
+if (falsePositiveOurs.length > 0) {
+  console.error(`benign-corpus gate failed for ${falsePositiveOurs.length} Stroq rule(s):`);
+  for (const line of falsePositiveOurs) console.error(`  ${line}`);
   process.exit(1);
 }
 for (const e of errors) disabled.set(e.id, `uncompilable: ${e.error}`);
