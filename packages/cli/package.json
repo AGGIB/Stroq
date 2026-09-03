@@ -1,0 +1,25 @@
+{
+  "name": "stroq",
+  "version": "0.1.0",
+  "description": "Local action firewall for AI agents: scans what the agent reads, taints the session, blocks dangerous follow-up actions",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "stroq": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stroq/core": "workspace:*",
+    "yaml": "2.9.0",
+    "zod": "4.5.4"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "@stroq/core": ["../core/src/index.ts"] }
+  },
+  "include": ["src", "test"]
+}
