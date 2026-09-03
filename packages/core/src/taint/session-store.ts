@@ -36,13 +36,22 @@ export class FileSessionStore implements SessionStore {
   }
 
   private async read(sessionId: string): Promise<SessionState> {
+    let raw: string;
     try {
-      const parsed = JSON.parse(await readFile(this.file(sessionId), 'utf8')) as SessionState;
-      return { ...parsed, sessionId };
+      raw = await readFile(this.file(sessionId), 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT')
         return emptyState(sessionId, this.now().toISOString());
       throw err;
+    }
+    try {
+      const parsed = JSON.parse(raw) as SessionState;
+      return { ...parsed, sessionId };
+    } catch (err) {
+      // Fail closed: a corrupt session file must surface as an error, not as an
+      // untainted or partially-tainted state, so the caller (the CLI hook layer)
+      // can deny/ask on high-impact tools instead of silently trusting bad state.
+      throw new Error(`corrupt session state: ${this.file(sessionId)}`, { cause: err });
     }
   }
 
@@ -68,6 +77,9 @@ export class FileSessionStore implements SessionStore {
   }
 
   async clear(sessionId: string): Promise<void> {
-    await rm(this.file(sessionId), { force: true });
+    await mkdir(this.dir, { recursive: true });
+    return withLock(`${this.file(sessionId)}.lock`, async () => {
+      await rm(this.file(sessionId), { force: true });
+    });
   }
 }

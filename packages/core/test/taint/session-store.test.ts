@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -41,6 +42,27 @@ describe('FileSessionStore', () => {
     await store.markSuspect('s1', src('Read'));
     await store.clear('s1');
     expect((await store.get('s1')).taint).toBeNull();
+  });
+  it('never corrupts state when clear races with markSuspect', async () => {
+    const store = fresh();
+    for (let i = 0; i < 10; i++) {
+      await expect(
+        Promise.all([store.markSuspect('s1', src(`race${i}`)), store.clear('s1')]),
+      ).resolves.toBeDefined();
+      const state = await store.get('s1');
+      if (state.taint === null) {
+        continue;
+      }
+      expect(Array.isArray(state.taint.sources)).toBe(true);
+      expect(state.taint.sources.every((s) => typeof s.tool === 'string')).toBe(true);
+    }
+  });
+  it('throws a clear error when the session file contains invalid JSON', async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${sessionKey('s1')}.json`), 'not json', 'utf8');
+    const store = new FileSessionStore(dir);
+    await expect(store.get('s1')).rejects.toThrow(/corrupt session state/);
   });
   it('never uses the raw session id as a file name', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
