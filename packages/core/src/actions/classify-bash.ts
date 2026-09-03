@@ -1,4 +1,5 @@
 import type { ActionClass } from '../types.js';
+import { commandWord, firstArgAfter, splitSegments } from './shell-segments.js';
 
 export interface CommandClassification {
   readonly classes: readonly ActionClass[];
@@ -6,22 +7,8 @@ export interface CommandClassification {
   readonly signals: readonly string[];
 }
 
-const SEGMENT_SPLIT = /\|\||&&|\||;|\n/;
-const PREFIX_WORDS = new Set([
-  'sudo',
-  'time',
-  'nohup',
-  'exec',
-  'command',
-  'builtin',
-  'env',
-  'nice',
-]);
-const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
-  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-T', '-U']),
-  nice: new Set(['-n']),
-  env: new Set(['-u', '-C']),
-};
+export { commandWord, splitSegments } from './shell-segments.js';
+
 const SHELLS = new Set([
   'sh',
   'bash',
@@ -53,6 +40,22 @@ const NETWORK_COMMANDS = new Set([
   'ftp',
   'socat',
 ]);
+// Wrapper CLIs that are only network-ish for specific subcommands — bare
+// `npm install` / `docker build` / `gh pr view` stay benign.
+const NETWORK_SUBCOMMANDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  gh: new Set(['api', 'release', 'gist']),
+  aws: new Set(['s3', 'sns', 'sqs', 'lambda', 'ssm']),
+  az: new Set(['storage', 'keyvault']),
+  gcloud: new Set(['storage', 'secrets', 'pubsub']),
+  kubectl: new Set(['cp', 'exec']),
+  docker: new Set(['push', 'login']),
+  npm: new Set(['publish']),
+  pnpm: new Set(['publish']),
+  yarn: new Set(['publish']),
+  pip: new Set(['upload']),
+  twine: new Set(['upload']),
+  cargo: new Set(['publish']),
+};
 const URL_HOST = /https?:\/\/([^\s/'"`:]+)/g;
 const SSH_TARGET = /\b[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g;
 const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-r)\b/;
@@ -62,6 +65,12 @@ const INLINE_PAYLOAD =
   /(exec\(|base64|__import__|atob\(|Buffer\.from\([^)]*base64|child_process|subprocess|os\.system)/;
 const INLINE_NETWORK = /(urllib|requests|socket|http\.client|fetch\(|http\.request|net\.connect)/;
 const SHELL_C_REMOTE = /\b(ba|z|da)?sh\s+-c\s+["']?\$\((curl|wget)\b/;
+// `bash|sh|zsh|source|.` piping a process substitution straight into the
+// shell — `bash <(curl ...)` / `source <(curl ...)`. The substitution's
+// inner text is also split out as its own segment by shell-segments.ts, so
+// this only needs to add the `shell.exec_encoded` signal; `shell.network`
+// comes from that extracted inner segment matching `isNetwork` on its own.
+const SHELL_PROC_SUB_REMOTE = /\b(bash|sh|zsh|dash|ksh|source|\.)\b[^\n]*<\(\s*(curl|wget)\b/;
 const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bgit\s+reset\s+--hard\b/, 'git-destructive'],
   [/\bgit\s+clean\s+-[a-zA-Z]*f/, 'git-destructive'],
@@ -82,7 +91,9 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /(^|[\s"'/=])~?\/?\.ssh(\/|\b)/,
   /\bid_(rsa|ed25519|ecdsa|dsa)\b/,
   /\.aws\/(credentials|config)\b/,
-  /(^|[\s"'/=])\.env(\.[\w-]+)?\b/,
+  // `@` is included so `-f body=@.env` / `-d @.env` (a file-upload argument,
+  // not a literal path segment) is also recognised.
+  /(^|[\s"'/=@])\.env(\.[\w-]+)?\b/,
   /\.(pem|p12|pfx|key)\b/,
   /\.(npmrc|netrc|pgpass|git-credentials)\b/,
   /\.kube\/config\b/,
@@ -95,43 +106,29 @@ const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
 const PUSH_EXTERNAL =
   /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
 const SELF_CONFIG = /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
-const WRITE_COMMANDS = new Set([
-  'sed',
-  'rm',
-  'mv',
-  'cp',
-  'tee',
-  'truncate',
-  'chmod',
-  'chown',
-  'ln',
+// Deny-unless-read: any segment that mentions a protected path is
+// `config.self` UNLESS its command word is a known read-only tool AND the
+// segment has no write redirection. This replaces the previous
+// allow-unless-on-a-write-list gate, which any command not on the write
+// list (python, perl, jq|sponge, git checkout, …) could bypass.
+const SELF_CONFIG_READ_COMMANDS = new Set([
+  'cat',
+  'less',
+  'more',
+  'head',
+  'tail',
+  'grep',
+  'rg',
+  'jq',
+  'diff',
+  'stat',
+  'ls',
+  'wc',
+  'bat',
+  'file',
 ]);
-
-export function splitSegments(command: string): string[] {
-  return command
-    .split(SEGMENT_SPLIT)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-export function commandWord(segment: string): string {
-  const tokens = segment.split(/\s+/);
-  let wrapper = '';
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i] ?? '';
-    if (token === '' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
-    if (PREFIX_WORDS.has(token)) {
-      wrapper = token;
-      continue;
-    }
-    if (token.startsWith('-')) {
-      if (WRAPPER_VALUE_FLAGS[wrapper]?.has(token)) i += 1;
-      continue;
-    }
-    return token.replace(/^.*\//, '');
-  }
-  return '';
-}
+// A pipe into these always counts as a write even without `>` in that segment.
+const WRITE_REDIRECT_COMMANDS = new Set(['sponge', 'tee']);
 
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
@@ -157,8 +154,15 @@ function rmIsDangerous(segment: string, cwd: string): boolean {
 
 const isShell = (seg: string): boolean => SHELLS.has(commandWord(seg));
 
+function hasNetworkSubcommand(seg: string, word: string): boolean {
+  const subcommands = NETWORK_SUBCOMMANDS[word];
+  return subcommands !== undefined && subcommands.has(firstArgAfter(seg));
+}
+
 function isNetwork(seg: string): boolean {
-  if (NETWORK_COMMANDS.has(commandWord(seg))) return true;
+  const word = commandWord(seg);
+  if (NETWORK_COMMANDS.has(word)) return true;
+  if (hasNetworkSubcommand(seg, word)) return true;
   if (/\bpython3?\s+-m\s+http\.server\b/.test(seg)) return true;
   if (INLINE_INTERP.test(seg) && INLINE_NETWORK.test(seg)) return true;
   return /\/dev\/tcp\//.test(seg);
@@ -174,6 +178,7 @@ function encodedExecSignals(segments: readonly string[]): string[] {
     if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
       signals.push('inline-interpreter-payload');
     if (SHELL_C_REMOTE.test(seg)) signals.push('shell-c-remote');
+    if (SHELL_PROC_SUB_REMOTE.test(seg)) signals.push('shell-proc-sub-remote');
     return signals;
   });
 }
@@ -194,11 +199,17 @@ function secretSignals(segments: readonly string[]): string[] {
   });
 }
 
+function isWriteSegment(seg: string): boolean {
+  return seg.includes('>') || WRITE_REDIRECT_COMMANDS.has(commandWord(seg));
+}
+
 function selfTamperSignals(segments: readonly string[]): string[] {
   return segments
-    .filter(
-      (seg) => SELF_CONFIG.test(seg) && (seg.includes('>') || WRITE_COMMANDS.has(commandWord(seg))),
-    )
+    .filter((seg) => {
+      if (!SELF_CONFIG.test(seg)) return false;
+      const isReadOnly = SELF_CONFIG_READ_COMMANDS.has(commandWord(seg)) && !isWriteSegment(seg);
+      return !isReadOnly;
+    })
     .map(() => 'self-config-write');
 }
 
