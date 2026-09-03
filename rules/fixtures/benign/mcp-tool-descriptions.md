@@ -1,0 +1,4 @@
+- `search_issues`: Call this tool to search GitHub issues. Execute this query with `q` parameter.
+- `create_file`: Writes a file. You must provide `path` and `content`. Do not call with an empty path.
+- `send_email`: Sends an email via SMTP. Requires `to`, `subject`, `body`.
+- `run_query`: Runs a read-only SQL query against the analytics database.
