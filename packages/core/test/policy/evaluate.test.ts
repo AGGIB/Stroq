@@ -37,6 +37,13 @@ describe('evaluatePolicy with DEFAULT_POLICY', () => {
       'ask',
     );
   });
+  it('allows WebFetch while clean and denies it once the session is tainted', () => {
+    expect(evaluatePolicy(DEFAULT_POLICY, ['network.fetch'], null).effect).toBe('allow');
+    expect(evaluatePolicy(DEFAULT_POLICY, ['network.fetch'], 'suspect')).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-fetch-when-tainted',
+    });
+  });
   it('first matching rule wins', () => {
     const d = evaluatePolicy(DEFAULT_POLICY, ['shell.destructive', 'shell.exec_encoded'], null);
     expect(d.effect).toBe('deny');

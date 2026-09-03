@@ -24,6 +24,12 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['shell.network'], taint: 'suspect' },
     },
     {
+      id: 'deny-fetch-when-tainted',
+      effect: 'deny',
+      reason: 'Session is tainted by suspicious content; web fetch blocked',
+      when: { classes: ['network.fetch'], taint: 'suspect' },
+    },
+    {
       id: 'deny-secrets-when-tainted',
       effect: 'deny',
       reason: 'Session is tainted by suspicious content; access to secrets blocked',
