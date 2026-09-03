@@ -8,3 +8,7 @@ export * from './scan/matcher.js';
 export * from './scan/scanner.js';
 export * from './actions/classify-bash.js';
 export * from './actions/classify-tool.js';
+export * from './policy/policy-types.js';
+export * from './policy/default-policy.js';
+export * from './policy/evaluate.js';
+export * from './policy/load-policy.js';
