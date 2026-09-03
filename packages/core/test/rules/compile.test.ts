@@ -17,6 +17,24 @@ detection:
       value: "(?i)ignore\\\\s+(all\\\\s+)?previous\\\\s+instructions"
 `;
 
+const operatorsYamlRule = `
+id: ATR-2026-00121
+title: "Operator variety"
+severity: low
+detection:
+  condition: any
+  conditions:
+    - field: content
+      operator: contains
+      value: "danger"
+    - field: content
+      operator: exact
+      value: "exact-match"
+    - field: content
+      operator: starts_with
+      value: "prefix-"
+`;
+
 describe('translatePcre', () => {
   it('moves a leading (?i) into RegExp flags', () => {
     expect(translatePcre('(?i)abc')).toEqual({ source: 'abc', flags: 'i' });
@@ -51,5 +69,19 @@ describe('compileRule', () => {
     const result = compileRules([ok, bad]);
     expect(result.compiled).toHaveLength(1);
     expect(result.errors).toHaveLength(1);
+  });
+
+  it('compiles contains/exact/starts_with conditions without building a regex', () => {
+    const { rule } = parseRule(operatorsYamlRule, 'operators.yaml');
+    const { compiled, error } = compileRule(rule!);
+    expect(error).toBeUndefined();
+    const tests = compiled?.tests ?? [];
+    expect(tests).toHaveLength(3);
+    expect(tests[0]).toMatchObject({ kind: 'contains', value: 'danger' });
+    expect(tests[0]?.regex).toBeUndefined();
+    expect(tests[1]).toMatchObject({ kind: 'exact', value: 'exact-match' });
+    expect(tests[1]?.regex).toBeUndefined();
+    expect(tests[2]).toMatchObject({ kind: 'starts_with', value: 'prefix-' });
+    expect(tests[2]?.regex).toBeUndefined();
   });
 });
