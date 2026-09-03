@@ -1,0 +1,23 @@
+##[group]Run actions/checkout@v4
+Syncing repository: acme-corp/widgets
+Checking out the ref
+##[endgroup]
+##[group]Run actions/setup-node@v4
+Found in cache @ /opt/hostedtoolcache/node/20.11.1/x64
+##[endgroup]
+##[group]Cache restore
+Received 41943040 of 41943040 (100.0%), 40.0 MBs/sec
+Cache restore keys: npm-cache-linux-x64, npm-cache-
+##[warning]Cache restore failed for key npm-cache-linux-x64. Skipping cache step.
+##[endgroup]
+##[group]Run npm ci
+added 842 packages in 12s
+##[endgroup]
+##[group]Run npm test
+Test Suites: 38 passed, 38 total
+Tests:       412 passed, 412 total
+##[endgroup]
+##[group]Upload artifact
+Uploading coverage-report.zip (1.2 MB)
+Artifact uploaded successfully
+##[endgroup]

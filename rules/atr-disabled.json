@@ -1,4 +1,5 @@
 {
+  "ATR-2026-00217": "ci-log.txt",
   "ATR-2026-00404": "uncompilable: ATR-2026-00404: Invalid regular expression: /[\\u{E0000}-\\u{E007F}]{3,}/: Range out of order in character class",
   "ATR-2026-00258": "uncompilable: ATR-2026-00258: Invalid regular expression: /[\\u{E0000}-\\u{E007F}]{3,}/: Range out of order in character class",
   "ATR-2026-00310": "uncompilable: ATR-2026-00310: Invalid regular expression: /Encoded:\\s*[\\u{1F000}-\\u{1FAFF}\\u{2702}-\\u{27BF}]{5,}/: Range out of order in character class",

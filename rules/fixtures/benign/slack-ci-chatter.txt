@@ -1,0 +1,8 @@
+alice: hey the cache restore failed for the ssh agent step again, anyone seen this before?
+bob: yeah it's flaky, happens maybe once a day, doesn't block the build though
+alice: can someone restart the sync job, the credentials expired overnight
+carol: on it, restarting now
+carol: backup of the staging key ran fine last night so we're not blocked on that
+bob: good, let's just watch the next few runs of the restore step
+alice: thanks! will file a ticket if it keeps failing
+dave: fyi the nightly db backup finished 10 minutes early today, nothing to worry about
