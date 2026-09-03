@@ -78,3 +78,26 @@ describe('classifyTool', () => {
     ).toContain('config.self');
   });
 });
+
+describe('F3 self-tamper gate precision: MCP write-shaped tool + path-like key only', () => {
+  it('read_file with a path-like key is only mcp.call, no config.self', () => {
+    const r = classifyTool('mcp__fs__read_file', { path: '.claude/settings.json' }, cwd);
+    expect(r.classes).toEqual(['mcp.call']);
+  });
+  it('create_issue mentioning the path in a non-path key (body) does not flag config.self', () => {
+    const r = classifyTool('mcp__github__create_issue', { body: 'see .claude/settings.json' }, cwd);
+    expect(r.classes).not.toContain('config.self');
+  });
+  it('send_message mentioning the path in a non-path key (text) does not flag config.self', () => {
+    const r = classifyTool(
+      'mcp__slack__send_message',
+      { text: 'I updated .claude/settings.json' },
+      cwd,
+    );
+    expect(r.classes).not.toContain('config.self');
+  });
+  it('write_file with the path in a path-like key still flags config.self', () => {
+    const r = classifyTool('mcp__fs__write_file', { path: '.claude/settings.json' }, cwd);
+    expect(r.classes).toContain('config.self');
+  });
+});

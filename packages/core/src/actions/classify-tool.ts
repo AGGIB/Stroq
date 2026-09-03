@@ -10,6 +10,13 @@ const SECRET_PATH =
   /(\/\.ssh\/|\bid_(rsa|ed25519|ecdsa|dsa)\b|\/\.aws\/|(^|\/)\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|\/\.(npmrc|netrc|pgpass|git-credentials)$|\/\.kube\/config$|\/\.config\/gcloud\/|\/etc\/(shadow|passwd)$)/;
 const SIDE_EFFECT_TOOL =
   /(send|post|publish|upload|email|mail|message|notify|pay|transfer|purchase|delete|remove|drop|deploy|execute|exec|run|shell|write|update|create|comment|merge|push)/i;
+// `config.self` on an MCP call requires BOTH a write-shaped tool name and the
+// protected path sitting in a path-like argument key — a path merely
+// mentioned in a text/body/title value, or read by a read-shaped tool, is
+// not self-tampering.
+const WRITE_SHAPED_TOOL =
+  /(write|edit|delete|remove|move|rename|append|put|save|update|create_file|mkdir)/i;
+const PATH_LIKE_KEY = /^(path|filepath|file_path|file|target|dest|destination|uri|url)s?$/i;
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const EMPTY: CommandClassification = { classes: [], hosts: [], signals: [] };
 
@@ -40,9 +47,15 @@ function classifyPath(path: string, write: boolean): ToolClassification {
   return { classes, hosts: [], signals };
 }
 
-/** Scans every string value in `toolInput` (one level deep, plus arrays of strings). */
-function touchesSelfConfig(toolInput: Readonly<Record<string, unknown>>): boolean {
-  return Object.values(toolInput).some((value) => {
+/**
+ * Scans path-like keys of `toolInput` (one level deep, plus arrays of
+ * strings under such a key) for the protected path. A path mentioned in a
+ * non-path key (`body`, `text`, `title`, …) does not count — that is
+ * incidental text, not an argument telling the tool where to write.
+ */
+function touchesSelfConfigPathLikeKey(toolInput: Readonly<Record<string, unknown>>): boolean {
+  return Object.entries(toolInput).some(([key, value]) => {
+    if (!PATH_LIKE_KEY.test(key)) return false;
     if (typeof value === 'string') return SELF_CONFIG_PATH.test(value);
     if (Array.isArray(value)) {
       return value.some((v) => typeof v === 'string' && SELF_CONFIG_PATH.test(v));
@@ -58,7 +71,7 @@ function classifyMcp(
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return EMPTY;
   const sideEffect = SIDE_EFFECT_TOOL.test(mcp.tool);
-  const selfConfig = touchesSelfConfig(toolInput);
+  const selfConfig = WRITE_SHAPED_TOOL.test(mcp.tool) && touchesSelfConfigPathLikeKey(toolInput);
   const classes: ActionClass[] = ['mcp.call'];
   if (sideEffect) classes.push('mcp.side_effect');
   if (selfConfig) classes.push('config.self');

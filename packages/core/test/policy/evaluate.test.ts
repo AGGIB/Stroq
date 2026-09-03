@@ -15,6 +15,16 @@ describe('evaluatePolicy with DEFAULT_POLICY', () => {
     expect(evaluatePolicy(DEFAULT_POLICY, ['shell.exec_encoded'], null).effect).toBe('deny');
     expect(evaluatePolicy(DEFAULT_POLICY, ['config.self'], null).ruleId).toBe('deny-self-tamper');
   });
+  it('asks for commands that merely reference agent security config, tainted or not', () => {
+    expect(evaluatePolicy(DEFAULT_POLICY, ['config.self_touch'], null)).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-self-touch',
+    });
+    expect(evaluatePolicy(DEFAULT_POLICY, ['config.self_touch'], 'suspect')).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-self-touch',
+    });
+  });
   it('allows network commands and secret reads while untainted, denies them when tainted', () => {
     expect(evaluatePolicy(DEFAULT_POLICY, ['shell.network'], null).effect).toBe('allow');
     expect(evaluatePolicy(DEFAULT_POLICY, ['fs.secrets'], null).effect).toBe('allow');

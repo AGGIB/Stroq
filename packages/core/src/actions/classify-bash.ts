@@ -106,11 +106,15 @@ const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
 const PUSH_EXTERNAL =
   /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
 const SELF_CONFIG = /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
-// Deny-unless-read: any segment that mentions a protected path is
-// `config.self` UNLESS its command word is a known read-only tool AND the
-// segment has no write redirection. This replaces the previous
-// allow-unless-on-a-write-list gate, which any command not on the write
-// list (python, perl, jq|sponge, git checkout, …) could bypass.
+// Self-tamper gate: a segment that mentions a protected path is classified
+// into one of three buckets:
+//   - `config.self` (deny)       — clear write intent against the path
+//   - no class                   — a known read-only command, no redirection
+//   - `config.self_touch` (ask)  — everything else (unknown commands,
+//                                  editors, interpreters without inline code)
+// This replaces the previous deny-unless-read gate, which denied harmless
+// references (`git add`, `echo`, `mkdir ~/.stroq`, …) alongside real tamper
+// attempts.
 const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',
   'less',
@@ -126,9 +130,62 @@ const SELF_CONFIG_READ_COMMANDS = new Set([
   'wc',
   'bat',
   'file',
+  'echo',
+  'printf',
+  'test',
+  '[',
+  'du',
+  'find',
+  'mkdir',
 ]);
-// A pipe into these always counts as a write even without `>` in that segment.
-const WRITE_REDIRECT_COMMANDS = new Set(['sponge', 'tee']);
+// Writers/editors/deleters: mentioning the protected path alongside one of
+// these command words is always write intent, regardless of `>`.
+const SELF_CONFIG_WRITE_COMMANDS = new Set([
+  'rm',
+  'mv',
+  'cp',
+  'tee',
+  'sed',
+  'sponge',
+  'truncate',
+  'chmod',
+  'chown',
+  'ln',
+  'dd',
+  'install',
+  'touch',
+  'shred',
+]);
+// Interpreters are write intent only when invoked with inline code
+// (`-c`/`-e`, including combined short flags like `perl -pi -e` or
+// `perl -pe`); a bare `python3 -m json.tool file` is not write intent.
+const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
+const GIT_WRITE_SUBCOMMAND = /^git\s+(checkout|restore|reset|clean|rm|stash)\b/;
+const GIT_READ_SUBCOMMAND = /^git\s+(status|diff|log|show|add|blame)\b/;
+
+function isInlineCodeToken(token: string): boolean {
+  if (!/^-[A-Za-z]+$/.test(token)) return false;
+  return /[ec]/.test(token.slice(1));
+}
+
+function hasInlineCode(segment: string): boolean {
+  return segment.split(/\s+/).some(isInlineCodeToken);
+}
+
+function isSelfConfigWriteIntent(segment: string, word: string): boolean {
+  if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
+  if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
+  if (segment.includes('>')) return true;
+  if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;
+  return false;
+}
+
+function isSelfConfigReadOnly(segment: string, word: string): boolean {
+  if (SELF_CONFIG_READ_COMMANDS.has(word)) return true;
+  if (word === 'git' && GIT_READ_SUBCOMMAND.test(segment)) return true;
+  if (SELF_CONFIG_INTERPRETERS.has(word) && !hasInlineCode(segment)) return true;
+  return false;
+}
 
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
@@ -199,18 +256,48 @@ function secretSignals(segments: readonly string[]): string[] {
   });
 }
 
-function isWriteSegment(seg: string): boolean {
-  return seg.includes('>') || WRITE_REDIRECT_COMMANDS.has(commandWord(seg));
+type SelfConfigVerdict = 'deny' | 'ask' | null;
+
+function classifySelfConfigSegment(segment: string): SelfConfigVerdict {
+  if (!SELF_CONFIG.test(segment)) return null;
+  const word = commandWord(segment);
+  if (isSelfConfigWriteIntent(segment, word)) return 'deny';
+  if (isSelfConfigReadOnly(segment, word)) return null;
+  return 'ask';
 }
 
-function selfTamperSignals(segments: readonly string[]): string[] {
-  return segments
-    .filter((seg) => {
-      if (!SELF_CONFIG.test(seg)) return false;
-      const isReadOnly = SELF_CONFIG_READ_COMMANDS.has(commandWord(seg)) && !isWriteSegment(seg);
-      return !isReadOnly;
-    })
-    .map(() => 'self-config-write');
+interface SelfConfigSignals {
+  readonly deny: readonly string[];
+  readonly ask: readonly string[];
+}
+
+// Our segment splitter is not quote-aware (see shell-segments.ts): a `;`
+// inside an interpreter's inline-code string (`python3 -c "import os;os...`)
+// splits the payload away from its `-c`/`-e` flag, so the fragment that
+// actually mentions the protected path can no longer see the flag on its
+// own. When some sibling segment of the same command IS an interpreter
+// invocation with inline code, an otherwise-ambiguous sibling that mentions
+// the path is still write intent, not a mere reference.
+function anySegmentIsInterpreterInlineCode(segments: readonly string[]): boolean {
+  return segments.some((seg) => {
+    const word = commandWord(seg);
+    return SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(seg);
+  });
+}
+
+function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {
+  const interpreterInlineElsewhere = anySegmentIsInterpreterInlineCode(segments);
+  const deny: string[] = [];
+  const ask: string[] = [];
+  for (const segment of segments) {
+    const verdict = classifySelfConfigSegment(segment);
+    if (verdict === 'deny' || (verdict === 'ask' && interpreterInlineElsewhere)) {
+      deny.push('self-config-write');
+    } else if (verdict === 'ask') {
+      ask.push('self-config-touch');
+    }
+  }
+  return { deny, ask };
 }
 
 function hostsOf(command: string): string[] {
@@ -222,6 +309,7 @@ function hostsOf(command: string): string[] {
 
 export function classifyCommand(command: string, cwd: string): CommandClassification {
   const segments = splitSegments(command);
+  const selfConfig = selfTamperSignals(segments);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
     ['shell.exec_encoded', encodedExecSignals(segments)],
     ['shell.network', segments.filter(isNetwork).map(() => 'network-command')],
@@ -231,7 +319,8 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
       'git.push_external',
       segments.filter((s) => PUSH_EXTERNAL.test(s)).map(() => 'git-push-external'),
     ],
-    ['config.self', selfTamperSignals(segments)],
+    ['config.self', selfConfig.deny],
+    ['config.self_touch', selfConfig.ask],
   ];
   const active = groups.filter(([, signals]) => signals.length > 0);
   return {

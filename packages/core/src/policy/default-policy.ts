@@ -12,6 +12,12 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['config.self'], taint: 'any' },
     },
     {
+      id: 'ask-self-touch',
+      effect: 'ask',
+      reason: 'Command references agent security configuration; confirm',
+      when: { classes: ['config.self_touch'], taint: 'any' },
+    },
+    {
       id: 'deny-encoded-exec',
       effect: 'deny',
       reason: 'Executing decoded or remotely fetched code is blocked',

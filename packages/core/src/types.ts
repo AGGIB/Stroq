@@ -5,6 +5,7 @@ export type ActionClass =
   | 'fs.secrets'
   | 'git.push_external'
   | 'config.self'
+  | 'config.self_touch'
   | 'network.fetch'
   | 'mcp.call'
   | 'mcp.side_effect';
@@ -16,6 +17,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'fs.secrets',
   'git.push_external',
   'config.self',
+  'config.self_touch',
   'network.fetch',
   'mcp.call',
   'mcp.side_effect',
