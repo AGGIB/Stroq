@@ -105,7 +105,12 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
 const PUSH_EXTERNAL =
   /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
-const SELF_CONFIG = /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
+// `.claude` and `.stroq` are matched as bare directories (like `find .claude
+// -name settings.json -delete`, where the filename never appears adjacent to
+// the directory in the same token) — not just the specific
+// `.claude/settings.json` path. `.cursor` stays scoped to its one protected
+// file since nothing else under it is agent-security-relevant today.
+const SELF_CONFIG = /(\.claude(\/|\b)|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
 // Self-tamper gate: a segment that mentions a protected path is classified
 // into one of three buckets:
 //   - `config.self` (deny)       — clear write intent against the path
@@ -162,6 +167,10 @@ const SELF_CONFIG_WRITE_COMMANDS = new Set([
 const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
 const GIT_WRITE_SUBCOMMAND = /^git\s+(checkout|restore|reset|clean|rm|stash)\b/;
 const GIT_READ_SUBCOMMAND = /^git\s+(status|diff|log|show|add|blame)\b/;
+// `find` is read-only by default (in SELF_CONFIG_READ_COMMANDS), but any of
+// these primaries give it write/delete intent regardless of the path
+// mentioned, e.g. `find ~/.stroq -delete` or `find . -exec rm -rf {} \;`.
+const FIND_WRITE_PRIMARIES = /-(delete|exec|execdir|ok|okdir|fprint|fprintf)\b/;
 
 function isInlineCodeToken(token: string): boolean {
   if (!/^-[A-Za-z]+$/.test(token)) return false;
@@ -177,6 +186,7 @@ function isSelfConfigWriteIntent(segment: string, word: string): boolean {
   if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
   if (segment.includes('>')) return true;
   if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;
+  if (word === 'find' && FIND_WRITE_PRIMARIES.test(segment)) return true;
   return false;
 }
 

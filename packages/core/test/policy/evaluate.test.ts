@@ -60,6 +60,25 @@ describe('evaluatePolicy with DEFAULT_POLICY', () => {
   });
 });
 
+describe('F4 ask-self-touch must not shadow deny rules', () => {
+  it('denies encoded exec even when self_touch is also present, clean session', () => {
+    const d = evaluatePolicy(DEFAULT_POLICY, ['shell.exec_encoded', 'config.self_touch'], null);
+    expect(d).toMatchObject({ effect: 'deny', ruleId: 'deny-encoded-exec' });
+  });
+  it('denies tainted network/secrets even when self_touch is also present', () => {
+    const d = evaluatePolicy(
+      DEFAULT_POLICY,
+      ['shell.network', 'fs.secrets', 'config.self_touch'],
+      'suspect',
+    );
+    expect(d.effect).toBe('deny');
+  });
+  it('still asks for self_touch alone, clean session', () => {
+    const d = evaluatePolicy(DEFAULT_POLICY, ['config.self_touch'], null);
+    expect(d).toMatchObject({ effect: 'ask', ruleId: 'ask-self-touch' });
+  });
+});
+
 describe('parsePolicy', () => {
   it('applies defaults and validates effects', () => {
     const p = parsePolicy(
