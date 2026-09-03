@@ -31,12 +31,27 @@ describe('withLock', () => {
   });
   it('times out when the lock is held too long', async () => {
     const lock = join(mkdtempSync(join(tmpdir(), 'stroq-lock-')), 'z.lock');
-    const holder = withLock(lock, () => new Promise((r) => setTimeout(r, 300)), {
-      staleMs: 10_000,
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
     });
-    await expect(withLock(lock, async () => 1, { timeoutMs: 50, staleMs: 10_000 })).rejects.toThrow(
-      /timeout/,
+    let acquired!: () => void;
+    const acquiredPromise = new Promise<void>((r) => {
+      acquired = r;
+    });
+    const holder = withLock(
+      lock,
+      async () => {
+        acquired();
+        await held;
+      },
+      { staleMs: 10_000 },
     );
+    await acquiredPromise; // holder definitely owns the lock now
+    await expect(
+      withLock(lock, async () => 1, { timeoutMs: 100, staleMs: 10_000 }),
+    ).rejects.toThrow(/timeout/);
+    release();
     await holder;
   });
   it('preserves the original error when releasing the lock also fails', async () => {
