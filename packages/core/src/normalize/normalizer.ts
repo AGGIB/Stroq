@@ -6,7 +6,12 @@ export interface Variant {
   readonly text: string;
 }
 
-const ZERO_WIDTH = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+// Zero-width and invisible characters used to hide instructions: soft hyphen,
+// zero-width space/joiners and bidi marks, invisible operators, BOM,
+// variation selectors (U+FE00-FE0F) and Unicode tag characters
+// (U+E0000-E007F, the "ASCII smuggling" block). The `u` flag is required
+// for the astral \u{...} range syntax.
+const ZERO_WIDTH = /[\u00AD\u200B-\u200F\u2060-\u2064\uFE00-\uFE0F\uFEFF\u{E0000}-\u{E007F}]/gu;
 const CYRILLIC = /[\u0400-\u04FF]/;
 const LATIN = /[A-Za-z]/;
 const HOMOGLYPHS: Readonly<Record<string, string>> = {

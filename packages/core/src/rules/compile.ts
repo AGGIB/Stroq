@@ -18,6 +18,11 @@ export interface CompiledRule {
 }
 
 const LEADING_FLAGS = /^\(\?([imsx]+)\)/;
+// `\u{...}` code-point escapes and `\p{...}` property escapes only compile
+// with the `u` flag. We add it *only* for those patterns, because `u` also
+// rejects escapes that are legal in a non-unicode RegExp; a pattern that
+// still throws is recorded as an error, exactly as before.
+const NEEDS_UNICODE = /\\[upP]\{/;
 
 export function translatePcre(pattern: string): { source: string; flags: string } {
   let source = pattern;
@@ -31,6 +36,7 @@ export function translatePcre(pattern: string): { source: string; flags: string 
     .replace(/\\A/g, '^')
     .replace(/\\Z/g, '$')
     .replace(/([+*?}])\+/g, '$1');
+  if (NEEDS_UNICODE.test(source)) flags += 'u';
   return { source, flags };
 }
 
