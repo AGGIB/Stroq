@@ -88,6 +88,13 @@ describe('stroq hook claude-code (end to end)', () => {
     expect(res.stdout).toContain('fail-closed');
   }, 60_000);
 
+  it('fails closed when stdin is not valid JSON at all and exits 0', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-e2e-'));
+    const res = await runCli(['hook', 'claude-code'], 'not json {{{', home);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain('"permissionDecision":"deny"');
+  }, 60_000);
+
   it('prints usage and exits 1 for an unknown command', async () => {
     const res = await runCli(['bogus'], '', mkdtempSync(join(tmpdir(), 'stroq-e2e-')));
     expect(res.code).toBe(1);
