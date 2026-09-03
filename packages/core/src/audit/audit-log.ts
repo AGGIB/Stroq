@@ -37,7 +37,9 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 ];
 
 export function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v === undefined ? null : v)).join(',')}]`;
+  }
   if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
@@ -64,16 +66,21 @@ export class AuditLog {
   ) {}
 
   async readAll(): Promise<AuditEntry[]> {
+    let raw: string;
     try {
-      const raw = await readFile(this.file, 'utf8');
-      return raw
-        .split('\n')
-        .filter((l) => l.trim().length > 0)
-        .map((l) => JSON.parse(l) as AuditEntry);
+      raw = await readFile(this.file, 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
+    const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+    return lines.map((line, i) => {
+      try {
+        return JSON.parse(line) as AuditEntry;
+      } catch (err) {
+        throw new Error(`corrupt audit line ${i + 1}: ${this.file}`, { cause: err });
+      }
+    });
   }
 
   async append(input: AuditEntryInput): Promise<AuditEntry> {
@@ -95,8 +102,30 @@ export class AuditLog {
     });
   }
 
+  /**
+   * Verifies the hash chain across all entries.
+   *
+   * The chain proves that surviving entries are internally consistent: an
+   * edit, reorder, or mid-log deletion of any entry breaks the
+   * `prevHash`/`hash` links and is detected here. However, deleting
+   * entries from the END of the file is NOT detectable this way — a
+   * truncated log whose remaining prefix is untouched still verifies as
+   * `ok: true` with a smaller `count`. Signed checkpoints (anchoring
+   * `count` to an external, tamper-evident record) are a planned later
+   * feature. Callers who need protection against truncation must compare
+   * the returned `count` against an independently known expected value.
+   */
   async verify(): Promise<{ ok: boolean; count: number; brokenAt: number | null }> {
-    const entries = await this.readAll();
+    let entries: AuditEntry[];
+    try {
+      entries = await this.readAll();
+    } catch (err) {
+      const match = err instanceof Error ? /corrupt audit line (\d+)/.exec(err.message) : null;
+      if (!match) throw err;
+      const raw = await readFile(this.file, 'utf8');
+      const count = raw.split('\n').filter((l) => l.trim().length > 0).length;
+      return { ok: false, count, brokenAt: Number(match[1]) };
+    }
     let prev = GENESIS_HASH;
     for (const entry of entries) {
       const { hash, ...rest } = entry;

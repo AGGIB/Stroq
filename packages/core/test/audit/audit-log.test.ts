@@ -22,6 +22,9 @@ describe('stableStringify', () => {
   it('sorts keys recursively', () => {
     expect(stableStringify({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}');
   });
+  it('renders undefined array elements as null', () => {
+    expect(stableStringify([1, undefined, 3])).toBe('[1,null,3]');
+  });
 });
 
 describe('redact', () => {
@@ -71,5 +74,40 @@ describe('AuditLog', () => {
     const log = new AuditLog(fresh());
     await Promise.all(Array.from({ length: 20 }, (_, i) => log.append(input(i))));
     expect(await log.verify()).toMatchObject({ ok: true, count: 20 });
+  });
+  it('reports a corrupt line via verify without throwing', async () => {
+    const file = fresh();
+    const log = new AuditLog(file);
+    for (let i = 1; i <= 3; i += 1) await log.append(input(i));
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    lines[1] = '{not json';
+    writeFileSync(file, lines.join('\n') + '\n');
+    expect(await log.verify()).toEqual({ ok: false, count: 3, brokenAt: 2 });
+  });
+  it('rejects readAll with a corrupt-line error', async () => {
+    const file = fresh();
+    const log = new AuditLog(file);
+    for (let i = 1; i <= 3; i += 1) await log.append(input(i));
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    lines[1] = '{not json';
+    writeFileSync(file, lines.join('\n') + '\n');
+    await expect(log.readAll()).rejects.toThrow(/corrupt audit line 2/);
+  });
+  it('rejects append with the same corrupt-line error', async () => {
+    const file = fresh();
+    const log = new AuditLog(file);
+    for (let i = 1; i <= 3; i += 1) await log.append(input(i));
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    lines[1] = '{not json';
+    writeFileSync(file, lines.join('\n') + '\n');
+    await expect(log.append(input(4))).rejects.toThrow(/corrupt audit line 2/);
+  });
+  it('does not detect deletion of the last entry (documented limitation)', async () => {
+    const file = fresh();
+    const log = new AuditLog(file);
+    for (let i = 1; i <= 3; i += 1) await log.append(input(i));
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    writeFileSync(file, lines.slice(0, 2).join('\n') + '\n');
+    expect(await log.verify()).toEqual({ ok: true, count: 2, brokenAt: null });
   });
 });
