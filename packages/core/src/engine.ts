@@ -38,6 +38,8 @@ export interface PostResult {
 export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 
+// `toolName` is intentionally unused for now; kept to match the interface
+// consumed by the CLI, which may need it for tool-specific summaries later.
 export function summarizeInput(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
@@ -98,14 +100,11 @@ export class StroqEngine {
     const scan = scanContent(this.opts.rules, event.toolResultText, {
       threshold: this.opts.policy.threshold,
     });
-    const state =
-      scan.verdict === 'suspect'
-        ? await this.opts.sessions.markSuspect(event.sessionId, {
-            tool: event.toolName,
-            ruleIds: [...new Set(scan.matches.map((m) => m.ruleId))],
-            at: this.now(),
-          })
-        : await this.opts.sessions.get(event.sessionId);
+    const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
+    // The audit entry is the forensic record and must be durable before we
+    // derive and persist taint from it: if markSuspect ran first and the
+    // audit append then failed, the session would be tainted with no
+    // record explaining why.
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'post',
@@ -114,9 +113,17 @@ export class StroqEngine {
       scan: {
         verdict: scan.verdict,
         score: scan.score,
-        ruleIds: scan.matches.map((m) => m.ruleId),
+        ruleIds,
       },
     });
+    const state =
+      scan.verdict === 'suspect'
+        ? await this.opts.sessions.markSuspect(event.sessionId, {
+            tool: event.toolName,
+            ruleIds,
+            at: this.now(),
+          })
+        : await this.opts.sessions.get(event.sessionId);
     return { scan, taint: state.taint, scanned: true };
   }
 }
