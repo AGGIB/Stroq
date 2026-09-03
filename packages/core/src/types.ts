@@ -65,6 +65,8 @@ export interface ScanResult {
   readonly verdict: 'clean' | 'suspect';
   readonly score: number;
   readonly matches: readonly RuleMatch[];
+  /** True when the scan hit its time budget and failed closed. */
+  readonly timedOut?: boolean;
 }
 
 export interface PreToolEvent {
