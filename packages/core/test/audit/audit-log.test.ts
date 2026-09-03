@@ -69,6 +69,23 @@ describe('redact', () => {
     const sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
     expect(redact(`git show ${sha}`)).toBe(`git show ${sha}`);
   });
+
+  it('does not redact a long file path (contains a slash)', () => {
+    const cmd = 'node /Users/dev/project/packages/core/dist/some-really-long-chunk-a1b2c3d4.js';
+    expect(redact(cmd)).toBe(cmd);
+  });
+  it('does not redact a long @scope package name', () => {
+    const cmd = 'pnpm add @scope/package-name-version-1234567890abcdef';
+    expect(redact(cmd)).toBe(cmd);
+  });
+  it('does not redact a long hyphenated filename ending in a file extension', () => {
+    const cmd = 'read with-a-very-long-hyphenated-name-2026-09-04.md';
+    expect(redact(cmd)).toBe(cmd);
+  });
+  it('does not redact a docker -u uid:gid flag', () => {
+    const cmd = 'docker run -u 1000:1000 ubuntu';
+    expect(redact(cmd)).toBe(cmd);
+  });
 });
 
 describe('AuditLog', () => {

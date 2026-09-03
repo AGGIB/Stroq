@@ -25,7 +25,7 @@ describe.skipIf(!existsSync(atrDir))('imported ATR rules', () => {
     const reasons = JSON.parse(readFileSync(disabledReport, 'utf8')) as Record<string, string>;
     const slow = new Set(
       Object.entries(reasons)
-        .filter(([, reason]) => reason.startsWith('slow:'))
+        .filter(([, reason]) => reason.startsWith('slow on '))
         .map(([id]) => id),
     );
     expect(slow.size).toBeGreaterThan(0);

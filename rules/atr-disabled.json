@@ -1,9 +1,9 @@
 {
-  "ATR-2026-00228": "slow: 401 ms on letter-a@32768",
-  "ATR-2026-00233": "slow: 401 ms on letter-a@32768",
+  "ATR-2026-00228": "slow on letter-a@32768 (>50 ms)",
+  "ATR-2026-00233": "slow on letter-a@32768 (>50 ms)",
   "ATR-2026-00217": "ci-log.txt",
-  "ATR-2026-00220": "slow: 1624 ms on base64-alphabet@2048",
-  "ATR-2026-00223": "slow: 144 ms on base64-alphabet@8192",
-  "ATR-2026-02261": "slow: 526 ms on letter-a@32768",
-  "ATR-2026-01307": "slow: 648 ms on letter-a@32768"
+  "ATR-2026-00220": "slow on base64-alphabet@2048 (>50 ms)",
+  "ATR-2026-00223": "slow on base64-alphabet@8192 (>50 ms)",
+  "ATR-2026-02261": "slow on letter-a@32768 (>50 ms)",
+  "ATR-2026-01307": "slow on letter-a@32768 (>50 ms)"
 }

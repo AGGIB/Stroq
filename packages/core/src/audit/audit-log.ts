@@ -53,8 +53,12 @@ const STRUCTURAL_REDACTIONS: readonly RedactionRule[] = [
     re: /((?:x-api-key|api[-_]?key|token|secret|password|passwd|pwd)\s*[:=]\s*)\S+/gi,
     replace: '$1[REDACTED]',
   },
-  // `curl -u user:pass` / `--user user:pass` — drop the whole flag+value.
-  { re: /(-u|--user)\s+\S+:\S+/g, replace: '[REDACTED]' },
+  // `curl -u user:pass` / `--user user:pass` — drop the whole flag+value,
+  // except `-u uid:gid` (both sides all digits), e.g. `docker run -u 1000:1000`.
+  {
+    re: /(-u|--user)\s+(?!\d+:\d+(?:\s|$))\S+:\S+/g,
+    replace: '[REDACTED]',
+  },
   // URL userinfo: scheme://user:pass@host
   { re: /:\/\/[^\s/:@]+:[^\s/@]+@/g, replace: '://[REDACTED]@' },
 ];
@@ -66,13 +70,27 @@ const STRUCTURAL_REDACTIONS: readonly RedactionRule[] = [
 const LONG_TOKEN = /(?<![A-Za-z0-9._-])[A-Za-z0-9._-]{32,}(?![A-Za-z0-9._-])/g;
 const isPureHex = (token: string): boolean => /^[0-9a-fA-F]+$/.test(token);
 const hasLetterAndDigit = (token: string): boolean => /[A-Za-z]/.test(token) && /[0-9]/.test(token);
+// Whitespace-delimited words that look like identifiers rather than secrets
+// are exempt entirely, even if a substring of them would otherwise match
+// LONG_TOKEN: file paths (contain `/`), scoped package names (start with
+// `@`), and file names (end in a short extension).
+const FILE_EXTENSION = /\.[A-Za-z0-9]{1,5}$/;
+const isExemptWord = (word: string): boolean =>
+  word.includes('/') || word.startsWith('@') || FILE_EXTENSION.test(word);
 
-function redactLongTokens(text: string): string {
-  return text.replace(LONG_TOKEN, (token) => {
+function redactLongTokenSpans(word: string): string {
+  return word.replace(LONG_TOKEN, (token) => {
     if (isPureHex(token) && token.length <= 64) return token;
     if (!hasLetterAndDigit(token)) return token;
     return '[REDACTED]';
   });
+}
+
+function redactLongTokens(text: string): string {
+  return text
+    .split(/(\s+)/)
+    .map((word) => (isExemptWord(word) ? word : redactLongTokenSpans(word)))
+    .join('');
 }
 
 export function stableStringify(value: unknown): string {

@@ -29,7 +29,13 @@ const BLOBS: ReadonlyArray<{ name: string; build: (size: number) => string }> = 
   { name: 'urls', build: (size) => repeatTo('http://a.example/x ', size) },
 ];
 
-/** Returns a `slow: …` reason when the rule exceeds SLOW_MS on any blob. */
+/**
+ * Returns a `slow on <blob>@<size> (>50 ms)` reason when the rule exceeds
+ * SLOW_MS on any blob. The reason string is deterministic (no measured
+ * timing) so the disabled-rules report doesn't change between runs when
+ * nothing about the rules or fixtures actually changed; the measurement
+ * itself is still printed to stdout for visibility.
+ */
 function slowReason(rule: CompiledRule): string | null {
   for (const blob of BLOBS) {
     for (const size of STAGES) {
@@ -37,7 +43,10 @@ function slowReason(rule: CompiledRule): string | null {
       const started = performance.now();
       matchRules([rule], text);
       const ms = performance.now() - started;
-      if (ms > SLOW_MS) return `slow: ${ms.toFixed(0)} ms on ${blob.name}@${size}`;
+      if (ms > SLOW_MS) {
+        console.log(`${rule.id}: ${ms.toFixed(0)} ms on ${blob.name}@${size}`);
+        return `slow on ${blob.name}@${size} (>${SLOW_MS} ms)`;
+      }
     }
   }
   return null;
@@ -95,11 +104,30 @@ if (falsePositiveOurs.length > 0) {
 for (const e of errors) disabled.set(e.id, `uncompilable: ${e.error}`);
 
 const rules: AtrRule[] = loaded.filter((r) => compilable.has(r.id) || disabled.has(r.id));
+const disabledIds = [...disabled.keys()].sort();
+// Reuse the previous `generatedAt` when the rule set and disabled list are
+// otherwise unchanged, so a rerun with no real changes produces a
+// byte-identical bundle instead of dirtying the tree on every build.
+const previousBundle = existsSync(outFile)
+  ? (JSON.parse(readFileSync(outFile, 'utf8')) as {
+      generatedAt?: string;
+      rules?: unknown;
+      disabled?: unknown;
+    })
+  : null;
+const bundleUnchanged =
+  previousBundle !== null &&
+  JSON.stringify(previousBundle.rules) === JSON.stringify(rules) &&
+  JSON.stringify(previousBundle.disabled) === JSON.stringify(disabledIds);
+const generatedAt =
+  bundleUnchanged && previousBundle?.generatedAt
+    ? previousBundle.generatedAt
+    : new Date().toISOString();
 const bundle = {
   version: 1,
-  generatedAt: new Date().toISOString(),
+  generatedAt,
   rules,
-  disabled: [...disabled.keys()].sort(),
+  disabled: disabledIds,
 };
 mkdirSync(join(root, 'packages/core/src'), { recursive: true });
 writeFileSync(outFile, JSON.stringify(bundle));
