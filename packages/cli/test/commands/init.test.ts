@@ -64,6 +64,21 @@ describe('mergeHooks', () => {
     expect(isStroqHandler({ type: 'command', command: cmd, timeout: 15 })).toBe(true);
     expect(isStroqHandler({ type: 'command', command: 'echo hi', timeout: 15 })).toBe(false);
   });
+  it('preserves a malformed hook group lacking a hooks array, and stays idempotent', () => {
+    const malformed = { hooks: { PreToolUse: [{ matcher: 'Bash' }] } } as unknown as Parameters<
+      typeof mergeHooks
+    >[0];
+    const once = mergeHooks(malformed, cmd);
+    expect(once.hooks?.['PreToolUse']).toEqual([
+      { matcher: 'Bash' },
+      { matcher: PRE_MATCHER, hooks: [{ type: 'command', command: cmd, timeout: 15 }] },
+    ]);
+    const twice = mergeHooks(once, cmd);
+    expect(twice.hooks?.['PreToolUse']).toEqual([
+      { matcher: 'Bash' },
+      { matcher: PRE_MATCHER, hooks: [{ type: 'command', command: cmd, timeout: 15 }] },
+    ]);
+  });
 });
 
 describe('settings files', () => {
@@ -81,5 +96,12 @@ describe('settings files', () => {
     installHooks(file, '"/n" "/e.js" hook claude-code');
     expect(existsSync(file)).toBe(true);
     expect(JSON.parse(readFileSync(file, 'utf8')).hooks.PostToolUse).toHaveLength(1);
+  });
+  it('throws a descriptive error when the settings file has invalid JSON', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-'));
+    mkdirSync(join(dir, '.claude'));
+    const file = join(dir, '.claude', 'settings.json');
+    writeFileSync(file, '{ not json');
+    expect(() => readSettings(file)).toThrow(/cannot parse/);
   });
 });

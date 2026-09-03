@@ -35,8 +35,10 @@ export const isStroqHandler = (handler: HookHandler): boolean =>
 
 function withoutStroq(groups: readonly HookGroup[]): HookGroup[] {
   return groups
-    .map((g) => ({ ...g, hooks: g.hooks.filter((h) => !isStroqHandler(h)) }))
-    .filter((g) => g.hooks.length > 0);
+    .map((g) =>
+      Array.isArray(g.hooks) ? { ...g, hooks: g.hooks.filter((h) => !isStroqHandler(h)) } : g,
+    )
+    .filter((g) => !Array.isArray(g.hooks) || g.hooks.length > 0);
 }
 
 export function mergeHooks(settings: SettingsJson, command: string): SettingsJson {
@@ -66,7 +68,12 @@ export function settingsPath(scope: 'project' | 'user', cwd: string = process.cw
 export function readSettings(file: string): SettingsJson {
   if (!existsSync(file)) return {};
   const text = readFileSync(file, 'utf8');
-  return text.trim().length === 0 ? {} : (JSON.parse(text) as SettingsJson);
+  if (text.trim().length === 0) return {};
+  try {
+    return JSON.parse(text) as SettingsJson;
+  } catch (err) {
+    throw new Error(`cannot parse ${file}: ${(err as Error).message}`, { cause: err });
+  }
 }
 
 export function installHooks(file: string, command: string): SettingsJson {

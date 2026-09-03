@@ -42,6 +42,27 @@ describe('log and verify', () => {
     expect(out.lines.join('')).not.toContain('cmd 1');
   });
 
+  it('clamps --count 0 to 1, and falls back to 20 for a non-numeric value', async () => {
+    const log = new AuditLog(auditFile());
+    for (let i = 1; i <= 3; i += 1) {
+      await log.append({ sessionId: 's', phase: 'pre', tool: 'Bash', summary: `cmd ${i}` });
+    }
+    let out = capture();
+    expect(await runLog(['--count', '0'])).toBe(0);
+    out.restore();
+    const zeroOutput = out.lines.filter((l) => l.trim().length > 0);
+    expect(zeroOutput).toHaveLength(1);
+    expect(zeroOutput[0]).toContain('cmd 3');
+
+    out = capture();
+    expect(await runLog(['--count', 'abc'])).toBe(0);
+    out.restore();
+    const abcOutput = out.lines.join('');
+    expect(abcOutput).toContain('cmd 1');
+    expect(abcOutput).toContain('cmd 2');
+    expect(abcOutput).toContain('cmd 3');
+  });
+
   it('verify reports OK and BROKEN', async () => {
     const log = new AuditLog(auditFile());
     await log.append({

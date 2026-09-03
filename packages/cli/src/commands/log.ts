@@ -15,7 +15,8 @@ export async function runLog(args: readonly string[]): Promise<number> {
     args: [...args],
     options: { count: { type: 'string', default: '20' } },
   });
-  const count = Math.max(1, Number.parseInt(values.count ?? '20', 10) || 20);
+  const parsedCount = Number.parseInt(values.count ?? '20', 10);
+  const count = Number.isNaN(parsedCount) ? 20 : Math.max(1, parsedCount);
   const entries = await new AuditLog(auditFile()).readAll();
   if (entries.length === 0) {
     process.stdout.write('no audit entries yet\n');
