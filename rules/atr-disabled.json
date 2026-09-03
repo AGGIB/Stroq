@@ -1,1 +1,12 @@
-{}
+{
+  "ATR-2026-00404": "uncompilable: ATR-2026-00404: Invalid regular expression: /[\\u{E0000}-\\u{E007F}]{3,}/: Range out of order in character class",
+  "ATR-2026-00258": "uncompilable: ATR-2026-00258: Invalid regular expression: /[\\u{E0000}-\\u{E007F}]{3,}/: Range out of order in character class",
+  "ATR-2026-00310": "uncompilable: ATR-2026-00310: Invalid regular expression: /Encoded:\\s*[\\u{1F000}-\\u{1FAFF}\\u{2702}-\\u{27BF}]{5,}/: Range out of order in character class",
+  "ATR-2026-00312": "uncompilable: ATR-2026-00312: Invalid regular expression: /[\\u{E0100}-\\u{E017F}]{3,}/: Range out of order in character class",
+  "ATR-2026-00367": "uncompilable: ATR-2026-00367: Invalid regular expression: /(?:write\\s+(?:a\\s+)?(?:guide|tutorial|instructions?|how[\\s-]to)|decode\\s+(?:the\\s+)?emojis?\\s+(?:into\\s+)?(?:a\\s+)?phrase|derive\\s+(?:a\\s+)?(?:phrase|meaning|word)\\s+from\\s+(?:the\\s+)?emojis?)[\\s\\S]{0,200}(?:[\\u{1F1E6}-\\u{1F1FF}]){4}/: Range out of order in character class",
+  "ATR-2026-00444": "uncompilable: ATR-2026-00444: Invalid regular expression: /[\\u{1D400}-\\u{1D7FF}]{3,}/: Range out of order in character class",
+  "ATR-2026-02004": "uncompilable: ATR-2026-02004: Invalid regular expression: /[\\u{1F1E6}-\\u{1F1FF}]{6,}/: Range out of order in character class",
+  "ATR-2026-02010": "uncompilable: ATR-2026-02010: Invalid regular expression: /^[\\u{1F000}-\\u{1FFFF}\\u{2600}-\\u{27BF}\\u{2190}-\\u{21FF}\\u{2300}-\\u{23FF}\\u{2B00}-\\u{2BFF}\\s\\u{FE0F}\\u{200D}\\u{1F3FB}-\\u{1F3FF}]+$/: Range out of order in character class",
+  "ATR-2026-02015": "uncompilable: ATR-2026-02015: Invalid regular expression: /(?:[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}]\\s*){8,}/: Range out of order in character class",
+  "ATR-2026-02018": "uncompilable: ATR-2026-02018: Invalid regular expression: /[\\u{1F1E6}-\\u{1F1FF}]{4,}/: Range out of order in character class"
+}

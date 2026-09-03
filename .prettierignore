@@ -5,3 +5,5 @@ dist/
 coverage/
 .superpowers/
 rules/fixtures/
+rules/atr/
+packages/core/src/rules.bundle.json
