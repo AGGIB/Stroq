@@ -8,18 +8,43 @@
     "stroq": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AGGIB/stroq.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/AGGIB/stroq#readme",
+  "bugs": "https://github.com/AGGIB/stroq/issues",
+  "keywords": [
+    "ai-agents",
+    "agent-security",
+    "prompt-injection",
+    "claude-code",
+    "mcp",
+    "firewall",
+    "guardrails",
+    "cursor",
+    "llm-security"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@stroq/core": "workspace:*",
     "yaml": "2.9.0",
     "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@stroq/core": "workspace:*"
   }
 }

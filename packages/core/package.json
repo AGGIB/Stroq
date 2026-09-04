@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Stroq core: normalizer, ATR-compatible rule matcher, action classifier, taint-aware policy, audit chain",
   "license": "Apache-2.0",
+  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,6 +16,14 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AGGIB/stroq.git",
+    "directory": "packages/core"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean --sourcemap",
     "typecheck": "tsc --noEmit -p tsconfig.json"

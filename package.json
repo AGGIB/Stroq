@@ -1,7 +1,13 @@
 {
   "name": "stroq-monorepo",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AGGIB/stroq.git"
+  },
   "packageManager": "pnpm@11.24.0",
   "engines": {
     "node": ">=22"
@@ -9,6 +15,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
+    "demo:svg": "tsx scripts/render-demo-svg.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",

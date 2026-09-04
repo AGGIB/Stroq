@@ -32,15 +32,16 @@ importers:
 
   packages/cli:
     dependencies:
-      '@stroq/core':
-        specifier: workspace:*
-        version: link:../core
       yaml:
         specifier: 2.9.0
         version: 2.9.0
       zod:
         specifier: 4.5.4
         version: 4.5.4
+    devDependencies:
+      '@stroq/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:
