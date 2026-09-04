@@ -45,6 +45,12 @@ export interface PostResult {
   readonly scanned: boolean;
   /** Actionable atoms found in the scanned output (empty when not scanned). */
   readonly atoms: readonly Atom[];
+  /**
+   * Error message if recording provenance failed; null on success or when
+   * nothing was recorded. Recording is enrichment: its failure must never
+   * suppress the scan verdict or taint above.
+   */
+  readonly provenanceError: string | null;
 }
 
 export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
@@ -100,28 +106,37 @@ export class StroqEngine {
     return hits;
   }
 
+  /**
+   * Persists provenance for `atoms`, never throwing: recording is enrichment,
+   * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
+   * the caller the scan verdict and taint already computed in `post()`.
+   * Returns the error message on failure, or null on success / no-op.
+   */
   private async recordProvenance(
     event: PostToolEvent,
+    summary: string,
     atoms: readonly Atom[],
     suspect: boolean,
-  ): Promise<void> {
+  ): Promise<string | null> {
     const store = this.opts.provenance;
-    if (!store || atoms.length === 0) return;
-    const source = redact(summarizeInput(event.toolName, event.toolInput)).slice(
-      0,
-      MAX_STORED_CHARS,
-    );
-    await store.record(
-      event.sessionId,
-      atoms.map((atom) => ({
-        tool: event.toolName,
-        source,
-        kind: atom.kind,
-        hash: atomHash(atom),
-        excerpt: redact(atom.value).slice(0, MAX_STORED_CHARS),
-        suspect,
-      })),
-    );
+    if (!store || atoms.length === 0) return null;
+    const source = redact(summary).slice(0, MAX_STORED_CHARS);
+    try {
+      await store.record(
+        event.sessionId,
+        atoms.map((atom) => ({
+          tool: event.toolName,
+          source,
+          kind: atom.kind,
+          hash: atomHash(atom),
+          excerpt: redact(atom.value).slice(0, MAX_STORED_CHARS),
+          suspect,
+        })),
+      );
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {
@@ -152,8 +167,9 @@ export class StroqEngine {
   async post(event: PostToolEvent): Promise<PostResult> {
     if (!SCANNED_TOOLS.test(event.toolName)) {
       const state = await this.opts.sessions.get(event.sessionId);
-      return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [] };
+      return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
+    const summary = summarizeInput(event.toolName, event.toolInput);
     const scan = scanContent(this.opts.rules, event.toolResultText, {
       threshold: this.opts.policy.threshold,
     });
@@ -166,7 +182,7 @@ export class StroqEngine {
       sessionId: event.sessionId,
       phase: 'post',
       tool: event.toolName,
-      summary: summarizeInput(event.toolName, event.toolInput),
+      summary,
       scan: { verdict: scan.verdict, score: scan.score, ruleIds },
     });
     const state =
@@ -178,7 +194,12 @@ export class StroqEngine {
           })
         : await this.opts.sessions.get(event.sessionId);
     const atoms = extractAtoms(event.toolResultText);
-    await this.recordProvenance(event, atoms, scan.verdict === 'suspect');
-    return { scan, taint: state.taint, scanned: true, atoms };
+    const provenanceError = await this.recordProvenance(
+      event,
+      summary,
+      atoms,
+      scan.verdict === 'suspect',
+    );
+    return { scan, taint: state.taint, scanned: true, atoms, provenanceError };
   }
 }
