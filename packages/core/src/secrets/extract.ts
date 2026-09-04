@@ -6,8 +6,11 @@ export interface ExtractedSecret {
 
 /** Shorter values are never treated as secrets (too many collisions with ordinary words). */
 export const MIN_SECRET_LENGTH = 12;
+/** Ceiling on total extractor input — the same ceiling the index applies to source files. */
+export const MAX_TEXT_CHARS = 262_144;
 const MAX_LINES = 5000;
 const MAX_LINE_CHARS = 4096;
+const MAX_NETRC_TOKENS = 20_000;
 
 /** Key / variable names that mark a value as credential-like. */
 const SECRET_NAME =
@@ -69,6 +72,7 @@ function classify(name: string, value: string): ExtractedSecret | null {
 /** dotenv, ini (AWS credentials) and npmrc lines: `NAME=VALUE`. */
 export function extractKeyValues(text: string): ExtractedSecret[] {
   return text
+    .slice(0, MAX_TEXT_CHARS)
     .split('\n')
     .slice(0, MAX_LINES)
     .flatMap((raw) => {
@@ -83,7 +87,11 @@ export function extractKeyValues(text: string): ExtractedSecret[] {
 
 /** `~/.netrc`: `machine <host> login <user> password <secret>`, also across lines. */
 export function extractNetrc(text: string): ExtractedSecret[] {
-  const tokens = text.split(/\s+/).filter((t) => t.length > 0);
+  const tokens = text
+    .slice(0, MAX_TEXT_CHARS)
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .slice(0, MAX_NETRC_TOKENS);
   const out: ExtractedSecret[] = [];
   let machine = 'default';
   for (let i = 0; i < tokens.length; i += 1) {
@@ -106,7 +114,7 @@ export function extractNetrc(text: string): ExtractedSecret[] {
 export function extractDockerAuths(text: string): ExtractedSecret[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text.slice(0, MAX_TEXT_CHARS));
   } catch {
     return [];
   }
@@ -129,7 +137,7 @@ export function extractDockerAuths(text: string): ExtractedSecret[] {
 export function extractEnv(env: Readonly<Record<string, string | undefined>>): ExtractedSecret[] {
   return Object.entries(env).flatMap(([name, value]) => {
     if (typeof value !== 'string') return [];
-    const found = classify(name, value);
+    const found = classify(name, value.slice(0, MAX_LINE_CHARS));
     return found ? [found] : [];
   });
 }

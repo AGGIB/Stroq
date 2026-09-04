@@ -137,3 +137,47 @@ describe('extractEnv', () => {
     expect(found.find((e) => e.name === 'STROQ_CANARY_KEY')?.canary).toBe(true);
   });
 });
+
+describe('size caps', () => {
+  it('drops secrets past MAX_LINES but keeps ones before the cutoff', () => {
+    const lines = Array.from({ length: 6000 }, (_, i) => {
+      if (i === 0) return 'EARLY_SECRET_KEY=abcdefghijklmnopqrstuvwxyz';
+      if (i === 5499) return 'LATE_SECRET_KEY=abcdefghijklmnopqrstuvwxyz';
+      return `FILLER_${i}=x`;
+    });
+    const found = extractKeyValues(lines.join('\n'));
+    expect(names(found)).toContain('EARLY_SECRET_KEY');
+    expect(names(found)).not.toContain('LATE_SECRET_KEY');
+  });
+
+  it('cuts an oversized line at MAX_LINE_CHARS before parsing its value', () => {
+    const name = 'LONG_SECRET_KEY';
+    const line = `${name}=${'a'.repeat(5000)}`;
+    const found = extractKeyValues(line);
+    const entry = found.find((e) => e.name === name);
+    expect(entry?.value.length).toBe(4096 - `${name}=`.length);
+  });
+
+  it('bounds extractNetrc cost and output on pathological input', () => {
+    const text = `machine x password ${'p'.repeat(20)} ${'x '.repeat(200_000)}`;
+    const start = performance.now();
+    const found = extractNetrc(text);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(found).toHaveLength(1);
+  });
+
+  it('bounds extractDockerAuths cost and fails safe on truncated JSON', () => {
+    const text = `{"auths":{"a":{"auth":"${'A'.repeat(400_000)}"}}}`;
+    const start = performance.now();
+    const found = extractDockerAuths(text);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(found).toEqual([]);
+  });
+
+  it('caps extractEnv values at MAX_LINE_CHARS before classifying', () => {
+    // 'k' avoids the PLACEHOLDER `xxx+` branch that a repeated 'x' value would trip.
+    const found = extractEnv({ BIG_TOKEN: 'k'.repeat(10_000) });
+    expect(found).toHaveLength(1);
+    expect(found[0]?.value.length).toBeLessThanOrEqual(4096);
+  });
+});
