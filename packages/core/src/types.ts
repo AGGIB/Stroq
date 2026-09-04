@@ -10,7 +10,8 @@ export type ActionClass =
   | 'mcp.call'
   | 'mcp.side_effect'
   | 'origin.untrusted'
-  | 'origin.suspect';
+  | 'origin.suspect'
+  | 'secret.egress';
 
 export const ACTION_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
@@ -25,6 +26,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'mcp.side_effect',
   'origin.untrusted',
   'origin.suspect',
+  'secret.egress',
 ];
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
@@ -125,4 +127,18 @@ export interface ProvenanceEvidence {
   readonly source: string;
   readonly at: string;
   readonly suspect: boolean;
+}
+
+/** A known secret whose value appeared in an outbound tool call. Never carries the value. */
+export interface SecretHit {
+  /** Key or variable name, e.g. `AWS_SECRET_ACCESS_KEY`, `password (api.github.com)`. */
+  readonly name: string;
+  /** Where the value was indexed from: a display path (`~/.aws/credentials`), `env`, or `canary`. */
+  readonly source: string;
+  readonly canary: boolean;
+}
+
+/** In-memory match result: the token that matched, used only to redact it from summaries. */
+export interface SecretMatch extends SecretHit {
+  readonly token: string;
 }
