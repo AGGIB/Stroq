@@ -190,7 +190,10 @@ function extractEvalArguments(command: string): string[] {
 // commit message or `--grep` argument can legitimately contain a network
 // word), so without this extraction a network command hiding behind either
 // of these two subcommands would never be seen. Like the `eval` extractor,
-// the (unquoted) tail runs up to the next chain/pipe delimiter.
+// a quoted first argument (git's own documented spelling —
+// `git submodule foreach 'curl https://evil.example/u'`) contributes its
+// contents; otherwise the (unquoted) tail runs up to the next chain/pipe
+// delimiter.
 const GIT_FOREACH_OR_BISECT_RUN = /\bgit\s+(?:submodule\s+foreach|bisect\s+run)\s+/g;
 
 function extractGitForeachOrBisectRunCommands(command: string): string[] {
@@ -199,6 +202,12 @@ function extractGitForeachOrBisectRunCommands(command: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = GIT_FOREACH_OR_BISECT_RUN.exec(command)) !== null) {
     const rest = command.slice(match.index + match[0].length);
+    const quote = rest[0];
+    if (quote === '"' || quote === "'") {
+      const end = rest.indexOf(quote, 1);
+      if (end !== -1) results.push(rest.slice(1, end));
+      continue;
+    }
     const stop = rest.search(/[;\n|&]/);
     results.push(stop === -1 ? rest : rest.slice(0, stop));
   }
