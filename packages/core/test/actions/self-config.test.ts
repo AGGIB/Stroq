@@ -92,6 +92,18 @@ describe('find write intent (F5-2: -exec/-execdir gated on inner writer/reader)'
   );
 });
 
+describe('F6 FIND_EXEC_WRITE_WORDS aligned with SELF_CONFIG_WRITE_COMMANDS', () => {
+  it.each([
+    'find ~/.stroq -exec touch {} \\;',
+    'find ~/.stroq -exec dd of={} if=/dev/null \\;',
+    'find .claude -name settings.json -exec bash -c "rm {}" \\;',
+  ])('deny: %s', (segment) => expect(classifySelfConfigSegment(segment)).toBe('deny'));
+
+  it('a plain reader inner command is still not write intent', () => {
+    expect(classifySelfConfigSegment("find .claude -name '*.md' -exec cat {} \\;")).toBeNull();
+  });
+});
+
 describe('selfTamperSignals', () => {
   it('produces deny signals for a write-intent segment and nothing for a benign one', () => {
     const result = selfTamperSignals(['echo "{}" > .claude/settings.json', 'ls -la']);

@@ -91,7 +91,12 @@ const FIND_DELETE_PRIMARIES = /-(delete|ok|okdir|fprint|fprintf)\b/;
 const FIND_EXEC_PRIMARY = /-exec(?:dir)?\s+(\S+)/;
 // Writer/deleter verbs that make a `find ... -exec <verb> ...` write intent.
 // A reader (`cat`, `grep`, `ls`, `head`, …) is not — `find . -exec cat {} \;`
-// only reads the matched files.
+// only reads the matched files. Kept aligned with SELF_CONFIG_WRITE_COMMANDS
+// (`dd`, `install`, `touch`, `sponge` included below) so a writer that is
+// unconditional at the top level is also unconditional as a `-exec` verb;
+// `perl` stays here even though it is conditional (inline-code-only) at the
+// top level, since `find`'s own gate has no equivalent way to see whether
+// the inner `perl` invocation carries `-e`/`-pi`.
 const FIND_EXEC_WRITE_WORDS = new Set([
   'rm',
   'mv',
@@ -104,7 +109,18 @@ const FIND_EXEC_WRITE_WORDS = new Set([
   'ln',
   'truncate',
   'shred',
+  'dd',
+  'install',
+  'touch',
+  'sponge',
 ]);
+// `find ... -exec bash|sh|zsh -c '<code>' \;` runs an arbitrary inner shell
+// script rather than a single known verb, so its write intent can't be read
+// off of one command word the way `-exec rm {} \;` can. Treated as write
+// intent unconditionally (the same conservative call `SHELL_C_REMOTE` makes
+// for network detection in classify-bash.ts) rather than trying to parse the
+// quoted script for its own verb.
+const FIND_EXEC_SHELL_C = /-exec(?:dir)?\s+(?:bash|sh|zsh)\s+-c\b/;
 
 function isInlineCodeToken(token: string): boolean {
   if (!/^-[A-Za-z]+$/.test(token)) return false;
@@ -116,6 +132,7 @@ function hasInlineCode(segment: string): boolean {
 }
 
 function findExecIsWriteIntent(segment: string): boolean {
+  if (FIND_EXEC_SHELL_C.test(segment)) return true;
   const match = FIND_EXEC_PRIMARY.exec(segment);
   if (!match) return false;
   const word = (match[1] ?? '').replace(/^.*\//, '');
