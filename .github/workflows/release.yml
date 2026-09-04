@@ -32,7 +32,20 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Skip if this version is already on npm
+
+        id: published
+
+        working-directory: packages/cli
+
+        run: |
+
+          V=$(node -p "require('./package.json').version")
+
+          if npm view "@stroq/cli@$V" version >/dev/null 2>&1; then echo "already=true" >> "$GITHUB_OUTPUT"; echo "@stroq/cli@$V is already published; skipping"; else echo "already=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Publish to npm
+        if: steps.published.outputs.already != 'true'
         working-directory: packages/cli
         run: npm publish --provenance --access public
         env:
