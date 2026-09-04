@@ -145,11 +145,14 @@ describe('handleClaudeHook', () => {
     });
   });
 
-  it('prints nothing for clean PostToolUse output', async () => {
-    expect(
-      (await handleClaudeHook(createEngine(), post('Read', 'Run npm install then npm test.')))
-        .stdout,
-    ).toBe('');
+  it('prints nothing but a classifierContext for clean PostToolUse output that carries atoms', async () => {
+    const out = await handleClaudeHook(
+      createEngine(),
+      post('Read', 'Run npm install then npm test.'),
+    );
+    expect(parse(out.stdout).hookSpecificOutput['classifierContext']).toMatchObject({
+      stroq: { verdict: 'clean' },
+    });
   });
 
   it('rejects malformed input', async () => {

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import {
   AuditLog,
   DEFAULT_POLICY,
+  FileProvenanceStore,
   FileSessionStore,
   StroqEngine,
   loadBundledRules,
@@ -20,6 +21,7 @@ export function createEngine(): StroqEngine {
     rules: loadBundledRules(),
     policy: loadPolicy(),
     sessions: new FileSessionStore(sessionsDir()),
+    provenance: new FileProvenanceStore(sessionsDir()),
     audit: new AuditLog(auditFile()),
   });
 }
