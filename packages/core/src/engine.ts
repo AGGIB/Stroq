@@ -9,6 +9,8 @@ import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
+import { candidateTokens } from './secrets/candidates.js';
+import type { SecretIndex } from './secrets/index.js';
 import type { SessionStore } from './taint/session-store.js';
 import type {
   ActionClass,
@@ -18,6 +20,8 @@ import type {
   PreToolEvent,
   ProvenanceHit,
   ScanResult,
+  SecretHit,
+  SecretMatch,
   Taint,
 } from './types.js';
 
@@ -28,6 +32,8 @@ export interface EngineOptions {
   readonly audit: AuditLog;
   /** Optional: without it, nothing is recorded and `origin.*` classes never fire. */
   readonly provenance?: ProvenanceStore;
+  /** Optional: without it, `secret.egress` never fires. */
+  readonly secrets?: SecretIndex;
   readonly now?: () => Date;
 }
 
@@ -38,6 +44,8 @@ export interface PreResult {
   readonly taint: Taint | null;
   /** Provenance hits that contributed `origin.*` classes (empty when none). */
   readonly provenance: readonly ProvenanceHit[];
+  /** Known secrets whose values appeared in the arguments (never the values). */
+  readonly secrets: readonly SecretHit[];
 }
 
 export interface PostResult {
@@ -57,6 +65,23 @@ export interface PostResult {
 export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 const MAX_STORED_CHARS = 120;
+
+/** Action classes that send data somewhere: the only ones checked for secret values. */
+const EGRESS_CLASSES: readonly ActionClass[] = [
+  'shell.network',
+  'network.fetch',
+  'mcp.call',
+  'mcp.side_effect',
+  'git.push_external',
+  'shell.exec_encoded',
+];
+const CANARY_RULE_ID = 'STROQ-CANARY';
+
+function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
+  return matches.reduce((text, m) => text.split(m.token).join(`[REDACTED:${m.name}]`), summary);
+}
+
+const toHit = (m: SecretMatch): SecretHit => ({ name: m.name, source: m.source, canary: m.canary });
 
 // `toolName` is intentionally unused for now; kept to match the interface
 // consumed by the CLI, which may need it for tool-specific summaries later.
@@ -107,6 +132,16 @@ export class StroqEngine {
     return hits;
   }
 
+  /** Secret values in the arguments of an egress-shaped action; empty without an index. */
+  private async findSecrets(
+    event: PreToolEvent,
+    classes: readonly ActionClass[],
+  ): Promise<SecretMatch[]> {
+    const index = this.opts.secrets;
+    if (!index || !classes.some((c) => EGRESS_CLASSES.includes(c))) return [];
+    return index.lookup(candidateTokens(event.toolName, event.toolInput), event.cwd);
+  }
+
   /**
    * Persists provenance for `atoms`, never throwing: recording is enrichment,
    * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
@@ -144,24 +179,41 @@ export class StroqEngine {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
-    const classes = [...classification.classes, ...origin.classes];
+    const matches = await this.findSecrets(event, classification.classes);
+    const secrets = matches.map(toHit);
+    const classes: ActionClass[] = [
+      ...classification.classes,
+      ...origin.classes,
+      ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
+    ];
     const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
     const provenance = origin.counted.map(toEvidence);
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
       tool: event.toolName,
-      summary: summarizeInput(event.toolName, event.toolInput),
+      summary: redactMatches(summarizeInput(event.toolName, event.toolInput), matches),
       classes,
       decision,
       ...(provenance.length > 0 ? { provenance } : {}),
+      ...(secrets.length > 0 ? { secrets } : {}),
     });
+    const taint = secrets.some((s) => s.canary)
+      ? (
+          await this.opts.sessions.markSuspect(event.sessionId, {
+            tool: event.toolName,
+            ruleIds: [CANARY_RULE_ID],
+            at: this.now(),
+          })
+        ).taint
+      : state.taint;
     return {
       decision,
       classes,
       hosts: classification.hosts,
-      taint: state.taint,
+      taint,
       provenance: origin.counted,
+      secrets,
     };
   }
 
