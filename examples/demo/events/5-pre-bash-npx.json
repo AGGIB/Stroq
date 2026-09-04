@@ -1,0 +1,8 @@
+{
+  "session_id": "demo-session-2",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": { "command": "npx @sentry-tooling/report-fix --apply" },
+  "cwd": "/tmp/demo",
+  "tool_use_id": "toolu_01DemoNpx"
+}
