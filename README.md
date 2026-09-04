@@ -13,7 +13,7 @@ Coding agents read untrusted content constantly — web pages, file contents, MC
 
 ## See it block an attack
 
-<img src="docs/assets/demo.svg" alt="Terminal recording of Stroq scanning a poisoned README, tainting the session, and denying the resulting curl pipe sh command" width="920">
+<img src="docs/assets/demo.gif" alt="Stroq blocking a prompt-injection attack in Claude Code" width="800">
 
 1. Claude Code reads a dependency's `README.md` that hides an instruction to run `curl | sh` and a base64-encoded command to exfiltrate `~/.ssh/id_rsa`.
 2. Stroq's `PostToolUse` scan matches 13 rules across two rule sets, marks the session `suspect`, and hands the agent an inline warning to treat the file as untrusted.

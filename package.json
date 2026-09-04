@@ -16,6 +16,7 @@
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
+    "demo:gif": "bash scripts/render-demo-gif.sh",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
