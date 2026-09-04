@@ -11,3 +11,5 @@ coverage/
 # Vercel link files for the website (site/)
 site/.vercel/
 site/.env*
+.vercel
+.env*
