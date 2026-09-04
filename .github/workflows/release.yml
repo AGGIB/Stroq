@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual run from a branch whose package.json version is not on npm yet
+  # (e.g. to publish after configuring the token or trusted publishing).
+  workflow_dispatch:
 
 permissions:
   contents: read
