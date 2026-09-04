@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { extractAtoms, normalizePackageName } from './atoms.js';
@@ -20,14 +20,24 @@ const DEPENDENCY_SECTIONS = [
 ];
 const REQUIREMENT_LINE = /^\s*([A-Za-z0-9_][A-Za-z0-9_.-]*)/;
 const PYPROJECT_DEP = /["']([A-Za-z0-9_][A-Za-z0-9_.-]*)(?:\[[^\]]*\])?\s*(?:[<>=!~;]|["'])/g;
-// `dependencies = [...]` assignments anywhere in the file (e.g. under `[project]`).
-const PYPROJECT_DEPS_ARRAY = /dependencies\s*=\s*\[([^\]]*)\]/g;
+// `dependencies = [...]` assignments anywhere in the file (e.g. under `[project]`). The
+// bracket body is bounded to 4,000 chars: given no closing "]" ahead, an unbounded `[^\]]*`
+// scans to end-of-string and backtracks one char at a time — O(remaining length) per match
+// attempt, O(n^2) over every `dependencies=[` occurrence in an adversarial file. A real
+// dependency array is nowhere near 4,000 chars, so a longer one is simply truncated.
+const PYPROJECT_DEPS_ARRAY = /dependencies\s*=\s*\[([^\]]{0,4000})\]/g;
 // Any `key = [...]` assignment, scoped to the `[project.optional-dependencies]` table body.
-const PYPROJECT_KEYED_ARRAY = /=\s*\[([^\]]*)\]/g;
+// Same bound, same reason.
+const PYPROJECT_KEYED_ARRAY = /=\s*\[([^\]]{0,4000})\]/g;
 const OPTIONAL_DEPS_HEADER = '[project.optional-dependencies]';
+// A manifest bigger than this contributes no names: reading (and then regex-scanning) an
+// arbitrarily large planted file would itself be the slow part `knownPackages` must avoid,
+// since it runs on every Bash PreToolUse.
+const MAX_MANIFEST_BYTES = 262_144;
 
 function readText(path: string): string | null {
   try {
+    if (statSync(path).size > MAX_MANIFEST_BYTES) return null;
     return readFileSync(path, 'utf8');
   } catch {
     return null;

@@ -91,6 +91,23 @@ describe('knownPackages', () => {
     for (const name of ['httpx', 'typer', 'pytest', 'ruff']) expect(known.has(name)).toBe(true);
     for (const name of ['myapp', '1.0.0', 'readme.md', 'mit']) expect(known.has(name)).toBe(false);
   });
+
+  it('stays fast on adversarial manifests', () => {
+    const cwd = project();
+    writeFileSync(join(cwd, 'pyproject.toml'), 'dependencies=['.repeat(7000));
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ dependencies: { left: '1' } }));
+    const start = performance.now();
+    const known = knownPackages(cwd);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(known.has('left')).toBe(true);
+
+    const oversizedCwd = project();
+    writeFileSync(join(oversizedCwd, 'pyproject.toml'), 'dependencies=['.repeat(40000));
+    const start2 = performance.now();
+    const oversized = knownPackages(oversizedCwd);
+    expect(performance.now() - start2).toBeLessThan(1000);
+    expect(oversized.has('dependencies')).toBe(false);
+  });
 });
 
 describe('atomsForAction', () => {
