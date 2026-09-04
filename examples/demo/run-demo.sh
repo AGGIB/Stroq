@@ -4,7 +4,9 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 cli="$root/packages/cli/dist/index.js"
 [ -f "$cli" ] || { echo "build first: pnpm build" >&2; exit 1; }
 export STROQ_HOME="$(mktemp -d)"
+export HOME="$(mktemp -d)"
 demo_cwd="$(mktemp -d)"
+trap 'rm -rf "$STROQ_HOME" "$HOME" "$demo_cwd"' EXIT
 printf 'DEMO_API_KEY=demo_secret_value_1234567890abcdef\n' > "$demo_cwd/.env"
 echo "STROQ_HOME=$STROQ_HOME"
 echo "demo project with a .env: $demo_cwd"
