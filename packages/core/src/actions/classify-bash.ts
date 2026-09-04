@@ -114,6 +114,16 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bchmod\s+-R\s+777\s+\//, 'chmod-root'],
   [/>\s*\/dev\/(sd|nvme|disk)/, 'write-device'],
   [/\bkill\s+-9\s+-1\b/, 'kill-all'],
+  // Infrastructure and database wipes the incident record shows agents running
+  // unprompted: `terraform destroy` / `apply -destroy`, `drizzle-kit push --force`
+  // (claude-code #27063), `prisma migrate reset` / `db push --force-reset`.
+  [/\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy\b)/, 'iac-destroy'],
+  [/\bpulumi\s+(destroy|down)\b/, 'iac-destroy'],
+  [/\bdrizzle-kit\s+push\b[^\n]*--force\b/, 'db-force-migrate'],
+  [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
+  [/\bprisma\s+db\s+push\b[^\n]*--(force-reset|accept-data-loss)\b/, 'db-force-migrate'],
+  [/\bsupabase\s+db\s+reset\b/, 'db-force-migrate'],
+  [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
 ];
 const SECRET_PATTERNS: readonly RegExp[] = [
   /(^|[\s"'/=])~?\/?\.ssh(\/|\b)/,
@@ -133,12 +143,18 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
 const PUSH_EXTERNAL =
   /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
+// `gh repo create … --push` creates a remote repository and pushes the source
+// directory to it in one step — the s1ngularity exfiltration shape.
+const GH_REPO_CREATE_PUSH = /\bgh\s+repo\s+create\b[^\n]*--push\b/;
 
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
   if (t === '') return false;
-  if (['/', '/*', '~', '~/', '~/*', '.', './', '*', './*'].includes(t)) return true;
-  if (t.startsWith('$') || t.startsWith('..')) return true;
+  if (['/', '/*', '.', './', '*', './*'].includes(t)) return true;
+  // `~`, `~/…` and `~user/…` expand to a home directory, which is never inside a
+  // project checkout; `$VAR` is unknown and `..` points upward — all treated as
+  // outside the working tree.
+  if (t.startsWith('~') || t.startsWith('$') || t.startsWith('..')) return true;
   if (!t.startsWith('/')) return false;
   const normalized = t.replace(/\/+$/, '');
   return !normalized.startsWith(`${cwd}/`);
@@ -273,6 +289,13 @@ function destructiveSignals(segments: readonly string[], cwd: string): string[] 
   });
 }
 
+function pushExternalSignals(segments: readonly string[]): string[] {
+  return segments.flatMap((seg) => [
+    ...(PUSH_EXTERNAL.test(seg) ? ['git-push-external'] : []),
+    ...(GH_REPO_CREATE_PUSH.test(seg) ? ['gh-repo-create-push'] : []),
+  ]);
+}
+
 function secretSignals(segments: readonly string[]): string[] {
   return segments.flatMap((seg) => {
     const signals = SECRET_PATTERNS.filter((re) => re.test(seg)).map(
@@ -297,10 +320,7 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
     ['shell.network', segments.filter(isNetwork).map(() => 'network-command')],
     ['shell.destructive', destructiveSignals(segments, cwd)],
     ['fs.secrets', secretSignals(segments)],
-    [
-      'git.push_external',
-      segments.filter((s) => PUSH_EXTERNAL.test(s)).map(() => 'git-push-external'),
-    ],
+    ['git.push_external', pushExternalSignals(segments)],
     ['config.self', selfConfig.deny],
     ['config.self_touch', selfConfig.ask],
   ];
