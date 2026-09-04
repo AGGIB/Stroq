@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Secret egress guard.** Values of known secrets (project `.env*` files, `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json`, credential-shaped environment variables) are indexed as salted hashes in `~/.stroq/secrets.json`; an egress-shaped action whose arguments contain one of them is denied by the new first default rule `deny-secret-egress` (new action class `secret.egress`), the reason names the secret and its source, and the value is redacted from the audit summary. Users with a custom `~/.stroq/policy.yaml` must add the rule to be protected.
+- `stroq canary [--name <NAME>]`: prints a decoy secret to plant; its outbound use is a certain positive that also marks the session suspect. `stroq doctor` reports the index size; `stroq why` explains secret-egress denials.
+- Demo: event 6 exfiltrates a `.env` value with `curl` and is denied.
+
 ## [0.2.0] - 2026-09-05
 
 ### Added

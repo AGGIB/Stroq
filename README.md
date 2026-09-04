@@ -74,6 +74,7 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 ## What you get
 
 - **Provenance: Stroq knows where an instruction came from.** Every scanned tool output leaves a bounded, redacted trace of its _actionable atoms_ — URLs and hosts, `npx`/`pip install` package names, `curl … | sh` lines, base64 blobs. When a later command contains one of them, the decision carries the evidence (`stroq why` shows it, and so does the hook reason Claude Code displays): an unknown package or a pipe-to-shell copied from a file, a web page or an MCP result is asked about; copied from content Stroq had already flagged, it is denied. Packages the project already depends on are ignored for shell commands, so `npx tsc` from your own README stays silent.
+- **Secret egress guard: Stroq knows where your secrets are going.** The values of secrets on this machine — the project's `.env*` files, `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json`, and credential-shaped environment variables — are indexed as salted hashes. An outbound action (network command, web fetch, MCP call, external push, encoded exec) whose arguments contain one of those values is denied and the reason names the secret and its file, never the value. `stroq canary` prints a decoy secret to plant; any outbound use of it is a certain positive that also taints the session.
 - **Content scanning with real normalization.** Zero-width and tag characters stripped, homoglyphs folded, nested base64/hex/URL decoding — so `сurl` with a Cyrillic `с`, or a command hidden in base64, is matched like the plain text it decodes to.
 - **599 gated rules.** 12 hand-written Stroq rules plus 596 vendored [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules), every one of them passed through a benign-corpus false-positive gate and a regex performance gate before it ships. Russian-language rule variants included.
 - **Taint-aware policy.** The decision about an action knows whether the agent has read something suspicious in this session. Twelve action classes, one ordered YAML policy, first match wins.
@@ -111,15 +112,16 @@ node packages/cli/dist/index.js doctor
 
 ## Commands
 
-| Command                                  | What it does                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------- |
-| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`) |
-| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                |
-| `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
-| `stroq log [--count 20]`                 | Show recent audit entries                                                 |
-| `stroq verify`                           | Verify the audit hash chain                                               |
-| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint and provenance, or every session's |
-| `stroq why [--seq <n>]`                  | Explain the most recent denied/asked action: rule, provenance, taint      |
+| Command                                  | What it does                                                                      |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`)         |
+| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                        |
+| `stroq doctor`                           | Check Node version, rules, hooks, self-test                                       |
+| `stroq log [--count 20]`                 | Show recent audit entries                                                         |
+| `stroq verify`                           | Verify the audit hash chain                                                       |
+| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint and provenance, or every session's         |
+| `stroq why [--seq <n>]`                  | Explain the most recent denied/asked action: rule, provenance, taint              |
+| `stroq canary [--name <NAME>]`           | Print a canary secret to plant; its outbound use is denied and taints the session |
 
 ## Policy
 
@@ -131,6 +133,7 @@ Generated from [`policies/default.yaml`](policies/default.yaml); rules are evalu
 
 | Rule id                            | Effect    | When                                 |
 | ---------------------------------- | --------- | ------------------------------------ |
+| `deny-secret-egress`               | deny      | `secret.egress`, any taint           |
 | `deny-self-tamper`                 | deny      | `config.self`, any taint             |
 | `deny-encoded-exec`                | deny      | `shell.exec_encoded`, any taint      |
 | `deny-origin-suspect`              | deny      | `origin.suspect`, any taint          |
@@ -150,6 +153,10 @@ Commands that only read the security config — `cat`, `grep`, `git status`/`dif
 ### Provenance
 
 `origin.untrusted` fires when a proposed action contains an atom that appeared in an earlier tool output of the same session; `origin.suspect` additionally requires that output to have scanned as `suspect`. Only some atoms count: package specs (`npx`, `pnpm dlx`, `uvx`, `npm install`, `pip install`, `cargo install`, …), `curl`/`wget` piped into a shell, and base64 blobs always do; URLs and hosts count only when the action is already network-shaped (`shell.network`, `git.push_external`, `shell.exec_encoded`), so following a documentation link with `WebFetch` never asks. Package atoms found in `package.json` dependencies, `node_modules/.bin`, `requirements.txt`, `requirements-dev.txt` or `pyproject.toml` of the working directory are not counted for shell commands. Traces live in `~/.stroq/sessions/<hash>.prov.json` (named by a hash of the session id; hash, redacted excerpt ≤ 120 chars, source, timestamp; at most 2,000 per session; mode `0600`). Once an output is flagged suspect, every atom it contains is treated as dictated by it — including a project's own legitimate setup commands if they appeared in the same file — so the recovery for a false positive is `stroq untaint --session <id>` (the session id is shown in `stroq log`), which clears both the taint and the provenance trace. Per-source trust is planned. Provenance is text-level: an agent that reads a poisoned page and then writes its _own_ command is not attributed this way — that is what taint and the policy rules above are for — and a package the agent has itself added to `package.json` becomes "known", since provenance does not attribute `Write`/`Edit` calls.
+
+### Secret egress guard
+
+`secret.egress` fires when an egress-shaped action (`shell.network`, `network.fetch`, `mcp.call`, `mcp.side_effect`, `git.push_external`, `shell.exec_encoded`) carries the exact value of a known secret. Known secrets are the credential-named or vendor-shaped values (12+ characters, no whitespace, no placeholders, no paths) found in the working directory's `.env*` files (except `.env.example`-style files), `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json`, and in environment variables with credential-like names. The index at `~/.stroq/secrets.json` (mode `0600`) holds only `sha256(salt + value)`, the key name and the file path; it is rebuilt when a source changes, and environment variables are hashed live and never stored. The index is fully derivable from its sources, so a damaged file is rebuilt rather than blocking actions, and `stroq doctor` shows a `secrets` line (`<n> values from <m> sources, <k> canaries`, or `index not built yet`). The matched value is redacted from the audit summary as `[REDACTED:<name>]`. Limits: only exact and URL-encoded values are matched (a base64-encoded or split secret is not), only egress-shaped actions are checked (a secret in a purely local command is not egress), and `~/.ssh` private keys, `~/.kube/config` and gcloud configs are not indexed yet — reading those _files_ is still covered by `fs.secrets`.
 
 ## Rules
 
