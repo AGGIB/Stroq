@@ -117,7 +117,11 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   // Infrastructure and database wipes the incident record shows agents running
   // unprompted: `terraform destroy` / `apply -destroy`, `drizzle-kit push --force`
   // (claude-code #27063), `prisma migrate reset` / `db push --force-reset`.
-  [/\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy(?![\w=-]))/, 'iac-destroy'],
+  // `-destroy`, `-destroy=true|t|1` are destructive; `-destroy=false` explicitly is not.
+  [
+    /\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy(?:=(?:1|t|true))?(?![\w=-]))/i,
+    'iac-destroy',
+  ],
   [/\bpulumi\s+destroy\b/, 'iac-destroy'],
   [/\bdrizzle-kit\s+push\b[^\n]*--force(?![\w-])/, 'db-force-migrate'],
   [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
