@@ -20,3 +20,7 @@ export * from './provenance/atoms.js';
 export * from './provenance/store.js';
 export * from './provenance/action-atoms.js';
 export * from './provenance/describe.js';
+export * from './secrets/extract.js';
+export * from './secrets/candidates.js';
+export * from './secrets/index.js';
+export * from './secrets/describe.js';

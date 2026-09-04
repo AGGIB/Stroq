@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { ActionClass, Decision, ProvenanceEvidence } from '../types.js';
+import type { ActionClass, Decision, ProvenanceEvidence, SecretHit } from '../types.js';
 import { withLock } from '../util/lock.js';
 
 export interface AuditEntryInput {
@@ -18,6 +18,8 @@ export interface AuditEntryInput {
   };
   /** Provenance evidence that contributed `origin.*` classes to `decision`. */
   readonly provenance?: readonly ProvenanceEvidence[];
+  /** Known secrets whose values appeared in the arguments (names and sources only). */
+  readonly secrets?: readonly SecretHit[];
 }
 
 export interface AuditEntry extends AuditEntryInput {

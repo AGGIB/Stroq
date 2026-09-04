@@ -79,6 +79,21 @@ describe('evaluatePolicy with DEFAULT_POLICY', () => {
       ).ruleId,
     ).toBe('deny-encoded-exec');
   });
+
+  it('denies secret egress before anything else, tainted or not', () => {
+    expect(evaluatePolicy(DEFAULT_POLICY, ['shell.network', 'secret.egress'], null)).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-secret-egress',
+    });
+    expect(
+      evaluatePolicy(
+        DEFAULT_POLICY,
+        ['secret.egress', 'shell.exec_encoded', 'config.self'],
+        'suspect',
+      ).ruleId,
+    ).toBe('deny-secret-egress');
+    expect(DEFAULT_POLICY.rules[0]?.id).toBe('deny-secret-egress');
+  });
 });
 
 describe('F4 ask-self-touch must not shadow deny rules', () => {

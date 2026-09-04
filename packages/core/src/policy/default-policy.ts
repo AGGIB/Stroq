@@ -6,6 +6,12 @@ export const DEFAULT_POLICY: Policy = {
   default: 'allow',
   rules: [
     {
+      id: 'deny-secret-egress',
+      effect: 'deny',
+      reason: 'Arguments contain the value of a known secret; outbound use is blocked',
+      when: { classes: ['secret.egress'], taint: 'any' },
+    },
+    {
       id: 'deny-self-tamper',
       effect: 'deny',
       reason: 'Modifying agent security configuration is blocked',
