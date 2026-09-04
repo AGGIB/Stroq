@@ -87,7 +87,7 @@ describe('stroq hook claude-code (end to end)', () => {
 
     const untainted = await runCli(['untaint', '--session', 'e2e'], '', home);
     expect(untainted).toMatchObject({ code: 0 });
-    expect(untainted.stdout).toContain('cleared taint for session e2e');
+    expect(untainted.stdout).toContain('cleared taint and provenance for session e2e');
 
     const allowedAfterUntaint = await runCli(
       ['hook', 'claude-code'],

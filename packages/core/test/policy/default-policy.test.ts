@@ -12,4 +12,9 @@ describe('policies/default.yaml', () => {
     );
     expect(parsePolicy(yamlText)).toEqual(DEFAULT_POLICY);
   });
+
+  it('tells the user how to clear a false positive in the origin-suspect reason', () => {
+    const rule = DEFAULT_POLICY.rules.find((r) => r.id === 'deny-origin-suspect');
+    expect(rule?.reason).toContain('stroq untaint --session <id>');
+  });
 });

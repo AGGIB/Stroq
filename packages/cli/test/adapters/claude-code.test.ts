@@ -96,7 +96,10 @@ describe('handleClaudeHook', () => {
     );
     const denyJson = parse(denied.stdout).hookSpecificOutput;
     expect(denyJson['permissionDecision']).toBe('deny');
-    expect(String(denyJson['permissionDecisionReason'])).toContain('deny-network-when-tainted');
+    // The follow-up command reuses the exact host ("evil.example") the provenance
+    // store just recorded from suspect-flagged output, so the more specific
+    // origin rule fires ahead of the generic tainted-network rule (both deny).
+    expect(String(denyJson['permissionDecisionReason'])).toContain('deny-origin-suspect');
   });
 
   it('denies WebFetch once the session is tainted', async () => {
@@ -145,11 +148,14 @@ describe('handleClaudeHook', () => {
     });
   });
 
-  it('prints nothing for clean PostToolUse output', async () => {
-    expect(
-      (await handleClaudeHook(createEngine(), post('Read', 'Run npm install then npm test.')))
-        .stdout,
-    ).toBe('');
+  it('prints nothing but a classifierContext for clean PostToolUse output that carries atoms', async () => {
+    const out = await handleClaudeHook(
+      createEngine(),
+      post('Read', 'Run npm install then npm test.'),
+    );
+    expect(parse(out.stdout).hookSpecificOutput['classifierContext']).toMatchObject({
+      stroq: { verdict: 'clean' },
+    });
   });
 
   it('rejects malformed input', async () => {

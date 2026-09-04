@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Provenance.** `PostToolUse` now records the actionable atoms of every scanned output (URLs/hosts, package specs, pipe-to-shell commands, base64 blobs) in a per-session, redacted, bounded trace; `PreToolUse` attributes proposed actions to those traces and adds two action classes, `origin.untrusted` and `origin.suspect`, evaluated by two new default rules (`ask-origin-untrusted`, `deny-origin-suspect`). Hook reasons and audit entries carry the evidence ("… appeared in the output of mcp__sentry__get_issue (…) 40 s ago"); clean outputs that contain atoms are annotated for Claude Code's auto-mode classifier via `classifierContext`. Packages the project already depends on are never counted for shell commands.
+  - Upgrade note: a custom `~/.stroq/policy.yaml` replaces the default policy wholesale, so provenance is enforced only if it contains rules for `origin.suspect` and `origin.untrusted` — copy `deny-origin-suspect` and `ask-origin-untrusted` from `policies/default.yaml` (keeping them ahead of the `ask-*` rules).
+- `stroq why [--seq <n>]`: explains the most recent denied or asked action — rule, provenance evidence, and session taint.
+- `stroq untaint --session <id>` now also clears the session's provenance trace, so a false positive stops producing `origin.*` decisions.
+- Demo: a Sentry-style poisoned MCP result (`examples/demo/events/4-post-mcp-sentry.json`) followed by the `npx` it suggests.
+
 ### Fixed
 
 - **CI's rules-bundle check no longer depends on machine speed.** Previously, CI regenerated `packages/core/src/rules.bundle.json` and diffed it against the committed copy; a GitHub runner slower than the maintainer's machine could push a rule over the regex performance gate's threshold, disabling a rule the committed bundle didn't and failing CI with an unrelated-looking diff. `scripts/build-rules.ts --check` (wired into CI as `pnpm build:rules --check --advisory-perf`, and available locally as `pnpm check:rules`) now re-verifies rule compilation and the benign-corpus scan against the already-committed `rules/atr-disabled.json` and byte-compares an in-memory rebuild against the committed bundle, without measuring performance at all. `--advisory-perf` still times every rule and prints a `WARNING` for anything over threshold that isn't already disabled, but never fails the build.

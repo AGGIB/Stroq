@@ -58,6 +58,27 @@ describe('evaluatePolicy with DEFAULT_POLICY', () => {
     const d = evaluatePolicy(DEFAULT_POLICY, ['shell.destructive', 'shell.exec_encoded'], null);
     expect(d.effect).toBe('deny');
   });
+  it('denies an action dictated by flagged content and asks for one copied from unflagged content', () => {
+    expect(
+      evaluatePolicy(DEFAULT_POLICY, ['origin.untrusted', 'origin.suspect'], null),
+    ).toMatchObject({ effect: 'deny', ruleId: 'deny-origin-suspect' });
+    expect(evaluatePolicy(DEFAULT_POLICY, ['origin.untrusted'], null)).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-origin-untrusted',
+    });
+    // Existing deny rules keep precedence over the origin "ask".
+    expect(
+      evaluatePolicy(DEFAULT_POLICY, ['shell.network', 'origin.untrusted'], 'suspect'),
+    ).toMatchObject({ effect: 'deny', ruleId: 'deny-network-when-tainted' });
+    // Encoded execution keeps its own rule id even when provenance also fires.
+    expect(
+      evaluatePolicy(
+        DEFAULT_POLICY,
+        ['shell.exec_encoded', 'origin.untrusted', 'origin.suspect'],
+        null,
+      ).ruleId,
+    ).toBe('deny-encoded-exec');
+  });
 });
 
 describe('F4 ask-self-touch must not shadow deny rules', () => {

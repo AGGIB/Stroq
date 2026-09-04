@@ -4,6 +4,7 @@ import { runInit } from './commands/init.js';
 import { runLog } from './commands/log.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
+import { runWhy } from './commands/why.js';
 
 const USAGE = `stroq <command>
 
@@ -14,6 +15,7 @@ Commands:
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
+  why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -34,6 +36,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runVerify();
     case 'untaint':
       return runUntaint(rest);
+    case 'why':
+      return runWhy(rest);
     default:
       process.stdout.write(USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;

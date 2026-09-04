@@ -1,5 +1,14 @@
-import { warningFor, type StroqEngine } from '@stroq/core';
+import {
+  describeEvidence,
+  toEvidence,
+  warningFor,
+  type Atom,
+  type AtomKind,
+  type ProvenanceHit,
+  type StroqEngine,
+} from '@stroq/core';
 import { z } from 'zod';
+import { logError } from '../log.js';
 
 export const ClaudeHookInputSchema = z.looseObject({
   session_id: z.string().min(1),
@@ -25,6 +34,44 @@ export interface HookOutput {
 export const NO_OUTPUT: HookOutput = { stdout: '', exitCode: 0 };
 
 const clip = (s: string): string => s.slice(0, MAX_RESULT_CHARS);
+
+const MAX_EVIDENCE = 2;
+
+/** Appends up to MAX_EVIDENCE provenance sentences to a hook reason. */
+export function withEvidence(
+  reason: string,
+  hits: readonly ProvenanceHit[],
+  now: Date = new Date(),
+): string {
+  if (hits.length === 0) return reason;
+  const sentences = hits
+    .slice(0, MAX_EVIDENCE)
+    .map((hit) => describeEvidence(toEvidence(hit), now));
+  return `${reason} Evidence: ${sentences.join(' ')}`;
+}
+
+// Only the kinds that can fire an `origin.*` class on their own. URLs and hosts
+// count for network-shaped actions only, so reporting them here would tell the
+// auto-mode classifier about a page of ordinary documentation links.
+const COUNTED_KINDS: readonly AtomKind[] = ['pkg', 'pipe_shell', 'encoded'];
+
+export function countAtoms(atoms: readonly Atom[]): Partial<Record<AtomKind, number>> {
+  return atoms
+    .filter((atom) => COUNTED_KINDS.includes(atom.kind))
+    .reduce<Partial<Record<AtomKind, number>>>(
+      (acc, atom) => ({ ...acc, [atom.kind]: (acc[atom.kind] ?? 0) + 1 }),
+      {},
+    );
+}
+
+function postOutput(fields: Readonly<Record<string, unknown>>): HookOutput {
+  return {
+    stdout: JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PostToolUse', ...fields },
+    }),
+    exitCode: 0,
+  };
+}
 
 /** Read/Write responses nest the file body under `file.content`. */
 function fileContentOf(obj: Record<string, unknown>): string | null {
@@ -87,31 +134,41 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     cwd,
   };
   if (input.hook_event_name === 'PreToolUse') {
-    const { decision } = await engine.pre(base);
+    const { decision, provenance } = await engine.pre(base);
     if (decision.effect === 'deny')
-      return denyOutput(`Stroq blocked this action (${decision.ruleId}): ${decision.reason}`);
+      return denyOutput(
+        withEvidence(
+          `Stroq blocked this action (${decision.ruleId}): ${decision.reason}`,
+          provenance,
+        ),
+      );
     if (decision.effect === 'ask')
-      return askOutput(`Stroq: ${decision.reason} (${decision.ruleId})`);
+      return askOutput(withEvidence(`Stroq: ${decision.reason} (${decision.ruleId})`, provenance));
     return NO_OUTPUT;
   }
   const result = await engine.post({
     ...base,
     toolResultText: toolResultToText(input.tool_response ?? input.tool_result),
   });
-  if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
+  if (result.provenanceError) logError('provenance', result.provenanceError);
+  if (!result.scanned) return NO_OUTPUT;
   const ruleIds = [...new Set(result.scan.matches.map((m) => m.ruleId))];
-  return {
-    stdout: JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: warningFor(result.scan, input.tool_name),
-        classifierContext: {
-          stroq: { verdict: result.scan.verdict, score: result.scan.score, ruleIds },
-        },
-      },
-    }),
-    exitCode: 0,
+  const atoms = countAtoms(result.atoms);
+  const stroq = {
+    verdict: result.scan.verdict,
+    score: result.scan.score,
+    ruleIds,
+    atoms,
   };
+  if (result.scan.verdict !== 'suspect') {
+    return Object.keys(atoms).length === 0
+      ? NO_OUTPUT
+      : postOutput({ classifierContext: { stroq } });
+  }
+  return postOutput({
+    additionalContext: warningFor(result.scan, input.tool_name),
+    classifierContext: { stroq },
+  });
 }
 
 export function failClosedOutput(raw: unknown, err: unknown): HookOutput {

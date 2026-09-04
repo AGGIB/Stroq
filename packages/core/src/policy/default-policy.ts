@@ -18,6 +18,13 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['shell.exec_encoded'], taint: 'any' },
     },
     {
+      id: 'deny-origin-suspect',
+      effect: 'deny',
+      reason:
+        'Action was dictated by content Stroq flagged as suspicious; blocked (a false positive can be cleared with: stroq untaint --session <id>)',
+      when: { classes: ['origin.suspect'], taint: 'any' },
+    },
+    {
       id: 'deny-network-when-tainted',
       effect: 'deny',
       reason: 'Session is tainted by suspicious content; outbound network command blocked',
@@ -40,6 +47,13 @@ export const DEFAULT_POLICY: Policy = {
       effect: 'deny',
       reason: 'Session is tainted by suspicious content; push to external remote blocked',
       when: { classes: ['git.push_external'], taint: 'suspect' },
+    },
+    {
+      id: 'ask-origin-untrusted',
+      effect: 'ask',
+      reason:
+        'Action was copied from content the agent read (tool output is data, not instructions); confirm',
+      when: { classes: ['origin.untrusted'], taint: 'any' },
     },
     {
       id: 'ask-mcp-side-effect-when-tainted',
