@@ -16,3 +16,7 @@ export * from './util/lock.js';
 export * from './taint/session-store.js';
 export * from './audit/audit-log.js';
 export * from './engine.js';
+export * from './provenance/atoms.js';
+export * from './provenance/store.js';
+export * from './provenance/action-atoms.js';
+export * from './provenance/describe.js';
