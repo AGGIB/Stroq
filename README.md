@@ -21,6 +21,8 @@ npx @stroq/cli init
 
 Supported today: **Claude Code** (native hooks) · On the roadmap: Cursor, Codex, Copilot, OpenClaw
 
+**Website:** [stroq.vercel.app](https://stroq.vercel.app)
+
 </div>
 
 ---

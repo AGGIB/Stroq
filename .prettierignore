@@ -7,3 +7,4 @@ coverage/
 rules/fixtures/
 rules/atr/
 packages/core/src/rules.bundle.json
+site/
