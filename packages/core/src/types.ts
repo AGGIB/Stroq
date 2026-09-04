@@ -8,7 +8,9 @@ export type ActionClass =
   | 'config.self_touch'
   | 'network.fetch'
   | 'mcp.call'
-  | 'mcp.side_effect';
+  | 'mcp.side_effect'
+  | 'origin.untrusted'
+  | 'origin.suspect';
 
 export const ACTION_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
@@ -21,6 +23,8 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'network.fetch',
   'mcp.call',
   'mcp.side_effect',
+  'origin.untrusted',
+  'origin.suspect',
 ];
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
@@ -80,4 +84,45 @@ export interface PreToolEvent {
 
 export interface PostToolEvent extends PreToolEvent {
   readonly toolResultText: string;
+}
+
+/** Kinds of "actionable atoms" tracked for instruction provenance. */
+export type AtomKind = 'url' | 'host' | 'pkg' | 'pipe_shell' | 'encoded';
+
+export interface Atom {
+  readonly kind: AtomKind;
+  /** Normalized value (lower-cased, whitespace-collapsed, version-stripped); ≤ 512 chars. */
+  readonly value: string;
+}
+
+/** One atom seen in a tool output earlier in the session. Stored on disk; never contains raw output. */
+export interface ProvenanceRecord {
+  readonly seq: number;
+  readonly at: string;
+  /** Tool whose output carried the atom, e.g. `Read`, `mcp__sentry__get_issue`. */
+  readonly tool: string;
+  /** Redacted summary of that tool's input (file path, URL, command, or JSON), ≤ 120 chars. */
+  readonly source: string;
+  readonly kind: AtomKind;
+  /** `atomHash(atom)` — the lookup key. */
+  readonly hash: string;
+  /** Redacted atom value, ≤ 120 chars, for explanations. */
+  readonly excerpt: string;
+  /** Whether the scan of that output was `suspect`. */
+  readonly suspect: boolean;
+}
+
+export interface ProvenanceHit {
+  readonly atom: Atom;
+  readonly record: ProvenanceRecord;
+}
+
+/** The explanation-oriented subset of a hit, as written to the audit log. */
+export interface ProvenanceEvidence {
+  readonly kind: AtomKind;
+  readonly excerpt: string;
+  readonly tool: string;
+  readonly source: string;
+  readonly at: string;
+  readonly suspect: boolean;
 }
