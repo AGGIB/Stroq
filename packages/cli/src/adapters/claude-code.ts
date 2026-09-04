@@ -25,7 +25,7 @@ export const ClaudeHookInputSchema = z.looseObject({
 });
 export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
 
-export const HIGH_IMPACT_TOOL = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__)/;
+export const HIGH_IMPACT_TOOL = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
 const MAX_RESULT_CHARS = 200_000;
 
 export interface HookOutput {
@@ -39,7 +39,11 @@ const clip = (s: string): string => s.slice(0, MAX_RESULT_CHARS);
 
 const MAX_EVIDENCE = 2;
 
-/** Appends up to MAX_EVIDENCE sentences (provenance first, then secrets) to a hook reason. */
+/**
+ * Appends up to MAX_EVIDENCE sentences to a hook reason. Secrets come first: when a
+ * secret value is in the arguments it IS the reason for the denial, and the two-sentence
+ * budget must not be spent on provenance before it is mentioned.
+ */
 export function withEvidence(
   reason: string,
   hits: readonly ProvenanceHit[],
@@ -47,8 +51,8 @@ export function withEvidence(
   secrets: readonly SecretHit[] = [],
 ): string {
   const sentences = [
-    ...hits.map((hit) => describeEvidence(toEvidence(hit), now)),
     ...secrets.map(describeSecretHit),
+    ...hits.map((hit) => describeEvidence(toEvidence(hit), now)),
   ].slice(0, MAX_EVIDENCE);
   if (sentences.length === 0) return reason;
   return `${reason} Evidence: ${sentences.join(' ')}`;
