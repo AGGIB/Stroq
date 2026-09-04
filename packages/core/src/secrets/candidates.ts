@@ -16,11 +16,12 @@ export interface SecretCandidate {
  */
 export const MAX_INPUT_CHARS = 262_144;
 /**
- * Pure memory guard on the candidate list, not a security bound: `MAX_INPUT_CHARS`
- * of text cannot hold more than ~20k distinct tokens of `MIN_SECRET_LENGTH`, so a
- * real input never reaches this and ordering never decides what gets looked up.
+ * Pure memory guard on the candidate list, not a security bound. The densest
+ * measured padding (`a%41=b%41:c%41` repeated) yields ~0.19 candidates per input
+ * character, i.e. ~50k for `MAX_INPUT_CHARS` of text; this ceiling sits four times
+ * above that, so ordering never decides what gets looked up.
  */
-export const MAX_CANDIDATES = 50_000;
+export const MAX_CANDIDATES = 200_000;
 // Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
 // secret values can contain them (an AWS-style key, a `p@ssw0rd`-style password); a
 // second pass below splits on both instead, so the whole token is still a candidate.
