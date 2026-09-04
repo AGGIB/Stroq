@@ -38,4 +38,11 @@ describe('stroq canary', () => {
     out.restore();
     expect(out.lines.join('')).toMatch(/FAKE_STRIPE_KEY=stroq_canary_/);
   });
+
+  it('falls back to the default name when --name is empty or blank', async () => {
+    const out = capture();
+    expect(await runCanary(['--name', ''])).toBe(0);
+    out.restore();
+    expect(out.lines.join('')).toMatch(/^STROQ_CANARY_KEY=stroq_canary_/);
+  });
 });

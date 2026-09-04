@@ -1,5 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleClaudeHook, withEvidence } from '../../src/adapters/claude-code.js';
@@ -38,6 +38,13 @@ describe('secret egress in the Claude Code adapter', () => {
       `Evidence: the arguments contain the value of DB_PASSWORD from ${join(cwd, '.env')}.`,
     );
     expect(reason).not.toContain(SECRET);
+    const indexFile = join(process.env['STROQ_HOME'] ?? '', 'secrets.json');
+    expect(existsSync(indexFile)).toBe(true);
+    const index = JSON.parse(readFileSync(indexFile, 'utf8')) as {
+      sources: readonly { path: string }[];
+    };
+    const realHome = userInfo().homedir;
+    expect(index.sources.some((s) => s.path.startsWith(realHome))).toBe(false);
   });
 
   it('allows the same command when the value is not a known secret', async () => {

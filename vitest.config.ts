@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts'],
+    setupFiles: ['./test/setup-env.ts'],
     coverage: {
       provider: 'v8',
       include: ['packages/*/src/**/*.ts'],

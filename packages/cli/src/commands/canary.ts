@@ -21,7 +21,8 @@ export async function runCanary(args: readonly string[]): Promise<number> {
     args: [...args],
     options: { name: { type: 'string', default: 'STROQ_CANARY_KEY' } },
   });
-  const name = values.name ?? 'STROQ_CANARY_KEY';
+  const rawName = values.name ?? 'STROQ_CANARY_KEY';
+  const name = rawName.trim() === '' ? 'STROQ_CANARY_KEY' : rawName;
   const value = canaryValue();
   await new FileSecretIndex(secretsFile(), homedir()).addCanary(value, name);
   process.stdout.write(
