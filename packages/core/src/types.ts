@@ -138,7 +138,10 @@ export interface SecretHit {
   readonly canary: boolean;
 }
 
-/** In-memory match result: the token that matched, used only to redact it from summaries. */
+/** In-memory match result: what matched, used only to redact it from summaries. */
 export interface SecretMatch extends SecretHit {
+  /** The lookup form that hashed to a known secret (URL-decoded where that applied). */
   readonly token: string;
+  /** The substring exactly as it appeared in the tool input, over-encoding and all. */
+  readonly raw: string;
 }

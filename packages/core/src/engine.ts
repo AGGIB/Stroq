@@ -80,15 +80,16 @@ const CANARY_RULE_ID = 'STROQ-CANARY';
 /**
  * Redacts every match from `summary`. A match's `token` is the candidate that hashed
  * to a known secret, which may be a URL-decoded form of what actually appears in the
- * text (e.g. the agent passed `%2F`, not `/`); so each match is redacted in its raw
- * form, its URL-encoded form, and that encoding with lowercase hex escapes, skipping
- * any form identical to one already applied.
+ * text (e.g. the agent passed `%2F`, not `/`, or over-encoded the whole value as
+ * `%77Jalr…`); so each match is redacted in its `raw` spelling from the input, its
+ * decoded token, that token's URL-encoding, and the encoding with lowercase hex
+ * escapes, skipping any form identical to one already applied.
  */
 function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
   return matches.reduce((text, m) => {
     const encoded = encodeURIComponent(m.token);
     const lowerEncoded = encoded.replace(/%[0-9A-F]{2}/g, (hex) => hex.toLowerCase());
-    const forms = new Set([m.token, encoded, lowerEncoded]);
+    const forms = new Set([m.raw, m.token, encoded, lowerEncoded]);
     return [...forms].reduce((t, form) => t.split(form).join(`[REDACTED:${m.name}]`), text);
   }, summary);
 }

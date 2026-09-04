@@ -34,6 +34,20 @@ describe('isSecretValue / looksLikeToken', () => {
     ).toBe(true);
     expect(looksLikeToken('awesome-widgets-app')).toBe(false);
   });
+  it('rejects locations: URLs, localhost, cookie domains, hostnames and host:port', () => {
+    expect(isSecretValue('http://localhost:3000')).toBe(false);
+    expect(isSecretValue('https://dev-abc.us.auth0.com')).toBe(false);
+    expect(isSecretValue('postgres://user:pw@db.internal:5432/app')).toBe(false);
+    expect(isSecretValue('localhost:5432')).toBe(false);
+    expect(isSecretValue('.staging.example.com')).toBe(false);
+    expect(isSecretValue('api.staging.example.com')).toBe(false);
+    expect(isSecretValue('api.staging.example.com:8443')).toBe(false);
+    // A vendor-shaped token is a credential whatever else it resembles.
+    expect(isSecretValue('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop')).toBe(
+      true,
+    );
+    expect(isSecretValue('demo_secret_value_1234567890abcdef')).toBe(true);
+  });
 });
 
 describe('extractKeyValues', () => {
@@ -90,6 +104,31 @@ describe('extractKeyValues', () => {
 
   it('ignores commented lines and lines without an equals sign', () => {
     expect(extractKeyValues('; API_KEY=abcdefghijklmnop\nAPI_KEY abcdefghijklmnop\n')).toEqual([]);
+  });
+
+  it('strips an inline comment introduced by a tab as well as by a space', () => {
+    const found = extractKeyValues('API_KEY=abcdefghijklmnopqrstu\t# tab-introduced comment\n');
+    expect(found[0]?.value).toBe('abcdefghijklmnopqrstu');
+  });
+
+  it('indexes only the real credential in a realistic Next.js/Auth0 .env', () => {
+    const dotenv = [
+      'NEXTAUTH_URL=http://localhost:3000',
+      'AUTH0_ISSUER_BASE_URL=https://dev-abc.us.auth0.com',
+      'SESSION_COOKIE_DOMAIN=.staging.example.com',
+      'API_KEY_HEADER_NAME=x-api-key-header',
+      'AUTH0_CLIENT_SECRET=stroq_test_client_secret_0123456789',
+      'DATABASE_URL=postgres://user:stroq_test_pw_0123456789@db.internal:5432/app',
+    ].join('\n');
+    // Documented v1 limit: a connection URL is skipped whole, so the password
+    // inside `DATABASE_URL` is not indexed.
+    expect(names(extractKeyValues(dotenv))).toEqual(['AUTH0_CLIENT_SECRET']);
+  });
+
+  it('keeps the demo key indexable', () => {
+    expect(names(extractKeyValues('DEMO_API_KEY=demo_secret_value_1234567890abcdef\n'))).toEqual([
+      'DEMO_API_KEY',
+    ]);
   });
 });
 

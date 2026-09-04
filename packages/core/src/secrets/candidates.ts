@@ -1,7 +1,26 @@
 import { MIN_SECRET_LENGTH } from './extract.js';
 
-/** Upper bound on tokens hashed per event. */
-export const MAX_CANDIDATES = 500;
+/** One substring of a tool input that might be the value of a known secret. */
+export interface SecretCandidate {
+  /** The lookup form: URL-decoded when decoding changed the substring. */
+  readonly token: string;
+  /** The substring exactly as it appeared in the input, so it can be redacted. */
+  readonly raw: string;
+}
+
+/**
+ * Ceiling on the text taken from one tool input before tokenisation. Bounding the
+ * INPUT rather than the candidate count is what makes padding useless: an attacker
+ * who could evict candidates by adding text would have a bypass, so the only limit
+ * is on how much text is considered at all.
+ */
+export const MAX_INPUT_CHARS = 262_144;
+/**
+ * Pure memory guard on the candidate list, not a security bound: `MAX_INPUT_CHARS`
+ * of text cannot hold more than ~20k distinct tokens of `MIN_SECRET_LENGTH`, so a
+ * real input never reaches this and ordering never decides what gets looked up.
+ */
+export const MAX_CANDIDATES = 50_000;
 // Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
 // secret values can contain them (an AWS-style key, a `p@ssw0rd`-style password); a
 // second pass below splits on both instead, so the whole token is still a candidate.
@@ -22,12 +41,12 @@ function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>):
   return '';
 }
 
-/** `decodeURIComponent(token)` when it changes the value and doesn't throw, else `null`. */
-function decodedVariant(token: string): string | null {
-  if (!token.includes('%')) return null;
+/** `decodeURIComponent(span)` when it changes the value and doesn't throw, else `null`. */
+function decodedVariant(span: string): string | null {
+  if (!span.includes('%')) return null;
   try {
-    const decoded = decodeURIComponent(token);
-    return decoded !== token ? decoded : null;
+    const decoded = decodeURIComponent(span);
+    return decoded !== span ? decoded : null;
   } catch {
     return null;
   }
@@ -48,49 +67,51 @@ function afterFirst(span: string, sep: string): string[] {
 }
 
 /**
- * Whole-value candidates that survive even when the value itself contains a
- * delimiter character (`p@ss#w?rd:1234567`, a DSN, a header value): every
- * word bounded by whitespace or a quote mark, every quoted string's full
- * content, the tail after each one's first `=` or `:`, and the URL-decoded
- * form of any of those. Pushed ahead of the delimiter-split pieces in
- * `candidateTokens` so they are not crowded out by `MAX_CANDIDATES`.
+ * Whole-value spans that survive even when the value itself contains a delimiter
+ * character (`p@ss#w?rd:1234567`, a DSN, a header value): every word bounded by
+ * whitespace or a quote mark, every quoted string's full content, and the tail
+ * after each one's first `=` or `:`.
  */
 function valueSpans(text: string): string[] {
   const level1 = [...quotedContents(text), ...text.split(WORD_BOUNDARY).filter((w) => w !== '')];
-  const tails = level1.flatMap((s) => [...afterFirst(s, '='), ...afterFirst(s, ':')]);
-  const spans = [...level1, ...tails];
-  const decoded = spans.flatMap((s) => {
-    const variant = decodedVariant(s);
-    return variant ? [variant] : [];
+  return [...level1, ...level1.flatMap((s) => [...afterFirst(s, '='), ...afterFirst(s, ':')])];
+}
+
+/** Each span as a candidate, plus its URL-decoded form when decoding changes it. */
+function withDecoded(spans: readonly string[]): SecretCandidate[] {
+  return spans.flatMap((raw) => {
+    const decoded = decodedVariant(raw);
+    return decoded
+      ? [
+          { token: raw, raw },
+          { token: decoded, raw },
+        ]
+      : [{ token: raw, raw }];
   });
-  return [...spans, ...decoded];
 }
 
 /**
  * Substrings of a tool input that could be a secret value: whole value spans
  * that survive an embedded delimiter, plus the coarse/fine delimiter-split
- * pieces (with and without `/` and `@`), plus URL-decoded forms of either.
- * Keeps pieces of secret length, dedupes, caps.
+ * pieces (with and without `/` and `@`), each paired with its URL-decoded form.
+ * Keeps pieces of secret length and dedupes; the text itself is truncated at
+ * `MAX_INPUT_CHARS` so padding cannot push a payload out of the result.
  */
 export function candidateTokens(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
-): string[] {
-  const text = textOf(toolName, toolInput);
+): SecretCandidate[] {
+  const text = textOf(toolName, toolInput).slice(0, MAX_INPUT_CHARS);
   if (text.trim() === '') return [];
   const coarse = text.split(DELIMITERS);
   const fine = coarse.flatMap((piece) => piece.split(SLASH));
-  const raw = [...coarse, ...fine];
-  const decoded = raw.flatMap((token) => {
-    const variant = decodedVariant(token);
-    return variant ? [variant] : [];
-  });
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const token of [...valueSpans(text), ...raw, ...decoded]) {
-    if (token.length < MIN_SECRET_LENGTH || seen.has(token)) continue;
-    seen.add(token);
-    out.push(token);
+  const out: SecretCandidate[] = [];
+  for (const candidate of withDecoded([...valueSpans(text), ...coarse, ...fine])) {
+    const key = `${candidate.token}\n${candidate.raw}`;
+    if (candidate.token.length < MIN_SECRET_LENGTH || seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
     if (out.length >= MAX_CANDIDATES) break;
   }
   return out;
