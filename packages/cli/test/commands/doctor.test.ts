@@ -46,6 +46,36 @@ describe('doctorReport', () => {
     expect(report.checks.find((c) => c.name === 'hooks')).toBeDefined();
   });
 
+  it('says the index is corrupt rather than never built', async () => {
+    mkdirSync(dirname(secretsFile()), { recursive: true });
+    writeFileSync(secretsFile(), '{ not json');
+    const secretsCheck = (await doctorReport(cwd)).checks.find((c) => c.name === 'secrets')!;
+    expect(secretsCheck.ok).toBe(false);
+    expect(secretsCheck.detail).toBe('index file was corrupt and will be rebuilt');
+  });
+
+  it('reports an unreadable source and a truncated index as a failing secrets check', async () => {
+    mkdirSync(dirname(secretsFile()), { recursive: true });
+    writeFileSync(
+      secretsFile(),
+      JSON.stringify({
+        version: 2,
+        salt: 'a'.repeat(32),
+        builtAt: new Date().toISOString(),
+        sources: [{ path: '/tmp/x/.env', mtimeMs: 1, size: 1 }],
+        entries: [],
+        canaries: [],
+        truncated: true,
+        unreadable: 1,
+      }),
+    );
+    const secretsCheck = (await doctorReport(cwd)).checks.find((c) => c.name === 'secrets')!;
+    expect(secretsCheck.ok).toBe(false);
+    expect(secretsCheck.detail).toBe(
+      '0 values from 1 sources, 0 canaries; 1 source unreadable; sources truncated, some values are not indexed',
+    );
+  });
+
   it('runDoctor returns 1 without throwing when the project settings.json is corrupt', async () => {
     const file = settingsPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });

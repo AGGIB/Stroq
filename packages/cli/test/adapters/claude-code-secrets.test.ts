@@ -55,7 +55,7 @@ describe('secret egress in the Claude Code adapter', () => {
     expect(out.stdout).toBe('');
   });
 
-  it('withEvidence renders secret hits after provenance hits, two sentences at most', () => {
+  it('withEvidence renders secret hits before provenance hits, two sentences at most', () => {
     const secrets = [
       { name: 'A_KEY', source: 'env', canary: false },
       { name: 'B_KEY', source: 'env', canary: false },
@@ -64,6 +64,29 @@ describe('secret egress in the Claude Code adapter', () => {
     const text = withEvidence('reason', [], new Date(), secrets);
     expect(text).toBe(
       'reason Evidence: the arguments contain the value of A_KEY from env. the arguments contain the value of B_KEY from env.',
+    );
+  });
+
+  it('withEvidence spends the sentence budget on the secret, not on provenance', () => {
+    const at = new Date('2026-09-05T12:00:00.000Z');
+    const hit = {
+      atom: { kind: 'url' as const, value: 'https://x.example/p' },
+      record: {
+        seq: 1,
+        at: at.toISOString(),
+        tool: 'Read',
+        source: 'notes.md',
+        kind: 'url' as const,
+        hash: 'h1',
+        excerpt: 'https://x.example/p',
+        suspect: true,
+      },
+    };
+    const text = withEvidence('reason', [hit], at, [
+      { name: 'DB_PASSWORD', source: '.env', canary: false },
+    ]);
+    expect(text).toContain(
+      'Evidence: the arguments contain the value of DB_PASSWORD from .env. "https://x.example/p"',
     );
   });
 });

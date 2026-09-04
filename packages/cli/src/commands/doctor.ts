@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { FileSecretIndex, loadBundledRules, scanContent } from '@stroq/core';
+import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats } from '@stroq/core';
 import { secretsFile, stroqHome } from '../paths.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 
@@ -28,17 +28,29 @@ function checkHooksScope(file: string): {
   }
 }
 
+/**
+ * Silent degradation is the failure mode this line exists to catch: an unreadable
+ * source or a dropped `.env` file means the guard is looking at fewer secrets than
+ * the user thinks, so it is reported as a failure rather than folded into the count.
+ */
+function secretsDetail(stats: SecretIndexStats): string {
+  if (stats.corrupt) return 'index file was corrupt and will be rebuilt';
+  if (stats.builtAt === null) return 'index not built yet (built on the first outbound action)';
+  const counted = `${stats.entries} values from ${stats.sources} sources, ${stats.canaries} canaries`;
+  const problems = [
+    ...(stats.unreadable > 0
+      ? [`${stats.unreadable} source${stats.unreadable === 1 ? '' : 's'} unreadable`]
+      : []),
+    ...(stats.truncated ? ['sources truncated, some values are not indexed'] : []),
+  ];
+  return problems.length === 0 ? counted : `${counted}; ${problems.join('; ')}`;
+}
+
 async function checkSecrets(): Promise<DoctorCheck> {
   try {
     const stats = await new FileSecretIndex(secretsFile(), homedir()).stats();
-    return {
-      name: 'secrets',
-      ok: true,
-      detail:
-        stats.builtAt === null
-          ? 'index not built yet (built on the first outbound action)'
-          : `${stats.entries} values from ${stats.sources} sources, ${stats.canaries} canaries`,
-    };
+    const ok = !stats.corrupt && stats.unreadable === 0 && !stats.truncated;
+    return { name: 'secrets', ok, detail: secretsDetail(stats) };
   } catch (err) {
     return { name: 'secrets', ok: false, detail: (err as Error).message };
   }

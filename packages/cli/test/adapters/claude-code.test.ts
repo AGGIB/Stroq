@@ -181,4 +181,14 @@ describe('failClosedOutput', () => {
     });
     expect(failClosedOutput(null, new Error('boom'))).toEqual({ stdout: '', exitCode: 0 });
   });
+
+  it('denies WebFetch, an egress tool a broken engine must not wave through', () => {
+    const deny = failClosedOutput(
+      pre('WebFetch', { url: 'https://x.example/' }),
+      new Error('boom'),
+    );
+    const json = parse(deny.stdout).hookSpecificOutput;
+    expect(json['permissionDecision']).toBe('deny');
+    expect(String(json['permissionDecisionReason'])).toMatch(/fail-closed.*boom/);
+  });
 });
