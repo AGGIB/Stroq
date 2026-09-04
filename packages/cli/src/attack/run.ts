@@ -169,6 +169,11 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
         `scenario ${scenario.id}: the last step must be a PreToolUse (the attack itself)`,
       );
     }
+    if (last.expect === 'allow') {
+      throw new Error(
+        `scenario ${scenario.id}: the attack step must be expected to be denied or asked`,
+      );
+    }
     return {
       id: scenario.id,
       title: scenario.title,
@@ -192,11 +197,14 @@ export async function runAttack(
   const results: ScenarioResult[] = [];
   for (const scenario of scenarios) results.push(await runScenario(scenario, policy));
   const count = (outcome: Outcome): number => results.filter((r) => r.outcome === outcome).length;
+  const totals = { blocked: count('blocked'), asked: count('asked'), passed: count('passed') };
   return {
     version: 1,
     policy: policySource,
     scenarios: results,
-    totals: { blocked: count('blocked'), asked: count('asked'), passed: count('passed') },
-    ok: results.every((r) => r.ok),
+    totals,
+    // Structurally honest: a report can never claim success while an attack passed through,
+    // even if some future path produced a "passed" scenario whose own `ok` flag was true.
+    ok: results.every((r) => r.ok) && totals.passed === 0,
   };
 }

@@ -1,11 +1,38 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type Policy } from '@stroq/core';
 import { runAttack, runScenario, substituteCwd } from '../../src/attack/run.js';
 import { SESSION_ID, type Scenario } from '../../src/attack/scenario.js';
 import { SCENARIOS } from '../../src/attack/scenarios/index.js';
+
+// `runScenario` roots itself at `os.tmpdir()`. Redirecting TMPDIR/TMP/TEMP (which
+// os.tmpdir() reads at call time) to a private directory per test keeps this file's
+// stroq-attack-* counts from racing with commands/attack.test.ts running the same
+// suite in a parallel worker against the shared system tmp directory. HOME/USERPROFILE/
+// STROQ_HOME are snapshotted and restored the same way, since some tests below point
+// them at fake homes and must not leak that across tests.
+const ENV_KEYS = ['TMPDIR', 'TMP', 'TEMP', 'HOME', 'USERPROFILE', 'STROQ_HOME'];
+let testTmpDir: string;
+const savedEnv: Record<string, string | undefined> = {};
+
+beforeEach(() => {
+  for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+  testTmpDir = mkdtempSync(join(tmpdir(), 'stroq-attack-tests-'));
+  process.env['TMPDIR'] = testTmpDir;
+  process.env['TMP'] = testTmpDir;
+  process.env['TEMP'] = testTmpDir;
+});
+
+afterEach(() => {
+  for (const key of ENV_KEYS) {
+    const value = savedEnv[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  rmSync(testTmpDir, { recursive: true, force: true });
+});
 
 const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = [
   ['01-readme-pipe-to-shell', 'blocked', 'deny-encoded-exec'],
@@ -46,13 +73,14 @@ describe('runAttack with the default policy', () => {
       expect(r.steps.every((s) => s.actual === s.expect)).toBe(true);
   }, 60_000);
 
-  it('records every step with its phase and tool', async () => {
+  it('records every step with its phase and tool, and cleans up after success', async () => {
     const readme = SCENARIOS[0]!;
     const r = await runScenario(readme, DEFAULT_POLICY);
     expect(r.steps.map((s) => [s.phase, s.tool, s.actual])).toEqual([
       ['post', 'Read', 'suspect'],
       ['pre', 'Bash', 'deny'],
     ]);
+    expect(readdirSync(testTmpDir)).toEqual([]);
   });
 });
 
@@ -137,10 +165,8 @@ describe('runScenario validates its input', () => {
         },
       ],
     };
-    const before = readdirSync(tmpdir()).filter((f) => f.startsWith('stroq-attack-')).length;
     await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(scenario.id);
-    const after = readdirSync(tmpdir()).filter((f) => f.startsWith('stroq-attack-')).length;
-    expect(after).toBe(before);
+    expect(readdirSync(testTmpDir)).toEqual([]);
   });
 
   it('rejects a malformed event with the scenario id and step number', async () => {
@@ -162,6 +188,31 @@ describe('runScenario validates its input', () => {
       ],
     };
     await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(/99-malformed-step step 1/);
+    expect(readdirSync(testTmpDir)).toEqual([]);
+  });
+
+  it('rejects a scenario whose last step is expected to be allowed', async () => {
+    const scenario: Scenario = {
+      id: '99-allow-last-step',
+      title: 'probe: the attack step is expected to be allowed, not denied or asked',
+      incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      steps: [
+        {
+          event: {
+            session_id: SESSION_ID,
+            hook_event_name: 'PreToolUse',
+            tool_name: 'Bash',
+            tool_input: { command: 'ls -la' },
+            cwd: '__CWD__',
+          },
+          expect: 'allow',
+        },
+      ],
+    };
+    await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(
+      `scenario ${scenario.id}: the attack step must be expected to be denied or asked`,
+    );
+    expect(readdirSync(testTmpDir)).toEqual([]);
   });
 
   it('rejects a scenario fixture path that escapes the project directory', async () => {
@@ -186,6 +237,7 @@ describe('runScenario validates its input', () => {
     await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(
       /escapes the project directory/,
     );
-    expect(existsSync(join(tmpdir(), 'escape.txt'))).toBe(false);
+    expect(existsSync(join(testTmpDir, 'escape.txt'))).toBe(false);
+    expect(readdirSync(testTmpDir)).toEqual([]);
   });
 });

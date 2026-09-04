@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runAttackCommand } from '../../src/commands/attack.js';
+import { displayPath, runAttackCommand } from '../../src/commands/attack.js';
 
 function capture(): { lines: string[]; restore: () => void } {
   const lines: string[] = [];
@@ -58,5 +58,32 @@ describe('stroq attack', () => {
     out.restore();
     expect(out.lines.join('')).toContain('no scenario matches "nope"');
     expect(out.lines.join('')).toContain('01-readme-pipe-to-shell');
+  });
+});
+
+describe('displayPath', () => {
+  it('shortens a path under a fake HOME to ~/..., for the JSON report to avoid leaking it', () => {
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = '/Users/fakeuser';
+    try {
+      expect(displayPath('/Users/fakeuser/.stroq/policy.yaml')).toBe('~/.stroq/policy.yaml');
+      expect(displayPath('/Users/fakeuser')).toBe('~');
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+    }
+  });
+
+  it('leaves non-home paths and the "default" sentinel untouched', () => {
+    const previousHome = process.env['HOME'];
+    process.env['HOME'] = '/Users/fakeuser';
+    try {
+      expect(displayPath('default')).toBe('default');
+      expect(displayPath('/etc/stroq/policy.yaml')).toBe('/etc/stroq/policy.yaml');
+      expect(displayPath('/Users/fakeuser2/policy.yaml')).toBe('/Users/fakeuser2/policy.yaml');
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = previousHome;
+    }
   });
 });
