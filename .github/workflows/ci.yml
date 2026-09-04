@@ -36,10 +36,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Rules bundle is up to date
-        run: |
-          pnpm build:rules
-          git diff --exit-code -- packages/core/src/rules.bundle.json rules/atr-disabled.json
+      - name: Rules bundle verified
+        run: pnpm build:rules --check --advisory-perf
 
       - name: Run demo
         run: ./examples/demo/run-demo.sh

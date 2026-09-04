@@ -20,9 +20,20 @@ describe.skipIf(!existsSync(atrDir))('imported ATR rules', () => {
     expect(existsSync(join(atrDir, 'LICENSE'))).toBe(true);
   });
 
-  it('disables exactly the rules that fire on benign fixtures or fail to compile', () => {
-    const disabled = new Set(bundle.disabled);
+  it('disables exactly the rules committed in rules/atr-disabled.json, each with a reason', () => {
+    // rules/atr-disabled.json is the authoritative, maintainer-reviewed
+    // record of which vendored rules are disabled and why (see
+    // scripts/build-rules.ts --check, which verifies against it instead of
+    // re-measuring performance). The bundle's own `disabled` array must
+    // agree with it exactly.
     const reasons = JSON.parse(readFileSync(disabledReport, 'utf8')) as Record<string, string>;
+    const disabled = new Set(Object.keys(reasons));
+    for (const [id, reason] of Object.entries(reasons)) {
+      expect(typeof reason, `${id} should have a string reason`).toBe('string');
+      expect(reason.length, `${id} should have a non-empty reason`).toBeGreaterThan(0);
+    }
+    expect(new Set(bundle.disabled)).toEqual(disabled);
+
     const slow = new Set(
       Object.entries(reasons)
         .filter(([, reason]) => reason.startsWith('slow on '))

@@ -15,6 +15,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
+    "check:rules": "tsx scripts/build-rules.ts --check",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
     "demo:gif": "bash scripts/render-demo-gif.sh",
     "test": "vitest run",
