@@ -39,4 +39,12 @@ describe('candidateTokens', () => {
     const command = Array.from({ length: 700 }, (_, i) => `tok${i}abcdefghijklmnop`).join(' ');
     expect(candidateTokens('Bash', { command })).toHaveLength(MAX_CANDIDATES);
   });
+
+  it('also tries URL-decoded forms', () => {
+    const tokens = candidateTokens('Bash', {
+      command: 'curl "https://x/?k=wJalrXUtnFEMI%2FK7MDENG%2FbPxRfiCYEXAMPLEKEY"',
+    });
+    expect(tokens).toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
+    expect(() => candidateTokens('Bash', { command: 'echo abc%ZZdefghijklmnop' })).not.toThrow();
+  });
 });
