@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "stroq": "./dist/index.js"
+    "stroq": "dist/index.js"
   },
   "files": [
     "dist",
