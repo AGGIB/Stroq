@@ -23,7 +23,7 @@ function scenarioLine(result: ScenarioResult): string {
 function summaryLine(report: AttackReport): string {
   const { blocked, asked, passed } = report.totals;
   const head = `${plural(report.scenarios.length, 'scenario')}: ${blocked} blocked, ${asked} asked, ${passed} passed through`;
-  if (report.ok) return `${head} — every attack was stopped.`;
+  if (report.ok && passed === 0) return `${head} — every attack was stopped.`;
   const wrong = report.scenarios.filter((r) => !r.ok).length;
   return `${head} — ${plural(wrong, 'scenario')} did not behave as expected; your policy is weaker than the default (compare it with policies/default.yaml).`;
 }

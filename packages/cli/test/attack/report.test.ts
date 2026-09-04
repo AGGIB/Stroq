@@ -58,4 +58,11 @@ describe('formatReport', () => {
     expect(text).toContain('1 scenario did not behave as expected');
     expect(text).toContain('policies/default.yaml');
   });
+
+  it('never claims "every attack was stopped" when a scenario passed through, even if ok is forced true', () => {
+    // Synthetic: a caller-constructed report where `ok` says success but `totals.passed`
+    // says an attack got through. formatReport must not trust `ok` alone for this claim.
+    const text = formatReport(report([passed], true));
+    expect(text).not.toContain('every attack was stopped');
+  });
 });

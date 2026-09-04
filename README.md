@@ -66,7 +66,7 @@ stroq attack: 12 recorded incidents against policy default
 12 scenarios: 8 blocked, 4 asked, 0 passed through — every attack was stopped.
 ```
 
-Every scenario cites the incident it models (`stroq attack --json` includes the links). The exit code is 1 when any scenario does not behave as expected, so a weakened `policy.yaml` fails your CI, and `--only 05` replays one scenario. The suite is the acceptance test for the default policy: CI runs it on every push. Live mode (driving a real agent session) is not part of it.
+Every scenario cites the incident it models (`stroq attack --json` includes the links). The exit code is 1 when any scenario does not behave as expected, so a weakened `policy.yaml` fails your CI, and `--only 05` replays one scenario. The suite is the acceptance test for the default policy: CI runs it on every push to `main` and every pull request. Live mode (driving a real agent session) is not part of it.
 
 ## How it works
 
