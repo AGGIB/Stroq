@@ -88,5 +88,5 @@ Releases are cut from `main` once CI is green:
    git push --tags
    ```
 
-4. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and runs `npm publish --provenance --access public` for the `packages/cli` package.
-5. This requires an `NPM_TOKEN` repository secret with publish rights for the `stroq` package (or npm trusted publishing configured for this repository as an alternative to a long-lived token).
+4. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and runs `npm publish --provenance --access public` for the `packages/cli` package. To publish manually instead, run `cd packages/cli && npm publish --access public` (the `--access public` flag is required the first time a scoped package is published, since scoped packages default to private).
+5. This requires an `NPM_TOKEN` repository secret with publish rights for the `@stroq/cli` package (or npm trusted publishing configured for this repository as an alternative to a long-lived token).

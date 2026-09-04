@@ -7,11 +7,13 @@ Supported today: **Claude Code** (via native hooks).
 ## Install
 
 ```bash
-npx stroq init      # in your project: writes .claude/settings.json hooks
-npx stroq doctor     # check the installation
+npx @stroq/cli init    # in your project: writes .claude/settings.json hooks
+npx @stroq/cli doctor  # check the installation
 ```
 
 `init` writes hooks into the project's `.claude/settings.json` by default; pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change.
+
+Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
 ## Commands
 

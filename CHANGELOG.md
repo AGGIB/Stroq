@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `scripts/build-rules.ts` is now a thin CLI over `scripts/lib/rules-pipeline.ts`, a set of pure functions (load, compile, benign-corpus gate, timing gate, assemble, compare) covered directly by `packages/core/test/rules/rules-pipeline.test.ts`.
+- npm package published as `@stroq/cli`; the unscoped name `stroq` is refused by the registry's similarity check. The CLI binary is unaffected — it's still invoked as `stroq` (`npm install -g @stroq/cli`, then `stroq init`; or `npx @stroq/cli init` for one-off use).
 
 ## [0.1.0] - 2026-09-04
 

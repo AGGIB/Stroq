@@ -3,7 +3,7 @@
 **Local action firewall for AI coding agents.**
 
 [![CI](https://github.com/AGGIB/stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/stroq/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/stroq.svg)](https://www.npmjs.com/package/stroq)
+[![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli.svg)](https://www.npmjs.com/package/@stroq/cli)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-339933)](package.json)
 
@@ -24,11 +24,13 @@ Run it yourself: `pnpm install && pnpm build && ./examples/demo/run-demo.sh`.
 ## Install
 
 ```bash
-npx stroq init      # in your project: writes .claude/settings.json hooks
-npx stroq doctor     # check the installation
+npx @stroq/cli init    # in your project: writes .claude/settings.json hooks
+npx @stroq/cli doctor  # check the installation
 ```
 
 `init` writes hooks into the project's `.claude/settings.json` by default; pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change without writing anything. Then open Claude Code in that project.
+
+Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
 Supported today: **Claude Code** (via native hooks). Cursor, Codex, Copilot, and OpenClaw adapters are on the [roadmap](#roadmap).
 
