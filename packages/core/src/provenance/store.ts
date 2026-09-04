@@ -35,14 +35,20 @@ export class FileProvenanceStore implements ProvenanceStore {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(raw) as unknown;
-      return Array.isArray(parsed) ? (parsed as ProvenanceRecord[]) : [];
+      parsed = JSON.parse(raw);
     } catch (err) {
       // Fail closed, like the session store: the CLI turns this into `deny`
       // on high-impact tools rather than silently forgetting what was read.
       throw new Error(`corrupt provenance state: ${this.file(sessionId)}`, { cause: err });
     }
+    if (!Array.isArray(parsed)) {
+      // Valid JSON but the wrong shape is corruption too: silently treating it
+      // as an empty list would let `record` fold it away on the next write.
+      throw new Error(`corrupt provenance state: ${this.file(sessionId)}`);
+    }
+    return parsed as ProvenanceRecord[];
   }
 
   private async write(sessionId: string, records: readonly ProvenanceRecord[]): Promise<void> {

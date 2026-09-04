@@ -86,4 +86,14 @@ describe('FileProvenanceStore', () => {
     await expect(store.lookup('s1', ['h'])).rejects.toThrow(/corrupt provenance/);
     await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
   });
+
+  it('fails closed on a parseable file with the wrong shape', async () => {
+    const { dir, store } = fresh();
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, `${sessionKey('s1')}.prov.json`);
+    writeFileSync(file, '{}');
+    await expect(store.lookup('s1', ['h'])).rejects.toThrow(/corrupt provenance/);
+    await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
+    expect(readFileSync(file, 'utf8')).toBe('{}');
+  });
 });
