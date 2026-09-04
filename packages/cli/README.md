@@ -16,13 +16,13 @@ npx stroq doctor     # check the installation
 ## Commands
 
 | Command                                  | What it does                                                              |
-| ----------------------------------------- | -------------------------------------------------------------------------- |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
 | `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`) |
 | `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                |
-| `stroq doctor`                            | Check Node version, rules, hooks, self-test                               |
-| `stroq log [--count 20]`                  | Show recent audit entries                                                 |
-| `stroq verify`                            | Verify the audit hash chain                                               |
-| `stroq untaint [--session <id>] [--all]`  | Clear a false-positive session's taint, or every session's                |
+| `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
+| `stroq log [--count 20]`                 | Show recent audit entries                                                 |
+| `stroq verify`                           | Verify the audit hash chain                                               |
+| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint, or every session's                |
 
 ## Learn more
 

@@ -1,7 +1,7 @@
 name: False positive
 description: Stroq flagged, warned on, or blocked something benign
-title: "[False positive]: "
-labels: ["false-positive"]
+title: '[False positive]: '
+labels: ['false-positive']
 body:
   - type: markdown
     attributes:
@@ -34,7 +34,7 @@ body:
     id: agent
     attributes:
       label: Agent and version
-      placeholder: "e.g. Claude Code 2.1.226"
+      placeholder: 'e.g. Claude Code 2.1.226'
     validations:
       required: true
   - type: textarea

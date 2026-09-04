@@ -1,7 +1,7 @@
 name: Classification gap
 description: A non-sensitive case that seems misclassified or under-covered
-title: "[Gap]: "
-labels: ["classification-gap"]
+title: '[Gap]: '
+labels: ['classification-gap']
 body:
   - type: markdown
     attributes:
@@ -36,6 +36,6 @@ body:
     id: stroq-version
     attributes:
       label: Stroq version
-      placeholder: "0.1.0"
+      placeholder: '0.1.0'
     validations:
       required: true

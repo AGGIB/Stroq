@@ -1,7 +1,7 @@
 name: Bug report
 description: Something is broken — not a missed detection and not a security bypass
-title: "[Bug]: "
-labels: ["bug"]
+title: '[Bug]: '
+labels: ['bug']
 body:
   - type: markdown
     attributes:
@@ -36,21 +36,21 @@ body:
     attributes:
       label: Stroq version
       description: See package.json, or run `npm ls stroq`.
-      placeholder: "0.1.0"
+      placeholder: '0.1.0'
     validations:
       required: true
   - type: input
     id: node-version
     attributes:
       label: Node version
-      placeholder: "output of `node --version`"
+      placeholder: 'output of `node --version`'
     validations:
       required: true
   - type: input
     id: os
     attributes:
       label: Operating system
-      placeholder: "e.g. macOS 15, Ubuntu 24.04"
+      placeholder: 'e.g. macOS 15, Ubuntu 24.04'
     validations:
       required: true
   - type: textarea
