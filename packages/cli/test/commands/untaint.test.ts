@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FileSessionStore, type TaintSource } from '@stroq/core';
+import { FileProvenanceStore, FileSessionStore, sessionKey, type TaintSource } from '@stroq/core';
 import { runUntaint } from '../../src/commands/untaint.js';
 import { sessionsDir } from '../../src/paths.js';
 
@@ -34,6 +34,31 @@ describe('stroq untaint', () => {
     expect(await runUntaint(['--session', 's1'])).toBe(0);
 
     expect((await store.get('s1')).taint).toBeNull();
+  });
+
+  it("clears a session's provenance too with --session, leaving other sessions untouched", async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    const record = {
+      tool: 'Read',
+      source: 'README.md',
+      kind: 'pkg' as const,
+      hash: 'h1',
+      excerpt: 'h1',
+      suspect: true,
+    };
+    await provenance.record('s1', [record]);
+    await provenance.record('s2', [record]);
+    const provFile = (id: string) => join(sessionsDir(), `${sessionKey(id)}.prov.json`);
+    expect(existsSync(provFile('s1'))).toBe(true);
+    expect(existsSync(provFile('s2'))).toBe(true);
+
+    const out = capture();
+    expect(await runUntaint(['--session', 's1'])).toBe(0);
+    out.restore();
+
+    expect(out.lines.join('')).toContain('cleared taint and provenance for session s1');
+    expect(existsSync(provFile('s1'))).toBe(false);
+    expect(existsSync(provFile('s2'))).toBe(true);
   });
 
   it('clears every session with --all', async () => {

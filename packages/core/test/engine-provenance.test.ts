@@ -143,6 +143,7 @@ describe('StroqEngine provenance', () => {
         throw new Error('disk full');
       },
       lookup: async () => [],
+      clear: async () => {},
     };
     const e = new StroqEngine({
       rules: loadBundledRules(),

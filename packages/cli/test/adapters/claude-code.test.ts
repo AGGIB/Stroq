@@ -96,7 +96,10 @@ describe('handleClaudeHook', () => {
     );
     const denyJson = parse(denied.stdout).hookSpecificOutput;
     expect(denyJson['permissionDecision']).toBe('deny');
-    expect(String(denyJson['permissionDecisionReason'])).toContain('deny-network-when-tainted');
+    // The follow-up command reuses the exact host ("evil.example") the provenance
+    // store just recorded from suspect-flagged output, so the more specific
+    // origin rule fires ahead of the generic tainted-network rule (both deny).
+    expect(String(denyJson['permissionDecisionReason'])).toContain('deny-origin-suspect');
   });
 
   it('denies WebFetch once the session is tainted', async () => {

@@ -96,4 +96,12 @@ describe('FileProvenanceStore', () => {
     await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
     expect(readFileSync(file, 'utf8')).toBe('{}');
   });
+
+  it("clear removes the session's records", async () => {
+    const { store } = fresh();
+    await store.record('s1', [input('h1')]);
+    await store.clear('s1');
+    expect(await store.lookup('s1', ['h1'])).toEqual([]);
+    await expect(store.clear('unknown-session')).resolves.toBeUndefined();
+  });
 });

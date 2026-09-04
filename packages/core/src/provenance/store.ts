@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { ProvenanceRecord } from '../types.js';
@@ -10,6 +10,8 @@ export interface ProvenanceStore {
   record(sessionId: string, inputs: readonly ProvenanceInput[]): Promise<void>;
   /** Records whose hash is in `hashes`, most recent first. */
   lookup(sessionId: string, hashes: readonly string[]): Promise<ProvenanceRecord[]>;
+  /** Deletes all stored records for a session; a no-op if none exist. */
+  clear(sessionId: string): Promise<void>;
 }
 
 /** Oldest records are dropped beyond this many per session. */
@@ -73,5 +75,12 @@ export class FileProvenanceStore implements ProvenanceStore {
   async lookup(sessionId: string, hashes: readonly string[]): Promise<ProvenanceRecord[]> {
     const wanted = new Set(hashes);
     return (await this.read(sessionId)).filter((r) => wanted.has(r.hash)).reverse();
+  }
+
+  async clear(sessionId: string): Promise<void> {
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    await withLock(`${this.file(sessionId)}.lock`, async () => {
+      await rm(this.file(sessionId), { force: true });
+    });
   }
 }
