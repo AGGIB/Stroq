@@ -20,7 +20,8 @@ Useful scripts:
 pnpm test:coverage   # vitest with the 80% coverage gate
 pnpm typecheck
 pnpm format:check    # prettier --check
-pnpm build:rules     # rebuild packages/core/src/rules.bundle.json from rules/
+pnpm build:rules     # rebuild packages/core/src/rules.bundle.json from rules/ (run this locally)
+pnpm check:rules     # verify the committed bundle deterministically, the same way CI does
 ./examples/demo/run-demo.sh
 ```
 
@@ -43,9 +44,9 @@ Rules live in `rules/stroq/` in [ATR](https://github.com/Agent-Threat-Rule/agent
 1. Have a unique `id` following the existing `STROQ-<year>-<sequence>-<slug>` pattern.
 2. Include `test_cases` with at least one true positive and, where the pattern could plausibly match legitimate text, at least one true negative.
 3. Pass the benign-corpus gate: run `pnpm build:rules` and confirm your rule does not fire on anything in `rules/fixtures/benign/`. Unlike vendored ATR rules (which are auto-disabled on a benign-corpus hit), a Stroq-authored rule that fires on the benign corpus **fails the build** — fix the pattern instead of disabling it.
-4. Pass the regex performance gate: `pnpm build:rules` also times every rule against adversarial blobs (repeated base64 alphabet, repeated characters, repeated URLs) at increasing sizes and disables anything over 50 ms. A Stroq rule that fails this gate fails the build the same way.
+4. Pass the regex performance gate: `pnpm build:rules` also times every rule against adversarial blobs (repeated base64 alphabet, repeated characters, repeated URLs) at increasing sizes and disables anything over 25 ms. A Stroq rule that fails this gate fails the build the same way.
 
-Run `pnpm build:rules` after any change under `rules/` and commit the regenerated `packages/core/src/rules.bundle.json` and `rules/atr-disabled.json` alongside your rule change — CI re-runs the same command and fails if the checked-in bundle drifts from a fresh build.
+Run `pnpm build:rules` after any change under `rules/` and commit the regenerated `packages/core/src/rules.bundle.json` and `rules/atr-disabled.json` alongside your rule change. The committed `rules/atr-disabled.json` is the authoritative record of which vendored rules are disabled and why; `pnpm build:rules` (run on a maintainer's machine) is what regenerates it, including the performance gate's timing measurements. CI does not re-run those measurements — machine speed shouldn't decide which rules ship — instead it runs `pnpm build:rules --check` (the same thing `pnpm check:rules` runs locally), which deterministically re-verifies rule compilation and the benign-corpus scan against the committed disabled list and byte-compares the assembled bundle, and `--advisory-perf` on top of that, which times every rule and warns about anything over threshold that isn't already disabled without failing the build. Run `pnpm check:rules` before opening a pull request to confirm your commit would pass CI.
 
 ## Adding a Benign Fixture
 
@@ -68,7 +69,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `type: short d
 Before opening a pull request:
 
 - [ ] Tests added or updated for the change (including a regression test for any bug fix)
-- [ ] `pnpm build:rules` run and its output committed, if anything under `rules/` changed
+- [ ] `pnpm build:rules` run and its output committed, if anything under `rules/` changed (`pnpm check:rules` confirms it matches what CI expects)
 - [ ] `pnpm test:coverage`, `pnpm typecheck`, and `pnpm format:check` all pass locally
 - [ ] Docs updated (README, `packages/cli/README.md`, or this file) if behavior, commands, or policy defaults changed
 

@@ -89,12 +89,14 @@ Copy [`policies/default.yaml`](policies/default.yaml) to `~/.stroq/policy.yaml` 
 
 Stroq ships 12 hand-written rules in [`rules/stroq/`](rules/stroq/) (Apache-2.0) targeting instruction override, hidden directives to the agent, secret exfiltration, encoded execution, and related prompt-injection patterns — some with Russian-language rule alternatives and matching fixtures alongside the English ones. [`rules/atr/`](rules/atr/) vendors 596 more from [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules) (MIT).
 
-Every rule is built through two gates (`pnpm build:rules`):
+Every rule is built through two gates, run locally by a maintainer (`pnpm build:rules`):
 
-- **Benign-corpus gate:** any rule that fires on [`rules/fixtures/benign/`](rules/fixtures/benign/) is a false positive. A vendored ATR rule that fails this is disabled automatically ([`rules/atr-disabled.json`](rules/atr-disabled.json) currently lists 7); a Stroq-authored rule held to the same bar is never auto-disabled — a false positive fails the build instead, so the rule gets fixed.
-- **Regex performance gate:** every rule is timed against adversarial blobs (repeated base64 alphabet, repeated characters, repeated URLs) at increasing sizes; anything over 50 ms is disabled before it ships, rather than shipping a rule that could stall a hook on real input.
+- **Benign-corpus gate:** any rule that fires on [`rules/fixtures/benign/`](rules/fixtures/benign/) is a false positive. A vendored ATR rule that fails this is disabled automatically ([`rules/atr-disabled.json`](rules/atr-disabled.json) currently lists 9); a Stroq-authored rule held to the same bar is never auto-disabled — a false positive fails the build instead, so the rule gets fixed.
+- **Regex performance gate:** every rule is timed against adversarial blobs (repeated base64 alphabet, repeated characters, repeated URLs) at increasing sizes; anything over 25 ms is disabled before it ships, rather than shipping a rule that could stall a hook on real input.
 
-That leaves 601 active rules at runtime out of 608 defined.
+That leaves 599 active rules at runtime out of 608 defined.
+
+The performance gate's timings are machine-dependent, so CI never re-measures them: `pnpm build:rules --check` re-verifies rule compilation and the benign-corpus scan against the committed [`rules/atr-disabled.json`](rules/atr-disabled.json) and byte-compares the result against the committed bundle, deterministically and without timing anything. CI runs it with `--advisory-perf`, which additionally times every rule and prints a warning for anything over threshold that isn't already disabled, without failing the build — a rule that's consistently slow gets caught and disabled the next time a maintainer runs `pnpm build:rules` locally.
 
 ## Guarantees and limits
 

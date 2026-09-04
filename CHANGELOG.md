@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **CI's rules-bundle check no longer depends on machine speed.** Previously, CI regenerated `packages/core/src/rules.bundle.json` and diffed it against the committed copy; a GitHub runner slower than the maintainer's machine could push a rule over the regex performance gate's threshold, disabling a rule the committed bundle didn't and failing CI with an unrelated-looking diff. `scripts/build-rules.ts --check` (wired into CI as `pnpm build:rules --check --advisory-perf`, and available locally as `pnpm check:rules`) now re-verifies rule compilation and the benign-corpus scan against the already-committed `rules/atr-disabled.json` and byte-compares an in-memory rebuild against the committed bundle, without measuring performance at all. `--advisory-perf` still times every rule and prints a `WARNING` for anything over threshold that isn't already disabled, but never fails the build.
+- The local performance gate's threshold (`pnpm build:rules`, run by a maintainer to regenerate the bundle) dropped from 50 ms to 25 ms, leaving margin for machines slower than the one that produced the committed bundle.
+
+### Changed
+
+- `scripts/build-rules.ts` is now a thin CLI over `scripts/lib/rules-pipeline.ts`, a set of pure functions (load, compile, benign-corpus gate, timing gate, assemble, compare) covered directly by `packages/core/test/rules/rules-pipeline.test.ts`.
+
 ## [0.1.0] - 2026-09-04
 
 Initial public release.
