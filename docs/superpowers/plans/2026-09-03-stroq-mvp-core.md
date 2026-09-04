@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ≥ 22 (dev machine: Node 24.13.1), pnpm 11, TypeScript 5.9.3, ESM (`"type": "module"`, `moduleResolution: NodeNext`, relative imports end in `.js`), vitest 4.1.11 + @vitest/coverage-v8, zod 4.5.4, yaml 2.9.0, tsup 8.5.1, tsx 4.23.13, prettier 3.9.6. No other runtime dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-09-03-stroq-strategy.md` (approved strategy; this plan implements its section 5 "Архитектура MVP" and the Week 1–2 items of section 6, with one deliberate deviation: no daemon yet — in-process hook first, daemon arrives with the ONNX classifier in Week 3).
+**Spec:** `docs/superpowers/specs/2026-09-03-stroq-strategy.md` (approved strategy; this plan implements its section 5 (MVP architecture) and the Week 1–2 items of section 6, with one deliberate deviation: no daemon yet — in-process hook first, daemon arrives with the ONNX classifier in Week 3).
 
 ## Global Constraints
 

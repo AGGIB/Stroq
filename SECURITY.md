@@ -41,7 +41,7 @@ Good-faith security research against Stroq — running the CLI against your own 
 
 - Evasions of the shell classifier that rely on shell quote-splicing or quoting the classifier does not fully parse yet (for example `c"u"rl`, `$'curl'`, heredoc/`<<<` and pipe-to-shell forms) — a quote-aware lexer for the Bash classifier is on the roadmap.
 - Denial of a single scan via a pathological regex running past the build-time performance gate: worker-isolated scanning (so one slow match cannot stall the hook process) has not shipped yet; today the gate only rejects rules that are already slow against the fixed benchmark blobs.
-- Adapters for any agent other than Claude Code (Cursor, Codex, Copilot, Windsurf, OpenClaw) — these do not exist yet, so there is nothing to bypass.
+- Adapters for any agent other than Claude Code (Cursor, Codex, Copilot, OpenClaw) — these do not exist yet, so there is nothing to bypass.
 - Tail truncation of the audit log (an attacker with local write access deletes the newest entries): documented as undetectable without an external anchor until signed checkpoints ship.
 - Resource exhaustion against the hook process itself (for example, extremely large tool output) that does not cause an incorrect allow — track as a performance issue rather than a bypass, unless it causes Stroq to fail open instead of closed.
 

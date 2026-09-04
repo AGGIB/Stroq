@@ -101,7 +101,7 @@ That leaves 601 active rules at runtime out of 608 defined.
 Stroq is young; here's what it actually gives you today, and where the edges are.
 
 - **Fail-closed:** if Stroq errors out while handling a high-impact `PreToolUse` call, the action is denied, not silently allowed.
-- **Latency:** roughly 100–200 ms per hook invocation today, dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
+- **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
 - **Shell quote-splicing evasions are known:** certain shell-quoting tricks (for example `c"u"rl`, `$'curl'`) can split a command word in a way the classifier does not yet fully parse. A quote-aware lexer is on the roadmap; see [SECURITY.md](SECURITY.md) for the full, current out-of-scope list.
@@ -122,12 +122,6 @@ We also deliberately never suggest installing Stroq via `curl | sh` — the enti
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, how to add a rule or a benign fixture, and the release process. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
-
-```bash
-pnpm test:coverage   # vitest, 80% threshold
-pnpm typecheck
-pnpm build
-```
 
 ## License
 
