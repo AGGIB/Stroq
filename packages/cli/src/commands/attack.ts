@@ -20,6 +20,7 @@ function select(only: string | undefined): readonly Scenario[] {
  */
 export function displayPath(path: string): string {
   const home = homedir();
+  if (home === '') return path;
   if (path === home) return '~';
   return path.startsWith(`${home}${sep}`) ? `~${path.slice(home.length)}` : path;
 }

@@ -25,6 +25,8 @@ describe('infrastructure and database wipes', () => {
   it.each([
     'terraform destroy -auto-approve',
     'terraform apply -destroy -auto-approve',
+    'terraform apply -destroy=true -auto-approve',
+    'terraform apply -auto-approve -destroy=TRUE',
     'tofu destroy',
     'pulumi destroy --yes',
     'npx drizzle-kit push --force',
