@@ -10,16 +10,18 @@ const MAX_VALUE_CHARS = 512;
 // quadratic on adversarial input that never hits a LINE_END character.
 const MAX_LINE_SCAN = 512;
 
-const URL_RE = /https?:\/\/[^\s"'<>()[\]`]+/gi;
+// `|` ends a URL too: in `curl https://x.example/i.sh|sh` the pipe is shell syntax,
+// not part of the URL the command fetches.
+const URL_RE = /https?:\/\/[^\s"'<>()[\]`|]+/gi;
 const TRAILING_PUNCT = /[.,;:!?'"]+$/;
 const URL_HOST = /^https?:\/\/(?:[^@/\s]+@)?([^/:?#\s]+)/;
 // `user@host.tld` — ssh/scp targets and git ssh remotes.
 const SSH_TARGET = /(?<![\w.-])[\w.-]+@((?:[\w-]+\.)+[a-z]{2,})(?![\w.-])/gi;
 // Package runners: the first positional token after them is the package.
-const RUNNER = /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run)(?=\s)/g;
+const RUNNER = /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run)(?=\s)/gi;
 // Package installers: every positional token after them is a package.
 const INSTALLER =
-  /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/g;
+  /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/gi;
 const LINE_END = /[\n|;`]|&&|\|\|/;
 const FLAGS_WITH_VALUE = new Set([
   '-r',

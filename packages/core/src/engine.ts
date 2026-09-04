@@ -1,5 +1,6 @@
 import { classifyTool } from './actions/classify-tool.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
+import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
@@ -193,7 +194,11 @@ export class StroqEngine {
             at: this.now(),
           })
         : await this.opts.sessions.get(event.sessionId);
-    const atoms = extractAtoms(event.toolResultText);
+    // Atoms come from the *normalized* text, exactly like the scan above and
+    // like `atomsForAction` on the PreToolUse side: a package name split by a
+    // zero-width space or spelled with a Cyrillic homoglyph must produce the
+    // same atom as the plain command the agent then runs, in both directions.
+    const atoms = extractAtoms(normalizeText(event.toolResultText));
     const provenanceError = await this.recordProvenance(
       event,
       summary,

@@ -93,6 +93,24 @@ describe('provenance in the Claude Code adapter', () => {
     expect(out).toEqual(NO_OUTPUT);
   });
 
+  it('stays silent for clean output that only contains urls', async () => {
+    const out = await handleClaudeHook(
+      createEngine(),
+      post(
+        'Read',
+        { file_path: 'links.md' },
+        {
+          type: 'text',
+          file: {
+            filePath: 'links.md',
+            content: 'See https://docs.example.com/guide and https://x.example/p',
+          },
+        },
+      ),
+    );
+    expect(out).toEqual(NO_OUTPUT);
+  });
+
   it('withEvidence and countAtoms are pure helpers', () => {
     expect(withEvidence('reason', [])).toBe('reason');
     expect(
@@ -101,7 +119,7 @@ describe('provenance in the Claude Code adapter', () => {
         { kind: 'pkg', value: 'b' },
         { kind: 'url', value: 'https://x.example/' },
       ]),
-    ).toEqual({ pkg: 2, url: 1 });
+    ).toEqual({ pkg: 2 });
   });
 
   it('logs a provenance store failure without changing the warning', async () => {

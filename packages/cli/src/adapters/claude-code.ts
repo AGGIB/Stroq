@@ -50,11 +50,18 @@ export function withEvidence(
   return `${reason} Evidence: ${sentences.join(' ')}`;
 }
 
+// Only the kinds that can fire an `origin.*` class on their own. URLs and hosts
+// count for network-shaped actions only, so reporting them here would tell the
+// auto-mode classifier about a page of ordinary documentation links.
+const COUNTED_KINDS: readonly AtomKind[] = ['pkg', 'pipe_shell', 'encoded'];
+
 export function countAtoms(atoms: readonly Atom[]): Partial<Record<AtomKind, number>> {
-  return atoms.reduce<Partial<Record<AtomKind, number>>>(
-    (acc, atom) => ({ ...acc, [atom.kind]: (acc[atom.kind] ?? 0) + 1 }),
-    {},
-  );
+  return atoms
+    .filter((atom) => COUNTED_KINDS.includes(atom.kind))
+    .reduce<Partial<Record<AtomKind, number>>>(
+      (acc, atom) => ({ ...acc, [atom.kind]: (acc[atom.kind] ?? 0) + 1 }),
+      {},
+    );
 }
 
 function postOutput(fields: Readonly<Record<string, unknown>>): HookOutput {
@@ -146,14 +153,17 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return NO_OUTPUT;
   const ruleIds = [...new Set(result.scan.matches.map((m) => m.ruleId))];
+  const atoms = countAtoms(result.atoms);
   const stroq = {
     verdict: result.scan.verdict,
     score: result.scan.score,
     ruleIds,
-    atoms: countAtoms(result.atoms),
+    atoms,
   };
   if (result.scan.verdict !== 'suspect') {
-    return result.atoms.length === 0 ? NO_OUTPUT : postOutput({ classifierContext: { stroq } });
+    return Object.keys(atoms).length === 0
+      ? NO_OUTPUT
+      : postOutput({ classifierContext: { stroq } });
   }
   return postOutput({
     additionalContext: warningFor(result.scan, input.tool_name),

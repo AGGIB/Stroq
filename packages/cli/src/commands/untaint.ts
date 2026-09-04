@@ -32,7 +32,7 @@ export async function runUntaint(args: readonly string[]): Promise<number> {
   });
   if (values.all) {
     await clearAll();
-    process.stdout.write('cleared taint for all sessions\n');
+    process.stdout.write('cleared taint and provenance for all sessions\n');
     return 0;
   }
   if (values.session) {

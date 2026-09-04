@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { normalizeText } from '../normalize/normalizer.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { extractAtoms, normalizePackageName } from './atoms.js';
 
@@ -24,7 +25,8 @@ const PYPROJECT_DEP = /["']([A-Za-z0-9_][A-Za-z0-9_.-]*)(?:\[[^\]]*\])?\s*(?:[<>
 // bracket body is bounded to 4,000 chars: given no closing "]" ahead, an unbounded `[^\]]*`
 // scans to end-of-string and backtracks one char at a time — O(remaining length) per match
 // attempt, O(n^2) over every `dependencies=[` occurrence in an adversarial file. A real
-// dependency array is nowhere near 4,000 chars, so a longer one is simply truncated.
+// dependency array is nowhere near 4,000 chars; a longer one has no "]" within the bound,
+// so the assignment does not match at all and that array contributes no names.
 const PYPROJECT_DEPS_ARRAY = /dependencies\s*=\s*\[([^\]]{0,4000})\]/g;
 // Any `key = [...]` assignment, scoped to the `[project.optional-dependencies]` table body.
 // Same bound, same reason.
@@ -122,7 +124,12 @@ export function knownPackages(cwd: string): ReadonlySet<string> {
   );
 }
 
-/** Atoms of a proposed action that could have been copied from earlier tool output. */
+/**
+ * Atoms of a proposed action that could have been copied from earlier tool output.
+ * The action text is normalized first, exactly like the scanned output it is matched
+ * against: otherwise a command carrying a zero-width space or a homoglyph would hash
+ * differently from the very content it was copied from, and vice versa.
+ */
 export function atomsForAction(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
@@ -132,9 +139,11 @@ export function atomsForAction(
     const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
     if (command === '') return [];
     const known = knownPackages(cwd);
-    return extractAtoms(command).filter((atom) => atom.kind !== 'pkg' || !known.has(atom.value));
+    return extractAtoms(normalizeText(command)).filter(
+      (atom) => atom.kind !== 'pkg' || !known.has(atom.value),
+    );
   }
-  if (toolName.startsWith('mcp__')) return extractAtoms(JSON.stringify(toolInput));
+  if (toolName.startsWith('mcp__')) return extractAtoms(normalizeText(JSON.stringify(toolInput)));
   return [];
 }
 

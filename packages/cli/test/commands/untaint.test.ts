@@ -66,8 +66,11 @@ describe('stroq untaint', () => {
     await store.markSuspect('s1', src);
     await store.markSuspect('s2', src);
 
+    const out = capture();
     expect(await runUntaint(['--all'])).toBe(0);
+    out.restore();
 
+    expect(out.lines.join('')).toContain('cleared taint and provenance for all sessions');
     expect((await store.get('s1')).taint).toBeNull();
     expect((await store.get('s2')).taint).toBeNull();
   });
