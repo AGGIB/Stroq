@@ -42,6 +42,9 @@ jobs:
       - name: Run demo
         run: ./examples/demo/run-demo.sh
 
+      - name: Attack suite
+        run: node packages/cli/dist/index.js attack
+
       - name: Verify npm package contents
         working-directory: packages/cli
         run: npm pack --dry-run
