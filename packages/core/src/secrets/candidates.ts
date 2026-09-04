@@ -2,10 +2,11 @@ import { MIN_SECRET_LENGTH } from './extract.js';
 
 /** Upper bound on tokens hashed per event. */
 export const MAX_CANDIDATES = 500;
-// Shell, JSON and URL delimiters. `/` is deliberately absent here because AWS-style
-// secrets contain it; a second pass below splits on it too.
-const DELIMITERS = /[\s"'`=:&?,;()[\]{}<>|\\@#]+/;
-const SLASH = /\//;
+// Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
+// secret values can contain them (an AWS-style key, a `p@ssw0rd`-style password); a
+// second pass below splits on both instead, so the whole token is still a candidate.
+const DELIMITERS = /[\s"'`=:&?,;()[\]{}<>|\\#]+/;
+const SLASH = /[/@]/;
 
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -28,8 +29,8 @@ function decodedVariant(token: string): string | null {
 
 /**
  * Substrings of a tool input that could be a secret value: split on delimiters
- * (with and without `/`), also try URL-decoding percent-encoded pieces, keep
- * pieces of secret length, dedupe, cap.
+ * (with and without `/` and `@`), also try URL-decoding percent-encoded pieces,
+ * keep pieces of secret length, dedupe, cap.
  */
 export function candidateTokens(
   toolName: string,
