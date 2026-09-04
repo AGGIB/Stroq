@@ -33,7 +33,8 @@ Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` co
 | `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
 | `stroq log [--count 20]`                 | Show recent audit entries                                                 |
 | `stroq verify`                           | Verify the audit hash chain                                               |
-| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint, or every session's                |
+| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint and provenance, or every session's |
+| `stroq why [--seq <n>]`                  | Explain the most recent denied/asked action: rule, provenance, taint      |
 
 ## Learn more
 
