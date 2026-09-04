@@ -117,12 +117,13 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   // Infrastructure and database wipes the incident record shows agents running
   // unprompted: `terraform destroy` / `apply -destroy`, `drizzle-kit push --force`
   // (claude-code #27063), `prisma migrate reset` / `db push --force-reset`.
-  [/\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy\b)/, 'iac-destroy'],
+  [/\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy(?![\w=-]))/, 'iac-destroy'],
   [/\bpulumi\s+destroy\b/, 'iac-destroy'],
-  [/\bdrizzle-kit\s+push\b[^\n]*--force\b/, 'db-force-migrate'],
+  [/\bdrizzle-kit\s+push\b[^\n]*--force(?![\w-])/, 'db-force-migrate'],
   [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
   [/\bprisma\s+db\s+push\b[^\n]*--(force-reset|accept-data-loss)\b/, 'db-force-migrate'],
-  [/\bsupabase\s+db\s+reset\b/, 'db-force-migrate'],
+  // Only the remote-targeting forms: a bare `supabase db reset` resets the local dev stack.
+  [/\bsupabase\s+db\s+reset\b[^\n]*--(linked|db-url)\b/, 'db-force-migrate'],
   [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
 ];
 const SECRET_PATTERNS: readonly RegExp[] = [

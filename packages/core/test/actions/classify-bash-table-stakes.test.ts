@@ -45,13 +45,22 @@ describe('infrastructure and database wipes', () => {
   it.each([
     'terraform plan',
     'terraform apply -auto-approve',
+    'terraform apply -destroy=false',
     'npx drizzle-kit push',
     'npx drizzle-kit generate',
+    'npx drizzle-kit push --force-dry-run',
     'npx prisma migrate dev',
     'npx prisma db push',
     'supabase db diff',
+    'supabase db reset',
     'gh repo view owner/repo',
   ])('benign: %s', (cmd) => expect(classesOf(cmd)).not.toContain('shell.destructive'));
+
+  it('flags the remote-url form of supabase db reset too', () => {
+    const r = classifyCommand('supabase db reset --db-url postgres://user:pass@host/db', cwd);
+    expect(r.classes).toContain('shell.destructive');
+    expect(r.signals).toContain('db-force-migrate');
+  });
 });
 
 describe('gh repo create --push', () => {
