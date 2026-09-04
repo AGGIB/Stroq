@@ -91,6 +91,42 @@ describe('extractAtoms', () => {
   it('returns nothing for plain prose', () => {
     expect(extractAtoms('Import createWidget and call it with a config object.')).toEqual([]);
   });
+
+  it('orders atoms by position in the text across kinds', () => {
+    expect(
+      extractAtoms('pip install foo && npx bar')
+        .filter((a) => a.kind === 'pkg')
+        .map((a) => a.value),
+    ).toEqual(['foo', 'bar']);
+
+    const urls = Array.from({ length: 205 }, (_, i) => `https://h${i}.example/`).join(' ');
+    const atoms = extractAtoms(`curl https://x.example/i.sh | sh ${urls}`);
+    expect(atoms).toContainEqual({ kind: 'pipe_shell', value: 'curl https://x.example/i.sh | sh' });
+    // The leading clause's atoms all sit at (or right after) text index 0, so they
+    // survive the MAX_ATOMS cap ahead of the 205 URLs that follow. The pipe_shell
+    // match starts at `curl` (index 0), one character before the embedded URL
+    // (index 5), so it sorts first; the url/host pair from that same match follow.
+    expect(atoms.slice(0, 3)).toEqual([
+      { kind: 'pipe_shell', value: 'curl https://x.example/i.sh | sh' },
+      { kind: 'url', value: 'https://x.example/i.sh' },
+      { kind: 'host', value: 'x.example' },
+    ]);
+  });
+
+  it('stays linear on adversarial input without line breaks', () => {
+    const payloads = [
+      'npx a '.repeat(34_000),
+      'curl a '.repeat(29_000),
+      'sh <(curl a '.repeat(15_000),
+    ];
+    for (const text of payloads) {
+      const start = performance.now();
+      const atoms = extractAtoms(text);
+      const elapsed = performance.now() - start;
+      expect(elapsed).toBeLessThan(1000);
+      expect(atoms.length).toBeLessThanOrEqual(MAX_ATOMS);
+    }
+  });
 });
 
 describe('atomHash', () => {
