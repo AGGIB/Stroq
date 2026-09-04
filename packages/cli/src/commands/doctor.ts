@@ -28,6 +28,22 @@ function checkHooksScope(file: string): {
   }
 }
 
+async function checkSecrets(): Promise<DoctorCheck> {
+  try {
+    const stats = await new FileSecretIndex(secretsFile(), homedir()).stats();
+    return {
+      name: 'secrets',
+      ok: true,
+      detail:
+        stats.builtAt === null
+          ? 'index not built yet (built on the first outbound action)'
+          : `${stats.entries} values from ${stats.sources} sources, ${stats.canaries} canaries`,
+    };
+  } catch (err) {
+    return { name: 'secrets', ok: false, detail: (err as Error).message };
+  }
+}
+
 export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorReport> {
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
@@ -38,7 +54,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
   });
   const hasError = scopes.some((s) => s.error !== null);
   const home = stroqHome();
-  const stats = await new FileSecretIndex(secretsFile(), homedir()).stats();
+  const secrets = await checkSecrets();
   return {
     checks: [
       { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
@@ -60,14 +76,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
         ok: true,
         detail: existsSync(home) ? home : `${home} (created on first use)`,
       },
-      {
-        name: 'secrets',
-        ok: true,
-        detail:
-          stats.builtAt === null
-            ? 'index not built yet (built on the first outbound action)'
-            : `${stats.entries} values from ${stats.sources} sources, ${stats.canaries} canaries`,
-      },
+      secrets,
     ],
   };
 }

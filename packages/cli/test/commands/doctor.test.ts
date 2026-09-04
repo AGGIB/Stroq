@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
+import { secretsFile } from '../../src/paths.js';
 
 let cwd: string;
 beforeEach(() => {
@@ -33,6 +34,16 @@ describe('doctorReport', () => {
     expect(hooksCheck.ok).toBe(false);
     expect(hooksCheck.detail).toMatch(/cannot parse/);
     expect(hooksCheck.detail).toContain(file);
+  });
+
+  it('reports a broken secrets check instead of throwing when secrets.json is unreadable', async () => {
+    mkdirSync(secretsFile(), { recursive: true });
+    const report = await doctorReport(cwd);
+    const secretsCheck = report.checks.find((c) => c.name === 'secrets')!;
+    expect(secretsCheck.ok).toBe(false);
+    expect(secretsCheck.detail.length).toBeGreaterThan(0);
+    expect(report.checks.find((c) => c.name === 'node')?.ok).toBe(true);
+    expect(report.checks.find((c) => c.name === 'hooks')).toBeDefined();
   });
 
   it('runDoctor returns 1 without throwing when the project settings.json is corrupt', async () => {
