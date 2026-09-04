@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -115,5 +115,77 @@ describe('runScenario isolation', () => {
     mkdirSync(stroqHome, { recursive: true });
     await runScenario(SCENARIOS[2]!, DEFAULT_POLICY);
     expect(readdirSync(stroqHome)).toEqual([]);
+  });
+});
+
+describe('runScenario validates its input', () => {
+  it('rejects a scenario whose last step is not the attack (a PreToolUse), cleaning up first', async () => {
+    const scenario: Scenario = {
+      id: '99-bad-last-step',
+      title: 'probe: the last step is a PostToolUse, not the attack itself',
+      incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      steps: [
+        {
+          event: {
+            session_id: SESSION_ID,
+            hook_event_name: 'PostToolUse',
+            tool_name: 'Bash',
+            tool_input: { command: 'ls' },
+            cwd: '__CWD__',
+          },
+          expect: 'clean',
+        },
+      ],
+    };
+    const before = readdirSync(tmpdir()).filter((f) => f.startsWith('stroq-attack-')).length;
+    await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(scenario.id);
+    const after = readdirSync(tmpdir()).filter((f) => f.startsWith('stroq-attack-')).length;
+    expect(after).toBe(before);
+  });
+
+  it('rejects a malformed event with the scenario id and step number', async () => {
+    const scenario: Scenario = {
+      id: '99-malformed-step',
+      title: 'probe: the recorded event fails schema validation',
+      incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      steps: [
+        {
+          event: {
+            session_id: SESSION_ID,
+            hook_event_name: 'PreToolUse',
+            tool_name: '',
+            tool_input: { command: 'ls' },
+            cwd: '__CWD__',
+          },
+          expect: 'deny',
+        },
+      ],
+    };
+    await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(/99-malformed-step step 1/);
+  });
+
+  it('rejects a scenario fixture path that escapes the project directory', async () => {
+    const scenario: Scenario = {
+      id: '99-escaping-fixture',
+      title: 'probe: a fixture path walks out of the project directory',
+      incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      files: { '../escape.txt': 'x' },
+      steps: [
+        {
+          event: {
+            session_id: SESSION_ID,
+            hook_event_name: 'PreToolUse',
+            tool_name: 'Bash',
+            tool_input: { command: 'ls' },
+            cwd: '__CWD__',
+          },
+          expect: 'deny',
+        },
+      ],
+    };
+    await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(
+      /escapes the project directory/,
+    );
+    expect(existsSync(join(tmpdir(), 'escape.txt'))).toBe(false);
   });
 });

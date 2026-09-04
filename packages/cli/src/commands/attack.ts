@@ -1,11 +1,12 @@
 import { parseArgs } from 'node:util';
 import { formatReport } from '../attack/report.js';
 import { runAttack } from '../attack/run.js';
+import type { Scenario } from '../attack/scenario.js';
 import { SCENARIOS } from '../attack/scenarios/index.js';
 import { loadPolicy, policySource } from '../engine-factory.js';
 
 /** `--only 05` or `--only 05-roguepilot-schema-url`. */
-function select(only: string | undefined) {
+function select(only: string | undefined): readonly Scenario[] {
   if (only === undefined) return SCENARIOS;
   return SCENARIOS.filter((s) => s.id === only || s.id.startsWith(`${only}-`));
 }

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Policy, StroqEngine } from '@stroq/core';
 import { ClaudeHookInputSchema, toolResultToText } from '../adapters/claude-code.js';
 import { createEngineAt } from '../engine-factory.js';
@@ -44,12 +44,6 @@ export interface AttackReport {
   readonly ok: boolean;
 }
 
-const OUTCOME_OF: Readonly<Record<'deny' | 'ask' | 'allow', Outcome>> = {
-  deny: 'blocked',
-  ask: 'asked',
-  allow: 'passed',
-};
-
 /** Replaces `__CWD__` in every string of a recorded event, however deeply nested. */
 export function substituteCwd(value: unknown, cwd: string): unknown {
   if (typeof value === 'string') return value.split(CWD_PLACEHOLDER).join(cwd);
@@ -61,9 +55,19 @@ export function substituteCwd(value: unknown, cwd: string): unknown {
   return value;
 }
 
+/** Resolves a fixture path under `dir`; refuses any path a `..` segment would carry outside it. */
+function containedPath(dir: string, rel: string): string {
+  const file = join(dir, rel);
+  const outside = relative(dir, resolve(file));
+  if (outside.startsWith('..') || isAbsolute(outside)) {
+    throw new Error(`scenario fixture path escapes the project directory: ${rel}`);
+  }
+  return file;
+}
+
 async function writeFixtures(dir: string, files: Readonly<Record<string, string>>): Promise<void> {
   for (const [rel, body] of Object.entries(files)) {
-    const file = join(dir, rel);
+    const file = containedPath(dir, rel);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, body, { encoding: 'utf8', mode: 0o600 });
   }
@@ -100,9 +104,43 @@ async function runStep(engine: StroqEngine, step: ScenarioStep, cwd: string): Pr
   };
 }
 
+/** Runs one step and adds scenario/step context to whatever it throws (e.g. a malformed recorded event). */
+async function runIndexedStep(
+  engine: StroqEngine,
+  scenario: Scenario,
+  index: number,
+  step: ScenarioStep,
+  cwd: string,
+): Promise<StepResult> {
+  try {
+    return await runStep(engine, step, cwd);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `scenario ${scenario.id} step ${index + 1} (${step.event.hook_event_name} ${step.event.tool_name}): ${message}`,
+    );
+  }
+}
+
+/** Narrows a decision effect honestly instead of casting; throws on a value `engine.pre` cannot produce. */
+function toOutcome(effect: StepExpectation): Outcome {
+  switch (effect) {
+    case 'deny':
+      return 'blocked';
+    case 'ask':
+      return 'asked';
+    case 'allow':
+      return 'passed';
+    default:
+      throw new Error(
+        `runAttack: a PreToolUse step produced an unexpected decision effect "${effect}"`,
+      );
+  }
+}
+
 function outcomeOf(last: StepResult): Outcome {
   if (last.phase !== 'pre') return 'passed';
-  return OUTCOME_OF[last.actual as 'deny' | 'ask' | 'allow'];
+  return toOutcome(last.actual);
 }
 
 /**
@@ -121,9 +159,16 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
     await writeFixtures(cwd, scenario.files ?? {});
     const engine = createEngineAt({ home, userHome, policy, env: {} });
     const steps: StepResult[] = [];
-    for (const step of scenario.steps) steps.push(await runStep(engine, step, cwd));
+    for (const [index, step] of scenario.steps.entries()) {
+      steps.push(await runIndexedStep(engine, scenario, index, step, cwd));
+    }
     const last = steps[steps.length - 1];
     if (!last) throw new Error(`scenario ${scenario.id} has no steps`);
+    if (last.phase !== 'pre') {
+      throw new Error(
+        `scenario ${scenario.id}: the last step must be a PreToolUse (the attack itself)`,
+      );
+    }
     return {
       id: scenario.id,
       title: scenario.title,
