@@ -15,12 +15,22 @@ const MAX_NETRC_TOKENS = 20_000;
 /** Key / variable names that mark a value as credential-like. */
 const SECRET_NAME =
   /(key|token|secret|pass(word|wd)?|pwd|credential|auth|private|signing|salt|dsn|session|cookie)/i;
-/** Names that are identifiers or locations even when they contain a secret-ish word. */
-const EXCLUDED_NAME = /(_sock|_path|_dir|_file|_home|_public|public_key|_id)$/i;
+/**
+ * Names that are identifiers, locations or labels even when they contain a
+ * secret-ish word. `NEXTAUTH_URL`, `AUTH0_ISSUER_BASE_URL`, `SESSION_COOKIE_DOMAIN`
+ * and `API_KEY_HEADER_NAME` are configuration: indexing their values would
+ * hard-deny every ordinary request to the app's own endpoints.
+ */
+const EXCLUDED_NAME =
+  /(_sock|_path|_dir|_file|_home|_public|public_key|_id|_url|_uri|_endpoint|_host|_hostname|_domain|_region|_name|_header)$/i;
 const CANARY_NAME = /^STROQ_CANARY/i;
 const PLACEHOLDER =
   /^(change[-_]?me|replace[-_]?me|todo|example|sample|dummy|placeholder|xxx+|\*+|<[^>]*>|\$\{[^}]*\}|your[-_])/i;
 const PATH_LIKE = /^(\/|\.\.?\/|~)/;
+/** Locations, not credentials: a URL, a `localhost`/dotted-domain prefix, a hostname or host:port. */
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+const LOCAL_PREFIX = /^(\.|localhost)/i;
+const HOST_LIKE = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i;
 /** Values with a vendor prefix are secrets regardless of their key name. */
 const TOKEN_SHAPES: readonly RegExp[] = [
   /^sk-[A-Za-z0-9_-]{10,}$/,
@@ -36,17 +46,21 @@ const TOKEN_SHAPES: readonly RegExp[] = [
 // `//registry.npmjs.org/:_authToken`. Only `=` separates name and value.
 const KEY_VALUE = /^\s*(?:export\s+)?([A-Za-z_/][\w./:-]*)\s*=\s*(.+?)\s*$/;
 
-export function isSecretValue(value: string): boolean {
-  return (
-    value.length >= MIN_SECRET_LENGTH &&
-    !/\s/.test(value) &&
-    !PLACEHOLDER.test(value) &&
-    !PATH_LIKE.test(value)
-  );
-}
-
 export function looksLikeToken(value: string): boolean {
   return TOKEN_SHAPES.some((re) => re.test(value));
+}
+
+/**
+ * A value worth indexing: long enough, whitespace-free, not a placeholder, not a
+ * path, and not a location — a URL, a hostname, a `host:port` or a `.cookie.domain`
+ * is configuration, and indexing `http://localhost:3000` would deny every request
+ * to the app itself. A vendor-shaped token is a credential whatever else it resembles.
+ */
+export function isSecretValue(value: string): boolean {
+  if (value.length < MIN_SECRET_LENGTH || /\s/.test(value)) return false;
+  if (PLACEHOLDER.test(value) || PATH_LIKE.test(value)) return false;
+  if (looksLikeToken(value)) return true;
+  return !URL_SCHEME.test(value) && !LOCAL_PREFIX.test(value) && !HOST_LIKE.test(value);
 }
 
 function unquote(value: string): string {
@@ -56,7 +70,7 @@ function unquote(value: string): string {
 
 function stripInlineComment(value: string): string {
   if (/^["']/.test(value)) return value;
-  const i = value.indexOf(' #');
+  const i = value.search(/[ \t]#/);
   return i > 0 ? value.slice(0, i).trim() : value;
 }
 
