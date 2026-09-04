@@ -60,6 +60,37 @@ describe('knownPackages', () => {
     writeFileSync(join(cwd, 'package.json'), '{broken');
     expect(knownPackages(cwd).size).toBe(0);
   });
+
+  it('tolerates package.json that parses to a non-object', () => {
+    for (const content of ['null', '[]', '42']) {
+      const cwd = project();
+      writeFileSync(join(cwd, 'package.json'), content);
+      expect(knownPackages(cwd).size).toBe(0);
+    }
+  });
+
+  it('ignores pyproject strings that are not dependencies', () => {
+    const cwd = project();
+    writeFileSync(
+      join(cwd, 'pyproject.toml'),
+      [
+        '[project]',
+        'name = "myapp"',
+        'version = "1.0.0"',
+        'readme = "README.md"',
+        'license = "MIT"',
+        'requires-python = ">=3.9"',
+        'dependencies = ["httpx>=0.27", "typer"]',
+        '',
+        '[project.optional-dependencies]',
+        'dev = ["pytest>=7.0", "ruff"]',
+        '',
+      ].join('\n'),
+    );
+    const known = knownPackages(cwd);
+    for (const name of ['httpx', 'typer', 'pytest', 'ruff']) expect(known.has(name)).toBe(true);
+    for (const name of ['myapp', '1.0.0', 'readme.md', 'mit']) expect(known.has(name)).toBe(false);
+  });
 });
 
 describe('atomsForAction', () => {

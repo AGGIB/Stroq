@@ -20,6 +20,11 @@ const DEPENDENCY_SECTIONS = [
 ];
 const REQUIREMENT_LINE = /^\s*([A-Za-z0-9_][A-Za-z0-9_.-]*)/;
 const PYPROJECT_DEP = /["']([A-Za-z0-9_][A-Za-z0-9_.-]*)(?:\[[^\]]*\])?\s*(?:[<>=!~;]|["'])/g;
+// `dependencies = [...]` assignments anywhere in the file (e.g. under `[project]`).
+const PYPROJECT_DEPS_ARRAY = /dependencies\s*=\s*\[([^\]]*)\]/g;
+// Any `key = [...]` assignment, scoped to the `[project.optional-dependencies]` table body.
+const PYPROJECT_KEYED_ARRAY = /=\s*\[([^\]]*)\]/g;
+const OPTIONAL_DEPS_HEADER = '[project.optional-dependencies]';
 
 function readText(path: string): string | null {
   try {
@@ -32,17 +37,19 @@ function readText(path: string): string | null {
 function packageJsonNames(cwd: string): string[] {
   const raw = readText(join(cwd, 'package.json'));
   if (raw === null) return [];
-  let pkg: Record<string, unknown>;
+  let pkg: unknown;
   try {
-    pkg = JSON.parse(raw) as Record<string, unknown>;
+    pkg = JSON.parse(raw);
   } catch {
     return [];
   }
+  if (pkg === null || typeof pkg !== 'object' || Array.isArray(pkg)) return [];
+  const manifest = pkg as Record<string, unknown>;
   const deps = DEPENDENCY_SECTIONS.flatMap((section) => {
-    const value = pkg[section];
+    const value = manifest[section];
     return value && typeof value === 'object' ? Object.keys(value as object) : [];
   });
-  return typeof pkg['name'] === 'string' ? [...deps, pkg['name']] : deps;
+  return typeof manifest['name'] === 'string' ? [...deps, manifest['name']] : deps;
 }
 
 function binNames(cwd: string): string[] {
@@ -53,6 +60,30 @@ function binNames(cwd: string): string[] {
   }
 }
 
+/** The `[project.optional-dependencies]` table body: its header line up to the next `[…]` header, or EOF. */
+function optionalDependenciesSection(text: string): string {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.trim() === OPTIONAL_DEPS_HEADER);
+  if (start === -1) return '';
+  const end = lines.findIndex((line, i) => i > start && line.trimStart().startsWith('['));
+  return lines.slice(start, end === -1 ? lines.length : end).join('\n');
+}
+
+/**
+ * Bracket bodies of `pyproject.toml` dependency arrays only: top-level
+ * `dependencies = [...]` assignments, plus every keyed array inside the
+ * `[project.optional-dependencies]` table. The rest of the file (name,
+ * version, readme, license, …) is quoted text too, but none of it names a
+ * dependency, so it must never reach `PYPROJECT_DEP`.
+ */
+function pyprojectDependencyBodies(text: string): string[] {
+  const direct = [...text.matchAll(PYPROJECT_DEPS_ARRAY)].map((m) => m[1] ?? '');
+  const optional = [...optionalDependenciesSection(text).matchAll(PYPROJECT_KEYED_ARRAY)].map(
+    (m) => m[1] ?? '',
+  );
+  return [...direct, ...optional];
+}
+
 function pythonNames(cwd: string): string[] {
   const fromRequirements = ['requirements.txt', 'requirements-dev.txt'].flatMap((file) =>
     (readText(join(cwd, file)) ?? '')
@@ -60,7 +91,9 @@ function pythonNames(cwd: string): string[] {
       .map((line) => REQUIREMENT_LINE.exec(line)?.[1] ?? '')
       .filter((name) => name.length > 0),
   );
-  const fromPyproject = [...(readText(join(cwd, 'pyproject.toml')) ?? '').matchAll(PYPROJECT_DEP)]
+  const pyprojectText = readText(join(cwd, 'pyproject.toml')) ?? '';
+  const dependencyBodies = pyprojectDependencyBodies(pyprojectText).join('\n');
+  const fromPyproject = [...dependencyBodies.matchAll(PYPROJECT_DEP)]
     .map((m) => m[1] ?? '')
     .filter((name) => name.length > 0);
   return [...fromRequirements, ...fromPyproject];
