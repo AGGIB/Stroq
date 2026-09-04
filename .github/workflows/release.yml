@@ -12,14 +12,18 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
 
+      # Node 24 ships npm 11.x, which trusted publishing (OIDC) requires (>= 11.5.1).
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
@@ -32,21 +36,35 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Skip if this version is already on npm
-
+      - name: Check whether this version is already on npm
         id: published
-
         working-directory: packages/cli
-
         run: |
-
           V=$(node -p "require('./package.json').version")
+          if npm view "@stroq/cli@$V" version >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "@stroq/cli@$V is already published; skipping"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
 
-          if npm view "@stroq/cli@$V" version >/dev/null 2>&1; then echo "already=true" >> "$GITHUB_OUTPUT"; echo "@stroq/cli@$V is already published; skipping"; else echo "already=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Publish to npm
-        if: steps.published.outputs.already != 'true'
+      # Path 1: an npm granular access token stored as the NPM_TOKEN repository secret.
+      - name: Publish to npm (token)
+        if: steps.published.outputs.already != 'true' && env.NPM_TOKEN != ''
         working-directory: packages/cli
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Path 2: npm trusted publishing (OIDC) configured for this repo/workflow on npmjs.com,
+      # enabled by setting the repository variable NPM_TRUSTED_PUBLISHING=true. No secret needed;
+      # provenance attestations are generated automatically.
+      - name: Publish to npm (trusted publishing)
+        if: steps.published.outputs.already != 'true' && env.NPM_TOKEN == '' && env.TRUSTED_PUBLISHING == 'true'
+        working-directory: packages/cli
+        run: npm publish --access public
+
+      - name: Publishing not configured
+        if: steps.published.outputs.already != 'true' && env.NPM_TOKEN == '' && env.TRUSTED_PUBLISHING != 'true'
+        run: |
+          echo "::warning::Nothing published: set the NPM_TOKEN secret or configure npm trusted publishing and set the NPM_TRUSTED_PUBLISHING repository variable to true, then re-run this workflow."
