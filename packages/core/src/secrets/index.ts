@@ -20,7 +20,7 @@ export interface SecretIndexStats {
 }
 
 export interface SecretIndex {
-  /** Matches among `candidates`, deduped by name+source. No I/O when `candidates` is empty. */
+  /** One match per matching token, deduped by token. No I/O when `candidates` is empty. */
   lookup(candidates: readonly string[], cwd: string): Promise<SecretMatch[]>;
   addCanary(value: string, name?: string): Promise<void>;
   stats(): Promise<SecretIndexStats>;
@@ -112,7 +112,13 @@ export class FileSecretIndex implements SecretIndex {
     return statSources([...homeFiles, ...projectEnvFiles(cwd)]);
   }
 
-  private async read(): Promise<IndexFile | null> {
+  /**
+   * The current index, or `null` when it's missing OR corrupt/wrong-shape/wrong-version.
+   * The index is fully derivable from its sources, so unlike the session and provenance
+   * stores it self-heals by rebuilding instead of failing closed; any canaries recorded
+   * in a corrupt file are lost, which is an acceptable trade-off for never hard-denying.
+   */
+  private async readOrNull(): Promise<IndexFile | null> {
     let raw: string;
     try {
       raw = await readFile(this.file, 'utf8');
@@ -123,12 +129,12 @@ export class FileSecretIndex implements SecretIndex {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new Error(`corrupt secret index: ${this.file}`, { cause: err });
+    } catch {
+      return null;
     }
     const index = parsed as IndexFile | null;
     if (!index || typeof index !== 'object' || Array.isArray(index) || index.version !== 1) {
-      throw new Error(`corrupt secret index: ${this.file}`);
+      return null;
     }
     return index;
   }
@@ -177,11 +183,11 @@ export class FileSecretIndex implements SecretIndex {
 
   /** Returns a current index, rebuilding (under the lock) when any source changed. */
   private async ensure(cwd: string): Promise<IndexFile> {
-    const previous = await this.read();
+    const previous = await this.readOrNull();
     if (previous && sameSources(previous.sources, this.sources(cwd))) return previous;
     await mkdir(join(this.file, '..'), { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file}.lock`, async () => {
-      const latest = await this.read();
+      const latest = await this.readOrNull();
       const next = await this.build(cwd, latest);
       await this.write(next);
       return next;
@@ -207,11 +213,10 @@ export class FileSecretIndex implements SecretIndex {
     const seen = new Set<string>();
     const hits: SecretMatch[] = [];
     for (const token of candidates) {
+      if (seen.has(token)) continue;
       const entry = byHash.get(hashSecret(index.salt, token));
       if (!entry) continue;
-      const key = `${entry.name}\n${entry.source}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      seen.add(token);
       hits.push({ name: entry.name, source: entry.source, canary: entry.canary, token });
     }
     return hits;
@@ -220,7 +225,7 @@ export class FileSecretIndex implements SecretIndex {
   async addCanary(value: string, name = 'STROQ_CANARY_KEY'): Promise<void> {
     await mkdir(join(this.file, '..'), { recursive: true, mode: PRIVATE_DIR_MODE });
     await withLock(`${this.file}.lock`, async () => {
-      const current = (await this.read()) ?? (await this.build('.', null));
+      const current = (await this.readOrNull()) ?? (await this.build('.', null));
       const entry: IndexedEntry = {
         hash: hashSecret(current.salt, value),
         name,
@@ -232,7 +237,7 @@ export class FileSecretIndex implements SecretIndex {
   }
 
   async stats(): Promise<SecretIndexStats> {
-    const index = await this.read();
+    const index = await this.readOrNull();
     if (!index) return { entries: 0, sources: 0, canaries: 0, builtAt: null };
     return {
       entries: index.entries.length,

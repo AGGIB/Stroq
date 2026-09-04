@@ -83,6 +83,24 @@ function redactMatches(summary: string, matches: readonly SecretMatch[]): string
 
 const toHit = (m: SecretMatch): SecretHit => ({ name: m.name, source: m.source, canary: m.canary });
 
+/**
+ * One hit per distinct name+source, for reporting (`PreResult.secrets`, the audit
+ * `secrets` field). `redactMatches` must still run over every underlying match so
+ * that two different secret values sharing a name and source (e.g. two AWS profiles
+ * both defining `aws_secret_access_key`) are both redacted from the summary text.
+ */
+function dedupeHits(hits: readonly SecretHit[]): SecretHit[] {
+  const seen = new Set<string>();
+  const out: SecretHit[] = [];
+  for (const hit of hits) {
+    const key = `${hit.name}\n${hit.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(hit);
+  }
+  return out;
+}
+
 // `toolName` is intentionally unused for now; kept to match the interface
 // consumed by the CLI, which may need it for tool-specific summaries later.
 export function summarizeInput(
@@ -180,7 +198,7 @@ export class StroqEngine {
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
     const matches = await this.findSecrets(event, classification.classes);
-    const secrets = matches.map(toHit);
+    const secrets = dedupeHits(matches.map(toHit));
     const classes: ActionClass[] = [
       ...classification.classes,
       ...origin.classes,

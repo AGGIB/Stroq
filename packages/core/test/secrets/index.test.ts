@@ -111,6 +111,23 @@ describe('FileSecretIndex', () => {
     expect(await index.stats()).toMatchObject({ canaries: 1 });
   });
 
+  it('returns every matching token even when name and source repeat', async () => {
+    const { home, cwd, index } = fixture();
+    const SECOND_SECRET = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYSECONDPROFILE';
+    writeFileSync(
+      join(home, '.aws', 'credentials'),
+      `[default]\naws_secret_access_key = ${AWS_SECRET}\n[work]\naws_secret_access_key = ${SECOND_SECRET}\n`,
+    );
+    const hits = await index.lookup([AWS_SECRET, SECOND_SECRET], cwd);
+    expect(hits.map((h) => [h.name, h.source, h.token])).toEqual(
+      expect.arrayContaining([
+        ['aws_secret_access_key', '~/.aws/credentials', AWS_SECRET],
+        ['aws_secret_access_key', '~/.aws/credentials', SECOND_SECRET],
+      ]),
+    );
+    expect(hits).toHaveLength(2);
+  });
+
   it('skips unreadable, missing and oversized sources without throwing', async () => {
     const { home, cwd, index } = fixture();
     writeFileSync(join(home, '.netrc'), 'x'.repeat(300_000));
@@ -120,12 +137,15 @@ describe('FileSecretIndex', () => {
     expect(hits.map((h) => h.name)).toEqual(['aws_secret_access_key']);
   });
 
-  it('fails closed on a corrupt index file', async () => {
+  it('recovers from a corrupt index file by rebuilding', async () => {
     const { file, cwd, index } = fixture();
-    writeFileSync(file, '{not json');
-    await expect(index.lookup([AWS_SECRET], cwd)).rejects.toThrow(/corrupt secret index/);
-    writeFileSync(file, '[]');
-    await expect(index.lookup([AWS_SECRET], cwd)).rejects.toThrow(/corrupt secret index/);
+    for (const corrupt of ['{not json', '[]', '{"version":2}']) {
+      writeFileSync(file, corrupt);
+      const hits = await index.lookup([AWS_SECRET], cwd);
+      expect(hits.map((h) => h.name)).toEqual(['aws_secret_access_key']);
+    }
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { version: number };
+    expect(parsed.version).toBe(1);
   });
 
   it('reports stats before and after building', async () => {
