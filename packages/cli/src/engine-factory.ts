@@ -1,15 +1,17 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import {
   AuditLog,
   DEFAULT_POLICY,
   FileProvenanceStore,
+  FileSecretIndex,
   FileSessionStore,
   StroqEngine,
   loadBundledRules,
   loadPolicyFile,
   type Policy,
 } from '@stroq/core';
-import { auditFile, policyFile, sessionsDir } from './paths.js';
+import { auditFile, policyFile, secretsFile, sessionsDir } from './paths.js';
 
 export function loadPolicy(): Policy {
   const file = policyFile();
@@ -23,5 +25,6 @@ export function createEngine(): StroqEngine {
     sessions: new FileSessionStore(sessionsDir()),
     provenance: new FileProvenanceStore(sessionsDir()),
     audit: new AuditLog(auditFile()),
+    secrets: new FileSecretIndex(secretsFile(), homedir()),
   });
 }

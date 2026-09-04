@@ -3,6 +3,7 @@ import {
   AuditLog,
   FileSessionStore,
   describeEvidence,
+  describeSecretHit,
   type AuditEntry,
   type SessionState,
 } from '@stroq/core';
@@ -24,8 +25,9 @@ function taintLine(state: SessionState): string {
 
 export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): string {
   const because = (entry.provenance ?? []).map((e) => `  because: ${describeEvidence(e, now)}`);
+  const secretLines = (entry.secrets ?? []).map((s) => `  because: ${describeSecretHit(s)}`);
   const fallback =
-    because.length === 0 && !state.taint
+    because.length === 0 && secretLines.length === 0 && !state.taint
       ? ['  because: the action itself matches the rule; no untrusted content was involved']
       : [];
   return `${[
@@ -33,6 +35,7 @@ export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): st
     `  action:  ${entry.summary}`,
     `  verdict: ${verdictLine(entry)}`,
     ...because,
+    ...secretLines,
     ...fallback,
     taintLine(state),
   ].join('\n')}\n`;

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { loadBundledRules, scanContent } from '@stroq/core';
-import { stroqHome } from '../paths.js';
+import { homedir } from 'node:os';
+import { FileSecretIndex, loadBundledRules, scanContent } from '@stroq/core';
+import { secretsFile, stroqHome } from '../paths.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 
 export interface DoctorCheck {
@@ -27,7 +28,7 @@ function checkHooksScope(file: string): {
   }
 }
 
-export function doctorReport(cwd: string = process.cwd()): DoctorReport {
+export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorReport> {
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
   const detected = scanContent(rules, SAMPLE).verdict === 'suspect';
@@ -37,6 +38,7 @@ export function doctorReport(cwd: string = process.cwd()): DoctorReport {
   });
   const hasError = scopes.some((s) => s.error !== null);
   const home = stroqHome();
+  const stats = await new FileSecretIndex(secretsFile(), homedir()).stats();
   return {
     checks: [
       { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
@@ -58,12 +60,20 @@ export function doctorReport(cwd: string = process.cwd()): DoctorReport {
         ok: true,
         detail: existsSync(home) ? home : `${home} (created on first use)`,
       },
+      {
+        name: 'secrets',
+        ok: true,
+        detail:
+          stats.builtAt === null
+            ? 'index not built yet (built on the first outbound action)'
+            : `${stats.entries} values from ${stats.sources} sources, ${stats.canaries} canaries`,
+      },
     ],
   };
 }
 
 export async function runDoctor(): Promise<number> {
-  const report = doctorReport();
+  const report = await doctorReport();
   for (const check of report.checks)
     process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name}: ${check.detail}\n`);
   return report.checks.every((c) => c.ok) ? 0 : 1;

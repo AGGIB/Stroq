@@ -8,3 +8,4 @@ export const sessionsDir = (): string => join(stroqHome(), 'sessions');
 export const auditFile = (): string => join(stroqHome(), 'audit.jsonl');
 export const logFile = (): string => join(stroqHome(), 'stroq.log');
 export const policyFile = (): string => join(stroqHome(), 'policy.yaml');
+export const secretsFile = (): string => join(stroqHome(), 'secrets.json');

@@ -1,10 +1,12 @@
 import {
   describeEvidence,
+  describeSecretHit,
   toEvidence,
   warningFor,
   type Atom,
   type AtomKind,
   type ProvenanceHit,
+  type SecretHit,
   type StroqEngine,
 } from '@stroq/core';
 import { z } from 'zod';
@@ -37,16 +39,18 @@ const clip = (s: string): string => s.slice(0, MAX_RESULT_CHARS);
 
 const MAX_EVIDENCE = 2;
 
-/** Appends up to MAX_EVIDENCE provenance sentences to a hook reason. */
+/** Appends up to MAX_EVIDENCE sentences (provenance first, then secrets) to a hook reason. */
 export function withEvidence(
   reason: string,
   hits: readonly ProvenanceHit[],
   now: Date = new Date(),
+  secrets: readonly SecretHit[] = [],
 ): string {
-  if (hits.length === 0) return reason;
-  const sentences = hits
-    .slice(0, MAX_EVIDENCE)
-    .map((hit) => describeEvidence(toEvidence(hit), now));
+  const sentences = [
+    ...hits.map((hit) => describeEvidence(toEvidence(hit), now)),
+    ...secrets.map(describeSecretHit),
+  ].slice(0, MAX_EVIDENCE);
+  if (sentences.length === 0) return reason;
   return `${reason} Evidence: ${sentences.join(' ')}`;
 }
 
@@ -134,16 +138,25 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     cwd,
   };
   if (input.hook_event_name === 'PreToolUse') {
-    const { decision, provenance } = await engine.pre(base);
+    const { decision, provenance, secrets } = await engine.pre(base);
     if (decision.effect === 'deny')
       return denyOutput(
         withEvidence(
           `Stroq blocked this action (${decision.ruleId}): ${decision.reason}`,
           provenance,
+          new Date(),
+          secrets,
         ),
       );
     if (decision.effect === 'ask')
-      return askOutput(withEvidence(`Stroq: ${decision.reason} (${decision.ruleId})`, provenance));
+      return askOutput(
+        withEvidence(
+          `Stroq: ${decision.reason} (${decision.ruleId})`,
+          provenance,
+          new Date(),
+          secrets,
+        ),
+      );
     return NO_OUTPUT;
   }
   const result = await engine.post({
