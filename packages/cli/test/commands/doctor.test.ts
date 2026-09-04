@@ -13,22 +13,22 @@ beforeEach(() => {
 });
 
 describe('doctorReport', () => {
-  it('reports missing hooks, then installed hooks', () => {
-    const before = doctorReport(cwd);
+  it('reports missing hooks, then installed hooks', async () => {
+    const before = await doctorReport(cwd);
     const byName = (name: string) => before.checks.find((c) => c.name === name)!;
     expect(byName('node').ok).toBe(true);
     expect(byName('rules').ok).toBe(true);
     expect(byName('self-test').ok).toBe(true);
     expect(byName('hooks').ok).toBe(false);
     installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
-    expect(doctorReport(cwd).checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
   });
 
-  it('reports a broken hooks check instead of throwing when settings.json is corrupt', () => {
+  it('reports a broken hooks check instead of throwing when settings.json is corrupt', async () => {
     const file = settingsPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
-    const report = doctorReport(cwd);
+    const report = await doctorReport(cwd);
     const hooksCheck = report.checks.find((c) => c.name === 'hooks')!;
     expect(hooksCheck.ok).toBe(false);
     expect(hooksCheck.detail).toMatch(/cannot parse/);

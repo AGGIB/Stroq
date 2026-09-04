@@ -1,3 +1,4 @@
+import { runCanary } from './commands/canary.js';
 import { runDoctor } from './commands/doctor.js';
 import { readStdin, runHook } from './commands/hook.js';
 import { runInit } from './commands/init.js';
@@ -16,6 +17,7 @@ Commands:
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
+  canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -38,6 +40,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runUntaint(rest);
     case 'why':
       return runWhy(rest);
+    case 'canary':
+      return runCanary(rest);
     default:
       process.stdout.write(USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;
