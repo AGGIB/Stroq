@@ -24,6 +24,8 @@ export const ClaudeHookInputSchema = z.looseObject({
   tool_response: z.unknown().optional(),
 });
 export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
+/** The shape a recorded event has before parsing (defaults still optional); used by `stroq attack` scenarios. */
+export type ClaudeHookEvent = z.input<typeof ClaudeHookInputSchema>;
 
 export const HIGH_IMPACT_TOOL = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
 const MAX_RESULT_CHARS = 200_000;
