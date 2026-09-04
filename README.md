@@ -47,7 +47,7 @@ Run it yourself: `pnpm install && pnpm build && ./examples/demo/run-demo.sh`.
 
 ### Replay twelve real incidents
 
-`stroq attack` replays recorded hook events from twelve public incidents — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the `rm -rf ~` and `drizzle-kit push --force` horror stories and more — through the engine with _your_ policy, in throwaway directories (nothing in `~/.stroq`, your home directory or your environment is read), and tells you which of them would get through:
+`stroq attack` replays recorded hook events from twelve public incidents — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the `rm -rf ~` and `drizzle-kit push --force` horror stories and more — through the engine with _your_ policy (`~/.stroq/policy.yaml` when present, otherwise the default) in throwaway directories — sessions, audit log, secret index, credential files and environment are all fake, so beyond the policy nothing on your machine is read — and tells you which of them would get through:
 
 ```text
 stroq attack: 12 recorded incidents against policy default
