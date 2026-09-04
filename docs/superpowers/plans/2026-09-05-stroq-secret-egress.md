@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ≥ 22, pnpm 11, TypeScript 5.9.3 ESM (`NodeNext`, relative imports end in `.js`), vitest 4.1.11, zod 4.5.4, yaml 2.9.0, tsup 8.5.1. No new runtime dependencies (`node:crypto`, `node:fs`, `node:os`).
 
-**Spec:** `docs/superpowers/specs/2026-09-04-killer-feature-research.md` section 6.2 ("Secret egress guard"). Deliberate v1 scope cuts, all documented in the README limits: only exact values are matched (a base64/URL-encoded or split secret is not); only egress-shaped actions are checked (a secret in a purely local command is not egress); `Write` outside the repo is not checked; `~/.ssh` private keys, `~/.kube/config` and gcloud configs are not indexed yet (their _paths_ are still covered by the existing `fs.secrets` class).
+**Spec:** `docs/superpowers/specs/2026-09-04-killer-feature-research.md` section 6.2 ("Secret egress guard"). Deliberate v1 scope cuts, all documented in the README limits: only exact and URL-encoded values are matched (a base64-encoded or split secret is not); only egress-shaped actions are checked (a secret in a purely local command is not egress); `Write` outside the repo is not checked; `~/.ssh` private keys, `~/.kube/config` and gcloud configs are not indexed yet (their _paths_ are still covered by the existing `fs.secrets` class).
 
 ## Global Constraints
 
@@ -19,7 +19,7 @@
 - Formatting: `pnpm format:check` must pass (prettier: single quotes, width 100, trailing commas). Run `pnpm prettier --write <files>` on every file you touch before committing. `policies/default.yaml` IS covered by prettier.
 - Never write invisible Unicode into source.
 - **Secret values never leave memory:** the index stores `sha256(salt + "\n" + value)` (32 hex chars), the secret's key/variable name and a display path; audit entries, hook reasons, `stroq why`, `stroq doctor` and logs only ever carry the name and the source. A matched value is redacted from the audit summary as `[REDACTED:<name>]`. Tests assert the value is absent from the audit log.
-- Every filesystem read of a secret source is guarded: a missing, unreadable, oversized (> `MAX_SOURCE_BYTES = 262_144`) or unparsable source contributes no entries and never throws. Only a corrupt index file throws (`corrupt secret index: <path>`), which the CLI turns into a fail-closed deny on high-impact tools — consistent with the session and provenance stores.
+- Every filesystem read of a secret source is guarded: a missing, unreadable, oversized (> `MAX_SOURCE_BYTES = 262_144`) or unparsable source contributes no entries and never throws. A corrupt or wrong-version index file is rebuilt from its sources (it is fully derivable, so self-healing cannot weaken the guard); only non-ENOENT I/O errors propagate.
 - Latency: the lookup does no I/O when there are no candidate tokens; a rebuild reads at most a handful of small files; hashing ≤ 500 candidates per event.
 - Claude Code hook contract unchanged; the `Evidence:` suffix mechanism from Provenance is reused (at most two sentences).
 - Commit after every task with plain conventional commit messages, no attribution trailers. Do not push.
