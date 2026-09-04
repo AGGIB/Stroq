@@ -1,0 +1,46 @@
+name: False positive
+description: Stroq flagged, warned on, or blocked something benign
+title: "[False positive]: "
+labels: ["false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A false positive is treated as a bug in this project. The more
+        precisely you can reproduce it, the faster it gets fixed.
+  - type: textarea
+    id: content
+    attributes:
+      label: The benign command or content
+      description: >
+        The exact command that was denied/asked, or the exact file/tool
+        output content that was flagged as suspicious. Paste the raw text —
+        do not paraphrase it, since the exact bytes matter for a regex fix.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Rule id(s) and decision line
+      description: >
+        The rule id(s) involved and the relevant line(s) from `stroq log`
+        (or the raw hook JSON output), including the `permissionDecision` and
+        `permissionDecisionReason` if this was a PreToolUse action.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      placeholder: "e.g. Claude Code 2.1.226"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead, and why you believe this content or command is benign.
+    validations:
+      required: true

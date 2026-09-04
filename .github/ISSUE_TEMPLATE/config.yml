@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability or bypass
+    url: https://github.com/AGGIB/stroq/security/advisories/new
+    about: Use this for any bypass of a documented protection. Please do not open a public issue for these.
+  - name: Questions and discussion
+    url: https://github.com/AGGIB/stroq/discussions
+    about: Usage questions, ideas, and general discussion that aren't a bug report.

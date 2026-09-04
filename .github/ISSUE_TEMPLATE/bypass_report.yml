@@ -1,0 +1,41 @@
+name: Classification gap
+description: A non-sensitive case that seems misclassified or under-covered
+title: "[Gap]: "
+labels: ["classification-gap"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If this is a real, working bypass of a documented protection —
+        something the README or a policy rule says should be denied/asked
+        that actually gets through — please do NOT file it here.** Use the
+        private security advisory process described in
+        [SECURITY.md](../../SECURITY.md) instead, so it can be fixed before
+        the technique is public.
+
+        This template is for non-sensitive coverage gaps: patterns you think
+        *should* be classified a certain way, edge cases in already-documented
+        roadmap items (see SECURITY.md's "out of scope" list), or requests to
+        extend a rule/classifier to a new but non-exploitable case.
+  - type: textarea
+    id: gap
+    attributes:
+      label: The gap
+      description: What input, and what classification or rule behavior you'd expect instead.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why-not-sensitive
+    attributes:
+      label: Why this isn't an active bypass
+      description: Briefly explain why this is a coverage/documentation gap rather than something currently exploitable.
+    validations:
+      required: true
+  - type: input
+    id: stroq-version
+    attributes:
+      label: Stroq version
+      placeholder: "0.1.0"
+    validations:
+      required: true
