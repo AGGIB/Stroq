@@ -1,15 +1,35 @@
-# Stroq
+<div align="center">
 
-**Local action firewall for AI coding agents.**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <img src="docs/assets/logo.svg" alt="Stroq" width="340">
+</picture>
 
-[![CI](https://github.com/AGGIB/stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/stroq/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli.svg)](https://www.npmjs.com/package/@stroq/cli)
+### Local action firewall for AI coding agents
+
+Scans what the agent reads. Taints the session. Blocks the dangerous follow-up — before anything leaves your machine.
+
+[![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli?logo=npm&logoColor=white&label=npm&color=cb3837)](https://www.npmjs.com/package/@stroq/cli)
+[![npm downloads](https://img.shields.io/npm/dm/%40stroq%2Fcli?label=downloads&color=0b7285)](https://www.npmjs.com/package/@stroq/cli)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-339933)](package.json)
+[![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](package.json)
+
+```bash
+npx @stroq/cli init
+```
+
+Supported today: **Claude Code** (native hooks) · On the roadmap: Cursor, Codex, Copilot, OpenClaw
+
+</div>
+
+---
 
 ## Why
 
-Coding agents read untrusted content constantly — web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that dutifully follows what it reads can turn them into real actions: outbound network requests, secret reads, external git pushes, arbitrary shell execution. Stroq sits on the agent's own tool-call hooks and enforces a deterministic, local policy on those actions — no cloud round trip, no relying on the model to notice the injection itself.
+Coding agents read untrusted content constantly — web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that dutifully follows what it reads can turn them into real actions: outbound network requests, secret reads, external git pushes, arbitrary shell execution.
+
+Stroq sits on the agent's own tool-call hooks and enforces a deterministic, local policy on those actions. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.
 
 ## See it block an attack
 
@@ -20,6 +40,48 @@ Coding agents read untrusted content constantly — web pages, file contents, MC
 3. When the next command tries to run that `curl | sh`, the tainted `PreToolUse` policy denies it outright (`deny-encoded-exec`) — before any request leaves the machine.
 
 Run it yourself: `pnpm install && pnpm build && ./examples/demo/run-demo.sh`.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph read [" PostToolUse · what the agent reads "]
+        R[Read · WebFetch · Bash output · mcp__*] --> N[Normalize<br/>zero-width, homoglyphs, base64 / hex / url]
+        N --> S[Scan<br/>599 rules]
+    end
+    S -- "score ≥ threshold" --> T[(Session taint<br/>suspect)]
+    subgraph act [" PreToolUse · what the agent wants to do "]
+        A[Bash · Write · Edit · WebFetch · mcp__*] --> C[Classify<br/>shell.network · fs.secrets · git.push_external · …]
+        C --> P{Policy<br/>first match wins}
+    end
+    T -.-> P
+    P -- deny --> D[Blocked]
+    P -- ask --> K[You decide]
+    P -- allow --> G[Runs]
+    D & K & G --> L[(Hash-chained audit<br/>~/.stroq/audit.jsonl)]
+```
+
+1. **`PostToolUse` — scan and taint.** The output of `Read`, `WebFetch`, `WebSearch`, `Bash`, `Grep`, and every `mcp__*` tool is normalized (zero-width characters and tag/variation-selector code points stripped, homoglyphs folded, base64/hex/URL-encoded content decoded up to two levels) and matched against the rule set. If the highest-severity match scores at or above `threshold` (0.6 by default), the session is marked `suspect` and the agent gets an inline warning telling it to treat the content as untrusted data.
+2. **`PreToolUse` — classify and decide.** `Bash`, `Write`/`Edit`/`MultiEdit`/`NotebookEdit`, `Read`, `WebFetch`, and `mcp__*` calls are classified into action classes (`shell.network`, `shell.destructive`, `shell.exec_encoded`, `fs.secrets`, `git.push_external`, `config.self`, `config.self_touch`, `mcp.side_effect`, and more) and evaluated against an ordered policy — first matching rule wins, otherwise the configured default (`allow`).
+3. **Audit.** Every decision, on both hooks, is appended to a hash-chained JSONL log (`~/.stroq/audit.jsonl`), with sensitive values redacted before they're written. `stroq verify` checks that the chain hasn't been tampered with. A false positive can be cleared with `stroq untaint --session <id>` (the session id is shown in `stroq log`).
+
+If Stroq itself crashes while handling a high-impact tool call, it fails **closed** — deny — rather than silently letting the action through.
+
+## What you get
+
+- **Content scanning with real normalization.** Zero-width and tag characters stripped, homoglyphs folded, nested base64/hex/URL decoding — so `сurl` with a Cyrillic `с`, or a command hidden in base64, is matched like the plain text it decodes to.
+- **599 gated rules.** 12 hand-written Stroq rules plus 596 vendored [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules), every one of them passed through a benign-corpus false-positive gate and a regex performance gate before it ships. Russian-language rule variants included.
+- **Taint-aware policy.** The decision about an action knows whether the agent has read something suspicious in this session. Ten action classes, one ordered YAML policy, first match wins.
+- **Self-protection.** An agent that has been tainted cannot edit Stroq's own policy, hooks, or `.claude/settings.json` (`config.self` → deny); touching them at all asks first.
+- **Tamper-evident audit.** Hash-chained JSONL with structural redaction, `0600` permissions, and `stroq verify`.
+- **Fail-closed.** Engine error on a high-impact `PreToolUse` call means deny, not allow.
+- **Local and zero-config.** One command to install, nothing sent anywhere, a single YAML file if you want to change the defaults.
+
+## How it's different
+
+- **The agent's own permission prompts** ask about an action; they don't know that the agent just read a README telling it to run that action. Stroq carries that context (taint) into the decision and never relies on the model noticing the injection.
+- **A regex in a hook script** sees the raw text. Stroq normalizes first (zero-width, homoglyphs, nested encodings), ships hundreds of gated rules instead of a handful, and records every decision in a log you can verify.
+- **Cloud AI-security platforms** put a network round trip in the hot path. Agent hooks fail open on timeout, so a guard that is slow to answer silently stops guarding. Stroq is local, deterministic, and fails closed on high-impact actions.
 
 ## Install
 
@@ -32,25 +94,30 @@ npx @stroq/cli doctor  # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
-Supported today: **Claude Code** (via native hooks). Cursor, Codex, Copilot, and OpenClaw adapters are on the [roadmap](#roadmap).
-
 ### From source
 
 ```bash
-git clone https://github.com/AGGIB/stroq.git
-cd stroq
+git clone https://github.com/AGGIB/Stroq.git
+cd Stroq
 pnpm install && pnpm build
 node packages/cli/dist/index.js init
 node packages/cli/dist/index.js doctor
 ```
 
-## What it does
+## Commands
 
-1. **`PostToolUse` — scan and taint.** The output of `Read`, `WebFetch`, `WebSearch`, `Bash`, `Grep`, and every `mcp__*` tool is normalized (zero-width characters and tag/variation-selector code points stripped, homoglyphs folded, base64/hex/URL-encoded content decoded up to two levels) and matched against the rule set. If the highest-severity match scores at or above `threshold` (0.6 by default), the session is marked `suspect` and the agent gets an inline warning telling it to treat the content as untrusted data.
-2. **`PreToolUse` — classify and decide.** `Bash`, `Write`/`Edit`/`MultiEdit`/`NotebookEdit`, `Read`, `WebFetch`, and `mcp__*` calls are classified into action classes (`shell.network`, `shell.destructive`, `shell.exec_encoded`, `fs.secrets`, `git.push_external`, `config.self`, `config.self_touch`, `mcp.side_effect`, and more) and evaluated against an ordered policy — first matching rule wins, otherwise the configured default (`allow`).
-3. **Audit.** Every decision, on both hooks, is appended to a hash-chained JSONL log (`~/.stroq/audit.jsonl`), with sensitive values redacted before they're written. `stroq verify` checks that the chain hasn't been tampered with. A false positive can be cleared with `stroq untaint --session <id>` (the session id is shown in `stroq log`).
+| Command                                  | What it does                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`) |
+| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                |
+| `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
+| `stroq log [--count 20]`                 | Show recent audit entries                                                 |
+| `stroq verify`                           | Verify the audit hash chain                                               |
+| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint, or every session's                |
 
-If Stroq itself crashes while handling a high-impact tool call, it fails **closed** — deny — rather than silently letting the action through.
+## Policy
+
+Copy [`policies/default.yaml`](policies/default.yaml) to `~/.stroq/policy.yaml` and edit it — rules are evaluated in order, the first match wins, and anything unmatched falls through to `default`. `threshold` (0–1) is the minimum scan score before a `PostToolUse` result taints a session as `suspect`. Set `STROQ_HOME` to relocate all state (policy override, sessions, and the audit log) to a different directory.
 
 ### Default policy
 
@@ -71,21 +138,6 @@ Generated from [`policies/default.yaml`](policies/default.yaml); rules are evalu
 | _(no rule matched)_                | **allow** | default                              |
 
 Commands that only read the security config — `cat`, `grep`, `git status`/`diff`/`add`, and the like — are classified as ordinary reads, not `config.self`, so they stay allowed; opening it in an editor or otherwise writing to it is what triggers `config.self` (deny) or `config.self_touch` (ask).
-
-## Commands
-
-| Command                                  | What it does                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------- |
-| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`) |
-| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                |
-| `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
-| `stroq log [--count 20]`                 | Show recent audit entries                                                 |
-| `stroq verify`                           | Verify the audit hash chain                                               |
-| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint, or every session's                |
-
-## Policy
-
-Copy [`policies/default.yaml`](policies/default.yaml) to `~/.stroq/policy.yaml` and edit it — rules are evaluated in order, the first match wins, and anything unmatched falls through to `default`. `threshold` (0–1) is the minimum scan score before a `PostToolUse` result taints a session as `suspect`. Set `STROQ_HOME` to relocate all state (policy override, sessions, and the audit log) to a different directory.
 
 ## Rules
 

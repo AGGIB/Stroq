@@ -1,4 +1,13 @@
-# stroq
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/logo.svg" alt="Stroq" width="280">
+</p>
+
+<p align="center">
+  <a href="https://github.com/AGGIB/Stroq/actions/workflows/ci.yml"><img src="https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@stroq/cli"><img src="https://img.shields.io/npm/v/%40stroq%2Fcli?logo=npm&logoColor=white&label=npm&color=cb3837" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/@stroq/cli"><img src="https://img.shields.io/npm/dm/%40stroq%2Fcli?label=downloads&color=0b7285" alt="npm downloads"></a>
+  <a href="https://github.com/AGGIB/Stroq/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+</p>
 
 **Local action firewall for AI coding agents.** Stroq scans what your agent reads (files, web pages, MCP tool results, command output) for indirect prompt injection, taints the session when it finds instruction-like text, and deterministically blocks the dangerous follow-up actions an injected agent would take — outbound network commands, secret access, external git pushes, encoded execution, self-tampering. Everything runs locally; nothing is sent to a cloud.
 
@@ -28,7 +37,7 @@ Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` co
 
 ## Learn more
 
-- Full documentation, architecture, and the demo: [github.com/AGGIB/stroq](https://github.com/AGGIB/stroq#readme)
-- Report a security issue or a bypass: [SECURITY.md](https://github.com/AGGIB/stroq/blob/main/SECURITY.md)
+- Full documentation, architecture, and the demo: [github.com/AGGIB/Stroq](https://github.com/AGGIB/Stroq#readme)
+- Report a security issue or a bypass: [SECURITY.md](https://github.com/AGGIB/Stroq/blob/main/SECURITY.md)
 
 License: Apache-2.0.
