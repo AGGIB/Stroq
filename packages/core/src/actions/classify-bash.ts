@@ -193,17 +193,20 @@ function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
   });
 }
 
-// Quoted spans (single or double) are inert data — a network-command word
-// sitting inside one (a commit message, a `-k "test_curl"` filter, …) is
-// text, not an invocation. Stripped before tokenizing the unknown-wrapper
-// scan below so `git commit -m "add curl support"` isn't misread as running
-// curl. `-m <value>` / `--message=<value>` is also stripped for the
-// unquoted form of the same argument.
-const QUOTED_SPAN = /"[^"]*"|'[^']*'/g;
-const MESSAGE_ARG = /--message(=\S+|\s+\S+)|(^|\s)-m\s+\S+/g;
+// A token that is nothing but one matching quoted span — `"curl"` or
+// `'curl'` — is what the shell would treat as the bare word, so it is
+// unwrapped to that word before the embedded-network-token check runs.
+// When the quoted content itself contains whitespace (a quoted multi-word
+// argument, e.g. a `-k "test curl"` filter, rather than a single quoted
+// word) the token is a piece of inert data and is dropped instead of
+// contributing any word to the scan.
+const FULLY_QUOTED_TOKEN = /^"([^"]*)"$|^'([^']*)'$/;
 
-function stripQuotedAndMessageArgs(segment: string): string {
-  return segment.replace(QUOTED_SPAN, ' ').replace(MESSAGE_ARG, ' ');
+function unwrapQuotedToken(token: string): string | null {
+  const match = FULLY_QUOTED_TOKEN.exec(token);
+  if (!match) return token;
+  const content = match[1] ?? match[2] ?? '';
+  return /\s/.test(content) ? null : content;
 }
 
 // Unlisted single-word wrappers (`setsid`, `flock`, `script`, `unbuffer`,
@@ -212,9 +215,29 @@ function stripQuotedAndMessageArgs(segment: string): string {
 // rather than skipping to the wrapped command. Rather than maintaining an
 // ever-growing wrapper allowlist, an unknown command word's remaining
 // tokens are scanned for an embedded network command word.
+//
+// The scan runs on tokens already produced by `tokenize` (which strips
+// empty quote pairs and backslashes per token) rather than pre-stripping
+// quoted spans out of the raw segment string first: stripping `"[^"]*"`
+// from the raw string also matches an *empty* pair like the `""` inside
+// `cu""rl`, deleting it and splitting what should be one word (`curl`)
+// into two (`cu`, `rl`) before `tokenize` ever gets a chance to fold it
+// back together. Running on tokens avoids that, and `unwrapQuotedToken`
+// still keeps a deliberately-quoted argument (`-k "test_curl"`, a commit
+// message) from being misread as a command name.
+//
+// `-m <value>` / `--message=<value>` is deliberately NOT stripped here:
+// `git` — the only command where a commit message could plausibly contain
+// a network word — is excluded from this scan entirely (see
+// `isClassifiedElsewhere`), and stripping `-m <word>` for every OTHER
+// unknown wrapper wrongly ate real, unrelated arguments, e.g.
+// `setsid -m curl https://x` (where `-m` is setsid's own flag).
 function isUnknownWrapperNetworkCall(seg: string, word: string): boolean {
   if (word === '' || isClassifiedElsewhere(word)) return false;
-  const tokens = tokenize(stripQuotedAndMessageArgs(seg)).filter((t) => t !== '--');
+  const tokens = tokenize(seg)
+    .filter((t) => t !== '--')
+    .map(unwrapQuotedToken)
+    .filter((t): t is string => t !== null);
   return hasEmbeddedNetworkToken(tokens);
 }
 
