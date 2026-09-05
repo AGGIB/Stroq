@@ -471,6 +471,12 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
 <span class="y-k">threshold</span>: <span class="y-n">0.6</span>
 <span class="y-k">default</span>: <span class="y-allow">allow</span>
 <span class="y-k">rules</span>:
+  - <span class="y-k">id</span>: deny-secret-egress
+    <span class="y-k">effect</span>: <span class="y-deny">deny</span>
+    <span class="y-k">reason</span>: <span class="y-s">Arguments contain the value of a known secret; outbound use is blocked</span>
+    <span class="y-k">when</span>:
+      <span class="y-k">classes</span>: [secret.egress]
+      <span class="y-k">taint</span>: any
   - <span class="y-k">id</span>: deny-self-tamper
     <span class="y-k">effect</span>: <span class="y-deny">deny</span>
     <span class="y-k">reason</span>: <span class="y-s">Modifying agent security configuration is blocked</span>
@@ -483,32 +489,15 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <span class="y-k">when</span>:
       <span class="y-k">classes</span>: [shell.exec_encoded]
       <span class="y-k">taint</span>: any
-  - <span class="y-k">id</span>: deny-network-when-tainted
+  - <span class="y-k">id</span>: deny-origin-suspect
     <span class="y-k">effect</span>: <span class="y-deny">deny</span>
-    <span class="y-k">reason</span>: <span class="y-s">Session is tainted by suspicious content; outbound network command blocked</span>
+    <span class="y-k">reason</span>: <span class="y-s">Action was dictated by content Stroq flagged as suspicious; blocked (a false positive can be cleared with: stroq untaint --session &lt;id&gt;)</span>
     <span class="y-k">when</span>:
-      <span class="y-k">classes</span>: [shell.network]
-      <span class="y-k">taint</span>: <span class="y-ask">suspect</span>
-  - <span class="y-k">id</span>: deny-fetch-when-tainted
-    <span class="y-k">effect</span>: <span class="y-deny">deny</span>
-    <span class="y-k">reason</span>: <span class="y-s">Session is tainted by suspicious content; web fetch blocked</span>
-    <span class="y-k">when</span>:
-      <span class="y-k">classes</span>: [network.fetch]
-      <span class="y-k">taint</span>: <span class="y-ask">suspect</span>
-  - <span class="y-k">id</span>: deny-secrets-when-tainted
-    <span class="y-k">effect</span>: <span class="y-deny">deny</span>
-    <span class="y-k">reason</span>: <span class="y-s">Session is tainted by suspicious content; access to secrets blocked</span>
-    <span class="y-k">when</span>:
-      <span class="y-k">classes</span>: [fs.secrets]
-      <span class="y-k">taint</span>: <span class="y-ask">suspect</span>
-  - <span class="y-k">id</span>: deny-push-external-when-tainted
-    <span class="y-k">effect</span>: <span class="y-deny">deny</span>
-    <span class="y-k">reason</span>: <span class="y-s">Session is tainted by suspicious content; push to external remote blocked</span>
-    <span class="y-k">when</span>:
-      <span class="y-k">classes</span>: [git.push_external]
-      <span class="y-k">taint</span>: <span class="y-ask">suspect</span>
-<span class="y-c"># … four more rules: ask-mcp-side-effect-when-tainted, ask-self-touch,</span>
-<span class="y-c">#   ask-destructive, ask-push-external</span></code></pre>
+      <span class="y-k">classes</span>: [origin.suspect]
+      <span class="y-k">taint</span>: any
+<span class="y-c"># … four tainted-session deny rules (network, fetch, secrets, external push)</span>
+<span class="y-c">#   and five ask rules: ask-origin-untrusted, ask-mcp-side-effect-when-tainted,</span>
+<span class="y-c">#   ask-self-touch, ask-destructive, ask-push-external</span></code></pre>
         <figcaption>First match wins. Copy to <code>~/.stroq/policy.yaml</code> and edit.</figcaption>
       </figure>
     </div>
