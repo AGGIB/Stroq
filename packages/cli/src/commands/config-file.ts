@@ -21,3 +21,32 @@ export function writeJsonObject(file: string, value: unknown): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
+
+/** A plain JSON object — not an array, not `null`. */
+export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * One event's hook groups with Stroq's own handlers removed, so re-installing
+ * replaces the entry instead of stacking a second one. Shared by the Claude Code
+ * and Codex installers, which differ only in how they recognise their own handler.
+ *
+ * A "group" that is not an object at all (a `null` left by a hand-edit, a bare
+ * string) is dropped: reading `.hooks` off it is how this used to throw and take
+ * the whole install down with it, and it is not user content worth preserving. A
+ * group whose `hooks` is not an array is kept untouched — malformed, but the
+ * user's, and rewriting it would lose a hook Stroq does not own.
+ */
+export function withoutStroqGroups<T>(
+  groups: readonly unknown[],
+  isOurs: (handler: unknown) => boolean,
+): T[] {
+  return groups
+    .filter(isPlainObject)
+    .map((group) =>
+      Array.isArray(group['hooks'])
+        ? { ...group, hooks: group['hooks'].filter((handler: unknown) => !isOurs(handler)) }
+        : group,
+    )
+    .filter((group) => !Array.isArray(group['hooks']) || group['hooks'].length > 0) as T[];
+}
