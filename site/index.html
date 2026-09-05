@@ -286,7 +286,7 @@
 
       <figure class="demo-fig reveal">
         <div class="demo-frame">
-          <img src="/assets/demo.gif" width="960" height="600" loading="lazy" decoding="async" alt="Terminal recording: Claude Code reads a poisoned README, Stroq marks the session suspect, and the follow-up curl piped to sh is denied by the rule deny-encoded-exec.">
+          <img src="/assets/demo.gif" width="960" height="600" loading="lazy" decoding="async" alt="Terminal recording: Claude Code reads a poisoned README, Stroq marks the session suspect and denies the follow-up curl piped to sh; an npx copied from an MCP result is asked about with its provenance; a curl carrying a .env value is denied by deny-secret-egress; stroq attack reports 8 blocked, 4 asked, 0 passed through.">
         </div>
         <figcaption>The bundled demo. A dependency's <code>README.md</code> hides a <code>curl | sh</code> and a base64-encoded command that exfiltrates <code>~/.ssh/id_rsa</code>. Thirteen rules match, the session goes <em>suspect</em>, and the follow-up command is denied by <code>deny-encoded-exec</code> before any request leaves the machine. Run it yourself: <code>pnpm install && pnpm build && ./examples/demo/run-demo.sh</code>.</figcaption>
       </figure>

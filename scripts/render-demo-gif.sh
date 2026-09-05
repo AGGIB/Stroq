@@ -46,7 +46,8 @@
 #
 # If durations.txt is missing, this script generates one from the Stroq
 # demo's own storyboard timings (1.5-3s per scene, 4s on the final scene) for
-# exactly 6 frames, or a flat 2s hold per frame for any other frame count.
+# exactly 7 frames (the 0.3.0 storyboard) or exactly 6 (the 0.2.0 one), or a
+# flat 2s hold per frame for any other frame count.
 #
 # Requires only ffmpeg (already installed) — no new packages, no network
 # access, no browser automation of its own.
@@ -73,7 +74,11 @@ if [ ! -f "$durations_file" ]; then
   echo "no durations.txt in $frames_dir - generating a default" >&2
   frame_count="${#frames[@]}"
   default_durations=()
-  if [ "$frame_count" -eq 6 ]; then
+  if [ "$frame_count" -eq 7 ]; then
+    # 0.3.0 storyboard: README, warning, curl|sh denied, MCP result, npx asked,
+    # secret egress denied, stroq attack summary.
+    default_durations=(1.8 2.5 2.8 1.8 2.8 3 4)
+  elif [ "$frame_count" -eq 6 ]; then
     default_durations=(2.5 2.5 3 2.5 1.5 4)
   else
     for ((i = 0; i < frame_count; i++)); do
