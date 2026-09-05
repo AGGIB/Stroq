@@ -6,10 +6,10 @@ Stroq is a security product: its job is to block specific dangerous actions once
 
 | Version | Supported |
 | ------- | --------- |
-| 0.3.x   | Yes       |
-| < 0.3   | No        |
+| 0.4.x   | Yes       |
+| < 0.4   | No        |
 
-Stroq is pre-1.0. Only the latest published `0.3.x` release is supported; please reproduce against the latest version before reporting.
+Stroq is pre-1.0. Only the latest published `0.4.x` release is supported; please reproduce against the latest version before reporting.
 
 ## Reporting a Vulnerability
 
