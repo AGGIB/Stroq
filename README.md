@@ -20,7 +20,7 @@ Scans what the agent reads. Taints the session. Blocks the dangerous follow-up �
 npx @stroq/cli init
 ```
 
-Supported today: **Claude Code** (native hooks) · On the roadmap: Cursor, Codex, Copilot, OpenClaw
+Supported today: **Claude Code**, **Cursor** (native hooks) · On the roadmap: Codex, Copilot, OpenClaw
 
 **Website:** [stroq.vercel.app](https://stroq.vercel.app)
 
@@ -120,13 +120,46 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 ## Install
 
 ```bash
-npx @stroq/cli init    # in your project: writes .claude/settings.json hooks
-npx @stroq/cli doctor  # check the installation
+npx @stroq/cli init                  # Claude Code: writes .claude/settings.json hooks
+npx @stroq/cli init --agent cursor   # Cursor: writes .cursor/hooks.json
+npx @stroq/cli doctor                # check the installation
 ```
 
 `init` writes hooks into the project's `.claude/settings.json` by default; pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change without writing anything. Then open Claude Code in that project.
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
+
+### Cursor
+
+```bash
+npx @stroq/cli init --agent cursor   # in your project: writes .cursor/hooks.json
+```
+
+`--user` writes `~/.cursor/hooks.json` instead, `--dry-run` prints the merged file without writing it. Restart Cursor afterwards; `stroq doctor` then shows a `cursor hooks` line next to the Claude Code one. Re-running `init` is idempotent and replaces an older Stroq entry rather than stacking a second one; foreign hooks and foreign events in the file are left untouched.
+
+Stroq installs on six of Cursor's hook events:
+
+| Cursor event           | What Stroq does                                                                                                   | Can it stop the action?                                                                             |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `beforeShellExecution` | Classifies the command, applies your policy                                                                       | Yes — `deny` / `ask`                                                                                |
+| `beforeMCPExecution`   | Classifies the MCP call and its arguments, secret egress included                                                 | Yes — `deny` / `ask`                                                                                |
+| `beforeReadFile`       | Scans the file body before the agent sees it; taints the session                                                  | Allow/deny only — a suspect file is allowed with a warning; a credential file under taint is denied |
+| `afterShellExecution`  | Scans the terminal output, taints the session, records provenance                                                 | No                                                                                                  |
+| `afterMCPExecution`    | Scans the MCP result, taints, records provenance                                                                  | No — but a suspect result adds `additional_context` for the agent                                   |
+| `afterFileEdit`        | Records the edit's classification (`config.self` for `.cursor/hooks.json`, `.claude/settings.json`, `~/.stroq/…`) | No — Cursor has no `beforeFileEdit`, so this is audit only                                          |
+
+`beforeShellExecution` and `beforeMCPExecution` are installed with `failClosed: true`, so a crashed or missing Stroq blocks those two events instead of silently allowing them; the other four are installed fail-open, because there is nothing there to block.
+
+**Limits.**
+
+- **Edits through Cursor's editor are audited, not blocked.** Cursor has no `beforeFileEdit`, so a write to Stroq's own config shows up in `stroq log` as a `config.self` decision that could not be enforced — a `deny(deny-self-tamper)` audit line for a `Write` from Cursor means "would have been denied; the edit happened," not that anything was stopped. A core-level marker for this kind of unenforced decision is planned. The equivalent shell command (`rm .cursor/hooks.json`, `sed -i … .claude/settings.json`) still goes through `beforeShellExecution` and is denied there.
+- **The project follows the workspace root, not the agent's shell `cwd`.** Stroq resolves the project directory as `workspace_roots[0]`, falling back to Cursor's own `cwd` field only when the workspace root is absent, and to the process's `cwd()` as a last resort. A `cd /tmp` inside the agent's shell does not shed the project's `.env*` secret index — the workspace root, not the shell's current directory, decides which project's secrets and paths apply.
+- **A poisoned terminal output taints silently.** `afterShellExecution` honours no output, so the agent is not told; the next network command, secret read or external push is denied all the same.
+- **`beforeReadFile` cannot ask.** A file that scans as suspect is allowed with a `user_message` warning and taints the session; only a credential path (`fs.secrets`) under an already-tainted session is denied. An internal error on this event allows the read, so a taint can be missed — it is not a high-impact action.
+- **Not used in v1:** Cursor's Tab hooks (`beforeTabFileRead`, `afterTabFileEdit`), the generic `preToolUse`/`postToolUse` events, `beforeSubmitPrompt`, `updated_input` rewriting and enterprise/team hook locations.
+- **Untested:** the Cursor CLI (`cursor-agent`) and Windows. Both are expected to work wherever `.cursor/hooks.json` is honoured. There is no plugin install path — Cursor has no plugin system, so `stroq init --agent cursor` is the only one.
+
+Run the Cursor demo yourself: `pnpm install && pnpm build && ./examples/demo/run-cursor-demo.sh`.
 
 ### As a Claude Code plugin
 
@@ -151,17 +184,17 @@ node packages/cli/dist/index.js doctor
 
 ## Commands
 
-| Command                                  | What it does                                                                      |
-| ---------------------------------------- | --------------------------------------------------------------------------------- |
-| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`)         |
-| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                        |
-| `stroq doctor`                           | Check Node version, rules, hooks, self-test                                       |
-| `stroq log [--count 20]`                 | Show recent audit entries                                                         |
-| `stroq verify`                           | Verify the audit hash chain                                                       |
-| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint and provenance, or every session's         |
-| `stroq why [--seq <n>]`                  | Explain the most recent denied/asked action: rule, provenance, taint              |
-| `stroq canary [--name <NAME>]`           | Print a canary secret to plant; its outbound use is denied and taints the session |
-| `stroq attack [--json] [--only <id>]`    | Replay 12 recorded incidents against your policy; exit 1 if any gets through      |
+| Command                                                         | What it does                                                                                              |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `stroq init [--agent claude-code\|cursor] [--user] [--dry-run]` | Install hooks into `.claude/settings.json` or `.cursor/hooks.json` (`--user` for the home-directory copy) |
+| `stroq hook claude-code` / `stroq hook cursor`                  | Hook entrypoint (reads the event on stdin)                                                                |
+| `stroq doctor`                                                  | Check Node version, rules, hooks for both agents, self-test                                               |
+| `stroq log [--count 20]`                                        | Show recent audit entries                                                                                 |
+| `stroq verify`                                                  | Verify the audit hash chain                                                                               |
+| `stroq untaint [--session <id>] [--all]`                        | Clear a false-positive session's taint and provenance, or every session's                                 |
+| `stroq why [--seq <n>]`                                         | Explain the most recent denied/asked action: rule, provenance, taint                                      |
+| `stroq canary [--name <NAME>]`                                  | Print a canary secret to plant; its outbound use is denied and taints the session                         |
+| `stroq attack [--json] [--only <id>]`                           | Replay 12 recorded incidents against your policy; exit 1 if any gets through                              |
 
 ## Policy
 
@@ -218,6 +251,7 @@ The performance gate's timings are machine-dependent, so CI never re-measures th
 Stroq is young; here's what it actually gives you today, and where the edges are.
 
 - **Fail-closed:** if Stroq errors out while handling a high-impact `PreToolUse` call, the action is denied, not silently allowed.
+- **Cursor coverage is narrower than Claude Code's:** Cursor has no `beforeFileEdit`, so edits are audited rather than blocked, and `afterShellExecution` cannot carry a warning back to the agent — the taint is still enforced on the next action. The full table is in [Cursor](#cursor).
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
@@ -226,7 +260,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 ## Roadmap
 
 - Local daemon with an ONNX-based classifier, replacing per-invocation Node startup and pure regex matching for the content scan.
-- Adapters for Cursor, Codex, Copilot, and OpenClaw.
+- Adapters for Codex, Copilot, and OpenClaw.
 - A quote-aware shell lexer and worker-isolated scanning (see Guarantees and limits above).
 - Team control plane: shared policy, fleet-wide audit visibility, and centralized false-positive triage across a team's agents.
 

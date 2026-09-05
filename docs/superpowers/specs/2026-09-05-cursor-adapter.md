@@ -10,13 +10,13 @@
 | --- | --- | --- | --- | --- |
 | `beforeShellExecution` | yes | `command`, `cwd`, `sandbox` | `permission: allow\|ask\|deny`, `user_message`, `agent_message` | `pre` — tool `Bash` |
 | `afterShellExecution` | no | `command`, `output` (full terminal output), `duration`; community: `stdout`/`stderr`/`exit_code` | none honoured | `post` — tool `Bash`, `toolResultText = output ?? stdout+stderr` |
-| `beforeMCPExecution` | yes | `tool_name`, `tool_input` (JSON string or object), `mcp_server_name`, `url`/`command` | `permission`, `user_message`, `agent_message` (`updated_input` exists; unused) | `pre` — tool `mcp__<server>__<tool>` |
+| `beforeMCPExecution` | yes | `tool_name`, `tool_input` (JSON string or object), `mcp_server_name` | `permission`, `user_message`, `agent_message` (`updated_input` exists; unused) | `pre` — tool `mcp__<server>__<tool>` |
 | `afterMCPExecution` | no | `tool_name`, `tool_input`, `mcp_server_name`, `result_json` (string); community: `tool_output` | `additional_context`, `updated_mcp_tool_output` | `post` — tool `mcp__<server>__<tool>`, `toolResultText = result_json` |
 | `beforeReadFile` | yes (allow/deny only) | `file_path`, `content`, `attachments` | `permission: allow\|deny`, `user_message` | `post`-style scan of `content` **before** the agent sees it (tool `Read`), plus `pre` classification of the path (`fs.secrets`) |
 | `afterFileEdit` | no | `file_path`, `edits[{old_string,new_string}]` | none | `pre`-style classification of the path for `config.self` audit only (cannot block — Cursor has no beforeFileEdit) |
 | `beforeSubmitPrompt`, `stop`, `sessionStart/End`, `preToolUse/postToolUse` (generic) | — | — | — | not used in v1 (`preToolUse` generic event is newer and less documented; revisit) |
 
-Common fields on every event: `conversation_id` (→ Stroq session id), `generation_id`, `hook_event_name`, `workspace_roots[0]` (→ cwd fallback).
+Common fields on every event: `conversation_id` (→ Stroq session id), `generation_id`, `hook_event_name`, `workspace_roots[0]` (the preferred project cwd; Cursor's own `cwd` and `process.cwd()` are fallbacks, in that order).
 
 Semantics that shape the design:
 
@@ -31,7 +31,7 @@ Semantics that shape the design:
 - `packages/cli/src/adapters/cursor.ts`
   - `CursorHookInputSchema` (zod `looseObject`): `conversation_id: string`, `hook_event_name: enum[...]`, `workspace_roots: string[]` (default `[]`), optional `command`, `cwd`, `output`, `stdout`, `stderr`, `exit_code`, `tool_name`, `tool_input: unknown`, `mcp_server_name`, `result_json`, `tool_output`, `file_path`, `content`, `edits`.
   - `handleCursorHook(engine, raw): Promise<HookOutput>` — `HookOutput` reused (`stdout`, `exitCode`).
-  - Mapping to engine events: `sessionId = conversation_id`; `cwd = cwd ?? workspace_roots[0] ?? process.cwd()`; tool names: `Bash` for shell, `mcp__${server}__${tool}` for MCP (server name sanitised to `[A-Za-z0-9_-]`), `Read` for beforeReadFile, `Write` for afterFileEdit; `toolInput`: `{command}` / MCP args (parse `tool_input` string as JSON, fall back to `{raw}`) / `{file_path}`.
+  - Mapping to engine events: `sessionId = conversation_id`; `cwd = workspace_roots[0] || cwd || process.cwd()`; tool names: `Bash` for shell, `mcp__${server}__${tool}` for MCP (server name sanitised to `[A-Za-z0-9_-]`), `Read` for beforeReadFile, `Write` for afterFileEdit; `toolInput`: `{command}` / MCP args (parse `tool_input` string as JSON, fall back to `{raw}`) / `{file_path}`.
   - Decision rendering: `deny` → `{"permission":"deny","user_message":"Stroq blocked …","agent_message":"<same + evidence>"}`; `ask` → `{"permission":"ask", …}`; `allow` → empty stdout (exit 0).
   - Post rendering: `afterMCPExecution` suspect → `{"additional_context": warningFor(...)}`; `afterShellExecution` → empty; `beforeReadFile` suspect → `{"permission":"allow","user_message":"⚠ Stroq: this file contains instruction-like text … session is now restricted"}`; `beforeReadFile` with a `fs.secrets` deny → `{"permission":"deny",…}`.
   - Fail-closed: `failClosedOutput` equivalent for `beforeShellExecution`/`beforeMCPExecution` → `deny` JSON (exit 0) with the internal error; `beforeReadFile` errors → allow (reading is not high-impact; taint may be missed — documented).
