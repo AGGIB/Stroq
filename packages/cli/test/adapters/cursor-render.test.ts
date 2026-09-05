@@ -2,9 +2,25 @@ import { describe, expect, it } from 'vitest';
 import {
   CURSOR_BLOCKING_EVENTS,
   CURSOR_EVENTS,
+  CursorHookInputSchema,
   cursorFailClosedOutput,
   renderDecision,
 } from '../../src/adapters/cursor.js';
+
+describe('schema tolerance on non-blocking fields', () => {
+  it('accepts a workspace_roots value that is not an array', () => {
+    for (const workspace_roots of ['/p', 42, null, { a: 1 }])
+      expect(() =>
+        CursorHookInputSchema.parse({
+          conversation_id: 'c',
+          hook_event_name: 'beforeReadFile',
+          workspace_roots,
+          file_path: '/p/a.md',
+          content: 'x',
+        }),
+      ).not.toThrow();
+  });
+});
 
 const body = (stdout: string) => JSON.parse(stdout) as Record<string, unknown>;
 
