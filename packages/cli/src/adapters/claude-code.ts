@@ -32,6 +32,13 @@ const MAX_RESULT_CHARS = 200_000;
 
 export interface HookOutput {
   readonly stdout: string;
+  /**
+   * Written by `stroq hook` before it exits. Only the Codex adapter sets it: exit
+   * code 2 with the reason on stderr is the one block Codex honours without
+   * parsing stdout, which is exactly what a fail-closed answer needs. Optional and
+   * additive — the Claude Code and Cursor adapters never set it.
+   */
+  readonly stderr?: string;
   readonly exitCode: number;
 }
 

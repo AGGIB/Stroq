@@ -101,3 +101,24 @@ describe('F3 self-tamper gate precision: MCP write-shaped tool + path-like key o
     expect(r.classes).toContain('config.self');
   });
 });
+
+describe('Codex security config is self-config', () => {
+  it('flags a write to .codex/hooks.json and .codex/config.toml', () => {
+    expect(
+      classifyTool('Write', { file_path: `${cwd}/.codex/hooks.json`, content: '{}' }, cwd).classes,
+    ).toEqual(['config.self']);
+    expect(
+      classifyTool('Edit', { file_path: '/home/dev/.codex/config.toml' }, cwd).classes,
+    ).toEqual(['config.self']);
+  });
+
+  it('flags a find -delete against the .codex directory', () => {
+    expect(
+      classifyTool('Bash', { command: "find .codex -name 'hooks.json' -delete" }, cwd).classes,
+    ).toContain('config.self');
+  });
+
+  it('still leaves an ordinary file in .codex alone', () => {
+    expect(classifyTool('Write', { file_path: `${cwd}/.codex/notes.md` }, cwd).classes).toEqual([]);
+  });
+});
