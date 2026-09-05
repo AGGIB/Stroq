@@ -72,6 +72,7 @@ describe('Claude Code plugin hook wrapper (end to end)', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
     const path = `${stroqShim()}:${BARE_PATH}`;
     const allowed = await runWrapper(preBash('ls -la'), path, home);
+    expect(allowed.stderr).toBe('');
     expect(allowed).toMatchObject({ code: 0, stdout: '' });
 
     const tainted = await runWrapper(postRead, path, home);
