@@ -39,7 +39,7 @@
 - **Runtime fail-open:** Codex has no `failClosed`; if the hook command cannot start (Node missing) Codex continues. Stroq itself exits 2 on its own errors for high-impact tools. Recommend a global `npm install -g @stroq/cli`.
 - Hosted tools (`WebSearch`) never reach hooks: web content Codex fetches itself is not scanned.
 - Project-local hooks require the `.codex/` layer to be trusted; `--user` avoids the prompt.
-- `apply_patch` paths are taken from the patch header lines; a patch with no recognisable header is classified as an ordinary write.
+- `apply_patch` paths are taken from the patch header lines; a patch with no recognisable header yields no path and no classes, so it is allowed rather than classified as any kind of write.
 - Windows untested; `commandWindows` not written.
 
 ## 4. Out of scope (v1)

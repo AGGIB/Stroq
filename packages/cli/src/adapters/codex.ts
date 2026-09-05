@@ -82,31 +82,53 @@ function codexRecord(value: unknown): Record<string, unknown> {
   return { raw: value };
 }
 
-/** Codex's shell input is `{ command }`; some builds send argv instead of one string. */
-function commandOf(record: Readonly<Record<string, unknown>>): string {
+const joinStrings = (values: readonly unknown[]): string =>
+  values.filter((p): p is string => typeof p === 'string').join(' ');
+
+/**
+ * Bash's command text, in every shape Codex might send `tool_input`: an object
+ * `{ command }` (string or argv array), a bare argv array (some builds skip the
+ * `{ command }` wrapper on the unified exec_command, joined the same way `command`'s
+ * own array is), or a plain string used as the command verbatim via `codexRecord`'s
+ * `raw` fallback. A `tool_input` this loose must still expose a command, or the
+ * secret-egress guard (which reads this field) and the classifier see nothing and a
+ * poisoned or destructive command sails through unclassified.
+ */
+function commandOf(toolInput: unknown): string {
+  if (Array.isArray(toolInput)) return joinStrings(toolInput);
+  const record = codexRecord(toolInput);
   const value = record['command'];
   if (typeof value === 'string') return value;
-  if (Array.isArray(value))
-    return value.filter((p): p is string => typeof p === 'string').join(' ');
-  return '';
+  if (Array.isArray(value)) return joinStrings(value);
+  const raw = record['raw'];
+  return typeof raw === 'string' ? raw : '';
 }
 
-/** The patch body, under whichever key this Codex build put it. */
-const PATCH_FIELDS = ['command', 'input', 'patch'] as const;
+/**
+ * The patch body, unioned across every field this Codex build might use for it —
+ * including `raw` (the whole `tool_input`, populated by `codexRecord` when it was not
+ * an object at all, e.g. a bare string or argv array) — rather than stopping at the
+ * first non-empty one. An earlier field can hold something unrelated (even Codex's
+ * own tool name, `command: 'apply_patch'`) while a later one carries the real patch
+ * text: reading only the first found would silently drop that patch's paths, and a
+ * dropped path is a `deny-self-tamper` that never fires. More fields can only add
+ * paths to the union below, never hide ones another field already carries.
+ */
+const PATCH_FIELDS = ['command', 'input', 'patch', 'raw'] as const;
 
 function patchTextOf(record: Readonly<Record<string, unknown>>): string {
+  const texts: string[] = [];
   for (const key of PATCH_FIELDS) {
     const value = record[key];
-    if (typeof value === 'string' && value !== '') return value;
-    if (Array.isArray(value)) {
+    if (typeof value === 'string' && value !== '') texts.push(value);
+    else if (Array.isArray(value)) {
       const joined = value.filter((p): p is string => typeof p === 'string').join('\n');
-      if (joined !== '') return joined;
+      if (joined !== '') texts.push(joined);
     }
   }
-  return '';
+  return texts.join('\n');
 }
 
-const MAX_PATCH_CHARS = 200_000;
 /**
  * A header only counts at column 0. Patch body lines are prefixed with `+`, `-` or a
  * space, so an anchored match is what stops a patch that merely *contains*
@@ -118,10 +140,17 @@ const MAX_PATCH_CHARS = 200_000;
 const PATCH_HEADER =
   /^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*([^\r\n]*?)[ \t\r]*$/;
 
-/** Every distinct path an `apply_patch` body declares, in the order it declares them. */
+/**
+ * Every distinct path an `apply_patch` body declares, in the order it declares them.
+ * No length cap: splitting a string and running one anchored regex per line is cheap,
+ * and `MAX_PATCH_PATHS` below is the actual timeout bound — a cap here would let a
+ * patch that pads its early lines past a fixed character count hide a later header
+ * (e.g. `*** Update File: .codex/hooks.json`) from ever being seen at all, which is
+ * strictly worse than the slow-but-thorough scan this function does instead.
+ */
 export function applyPatchPaths(patchText: string): readonly string[] {
   const paths = new Set<string>();
-  for (const line of patchText.slice(0, MAX_PATCH_CHARS).split('\n')) {
+  for (const line of patchText.split('\n')) {
     const path = PATCH_HEADER.exec(line)?.[1] ?? '';
     if (path !== '') paths.add(path);
   }
@@ -129,12 +158,12 @@ export function applyPatchPaths(patchText: string): readonly string[] {
 }
 
 export function codexToolInput(input: CodexHookInput): Record<string, unknown> {
+  if (input.tool_name === 'Bash') return { command: commandOf(input.tool_input) };
   const record = codexRecord(input.tool_input);
   if (input.tool_name === 'apply_patch') {
     const paths = applyPatchPaths(patchTextOf(record));
     return { file_path: paths[0] ?? '', file_paths: [...paths] };
   }
-  if (input.tool_name === 'Bash') return { command: commandOf(record) };
   return record;
 }
 
@@ -245,15 +274,19 @@ const SEVERITY: Readonly<Record<Decision['effect'], number>> = { allow: 0, ask: 
 /**
  * Sequential on purpose: the session store is file-locked and the audit log is a
  * hash chain, so the calls cannot overlap — and the order they run in is the order
- * `stroq log` will show the patch's paths.
+ * `stroq log` will show the patch's paths. `inputs` is always non-empty in practice —
+ * `patchInputs` never returns `[]` — the guard exists only to give `first` a real
+ * (non-`undefined`) type under `noUncheckedIndexedAccess` without a silent fallback.
  */
 async function decidePre(
   engine: StroqEngine,
   event: EngineEvent,
   inputs: readonly Record<string, unknown>[],
 ) {
-  let worst = await engine.pre({ ...event, toolInput: inputs[0] ?? event.toolInput });
-  for (const toolInput of inputs.slice(1)) {
+  const [first, ...rest] = inputs;
+  if (!first) throw new Error('decidePre: inputs must be non-empty');
+  let worst = await engine.pre({ ...event, toolInput: first });
+  for (const toolInput of rest) {
     const next = await engine.pre({ ...event, toolInput });
     if (SEVERITY[next.decision.effect] > SEVERITY[worst.decision.effect]) worst = next;
   }
