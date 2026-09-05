@@ -1,8 +1,8 @@
 {
   "conversation_id": "cursor-demo-2",
+  "generation_id": "gen-demo-4",
   "hook_event_name": "afterMCPExecution",
   "workspace_roots": ["__CWD__"],
-  "cwd": "__CWD__",
   "mcp_server_name": "sentry",
   "tool_name": "get_issue",
   "tool_input": "{\"issue_id\":\"PROJ-4521\"}",
