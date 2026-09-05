@@ -39,7 +39,12 @@ export const SUPPORTED_AGENTS: readonly string[] = Object.keys(ADAPTERS);
 const BAD_JSON = 'Stroq internal error (fail-closed): hook input is not valid JSON';
 
 export async function runHook(agent: string, rawJson: string): Promise<HookOutput> {
-  const adapter = ADAPTERS[agent];
+  // A plain lookup resolves inherited Object.prototype members too
+  // (`ADAPTERS['constructor']`, `ADAPTERS['__proto__']`), which are truthy and would
+  // then crash downstream with "adapter.handle is not a function" instead of the
+  // unknown-agent message below. Object.hasOwn restricts the lookup to agents this
+  // module actually registered.
+  const adapter = Object.hasOwn(ADAPTERS, agent) ? ADAPTERS[agent] : undefined;
   if (!adapter)
     return {
       stdout: `unknown agent "${agent}" (supported: ${SUPPORTED_AGENTS.join(', ')})\n`,

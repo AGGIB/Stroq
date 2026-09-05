@@ -38,6 +38,16 @@ describe('runHook agent routing', () => {
     });
   });
 
+  it('rejects prototype-chain property names as agent names', async () => {
+    for (const agent of ['constructor', '__proto__']) {
+      const out = await runHook(agent, '{}');
+      expect(out).toEqual({
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor)\n`,
+        exitCode: 1,
+      });
+    }
+  });
+
   it('fails closed with a Cursor deny when stdin is not valid JSON', async () => {
     const out = await runHook('cursor', 'not json {{{');
     expect(out.exitCode).toBe(0);
