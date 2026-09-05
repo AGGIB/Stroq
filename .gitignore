@@ -13,3 +13,8 @@ site/.vercel/
 site/.env*
 .vercel
 .env*
+
+# Session scratch: SDD ledgers/review packages and launch drafts (never published)
+.superpowers/
+# Claude Code worktrees created by EnterWorktree
+.claude/worktrees/
