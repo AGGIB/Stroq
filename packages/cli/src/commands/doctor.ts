@@ -63,19 +63,25 @@ function agentScopes(
  * An agent's line fails on a broken config file, or when NO agent is installed at
  * all. It deliberately does not fail merely because this agent is missing: a
  * Cursor-only user must not be told their Claude Code install is broken, while an
- * install-free machine must still fail `stroq doctor`.
+ * install-free machine must still fail `stroq doctor`. In that passing-but-absent
+ * case the detail says which agent is carrying the line, rather than putting a green
+ * tick next to the word "missing".
  */
 function hooksCheck(
   name: string,
   scopes: readonly ScopeStatus[],
-  anyInstalled: boolean,
+  other: { readonly name: string; readonly installed: boolean },
 ): DoctorCheck {
+  const broken = scopes.some((s) => s.error !== null);
+  const installed = scopes.some((s) => s.installed);
+  const perScope = scopes
+    .map((s) => s.error ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`)
+    .join('; ');
   return {
     name,
-    ok: scopes.every((s) => s.error === null) && anyInstalled,
-    detail: scopes
-      .map((s) => s.error ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`)
-      .join('; '),
+    ok: !broken && (installed || other.installed),
+    detail:
+      !broken && !installed && other.installed ? `not installed (ok: ${other.name} are)` : perScope,
   };
 }
 
@@ -113,7 +119,8 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
   const detected = scanContent(rules, SAMPLE).verdict === 'suspect';
   const claude = agentScopes(cwd, settingsPath, checkClaudeHooks);
   const cursor = agentScopes(cwd, cursorHooksPath, checkCursorHooks);
-  const anyInstalled = [...claude, ...cursor].some((s) => s.installed);
+  const claudeAgent = { name: 'hooks', installed: claude.some((s) => s.installed) };
+  const cursorAgent = { name: 'cursor hooks', installed: cursor.some((s) => s.installed) };
   const home = stroqHome();
   const secrets = await checkSecrets();
   return {
@@ -125,8 +132,8 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
         ok: detected,
         detail: detected ? 'injection sample detected' : 'injection sample NOT detected',
       },
-      hooksCheck('hooks', claude, anyInstalled),
-      hooksCheck('cursor hooks', cursor, anyInstalled),
+      hooksCheck('hooks', claude, cursorAgent),
+      hooksCheck('cursor hooks', cursor, claudeAgent),
       {
         name: 'home',
         ok: true,
