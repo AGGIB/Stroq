@@ -48,7 +48,9 @@ export const CursorHookInputSchema = z.looseObject({
   output: z.string().optional(),
   stdout: z.string().optional(),
   stderr: z.string().optional(),
-  exit_code: z.number().optional(),
+  // Untyped: never read, and a community client's non-numeric `exit_code`
+  // (e.g. `"0"`) must not fail validation and discard the whole event.
+  exit_code: z.unknown().optional(),
   // beforeMCPExecution / afterMCPExecution
   tool_name: z.string().optional(),
   tool_input: z.unknown().optional(),
@@ -59,19 +61,39 @@ export const CursorHookInputSchema = z.looseObject({
   file_path: z.string().optional(),
   content: z.string().optional(),
   attachments: z.array(z.unknown()).optional(),
-  // Recorded for completeness: Stroq classifies the path, not the diff.
-  edits: z.array(z.unknown()).optional(),
+  // Recorded for completeness: Stroq classifies the path, not the diff. Untyped
+  // for the same reason as `exit_code` — never read, so it must never fail
+  // validation on a shape Stroq does not otherwise care about.
+  edits: z.unknown().optional(),
 });
 export type CursorHookInput = z.infer<typeof CursorHookInputSchema>;
 
-const UNSAFE_NAME = /[^A-Za-z0-9_-]/g;
-const sanitize = (value: string): string => value.replace(UNSAFE_NAME, '_');
+// Underscore is treated as unsafe here too: a RUN of unsafe characters (including
+// pre-existing underscores) collapses to exactly one `_`, so padding a raw value
+// with e.g. two spaces can never synthesise a fresh `__` that core's
+// `parseMcpToolName` (which splits on the LAST `__`) would mistake for the
+// `mcp__<server>__<tool>` separator. The second pass is a defence-in-depth
+// squeeze for whenever two already-sanitised segments end up back to back.
+const UNSAFE_RUN = /[^A-Za-z0-9-]+/g;
+const DOUBLE_UNDERSCORE = /_{2,}/g;
+const sanitize = (value: string): string =>
+  value.replace(UNSAFE_RUN, '_').replace(DOUBLE_UNDERSCORE, '_');
 
-/** `mcp__<server>__<tool>`, the spelling Claude Code uses, so one classifier covers both. */
+/**
+ * `mcp__<server>__<tool>`, the spelling Claude Code uses, so one classifier covers both.
+ * A `tool_name` that already arrives in that shape is trusted verbatim — but only when
+ * there is no separate `mcp_server_name` to check it against: otherwise an adversary
+ * who controls `tool_name` alone could forge `mcp__<trusted-looking>__<tool>` and have
+ * it override the server Cursor actually reports the call went to. Once a server is
+ * given, `mcp__<server>__<tool>` is always composed from it; the tool part is
+ * sanitised, never parsed, even when it already looks like `mcp__…__…`.
+ */
 function mcpToolName(input: CursorHookInput): string {
-  const tool = sanitize(input.tool_name ?? '');
-  if (tool.startsWith('mcp__')) return tool;
-  const server = sanitize(input.mcp_server_name ?? '') || 'unknown';
+  const rawServer = input.mcp_server_name ?? '';
+  const rawTool = input.tool_name ?? '';
+  if (rawServer === '' && rawTool.startsWith('mcp__')) return rawTool;
+  const server = sanitize(rawServer) || 'unknown';
+  const tool = sanitize(rawTool);
   return `mcp__${server}__${tool || 'call'}`;
 }
 
@@ -92,13 +114,16 @@ export function cursorToolName(input: CursorHookInput): string {
 
 /**
  * MCP arguments arrive as a JSON string officially and as an object in some
- * community builds. A string that is not a JSON object is kept verbatim under
- * `raw`, so the secret-egress candidate extractor still sees the values in it.
+ * community builds. A string that is not a JSON object, and any other non-object
+ * value (array, number, boolean), is kept verbatim under `raw` rather than dropped
+ * to `{}` — the secret-egress candidate extractor scans `JSON.stringify(toolInput)`,
+ * so a value that disappears here is a value that can never be caught leaving
+ * through this call. `undefined`/`null` alone become `{}`: there is nothing to keep.
  */
 function mcpToolInput(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value))
-    return value as Record<string, unknown>;
-  if (typeof value !== 'string') return {};
+  if (value === undefined || value === null) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return { raw: JSON.stringify(value) };
   try {
     const parsed: unknown = JSON.parse(value);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
@@ -125,7 +150,11 @@ export function cursorToolInput(input: CursorHookInput): Record<string, unknown>
 
 /** The text of a completed action, across both field spellings. */
 export function cursorResultText(input: CursorHookInput): string {
-  if (typeof input.output === 'string') return toolResultToText(input.output);
+  // An empty `output` is not the official field actually being in play — Cursor (or a
+  // proxy) can send `output: ''` — so treat it as absent and fall through to the
+  // community `stdout`/`stderr` fields instead of shadowing them with nothing.
+  if (typeof input.output === 'string' && input.output !== '')
+    return toolResultToText(input.output);
   const streams = [input.stdout, input.stderr].filter(
     (part): part is string => typeof part === 'string' && part.length > 0,
   );
@@ -248,7 +277,12 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
     sessionId: input.conversation_id,
     toolName: cursorToolName(input),
     toolInput: cursorToolInput(input),
-    cwd: input.cwd || input.workspace_roots[0] || process.cwd(),
+    // The spec calls `workspace_roots[0]` the reliable project path; Cursor's own
+    // `cwd` is the shell's current directory, which an agent can move with a
+    // permitted `cd` and thereby step the secret index out from under the
+    // project's `.env*` files. Prefer the workspace root; fall back to `cwd` only
+    // when Cursor omits it, and to the process cwd as a last resort.
+    cwd: input.workspace_roots[0] || input.cwd || process.cwd(),
   };
   switch (input.hook_event_name) {
     case 'beforeShellExecution':
@@ -276,7 +310,7 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
 export function cursorFailClosedOutput(raw: unknown, err: unknown): HookOutput {
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const name = record['hook_event_name'];
-  if (typeof name !== 'string' || !CURSOR_BLOCKING_EVENTS.includes(name as CursorEvent))
+  if (typeof name !== 'string' || !(CURSOR_BLOCKING_EVENTS as readonly string[]).includes(name))
     return NO_OUTPUT;
   const message = err instanceof Error ? err.message : String(err);
   return cursorDenyOutput(`Stroq internal error (fail-closed): ${message}`);
