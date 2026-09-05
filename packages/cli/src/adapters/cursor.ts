@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
 import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
+import { mcpToolName } from './cursor-mcp-name.js';
 
 /** The six Cursor events Stroq installs on; any other event is not ours to answer. */
 export const CURSOR_EVENTS = [
@@ -48,7 +49,7 @@ export const CursorHookInputSchema = z.looseObject({
   // object where an array was documented) must not throw on a non-blocking event —
   // a throw there skips the content scan and the taint it would have set, and the
   // follow-up action sails through. `projectRoot` picks the first usable root.
-  workspace_roots: z.array(z.unknown()).default([]),
+  workspace_roots: z.unknown().optional(),
   cwd: z.string().default(''),
   // beforeShellExecution / afterShellExecution
   command: z.string().optional(),
@@ -77,58 +78,6 @@ export const CursorHookInputSchema = z.looseObject({
 });
 export type CursorHookInput = z.infer<typeof CursorHookInputSchema>;
 
-// Underscore is treated as unsafe here too: a RUN of unsafe characters (including
-// pre-existing underscores) collapses to exactly one `_`, so padding a raw value
-// with e.g. two spaces can never synthesise a fresh `__` that core's
-// `parseMcpToolName` (which splits on the LAST `__`) would mistake for the
-// `mcp__<server>__<tool>` separator. The second pass is a defence-in-depth
-// squeeze for whenever two already-sanitised segments end up back to back.
-const UNSAFE_RUN = /[^A-Za-z0-9-]+/g;
-const DOUBLE_UNDERSCORE = /_{2,}/g;
-const sanitize = (value: string): string =>
-  value.replace(UNSAFE_RUN, '_').replace(DOUBLE_UNDERSCORE, '_');
-
-/**
- * One `mcp__<server>__<tool>` segment. Sanitising alone is not enough: a value made
- * entirely of unsafe characters (`"__"`, `"!"`, `"✉"`, `"发送"`, `"/"`) collapses to a lone
- * `_`, and the composed `mcp__<server>___` then defeats core's `parseMcpToolName` (it
- * splits on the LAST `__` and rejects an empty tool part) — no `mcp.call`, so no
- * secret-egress lookup, so a `.env` value out through a hostile tool name. Trimming the
- * edge underscores empties such a segment and the `unknown`/`call` fallback takes over.
- */
-const segment = (value: string): string => sanitize(value).replace(/^_+|_+$/g, '');
-
-/**
- * `mcp__<server>__<tool>`, the spelling Claude Code uses, so one classifier covers both.
- * A `tool_name` that already arrives in that shape is trusted verbatim — but only when
- * there is no separate `mcp_server_name` to check it against: otherwise an adversary
- * who controls `tool_name` alone could forge `mcp__<trusted-looking>__<tool>` and have
- * it override the server Cursor actually reports the call went to. Once a server is
- * given, `mcp__<server>__<tool>` is always composed from it; the tool part is
- * sanitised, never parsed, even when it already looks like `mcp__…__…`.
- */
-function mcpToolName(input: CursorHookInput): string {
-  const rawServer = input.mcp_server_name ?? '';
-  const rawTool = input.tool_name ?? '';
-  if (rawServer === '' && rawTool.startsWith('mcp__')) return passThroughMcpName(rawTool);
-  const server = segment(rawServer) || 'unknown';
-  const tool = segment(rawTool);
-  return `mcp__${server}__${tool || 'call'}`;
-}
-
-/**
- * A pre-shaped `mcp__<server>__<tool>` name with no separate server to check it
- * against is split at its FIRST `__` and each half re-sanitised, so a tool literally
- * named `send__data` cannot smuggle a second separator past core's last-`__` split.
- */
-function passThroughMcpName(rawTool: string): string {
-  const rest = rawTool.slice('mcp__'.length);
-  const separator = rest.indexOf('__');
-  const server = separator > 0 ? rest.slice(0, separator) : rest;
-  const tool = separator > 0 ? rest.slice(separator + 2) : '';
-  return `mcp__${segment(server) || 'unknown'}__${segment(tool) || 'call'}`;
-}
-
 export function cursorToolName(input: CursorHookInput): string {
   switch (input.hook_event_name) {
     case 'beforeShellExecution':
@@ -136,7 +85,7 @@ export function cursorToolName(input: CursorHookInput): string {
       return 'Bash';
     case 'beforeMCPExecution':
     case 'afterMCPExecution':
-      return mcpToolName(input);
+      return mcpToolName(input.mcp_server_name ?? '', input.tool_name ?? '');
     case 'beforeReadFile':
       return 'Read';
     case 'afterFileEdit':
@@ -214,7 +163,8 @@ const fileText = (input: CursorHookInput): string =>
  * index out from under the project's `.env*` files. The process cwd is the last resort.
  */
 function projectRoot(input: CursorHookInput): string {
-  const root = input.workspace_roots.find((r): r is string => typeof r === 'string' && r !== '');
+  const roots = asList(input.workspace_roots);
+  const root = roots.find((r): r is string => typeof r === 'string' && r !== '');
   return root ?? (input.cwd || process.cwd());
 }
 
@@ -324,7 +274,7 @@ export const CURSOR_EDIT_UNENFORCED: Decision = {
   effect: 'allow',
   ruleId: 'cursor-edit-unenforced',
   reason:
-    'Cursor has no pre-edit hook installed; the edit already happened and is recorded, not blocked',
+    'Stroq installs no pre-edit hook on Cursor; the edit already happened and is recorded, not blocked',
 };
 
 /**
@@ -357,6 +307,12 @@ async function handleAfterMcp(
   return json({ additional_context: warningFor(result.scan, event.toolName) });
 }
 
+/**
+ * Coupling to know about: `afterFileEdit` appends its audit entry through `auditFile()`
+ * (the engine keeps its own `AuditLog` private), so an `engine` built at a different
+ * home — `createEngineAt`, used only by `stroq attack`, which never routes Cursor
+ * events — would see that one entry land under `STROQ_HOME` instead.
+ */
 export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = CursorHookInputSchema.parse(raw);
   const event: EngineEvent = {
