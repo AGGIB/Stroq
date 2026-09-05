@@ -4,13 +4,17 @@ import { HOOK_TIMEOUT_SECONDS, readJsonObject, writeJsonObject } from './config-
 
 /**
  * The `PreToolUse` tools Stroq answers on Codex. Kept in step with
- * `CODEX_HIGH_IMPACT_TOOL` in `adapters/codex.ts`: the matcher decides which events
- * reach the hook, the regex decides which of them fail closed, and a Pre event that
- * reaches Stroq but is not fail-closed would be a hole in the same list.
+ * `CODEX_HIGH_IMPACT_TOOL` in `adapters/codex-input.ts`: the matcher decides which
+ * events reach the hook, the regex decides which of them fail closed, and a Pre
+ * event that reaches Stroq but is not fail-closed would be a hole in the same list.
+ * Only `Bash`, `apply_patch` and `mcp__…` are documented by OpenAI; the other
+ * spellings are defensive aliases, and matching a tool Codex never sends costs
+ * nothing while missing one it does send costs the whole decision.
  */
-export const CODEX_PRE_MATCHER = 'Bash|apply_patch|mcp__.*';
+export const CODEX_PRE_MATCHER =
+  'Bash|exec_command|shell|local_shell|apply_patch|ApplyPatch|mcp__.*';
 /** `PostToolUse` scans what the agent just read; an `apply_patch` result has nothing to scan. */
-export const CODEX_POST_MATCHER = 'Bash|mcp__.*';
+export const CODEX_POST_MATCHER = 'Bash|exec_command|shell|local_shell|mcp__.*';
 
 /**
  * Every event Codex documents. Used only to recognise a file that keeps the event
