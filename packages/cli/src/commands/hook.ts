@@ -5,6 +5,7 @@ import {
   handleClaudeHook,
   type HookOutput,
 } from '../adapters/claude-code.js';
+import { codexBlockOutput, codexFailClosedOutput, handleCodexHook } from '../adapters/codex.js';
 import { cursorDenyOutput, cursorFailClosedOutput, handleCursorHook } from '../adapters/cursor.js';
 import { createEngine } from '../engine-factory.js';
 import { logError } from '../log.js';
@@ -30,6 +31,14 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     handle: handleCursorHook,
     failClosed: cursorFailClosedOutput,
     badJson: cursorDenyOutput,
+  },
+  // Codex answers a block with exit code 2 and the reason on stderr, not with JSON:
+  // stdin that was not JSON at all is exactly the case where a JSON deny would be
+  // dropped as an unsupported/unparseable payload, i.e. fail open.
+  codex: {
+    handle: handleCodexHook,
+    failClosed: codexFailClosedOutput,
+    badJson: codexBlockOutput,
   },
 };
 
