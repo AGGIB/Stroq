@@ -1,0 +1,51 @@
+# Codex adapter — design spec (2026-09-05)
+
+**Goal.** `stroq init --agent codex` gives OpenAI Codex CLI the same protection Claude Code and Cursor have — content scan + session taint, provenance, secret egress guard, ordered policy, hash-chained audit — through Codex's native hooks, offline, and as fail-closed as Codex allows.
+
+**Sources (fetched 2026-09-05).** Official Codex docs: `learn.chatgpt.com/docs/hooks` (redirect target of `developers.openai.com/codex/hooks`, updated 2026-08-31) and `…/docs/config-file/config-advanced`; cross-checked with two production integrations (falcosecurity/prempti `hooks/codex`, agenticcontrolplane's reference). Where they disagree, the official page wins and the adapter tolerates both.
+
+## 1. What Codex gives us
+
+| Item | Contract |
+| --- | --- |
+| Enable | Current releases: hooks on by default (feature key `hooks`; `codex_hooks` deprecated alias). Older releases: `[features] hooks = true` in `~/.codex/config.toml`. Not documented for Windows (`commandWindows` exists). |
+| Locations | `~/.codex/hooks.json`, `<repo>/.codex/hooks.json` (project-local hooks load **only when the project `.codex/` layer is trusted** — Codex prompts to review/trust non-managed hook definitions), inline `[hooks]` tables in `config.toml`, plugin `hooks/hooks.json`. |
+| hooks.json shape | Official: `{ "hooks": { "<Event>": [ { "matcher": "<regex>", "hooks": [ { "type": "command", "command": "…", "timeout": <s>, "statusMessage": "…" } ] } ] } }` — the Claude Code nesting. Some community docs show the event map at the root (no `hooks` wrapper); the adapter's installer preserves whichever shape an existing file already uses and writes the official nested shape into a new file. `timeout` is seconds (default 600). |
+| Events | `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `PreCompact`, `PostCompact`, `UserPromptSubmit`, `Stop`, `Interrupt`. Stroq installs on `PreToolUse` and `PostToolUse` only. |
+| stdin (all events) | `session_id`, `cwd`, `hook_event_name`, `model`, `transcript_path`, `permission_mode`. `PreToolUse` adds `turn_id`, `tool_name`, `tool_use_id`, `tool_input` (JSON value). `PostToolUse` adds `tool_response` (JSON value). |
+| `tool_name` values | `Bash` for shell and the unified `exec_command` (input `{ command }`); `apply_patch` for file edits (input carries the patch text — `command` in one integration, possibly `input`/`patch`; the adapter accepts any string field among `command`, `input`, `patch`, and extracts `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** Move to:` paths); `mcp__<server>__<tool>` for MCP tools; local function names (`update_plan`, `Agent`) otherwise. Hosted tools (`WebSearch`) never reach hooks. |
+| stdout `PreToolUse` | `{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny" \| "allow", "permissionDecisionReason": "…", "additionalContext": "…", "updatedInput": {…} } }`; legacy `{ "decision": "block", "reason": "…" }`; **exit code 2 blocks with the reason read from stderr**. There is **no `ask`**. |
+| stdout `PostToolUse` | `{ "decision": "block", "reason": "…", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "…" } }` (block after the fact = the model is told to stop; Stroq only uses `additionalContext`). |
+| Failure semantics | Exit 0 with no output = continue; exit 2 = block; any other exit code, invalid JSON or unsupported fields = hook failure, **operation continues (fail-open)**. No `failClosed` knob. |
+| Spawning | Commands run with the session `cwd` as working directory; shell not documented. |
+
+## 2. Adapter contract (`packages/cli/src/adapters/codex.ts`)
+
+- `CodexHookInputSchema`: zod `looseObject` — `session_id: string.min(1)`, `hook_event_name: enum['PreToolUse','PostToolUse']`, `tool_name: string`, `tool_input: unknown` (coerced to `{}` by `codexToolInput`), `tool_response: unknown` optional, `cwd: string` (default `''`), `permission_mode`, `turn_id`, `tool_use_id`, `model`, `transcript_path` optional unknown (never rejected).
+- Tool-name mapping: `Bash` → `Bash`; `mcp__…` → re-sanitised through the shared `mcpToolName('', name)` from `adapters/cursor-mcp-name.ts` (same forgery/`__` rules as Cursor); `apply_patch` → `Write` with `toolInput = { file_path: <first path>, file_paths: [...] }` — each extracted path is classified (`classifyTool('Write', { file_path }, cwd)`) and the classes are unioned, so a patch touching `.claude/settings.json`, `.codex/hooks.json` or `~/.stroq/policy.yaml` is `config.self` and a patch touching `.env` is `fs.secrets`; other `tool_name`s → passed through unchanged (they classify to nothing).
+- Engine calls: `PreToolUse` → `engine.pre` (for `apply_patch` the adapter runs one `engine.pre` per extracted path with `toolName: 'Write'` and that path in `file_path`, and takes the most severe decision — deny > ask > allow — so every path is audited); `PostToolUse` → `engine.post` with `toolResultText = codexResultText(tool_response)` (prefers `output`, then `stdout`+`stderr`, then the generic `toolResultToText`).
+- Decision rendering: `deny` → `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Stroq blocked this action (<rule>): <reason> Evidence: …"}}` (the exact shape a production Codex integration uses); `ask` → the same deny JSON with reason `Stroq would ask before this action (<rule>): <reason>. Codex hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml. Evidence: …` — **ask is lossy on Codex, by design**; `allow` → empty stdout. `PostToolUse` suspect → `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"<warningFor(...)>"}}`; clean → empty (no `classifierContext` — Claude-only).
+- Fail-closed: an internal error or unparsable input on a `PreToolUse` whose `tool_name` is `Bash`, `apply_patch` or `mcp__…` → **exit code 2 with the reason on stderr** (`Stroq internal error (fail-closed): …`), the one block path Codex honours regardless of JSON parsing; `PostToolUse` and other tools → empty output, exit 0. `HookOutput` gains an optional `stderr` that `stroq hook` writes before exiting.
+- A patch declaring more than 64 distinct files is denied outright (`codex-patch-too-large`, recorded in the audit): classifying thousands of paths one by one would run past Codex's hook timeout, and a timed-out hook fails open — exactly the outcome such a patch would be crafted to produce.
+- `stroq hook codex` in `commands/hook.ts` (adapter table gains `codex`); `SUPPORTED_AGENTS` = `['claude-code', 'cursor', 'codex']`.
+- `stroq init --agent codex`: writes `<repo>/.codex/hooks.json` (or `~/.codex/hooks.json` with `--user`): `PreToolUse` matcher `Bash|apply_patch|mcp__.*`, `PostToolUse` matcher `Bash|mcp__.*`, handler `{ type: 'command', command: '"<node>" "<entry>" hook codex', timeout: 15, statusMessage: 'Stroq' }`; merges idempotently (Stroq entries identified by `/ hook codex$/`), preserves foreign groups and unknown keys, keeps a flat (root-level events) file flat; `--dry-run`; prints a note: enable `[features] hooks = true` in `~/.codex/config.toml` on older Codex releases, and trust the project `.codex/` layer (or use `--user`) so project-local hooks load.
+- `stroq doctor`: a `codex hooks` line mirroring the Cursor one; `ok` when at least one agent is installed.
+- One core change, deliberately outside the "adapters only" rule: `SELF_CONFIG_FILE` and `PROTECTED_DIRS` in `packages/core/src/actions/self-config.ts` gain `.codex/hooks.json` and `.codex/config.toml`, so Codex's hook file and the file that can disable hooks entirely are `config.self` for every agent.
+- README: "Supported today: Claude Code, Cursor, Codex"; Install `--agent codex`; a `### Codex` subsection with the event table and limits; SECURITY.md scope; CHANGELOG; demo `examples/demo/codex-events/` + `run-codex-demo.sh` (poisoned `Bash` output → `curl | sh` denied; `apply_patch` on `.codex/hooks.json` denied by `deny-self-tamper`; `git reset --hard` → denied with the "would ask" reason; MCP call with a `.env` value denied); CI step.
+
+## 3. Limits to state in the README
+
+- **`ask` becomes `deny`** on Codex (no prompt in the hook contract): destructive commands, external pushes and unknown-package `npx` from tool output are blocked, not confirmed; the reason says so and names the rule to relax.
+- **Runtime fail-open:** Codex has no `failClosed`; if the hook command cannot start (Node missing) Codex continues. Stroq itself exits 2 on its own errors for high-impact tools. Recommend a global `npm install -g @stroq/cli`.
+- Hosted tools (`WebSearch`) never reach hooks: web content Codex fetches itself is not scanned.
+- Project-local hooks require the `.codex/` layer to be trusted; `--user` avoids the prompt.
+- `apply_patch` paths are taken from the patch header lines; a patch with no recognisable header is classified as an ordinary write.
+- Windows untested; `commandWindows` not written.
+
+## 4. Out of scope (v1)
+
+`PermissionRequest` (Codex's own approval prompt — Stroq already decided in `PreToolUse`), `updatedInput` rewriting, `SessionStart`/`Stop`/compaction events, inline `[hooks]` TOML installation (documented as an alternative), plugin-bundled hooks, `stroq attack` Codex scenarios (engine shared; the e2e test and demo cover the wire mapping).
+
+## 5. Test strategy
+
+Adapter unit tests with recorded payloads (Bash, exec_command-as-Bash, apply_patch with add/update/delete/move headers and with no header, MCP with a `.env` value, PostToolUse `tool_response` as string / `{output}` / `{stdout,stderr}`), decision rendering (deny, ask→deny wording), fail-closed exit 2 + stderr; installer merge tests for both file shapes; doctor; e2e spawning the CLI; demo in CI.
