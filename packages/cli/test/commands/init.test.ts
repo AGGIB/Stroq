@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   POST_MATCHER,
   PRE_MATCHER,
@@ -10,8 +10,10 @@ import {
   isStroqHandler,
   mergeHooks,
   readSettings,
+  runInit,
   settingsPath,
 } from '../../src/commands/init.js';
+import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -103,5 +105,84 @@ describe('settings files', () => {
     const file = join(dir, '.claude', 'settings.json');
     writeFileSync(file, '{ not json');
     expect(() => readSettings(file)).toThrow(/cannot parse/);
+  });
+});
+
+function capture(): { readonly lines: string[]; readonly restore: () => void } {
+  const lines: string[] = [];
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    lines.push(String(chunk));
+    return true;
+  });
+  return { lines, restore: () => spy.mockRestore() };
+}
+
+async function inDir<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const original = process.cwd();
+  try {
+    process.chdir(dir);
+    return await fn();
+  } finally {
+    process.chdir(original);
+  }
+}
+
+describe('hookCommand for cursor', () => {
+  it('ends with the agent name, which is how init finds its own entries', () => {
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js', 'cursor')).toBe(
+      '"/usr/bin/node" "/opt/stroq/dist/index.js" hook cursor',
+    );
+    expect(hookCommand('/usr/bin/node', '/w/src/index.ts', 'cursor')).toBe(
+      '"/usr/bin/node" --import tsx "/w/src/index.ts" hook cursor',
+    );
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js')).toMatch(/ hook claude-code$/);
+  });
+});
+
+describe('runInit --agent', () => {
+  it('writes .cursor/hooks.json for the project and is idempotent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-agent-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'cursor']));
+    out.restore();
+    expect(code).toBe(0);
+    const file = cursorHooksPath('project', dir);
+    expect(out.lines.join('')).toContain(file);
+    const first = readFileSync(file, 'utf8');
+    expect(JSON.parse(first).hooks.beforeShellExecution).toHaveLength(1);
+    expect(JSON.parse(first).hooks.beforeShellExecution[0].failClosed).toBe(true);
+
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'cursor']));
+    again.restore();
+    expect(readFileSync(file, 'utf8')).toBe(first);
+  });
+
+  it('prints the merged file and writes nothing with --dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-agent-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'cursor', '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect(JSON.parse(out.lines.join('')).hooks.afterFileEdit).toHaveLength(1);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+  });
+
+  it('still installs Claude Code hooks by default', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-agent-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit([]));
+    out.restore();
+    expect(code).toBe(0);
+    expect(existsSync(settingsPath('project', dir))).toBe(true);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+  });
+
+  it('rejects an unknown agent', async () => {
+    const out = capture();
+    const code = await runInit(['--agent', 'copilot']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.lines.join('')).toBe('unknown agent "copilot" (supported: claude-code, cursor)\n');
   });
 });

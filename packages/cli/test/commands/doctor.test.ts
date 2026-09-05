@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
+import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import { secretsFile } from '../../src/paths.js';
 
@@ -89,5 +90,42 @@ describe('doctorReport', () => {
       process.chdir(originalCwd);
       spy.mockRestore();
     }
+  });
+});
+
+describe('doctorReport cursor hooks', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+
+  it('reports both agents, and fails both lines when neither is installed', async () => {
+    const report = await doctorReport(cwd);
+    const cursor = report.checks.find((c) => c.name === 'cursor hooks')!;
+    expect(cursor.ok).toBe(false);
+    expect(cursor.detail).toContain(cursorHooksPath('project', cwd));
+    expect(cursor.detail).toContain('project: missing');
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(false);
+  });
+
+  it('passes both lines once Cursor alone is installed', async () => {
+    installCursorHooks(cursorHooksPath('project', cwd), '"/n" "/e.js" hook cursor');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
+    expect(detailOf(report, 'cursor hooks')).toContain('project: installed');
+    // A Cursor-only user must not be told their Claude Code install is broken.
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+    expect(detailOf(report, 'hooks')).toContain('project: missing');
+  });
+
+  it('reports a broken cursor hooks file without failing the Claude Code line', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const file = cursorHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ not json');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'cursor hooks')).toMatch(/cannot parse/);
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
   });
 });
