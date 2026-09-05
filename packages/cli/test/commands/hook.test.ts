@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { runHook } from '../../src/commands/hook.js';
+import { SUPPORTED_AGENTS, runHook } from '../../src/commands/hook.js';
 
 let home: string;
 
@@ -25,5 +25,65 @@ describe('runHook', () => {
     const log = readFileSync(join(home, 'stroq.log'), 'utf8');
     expect(log.trim().length).toBeGreaterThan(0);
     expect(log).toContain('hook claude-code');
+  });
+});
+
+describe('runHook agent routing', () => {
+  it('lists every supported agent when the agent is unknown', async () => {
+    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor']);
+    const out = await runHook('bogus', '{}');
+    expect(out).toEqual({
+      stdout: 'unknown agent "bogus" (supported: claude-code, cursor)\n',
+      exitCode: 1,
+    });
+  });
+
+  it('fails closed with a Cursor deny when stdin is not valid JSON', async () => {
+    const out = await runHook('cursor', 'not json {{{');
+    expect(out.exitCode).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual({
+      permission: 'deny',
+      user_message: 'Stroq internal error (fail-closed): hook input is not valid JSON',
+      agent_message: 'Stroq internal error (fail-closed): hook input is not valid JSON',
+    });
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook cursor');
+  });
+
+  it('fails closed on a malformed blocking event and stays silent on an after event', async () => {
+    const blocked = await runHook('cursor', '{"hook_event_name":"beforeShellExecution"}');
+    expect(blocked.exitCode).toBe(0);
+    expect(JSON.parse(blocked.stdout)).toMatchObject({ permission: 'deny' });
+    expect(String(JSON.parse(blocked.stdout).user_message)).toContain('fail-closed');
+
+    expect(await runHook('cursor', '{"hook_event_name":"afterShellExecution"}')).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+  });
+
+  it('routes a valid Cursor event to the Cursor adapter', async () => {
+    const allowed = await runHook(
+      'cursor',
+      JSON.stringify({
+        conversation_id: 'route-1',
+        hook_event_name: 'beforeShellExecution',
+        workspace_roots: ['/home/dev/p'],
+        cwd: '/home/dev/p',
+        command: 'ls -la',
+      }),
+    );
+    expect(allowed).toEqual({ stdout: '', exitCode: 0 });
+
+    const asked = await runHook(
+      'cursor',
+      JSON.stringify({
+        conversation_id: 'route-1',
+        hook_event_name: 'beforeShellExecution',
+        workspace_roots: ['/home/dev/p'],
+        cwd: '/home/dev/p',
+        command: 'git reset --hard',
+      }),
+    );
+    expect(JSON.parse(asked.stdout)).toMatchObject({ permission: 'ask' });
   });
 });
