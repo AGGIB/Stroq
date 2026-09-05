@@ -1,6 +1,13 @@
 /* Stroq site — progressive enhancement only.
    Everything renders without this file; it adds the menu toggle, copy buttons,
-   scroll reveals and the hero terminal animation. No network, no storage. */
+   scroll reveals and the hero terminal animation. No storage. The only network
+   call is Vercel Web Analytics (cookieless page views, first-party route),
+   whose deferred script loads after this file. */
+window.va =
+  window.va ||
+  function () {
+    (window.vaq = window.vaq || []).push(arguments);
+  };
 (function () {
   'use strict';
 
