@@ -10,19 +10,26 @@ import { z } from 'zod';
 import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
 import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
-import { mcpToolName } from './cursor-mcp-name.js';
+import {
+  CODEX_HIGH_IMPACT_TOOL,
+  codexToolInput,
+  codexToolName,
+  describeToolInput,
+  isBashTool,
+  isEmptyToolInput,
+  isPatchTool,
+} from './codex-input.js';
+
+export {
+  CODEX_HIGH_IMPACT_TOOL,
+  applyPatchPaths,
+  codexToolInput,
+  codexToolName,
+} from './codex-input.js';
 
 /** The two Codex events Stroq installs on; any other event is not ours to answer. */
 export const CODEX_EVENTS = ['PreToolUse', 'PostToolUse'] as const;
 export type CodexEvent = (typeof CODEX_EVENTS)[number];
-
-/**
- * Tool shapes where a Codex deny actually stops a high-impact action, and so the
- * ones an internal error answers with exit code 2 — the single block Codex honours
- * without parsing stdout. Kept identical to the `PreToolUse` matcher `init` writes
- * (`commands/codex-hooks.ts`), so Stroq never sees a Pre event it cannot answer.
- */
-export const CODEX_HIGH_IMPACT_TOOL = /^(Bash|apply_patch|mcp__)/;
 
 /**
  * Loose on purpose: a shape surprise in a field Stroq does not read must not fail
@@ -46,126 +53,6 @@ export const CodexHookInputSchema = z.looseObject({
   tool_use_id: z.unknown().optional(),
 });
 export type CodexHookInput = z.infer<typeof CodexHookInputSchema>;
-
-/**
- * Codex names an MCP tool `mcp__<server>__<tool>` in `tool_name` and reports no
- * separate server, so the shared sanitiser is called with an empty server: it then
- * splits at the FIRST `__` and re-sanitises each half, so a tool whose own name
- * carries a second separator cannot forge a different server. `apply_patch` becomes
- * `Write` (the tool name the classifier's path rules know); everything else is
- * passed through unchanged and classifies to nothing.
- */
-export function codexToolName(rawTool: string): string {
-  if (rawTool === 'apply_patch') return 'Write';
-  if (rawTool.startsWith('mcp__')) return mcpToolName('', rawTool);
-  return rawTool;
-}
-
-/**
- * Codex sends `tool_input` as a JSON value: usually an object, sometimes a JSON
- * string. A string that is not a JSON object, and any other non-object value, is
- * kept verbatim under `raw` rather than dropped to `{}` — the secret-egress
- * candidate extractor scans `JSON.stringify(toolInput)`, so a value that
- * disappears here is a value that can never be caught leaving through this call.
- */
-function codexRecord(value: unknown): Record<string, unknown> {
-  if (value === undefined || value === null) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value !== 'string') return { raw: JSON.stringify(value) };
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-      return parsed as Record<string, unknown>;
-  } catch {
-    // not JSON at all — fall through to the raw string below
-  }
-  return { raw: value };
-}
-
-const joinStrings = (values: readonly unknown[]): string =>
-  values.filter((p): p is string => typeof p === 'string').join(' ');
-
-/**
- * Bash's command text, in every shape Codex might send `tool_input`: an object
- * `{ command }` (string or argv array), a bare argv array (some builds skip the
- * `{ command }` wrapper on the unified exec_command, joined the same way `command`'s
- * own array is), or a plain string used as the command verbatim via `codexRecord`'s
- * `raw` fallback. A `tool_input` this loose must still expose a command, or the
- * secret-egress guard (which reads this field) and the classifier see nothing and a
- * poisoned or destructive command sails through unclassified.
- */
-function commandOf(toolInput: unknown): string {
-  if (Array.isArray(toolInput)) return joinStrings(toolInput);
-  const record = codexRecord(toolInput);
-  const value = record['command'];
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return joinStrings(value);
-  const raw = record['raw'];
-  return typeof raw === 'string' ? raw : '';
-}
-
-/**
- * The patch body, unioned across every field this Codex build might use for it —
- * including `raw` (the whole `tool_input`, populated by `codexRecord` when it was not
- * an object at all, e.g. a bare string or argv array) — rather than stopping at the
- * first non-empty one. An earlier field can hold something unrelated (even Codex's
- * own tool name, `command: 'apply_patch'`) while a later one carries the real patch
- * text: reading only the first found would silently drop that patch's paths, and a
- * dropped path is a `deny-self-tamper` that never fires. More fields can only add
- * paths to the union below, never hide ones another field already carries.
- */
-const PATCH_FIELDS = ['command', 'input', 'patch', 'raw'] as const;
-
-function patchTextOf(record: Readonly<Record<string, unknown>>): string {
-  const texts: string[] = [];
-  for (const key of PATCH_FIELDS) {
-    const value = record[key];
-    if (typeof value === 'string' && value !== '') texts.push(value);
-    else if (Array.isArray(value)) {
-      const joined = value.filter((p): p is string => typeof p === 'string').join('\n');
-      if (joined !== '') texts.push(joined);
-    }
-  }
-  return texts.join('\n');
-}
-
-/**
- * A header only counts at column 0. Patch body lines are prefixed with `+`, `-` or a
- * space, so an anchored match is what stops a patch that merely *contains*
- * `*** Add File: /home/dev/.ssh/id_rsa` from claiming to touch a file it does not —
- * and, in the other direction, from hiding the file it really does touch behind noise.
- * The capture may be empty (a header with no path, or one whose path is a lone `\r`):
- * the caller drops those, which is why it is `[^\r\n]*?` and not `.+?`.
- */
-const PATCH_HEADER =
-  /^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*([^\r\n]*?)[ \t\r]*$/;
-
-/**
- * Every distinct path an `apply_patch` body declares, in the order it declares them.
- * No length cap: splitting a string and running one anchored regex per line is cheap,
- * and `MAX_PATCH_PATHS` below is the actual timeout bound — a cap here would let a
- * patch that pads its early lines past a fixed character count hide a later header
- * (e.g. `*** Update File: .codex/hooks.json`) from ever being seen at all, which is
- * strictly worse than the slow-but-thorough scan this function does instead.
- */
-export function applyPatchPaths(patchText: string): readonly string[] {
-  const paths = new Set<string>();
-  for (const line of patchText.split('\n')) {
-    const path = PATCH_HEADER.exec(line)?.[1] ?? '';
-    if (path !== '') paths.add(path);
-  }
-  return [...paths];
-}
-
-export function codexToolInput(input: CodexHookInput): Record<string, unknown> {
-  if (input.tool_name === 'Bash') return { command: commandOf(input.tool_input) };
-  const record = codexRecord(input.tool_input);
-  if (input.tool_name === 'apply_patch') {
-    const paths = applyPatchPaths(patchTextOf(record));
-    return { file_path: paths[0] ?? '', file_paths: [...paths] };
-  }
-  return record;
-}
 
 /**
  * The text of a completed action. Codex puts the unified shell result in `output`;
@@ -256,8 +143,44 @@ export const CODEX_PATCH_TOO_LARGE: Decision = {
   reason: `the patch declares more than ${MAX_PATCH_PATHS} files, more than Stroq can classify inside Codex's hook timeout`,
 };
 
+/**
+ * Recorded (and enforced) when Codex sent something under a shape the adapter
+ * could not read a command or a patch out of. The reason names the top-level KEYS
+ * (or the value's type) and never a value: `tool_input` is exactly where a secret
+ * would be, and this reason is printed to the agent, logged and audited.
+ */
+export const codexUnreadableInput = (shape: string): Decision => ({
+  effect: 'deny',
+  ruleId: 'codex-unreadable-input',
+  reason:
+    `Stroq could not read the command or patch from Codex's tool_input (keys: ${shape}); ` +
+    'denied fail-closed. Report the payload shape at https://github.com/AGGIB/Stroq/issues',
+});
+
 const asPaths = (value: unknown): readonly string[] =>
   Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
+
+/**
+ * A high-impact call Codex sent arguments for, whose command or patch the adapter
+ * could not find. Handing the engine the empty action it extracted would classify
+ * nothing and allow the call — fail-open on precisely the shape surprise this
+ * adapter cannot anticipate — so it is denied instead. An EMPTY `tool_input` is a
+ * different thing: there is nothing to act on, and it keeps running through the
+ * engine. MCP tools are never this: their arguments are the record itself, which
+ * the secret guard scans whatever shape it arrived in.
+ */
+function unreadableInput(
+  input: CodexHookInput,
+  toolInput: Readonly<Record<string, unknown>>,
+): Decision | null {
+  const bash = isBashTool(input.tool_name);
+  const patch = isPatchTool(input.tool_name);
+  // The only two high-impact shapes with a command or a patch to lose.
+  if (!bash && !patch) return null;
+  if (isEmptyToolInput(input.tool_input)) return null;
+  const readable = bash ? toolInput['command'] !== '' : asPaths(toolInput['file_paths']).length > 0;
+  return readable ? null : codexUnreadableInput(describeToolInput(input.tool_input));
+}
 
 /** One `toolInput` per patched path, so every file the patch touches is classified and audited. */
 function patchInputs(
@@ -293,30 +216,45 @@ async function decidePre(
   return worst;
 }
 
-async function denyOversizedPatch(event: EngineEvent, count: number): Promise<HookOutput> {
+/** An audited deny the engine never made: recorded here so `stroq log`/`why` still explain it. */
+async function denyDirectly(
+  event: EngineEvent,
+  decision: Decision,
+  summary: string,
+): Promise<HookOutput> {
   await new AuditLog(auditFile()).append({
     sessionId: event.sessionId,
     phase: 'pre',
-    tool: 'Write',
-    summary: `apply_patch: ${count} files`,
+    tool: event.toolName,
+    summary,
     classes: [],
-    decision: CODEX_PATCH_TOO_LARGE,
+    decision,
   });
-  return codexDenyOutput(
-    `Stroq blocked this action (${CODEX_PATCH_TOO_LARGE.ruleId}): ${CODEX_PATCH_TOO_LARGE.reason}. Split the change into smaller patches.`,
-  );
+  return renderDecision(decision, [], []);
+}
+
+interface PreGuards {
+  readonly patchPaths: readonly string[];
+  readonly unreadable: Decision | null;
 }
 
 async function handlePre(
   engine: StroqEngine,
   event: EngineEvent,
-  patchPaths: readonly string[],
+  guards: PreGuards,
 ): Promise<HookOutput> {
-  if (patchPaths.length > MAX_PATCH_PATHS) return denyOversizedPatch(event, patchPaths.length);
+  if (guards.unreadable)
+    return denyDirectly(event, guards.unreadable, 'codex: unreadable tool_input');
+  if (guards.patchPaths.length > MAX_PATCH_PATHS)
+    return denyDirectly(
+      event,
+      CODEX_PATCH_TOO_LARGE,
+      `apply_patch: ${guards.patchPaths.length} files`,
+    );
   const { decision, provenance, secrets } = await decidePre(
     engine,
     event,
-    patchInputs(event.toolInput, patchPaths),
+    patchInputs(event.toolInput, guards.patchPaths),
   );
   return renderDecision(decision, provenance, secrets);
 }
@@ -333,10 +271,11 @@ async function handlePost(
 }
 
 /**
- * Coupling to know about: the oversized-patch deny appends its audit entry through
- * `auditFile()` (the engine keeps its own `AuditLog` private), so an engine built at
- * a different home — `createEngineAt`, used only by `stroq attack`, which never
- * routes Codex events — would see that one entry land under `STROQ_HOME` instead.
+ * Coupling to know about: the two adapter-level denies (oversized patch, unreadable
+ * input) append their audit entry through `auditFile()` (the engine keeps its own
+ * `AuditLog` private), so an engine built at a different home — `createEngineAt`,
+ * used only by `stroq attack`, which never routes Codex events — would see those
+ * entries land under `STROQ_HOME` instead.
  */
 export async function handleCodexHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = CodexHookInputSchema.parse(raw);
@@ -349,11 +288,10 @@ export async function handleCodexHook(engine: StroqEngine, raw: unknown): Promis
   };
   if (input.hook_event_name === 'PostToolUse')
     return handlePost(engine, event, input.tool_response);
-  return handlePre(
-    engine,
-    event,
-    input.tool_name === 'apply_patch' ? asPaths(toolInput['file_paths']) : [],
-  );
+  return handlePre(engine, event, {
+    patchPaths: isPatchTool(input.tool_name) ? asPaths(toolInput['file_paths']) : [],
+    unreadable: unreadableInput(input, toolInput),
+  });
 }
 
 /**

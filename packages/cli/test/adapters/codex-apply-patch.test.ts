@@ -67,16 +67,19 @@ describe('apply_patch', () => {
     expect(audit).toContain('"tool":"Write"');
   });
 
-  it('allows an ordinary patch and one whose headers it cannot read', async () => {
+  it('allows an ordinary patch and denies one whose headers it cannot read', async () => {
     expect(
       await run({
         tool_input: { command: patch('*** Add File: src/app.ts', '+export const a = 1;') },
       }),
     ).toEqual({ stdout: '', exitCode: 0 });
-    expect(await run({ tool_input: { command: 'no headers at all' } })).toEqual({
-      stdout: '',
-      exitCode: 0,
-    });
+    // Codex sent a patch and Stroq found no path in it: there is nothing to
+    // classify, and an unclassified write is an allowed write. Fail closed and
+    // say which keys were seen, rather than let an unreadable shape through.
+    const unreadable = await run({ tool_input: { command: 'no headers at all' } });
+    expect(reasonOf(unreadable.stdout)).toContain(
+      'Stroq blocked this action (codex-unreadable-input)',
+    );
   });
 
   it('denies a string-shaped tool_input the same way it denies the object-shaped one', async () => {

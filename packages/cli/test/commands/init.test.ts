@@ -14,7 +14,7 @@ import {
   settingsPath,
 } from '../../src/commands/init.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
-import { codexHooksPath } from '../../src/commands/codex-hooks.js';
+import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -211,7 +211,8 @@ describe('runInit --agent codex', () => {
     const file = codexHooksPath('project', dir);
     const printed = out.lines.join('');
     expect(printed).toContain(file);
-    expect(printed).toContain('Bash|apply_patch|mcp__.*');
+    expect(printed).toContain(CODEX_PRE_MATCHER);
+    expect(printed).toContain('apply_patch');
     // The two things a Codex user has to know that no other agent needs.
     expect(printed).toContain('[features] hooks = true');
     expect(printed).toContain('trust');

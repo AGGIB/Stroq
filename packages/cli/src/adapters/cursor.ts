@@ -13,6 +13,7 @@ import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
 import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
 import { mcpToolName } from './cursor-mcp-name.js';
+import { toolInputRecord } from './tool-input.js';
 
 /** The six Cursor events Stroq installs on; any other event is not ours to answer. */
 export const CURSOR_EVENTS = [
@@ -93,28 +94,6 @@ export function cursorToolName(input: CursorHookInput): string {
   }
 }
 
-/**
- * MCP arguments arrive as a JSON string officially and as an object in some
- * community builds. A string that is not a JSON object, and any other non-object
- * value (array, number, boolean), is kept verbatim under `raw` rather than dropped
- * to `{}` — the secret-egress candidate extractor scans `JSON.stringify(toolInput)`,
- * so a value that disappears here is a value that can never be caught leaving
- * through this call. `undefined`/`null` alone become `{}`: there is nothing to keep.
- */
-function mcpToolInput(value: unknown): Record<string, unknown> {
-  if (value === undefined || value === null) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value !== 'string') return { raw: JSON.stringify(value) };
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-      return parsed as Record<string, unknown>;
-  } catch {
-    // not JSON at all — fall through to the raw string below
-  }
-  return { raw: value };
-}
-
 export function cursorToolInput(input: CursorHookInput): Record<string, unknown> {
   switch (input.hook_event_name) {
     case 'beforeShellExecution':
@@ -122,7 +101,9 @@ export function cursorToolInput(input: CursorHookInput): Record<string, unknown>
       return { command: input.command ?? '' };
     case 'beforeMCPExecution':
     case 'afterMCPExecution':
-      return mcpToolInput(input.tool_input);
+      // Shared with the Codex adapter; `adapters/tool-input.ts` documents why a
+      // non-object value is kept under `raw` rather than dropped to `{}`.
+      return toolInputRecord(input.tool_input);
     case 'beforeReadFile':
     case 'afterFileEdit':
       return { file_path: input.file_path ?? '' };

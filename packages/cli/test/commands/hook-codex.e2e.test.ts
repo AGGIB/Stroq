@@ -48,12 +48,20 @@ const event = (project: string, session: string, fields: Record<string, unknown>
     ...fields,
   });
 
-const reasonOf = (stdout: string) =>
-  String(
-    (JSON.parse(stdout) as { hookSpecificOutput: Record<string, unknown> }).hookSpecificOutput[
-      'permissionDecisionReason'
-    ],
-  );
+const outputOf = (stdout: string) =>
+  (JSON.parse(stdout) as { hookSpecificOutput: Record<string, unknown> }).hookSpecificOutput;
+const reasonOf = (stdout: string) => String(outputOf(stdout)['permissionDecisionReason']);
+
+/**
+ * A deny is only a deny if Codex reads it as one: the event name has to be spelled
+ * exactly `PreToolUse` and the decision exactly `deny`, or the envelope is an
+ * unsupported field and the hook fails open.
+ */
+const expectDeny = (stdout: string): void => {
+  const fields = outputOf(stdout);
+  expect(fields['hookEventName']).toBe('PreToolUse');
+  expect(fields['permissionDecision']).toBe('deny');
+};
 
 describe('stroq hook codex (end to end)', () => {
   it('taints from a poisoned command output and denies the command it dictated', async () => {
@@ -89,7 +97,7 @@ describe('stroq hook codex (end to end)', () => {
     // Nothing went to the block channel: a real deny travels on stdout with exit 0.
     // (Asserted by content, not emptiness — the tsx loader may print its own notices.)
     expect(denied.stderr).not.toContain('fail-closed');
-    expect(denied.stdout).toContain('"permissionDecision":"deny"');
+    expectDeny(denied.stdout);
     expect(reasonOf(denied.stdout)).toContain('deny-encoded-exec');
     expect(reasonOf(denied.stdout)).toContain('Evidence:');
   }, 60_000);
@@ -111,6 +119,7 @@ describe('stroq hook codex (end to end)', () => {
       home,
     );
     expect(denied.code).toBe(0);
+    expectDeny(denied.stdout);
     expect(reasonOf(denied.stdout)).toContain('deny-self-tamper');
 
     const allowed = await runCli(
@@ -148,6 +157,7 @@ describe('stroq hook codex (end to end)', () => {
       home,
     );
     expect(denied.code).toBe(0);
+    expectDeny(denied.stdout);
     expect(reasonOf(denied.stdout)).toContain('deny-secret-egress');
     expect(reasonOf(denied.stdout)).toContain('E2E_API_TOKEN');
     // The reason names the secret and its source; it never carries the value.
@@ -163,9 +173,11 @@ describe('stroq hook codex (end to end)', () => {
       home,
     );
     expect(asked.code).toBe(0);
-    expect(asked.stdout).toContain('"permissionDecision":"deny"');
-    expect(reasonOf(asked.stdout)).toContain(
-      'Stroq would ask before this action (ask-destructive)',
+    expectDeny(asked.stdout);
+    // Anchored: the "would ask" wording has to open the reason, not merely appear
+    // somewhere inside an evidence sentence further along.
+    expect(reasonOf(asked.stdout)).toMatch(
+      /^Stroq would ask before this action \(ask-destructive\): /,
     );
   }, 60_000);
 

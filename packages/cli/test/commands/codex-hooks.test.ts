@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CODEX_HIGH_IMPACT_TOOL } from '../../src/adapters/codex.js';
 import {
   CODEX_POST_MATCHER,
   CODEX_PRE_MATCHER,
@@ -38,8 +39,21 @@ describe('codexHandler', () => {
       timeout: 15,
       statusMessage: 'Stroq',
     });
-    expect(CODEX_PRE_MATCHER).toBe('Bash|apply_patch|mcp__.*');
-    expect(CODEX_POST_MATCHER).toBe('Bash|mcp__.*');
+    // Every tool name the adapter treats as high-impact, so no Pre event can
+    // reach Stroq that its fail-closed path does not also cover.
+    expect(CODEX_PRE_MATCHER).toBe(
+      'Bash|exec_command|shell|local_shell|apply_patch|ApplyPatch|mcp__.*',
+    );
+    expect(CODEX_POST_MATCHER).toBe('Bash|exec_command|shell|local_shell|mcp__.*');
+    for (const tool of [
+      'Bash',
+      'exec_command',
+      'shell',
+      'local_shell',
+      'apply_patch',
+      'ApplyPatch',
+    ])
+      expect(CODEX_HIGH_IMPACT_TOOL.test(tool), tool).toBe(true);
   });
 
   it('recognises only its own entries', () => {
