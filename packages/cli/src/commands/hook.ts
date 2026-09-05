@@ -74,3 +74,28 @@ export async function runHook(agent: string, rawJson: string): Promise<HookOutpu
     return adapter.failClosed(raw, err);
   }
 }
+
+/**
+ * The whole `stroq hook` command, stdin included. `runHook` above answers every
+ * failure it can see, but the read itself can still reject (a closed or broken
+ * stdin, an out-of-memory payload) — and on Codex the unhandled path is exit code
+ * 1, which Codex classifies as a hook failure and continues past: fail-open on
+ * exactly the events Stroq exists to block. Codex therefore answers any rejection
+ * here with its one honoured block, exit 2 plus the reason on stderr. The other
+ * agents re-throw and keep today's behaviour, where `main`'s top-level handler
+ * prints the error and exits 1 — for them a non-zero exit is not read as an
+ * allow, so there is nothing to change and no contract to bend.
+ */
+export async function runHookCommand(
+  agent: string,
+  read: () => Promise<string> = readStdin,
+): Promise<HookOutput> {
+  try {
+    return await runHook(agent, await read());
+  } catch (err) {
+    if (agent !== 'codex') throw err;
+    logError(`hook ${agent}`, err);
+    const message = err instanceof Error ? err.message : String(err);
+    return codexBlockOutput(`Stroq internal error (fail-closed): ${message}`);
+  }
+}
