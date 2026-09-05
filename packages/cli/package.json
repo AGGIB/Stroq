@@ -1,6 +1,6 @@
 {
   "name": "@stroq/cli",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Local action firewall for AI agents: scans what the agent reads, taints the session, blocks dangerous follow-up actions",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,8 +10,12 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "DISCLOSURE"
   ],
+  "contentPolicy": {
+    "class": "dual-use"
+  },
   "engines": {
     "node": ">=22"
   },

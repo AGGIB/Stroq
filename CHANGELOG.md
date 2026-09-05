@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-05
+
+### Changed
+
+- **npm dual-use disclosure.** `@stroq/cli` now declares `"contentPolicy": { "class": "dual-use" }` in its `package.json` and ships a `DISCLOSURE` file, per npm's dual-use content policy: the package reads credential files (to hash them for the secret egress guard), installs hooks into other programs' configuration (on `stroq init`) and carries an attack corpus and a prompt-injection rule bundle, all of which resemble malware to npm's publish-time scanner. Versions 0.3.0, 0.4.0 and 0.5.0 were accepted by the registry but held for manual review and never became installable; nothing in the code changed for this release.
+- **Release workflow publishes to npm's staging area.** Dual-use packages must be published with 2FA, so `release.yml` now runs `npm stage publish` (trusted publishing or token) and a maintainer approves the staged version on npmjs.com or with `npm stage approve` after a 2FA prompt, instead of publishing directly.
+
 ## [0.5.0] - 2026-09-05
 
 ### Added
