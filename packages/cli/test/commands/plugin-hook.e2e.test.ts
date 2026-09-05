@@ -24,8 +24,10 @@ function runWrapper(
   home: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
+    // cwd is the CLI package so that tsx resolves `@stroq/core` through
+    // packages/cli/tsconfig.json paths (the core dist is not built when tests run).
     const child = spawn('bash', [wrapper], {
-      cwd: repoRoot,
+      cwd: cliDir,
       env: { ...process.env, PATH: path, STROQ_HOME: home },
     });
     let stdout = '';
