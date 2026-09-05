@@ -10,6 +10,7 @@
 Scans what the agent reads. Taints the session. Blocks the dangerous follow-up — before anything leaves your machine.
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
+[![stroq attack: 12/12 stopped](https://img.shields.io/badge/stroq%20attack-12%2F12%20stopped-1f9d55)](#replay-twelve-real-incidents)
 [![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli?logo=npm&logoColor=white&label=npm&color=cb3837)](https://www.npmjs.com/package/@stroq/cli)
 [![npm downloads](https://img.shields.io/npm/dm/%40stroq%2Fcli?label=downloads&color=0b7285)](https://www.npmjs.com/package/@stroq/cli)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)

@@ -132,8 +132,8 @@
         </div>
         <div class="stat">
           <dt class="stat-label">Tests</dt>
-          <dd class="stat-num">476</dd>
-          <dd class="stat-sub">Across the core engine, the CLI and the rules pipeline.</dd>
+          <dd class="stat-num">671</dd>
+          <dd class="stat-sub">Across the core engine, the CLI, the rules pipeline and the twelve replayed incidents.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -447,12 +447,15 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <div class="container policy-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="policy-title">One YAML file. First match wins.</h2>
-        <p class="section-lead">Ten action classes and one ordered policy. Tainted sessions get <em>deny</em> on network, fetch, secret and external-push actions; destructive commands always <em>ask</em>; encoded execution and self-tampering are always denied. Anything unmatched falls through to the default.</p>
+        <p class="section-lead">Thirteen action classes and one ordered policy. A secret value in an outbound call, self-tampering, encoded execution and commands dictated by flagged content are always denied; tainted sessions get <em>deny</em> on network, fetch, secret and external-push actions; destructive commands and commands copied from tool output always <em>ask</em>. Anything unmatched falls through to the default.</p>
         <p class="section-lead">Commands that only read the security config — <code>cat</code>, <code>grep</code>, <code>git diff</code> — stay allowed. Writing to it is what triggers <code>config.self</code>.</p>
         <p class="list-title">Action classes named in the default policy</p>
         <ul class="class-list" aria-label="Action classes named in the default policy">
+          <li><code>secret.egress</code></li>
           <li><code>config.self</code></li>
           <li><code>shell.exec_encoded</code></li>
+          <li><code>origin.suspect</code></li>
+          <li><code>origin.untrusted</code></li>
           <li><code>shell.network</code></li>
           <li><code>network.fetch</code></li>
           <li><code>fs.secrets</code></li>
