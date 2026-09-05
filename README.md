@@ -20,7 +20,7 @@ Scans what the agent reads. Taints the session. Blocks the dangerous follow-up �
 npx @stroq/cli init
 ```
 
-Supported today: **Claude Code**, **Cursor** (native hooks) · On the roadmap: Codex, Copilot, OpenClaw
+Supported today: **Claude Code**, **Cursor**, **Codex** (native hooks) · On the roadmap: Copilot, OpenClaw
 
 **Website:** [stroq.vercel.app](https://stroq.vercel.app)
 
@@ -122,6 +122,7 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 ```bash
 npx @stroq/cli init                  # Claude Code: writes .claude/settings.json hooks
 npx @stroq/cli init --agent cursor   # Cursor: writes .cursor/hooks.json
+npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
 npx @stroq/cli doctor                # check the installation
 ```
 
@@ -165,6 +166,39 @@ Stroq installs on six of Cursor's hook events:
 
 Run the Cursor demo yourself: `pnpm install && pnpm build && ./examples/demo/run-cursor-demo.sh`.
 
+### Codex
+
+```bash
+npx @stroq/cli init --agent codex   # in your project: writes .codex/hooks.json
+```
+
+`--user` writes `~/.codex/hooks.json` instead, `--dry-run` prints the merged file without writing it. `stroq doctor` then shows a `codex hooks` line next to the other two. Re-running `init` is idempotent and replaces an older Stroq entry rather than stacking a second one; foreign matchers, foreign events and any other key in the file are left untouched, and a file that keeps its events at the root instead of under the official `hooks` wrapper keeps that shape.
+
+Two things to check after installing, both specific to Codex:
+
+- On releases where hooks are still opt-in, add `[features]` / `hooks = true` to `~/.codex/config.toml`.
+- A project-local `.codex/` layer only loads once you trust it — Codex prompts the first time it sees one. `--user` writes the home-directory copy and skips that prompt entirely.
+
+Stroq installs on two of Codex's events:
+
+| Codex event   | Matcher                      | What Stroq does                                                                                                                                         | Can it stop the action?                                          |
+| ------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `PreToolUse`  | `Bash\|apply_patch\|mcp__.*` | Classifies the shell command, every path an `apply_patch` declares, or the MCP call and its arguments (secret egress included), and applies your policy | Yes — `deny` (see the `ask` limit below)                         |
+| `PostToolUse` | `Bash\|mcp__.*`              | Scans the command output or MCP result, taints the session, records provenance                                                                          | No — but a suspect result adds `additionalContext` for the model |
+
+`apply_patch` carries a patch body rather than a path, so Stroq reads the `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** Move to:` headers and classifies **every** file the patch declares, taking the most severe decision — a patch that quietly deletes `.codex/hooks.json` alongside a legitimate edit is denied by `deny-self-tamper`, and every path is in `stroq log`. `.codex/hooks.json` and `.codex/config.toml` are protected the same way `.claude/settings.json` and `.cursor/hooks.json` already were, for every agent.
+
+**Limits.**
+
+- **`ask` becomes `deny`.** Codex's hook contract has no way to prompt, so a decision the policy makes an `ask` — a destructive command, an external push, an `npx` for a package that came out of tool output — is denied instead, with a reason that says so and names the rule: `Stroq would ask before this action (ask-destructive): … Codex hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.` The audit still records the policy's real `ask`; only the wire answer is lossy. If that trade is wrong for you, set those rules' effect to `allow` in your own `policy.yaml` — but then nothing stops them.
+- **Codex fails open at runtime, and there is no `failClosed` knob.** If the hook command cannot start at all (no Node on `PATH`, a bad entry path), Codex logs a hook failure and continues. Stroq covers its _own_ errors by exiting 2 with the reason on stderr — the one block Codex honours without parsing stdout — for `PreToolUse` on `Bash`, `apply_patch` and `mcp__*`. Everything else answers an error with silence, because there is nothing there to block. For the smallest chance of a failed start, `npm install -g @stroq/cli` rather than relying on `npx`.
+- **Codex's own web reads are not scanned.** Hosted tools such as `WebSearch` never reach hooks, so a poisoned page Codex fetches itself is neither scanned nor taints the session — unlike Claude Code, where `WebFetch`/`WebSearch` go through `PostToolUse`. Content that arrives through a command's output or an MCP call is covered as usual.
+- **A patch with no recognisable header is treated as an ordinary write.** Stroq only trusts a header at column 0; a `*** Add File:` line inside the patch body (prefixed with `+`, `-` or a space) is body text, not a claim about which files are touched. A patch declaring more than 64 files is denied outright (`codex-patch-too-large`) rather than classified path by path, because the classification would risk running past the hook timeout — and a timed-out hook fails open.
+- **Not used in v1:** `PermissionRequest` (Codex's own approval prompt; Stroq has already decided in `PreToolUse`), `updatedInput` rewriting, `SessionStart`/`SessionEnd`/`Stop`/`Interrupt`/compaction events, inline `[hooks]` tables in `config.toml` (they work, but `init` does not write them), and plugin-bundled hooks.
+- **Untested:** Windows. `commandWindows` is not written, and nothing here has been exercised there.
+
+Run the Codex demo yourself: `pnpm install && pnpm build && ./examples/demo/run-codex-demo.sh`.
+
 ### As a Claude Code plugin
 
 The repository is also a plugin marketplace. Inside Claude Code:
@@ -188,17 +222,17 @@ node packages/cli/dist/index.js doctor
 
 ## Commands
 
-| Command                                                         | What it does                                                                                              |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `stroq init [--agent claude-code\|cursor] [--user] [--dry-run]` | Install hooks into `.claude/settings.json` or `.cursor/hooks.json` (`--user` for the home-directory copy) |
-| `stroq hook claude-code` / `stroq hook cursor`                  | Hook entrypoint (reads the event on stdin)                                                                |
-| `stroq doctor`                                                  | Check Node version, rules, hooks for both agents, self-test                                               |
-| `stroq log [--count 20]`                                        | Show recent audit entries                                                                                 |
-| `stroq verify`                                                  | Verify the audit hash chain                                                                               |
-| `stroq untaint [--session <id>] [--all]`                        | Clear a false-positive session's taint and provenance, or every session's                                 |
-| `stroq why [--seq <n>]`                                         | Explain the most recent denied/asked action: rule, provenance, taint                                      |
-| `stroq canary [--name <NAME>]`                                  | Print a canary secret to plant; its outbound use is denied and taints the session                         |
-| `stroq attack [--json] [--only <id>]`                           | Replay 12 recorded incidents against your policy; exit 1 if any gets through                              |
+| Command                                                                | What it does                                                                                                                   |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `stroq init [--agent claude-code\|cursor\|codex] [--user] [--dry-run]` | Install hooks into `.claude/settings.json`, `.cursor/hooks.json` or `.codex/hooks.json` (`--user` for the home-directory copy) |
+| `stroq hook claude-code` / `stroq hook cursor` / `stroq hook codex`    | Hook entrypoint (reads the event on stdin)                                                                                     |
+| `stroq doctor`                                                         | Check Node version, rules, hooks for every agent, self-test                                                                    |
+| `stroq log [--count 20]`                                               | Show recent audit entries                                                                                                      |
+| `stroq verify`                                                         | Verify the audit hash chain                                                                                                    |
+| `stroq untaint [--session <id>] [--all]`                               | Clear a false-positive session's taint and provenance, or every session's                                                      |
+| `stroq why [--seq <n>]`                                                | Explain the most recent denied/asked action: rule, provenance, taint                                                           |
+| `stroq canary [--name <NAME>]`                                         | Print a canary secret to plant; its outbound use is denied and taints the session                                              |
+| `stroq attack [--json] [--only <id>]`                                  | Replay 12 recorded incidents against your policy; exit 1 if any gets through                                                   |
 
 ## Policy
 
@@ -256,6 +290,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 
 - **Fail-closed:** if Stroq errors out while handling a high-impact `PreToolUse` call, the action is denied, not silently allowed.
 - **Cursor coverage is narrower than Claude Code's:** Stroq v1 installs on no Cursor event that can stop a file edit, so edits made through Cursor's editor are audited (`allow(cursor-edit-unenforced)`) rather than blocked; `afterShellExecution` cannot carry a warning back to the agent, and Cursor's own web reads have no hook at all — the taint, where there is one, is still enforced on the next action. The full table and limits are in [Cursor](#cursor).
+- **Codex cannot be asked, only told:** Codex's hook contract has no `ask`, so every `ask` in the policy is enforced as a deny whose reason says a prompt was not possible and names the rule to relax. Codex also has no `failClosed` knob and fails open on a hook that cannot start; Stroq answers its _own_ errors on high-impact `PreToolUse` events with exit code 2 and the reason on stderr, the one block Codex honours regardless. The full table and limits are in [Codex](#codex).
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
@@ -264,7 +299,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 ## Roadmap
 
 - Local daemon with an ONNX-based classifier, replacing per-invocation Node startup and pure regex matching for the content scan.
-- Adapters for Codex, Copilot, and OpenClaw.
+- Adapters for Copilot and OpenClaw.
 - Cursor's generic `preToolUse` hook, so edits and deletes made through Cursor's editor can be blocked rather than only audited.
 - A quote-aware shell lexer and worker-isolated scanning (see Guarantees and limits above).
 - Team control plane: shared policy, fleet-wide audit visibility, and centralized false-positive triage across a team's agents.

@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Codex CLI adapter.** `stroq init --agent codex` writes `.codex/hooks.json` (or `~/.codex/hooks.json` with `--user`, `--dry-run` to preview), registering `stroq hook codex` on `PreToolUse` (matcher `Bash|apply_patch|mcp__.*`) and `PostToolUse` (matcher `Bash|mcp__.*`). Decisions use Codex's `hookSpecificOutput` envelope: a deny carries `permissionDecision: "deny"` with the rule, the reason and the provenance/secret evidence; a suspect `PostToolUse` result carries `additionalContext` (and nothing else — `classifierContext` is Claude-only, and an unknown field is a hook failure on Codex). `apply_patch` carries a patch body rather than a path, so the adapter reads its `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** Move to:` headers, runs one classification per declared file and takes the most severe decision, so a patch that deletes `.codex/hooks.json` alongside a legitimate edit is denied by `deny-self-tamper` with every path in the audit. MCP names arrive whole in `tool_name` and go through the same sanitiser the Cursor adapter uses, so a hostile tool name can neither forge a server nor produce a name the classifier fails to parse. `stroq doctor` gains a `codex hooks` line and passes when at least one agent is installed. A runnable demo lives in `examples/demo/run-codex-demo.sh` and runs in CI.
+- `.codex/hooks.json` and `.codex/config.toml` join `.claude/settings.json`, `.cursor/hooks.json` and `~/.stroq/…` as `config.self` paths, for **every** adapter: a write, delete or `find -delete` against Codex's hook file, or against the config file that can turn hooks off entirely, is self-tampering wherever it comes from.
+
+### Changed
+
+- `HookOutput` gained an optional `stderr`, written by `stroq hook` before it exits. Only the Codex adapter sets it: Codex's one unconditional block is exit code 2 with the reason on stderr, which is what a fail-closed answer needs when the failure is itself a parse error. The Claude Code and Cursor adapters are byte-for-byte unchanged.
+
+### Limits
+
+- Codex's hook contract has no `ask`, so every `ask` in the policy is enforced as a deny whose reason says a prompt was not possible and names the rule to relax; the audit still records the policy's real `ask`. Codex has no `failClosed` knob and fails open when the hook command cannot start, hosted tools such as `WebSearch` never reach hooks, and an `apply_patch` declaring more than 64 files is denied outright rather than classified path by path. See the Codex section of the README.
+
 ## [0.4.0] - 2026-09-05
 
 ### Added
