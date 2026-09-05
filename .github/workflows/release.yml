@@ -61,21 +61,31 @@ jobs:
             echo "mode=none" >> "$GITHUB_OUTPUT"
           fi
 
+      # @stroq/cli is declared dual-use (packages/cli/DISCLOSURE): it reads credential files to
+      # hash them, installs hooks into other tools' config and ships an attack corpus. npm's
+      # dual-use policy requires such packages to be published with 2FA — interactively, or by
+      # staging from CI and approving with 2FA — so CI only STAGES the version. A maintainer then
+      # approves it on npmjs.com (Staged Packages → Approve) or with `npm stage approve <id>`.
       # Path 1: an npm granular access token stored as the NPM_TOKEN repository secret.
-      - name: Publish to npm (token)
+      - name: Stage on npm (token)
         if: steps.mode.outputs.mode == 'token'
         working-directory: packages/cli
-        run: npm publish --provenance --access public
+        run: npm stage publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Path 2: npm trusted publishing (OIDC) configured for this repo/workflow on npmjs.com,
-      # enabled by setting the repository variable NPM_TRUSTED_PUBLISHING=true. No secret needed;
-      # provenance attestations are generated automatically.
-      - name: Publish to npm (trusted publishing)
+      # Path 2: npm trusted publishing (OIDC) configured for this repo/workflow on npmjs.com with
+      # stage-publish allowed, enabled by setting the repository variable
+      # NPM_TRUSTED_PUBLISHING=true. No secret needed; provenance is attached automatically.
+      - name: Stage on npm (trusted publishing)
         if: steps.mode.outputs.mode == 'trusted'
         working-directory: packages/cli
-        run: npm publish --access public
+        run: npm stage publish --access public
+
+      - name: Staged, awaiting approval
+        if: steps.mode.outputs.mode == 'token' || steps.mode.outputs.mode == 'trusted'
+        run: |
+          echo "::notice::@stroq/cli is staged. Approve it with 2FA on npmjs.com (Staged Packages) or run: npm stage list && npm stage approve <stage-id>"
 
       - name: Publishing not configured
         if: steps.mode.outputs.mode == 'none'

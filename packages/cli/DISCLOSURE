@@ -1,0 +1,68 @@
+Dual-use disclosure for @stroq/cli
+===================================
+
+Stroq is an open-source (Apache-2.0) local "action firewall" for AI coding
+agents such as Claude Code, Cursor and OpenAI Codex CLI. It is a defensive
+security tool. It runs entirely on the developer's own machine, and it makes
+no network requests of its own: the strings `fetch(`, `curl ... | sh`,
+`base64 -d`, `~/.ssh/id_rsa` and similar that appear in this package are
+detection rules and recorded attack fixtures, not code paths that execute
+them. Source, tests and the rule corpus: https://github.com/AGGIB/Stroq
+
+Why an automated scanner may flag this package
+----------------------------------------------
+
+1. It reads credential files, locally, to protect them.
+   `stroq` builds an index of secret VALUES from the project's `.env*` files
+   and from `~/.aws/credentials`, `~/.npmrc`, `~/.netrc` and
+   `~/.docker/config.json`, so that it can refuse any agent action whose
+   arguments would send one of those values somewhere (the "secret egress
+   guard"). Only salted SHA-256 hashes are stored (`~/.stroq/secrets.json`);
+   the values themselves are never written to disk, never logged, never
+   transmitted, and are redacted from the audit trail. Credential-shaped
+   environment variables are hashed in memory only.
+
+2. It installs hooks into other programs' configuration, on request.
+   `stroq init` writes hook entries into `.claude/settings.json`,
+   `.cursor/hooks.json` or `.codex/hooks.json` (project or user scope), so the
+   agent calls `stroq hook <agent>` before and after each tool use. It only
+   does this when the user runs `stroq init`; it never modifies those files
+   otherwise, and it refuses to let a compromised agent session modify them.
+
+3. It ships an attack corpus.
+   `stroq attack` replays twelve recorded, incident-backed prompt-injection
+   scenarios (a protestware README, poisoned MCP results, `curl | sh`
+   installers, base64-encoded installers, a `~/.ssh/id_rsa` fetch, `rm -rf ~`,
+   secret exfiltration through `curl`) through the user's own policy in
+   throwaway directories, and reports which ones were blocked. The payloads
+   are data used to test the firewall; nothing in them is executed.
+
+4. It contains a large prompt-injection rule bundle.
+   Hundreds of regular expressions (Agent Threat Rules format) describe
+   malicious instructions so that they can be recognised in files, web pages,
+   MCP responses and command output that an agent reads. Their text
+   necessarily looks like the attacks they detect.
+
+What the package does not do
+----------------------------
+
+- No network I/O, no telemetry, no remote configuration, no auto-update.
+- No install-time scripts (`preinstall`/`postinstall`/`prepare`).
+- No reading of secrets beyond the files listed above, and no use of their
+  values other than comparing hashes.
+- No modification of any file except `~/.stroq/*` (its own state), the
+  agent hook files written by an explicit `stroq init`, and the temporary
+  directories `stroq attack` creates and removes for its replay.
+
+Intended legitimate use
+-----------------------
+
+Developers and security teams install it next to their AI coding agent so
+that a prompt injection in a README, an issue comment, a web page or an MCP
+result cannot turn into a `curl | sh`, a credential exfiltration, a
+destructive command or a self-disabling edit of the agent's configuration.
+Every decision is written to a hash-chained local audit log (`stroq log`,
+`stroq verify`, `stroq why`).
+
+Contact: https://github.com/AGGIB/Stroq/issues (security reports: see
+SECURITY.md in the repository).
