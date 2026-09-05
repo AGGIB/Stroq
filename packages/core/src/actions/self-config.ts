@@ -18,9 +18,12 @@ import { commandWord } from './shell-segments.js';
  * and touching them is not self-tampering. `.stroq` stays a directory match
  * (`.stroq` or `.stroq/...`) since everything under it is Stroq's own state
  * (audit log, session data) and nothing else belongs there.
+ * `.codex/config.toml` is listed alongside `.codex/hooks.json` because that file
+ * can both define inline `[hooks]` tables and turn the whole hooks feature off,
+ * so editing it disables the firewall just as surely as deleting the hook file.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -32,7 +35,7 @@ export const SELF_CONFIG_FILE =
  * `find .claude -name 'settings.json' -delete` never has the literal
  * substring `.claude/settings.json` anywhere in the command text.
  */
-export const PROTECTED_DIRS = /\.(claude|cursor|stroq)(\/|$|\s)/;
+export const PROTECTED_DIRS = /\.(claude|cursor|codex|stroq)(\/|$|\s)/;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',
