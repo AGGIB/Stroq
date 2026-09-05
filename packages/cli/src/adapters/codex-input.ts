@@ -46,8 +46,13 @@ export function codexToolName(rawTool: string): string {
 
 /** `bash`, `sh`, `/bin/zsh`, `/usr/bin/dash`: argv[0] of a `<shell> -c <script>` call. */
 const ARGV_SHELL = /^(?:\/\w+\/)*(?:bash|sh|zsh|dash)$/;
-/** `-c`, `-lc`, `-ec`, …: the flag that makes the next element a script, not a word. */
-const ARGV_SHELL_FLAG = /^-[a-z]*c[a-z]*$/;
+/**
+ * `-c`, `-lc`, `-ec`, `-xc`, `-ce`, …: the flag that makes the next element a script
+ * rather than a word. Deliberately narrow — the shell's other single-letter options
+ * only — so a long option that merely contains a `c` (`-check`, `-nocorrect`) stays
+ * an ordinary argument instead of hiding everything before it from the classifier.
+ */
+const ARGV_SHELL_FLAG = /^-[eilx]{0,3}c[eilx]{0,2}$/;
 /** Whitespace or a character a shell reads as syntax rather than as literal text. */
 const NEEDS_QUOTING = /[\s'"$`\\|&;<>()*?[\]#~]/;
 
@@ -95,24 +100,35 @@ const fieldCommand = (value: unknown): string => {
 };
 
 /**
- * The shell command, in every shape Codex might send `tool_input`: an object under
- * any of the field spellings above (string, argv array, or a one-level-nested
- * `{ text }`), a bare argv array, or a plain string used verbatim through
- * `toolInputRecord`'s `raw` fallback. First non-empty field wins. A `tool_input`
- * this loose must still expose a command, or the secret-egress guard (which reads
- * this field) and the classifier see nothing and a poisoned or destructive command
- * sails through unclassified — which is why an empty result here is denied
- * fail-closed by the caller rather than passed to the engine as an empty action.
+ * EVERY command `tool_input` could be carrying, in field order and de-duplicated:
+ * an object under any of the field spellings above (string, argv array, or a
+ * one-level-nested `{ text }`), a bare argv array, or a plain string used verbatim
+ * through `toolInputRecord`'s `raw` fallback.
+ *
+ * All of them, not the first: taking only the first would let `{ command: 'ls',
+ * cmd: 'curl … | sh' }` classify `ls` and allow the call, with whichever field
+ * Codex actually meant never examined. The caller runs one `engine.pre` per
+ * candidate and takes the worst, the same way it treats an `apply_patch`'s paths.
+ * An empty result is denied fail-closed rather than handed to the engine as an
+ * empty action — the classifier and the secret-egress guard both read this field,
+ * and a command that reaches neither is a command that runs.
  */
-export function commandOf(toolInput: unknown): string {
-  if (Array.isArray(toolInput)) return joinArgv(toolInput);
+export function commandCandidates(toolInput: unknown): readonly string[] {
+  if (Array.isArray(toolInput)) {
+    const joined = joinArgv(toolInput);
+    return joined === '' ? [] : [joined];
+  }
   const record = toolInputRecord(toolInput);
+  const found = new Set<string>();
   for (const key of COMMAND_FIELDS) {
     const text = fieldCommand(record[key]);
-    if (text !== '') return text;
+    if (text !== '') found.add(text);
   }
-  return '';
+  return [...found];
 }
+
+/** The command the engine and the secret guard see in `command`: the first candidate. */
+export const commandOf = (toolInput: unknown): string => commandCandidates(toolInput)[0] ?? '';
 
 /**
  * The patch body, unioned across every field this Codex build might use for it —

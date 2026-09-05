@@ -218,6 +218,37 @@ describe('mergeCodexHooks on a file that keeps its events at the root', () => {
     ]);
   });
 
+  it('migrates a single group object at the root, without duplicating it on a re-run', () => {
+    // A plausible hand-edit: one group written directly under the event name,
+    // with no array around it. Wrapping it is the only way not to lose it.
+    const single = { PreToolUse: group('Bash', 'echo hi') } as unknown as CodexHooksJson;
+    const once = mergeCodexHooks(single, cmd);
+    expect(once['PreToolUse']).toBeUndefined();
+    expect(nested(once, 'PreToolUse')).toEqual([
+      { matcher: 'Bash', commands: ['echo hi'] },
+      { matcher: CODEX_PRE_MATCHER, commands: [cmd] },
+    ]);
+    expect(JSON.stringify(mergeCodexHooks(once, cmd))).toBe(JSON.stringify(once));
+  });
+
+  it('leaves a root event value it cannot read exactly where it found it', () => {
+    const odd = { Stop: 'echo x', SessionStart: 7 } as unknown as CodexHooksJson;
+    const merged = mergeCodexHooks(odd, cmd);
+    // Not something Stroq can turn into hook groups — and not Stroq's to delete
+    // either. Only the keys actually lifted are removed from the root.
+    expect(merged['Stop']).toBe('echo x');
+    expect(merged['SessionStart']).toBe(7);
+    expect(merged.hooks?.['Stop']).toBeUndefined();
+    expect(hasStroqCodexHook(merged)).toBe(true);
+  });
+
+  it('installs under hooks while keeping an unreadable root PreToolUse', () => {
+    const merged = mergeCodexHooks({ PreToolUse: 'nope' } as unknown as CodexHooksJson, cmd);
+    expect(merged['PreToolUse']).toBe('nope');
+    expect(nested(merged, 'PreToolUse')).toEqual([{ matcher: CODEX_PRE_MATCHER, commands: [cmd] }]);
+    expect(hasStroqCodexHook(merged)).toBe(true);
+  });
+
   it('reports a root-level Stroq entry as not installed, then migrates it', () => {
     const rootOnly = { PreToolUse: [group(CODEX_PRE_MATCHER, cmd)] } as unknown as CodexHooksJson;
     // `init` only ever writes under `hooks`, so that is the only place `doctor`

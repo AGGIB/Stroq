@@ -190,7 +190,9 @@ describe('codexToolInput', () => {
     expect(codexToolInput(parsed({ tool_name: 'Bash' }))).toEqual({ command: '' });
   });
 
-  it('reads the command from every field spelling, first non-empty wins', () => {
+  it('reads the command from every field spelling', () => {
+    // The record handed to the engine carries the first candidate; when a payload
+    // holds several, `handleCodexHook` classifies each of them (see codex-shapes).
     for (const key of ['command', 'cmd', 'input', 'script'])
       expect(
         codexToolInput(parsed({ tool_name: 'Bash', tool_input: { [key]: 'ls -la' } }))['command'],
@@ -209,6 +211,28 @@ describe('codexToolInput', () => {
     expect(
       codexToolInput(parsed({ tool_name: 'Bash', tool_input: { shell_command: 'ls -la' } })),
     ).toEqual({ command: '' });
+  });
+
+  it('only treats a real shell -c flag as one, not any flag containing a c', () => {
+    // `-check` is an argument of `sh`, not the flag that makes the next element a
+    // script: reading it as one would classify `foo` alone and drop `sh -check`.
+    expect(
+      codexToolInput(
+        parsed({ tool_name: 'Bash', tool_input: { command: ['sh', '-check', 'foo'] } }),
+      ),
+    ).toEqual({ command: 'sh -check foo' });
+    expect(
+      codexToolInput(
+        parsed({ tool_name: 'Bash', tool_input: { command: ['zsh', '-nocorrect', 'ls'] } }),
+      ),
+    ).toEqual({ command: 'zsh -nocorrect ls' });
+    for (const flag of ['-c', '-lc', '-ec', '-xc', '-lec', '-ce', '-cl', '-ic'])
+      expect(
+        codexToolInput(
+          parsed({ tool_name: 'Bash', tool_input: { command: ['bash', flag, 'ls'] } }),
+        ),
+        flag,
+      ).toEqual({ command: 'ls' });
   });
 
   it('exposes the first patched path plus the whole list', () => {

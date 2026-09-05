@@ -87,27 +87,49 @@ function nestedEvents(settings: CodexHooksJson): CodexEventMap {
 }
 
 /**
- * Every group the file declares for each event, from the official `hooks` wrapper
- * and from the root, in that order. The file is user-supplied JSON, so the casts
- * are a naming convenience only: `groupsOf` and `withoutStroqGroups` re-check
- * every value they read.
+ * One root-level event value as hook groups, or `null` when it is not a shape that
+ * can be lifted. An array is the documented root form; a bare group object is a
+ * plausible hand-edit and is wrapped rather than lost. Anything else (a string, a
+ * number, `null`) is left where it was found — Stroq cannot read it, and a key it
+ * cannot read is not a key it may delete.
  */
-function eventMapOf(settings: CodexHooksJson): CodexEventMap {
-  const merged: Record<string, readonly CodexHookGroup[]> = { ...nestedEvents(settings) };
-  for (const name of CODEX_EVENT_NAMES) {
-    const rooted = settings[name];
-    if (!Array.isArray(rooted)) continue;
-    merged[name] = [...groupsOf(merged, name), ...(rooted as readonly CodexHookGroup[])];
-  }
-  return merged;
+function liftableGroups(value: unknown): readonly CodexHookGroup[] | null {
+  if (Array.isArray(value)) return value as readonly CodexHookGroup[];
+  if (isPlainObject(value)) return [value as unknown as CodexHookGroup];
+  return null;
 }
 
-/** Keys the merge re-writes itself, so they must not be copied through from the root. */
-const REWRITTEN_KEYS: ReadonlySet<string> = new Set([...CODEX_EVENT_NAMES, 'hooks']);
+interface RootMerge {
+  /** Every group the file declares per event, `hooks` first then the root. */
+  readonly events: CodexEventMap;
+  /** The root keys actually lifted — the only ones the root may lose. */
+  readonly lifted: ReadonlySet<string>;
+}
 
-/** Everything else in the file, preserved untouched. */
-const otherKeys = (settings: CodexHooksJson): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(settings).filter(([key]) => !REWRITTEN_KEYS.has(key)));
+/**
+ * The file is user-supplied JSON, so the casts here are a naming convenience only:
+ * `groupsOf` and `withoutStroqGroups` re-check every value they read.
+ */
+function eventMapOf(settings: CodexHooksJson): RootMerge {
+  const merged: Record<string, readonly CodexHookGroup[]> = { ...nestedEvents(settings) };
+  const lifted = new Set<string>();
+  for (const name of CODEX_EVENT_NAMES) {
+    const groups = liftableGroups(settings[name]);
+    if (groups === null) continue;
+    merged[name] = [...groupsOf(merged, name), ...groups];
+    lifted.add(name);
+  }
+  return { events: merged, lifted };
+}
+
+/** Everything the merge does not rewrite itself, preserved untouched. */
+const otherKeys = (
+  settings: CodexHooksJson,
+  lifted: ReadonlySet<string>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(settings).filter(([key]) => key !== 'hooks' && !lifted.has(key)),
+  );
 
 const mergeGroups = (
   groups: readonly CodexHookGroup[],
@@ -129,12 +151,13 @@ const mergeGroups = (
  * The result is always the official nested shape: an event the file kept at the
  * root is moved under `hooks` with its groups intact rather than left where a
  * `hooks`-reading Codex might not look for it. Nothing is dropped — an event
- * declared in both places keeps both, `hooks` first.
+ * declared in both places keeps both (`hooks` first), and a root value that is
+ * neither an array nor a group object is left at the root exactly as it was.
  */
 export function mergeCodexHooks(settings: CodexHooksJson, command: string): CodexHooksJson {
-  const events = eventMapOf(settings);
+  const { events, lifted } = eventMapOf(settings);
   return {
-    ...otherKeys(settings),
+    ...otherKeys(settings, lifted),
     hooks: {
       ...events,
       PreToolUse: mergeGroups(groupsOf(events, 'PreToolUse'), CODEX_PRE_MATCHER, command),
