@@ -14,6 +14,7 @@ import {
   settingsPath,
 } from '../../src/commands/init.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
+import { codexHooksPath } from '../../src/commands/codex-hooks.js';
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -183,6 +184,65 @@ describe('runInit --agent', () => {
     const code = await runInit(['--agent', 'copilot']);
     out.restore();
     expect(code).toBe(1);
-    expect(out.lines.join('')).toBe('unknown agent "copilot" (supported: claude-code, cursor)\n');
+    expect(out.lines.join('')).toBe(
+      'unknown agent "copilot" (supported: claude-code, cursor, codex)\n',
+    );
+  });
+});
+
+describe('hookCommand for codex', () => {
+  it('ends with the agent name, which is how init finds its own entries', () => {
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js', 'codex')).toBe(
+      '"/usr/bin/node" "/opt/stroq/dist/index.js" hook codex',
+    );
+    expect(hookCommand('/usr/bin/node', '/w/src/index.ts', 'codex')).toBe(
+      '"/usr/bin/node" --import tsx "/w/src/index.ts" hook codex',
+    );
+  });
+});
+
+describe('runInit --agent codex', () => {
+  it('writes .codex/hooks.json for the project and is idempotent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-codex-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'codex']));
+    out.restore();
+    expect(code).toBe(0);
+    const file = codexHooksPath('project', dir);
+    const printed = out.lines.join('');
+    expect(printed).toContain(file);
+    expect(printed).toContain('Bash|apply_patch|mcp__.*');
+    // The two things a Codex user has to know that no other agent needs.
+    expect(printed).toContain('[features] hooks = true');
+    expect(printed).toContain('trust');
+    const first = readFileSync(file, 'utf8');
+    const parsed = JSON.parse(first);
+    expect(parsed.hooks.PreToolUse).toHaveLength(1);
+    expect(parsed.hooks.PreToolUse[0].hooks[0].statusMessage).toBe('Stroq');
+    expect(parsed.hooks.PreToolUse[0].hooks[0].failClosed).toBeUndefined();
+
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'codex']));
+    again.restore();
+    expect(readFileSync(file, 'utf8')).toBe(first);
+  });
+
+  it('prints the merged file and writes nothing with --dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-codex-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'codex', '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect(JSON.parse(out.lines.join('')).hooks.PostToolUse).toHaveLength(1);
+    expect(existsSync(codexHooksPath('project', dir))).toBe(false);
+  });
+
+  it('does not touch the other agents', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-codex-'));
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'codex']));
+    out.restore();
+    expect(existsSync(settingsPath('project', dir))).toBe(false);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
   });
 });

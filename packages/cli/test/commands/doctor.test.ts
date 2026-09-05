@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
 import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
+import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import { secretsFile } from '../../src/paths.js';
 
@@ -138,5 +139,83 @@ describe('doctorReport cursor hooks', () => {
     expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(false);
     expect(detailOf(report, 'cursor hooks')).toMatch(/cannot parse/);
     expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+  });
+});
+
+describe('doctorReport codex hooks', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+
+  it('reports three agents and fails all three lines when none is installed', async () => {
+    const report = await doctorReport(cwd);
+    expect(report.checks.map((c) => c.name)).toEqual([
+      'node',
+      'rules',
+      'self-test',
+      'hooks',
+      'cursor hooks',
+      'codex hooks',
+      'home',
+      'secrets',
+    ]);
+    const codex = report.checks.find((c) => c.name === 'codex hooks')!;
+    expect(codex.ok).toBe(false);
+    expect(codex.detail).toContain(codexHooksPath('project', cwd));
+    expect(codex.detail).toContain('project: missing');
+  });
+
+  it('passes every line once Codex alone is installed', async () => {
+    installCodexHooks(codexHooksPath('project', cwd), '"/n" "/e.js" hook codex');
+    const report = await doctorReport(cwd);
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+    expect(detailOf(report, 'codex hooks')).toContain('project: installed');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: codex hooks are)');
+    expect(detailOf(report, 'cursor hooks')).toBe('not installed (ok: codex hooks are)');
+  });
+
+  it('names every agent that is carrying the line', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installCursorHooks(cursorHooksPath('project', cwd), '"/n" "/e.js" hook cursor');
+    expect(detailOf(await doctorReport(cwd), 'codex hooks')).toBe(
+      'not installed (ok: hooks, cursor hooks are)',
+    );
+  });
+
+  it('reports a broken codex hooks file without failing the other two lines', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const file = codexHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ not json');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'codex hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'codex hooks')).toMatch(/cannot parse/);
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+    expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
+  });
+
+  it('recognises a flat hooks file as installed', async () => {
+    const file = codexHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [
+              {
+                type: 'command',
+                command: '"/n" "/e.js" hook codex',
+                timeout: 15,
+                statusMessage: 'Stroq',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(true);
   });
 });
