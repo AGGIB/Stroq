@@ -1,0 +1,13 @@
+{
+  "session_id": "codex-demo-2",
+  "cwd": "__CWD__",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5-codex",
+  "permission_mode": "auto",
+  "turn_id": "turn-1",
+  "tool_use_id": "call-1",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: src/report.ts\n@@\n-const limit = 10;\n+const limit = 100;\n*** Delete File: .codex/hooks.json\n*** End Patch\n"
+  }
+}

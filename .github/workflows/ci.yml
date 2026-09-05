@@ -45,6 +45,9 @@ jobs:
       - name: Run Cursor demo
         run: ./examples/demo/run-cursor-demo.sh
 
+      - name: Run Codex demo
+        run: ./examples/demo/run-codex-demo.sh
+
       - name: Attack suite
         run: node packages/cli/dist/index.js attack
 
