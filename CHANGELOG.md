@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Claude Code plugin and marketplace.** The repository is now a plugin marketplace with one plugin, `stroq` (`plugins/stroq`): `/plugin marketplace add AGGIB/Stroq` then `/plugin install stroq@stroq` installs the same `PreToolUse`/`PostToolUse` hooks as `stroq init`, without touching `.claude/settings.json`. The plugin's hook wrapper prefers a globally installed `stroq` and falls back to `npx -y @stroq/cli@<pinned version>`; if neither can start, a `PreToolUse` event exits with code 2 (block), so a missing runtime never silently disables the firewall.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added

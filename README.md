@@ -124,6 +124,17 @@ npx @stroq/cli doctor  # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
+### As a Claude Code plugin
+
+The repository is also a plugin marketplace. Inside Claude Code:
+
+```text
+/plugin marketplace add AGGIB/Stroq
+/plugin install stroq@stroq
+```
+
+This registers the same `PreToolUse`/`PostToolUse` hooks as `stroq init` without touching your `.claude/settings.json`, so `stroq doctor` will report the settings-file hooks as missing — that is expected. The plugin's hook wrapper runs a globally installed `stroq` when there is one (fastest), and otherwise `npx -y @stroq/cli@<pinned version>` (the first run downloads the package). If neither can start, a `PreToolUse` event exits with code 2, which Claude Code treats as _block_: a missing runtime never silently disables the firewall. For the lowest per-call latency, `npm install -g @stroq/cli` alongside the plugin.
+
 ### From source
 
 ```bash
