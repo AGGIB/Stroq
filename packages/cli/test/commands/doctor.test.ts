@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -195,27 +195,39 @@ describe('doctorReport codex hooks', () => {
     expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
   });
 
-  it('recognises a flat hooks file as installed', async () => {
+  it('does not call a root-level entry installed; re-running init migrates it', async () => {
     const file = codexHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(
-      file,
-      JSON.stringify({
-        PreToolUse: [
-          {
-            matcher: 'Bash',
-            hooks: [
-              {
-                type: 'command',
-                command: '"/n" "/e.js" hook codex',
-                timeout: 15,
-                statusMessage: 'Stroq',
-              },
-            ],
-          },
-        ],
-      }),
-    );
+    const stroqGroup = {
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: '"/n" "/e.js" hook codex',
+          timeout: 15,
+          statusMessage: 'Stroq',
+        },
+      ],
+    };
+    // `init` only ever writes under `hooks`. A file that still keeps the entry at
+    // the root is reported as not installed rather than as protection a Codex
+    // build reading only `hooks` would never actually apply.
+    writeFileSync(file, JSON.stringify({ PreToolUse: [stroqGroup] }));
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(false);
+
+    installCodexHooks(file, '"/n" "/e.js" hook codex');
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(true);
+    const migrated = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    expect(migrated['PreToolUse']).toBeUndefined();
+  });
+
+  it('reports a hooks file whose event value is not an array as not installed', async () => {
+    const file = codexHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: 'nope' } }));
+    const report = await doctorReport(cwd);
+    const codex = report.checks.find((c) => c.name === 'codex hooks');
+    expect(codex?.ok).toBe(false);
+    expect(codex?.detail).not.toMatch(/cannot parse/);
   });
 });

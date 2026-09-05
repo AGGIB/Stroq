@@ -2,7 +2,12 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
-import { HOOK_TIMEOUT_SECONDS, readJsonObject, writeJsonObject } from './config-file.js';
+import {
+  HOOK_TIMEOUT_SECONDS,
+  readJsonObject,
+  withoutStroqGroups,
+  writeJsonObject,
+} from './config-file.js';
 import {
   cursorHooksPath,
   installCursorHooks,
@@ -56,13 +61,8 @@ export const stroqHandler = (command: string): HookHandler => ({
 export const isStroqHandler = (handler: HookHandler): boolean =>
   / hook claude-code$/.test(handler.command);
 
-function withoutStroq(groups: readonly HookGroup[]): HookGroup[] {
-  return groups
-    .map((g) =>
-      Array.isArray(g.hooks) ? { ...g, hooks: g.hooks.filter((h) => !isStroqHandler(h)) } : g,
-    )
-    .filter((g) => !Array.isArray(g.hooks) || g.hooks.length > 0);
-}
+const withoutStroq = (groups: readonly HookGroup[]): HookGroup[] =>
+  withoutStroqGroups<HookGroup>(groups, (handler) => isStroqHandler(handler as HookHandler));
 
 export function mergeHooks(settings: SettingsJson, command: string): SettingsJson {
   const hooks = settings.hooks ?? {};
@@ -125,14 +125,17 @@ function initCursor(scope: 'project' | 'user', command: string, dryRun: boolean)
 }
 
 /**
- * Two things a Codex user has to know that no other agent needs: on older releases
- * hooks are opt-in behind a feature flag, and a project-local `.codex/` layer only
- * loads once it is trusted — so an install that looks perfect can still be inert.
+ * Three things a Codex user has to know that no other agent needs: on older releases
+ * hooks are opt-in behind a feature flag, a project-local `.codex/` layer only loads
+ * once it is trusted — so an install that looks perfect can still be inert — and an
+ * existing file that kept its events at the root has just been restructured, which
+ * is a change to their file and so has to be said out loud.
  */
 const CODEX_NOTE =
   'On older Codex releases hooks are opt-in: set [features] hooks = true in ~/.codex/config.toml.\n' +
   "Project hooks load only once you trust this project's .codex/ layer (Codex asks the first time);\n" +
-  '"stroq init --agent codex --user" writes ~/.codex/hooks.json instead and skips that prompt.\n';
+  '"stroq init --agent codex --user" writes ~/.codex/hooks.json instead and skips that prompt.\n' +
+  'Events an existing file kept at its root are migrated under the official "hooks" wrapper; nothing is dropped.\n';
 
 function initCodex(scope: 'project' | 'user', command: string, dryRun: boolean): number {
   const file = codexHooksPath(scope);

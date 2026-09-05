@@ -169,47 +169,90 @@ describe('mergeCodexHooks on an existing nested file', () => {
   });
 });
 
-describe('mergeCodexHooks on a flat file', () => {
+const group = (matcher: string, command: string) => ({
+  matcher,
+  hooks: [{ type: 'command', command, timeout: 5, statusMessage: 'x' }],
+});
+
+describe('mergeCodexHooks on a file that keeps its events at the root', () => {
   /** Some community docs show the event map at the root, with no `hooks` wrapper. */
   const flatFile = {
-    SessionStart: [
-      {
-        matcher: '.*',
-        hooks: [{ type: 'command', command: 'echo start', timeout: 5, statusMessage: 'x' }],
-      },
-    ],
-    PreToolUse: [
-      {
-        matcher: 'Bash',
-        hooks: [{ type: 'command', command: 'echo hi', timeout: 5, statusMessage: 'x' }],
-      },
-    ],
+    SessionStart: [group('.*', 'echo start')],
+    PreToolUse: [group('Bash', 'echo hi')],
   } as unknown as CodexHooksJson;
 
-  it('keeps the events at the root rather than rewriting the file', () => {
+  it('migrates the root events into the official hooks wrapper, dropping nothing', () => {
     const merged = mergeCodexHooks(flatFile, cmd);
-    expect(merged.hooks).toBeUndefined();
-    expect(rooted(merged, 'PreToolUse')).toEqual([
+    // Which shape a file "is" cannot be guessed safely, so the merge always writes
+    // the official one and moves what it finds at the root into it.
+    expect(merged['PreToolUse']).toBeUndefined();
+    expect(merged['SessionStart']).toBeUndefined();
+    expect(nested(merged, 'PreToolUse')).toEqual([
       { matcher: 'Bash', commands: ['echo hi'] },
       { matcher: CODEX_PRE_MATCHER, commands: [cmd] },
     ]);
-    expect(rooted(merged, 'PostToolUse')).toEqual([
+    expect(nested(merged, 'PostToolUse')).toEqual([
       { matcher: CODEX_POST_MATCHER, commands: [cmd] },
     ]);
-    expect(merged['SessionStart']).toEqual(flatFile['SessionStart']);
+    expect(nested(merged, 'SessionStart')).toEqual([{ matcher: '.*', commands: ['echo start'] }]);
     expect(hasStroqCodexHook(merged)).toBe(true);
-    // Idempotent in this shape too: a second install must not stack a second entry.
+    // Idempotent after the migration: a second install must not stack a second entry.
     expect(JSON.stringify(mergeCodexHooks(merged, cmd))).toBe(JSON.stringify(merged));
   });
 
-  it('treats a file with a hooks wrapper as nested even when it also has root keys', () => {
-    const merged = mergeCodexHooks(
-      { version: 1, hooks: {}, notes: 'x' } as unknown as CodexHooksJson,
-      cmd,
-    );
-    expect(Object.keys(merged.hooks ?? {})).toEqual(['PreToolUse', 'PostToolUse']);
-    expect(merged['notes']).toBe('x');
+  it('keeps both copies when an event is declared in both shapes, hooks first', () => {
+    const both = {
+      version: 1,
+      notes: 'x',
+      hooks: { PreToolUse: [group('nested', 'echo nested')] },
+      PreToolUse: [group('rooted', 'echo rooted')],
+    } as unknown as CodexHooksJson;
+    const merged = mergeCodexHooks(both, cmd);
     expect(merged['PreToolUse']).toBeUndefined();
+    expect(merged['notes']).toBe('x');
+    expect(merged['version']).toBe(1);
+    expect(nested(merged, 'PreToolUse')).toEqual([
+      { matcher: 'nested', commands: ['echo nested'] },
+      { matcher: 'rooted', commands: ['echo rooted'] },
+      { matcher: CODEX_PRE_MATCHER, commands: [cmd] },
+    ]);
+  });
+
+  it('reports a root-level Stroq entry as not installed, then migrates it', () => {
+    const rootOnly = { PreToolUse: [group(CODEX_PRE_MATCHER, cmd)] } as unknown as CodexHooksJson;
+    // `init` only ever writes under `hooks`, so that is the only place `doctor`
+    // may call installed — otherwise a Codex build that reads only `hooks` would
+    // leave the user believing they were protected.
+    expect(hasStroqCodexHook(rootOnly)).toBe(false);
+    const merged = mergeCodexHooks(rootOnly, cmd);
+    expect(hasStroqCodexHook(merged)).toBe(true);
+    expect(nested(merged, 'PreToolUse')).toEqual([{ matcher: CODEX_PRE_MATCHER, commands: [cmd] }]);
+  });
+});
+
+describe('mergeCodexHooks on a file whose hooks key is not an event map', () => {
+  it.each([
+    ['a string', 'garbage'],
+    ['an array', [{ matcher: 'Bash', hooks: [] }]],
+    ['a number', 7],
+  ])('ignores a hooks key that is %s rather than spreading it', (_label, hooks) => {
+    const merged = mergeCodexHooks({ hooks } as unknown as CodexHooksJson, cmd);
+    // Spreading an array or a string would write numeric keys into the event map.
+    expect(Object.keys(merged.hooks ?? {})).toEqual(['PreToolUse', 'PostToolUse']);
+    expect(hasStroqCodexHook(merged)).toBe(true);
+  });
+
+  it('drops a null group instead of throwing, and keeps the real ones', () => {
+    const withNull = {
+      hooks: { PreToolUse: [null, group('Bash', 'echo hi'), 'nonsense', { matcher: 'no-hooks' }] },
+    } as unknown as CodexHooksJson;
+    const merged = mergeCodexHooks(withNull, cmd);
+    expect(merged.hooks?.['PreToolUse']).toEqual([
+      group('Bash', 'echo hi'),
+      { matcher: 'no-hooks' },
+      { matcher: CODEX_PRE_MATCHER, hooks: [codexHandler(cmd)] },
+    ]);
+    expect(hasStroqCodexHook(withNull)).toBe(false);
   });
 });
 
