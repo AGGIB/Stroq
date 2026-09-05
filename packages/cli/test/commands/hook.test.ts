@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SUPPORTED_AGENTS, runHook } from '../../src/commands/hook.js';
+import { SUPPORTED_AGENTS, runHook, runHookCommand } from '../../src/commands/hook.js';
 
 let home: string;
 
@@ -177,5 +177,38 @@ describe('runHook codex routing', () => {
     expect(cursor.exitCode).toBe(0);
     expect(cursor.stderr).toBeUndefined();
     expect(JSON.parse(cursor.stdout)).toMatchObject({ permission: 'deny' });
+  });
+});
+
+describe('runHookCommand when stdin itself fails', () => {
+  const exploding = () => Promise.reject(new Error('stdin exploded'));
+
+  it('answers a Codex hook with the block Codex honours, not an exit-1 fail-open', async () => {
+    const out = await runHookCommand('codex', exploding);
+    expect(out).toEqual({
+      stdout: '',
+      stderr: 'Stroq internal error (fail-closed): stdin exploded',
+      exitCode: 2,
+    });
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook codex');
+  });
+
+  it('leaves the other agents on the exit-1 path they already had', async () => {
+    for (const agent of ['claude-code', 'cursor'])
+      await expect(runHookCommand(agent, exploding)).rejects.toThrow('stdin exploded');
+  });
+
+  it('routes a readable stdin exactly as runHook does', async () => {
+    const event = JSON.stringify({
+      session_id: 'read-1',
+      hook_event_name: 'PreToolUse',
+      cwd: '/home/dev/p',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls -la' },
+    });
+    expect(await runHookCommand('codex', () => Promise.resolve(event))).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
   });
 });

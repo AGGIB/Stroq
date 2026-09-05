@@ -1,7 +1,7 @@
 import { runAttackCommand } from './commands/attack.js';
 import { runCanary } from './commands/canary.js';
 import { runDoctor } from './commands/doctor.js';
-import { readStdin, runHook } from './commands/hook.js';
+import { runHookCommand } from './commands/hook.js';
 import { runInit } from './commands/init.js';
 import { runLog } from './commands/log.js';
 import { runUntaint } from './commands/untaint.js';
@@ -27,7 +27,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
     case 'hook': {
-      const out = await runHook(rest[0] ?? '', await readStdin());
+      // Reading stdin happens inside the command so that a rejection there is
+      // answered by the agent's own fail-closed path, not by the exit-1 handler
+      // at the bottom of this file (which Codex would read as a hook failure and
+      // continue past).
+      const out = await runHookCommand(rest[0] ?? '');
       if (out.stdout) process.stdout.write(out.stdout);
       // Codex reads the block reason from stderr when the hook exits 2; the other
       // adapters never set this field.
