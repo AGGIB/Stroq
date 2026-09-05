@@ -103,9 +103,11 @@ describe('doctorReport cursor hooks', () => {
     const report = await doctorReport(cwd);
     const cursor = report.checks.find((c) => c.name === 'cursor hooks')!;
     expect(cursor.ok).toBe(false);
+    // A failing line keeps the per-scope paths: there is nothing carrying it.
     expect(cursor.detail).toContain(cursorHooksPath('project', cwd));
     expect(cursor.detail).toContain('project: missing');
     expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'hooks')).toContain('project: missing');
   });
 
   it('passes both lines once Cursor alone is installed', async () => {
@@ -113,9 +115,18 @@ describe('doctorReport cursor hooks', () => {
     const report = await doctorReport(cwd);
     expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
     expect(detailOf(report, 'cursor hooks')).toContain('project: installed');
-    // A Cursor-only user must not be told their Claude Code install is broken.
+    // A Cursor-only user must not be told their Claude Code install is broken —
+    // and a passing line must not read as a green tick next to the word "missing".
     expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
-    expect(detailOf(report, 'hooks')).toContain('project: missing');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: cursor hooks are)');
+  });
+
+  it('says which agent carries the line when Claude Code alone is installed', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
+    expect(detailOf(report, 'cursor hooks')).toBe('not installed (ok: hooks are)');
+    expect(detailOf(report, 'hooks')).toContain('project: installed');
   });
 
   it('reports a broken cursor hooks file without failing the Claude Code line', async () => {
