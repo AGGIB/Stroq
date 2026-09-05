@@ -14,6 +14,7 @@ import {
   CODEX_HIGH_IMPACT_TOOL,
   codexToolInput,
   codexToolName,
+  commandCandidates,
   describeToolInput,
   isBashTool,
   isEmptyToolInput,
@@ -169,36 +170,41 @@ const asPaths = (value: unknown): readonly string[] =>
  * engine. MCP tools are never this: their arguments are the record itself, which
  * the secret guard scans whatever shape it arrived in.
  */
-function unreadableInput(
-  input: CodexHookInput,
-  toolInput: Readonly<Record<string, unknown>>,
-): Decision | null {
+function unreadableInput(input: CodexHookInput, guards: Omit<PreGuards, 'unreadable'>) {
   const bash = isBashTool(input.tool_name);
   const patch = isPatchTool(input.tool_name);
   // The only two high-impact shapes with a command or a patch to lose.
   if (!bash && !patch) return null;
   if (isEmptyToolInput(input.tool_input)) return null;
-  const readable = bash ? toolInput['command'] !== '' : asPaths(toolInput['file_paths']).length > 0;
+  const readable = bash ? guards.commands.length > 0 : guards.patchPaths.length > 0;
   return readable ? null : codexUnreadableInput(describeToolInput(input.tool_input));
 }
 
-/** One `toolInput` per patched path, so every file the patch touches is classified and audited. */
-function patchInputs(
+/**
+ * One `toolInput` per thing that has to be classified on its own: every file an
+ * `apply_patch` declares, or every field a shell command could have arrived in. The
+ * ordinary single-value case is one call with the record untouched, so a normal
+ * payload still produces exactly one engine call and one audit entry.
+ */
+function preInputs(
   toolInput: Readonly<Record<string, unknown>>,
-  paths: readonly string[],
+  guards: PreGuards,
 ): Record<string, unknown>[] {
-  if (paths.length <= 1) return [{ ...toolInput }];
-  return paths.map((file_path) => ({ ...toolInput, file_path }));
+  if (guards.commands.length > 1)
+    return guards.commands.map((command) => ({ ...toolInput, command }));
+  if (guards.patchPaths.length > 1)
+    return guards.patchPaths.map((file_path) => ({ ...toolInput, file_path }));
+  return [{ ...toolInput }];
 }
 
-/** deny beats ask beats allow: a patch is only as safe as its worst path. */
+/** deny beats ask beats allow: a call is only as safe as its worst path or field. */
 const SEVERITY: Readonly<Record<Decision['effect'], number>> = { allow: 0, ask: 1, deny: 2 };
 
 /**
  * Sequential on purpose: the session store is file-locked and the audit log is a
  * hash chain, so the calls cannot overlap — and the order they run in is the order
  * `stroq log` will show the patch's paths. `inputs` is always non-empty in practice —
- * `patchInputs` never returns `[]` — the guard exists only to give `first` a real
+ * `preInputs` never returns `[]` — the guard exists only to give `first` a real
  * (non-`undefined`) type under `noUncheckedIndexedAccess` without a silent fallback.
  */
 async function decidePre(
@@ -234,8 +240,18 @@ async function denyDirectly(
 }
 
 interface PreGuards {
+  /** Every command spelling a shell call carried; empty for any other tool. */
+  readonly commands: readonly string[];
   readonly patchPaths: readonly string[];
   readonly unreadable: Decision | null;
+}
+
+function preGuards(input: CodexHookInput, toolInput: Readonly<Record<string, unknown>>): PreGuards {
+  const found = {
+    commands: isBashTool(input.tool_name) ? commandCandidates(input.tool_input) : [],
+    patchPaths: isPatchTool(input.tool_name) ? asPaths(toolInput['file_paths']) : [],
+  };
+  return { ...found, unreadable: unreadableInput(input, found) };
 }
 
 async function handlePre(
@@ -254,7 +270,7 @@ async function handlePre(
   const { decision, provenance, secrets } = await decidePre(
     engine,
     event,
-    patchInputs(event.toolInput, guards.patchPaths),
+    preInputs(event.toolInput, guards),
   );
   return renderDecision(decision, provenance, secrets);
 }
@@ -288,10 +304,7 @@ export async function handleCodexHook(engine: StroqEngine, raw: unknown): Promis
   };
   if (input.hook_event_name === 'PostToolUse')
     return handlePost(engine, event, input.tool_response);
-  return handlePre(engine, event, {
-    patchPaths: isPatchTool(input.tool_name) ? asPaths(toolInput['file_paths']) : [],
-    unreadable: unreadableInput(input, toolInput),
-  });
+  return handlePre(engine, event, preGuards(input, toolInput));
 }
 
 /**

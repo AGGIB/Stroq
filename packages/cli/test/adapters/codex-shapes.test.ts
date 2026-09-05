@@ -171,6 +171,42 @@ describe('unreadable tool_input is fail-closed (A4)', () => {
   });
 });
 
+describe('a command in more than one field is judged on its worst', () => {
+  const auditLines = () =>
+    readFileSync(join(home, 'audit.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line !== '').length;
+
+  it.each([
+    ['the first field looks harmless', { command: 'ls -la', cmd: CURL }],
+    ['the dangerous one is third', { cmd: 'ls -la', input: CURL }],
+  ])('denies when %s', async (_label, toolInput) => {
+    // First-non-empty wins would classify `ls -la` and allow the call, leaving
+    // whichever field Codex actually meant unexamined.
+    await taint();
+    const out = await run({ tool_name: 'Bash', tool_input: toolInput });
+    expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-encoded-exec)');
+  });
+
+  it('classifies and audits each distinct candidate exactly once', async () => {
+    const base = { session_id: 'codex-candidates', tool_name: 'Bash' };
+    expect(await run({ ...base, tool_input: { command: 'ls -la' } })).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+    expect(auditLines()).toBe(1);
+    // The same command under two spellings is one action, not two.
+    expect(await run({ ...base, tool_input: { command: 'ls -la', cmd: 'ls -la' } })).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+    expect(auditLines()).toBe(2);
+    // Two genuinely different commands are two classifications, both recorded.
+    await run({ ...base, tool_input: { command: 'ls -la', cmd: 'ls -R' } });
+    expect(auditLines()).toBe(4);
+  });
+});
+
 describe('argv joining does not invent a command (A3)', () => {
   it('quotes an argument that merely looks like a destructive command', async () => {
     expect(
