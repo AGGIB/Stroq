@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats } from '@stroq/core';
 import { secretsFile, stroqHome } from '../paths.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
+import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 
 export interface DoctorCheck {
@@ -41,6 +42,17 @@ function checkCursorHooks(file: string): {
   }
 }
 
+function checkCodexHooks(file: string): {
+  readonly installed: boolean;
+  readonly error: string | null;
+} {
+  try {
+    return { installed: hasStroqCodexHook(readCodexHooks(file)), error: null };
+  } catch (err) {
+    return { installed: false, error: (err as Error).message };
+  }
+}
+
 interface ScopeStatus {
   readonly scope: 'project' | 'user';
   readonly file: string;
@@ -59,29 +71,37 @@ function agentScopes(
   });
 }
 
+interface AgentStatus {
+  readonly name: string;
+  readonly installed: boolean;
+}
+
 /**
  * An agent's line fails on a broken config file, or when NO agent is installed at
  * all. It deliberately does not fail merely because this agent is missing: a
- * Cursor-only user must not be told their Claude Code install is broken, while an
+ * Codex-only user must not be told their Claude Code install is broken, while an
  * install-free machine must still fail `stroq doctor`. In that passing-but-absent
- * case the detail says which agent is carrying the line, rather than putting a green
- * tick next to the word "missing".
+ * case the detail names every agent that IS carrying the line, rather than putting a
+ * green tick next to the word "missing".
  */
 function hooksCheck(
   name: string,
   scopes: readonly ScopeStatus[],
-  other: { readonly name: string; readonly installed: boolean },
+  others: readonly AgentStatus[],
 ): DoctorCheck {
   const broken = scopes.some((s) => s.error !== null);
   const installed = scopes.some((s) => s.installed);
+  const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopes
     .map((s) => s.error ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`)
     .join('; ');
   return {
     name,
-    ok: !broken && (installed || other.installed),
+    ok: !broken && (installed || carrying.length > 0),
     detail:
-      !broken && !installed && other.installed ? `not installed (ok: ${other.name} are)` : perScope,
+      !broken && !installed && carrying.length > 0
+        ? `not installed (ok: ${carrying.join(', ')} are)`
+        : perScope,
   };
 }
 
@@ -117,10 +137,22 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
   const detected = scanContent(rules, SAMPLE).verdict === 'suspect';
-  const claude = agentScopes(cwd, settingsPath, checkClaudeHooks);
-  const cursor = agentScopes(cwd, cursorHooksPath, checkCursorHooks);
-  const claudeAgent = { name: 'hooks', installed: claude.some((s) => s.installed) };
-  const cursorAgent = { name: 'cursor hooks', installed: cursor.some((s) => s.installed) };
+  const agents = [
+    { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks) },
+    { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks) },
+    { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks) },
+  ];
+  const statuses: AgentStatus[] = agents.map((a) => ({
+    name: a.name,
+    installed: a.scopes.some((s) => s.installed),
+  }));
+  const hookChecks = agents.map((agent, i) =>
+    hooksCheck(
+      agent.name,
+      agent.scopes,
+      statuses.filter((_, j) => j !== i),
+    ),
+  );
   const home = stroqHome();
   const secrets = await checkSecrets();
   return {
@@ -132,8 +164,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
         ok: detected,
         detail: detected ? 'injection sample detected' : 'injection sample NOT detected',
       },
-      hooksCheck('hooks', claude, cursorAgent),
-      hooksCheck('cursor hooks', cursor, claudeAgent),
+      ...hookChecks,
       {
         name: 'home',
         ok: true,

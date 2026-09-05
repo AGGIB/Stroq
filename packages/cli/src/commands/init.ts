@@ -9,13 +9,21 @@ import {
   mergeCursorHooks,
   readCursorHooks,
 } from './cursor-hooks.js';
+import {
+  CODEX_POST_MATCHER,
+  CODEX_PRE_MATCHER,
+  codexHooksPath,
+  installCodexHooks,
+  mergeCodexHooks,
+  readCodexHooks,
+} from './codex-hooks.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
-export type HookAgent = 'claude-code' | 'cursor';
-export const HOOK_AGENTS: readonly HookAgent[] = ['claude-code', 'cursor'];
+export type HookAgent = 'claude-code' | 'cursor' | 'codex';
+export const HOOK_AGENTS: readonly HookAgent[] = ['claude-code', 'cursor', 'codex'];
 
 export interface HookHandler {
   readonly type: 'command';
@@ -116,6 +124,31 @@ function initCursor(scope: 'project' | 'user', command: string, dryRun: boolean)
   return 0;
 }
 
+/**
+ * Two things a Codex user has to know that no other agent needs: on older releases
+ * hooks are opt-in behind a feature flag, and a project-local `.codex/` layer only
+ * loads once it is trusted — so an install that looks perfect can still be inert.
+ */
+const CODEX_NOTE =
+  'On older Codex releases hooks are opt-in: set [features] hooks = true in ~/.codex/config.toml.\n' +
+  "Project hooks load only once you trust this project's .codex/ layer (Codex asks the first time);\n" +
+  '"stroq init --agent codex --user" writes ~/.codex/hooks.json instead and skips that prompt.\n';
+
+function initCodex(scope: 'project' | 'user', command: string, dryRun: boolean): number {
+  const file = codexHooksPath(scope);
+  if (dryRun) {
+    process.stdout.write(
+      `${JSON.stringify(mergeCodexHooks(readCodexHooks(file), command), null, 2)}\n`,
+    );
+    return 0;
+  }
+  installCodexHooks(file, command);
+  process.stdout.write(
+    `Stroq hooks installed in ${file}\n  PreToolUse  → ${CODEX_PRE_MATCHER}\n  PostToolUse → ${CODEX_POST_MATCHER}\n${CODEX_NOTE}Run "stroq doctor" to verify.\n`,
+  );
+  return 0;
+}
+
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -133,7 +166,10 @@ export async function runInit(args: readonly string[]): Promise<number> {
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
   const command = hookCommand(process.execPath, resolve(process.argv[1] ?? ''), agent as HookAgent);
-  return agent === 'cursor'
-    ? initCursor(scope, command, dryRun)
-    : initClaudeCode(scope, command, dryRun);
+  const install: Readonly<Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number>> = {
+    'claude-code': initClaudeCode,
+    cursor: initCursor,
+    codex: initCodex,
+  };
+  return install[agent as HookAgent](scope, command, dryRun);
 }
