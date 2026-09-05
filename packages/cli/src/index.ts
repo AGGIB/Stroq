@@ -12,8 +12,8 @@ const USAGE = `stroq <command>
 
 Commands:
   init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor; project config by default)
-  hook <claude-code|cursor>          hook entrypoint: reads the event JSON on stdin, prints a decision
+                                     install hooks (--agent claude-code | cursor | codex; project config by default)
+  hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
   doctor                             check the installation
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
@@ -29,6 +29,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     case 'hook': {
       const out = await runHook(rest[0] ?? '', await readStdin());
       if (out.stdout) process.stdout.write(out.stdout);
+      // Codex reads the block reason from stderr when the hook exits 2; the other
+      // adapters never set this field.
+      if (out.stderr) process.stderr.write(out.stderr);
       return out.exitCode;
     }
     case 'init':

@@ -30,10 +30,10 @@ describe('runHook', () => {
 
 describe('runHook agent routing', () => {
   it('lists every supported agent when the agent is unknown', async () => {
-    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor']);
+    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor', 'codex']);
     const out = await runHook('bogus', '{}');
     expect(out).toEqual({
-      stdout: 'unknown agent "bogus" (supported: claude-code, cursor)\n',
+      stdout: 'unknown agent "bogus" (supported: claude-code, cursor, codex)\n',
       exitCode: 1,
     });
   });
@@ -42,7 +42,7 @@ describe('runHook agent routing', () => {
     for (const agent of ['constructor', '__proto__']) {
       const out = await runHook(agent, '{}');
       expect(out).toEqual({
-        stdout: `unknown agent "${agent}" (supported: claude-code, cursor)\n`,
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex)\n`,
         exitCode: 1,
       });
     }
@@ -95,5 +95,87 @@ describe('runHook agent routing', () => {
       }),
     );
     expect(JSON.parse(asked.stdout)).toMatchObject({ permission: 'ask' });
+  });
+});
+
+describe('runHook codex routing', () => {
+  const reasonOf = (stdout: string) =>
+    String(
+      (JSON.parse(stdout) as { hookSpecificOutput: Record<string, unknown> }).hookSpecificOutput[
+        'permissionDecisionReason'
+      ],
+    );
+
+  it('lists codex among the supported agents', async () => {
+    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor', 'codex']);
+    expect(await runHook('bogus', '{}')).toEqual({
+      stdout: 'unknown agent "bogus" (supported: claude-code, cursor, codex)\n',
+      exitCode: 1,
+    });
+    for (const agent of ['constructor', '__proto__'])
+      expect(await runHook(agent, '{}')).toEqual({
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex)\n`,
+        exitCode: 1,
+      });
+  });
+
+  it('fails closed with exit 2 and a stderr reason when stdin is not valid JSON', async () => {
+    const out = await runHook('codex', 'not json {{{');
+    expect(out).toEqual({
+      stdout: '',
+      stderr: 'Stroq internal error (fail-closed): hook input is not valid JSON',
+      exitCode: 2,
+    });
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook codex');
+  });
+
+  it('fails closed on a malformed high-impact Pre event and stays silent otherwise', async () => {
+    const blocked = await runHook('codex', '{"hook_event_name":"PreToolUse","tool_name":"Bash"}');
+    expect(blocked.exitCode).toBe(2);
+    expect(String(blocked.stderr)).toContain('fail-closed');
+    expect(blocked.stdout).toBe('');
+
+    expect(await runHook('codex', '{"hook_event_name":"PostToolUse","tool_name":"Bash"}')).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+    expect(
+      await runHook('codex', '{"hook_event_name":"PreToolUse","tool_name":"update_plan"}'),
+    ).toEqual({ stdout: '', exitCode: 0 });
+  });
+
+  it('routes a valid Codex event to the Codex adapter', async () => {
+    const base = {
+      session_id: 'route-codex',
+      hook_event_name: 'PreToolUse',
+      cwd: '/home/dev/p',
+      turn_id: 't1',
+      tool_use_id: 'c1',
+    };
+    expect(
+      await runHook(
+        'codex',
+        JSON.stringify({ ...base, tool_name: 'Bash', tool_input: { command: 'ls -la' } }),
+      ),
+    ).toEqual({ stdout: '', exitCode: 0 });
+
+    const asked = await runHook(
+      'codex',
+      JSON.stringify({ ...base, tool_name: 'Bash', tool_input: { command: 'git reset --hard' } }),
+    );
+    expect(asked.exitCode).toBe(0);
+    expect(reasonOf(asked.stdout)).toContain(
+      'Stroq would ask before this action (ask-destructive)',
+    );
+  });
+
+  it('leaves the other two adapters answering exactly as before', async () => {
+    const claude = await runHook('claude-code', 'not json {{{');
+    expect(claude.exitCode).toBe(0);
+    expect(claude.stderr).toBeUndefined();
+    const cursor = await runHook('cursor', 'not json {{{');
+    expect(cursor.exitCode).toBe(0);
+    expect(cursor.stderr).toBeUndefined();
+    expect(JSON.parse(cursor.stdout)).toMatchObject({ permission: 'deny' });
   });
 });
