@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stroq-hook.sh\"",
+            "timeout": 15,
+            "statusMessage": "Stroq: checking this action"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|WebFetch|WebSearch|Bash|Grep|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stroq-hook.sh\"",
+            "timeout": 15,
+            "statusMessage": "Stroq: scanning tool output"
+          }
+        ]
+      }
+    ]
+  }
+}

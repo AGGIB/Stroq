@@ -1,0 +1,20 @@
+{
+  "name": "stroq",
+  "description": "Local action firewall for Claude Code: scans what the agent reads, taints the session, attributes commands to the content they came from, denies outbound calls that carry your secrets, and asks before destructive or external actions. Deterministic, offline, hash-chained audit.",
+  "version": "0.3.0",
+  "author": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
+  "homepage": "https://stroq.vercel.app",
+  "repository": "https://github.com/AGGIB/Stroq",
+  "license": "Apache-2.0",
+  "keywords": [
+    "security",
+    "firewall",
+    "prompt-injection",
+    "hooks",
+    "secrets",
+    "provenance",
+    "audit",
+    "mcp"
+  ],
+  "hooks": "./hooks/hooks.json"
+}
