@@ -91,10 +91,23 @@ const sanitize = (value: string): string =>
 function mcpToolName(input: CursorHookInput): string {
   const rawServer = input.mcp_server_name ?? '';
   const rawTool = input.tool_name ?? '';
-  if (rawServer === '' && rawTool.startsWith('mcp__')) return rawTool;
+  if (rawServer === '' && rawTool.startsWith('mcp__')) return passThroughMcpName(rawTool);
   const server = sanitize(rawServer) || 'unknown';
   const tool = sanitize(rawTool);
   return `mcp__${server}__${tool || 'call'}`;
+}
+
+/**
+ * A pre-shaped `mcp__<server>__<tool>` name with no separate server to check it
+ * against is split at its FIRST `__` and each half re-sanitised, so a tool literally
+ * named `send__data` cannot smuggle a second separator past core's last-`__` split.
+ */
+function passThroughMcpName(rawTool: string): string {
+  const rest = rawTool.slice('mcp__'.length);
+  const separator = rest.indexOf('__');
+  const server = separator > 0 ? rest.slice(0, separator) : rest;
+  const tool = separator > 0 ? rest.slice(separator + 2) : '';
+  return `mcp__${sanitize(server) || 'unknown'}__${sanitize(tool) || 'call'}`;
 }
 
 export function cursorToolName(input: CursorHookInput): string {
