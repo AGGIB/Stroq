@@ -11,8 +11,9 @@ import { runWhy } from './commands/why.js';
 const USAGE = `stroq <command>
 
 Commands:
-  init [--user] [--dry-run]          install Claude Code hooks (project .claude/settings.json by default)
-  hook claude-code                   hook entrypoint: reads the event JSON on stdin, prints a decision
+  init [--agent <name>] [--user] [--dry-run]
+                                     install hooks (--agent claude-code | cursor; project config by default)
+  hook <claude-code|cursor>          hook entrypoint: reads the event JSON on stdin, prints a decision
   doctor                             check the installation
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
