@@ -77,6 +77,26 @@ describe('cursorFailClosedOutput', () => {
         stdout: '',
         exitCode: 0,
       });
-    expect(cursorFailClosedOutput('not an object', 'boom')).toEqual({ stdout: '', exitCode: 0 });
+  });
+
+  it('stays silent for a named event Stroq did not install on', () => {
+    for (const name of ['beforeSubmitPrompt', 'afterTabFileEdit', 'stop'])
+      expect(cursorFailClosedOutput({ hook_event_name: name }, new Error('boom'))).toEqual({
+        stdout: '',
+        exitCode: 0,
+      });
+  });
+
+  it('denies when the event name is missing or not a string (M2)', () => {
+    const deny = {
+      permission: 'deny',
+      user_message: 'Stroq internal error (fail-closed): boom',
+      agent_message: 'Stroq internal error (fail-closed): boom',
+    };
+    for (const raw of [{}, { hook_event_name: 42 }, { hook_event_name: null }, 'not an object']) {
+      const out = cursorFailClosedOutput(raw, new Error('boom'));
+      expect(out.exitCode).toBe(0);
+      expect(body(out.stdout)).toEqual(deny);
+    }
   });
 });

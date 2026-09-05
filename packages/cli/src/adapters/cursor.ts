@@ -1,4 +1,6 @@
 import {
+  AuditLog,
+  classifyTool,
   warningFor,
   type Decision,
   type ProvenanceHit,
@@ -8,6 +10,7 @@ import {
 } from '@stroq/core';
 import { z } from 'zod';
 import { logError } from '../log.js';
+import { auditFile } from '../paths.js';
 import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
 
 /** The six Cursor events Stroq installs on; any other event is not ours to answer. */
@@ -41,7 +44,11 @@ export const CURSOR_BLOCKING_EVENTS: readonly CursorEvent[] = [
 export const CursorHookInputSchema = z.looseObject({
   conversation_id: z.string().min(1),
   hook_event_name: z.enum(CURSOR_EVENTS),
-  workspace_roots: z.array(z.string()).default([]),
+  // Loosely typed on purpose: a shape surprise (a root that is not a string, an
+  // object where an array was documented) must not throw on a non-blocking event —
+  // a throw there skips the content scan and the taint it would have set, and the
+  // follow-up action sails through. `projectRoot` picks the first usable root.
+  workspace_roots: z.array(z.unknown()).default([]),
   cwd: z.string().default(''),
   // beforeShellExecution / afterShellExecution
   command: z.string().optional(),
@@ -60,7 +67,9 @@ export const CursorHookInputSchema = z.looseObject({
   // beforeReadFile / afterFileEdit
   file_path: z.string().optional(),
   content: z.string().optional(),
-  attachments: z.array(z.unknown()).optional(),
+  // Normalised by `fileText`, never rejected, for the reason above: `beforeReadFile`
+  // is where poisoned content is caught, and it is not a blocking event.
+  attachments: z.unknown().optional(),
   // Recorded for completeness: Stroq classifies the path, not the diff. Untyped
   // for the same reason as `exit_code` — never read, so it must never fail
   // validation on a shape Stroq does not otherwise care about.
@@ -80,6 +89,16 @@ const sanitize = (value: string): string =>
   value.replace(UNSAFE_RUN, '_').replace(DOUBLE_UNDERSCORE, '_');
 
 /**
+ * One `mcp__<server>__<tool>` segment. Sanitising alone is not enough: a value made
+ * entirely of unsafe characters (`"__"`, `"!"`, `"✉"`, `"发送"`, `"/"`) collapses to a lone
+ * `_`, and the composed `mcp__<server>___` then defeats core's `parseMcpToolName` (it
+ * splits on the LAST `__` and rejects an empty tool part) — no `mcp.call`, so no
+ * secret-egress lookup, so a `.env` value out through a hostile tool name. Trimming the
+ * edge underscores empties such a segment and the `unknown`/`call` fallback takes over.
+ */
+const segment = (value: string): string => sanitize(value).replace(/^_+|_+$/g, '');
+
+/**
  * `mcp__<server>__<tool>`, the spelling Claude Code uses, so one classifier covers both.
  * A `tool_name` that already arrives in that shape is trusted verbatim — but only when
  * there is no separate `mcp_server_name` to check it against: otherwise an adversary
@@ -92,8 +111,8 @@ function mcpToolName(input: CursorHookInput): string {
   const rawServer = input.mcp_server_name ?? '';
   const rawTool = input.tool_name ?? '';
   if (rawServer === '' && rawTool.startsWith('mcp__')) return passThroughMcpName(rawTool);
-  const server = sanitize(rawServer) || 'unknown';
-  const tool = sanitize(rawTool);
+  const server = segment(rawServer) || 'unknown';
+  const tool = segment(rawTool);
   return `mcp__${server}__${tool || 'call'}`;
 }
 
@@ -107,7 +126,7 @@ function passThroughMcpName(rawTool: string): string {
   const separator = rest.indexOf('__');
   const server = separator > 0 ? rest.slice(0, separator) : rest;
   const tool = separator > 0 ? rest.slice(separator + 2) : '';
-  return `mcp__${sanitize(server) || 'unknown'}__${sanitize(tool) || 'call'}`;
+  return `mcp__${segment(server) || 'unknown'}__${segment(tool) || 'call'}`;
 }
 
 export function cursorToolName(input: CursorHookInput): string {
@@ -172,13 +191,32 @@ export function cursorResultText(input: CursorHookInput): string {
     (part): part is string => typeof part === 'string' && part.length > 0,
   );
   if (streams.length > 0) return toolResultToText(streams.join('\n'));
-  if (input.result_json !== undefined) return toolResultToText(input.result_json);
+  // `result_json` gets the same treatment as `output` above: an empty string or an
+  // explicit null is not the official field being in play, so it must not shadow a
+  // community `tool_output` that carries the real (possibly poisoned) result.
+  const official = input.result_json ?? '';
+  if (official !== '') return toolResultToText(official);
   return toolResultToText(input.tool_output);
 }
 
+/** `attachments` as a list, whatever shape it arrived in. */
+const asList = (value: unknown): readonly unknown[] =>
+  Array.isArray(value) ? value : value === undefined ? [] : [value];
+
 /** The body Cursor is about to hand the agent, plus whatever it attached to it. */
 const fileText = (input: CursorHookInput): string =>
-  toolResultToText([input.content ?? '', ...(input.attachments ?? [])]);
+  toolResultToText([input.content ?? '', ...asList(input.attachments)]);
+
+/**
+ * The project directory: the first usable *string* workspace root, the spec's reliable
+ * project path. Cursor's own `cwd` is only a fallback — it is the shell's current
+ * directory, which an agent can move with a permitted `cd` and thereby step the secret
+ * index out from under the project's `.env*` files. The process cwd is the last resort.
+ */
+function projectRoot(input: CursorHookInput): string {
+  const root = input.workspace_roots.find((r): r is string => typeof r === 'string' && r !== '');
+  return root ?? (input.cwd || process.cwd());
+}
 
 export interface CursorDecision {
   readonly permission: 'deny' | 'ask';
@@ -262,7 +300,11 @@ async function handleReadFile(
 ): Promise<HookOutput> {
   const { decision, provenance, secrets } = await engine.pre(event);
   const rendered = renderDecision(decision, provenance, secrets);
-  if (rendered?.permission === 'deny') return json({ ...rendered });
+  // Cursor documents only `permission` and `user_message` on this event, so the
+  // evidence-carrying `agent_message` is dropped rather than sent to a field the
+  // client is not specified to read.
+  if (rendered?.permission === 'deny')
+    return json({ permission: 'deny', user_message: rendered.user_message });
   const result = await scanOutput(engine, event, text);
   const messages = [
     ...(rendered === null ? [] : [rendered.user_message]),
@@ -271,6 +313,37 @@ async function handleReadFile(
   return messages.length === 0
     ? NO_OUTPUT
     : json({ permission: 'allow', user_message: messages.join(' ') });
+}
+
+/**
+ * What the audit records for an edit Stroq was not installed to stop: an explicit
+ * `allow`, so it can never be read as a block that happened, and so `stroq why`
+ * (which reports the most recent non-allow entry) keeps explaining the real denial.
+ */
+export const CURSOR_EDIT_UNENFORCED: Decision = {
+  effect: 'allow',
+  ruleId: 'cursor-edit-unenforced',
+  reason:
+    'Cursor has no pre-edit hook installed; the edit already happened and is recorded, not blocked',
+};
+
+/**
+ * `afterFileEdit`: the edit has already happened, and Stroq v1 installs on no Cursor
+ * event that could have stopped it. `engine.pre` would write a `deny(deny-self-tamper)`
+ * the firewall never enforced, so the path is classified and recorded directly. Every
+ * edit is appended, as the Claude Code adapter audits every `PreToolUse` it is handed.
+ */
+async function handleFileEdit(event: EngineEvent, filePath: string): Promise<HookOutput> {
+  const { classes } = classifyTool('Write', event.toolInput, event.cwd);
+  await new AuditLog(auditFile()).append({
+    sessionId: event.sessionId,
+    phase: 'pre',
+    tool: 'Write',
+    summary: filePath,
+    classes,
+    decision: CURSOR_EDIT_UNENFORCED,
+  });
+  return NO_OUTPUT;
 }
 
 /** `afterMCPExecution`: the only completed action whose output Cursor lets us annotate. */
@@ -290,12 +363,7 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
     sessionId: input.conversation_id,
     toolName: cursorToolName(input),
     toolInput: cursorToolInput(input),
-    // The spec calls `workspace_roots[0]` the reliable project path; Cursor's own
-    // `cwd` is the shell's current directory, which an agent can move with a
-    // permitted `cd` and thereby step the secret index out from under the
-    // project's `.env*` files. Prefer the workspace root; fall back to `cwd` only
-    // when Cursor omits it, and to the process cwd as a last resort.
-    cwd: input.workspace_roots[0] || input.cwd || process.cwd(),
+    cwd: projectRoot(input),
   };
   switch (input.hook_event_name) {
     case 'beforeShellExecution':
@@ -310,20 +378,21 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
       await scanOutput(engine, event, cursorResultText(input));
       return NO_OUTPUT;
     case 'afterFileEdit':
-      // Cursor has no `beforeFileEdit`, so the edit already happened: the
-      // classification (`config.self` for `.cursor/hooks.json`,
-      // `.claude/settings.json`, `~/.stroq/…`) is recorded in the audit log and
-      // cannot be enforced. The equivalent shell command still goes through
-      // `beforeShellExecution` and is denied there.
-      await engine.pre(event);
-      return NO_OUTPUT;
+      // The classification (`config.self` for `.cursor/hooks.json`,
+      // `.claude/settings.json`, `~/.stroq/…`) is recorded, not enforced. The
+      // equivalent shell command still goes through `beforeShellExecution` and is
+      // denied there.
+      return handleFileEdit(event, input.file_path ?? '');
   }
 }
 
 export function cursorFailClosedOutput(raw: unknown, err: unknown): HookOutput {
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const name = record['hook_event_name'];
-  if (typeof name !== 'string' || !(CURSOR_BLOCKING_EVENTS as readonly string[]).includes(name))
+  // A *named* event outside the six is not ours to answer: Stroq does not reply to
+  // events it did not install on. A missing or non-string name is malformed input,
+  // which is fail-closed exactly like stdin that was not JSON at all.
+  if (typeof name === 'string' && !(CURSOR_BLOCKING_EVENTS as readonly string[]).includes(name))
     return NO_OUTPUT;
   const message = err instanceof Error ? err.message : String(err);
   return cursorDenyOutput(`Stroq internal error (fail-closed): ${message}`);
