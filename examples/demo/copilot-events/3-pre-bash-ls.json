@@ -1,0 +1,7 @@
+{
+  "sessionId": "copilot-demo",
+  "cwd": "__CWD__",
+  "timestamp": 1757000002000,
+  "toolName": "bash",
+  "toolArgs": { "command": "ls -la" }
+}

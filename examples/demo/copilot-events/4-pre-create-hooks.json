@@ -1,0 +1,10 @@
+{
+  "sessionId": "copilot-demo-2",
+  "cwd": "__CWD__",
+  "timestamp": 1757000003000,
+  "toolName": "create",
+  "toolArgs": {
+    "path": "__CWD__/.github/hooks/stroq.json",
+    "content": "{ \"version\": 1, \"hooks\": {} }"
+  }
+}
