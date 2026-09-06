@@ -34,9 +34,18 @@ import { commandWord } from './shell-segments.js';
  * `rm -rf .github/hooks && …`) but never a FILE whose name merely starts with it:
  * `.github/hooks.md` and `.github/hooks-README.md` are documentation, and denying
  * an edit to them is a false positive of the same kind the bare `.claude` match was.
+ * OpenClaw is protected at three entries rather than as a whole directory:
+ * `.openclaw/openclaw.json`, where `plugins.entries.stroq.enabled = false` switches
+ * the firewall off, and the `plugins`/`extensions` directories a replacement plugin
+ * would be dropped into. Everything else under `.openclaw` — agent instructions,
+ * skills, memory — is ordinary work, and denying an edit to it would be the same
+ * false positive the bare `.claude` match once was. Those two directory
+ * alternatives end at `(?![\w.-])` for the same reason `.github/hooks` does, so
+ * `.openclaw/plugins.md` is documentation while `rm -rf .openclaw/plugins && …`
+ * is not.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -49,7 +58,7 @@ export const SELF_CONFIG_FILE =
  * substring `.claude/settings.json` anywhere in the command text.
  */
 export const PROTECTED_DIRS =
-  /\.(claude|cursor|codex|copilot|stroq|github\/(hooks|copilot))(\/|$|\s)/;
+  /\.(claude|cursor|codex|copilot|openclaw|stroq|github\/(hooks|copilot))(\/|$|\s)/;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',

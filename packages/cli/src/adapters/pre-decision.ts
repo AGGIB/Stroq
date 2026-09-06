@@ -175,9 +175,45 @@ export async function decideWithGuards(
 }
 
 /**
- * The whole `post` answer: scan the result text, then say nothing unless the scan came
- * back suspect. Shared for the same reason as `decideWithGuards`; the adapters differ
- * only in how they read the result text and how they wrap the warning.
+ * What a `post` scan concluded, for an adapter whose answer distinguishes the three
+ * cases. `scanned: false` is core declining to scan this tool at all (`SCANNED_TOOLS`),
+ * which is not the same thing as a scan that came back clean: the first says nothing
+ * was looked at, the second says something was and was fine. `warning` is non-null
+ * exactly when the verdict is `suspect`.
+ */
+export interface PostOutcome {
+  readonly scanned: boolean;
+  readonly verdict: 'clean' | 'suspect';
+  readonly warning: string | null;
+}
+
+/**
+ * The whole `post` path — scan the result text, record provenance, taint the session —
+ * with the outcome returned rather than rendered. Shared for the same reason as
+ * `decideWithGuards`: the three adapters differ only in how they read the result text
+ * and what they print, never in what gets scanned or when a session is tainted.
+ */
+export async function scanPostResult(
+  engine: StroqEngine,
+  event: EngineEvent,
+  toolResultText: string,
+): Promise<PostOutcome> {
+  const result = await engine.post({ ...event, toolResultText });
+  if (result.provenanceError) logError('provenance', result.provenanceError);
+  if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
+  if (result.scan.verdict !== 'suspect') return { scanned: true, verdict: 'clean', warning: null };
+  return {
+    scanned: true,
+    verdict: 'suspect',
+    warning: warningFor(result.scan, event.toolName),
+  };
+}
+
+/**
+ * Codex's and Copilot's rendering of the above: silence unless the scan came back
+ * suspect, because on both agents an empty `PostToolUse` answer is the default flow
+ * and the smallest surface. Behaviour is identical to what this function did before
+ * the outcome was split out of it.
  */
 export async function handlePostResult(
   engine: StroqEngine,
@@ -185,8 +221,6 @@ export async function handlePostResult(
   toolResultText: string,
   wrap: (context: string) => HookOutput,
 ): Promise<HookOutput> {
-  const result = await engine.post({ ...event, toolResultText });
-  if (result.provenanceError) logError('provenance', result.provenanceError);
-  if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
-  return wrap(warningFor(result.scan, event.toolName));
+  const outcome = await scanPostResult(engine, event, toolResultText);
+  return outcome.warning === null ? NO_OUTPUT : wrap(outcome.warning);
 }

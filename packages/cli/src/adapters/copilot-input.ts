@@ -12,6 +12,11 @@ import { streamResultText } from './tool-result.js';
  * both agents send a shell command under a handful of field spellings and an
  * `apply_patch` body in the same format, and a divergence between the two readers
  * would be a bypass that only reproduces on one agent.
+ *
+ * `pathsOf`, `urlsOf`, `withCandidates` and `withoutKeys` are exported for the same
+ * reason and are read by the OpenClaw adapter (`openclaw-input.ts`): they are about
+ * the shape of a tool call, not about Copilot, and `withCandidates` in particular is
+ * what stops a payload's own `urls`/`file_paths` from choosing what gets classified.
  */
 
 /**
@@ -120,7 +125,7 @@ const PATH_FIELDS = ['path', 'file_path', 'raw'] as const;
  * list under `file_paths` and `preGuards`/`preInputs` fan out one `engine.pre` per
  * path, worst wins.
  */
-const pathsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
+export const pathsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
   const found = new Set<string>();
   for (const key of PATH_FIELDS) {
     const value = record[key];
@@ -142,7 +147,7 @@ const URL_FIELDS = ['url', 'uri', 'href', 'raw'] as const;
  * contributes nothing, and a call left with no candidate at all is denied by
  * `unreadableInput` rather than run through the engine as an empty fetch.
  */
-const urlsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
+export const urlsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
   const found = new Set<string>();
   for (const key of URL_FIELDS) {
     const value = record[key];
@@ -162,7 +167,7 @@ const urlsOf = (record: Readonly<Record<string, unknown>>): readonly string[] =>
  */
 const DROPPED_FILE_FIELDS: readonly string[] = ['command', 'path'];
 
-const withoutKeys = (
+export const withoutKeys = (
   record: Readonly<Record<string, unknown>>,
   drop: readonly string[],
 ): Record<string, unknown> =>
@@ -182,7 +187,7 @@ const withoutKeys = (
  * computed list only when there is more than one candidate would still leave the
  * payload's own list in place for the single-candidate case, which is the common one.
  */
-const withCandidates = (
+export const withCandidates = (
   base: Readonly<Record<string, unknown>>,
   key: 'file_path' | 'url',
   candidates: readonly string[],
