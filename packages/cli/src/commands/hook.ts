@@ -14,6 +14,7 @@ import {
   handleCopilotHook,
   isCopilotPhase,
 } from '../adapters/copilot.js';
+import { cursorDenyOutput, cursorFailClosedOutput, handleCursorHook } from '../adapters/cursor.js';
 import {
   handleOpenClawHook,
   isOpenClawPhase,
@@ -22,7 +23,6 @@ import {
   openclawFailClosedOutput,
   openclawPostErrorOutput,
 } from '../adapters/openclaw.js';
-import { cursorDenyOutput, cursorFailClosedOutput, handleCursorHook } from '../adapters/cursor.js';
 import { createEngine } from '../engine-factory.js';
 import { logError } from '../log.js';
 
