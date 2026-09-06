@@ -12,8 +12,9 @@ const USAGE = `stroq <command>
 
 Commands:
   init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor | codex; project config by default)
+                                     install hooks (--agent claude-code | cursor | codex | copilot; project config by default)
   hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
+  hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
   doctor                             check the installation
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
@@ -29,12 +30,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     case 'hook': {
       // Reading stdin happens inside the command so that a rejection there is
       // answered by the agent's own fail-closed path, not by the exit-1 handler
-      // at the bottom of this file (which Codex would read as a hook failure and
-      // continue past).
-      const out = await runHookCommand(rest[0] ?? '');
+      // at the bottom of this file (which Codex and Copilot both read as a hook
+      // failure and continue past). `rest[1]` is Copilot's phase; the other
+      // agents ignore it.
+      const out = await runHookCommand(rest[0] ?? '', rest[1] ?? '');
       if (out.stdout) process.stdout.write(out.stdout);
-      // Codex reads the block reason from stderr when the hook exits 2; the other
-      // adapters never set this field.
+      // Codex and Copilot read the block reason from stderr when the hook exits 2;
+      // the other adapters never set this field.
       if (out.stderr) process.stderr.write(out.stderr);
       return out.exitCode;
     }
