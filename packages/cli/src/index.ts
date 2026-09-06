@@ -12,8 +12,9 @@ const USAGE = `stroq <command>
 
 Commands:
   init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw; project config by default)
+                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw | windsurf; project config by default)
   hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
+  hook windsurf                      Windsurf entrypoint: its events name themselves, and a block is exit 2 with the reason on stderr
   hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
   hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
   doctor                             check the installation
@@ -41,6 +42,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       // the other adapters never set this field.
       // OpenClaw's plugin blocks on any non-zero exit and reads the reason from
       // stderr, so it needs the same two channels Copilot does.
+      // Windsurf's Cascade reads ONLY exit 2 as a block, with the reason on stderr,
+      // and treats every other non-zero exit — exit 1 included — as an allow.
       if (out.stderr) process.stderr.write(out.stderr);
       return out.exitCode;
     }
