@@ -93,20 +93,15 @@ function approval(api, event, reply, config) {
 
 export function register(api) {
   const config = (api && api.pluginConfig) || {};
-  // `detail` is clipped the same way a child's own stderr already is: an internal
-  // `String(err)` can be arbitrarily long (a huge stack, a strange error's toString),
-  // and this line is a block reason shown to a user, not a log sink.
+  // `detail` is clipped like a child's stderr: it is a block reason shown to a user.
   const block = (event, detail) => {
     const clipped = clip(String(detail), 300);
     logAt(api, 'warn', `stroq: ${text(event && event.toolName) || 'tool'}: ${clipped}`);
     return { block: true, blockReason: `Stroq internal error (fail-closed): ${clipped}` };
   };
-  // How `run-stroq.js` reports the one thing it can find that is not a decision: a
-  // `stroq.json` whose recorded entry is gone. `warn`, not `debug` — the plugin is
-  // running on a fallback the operator did not choose and should repair.
+  // A stale `stroq.json` entry is reported at `warn`: the operator should repair it.
   const warn = (message) => logAt(api, 'warn', `stroq: ${message}`);
-  // Priority 100 so Stroq answers before ordinary hooks, and no matcher: every tool
-  // goes through Stroq, and one it does not care about answers allow in ~100 ms.
+  // Priority 100 so Stroq answers before ordinary hooks; no matcher, every tool goes through.
   api.on(
     'before_tool_call',
     async (event, ctx) => {
@@ -130,18 +125,13 @@ export function register(api) {
     },
     { priority: 100 },
   );
-  // Observe-only, and it must never throw: the tool has already run, the return value
-  // is ignored, and the taint the scan sets is enforced on the NEXT call. The abort
-  // signal is deliberately NOT forwarded here: the tool's result already happened by
-  // the time this fires, so a cancelled run must still be scanned and tainted.
+  // Observe-only and never throws; the taint it sets is enforced on the NEXT call. The
+  // abort signal is not forwarded: a cancelled run's result must still be scanned.
   api.on('after_tool_call', async (event, ctx) => {
     try {
       const payload = payloadFor('post', event, ctx, config);
       const outcome = await runStroq(config, 'post', payload, undefined, warn);
-      // `warn`, not `debug`: a scan that timed out or errored is a result nobody
-      // looked at, so the session is not tainted by it and the follow-up action
-      // sails through. Nothing can be blocked here, which is exactly why the
-      // operator has to be able to see it.
+      // `warn`: a scan nobody looked at leaves the session untainted; operators must see it.
       if (outcome.error) logAt(api, 'warn', `stroq: post scan failed: ${outcome.error}`);
       else if (text(outcome.reply.warning)) logAt(api, 'warn', `stroq: ${outcome.reply.warning}`);
     } catch (err) {

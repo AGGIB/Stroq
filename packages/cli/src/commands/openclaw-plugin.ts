@@ -19,8 +19,8 @@ const OPENCLAW_BIN = 'openclaw';
 const PLUGIN_DIRNAME = 'openclaw-plugin';
 const PLUGIN_ENTRY = 'index.js';
 const PLUGIN_MANIFEST = 'openclaw.plugin.json';
-/** Named separately so `doctor.ts` can point a "missing"/half-install line at the
- * manifest — the file `isStroqOpenClawPlugin` actually checks — instead of the entry. */
+/** Named separately so `doctor.ts` can point a half-install line at the manifest — the file
+ * that carries the plugin id `isStroqOpenClawPlugin` checks once every shipped file exists. */
 export const OPENCLAW_PLUGIN_MANIFEST = PLUGIN_MANIFEST;
 
 /** The five files the plugin is made of, all shipped inside `@stroq/cli`. */
