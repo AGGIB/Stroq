@@ -1,0 +1,7 @@
+{
+  "sessionId": "copilot-demo-4",
+  "cwd": "__CWD__",
+  "timestamp": 1757000005000,
+  "toolName": "bash",
+  "toolArgs": { "command": "git reset --hard" }
+}

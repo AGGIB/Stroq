@@ -48,6 +48,9 @@ jobs:
       - name: Run Codex demo
         run: ./examples/demo/run-codex-demo.sh
 
+      - name: Run Copilot demo
+        run: ./examples/demo/run-copilot-demo.sh
+
       - name: Attack suite
         run: node packages/cli/dist/index.js attack
 
