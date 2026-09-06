@@ -30,10 +30,18 @@ describe('runHook', () => {
 
 describe('runHook agent routing', () => {
   it('lists every supported agent when the agent is unknown', async () => {
-    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor', 'codex', 'copilot', 'openclaw']);
+    expect(SUPPORTED_AGENTS).toEqual([
+      'claude-code',
+      'cursor',
+      'codex',
+      'copilot',
+      'openclaw',
+      'windsurf',
+    ]);
     const out = await runHook('bogus', '{}');
     expect(out).toEqual({
-      stdout: 'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw)\n',
+      stdout:
+        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
       exitCode: 1,
     });
   });
@@ -42,7 +50,7 @@ describe('runHook agent routing', () => {
     for (const agent of ['constructor', '__proto__']) {
       const out = await runHook(agent, '{}');
       expect(out).toEqual({
-        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw)\n`,
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n`,
         exitCode: 1,
       });
     }
@@ -107,14 +115,22 @@ describe('runHook codex routing', () => {
     );
 
   it('lists codex among the supported agents', async () => {
-    expect(SUPPORTED_AGENTS).toEqual(['claude-code', 'cursor', 'codex', 'copilot', 'openclaw']);
+    expect(SUPPORTED_AGENTS).toEqual([
+      'claude-code',
+      'cursor',
+      'codex',
+      'copilot',
+      'openclaw',
+      'windsurf',
+    ]);
     expect(await runHook('bogus', '{}')).toEqual({
-      stdout: 'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw)\n',
+      stdout:
+        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
       exitCode: 1,
     });
     for (const agent of ['constructor', '__proto__'])
       expect(await runHook(agent, '{}')).toEqual({
-        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw)\n`,
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n`,
         exitCode: 1,
       });
   });
@@ -312,5 +328,53 @@ describe('runHook copilot routing', () => {
     expect(JSON.parse((await runHook('cursor', 'not json {{{')).stdout)).toMatchObject({
       permission: 'deny',
     });
+  });
+});
+
+describe('runHook windsurf routing', () => {
+  const event = (fields: Record<string, unknown>) =>
+    JSON.stringify({ trajectory_id: 'route-windsurf', execution_id: 'turn-1', ...fields });
+
+  it('takes no phase argument, because the event names itself', async () => {
+    // Copilot and OpenClaw need `stroq hook <agent> pre|post`; Windsurf does not, and
+    // an argument that arrives anyway is ignored rather than rejected.
+    expect(
+      await runHook(
+        'windsurf',
+        event({ agent_action_name: 'pre_run_command', tool_info: { command_line: 'ls -la' } }),
+        '',
+      ),
+    ).toEqual({ stdout: '', exitCode: 0 });
+    expect(
+      await runHook(
+        'windsurf',
+        event({ agent_action_name: 'pre_run_command', tool_info: { command_line: 'ls -la' } }),
+        'pre',
+      ),
+    ).toEqual({ stdout: '', exitCode: 0 });
+  });
+
+  it('fails closed with exit 2 and a stderr reason when stdin is not valid JSON', async () => {
+    // Every event, not just a pre: with no event to inspect, exit 2 is a deny on a
+    // pre hook and a visible message on a post hook, the smallest harm available.
+    expect(await runHook('windsurf', 'not json {{{')).toEqual({
+      stdout: '',
+      stderr: 'Stroq internal error (fail-closed): hook input is not valid JSON',
+      exitCode: 2,
+    });
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook windsurf');
+  });
+
+  it('fails closed on a payload with no usable event name', async () => {
+    const out = await runHook('windsurf', '{"trajectory_id":"t"}');
+    expect(out.exitCode).toBe(2);
+    expect(out.stdout).toBe('');
+    expect(String(out.stderr)).toContain('Stroq internal error (fail-closed)');
+  });
+
+  it('stays silent on an event Stroq did not install on', async () => {
+    expect(
+      await runHook('windsurf', event({ agent_action_name: 'pre_user_prompt', tool_info: {} })),
+    ).toEqual({ stdout: '', exitCode: 0 });
   });
 });
