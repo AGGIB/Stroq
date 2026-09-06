@@ -152,6 +152,23 @@ describe('windsurfToolArgs', () => {
     const read = { file_path: 'a.ts' };
     expect(windsurfToolArgs('pre_read_code', read)).toEqual(read);
   });
+
+  it('falls back to `arguments` then `args` when the documented spelling is absent', () => {
+    expect(windsurfToolArgs('pre_mcp_tool_use', { arguments: { a: 1 } })).toEqual({ a: 1 });
+    expect(windsurfToolArgs('pre_mcp_tool_use', { args: { a: 1 } })).toEqual({ a: 1 });
+    // The documented spelling wins whenever more than one is present, in the
+    // documented-first order every other spelling list in this adapter uses.
+    expect(
+      windsurfToolArgs('pre_mcp_tool_use', {
+        mcp_tool_arguments: { a: 1 },
+        arguments: { a: 2 },
+        args: { a: 3 },
+      }),
+    ).toEqual({ a: 1 });
+    expect(windsurfToolArgs('pre_mcp_tool_use', { arguments: { a: 2 }, args: { a: 3 } })).toEqual({
+      a: 2,
+    });
+  });
 });
 
 describe('windsurfToolInput', () => {

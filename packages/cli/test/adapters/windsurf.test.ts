@@ -95,6 +95,18 @@ describe('rendering, which is exit codes and stderr because there is no stdout c
     );
   });
 
+  it('strips one trailing period from the reason before appending its own', () => {
+    // A custom policy's `ask` reason might already end its own sentence — the
+    // default policy's never do, but appending unconditionally would render "..".
+    const periodAsk: Decision = { ...ask, reason: 'This command is destructive.' };
+    const out = renderDecision(periodAsk, [], []);
+    expect(out.stderr).not.toContain('..');
+    expect(out.stderr).toBe(
+      'Stroq would ask before this action (ask-destructive): This command is destructive. ' +
+        'Windsurf hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.',
+    );
+  });
+
   it('appends evidence sentences to a block', () => {
     const now = new Date('2026-09-06T12:00:00.000Z');
     const out = renderDecision(

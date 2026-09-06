@@ -72,7 +72,12 @@ export function mergeWindsurfHooks(
   settings: WindsurfHooksJson,
   command: string,
 ): WindsurfHooksJson {
-  const hooks = settings.hooks ?? {};
+  // A hand-mangled `hooks: "…"` or `hooks: [...]` is not a record: spreading it below
+  // (`{ ...hooks, ...ours }`) would otherwise fan a string or an array out into
+  // `"0"`, `"1"`, … keys in the written file. Neither is user content worth
+  // preserving in that shape, so it is dropped like the other malformed cases this
+  // function already tolerates.
+  const hooks = isPlainObject(settings.hooks) ? settings.hooks : {};
   const ours = Object.fromEntries(
     WINDSURF_EVENTS.map((event): [WindsurfEvent, WindsurfHookEntry[]] => [
       event,

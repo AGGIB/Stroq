@@ -108,16 +108,26 @@ export function windsurfToolName(event: WindsurfEvent, toolInfo: unknown): strin
   return hasEdits(toolInfo) ? 'Edit' : 'Write';
 }
 
+/** Where an MCP call's arguments might be, Windsurf's documented spelling first. */
+const MCP_ARGS_FIELDS = ['mcp_tool_arguments', 'arguments', 'args'] as const;
+
 /**
- * The raw arguments the shared reader is given. For an MCP call that is
- * `mcp_tool_arguments` and nothing else: the whole record reaches the engine, so the
- * secret-egress guard scans every field of it, and the server and tool names — which
- * are the call's identity, not its arguments — stay out. Every other event hands over
- * `tool_info` itself.
+ * The raw arguments the shared reader is given. For an MCP call that is one of
+ * `MCP_ARGS_FIELDS` and nothing else — `mcp_tool_arguments` is Windsurf's documented
+ * spelling, `arguments`/`args` are the defensive fallback for a renamed or
+ * community-shaped field, first non-`undefined` spelling wins — the whole record
+ * reaches the engine, so the secret-egress guard scans every field of it, and the
+ * server and tool names — which are the call's identity, not its arguments — stay
+ * out. Every other event hands over `tool_info` itself.
  */
 export function windsurfToolArgs(event: WindsurfEvent, toolInfo: unknown): unknown {
   if (windsurfToolKind(event) !== 'mcp') return toolInfo;
-  return toolInputRecord(toolInfo)['mcp_tool_arguments'];
+  const record = toolInputRecord(toolInfo);
+  for (const key of MCP_ARGS_FIELDS) {
+    const value = record[key];
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 /**

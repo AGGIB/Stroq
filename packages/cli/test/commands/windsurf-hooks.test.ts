@@ -96,6 +96,17 @@ describe('mergeWindsurfHooks', () => {
       expect(commandsOf(merged, 'pre_run_command')).toContain(cmd);
     }
   });
+
+  it('drops a hooks value that is not a plain object, rather than fanning it into numeric keys', () => {
+    for (const hooks of ['not an object', ['array', 'shaped']]) {
+      const merged = mergeWindsurfHooks({ hooks } as unknown as WindsurfHooksJson, cmd);
+      // `{ ...hooks, ...ours }` would otherwise spread a string or an array into
+      // "0", "1", … keys alongside the six real events — not user content worth
+      // keeping, and not a shape any reader of this file expects.
+      expect(Object.keys(merged.hooks ?? {}).every((key) => !/^\d+$/.test(key))).toBe(true);
+      expect(commandsOf(merged, 'pre_run_command')).toEqual([cmd]);
+    }
+  });
 });
 
 describe('isStroqWindsurfHooks', () => {

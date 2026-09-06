@@ -35,11 +35,11 @@ export async function main(argv: readonly string[]): Promise<number> {
       // the bottom of this file: Codex reads exit 1 as a hook failure and continues
       // past it, and Copilot denies on any non-zero exit from a `preToolUse` but
       // prints the reason only for exit 2 (on its other events, exit 1 fails open).
-      // `rest[1]` is Copilot's phase; the other agents ignore it.
+      // `rest[1]` is Copilot's and OpenClaw's phase argument; the other agents ignore it.
       const out = await runHookCommand(rest[0] ?? '', rest[1] ?? '');
       if (out.stdout) process.stdout.write(out.stdout);
-      // Codex and Copilot read the block reason from stderr when the hook exits 2;
-      // the other adapters never set this field.
+      // Codex, Copilot, OpenClaw and Windsurf all read the block reason from stderr
+      // when the hook exits 2; Claude Code and Cursor never set this field.
       // OpenClaw's plugin blocks on any non-zero exit and reads the reason from
       // stderr, so it needs the same two channels Copilot does.
       // Windsurf's Cascade reads ONLY exit 2 as a block, with the reason on stderr,

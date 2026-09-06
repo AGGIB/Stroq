@@ -4,8 +4,10 @@ import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import { preCandidatesFor, unreadableGuard } from './kind-input.js';
 import {
   MAX_PATCH_PATHS,
+  asPaths,
   decideWithGuards,
   handlePostResult,
+  scanPostResult,
   type EngineEvent,
   type PreGuards,
 } from './pre-decision.js';
@@ -76,10 +78,18 @@ export const windsurfBlockOutput = (reason: string): HookOutput => ({
  * Windsurf's hook contract has no `ask`. Rather than drop the decision to an allow,
  * the adapter denies and says so, naming the rule to relax — lossy on the wire, by
  * design, and never lossy in the audit, which still records the policy's real `ask`.
+ * One trailing period is stripped from the policy's own reason first: every default
+ * `ask` reason is written without one, but a custom policy's is not Stroq's to
+ * assume, and appending this sentence unconditionally would render `..` for a reason
+ * that already ends its own.
  */
-const askAsDeny = (decision: Decision): string =>
-  `Stroq would ask before this action (${decision.ruleId}): ${decision.reason}. ` +
-  'Windsurf hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.';
+const askAsDeny = (decision: Decision): string => {
+  const reason = decision.reason.endsWith('.') ? decision.reason.slice(0, -1) : decision.reason;
+  return (
+    `Stroq would ask before this action (${decision.ruleId}): ${reason}. ` +
+    'Windsurf hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.'
+  );
+};
 
 /** `NO_OUTPUT` for an allow: exit 0 and silence is how a Windsurf hook says "proceed". */
 export function renderDecision(
@@ -172,16 +182,41 @@ const handlePost = (engine: StroqEngine, event: EngineEvent, text: string) =>
   handlePostResult(engine, event, text, windsurfBlockOutput);
 
 /**
- * `post_read_code` carries the path and not the content, so Stroq reads the file
- * itself, capped, and scans that. A read that gave Cascade nothing — a directory, a
- * missing or unreadable file, an empty path, an empty file — gave the model nothing
- * either, so there is no engine call, no audit entry and no output.
+ * Every distinct path `post_read_code` named: `file_path` (the fan-out's canonical
+ * candidate, from the shared `pathsOf`) plus every entry of `file_paths`, which
+ * `kindToolInput`/`withCandidates` populates whenever the path fields disagreed.
+ * Reading `file_path` alone used to scan only ONE of several disagreeing candidates —
+ * `{ path: 'clean.md', file_path: 'poisoned.md' }` scanned `clean.md`, because
+ * `file_path` there is `pathsOf`'s `candidates[0]` (`path` sorts first), not
+ * necessarily the file Cascade actually read. Deduplicated so a payload whose fields
+ * agreed is not scanned twice.
+ */
+function postReadCandidates(toolInput: Readonly<Record<string, unknown>>): readonly string[] {
+  const first = toolInput['file_path'];
+  const rest = asPaths(toolInput['file_paths']);
+  const all = typeof first === 'string' && first !== '' ? [first, ...rest] : rest;
+  return [...new Set(all)];
+}
+
+/**
+ * `post_read_code` carries the path and not the content, so Stroq reads the file(s)
+ * itself, capped, and scans each candidate in turn — sequentially, never
+ * concurrently, because the session store is file-locked. A read that gave Cascade
+ * nothing — a directory, a missing or unreadable file, an empty path, an empty file —
+ * contributes no engine call, no audit entry and no output for that candidate. If ANY
+ * candidate scans suspect the call answers exit 2 with that warning (the worst wins,
+ * the same rule every other fan-out in this adapter uses); only when every candidate
+ * came back clean or unscanned does it answer `NO_OUTPUT`.
  */
 async function handlePostRead(engine: StroqEngine, event: EngineEvent): Promise<HookOutput> {
-  const path = event.toolInput['file_path'];
-  const text = typeof path === 'string' ? windsurfReadText(path, event.cwd) : '';
-  if (text === '') return NO_OUTPUT;
-  return handlePost(engine, event, text);
+  let warning: string | null = null;
+  for (const path of postReadCandidates(event.toolInput)) {
+    const text = windsurfReadText(path, event.cwd);
+    if (text === '') continue;
+    const outcome = await scanPostResult(engine, event, text);
+    if (outcome.warning !== null && warning === null) warning = outcome.warning;
+  }
+  return warning === null ? NO_OUTPUT : windsurfBlockOutput(warning);
 }
 
 /**
