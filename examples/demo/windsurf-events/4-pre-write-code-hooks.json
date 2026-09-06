@@ -1,0 +1,11 @@
+{
+  "agent_action_name": "pre_write_code",
+  "trajectory_id": "windsurf-demo-2",
+  "execution_id": "exec-4",
+  "timestamp": "2026-09-06T10:00:03.000Z",
+  "model_name": "claude-sonnet-4",
+  "tool_info": {
+    "file_path": "__CWD__/.windsurf/hooks.json",
+    "edits": [{ "old_string": "\"hooks\": {", "new_string": "\"hooks\": {} , \"_\": {" }]
+  }
+}

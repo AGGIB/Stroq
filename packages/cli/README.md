@@ -11,13 +11,18 @@
 
 **Local action firewall for AI coding agents.** Stroq scans what your agent reads (files, web pages, MCP tool results, command output) for indirect prompt injection, taints the session when it finds instruction-like text, and deterministically blocks the dangerous follow-up actions an injected agent would take — outbound network commands, secret access, external git pushes, encoded execution, self-tampering. Everything runs locally; nothing is sent to a cloud.
 
-Supported today: **Claude Code** (via native hooks).
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin).
 
 ## Install
 
 ```bash
-npx @stroq/cli init    # in your project: writes .claude/settings.json hooks
-npx @stroq/cli doctor  # check the installation
+npx @stroq/cli init                  # Claude Code: writes .claude/settings.json hooks
+npx @stroq/cli init --agent cursor   # Cursor: writes .cursor/hooks.json
+npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
+npx @stroq/cli init --agent copilot  # Copilot CLI: writes .github/hooks/stroq.json
+npx @stroq/cli init --agent openclaw # OpenClaw: installs a plugin into ~/.stroq/openclaw-plugin
+npx @stroq/cli init --agent windsurf # Windsurf: merges into .windsurf/hooks.json
+npx @stroq/cli doctor                # check the installation
 ```
 
 `init` writes hooks into the project's `.claude/settings.json` by default; pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change.
@@ -26,15 +31,15 @@ Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` co
 
 ## Commands
 
-| Command                                  | What it does                                                              |
-| ---------------------------------------- | ------------------------------------------------------------------------- |
-| `stroq init [--user] [--dry-run]`        | Install hooks into `.claude/settings.json` (or `~/.claude/settings.json`) |
-| `stroq hook claude-code`                 | Hook entrypoint (reads the event on stdin)                                |
-| `stroq doctor`                           | Check Node version, rules, hooks, self-test                               |
-| `stroq log [--count 20]`                 | Show recent audit entries                                                 |
-| `stroq verify`                           | Verify the audit hash chain                                               |
-| `stroq untaint [--session <id>] [--all]` | Clear a false-positive session's taint and provenance, or every session's |
-| `stroq why [--seq <n>]`                  | Explain the most recent denied/asked action: rule, provenance, taint      |
+| Command                                            | What it does                                                                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `stroq init [--agent <name>] [--user] [--dry-run]` | Install hooks for `claude-code`, `cursor`, `codex`, `copilot`, `openclaw` or `windsurf` (`--user` for the home-directory copy) |
+| `stroq hook <agent>`                               | Hook entrypoint (reads the event on stdin; `copilot` and `openclaw` take a `pre`/`post` argument, the others do not)           |
+| `stroq doctor`                                     | Check Node version, rules, hooks for every agent, self-test                                                                    |
+| `stroq log [--count 20]`                           | Show recent audit entries                                                                                                      |
+| `stroq verify`                                     | Verify the audit hash chain                                                                                                    |
+| `stroq untaint [--session <id>] [--all]`           | Clear a false-positive session's taint and provenance, or every session's                                                      |
+| `stroq why [--seq <n>]`                            | Explain the most recent denied/asked action: rule, provenance, taint                                                           |
 
 ## Learn more
 

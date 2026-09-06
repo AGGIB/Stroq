@@ -1,0 +1,8 @@
+{
+  "agent_action_name": "pre_run_command",
+  "trajectory_id": "windsurf-demo-4",
+  "execution_id": "exec-6",
+  "timestamp": "2026-09-06T10:00:05.000Z",
+  "model_name": "claude-sonnet-4",
+  "tool_info": { "command_line": "git reset --hard", "cwd": "__CWD__" }
+}
