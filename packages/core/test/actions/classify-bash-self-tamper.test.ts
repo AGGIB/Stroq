@@ -139,3 +139,21 @@ describe('I3 self-tamper gate bypasses', () => {
     expect(classesOf(cmd)).not.toContain('config.self'),
   );
 });
+
+describe('the agent’s own CLI can switch the gate off (OpenClaw, spec §2b)', () => {
+  it.each([
+    'openclaw plugins disable stroq',
+    'openclaw plugins remove stroq',
+    'openclaw plugins uninstall stroq',
+    'openclaw config set plugins.entries.stroq.enabled false',
+  ])('config.self: %s', (cmd) => expect(classesOf(cmd)).toContain('config.self'));
+
+  it.each(['openclaw plugins list', 'openclaw plugins enable stroq', 'openclaw gateway restart'])(
+    'no class at all (checking or repairing the install): %s',
+    (cmd) => {
+      const classes = classesOf(cmd);
+      expect(classes).not.toContain('config.self');
+      expect(classes).not.toContain('config.self_touch');
+    },
+  );
+});

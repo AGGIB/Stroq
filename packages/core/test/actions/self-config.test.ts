@@ -165,3 +165,47 @@ describe('selfTamperSignals', () => {
     expect(result.ask).toEqual(['self-config-touch']);
   });
 });
+
+describe('switching the gate off through the agent’s own CLI (spec §2b)', () => {
+  it.each([
+    'openclaw plugins disable stroq',
+    'openclaw plugins remove stroq',
+    'openclaw plugins uninstall stroq',
+    'openclaw config set plugins.entries.stroq.enabled false',
+    // A wrapper word, an absolute path and an inner `-exec` are the same command.
+    'sudo openclaw plugins disable stroq',
+    '/usr/local/bin/openclaw plugins uninstall stroq',
+    'find . -name x -exec openclaw plugins remove stroq \\;',
+  ])('deny (the firewall stops running): %s', (segment) =>
+    expect(classifySelfConfigSegment(segment)).toBe('deny'),
+  );
+
+  it.each([
+    'openclaw plugins list',
+    'openclaw plugins inspect stroq --runtime',
+    'openclaw plugins enable stroq',
+    'openclaw gateway restart',
+    // A name that merely starts with the same letters is a different program.
+    'myopenclaw plugins disable stroq',
+  ])('null (checking or repairing the install is not tampering): %s', (segment) =>
+    expect(classifySelfConfigSegment(segment)).toBeNull(),
+  );
+
+  it.each([
+    'openclaw plugins install --link ~/.stroq/openclaw-plugin',
+    'openclaw config get plugins.entries.stroq.enabled',
+  ])('still only asks where a protected word is named: %s', (segment) => {
+    // Pre-existing behaviour, pinned here so the new gate cannot turn the documented
+    // repair and inspection commands into denies: both name `.stroq` (the plugin
+    // directory, and the `entries.stroq` config key) through a command word that is
+    // neither a known reader nor a known writer, which has always been an ask.
+    expect(classifySelfConfigSegment(segment)).toBe('ask');
+  });
+
+  it('names its own signal, so the audit says which kind of tamper it was', () => {
+    expect(selfTamperSignals(['openclaw plugins disable stroq'])).toEqual({
+      deny: ['self-config-disable'],
+      ask: [],
+    });
+  });
+});
