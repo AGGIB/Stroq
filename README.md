@@ -131,6 +131,12 @@ npx @stroq/cli doctor                # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
+**If npm serves an older version than the [latest release](https://github.com/AGGIB/Stroq/releases/latest)** — npm's publish-time review can hold a new version of a security tool for a while — install the release tarball directly; it is the same package that goes to npm, built from the tagged commit:
+
+```bash
+npm install -g https://github.com/AGGIB/Stroq/releases/download/v0.6.0/stroq-cli-0.6.0.tgz
+```
+
 ### Cursor
 
 ```bash
