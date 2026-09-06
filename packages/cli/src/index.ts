@@ -12,9 +12,10 @@ const USAGE = `stroq <command>
 
 Commands:
   init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor | codex | copilot; project config by default)
+                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw; project config by default)
   hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
   hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
+  hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
   doctor                             check the installation
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
@@ -38,6 +39,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       if (out.stdout) process.stdout.write(out.stdout);
       // Codex and Copilot read the block reason from stderr when the hook exits 2;
       // the other adapters never set this field.
+      // OpenClaw's plugin blocks on any non-zero exit and reads the reason from
+      // stderr, so it needs the same two channels Copilot does.
       if (out.stderr) process.stderr.write(out.stderr);
       return out.exitCode;
     }
