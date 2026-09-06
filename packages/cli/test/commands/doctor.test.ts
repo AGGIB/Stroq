@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
 import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
+import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import { secretsFile } from '../../src/paths.js';
 
@@ -148,7 +149,7 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('reports three agents and fails all three lines when none is installed', async () => {
+  it('reports four agents and fails all four lines when none is installed', async () => {
     const report = await doctorReport(cwd);
     expect(report.checks.map((c) => c.name)).toEqual([
       'node',
@@ -157,6 +158,7 @@ describe('doctorReport codex hooks', () => {
       'hooks',
       'cursor hooks',
       'codex hooks',
+      'copilot hooks',
       'home',
       'secrets',
     ]);
@@ -229,5 +231,79 @@ describe('doctorReport codex hooks', () => {
     const codex = report.checks.find((c) => c.name === 'codex hooks');
     expect(codex?.ok).toBe(false);
     expect(codex?.detail).not.toMatch(/cannot parse/);
+  });
+});
+
+describe('doctorReport copilot hooks', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+  const cmd = (phase: string) => `"/n" "/e.js" hook copilot ${phase}`;
+  const install = (dir: string) =>
+    installCopilotHooks(copilotHooksPath('project', dir), cmd('pre'), cmd('post'));
+
+  it('names the file it looked for when nothing is installed', async () => {
+    const copilot = (await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')!;
+    expect(copilot.ok).toBe(false);
+    expect(copilot.detail).toContain(copilotHooksPath('project', cwd));
+    expect(copilot.detail).toContain('project: missing');
+  });
+
+  it('passes every line once Copilot alone is installed', async () => {
+    install(cwd);
+    const report = await doctorReport(cwd);
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+    expect(detailOf(report, 'copilot hooks')).toContain('project: installed');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: copilot hooks are)');
+  });
+
+  it('reports a broken copilot hooks file without failing the other lines', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const file = copilotHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ not json');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'copilot hooks')).toMatch(/cannot parse/);
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+  });
+
+  it('does not call a half-installed file installed', async () => {
+    // A `pre` without a `post` never taints and a `post` without a `pre` never
+    // blocks; either way the user is not getting what the line would claim.
+    const file = copilotHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        hooks: { preToolUse: [{ type: 'command', bash: cmd('pre'), timeoutSec: 15 }] },
+      }),
+    );
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(
+      false,
+    );
+    install(cwd);
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(true);
+  });
+
+  it('finds the user file through COPILOT_HOME', async () => {
+    const copilotHome = join(cwd, 'copilot-home');
+    process.env['COPILOT_HOME'] = copilotHome;
+    try {
+      installCopilotHooks(
+        copilotHooksPath('user', cwd, { COPILOT_HOME: copilotHome }),
+        cmd('pre'),
+        cmd('post'),
+      );
+      const report = await doctorReport(cwd);
+      expect(report.checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(true);
+      expect(report.checks.find((c) => c.name === 'copilot hooks')?.detail).toContain(
+        'user: installed',
+      );
+    } finally {
+      delete process.env['COPILOT_HOME'];
+    }
   });
 });

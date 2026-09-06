@@ -4,6 +4,7 @@ import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats }
 import { secretsFile, stroqHome } from '../paths.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
+import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 
 export interface DoctorCheck {
@@ -48,6 +49,17 @@ function checkCodexHooks(file: string): {
 } {
   try {
     return { installed: hasStroqCodexHook(readCodexHooks(file)), error: null };
+  } catch (err) {
+    return { installed: false, error: (err as Error).message };
+  }
+}
+
+function checkCopilotHooks(file: string): {
+  readonly installed: boolean;
+  readonly error: string | null;
+} {
+  try {
+    return { installed: isStroqCopilotHooks(readCopilotHooks(file)), error: null };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
   }
@@ -141,6 +153,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
     { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks) },
     { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks) },
     { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks) },
+    { name: 'copilot hooks', scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks) },
   ];
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,
