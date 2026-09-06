@@ -231,6 +231,7 @@ const OPENCLAW_NOTE =
   'OpenClaw loads plugins when the Gateway starts: restart it before this takes effect.\n' +
   'An "ask" arrives as an /approve prompt in the chat or UI; with no approval route the call is blocked when it times out.\n' +
   "Set plugins.entries.stroq.config.workspace when the agent's project is not the Gateway's working directory.\n" +
+  'Run that, and any other `openclaw config set plugins.…`, yourself: Stroq treats those commands as self-tampering when an agent issues them.\n' +
   'OpenClaw plugins are per Gateway host, not per project: --user and the default scope write the same directory.\n' +
   'If you set STROQ_HOME, set it for the Gateway process too — the plugin spawns a Stroq that reads it at run time.\n';
 
