@@ -7,6 +7,11 @@ import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-h
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
+import {
+  installOpenClawPlugin,
+  isStroqOpenClawPlugin,
+  openclawPluginDir,
+} from '../../src/commands/openclaw-plugin.js';
 import { secretsFile } from '../../src/paths.js';
 
 let cwd: string;
@@ -149,7 +154,7 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('reports four agents and fails all four lines when none is installed', async () => {
+  it('reports five agents and fails all five lines when none is installed', async () => {
     const report = await doctorReport(cwd);
     expect(report.checks.map((c) => c.name)).toEqual([
       'node',
@@ -159,6 +164,7 @@ describe('doctorReport codex hooks', () => {
       'cursor hooks',
       'codex hooks',
       'copilot hooks',
+      'openclaw plugin',
       'home',
       'secrets',
     ]);
@@ -324,5 +330,52 @@ describe('doctorReport copilot hooks', () => {
     } finally {
       delete process.env['COPILOT_HOME'];
     }
+  });
+});
+
+describe('doctorReport openclaw plugin', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+  const install = () =>
+    installOpenClawPlugin(openclawPluginDir(), [process.execPath, '/x/index.js']);
+
+  it('names the entry it looked for when nothing is installed', async () => {
+    const openclaw = (await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')!;
+    expect(openclaw.ok).toBe(false);
+    expect(openclaw.detail).toContain(openclawPluginDir());
+    expect(openclaw.detail).toContain('missing');
+  });
+
+  it('passes every line once OpenClaw alone is installed', async () => {
+    install();
+    expect(isStroqOpenClawPlugin(openclawPluginDir())).toBe(true);
+    const report = await doctorReport(cwd);
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+    expect(detailOf(report, 'openclaw plugin')).toContain('installed');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: openclaw plugin are)');
+  });
+
+  it('does not call a half-install installed', async () => {
+    // An entry with no manifest is a directory the Gateway will not load, and a
+    // green line beside it would promise protection that is not running.
+    const dir = openclawPluginDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'index.js'), 'export const register = () => {};');
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(
+      false,
+    );
+    install();
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(
+      true,
+    );
+  });
+
+  it('reports one scope, because OpenClaw plugins are per Gateway host', async () => {
+    // No project/user split: there is one directory, and printing two would invite a
+    // user to look for a per-repository install that does not exist.
+    const detail = detailOf(await doctorReport(cwd), 'openclaw plugin');
+    expect(detail.split(';')).toHaveLength(1);
   });
 });

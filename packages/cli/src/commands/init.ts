@@ -28,13 +28,28 @@ import {
   copilotReplacementNotice,
   installCopilotHooks,
 } from './copilot-hooks.js';
+import {
+  OPENCLAW_COMMAND_FILE,
+  OPENCLAW_PLUGIN_FILES,
+  installOpenClawPlugin,
+  openclawInstallCommands,
+  openclawOnPath,
+  openclawPluginDir,
+  runOpenClawInstall,
+} from './openclaw-plugin.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
-export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot';
-export const HOOK_AGENTS: readonly HookAgent[] = ['claude-code', 'cursor', 'codex', 'copilot'];
+export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot' | 'openclaw';
+export const HOOK_AGENTS: readonly HookAgent[] = [
+  'claude-code',
+  'cursor',
+  'codex',
+  'copilot',
+  'openclaw',
+];
 
 export interface HookHandler {
   readonly type: 'command';
@@ -49,14 +64,27 @@ export type SettingsJson = {
   readonly hooks?: Readonly<Record<string, readonly HookGroup[]>>;
 } & Record<string, unknown>;
 
+/** The tsx loader is needed only for a TypeScript entry, i.e. in development and tests. */
+const needsTsxLoader = (entry: string): boolean => entry.endsWith('.ts');
+
 /**
  * The command an agent runs for every hook event. The trailing agent name is
  * also how `init` recognises its own entries when re-installing, so it must stay
  * at the end of the string (see `isStroqHandler` / `isStroqCursorHook`).
  */
 export function hookCommand(node: string, entry: string, agent: HookAgent = 'claude-code'): string {
-  const loader = entry.endsWith('.ts') ? ' --import tsx' : '';
+  const loader = needsTsxLoader(entry) ? ' --import tsx' : '';
   return `"${node}"${loader} "${entry}" hook ${agent}`;
+}
+
+/**
+ * The same command as argv. The OpenClaw plugin spawns Stroq rather than shelling
+ * out, so it needs the parts rather than one quoted line — and sharing the loader
+ * rule with `hookCommand` is what keeps a `--import tsx` from appearing in one and
+ * not the other.
+ */
+export function hookArgv(node: string, entry: string): readonly string[] {
+  return needsTsxLoader(entry) ? [node, '--import', 'tsx', entry] : [node, entry];
 }
 
 export const stroqHandler = (command: string): HookHandler => ({
@@ -191,6 +219,61 @@ function initCopilot(scope: 'project' | 'user', command: string, dryRun: boolean
   return 0;
 }
 
+/**
+ * Four things an OpenClaw user has to know that no other agent needs: plugins are
+ * loaded when the Gateway starts; an `ask` needs a route to a human, and without one
+ * it becomes a block when the approval times out; the project directory has to be
+ * configured when the Gateway does not run in it; and the plugin spawns whatever
+ * `stroq.json` records, so `STROQ_HOME` has to match at run time.
+ */
+const OPENCLAW_NOTE =
+  'OpenClaw loads plugins when the Gateway starts: restart it before this takes effect.\n' +
+  'An "ask" arrives as an /approve prompt in the chat or UI; with no approval route the call is blocked when it times out.\n' +
+  "Set plugins.entries.stroq.config.workspace when the agent's project is not the Gateway's working directory.\n" +
+  'OpenClaw plugins are per Gateway host, not per project: --user and the default scope write the same directory.\n' +
+  'If you set STROQ_HOME, set it for the Gateway process too — the plugin spawns a Stroq that reads it at run time.\n';
+
+/**
+ * Unlike the other four agents this writes a directory rather than a config file, and
+ * then asks OpenClaw to link it. `scope` is ignored on purpose (see the note above);
+ * the parameter stays for the shared installer signature.
+ */
+function initOpenClaw(
+  _scope: 'project' | 'user',
+  argv: readonly string[],
+  dryRun: boolean,
+): number {
+  const dir = openclawPluginDir();
+  const commands = openclawInstallCommands(dir);
+  if (dryRun) {
+    const plan = {
+      directory: dir,
+      files: [...OPENCLAW_PLUGIN_FILES, OPENCLAW_COMMAND_FILE],
+      command: [...argv],
+      install: [...commands],
+    };
+    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    return 0;
+  }
+  installOpenClawPlugin(dir, argv);
+  process.stdout.write(`Stroq plugin installed in ${dir}\n`);
+  const bin = openclawOnPath();
+  if (bin === null) {
+    process.stdout.write(
+      `OpenClaw is not on PATH; run these two commands where it is:\n  ${commands.join('\n  ')}\n`,
+    );
+  } else {
+    for (const outcome of runOpenClawInstall(bin, dir)) {
+      process.stdout.write(`$ ${outcome.line}\n${outcome.output}`);
+      // `install --link` on an already-linked plugin is expected to fail; `enable`
+      // still has to run, so a failure is reported rather than aborting the install.
+      if (!outcome.ok) process.stderr.write(`"${outcome.line}" did not succeed; run it yourself\n`);
+    }
+  }
+  process.stdout.write(`${OPENCLAW_NOTE}Run "stroq doctor" to verify.\n`);
+  return 0;
+}
+
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -207,12 +290,17 @@ export async function runInit(args: readonly string[]): Promise<number> {
   }
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
-  const command = hookCommand(process.execPath, resolve(process.argv[1] ?? ''), agent as HookAgent);
+  const node = process.execPath;
+  const entry = resolve(process.argv[1] ?? '');
+  const command = hookCommand(node, entry, agent as HookAgent);
   const install: Readonly<Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number>> = {
     'claude-code': initClaudeCode,
     cursor: initCursor,
     codex: initCodex,
     copilot: initCopilot,
+    // The plugin spawns Stroq rather than shelling out, so it gets the command as
+    // argv; the quoted line the other four use means nothing to `child_process.spawn`.
+    openclaw: (scope, _command, dryRun) => initOpenClaw(scope, hookArgv(node, entry), dryRun),
   };
   return install[agent as HookAgent](scope, command, dryRun);
 }

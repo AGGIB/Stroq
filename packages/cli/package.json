@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "openclaw-plugin",
     "README.md",
     "LICENSE",
     "DISCLOSURE"

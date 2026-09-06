@@ -215,11 +215,11 @@ describe('runInit --agent', () => {
 
   it('rejects an unknown agent', async () => {
     const out = capture();
-    const code = await runInit(['--agent', 'openclaw']);
+    const code = await runInit(['--agent', 'gemini']);
     out.restore();
     expect(code).toBe(1);
     expect(out.lines.join('')).toBe(
-      'unknown agent "openclaw" (supported: claude-code, cursor, codex, copilot)\n',
+      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw)\n',
     );
   });
 });
