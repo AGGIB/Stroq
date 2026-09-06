@@ -30,6 +30,15 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     // documentation, and denying an edit to them is a false positive.
     'rm .github/hooks.md',
     "sed -i 's/a/b/' .github/hooks-README.md",
+    // `.openclaw` is protected only at its three security-relevant entries: the
+    // config file that can disable a plugin, and the two directories plugins and
+    // extensions load from. Agent instructions and skills under it are not
+    // security config, and a file whose NAME merely starts with `plugins` or
+    // `extensions` is documentation.
+    'cat .openclaw/agents/reviewer.md',
+    'rm .openclaw/skills/deploy.md',
+    'rm .openclaw/plugins.md',
+    "sed -i 's/a/b/' .openclaw/extensions-README.md",
   ])('does not match: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(false));
 
   it.each([
@@ -51,6 +60,14 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     '.github/copilot/settings.local.json',
     '~/.copilot/hooks/stroq.json',
     '~/.copilot/settings.json',
+    '.openclaw/openclaw.json',
+    '~/.openclaw/openclaw.json',
+    '.openclaw/plugins',
+    '.openclaw/plugins/stroq/index.js',
+    '.openclaw/extensions/',
+    // The directory still matches when something that cannot continue a filename
+    // follows it, which is how `rm -rf ~/.openclaw/plugins && …` stays self-tampering.
+    'rm -rf ~/.openclaw/plugins && echo done',
   ])('matches protected file/dir: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(true));
 });
 
@@ -69,6 +86,10 @@ describe('PROTECTED_DIRS (F5-2: bare directories, find-only usage)', () => {
   it('does not match .github on its own', () => {
     expect(PROTECTED_DIRS.test('.github -name')).toBe(false);
   });
+  it.each(['.openclaw -name', '.openclaw/', '~/.openclaw -delete'])(
+    'matches a bare OpenClaw dir: %s',
+    (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
+  );
 });
 
 describe('classifySelfConfigSegment', () => {

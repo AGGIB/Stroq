@@ -161,3 +161,34 @@ describe('Copilot security config is self-config', () => {
     ).not.toContain('config.self');
   });
 });
+
+describe('OpenClaw security config is self-config', () => {
+  it("flags a write to OpenClaw's config and to its plugin directories", () => {
+    for (const path of [
+      '/home/dev/.openclaw/openclaw.json',
+      `${cwd}/.openclaw/openclaw.json`,
+      '/home/dev/.openclaw/plugins/stroq/index.js',
+      '/home/dev/.openclaw/extensions/stroq.js',
+    ])
+      expect(classifyTool('Write', { file_path: path, content: '{}' }, cwd).classes, path).toEqual([
+        'config.self',
+      ]);
+  });
+
+  it('flags a find -delete against the plugin directory', () => {
+    expect(
+      classifyTool('Bash', { command: "find ~/.openclaw -name 'index.js' -delete" }, cwd).classes,
+    ).toContain('config.self');
+  });
+
+  it('leaves the rest of .openclaw alone', () => {
+    // Agent instructions, skills and memory live under `.openclaw` too, and editing
+    // them is ordinary work — the same reason a bare `.claude` is not protected.
+    expect(
+      classifyTool('Write', { file_path: `${cwd}/.openclaw/agents/reviewer.md` }, cwd).classes,
+    ).toEqual([]);
+    expect(
+      classifyTool('Bash', { command: 'cat .openclaw/skills/deploy.md' }, cwd).classes,
+    ).not.toContain('config.self');
+  });
+});
