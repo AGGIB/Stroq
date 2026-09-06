@@ -142,8 +142,10 @@ export function runStroq(config, phase, payload, abortSignal, warn = () => {}) {
       child.kill('SIGKILL');
       finish({ error: `no answer in ${ms} ms` });
     }, ms);
+    // Bytes, not UTF-16 code units: a cap called BYTES that counted `String.length`
+    // would let a reply of multi-byte characters buffer several times its own limit.
     const checkSize = () => {
-      if (stdout.length + stderr.length <= MAX_OUTPUT_BYTES) return;
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) <= MAX_OUTPUT_BYTES) return;
       child.kill('SIGKILL');
       finish({ error: `the reply exceeded ${MAX_OUTPUT_BYTES} bytes and was cut off` });
     };

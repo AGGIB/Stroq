@@ -163,7 +163,10 @@ export const preCandidatesFor = (
  */
 const READABLE: Readonly<
   Partial<
-    Record<ToolKind, (toolInput: Readonly<Record<string, unknown>>, found: PreCandidates) => boolean>
+    Record<
+      ToolKind,
+      (toolInput: Readonly<Record<string, unknown>>, found: PreCandidates) => boolean
+    >
   >
 > = {
   shell: (_toolInput, found) => found.commands.length > 0,

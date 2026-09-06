@@ -108,7 +108,7 @@ describe('openclawPluginDir', () => {
 });
 
 describe('installOpenClawPlugin', () => {
-  it('copies the four files, records the command, and is idempotent', () => {
+  it('copies the five files, records the command, and is idempotent', () => {
     const dir = join(tmp('stroq-openclaw-install-'), 'openclaw-plugin');
     const written = installOpenClawPlugin(dir, command);
     expect(written).toHaveLength(6);

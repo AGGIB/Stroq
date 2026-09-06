@@ -138,11 +138,7 @@ export interface CopilotToolCall {
  * audit summary carries it and a future widening needs no change here.
  */
 export const copilotToolInput = (call: CopilotToolCall): Record<string, unknown> =>
-  kindToolInput(
-    copilotToolKind(call.toolName, call.toolArgs),
-    call.toolArgs,
-    DROPPED_FILE_FIELDS,
-  );
+  kindToolInput(copilotToolKind(call.toolName, call.toolArgs), call.toolArgs, DROPPED_FILE_FIELDS);
 
 /**
  * The text of a completed action. Copilot's own field is `textResultForLlm`; the

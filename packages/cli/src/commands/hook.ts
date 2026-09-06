@@ -150,12 +150,14 @@ export async function runHook(agent: string, rawJson: string, arg = ''): Promise
 /**
  * The whole `stroq hook` command, stdin included. `runHook` above answers every
  * failure it can see, but the read itself can still reject, and `main`'s exit-1 path
- * is the wrong answer for two of the four agents: Codex reads an arbitrary non-zero
+ * is the wrong answer for three of the five agents: Codex reads an arbitrary non-zero
  * exit as a hook failure and continues past it, so exit 1 is fail-open on exactly the
- * events Stroq exists to block, and Copilot denies on any non-zero exit from a
- * `preToolUse` but surfaces the reason only on exit 2. Those adapters answer such a
- * rejection with their own fail-closed output (`stdinFailClosed`); the others
- * re-throw and keep today's behaviour, where `main` prints the error and exits 1.
+ * events Stroq exists to block; Copilot denies on any non-zero exit from a
+ * `preToolUse` but surfaces the reason only on exit 2; and OpenClaw's plugin reads
+ * exit 2 with a reason on stderr as a block and anything else as an internal error.
+ * Those three answer such a rejection with their own fail-closed output
+ * (`stdinFailClosed`); the other two re-throw and keep today's behaviour, where
+ * `main` prints the error and exits 1.
  */
 export async function runHookCommand(
   agent: string,
