@@ -288,6 +288,25 @@ describe('doctorReport copilot hooks', () => {
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(true);
   });
 
+  it('does not call a file installed when it is missing `version`', async () => {
+    // Copilot drops a hooks file outright when `version` is not 1, so a file
+    // that carries both correct entries but no `version` gets no protection —
+    // and must not be reported as if it did.
+    const file = copilotHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        hooks: {
+          preToolUse: [{ type: 'command', bash: cmd('pre'), timeoutSec: 15 }],
+          postToolUse: [{ type: 'command', bash: cmd('post'), timeoutSec: 15 }],
+        },
+      }),
+    );
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(false);
+  });
+
   it('finds the user file through COPILOT_HOME', async () => {
     const copilotHome = join(cwd, 'copilot-home');
     process.env['COPILOT_HOME'] = copilotHome;
