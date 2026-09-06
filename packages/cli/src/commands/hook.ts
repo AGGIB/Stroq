@@ -23,6 +23,11 @@ import {
   openclawFailClosedOutput,
   openclawPostErrorOutput,
 } from '../adapters/openclaw.js';
+import {
+  handleWindsurfHook,
+  windsurfBlockOutput,
+  windsurfFailClosedOutput,
+} from '../adapters/windsurf.js';
 import { createEngine } from '../engine-factory.js';
 import { logError } from '../log.js';
 
@@ -102,6 +107,18 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     badJson: (reason, arg) =>
       arg === 'post' ? openclawPostErrorOutput(reason) : openclawBlockOutput(reason),
     checkArg: (arg) => (isOpenClawPhase(arg) ? null : openclawBadPhaseOutput(arg)),
+    stdinFailClosed: true,
+  },
+  // Windsurf's payload names its own event (`agent_action_name`), so there is no
+  // phase argument and no `checkArg`: one command answers all six installed events,
+  // and any other event — including a future one — is answered with silence. A block
+  // is exit code 2 with the reason on stderr, the only channel Cascade reads; any
+  // OTHER non-zero exit is an allow on Windsurf, so a stdin rejection has to be
+  // answered here rather than by `main`'s exit-1 path, which would fail open.
+  windsurf: {
+    handle: handleWindsurfHook,
+    failClosed: windsurfFailClosedOutput,
+    badJson: windsurfBlockOutput,
     stdinFailClosed: true,
   },
 };
