@@ -94,6 +94,19 @@ describe('one shell command, every params shape', () => {
       expect(ruleOf(out.stdout)).toBe('deny-encoded-exec');
     },
   );
+
+  // Review ruling (Task 1 review): OpenClaw's own tool names are not guaranteed to
+  // arrive in one case or already trimmed. A spelling that misses the shell kind for
+  // nothing but casing or whitespace is named `mcp__openclaw__EXEC` instead, and the
+  // whole shell rule set (deny-encoded-exec included) never runs on it.
+  it.each(['EXEC', 'Exec', 'exec '])(
+    'toolName %s (mixed case / untrimmed) is still a shell call',
+    async (toolName) => {
+      await taint();
+      const out = await pre({ toolName, params: { command: CURL } });
+      expect(ruleOf(out.stdout)).toBe('deny-encoded-exec');
+    },
+  );
 });
 
 const PATCH_SHAPES: [string, unknown][] = [

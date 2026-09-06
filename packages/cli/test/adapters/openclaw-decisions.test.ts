@@ -2,7 +2,11 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { handleOpenClawHook, openclawFailClosedOutput } from '../../src/adapters/openclaw.js';
+import {
+  handleOpenClawHook,
+  openclawFailClosedOutput,
+  type OpenClawPhase,
+} from '../../src/adapters/openclaw.js';
 import { createEngine } from '../../src/engine-factory.js';
 
 let home: string;
@@ -103,6 +107,29 @@ describe('taint from tool output', () => {
     expect(decisionOf(denied.stdout)).toBe('deny');
   });
 
+  it('scans a poisoned tool_describe result too, since it now leaves the pass-through set', async () => {
+    // Review ruling (Task 1 review): `tool_describe` used to be self-mapped, which
+    // exempted its `post` result from the scan entirely (core's `SCANNED_TOOLS` never
+    // matched its bare name). It now composes `mcp__openclaw__tool_describe`, which
+    // does match, so a poisoned result taints the session exactly as any other tool's
+    // would.
+    const scanned = await post({
+      sessionId: 'openclaw-tool-describe',
+      toolName: 'tool_describe',
+      params: { name: 'some_tool' },
+      result: { text: POISONED },
+    });
+    expect(JSON.parse(scanned.stdout)).toMatchObject({ scanned: true, verdict: 'suspect' });
+
+    const denied = await pre({
+      sessionId: 'openclaw-tool-describe',
+      toolName: 'exec',
+      params: { command: CURL },
+    });
+    expect(decisionOf(denied.stdout)).toBe('deny');
+    expect(ruleOf(denied.stdout)).toBe('deny-encoded-exec');
+  });
+
   it('says the scan was clean, and says when there was no scan at all', async () => {
     // Three distinct answers, because the plugin reads them: not scanned, scanned and
     // clean, scanned and suspect. Collapsing the first two would hide a `write` whose
@@ -192,6 +219,22 @@ describe('secret egress', () => {
     expect(readFileSync(join(home, 'audit.jsonl'), 'utf8')).not.toContain(SECRET_VALUE);
   });
 
+  it('denies a tts call that would speak a project .env value out loud', async () => {
+    // Review ruling (Task 1 review): `tts` used to be self-mapped, which put its
+    // arguments nowhere the secret-egress guard ever looked (only `mcp.call` reads
+    // the whole record for a known secret value). It now composes an MCP name, so
+    // this is denied exactly like `message` or `browser` already were.
+    const project = projectWithSecret();
+    const out = await pre({
+      sessionId: 'openclaw-secret-tts',
+      cwd: project,
+      toolName: 'tts',
+      params: { text: `Reminder: API_TOKEN=${SECRET_VALUE}` },
+    });
+    expect(ruleOf(out.stdout)).toBe('deny-secret-egress');
+    expect(out.stdout).not.toContain(SECRET_VALUE);
+  });
+
   it('denies a browser call and an unknown tool carrying the same value', async () => {
     // `browser` is not side-effect-shaped by name, and `syndicate_report` is a tool
     // Stroq has never heard of. Both are `mcp.call`, which is an egress class, so the
@@ -271,6 +314,9 @@ describe('openclawFailClosedOutput', () => {
       'message',
       'browser',
       'mcp__github__add_issue_comment',
+      // Review ruling (Task 1 review): `tts` left the pass-through set, so a Stroq
+      // failure on it now fails closed like any other MCP call.
+      'tts',
     ])
       expect(openclawFailClosedOutput('pre', { toolName }, new Error('boom')), toolName).toEqual({
         stdout: '',
@@ -285,13 +331,32 @@ describe('openclawFailClosedOutput', () => {
   });
 
   it('allows a pre on a tool that only looks at things, and reports a post error', () => {
-    for (const toolName of ['read', 'web_search', 'x_search', 'ask_user', 'tts'])
+    for (const toolName of ['read', 'web_search', 'x_search', 'ask_user', 'get_goal'])
       expect(openclawFailClosedOutput('pre', { toolName }, 'boom'), toolName).toEqual({
         stdout: '{"decision":"allow"}',
         exitCode: 0,
       });
     expect(openclawFailClosedOutput('post', { toolName: 'exec' }, new Error('boom'))).toEqual({
       stdout: '{"scanned":false,"error":"Stroq internal error: boom"}',
+      exitCode: 0,
+    });
+  });
+
+  it('defaults to pre for any phase that is not exactly "post", symmetrically with handleOpenClawHook', () => {
+    // Review ruling (Task 1 review): `handleOpenClawHook` already treats anything
+    // but `'post'` as `pre`; this used to answer the opposite way — anything but
+    // `'pre'` as a `post` error, exit 0 — so a malformed phase reaching the error
+    // path on a high-impact tool would fail OPEN instead of closed. An out-of-type
+    // phase is exactly the case a caller who skipped validation could produce.
+    const bogus = 'before_tool_call' as unknown as OpenClawPhase;
+    expect(openclawFailClosedOutput(bogus, { toolName: 'exec' }, new Error('boom'))).toEqual({
+      stdout: '',
+      stderr: 'Stroq internal error (fail-closed): boom',
+      exitCode: 2,
+    });
+    // A low-impact tool still allows, exactly as it does for a real `pre`.
+    expect(openclawFailClosedOutput(bogus, { toolName: 'read' }, 'boom')).toEqual({
+      stdout: '{"decision":"allow"}',
       exitCode: 0,
     });
   });

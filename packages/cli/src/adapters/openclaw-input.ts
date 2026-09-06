@@ -44,43 +44,57 @@ const FETCH_TOOL = 'web_fetch';
 
 /**
  * Native tools whose Stroq name is fixed and whose arguments need no reshaping.
- * Everything from `ask_user` down maps to itself: these classify to nothing, and
- * giving them an MCP name would put a tool that never leaves the session in front of
- * the egress guard as if it did — `create_goal` and `update_goal` in particular would
- * read as side-effecting on their names alone.
+ * `ask_user`, `progress_card`, `heartbeat_respond` and `get_goal` map to themselves —
+ * and ONLY these four: each neither leaves the session, returns external content, nor
+ * mutates state, so classifying them to nothing costs nothing. `web_search`/`x_search`
+ * map onto the real `WebSearch` tool name instead of to themselves, which is scanned
+ * and low impact exactly as `Read` is.
+ *
+ * Task 1 review ruling: this list used to also self-map `view_image`,
+ * `image_generate`, `music_generate`, `video_generate`, `tts`, `tool_search`,
+ * `tool_search_code`, `tool_describe`, `create_goal` and `update_goal`. Every one of
+ * those returns external content (a search result, a generated asset, a tool's own
+ * docstring) or otherwise warrants the same scrutiny as a real MCP call, and
+ * self-mapping them exempted each one from the `post` scan (core's `SCANNED_TOOLS`
+ * never matches a bare name), the secret-egress guard (only `mcp.call` reads the
+ * whole argument record for a known secret) and the fail-closed path all at once —
+ * `tts` given a secret value was silently allowed, and a poisoned `tool_describe`
+ * result never tainted the session. All ten now fall through to the `mcp` kind below.
  */
 const PLAIN_NAMES: ReadonlyMap<string, string> = new Map([
   ['web_search', 'WebSearch'],
   ['x_search', 'WebSearch'],
   ['ask_user', 'ask_user'],
-  ['view_image', 'view_image'],
-  ['image_generate', 'image_generate'],
-  ['music_generate', 'music_generate'],
-  ['video_generate', 'video_generate'],
-  ['tts', 'tts'],
-  ['tool_search', 'tool_search'],
-  ['tool_search_code', 'tool_search_code'],
-  ['tool_describe', 'tool_describe'],
   ['progress_card', 'progress_card'],
   ['heartbeat_respond', 'heartbeat_respond'],
   ['get_goal', 'get_goal'],
-  ['create_goal', 'create_goal'],
-  ['update_goal', 'update_goal'],
 ]);
 
 const KIND_NAMES = { shell: 'Bash', patch: 'Write', read: 'Read', fetch: 'WebFetch' } as const;
+
+/**
+ * OpenClaw's own tool names are not guaranteed to arrive in one case or already
+ * trimmed — `EXEC`, `Exec` and `'exec '` have all been seen from real integrations —
+ * and a spelling that misses its kind for nothing but casing or whitespace becomes
+ * `mcp__openclaw__EXEC`, silently skipping the whole shell (or write, or read, …) rule
+ * set. Every kind and name lookup below runs on the normalised name; the tool name
+ * Stroq actually EMITS is unaffected, since it always comes from a fixed table
+ * (`KIND_NAMES`, `PLAIN_NAMES`'s values) rather than from the raw string's own casing.
+ */
+const normalizeToolName = (rawTool: string): string => rawTool.trim().toLowerCase();
 
 /**
  * Unlike Copilot's, this needs no arguments: OpenClaw has no editor tool that hides a
  * sub-command in a field called `command`, so the name alone decides the kind.
  */
 export function openclawToolKind(rawTool: string): OpenClawKind {
-  if (isShellTool(rawTool)) return 'shell';
-  if (PATCH_TOOLS.has(rawTool)) return 'patch';
-  if (WRITE_TOOLS.has(rawTool)) return 'write';
-  if (READ_TOOLS.has(rawTool)) return 'read';
-  if (rawTool === FETCH_TOOL) return 'fetch';
-  return PLAIN_NAMES.has(rawTool) ? 'plain' : 'mcp';
+  const tool = normalizeToolName(rawTool);
+  if (isShellTool(tool)) return 'shell';
+  if (PATCH_TOOLS.has(tool)) return 'patch';
+  if (WRITE_TOOLS.has(tool)) return 'write';
+  if (READ_TOOLS.has(tool)) return 'read';
+  if (tool === FETCH_TOOL) return 'fetch';
+  return PLAIN_NAMES.has(tool) ? 'plain' : 'mcp';
 }
 
 /**
@@ -94,13 +108,12 @@ export function openclawToolKind(rawTool: string): OpenClawKind {
  * readability, not for the decision.
  */
 export function openclawToolName(rawTool: string): string {
-  const kind = openclawToolKind(rawTool);
-  if (kind === 'write') return rawTool === 'write' ? 'Write' : 'Edit';
-  if (kind === 'plain') return PLAIN_NAMES.get(rawTool) ?? rawTool;
+  const tool = normalizeToolName(rawTool);
+  const kind = openclawToolKind(tool);
+  if (kind === 'write') return tool === 'write' ? 'Write' : 'Edit';
+  if (kind === 'plain') return PLAIN_NAMES.get(tool) ?? tool;
   if (kind !== 'mcp') return KIND_NAMES[kind];
-  return rawTool.startsWith('mcp__')
-    ? mcpToolName('', rawTool)
-    : mcpToolName(OPENCLAW_MCP_SERVER, rawTool);
+  return tool.startsWith('mcp__') ? mcpToolName('', tool) : mcpToolName(OPENCLAW_MCP_SERVER, tool);
 }
 
 /**
@@ -186,4 +199,5 @@ export function openclawResultText(result: unknown, error: unknown = undefined):
  */
 const LOW_IMPACT: ReadonlySet<string> = new Set([...READ_TOOLS, ...PLAIN_NAMES.keys()]);
 
-export const isOpenClawHighImpact = (rawTool: string): boolean => !LOW_IMPACT.has(rawTool);
+export const isOpenClawHighImpact = (rawTool: string): boolean =>
+  !LOW_IMPACT.has(normalizeToolName(rawTool));
