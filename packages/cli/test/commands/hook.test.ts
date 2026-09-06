@@ -377,4 +377,16 @@ describe('runHook windsurf routing', () => {
       await runHook('windsurf', event({ agent_action_name: 'pre_user_prompt', tool_info: {} })),
     ).toEqual({ stdout: '', exitCode: 0 });
   });
+
+  it('answers a stdin read that rejects with the fail-closed block, never exit 1', async () => {
+    // Cascade reads only exit 2 as a block; an exit-1 fail-open here would let
+    // whatever the read failure was hiding straight through.
+    const exploding = () => Promise.reject(new Error('stdin exploded'));
+    expect(await runHookCommand('windsurf', '', exploding)).toEqual({
+      stdout: '',
+      stderr: 'Stroq internal error (fail-closed): stdin exploded',
+      exitCode: 2,
+    });
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook windsurf');
+  });
 });
