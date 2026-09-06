@@ -32,6 +32,7 @@ import {
   OPENCLAW_COMMAND_FILE,
   OPENCLAW_PLUGIN_FILES,
   installOpenClawPlugin,
+  npxCacheWarning,
   openclawInstallCommands,
   openclawOnPath,
   openclawPluginDir,
@@ -257,6 +258,11 @@ function initOpenClaw(
   }
   installOpenClawPlugin(dir, argv);
   process.stdout.write(`Stroq plugin installed in ${dir}\n`);
+  // Printed before the install output, where it is still on screen: the plugin
+  // survives a pruned npx cache by falling back to `stroq` on PATH, but only a real
+  // install puts one there, and this is the moment the user can act on it.
+  const npx = npxCacheWarning(argv);
+  if (npx !== null) process.stdout.write(`${npx}\n`);
   const bin = openclawOnPath();
   if (bin === null) {
     process.stdout.write(

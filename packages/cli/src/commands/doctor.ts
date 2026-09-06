@@ -10,6 +10,7 @@ import { isStroqHandler, readSettings, settingsPath } from './init.js';
 import {
   OPENCLAW_PLUGIN_MANIFEST,
   isStroqOpenClawPlugin,
+  missingOpenClawPluginFile,
   openclawPluginDir,
 } from './openclaw-plugin.js';
 
@@ -79,16 +80,17 @@ function checkCopilotHooks(file: string): {
  * to enable the plugin belongs in `init`'s note, not in a check that must be fast,
  * offline and safe to run anywhere.
  *
- * `file` names the manifest, not the entry: `isStroqOpenClawPlugin` treats the
- * manifest as the decisive check (an entry with no manifest, or one belonging to
- * someone else, is "not installed" either way), so a half-install — the exact case
- * this line exists to catch — is one where `index.js` is NOT what is actually
- * missing or wrong, and naming it would point a "missing" line at the wrong file.
+ * `isStroqOpenClawPlugin` requires the plugin's ENTRY, every other file `@stroq/cli`
+ * ships beside it, and a manifest claiming Stroq's own id — so `file` names whichever
+ * shipped file is actually absent, and falls back to the manifest when they are all
+ * present (the remaining ways to fail are an unreadable manifest or one belonging to
+ * someone else, both of which are about that file). Naming a file that IS there would
+ * point a "missing" line at the wrong thing, which is the whole job of this line.
  * No `try/catch` here: neither `openclawPluginDir` nor `isStroqOpenClawPlugin` throws.
  */
 function openclawScopes(): ScopeStatus[] {
   const dir = openclawPluginDir();
-  const file = join(dir, OPENCLAW_PLUGIN_MANIFEST);
+  const file = join(dir, missingOpenClawPluginFile(dir) ?? OPENCLAW_PLUGIN_MANIFEST);
   return [{ scope: 'user', file, installed: isStroqOpenClawPlugin(dir), error: null }];
 }
 
