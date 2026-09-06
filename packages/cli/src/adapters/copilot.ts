@@ -120,11 +120,15 @@ export function renderDecision(
   return decision.effect === 'deny' ? copilotDenyOutput(reason) : copilotAskOutput(reason);
 }
 
-/** Recorded (and enforced) when a patch is too large to classify inside the hook timeout. */
-export const COPILOT_PATCH_TOO_LARGE: Decision = {
+/**
+ * Recorded (and enforced) when a call names more targets than Stroq can classify
+ * inside the hook timeout — the files an `apply_patch` declares or the URLs a
+ * `web_fetch` carries, both of which fan out to one `engine.pre` each.
+ */
+export const COPILOT_TOO_MANY_TARGETS: Decision = {
   effect: 'deny',
-  ruleId: 'copilot-patch-too-large',
-  reason: `the patch declares more than ${MAX_PATCH_PATHS} files, more than Stroq can classify inside Copilot's hook timeout — and a timed-out Copilot hook is treated as an allow`,
+  ruleId: 'copilot-too-many-targets',
+  reason: `the call names more than ${MAX_PATCH_PATHS} files or URLs, more than Stroq can classify inside Copilot's hook timeout — and a timed-out Copilot hook is treated as an allow`,
 };
 
 /**
@@ -213,7 +217,11 @@ const handlePre = (engine: StroqEngine, event: EngineEvent, guards: PreGuards) =
     engine,
     event,
     guards,
-    { tooLarge: COPILOT_PATCH_TOO_LARGE, unreadableSummary: 'copilot: unreadable toolArgs' },
+    {
+      tooLarge: COPILOT_TOO_MANY_TARGETS,
+      unreadableSummary: 'copilot: unreadable toolArgs',
+      tooLargeSummary: (count) => `${count} files or URLs`,
+    },
     renderDecision,
   );
 

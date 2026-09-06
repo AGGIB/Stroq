@@ -126,8 +126,10 @@ export const readCopilotHooks = (file: string): CopilotHooksJson =>
   readJsonObject<CopilotHooksJson>(file);
 
 /**
- * The one line `init` prints when it is about to overwrite a `stroq.json` that Stroq
- * did not write. The overwrite itself stays unconditional — the NAME is Stroq's by
+ * The one line `init` prints on STDERR when it is about to overwrite a `stroq.json`
+ * that Stroq did not write — stderr so that `init --agent copilot --dry-run | jq`
+ * still sees nothing but the file on stdout. The overwrite itself stays
+ * unconditional — the NAME is Stroq's by
  * contract, and a user's own hooks belong in a sibling file, which is the whole
  * reason there is nothing to merge — but replacing a file whose contents nobody
  * recognises should never be silent. Empty for a file that is absent or is already a

@@ -174,11 +174,12 @@ const COPILOT_NOTE =
 function initCopilot(scope: 'project' | 'user', command: string, dryRun: boolean): number {
   const file = copilotHooksPath(scope);
   const [pre, post] = [`${command} pre`, `${command} post`];
-  // Printed before the file (or the preview) so it is the first thing read: the
-  // overwrite is by contract, but it is never silent. Empty for the common cases —
-  // a fresh install and an idempotent re-run.
+  // On stderr, and before the file (or the preview), so it is the first thing read
+  // without putting anything but JSON on stdout: `init --dry-run | jq` still works.
+  // The overwrite is by contract, but it is never silent. Empty for the common
+  // cases — a fresh install and an idempotent re-run.
   const notice = copilotReplacementNotice(file, dryRun);
-  if (notice) process.stdout.write(notice);
+  if (notice) process.stderr.write(notice);
   if (dryRun) {
     process.stdout.write(`${JSON.stringify(buildCopilotHooks(pre, post), null, 2)}\n`);
     return 0;

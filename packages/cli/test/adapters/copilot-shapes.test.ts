@@ -133,6 +133,23 @@ describe('one fetched URL, every toolArgs shape', () => {
     expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-secret-egress)');
     expect(out.stdout).not.toContain(SECRET_VALUE);
   });
+
+  it('never lets a caller-supplied `urls` decide what gets judged', async () => {
+    // The fan-out list is Stroq's, computed from the fields it reads. A payload that
+    // brought its own `urls` used to REPLACE `url` in every fanned-out input, so the
+    // real URL — the one carrying the secret — was never handed to the engine at all.
+    const out = await pre({
+      toolName: 'web_fetch',
+      cwd: projectWithSecret(),
+      toolArgs: { url: FETCH_URL, urls: ['https://ok1.example', 'https://ok2.example'] },
+    });
+    expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-secret-egress)');
+    expect(out.stdout).not.toContain(SECRET_VALUE);
+    // The decoys are not judged targets, so they never reach the audit either.
+    const audit = readFileSync(join(home, 'audit.jsonl'), 'utf8');
+    expect(audit).not.toContain('ok1.example');
+    expect(audit).not.toContain('ok2.example');
+  });
 });
 
 const PATCH_SHAPES: [string, unknown][] = [
@@ -183,6 +200,32 @@ describe('one protected path, every file-tool shape', () => {
         toolArgs: { command: 'view', path: '.copilot/settings.json' },
       }),
     ).toEqual({ stdout: '', exitCode: 0 });
+  });
+});
+
+describe('a fan-out is bounded, because a slow Copilot hook fails open', () => {
+  const urls = (count: number): string[] =>
+    Array.from({ length: count }, (_, i) => `https://ok${i}.example/page`);
+
+  it('denies more than 64 URLs outright rather than classifying each one', async () => {
+    const out = await pre({ toolName: 'web_fetch', toolArgs: { url: urls(65) } });
+    const reason = reasonOf(out.stdout);
+    expect(reason).toContain('Stroq blocked this action (copilot-too-many-targets)');
+    expect(reason).toContain('files or URLs');
+    // One audited deny, not 65 classifications: the classification itself is what
+    // would run the hook past `timeoutSec`, and a timed-out Copilot hook is an allow.
+    const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('65 files or URLs');
+  });
+
+  it('judges 64 URLs normally', async () => {
+    expect(await pre({ toolName: 'web_fetch', toolArgs: { url: urls(64) } })).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+    const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(64);
   });
 });
 
