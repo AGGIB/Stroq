@@ -136,7 +136,7 @@ Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` co
 **If npm serves an older version than the [latest release](https://github.com/AGGIB/Stroq/releases/latest)** — npm's publish-time review can hold a new version of a security tool for a while — install the release tarball directly; it is the same package that goes to npm, built from the tagged commit:
 
 ```bash
-npm install -g https://github.com/AGGIB/Stroq/releases/download/v0.7.0/stroq-cli-0.7.0.tgz
+npm install -g https://github.com/AGGIB/Stroq/releases/download/v0.8.0/stroq-cli-0.8.0.tgz
 ```
 
 ### Cursor
