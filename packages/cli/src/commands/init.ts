@@ -22,13 +22,14 @@ import {
   mergeCodexHooks,
   readCodexHooks,
 } from './codex-hooks.js';
+import { buildCopilotHooks, copilotHooksPath, installCopilotHooks } from './copilot-hooks.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
-export type HookAgent = 'claude-code' | 'cursor' | 'codex';
-export const HOOK_AGENTS: readonly HookAgent[] = ['claude-code', 'cursor', 'codex'];
+export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot';
+export const HOOK_AGENTS: readonly HookAgent[] = ['claude-code', 'cursor', 'codex', 'copilot'];
 
 export interface HookHandler {
   readonly type: 'command';
@@ -152,6 +153,33 @@ function initCodex(scope: 'project' | 'user', command: string, dryRun: boolean):
   return 0;
 }
 
+/**
+ * Three things a Copilot user has to know that no other agent needs: hooks are read
+ * once when the CLI starts, so an install into a running session does nothing; Stroq
+ * owns this one file and rewrites it whole, so a hook of your own belongs in a
+ * sibling file; and `.github/hooks/` is the only location the cloud coding agent
+ * reads, where the command can only run if Node and @stroq/cli exist in its sandbox.
+ */
+const COPILOT_NOTE =
+  'Copilot reads its hooks when the CLI starts: restart "copilot" before this takes effect.\n' +
+  'Stroq owns this file and rewrites it whole; put hooks of your own in another *.json in the same directory.\n' +
+  '"stroq init --agent copilot --user" writes $COPILOT_HOME/hooks/stroq.json (or ~/.copilot/hooks/stroq.json) instead.\n' +
+  'The cloud coding agent reads only .github/hooks/, and can run this hook only where Node and @stroq/cli are installed.\n';
+
+function initCopilot(scope: 'project' | 'user', command: string, dryRun: boolean): number {
+  const file = copilotHooksPath(scope);
+  const [pre, post] = [`${command} pre`, `${command} post`];
+  if (dryRun) {
+    process.stdout.write(`${JSON.stringify(buildCopilotHooks(pre, post), null, 2)}\n`);
+    return 0;
+  }
+  installCopilotHooks(file, pre, post);
+  process.stdout.write(
+    `Stroq hooks installed in ${file}\n  preToolUse  -> every tool\n  postToolUse -> every tool\n${COPILOT_NOTE}Run "stroq doctor" to verify.\n`,
+  );
+  return 0;
+}
+
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -173,6 +201,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
     'claude-code': initClaudeCode,
     cursor: initCursor,
     codex: initCodex,
+    copilot: initCopilot,
   };
   return install[agent as HookAgent](scope, command, dryRun);
 }

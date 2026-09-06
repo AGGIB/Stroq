@@ -15,6 +15,7 @@ import {
 } from '../../src/commands/init.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
+import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -181,11 +182,11 @@ describe('runInit --agent', () => {
 
   it('rejects an unknown agent', async () => {
     const out = capture();
-    const code = await runInit(['--agent', 'copilot']);
+    const code = await runInit(['--agent', 'openclaw']);
     out.restore();
     expect(code).toBe(1);
     expect(out.lines.join('')).toBe(
-      'unknown agent "copilot" (supported: claude-code, cursor, codex)\n',
+      'unknown agent "openclaw" (supported: claude-code, cursor, codex, copilot)\n',
     );
   });
 });
@@ -245,5 +246,68 @@ describe('runInit --agent codex', () => {
     out.restore();
     expect(existsSync(settingsPath('project', dir))).toBe(false);
     expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+  });
+});
+
+describe('hookCommand for copilot', () => {
+  it('ends with the agent name; init appends the phase to it', () => {
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js', 'copilot')).toBe(
+      '"/usr/bin/node" "/opt/stroq/dist/index.js" hook copilot',
+    );
+    expect(hookCommand('/usr/bin/node', '/w/src/index.ts', 'copilot')).toBe(
+      '"/usr/bin/node" --import tsx "/w/src/index.ts" hook copilot',
+    );
+  });
+});
+
+describe('runInit --agent copilot', () => {
+  it('writes .github/hooks/stroq.json for the project and is idempotent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-copilot-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'copilot']));
+    out.restore();
+    expect(code).toBe(0);
+    const file = copilotHooksPath('project', dir);
+    const printed = out.lines.join('');
+    expect(printed).toContain(file);
+    // The three things a Copilot user has to know that no other agent needs.
+    expect(printed).toContain('restart');
+    expect(printed).toContain('stroq.json');
+    expect(printed).toContain('cloud coding agent');
+    const first = readFileSync(file, 'utf8');
+    const parsed = JSON.parse(first) as {
+      version: number;
+      hooks: Record<string, { bash: string; timeoutSec: number }[]>;
+    };
+    expect(parsed.version).toBe(1);
+    expect(parsed.hooks['preToolUse']?.[0]?.bash).toMatch(/ hook copilot pre$/);
+    expect(parsed.hooks['postToolUse']?.[0]?.bash).toMatch(/ hook copilot post$/);
+    expect(parsed.hooks['preToolUse']?.[0]?.timeoutSec).toBe(15);
+    expect(isStroqCopilotHooks(parsed)).toBe(true);
+
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'copilot']));
+    again.restore();
+    expect(readFileSync(file, 'utf8')).toBe(first);
+  });
+
+  it('prints the file and writes nothing with --dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-copilot-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'copilot', '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect(JSON.parse(out.lines.join('')).hooks.postToolUse).toHaveLength(1);
+    expect(existsSync(copilotHooksPath('project', dir))).toBe(false);
+  });
+
+  it('does not touch the other agents', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-copilot-'));
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'copilot']));
+    out.restore();
+    expect(existsSync(settingsPath('project', dir))).toBe(false);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+    expect(existsSync(codexHooksPath('project', dir))).toBe(false);
   });
 });
