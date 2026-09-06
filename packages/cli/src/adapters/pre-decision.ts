@@ -20,9 +20,11 @@ export interface EngineEvent {
 
 /**
  * The most a single call may fan out to before Stroq stops classifying it item by
- * item. Beyond this, the sequential `engine.pre` calls risk running past the agent's
- * hook timeout — and a timed-out hook fails open on both Codex and Copilot, which is
- * exactly the outcome a ten-thousand-file patch would be crafted to produce.
+ * item — the files a patch declares, the paths a file tool names, the URLs a fetch
+ * carries. Beyond this, the sequential `engine.pre` calls risk running past the
+ * agent's hook timeout — and a timed-out hook fails open on both Codex and Copilot,
+ * which is exactly the outcome a ten-thousand-target payload would be crafted to
+ * produce. The name is historical (patches were the first list); it bounds them all.
  */
 export const MAX_PATCH_PATHS = 64;
 
@@ -122,11 +124,24 @@ export type RenderDecision = (
 
 /** The two adapter-level denies, named by the adapter that records them. */
 export interface GuardDenials {
-  /** The decision an oversized patch gets; its rule id names the agent. */
+  /** The decision an over-long fan-out gets; its rule id names the agent. */
   readonly tooLarge: Decision;
   /** The audit summary for an unreadable payload, e.g. `codex: unreadable tool_input`. */
   readonly unreadableSummary: string;
+  /** That deny's audit summary, given the length of the list that tripped the bound. */
+  readonly tooLargeSummary: (count: number) => string;
 }
+
+/**
+ * The longest list this call would fan out over. Every list is bounded, not just a
+ * patch's paths: a `web_fetch` carrying an array of URLs fans out exactly the same
+ * way, and `{ url: [5000 URLs] }` is 5000 sequential `engine.pre` calls and 5000
+ * audit entries — well past any hook timeout, and a timed-out Copilot hook is an
+ * ALLOW. (`commands` is bounded by the number of field spellings and can never trip
+ * this; it is counted anyway so no future candidate list can be added unbounded.)
+ */
+const fanOutSize = (guards: PreCandidates): number =>
+  Math.max(guards.commands.length, guards.patchPaths.length, guards.urls.length);
 
 /**
  * The whole `pre` answer, in the order it has to happen: a payload the adapter could
@@ -148,13 +163,9 @@ export async function decideWithGuards(
   const deny = (decision: Decision) => render(decision, [], []);
   if (guards.unreadable)
     return denyDirectly(event, guards.unreadable, denials.unreadableSummary, deny);
-  if (guards.patchPaths.length > MAX_PATCH_PATHS)
-    return denyDirectly(
-      event,
-      denials.tooLarge,
-      `apply_patch: ${guards.patchPaths.length} files`,
-      deny,
-    );
+  const fanOut = fanOutSize(guards);
+  if (fanOut > MAX_PATCH_PATHS)
+    return denyDirectly(event, denials.tooLarge, denials.tooLargeSummary(fanOut), deny);
   const { decision, provenance, secrets } = await decidePre(
     engine,
     event,

@@ -130,6 +130,26 @@ describe('self-tamper through Copilot’s own file tools', () => {
     expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-self-tamper)');
   });
 
+  it('never lets a caller-supplied `file_paths` decide what gets judged', async () => {
+    // Same shape of bug as the `urls` one: the fan-out list has to be the one Stroq
+    // computed from `path`/`file_path`/`raw`, never a list the payload brought with
+    // it, which would replace `file_path` in every fanned-out input and leave the
+    // protected path unexamined.
+    const out = await pre({
+      toolName: 'create',
+      toolArgs: {
+        path: join(cwd, '.github/hooks/stroq.json'),
+        file_paths: ['a.txt', 'b.txt'],
+        content: 'x',
+      },
+    });
+    expect(decisionOf(out.stdout)).toBe('deny');
+    expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-self-tamper)');
+    const audit = readFileSync(join(home, 'audit.jsonl'), 'utf8');
+    expect(audit).not.toContain('a.txt');
+    expect(audit).not.toContain('b.txt');
+  });
+
   it('a single-key payload still produces exactly one audit entry', async () => {
     await pre({ toolName: 'create', toolArgs: { path: 'safe.txt' } });
     const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8')

@@ -126,6 +126,32 @@ function capture(): { readonly lines: string[]; readonly restore: () => void } {
   return { lines, restore: () => spy.mockRestore() };
 }
 
+/** Both streams at once: `init` prints its warnings on stderr, everything else on stdout. */
+function captureBoth(): {
+  readonly out: string[];
+  readonly err: string[];
+  readonly restore: () => void;
+} {
+  const out: string[] = [];
+  const err: string[] = [];
+  const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    out.push(String(chunk));
+    return true;
+  });
+  const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    err.push(String(chunk));
+    return true;
+  });
+  return {
+    out,
+    err,
+    restore: () => {
+      outSpy.mockRestore();
+      errSpy.mockRestore();
+    },
+  };
+}
+
 async function inDir<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   const original = process.cwd();
   try {
@@ -331,17 +357,19 @@ describe('runInit --agent copilot', () => {
     // the temp directory is reached through a symlink.
     const shown = copilotHooksPath('project', realpathSync(dir));
 
-    const out = capture();
+    const both = captureBoth();
     await inDir(dir, () => runInit(['--agent', 'copilot']));
-    out.restore();
-    expect(out.lines.join('')).toContain(`replacing ${shown}, which Stroq did not write`);
+    both.restore();
+    // On stderr, so a `--dry-run | jq` pipeline still sees only the file.
+    expect(both.err.join('')).toBe(`replacing ${shown}, which Stroq did not write\n`);
+    expect(both.out.join('')).not.toContain('which Stroq did not write');
     expect(isStroqCopilotHooks(JSON.parse(readFileSync(file, 'utf8')))).toBe(true);
 
     // A re-run now finds its own file and says nothing.
-    const again = capture();
+    const again = captureBoth();
     await inDir(dir, () => runInit(['--agent', 'copilot']));
     again.restore();
-    expect(again.lines.join('')).not.toContain('which Stroq did not write');
+    expect(again.err.join('')).toBe('');
   });
 
   it('warns in the conditional tense with --dry-run, and still writes nothing', async () => {
@@ -351,10 +379,12 @@ describe('runInit --agent copilot', () => {
     writeFileSync(file, '{ "hooks": {} }');
     const shown = copilotHooksPath('project', realpathSync(dir));
 
-    const out = capture();
+    const both = captureBoth();
     await inDir(dir, () => runInit(['--agent', 'copilot', '--dry-run']));
-    out.restore();
-    expect(out.lines.join('')).toContain(`would replace ${shown}, which Stroq did not write`);
+    both.restore();
+    expect(both.err.join('')).toBe(`would replace ${shown}, which Stroq did not write\n`);
+    // stdout stays parseable: the preview is the only thing on it.
+    expect(JSON.parse(both.out.join('')).version).toBe(1);
     expect(readFileSync(file, 'utf8')).toBe('{ "hooks": {} }');
   });
 });

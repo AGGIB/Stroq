@@ -164,7 +164,13 @@ const handlePre = (engine: StroqEngine, event: EngineEvent, guards: PreGuards) =
     engine,
     event,
     guards,
-    { tooLarge: CODEX_PATCH_TOO_LARGE, unreadableSummary: 'codex: unreadable tool_input' },
+    {
+      tooLarge: CODEX_PATCH_TOO_LARGE,
+      unreadableSummary: 'codex: unreadable tool_input',
+      // Codex fans out over patch paths only — it has no fetch tool that reaches
+      // hooks — so the count is always a patch's file count, as the audit says.
+      tooLargeSummary: (count) => `apply_patch: ${count} files`,
+    },
     renderDecision,
   );
 

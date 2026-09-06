@@ -172,14 +172,24 @@ const withoutKeys = (
  * The record the engine sees for a call whose real subject is one of several
  * candidates: the first under the canonical key the classifier reads, and the whole
  * list under `<key>s` when they disagreed, which is what `preInputs` fans out over.
+ *
+ * The plural key is ALWAYS this function's, never the payload's — a caller-supplied
+ * `urls`/`file_paths` is dropped whatever the candidate count. `preInputs` overwrites
+ * the singular key with each entry of the plural one, so a payload that brought its
+ * own list would decide what gets judged: `{ url: '<exfiltrating>', urls: ['<benign>',
+ * '<benign>'] }` would be classified twice on the decoys and never once on the real
+ * URL. Deleting the key unconditionally is what makes that impossible — writing the
+ * computed list only when there is more than one candidate would still leave the
+ * payload's own list in place for the single-candidate case, which is the common one.
  */
 const withCandidates = (
   base: Readonly<Record<string, unknown>>,
   key: 'file_path' | 'url',
   candidates: readonly string[],
 ): Record<string, unknown> => {
-  const one = { ...base, [key]: candidates[0] ?? '' };
-  return candidates.length > 1 ? { ...one, [`${key}s`]: [...candidates] } : one;
+  const plural = `${key}s`;
+  const one = { ...withoutKeys(base, [plural]), [key]: candidates[0] ?? '' };
+  return candidates.length > 1 ? { ...one, [plural]: [...candidates] } : one;
 };
 
 /** The subset of a Copilot event this module reads. */
@@ -193,6 +203,8 @@ export function copilotToolInput(call: CopilotToolCall): Record<string, unknown>
   const kind = copilotToolKind(call.toolName, call.toolArgs);
   if (kind === 'shell') return { command: commandOf(call.toolArgs) };
   if (kind === 'patch') {
+    // A fresh object, so nothing of the payload's — a `file_paths` it brought with
+    // it included — reaches the engine or drives the fan-out; see `withCandidates`.
     const paths = applyPatchPaths(patchTextOf(call.toolArgs));
     return { file_path: paths[0] ?? '', file_paths: [...paths] };
   }
