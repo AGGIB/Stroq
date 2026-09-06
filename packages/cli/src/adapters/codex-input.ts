@@ -10,6 +10,10 @@ import { isRecord, toolInputRecord } from './tool-input.js';
  * Codex's own unified-exec naming. Reading a field spelling Stroq does not know
  * costs nothing; missing one means a command that classifies to nothing, and a
  * command that classifies to nothing is a command that is allowed.
+ *
+ * The readers below are shared with the Copilot adapter (`copilot-input.ts`): Copilot
+ * sends the same three shapes under different names (`toolArgs` rather than
+ * `tool_input`), and an `apply_patch` body identical to Codex's.
  */
 
 /** Every `tool_name` that carries a shell command. */

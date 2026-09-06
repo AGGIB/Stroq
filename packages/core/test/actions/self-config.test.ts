@@ -21,6 +21,11 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     'cd .claude && ls',
     'tar czf backup.tgz .claude',
     'vim .claude/CLAUDE.md',
+    // `.github` is only protected where a literal `/hooks` or `/copilot` follows it:
+    // an api.github.com URL and the workflows directory are not agent security config.
+    'curl -s https://api.github.com/repos',
+    'rm .github/workflows/ci.yml',
+    'cat .github/copilot/instructions.md',
   ])('does not match: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(false));
 
   it.each([
@@ -30,6 +35,12 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     '.stroq',
     '~/.stroq',
     '.stroq/audit.jsonl',
+    '.github/hooks/stroq.json',
+    '.github/hooks',
+    '.github/copilot/settings.json',
+    '.github/copilot/settings.local.json',
+    '~/.copilot/hooks/stroq.json',
+    '~/.copilot/settings.json',
   ])('matches protected file/dir: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(true));
 });
 
@@ -40,6 +51,13 @@ describe('PROTECTED_DIRS (F5-2: bare directories, find-only usage)', () => {
   );
   it('does not match an unrelated dotted word', () => {
     expect(PROTECTED_DIRS.test('mystroqrc')).toBe(false);
+  });
+  it.each(['.copilot -name', '.github/hooks -name', '.github/copilot/'])(
+    'matches a bare Copilot dir: %s',
+    (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
+  );
+  it('does not match .github on its own', () => {
+    expect(PROTECTED_DIRS.test('.github -name')).toBe(false);
   });
 });
 

@@ -9,7 +9,7 @@ import {
 import { z } from 'zod';
 import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
-import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
+import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import {
   CODEX_HIGH_IMPACT_TOOL,
   codexToolInput,
@@ -20,6 +20,14 @@ import {
   isEmptyToolInput,
   isPatchTool,
 } from './codex-input.js';
+import {
+  MAX_PATCH_PATHS,
+  decidePre,
+  preInputs,
+  type EngineEvent,
+  type PreCandidates,
+} from './pre-decision.js';
+import { streamResultText } from './tool-result.js';
 
 export {
   CODEX_HIGH_IMPACT_TOOL,
@@ -27,6 +35,10 @@ export {
   codexToolInput,
   codexToolName,
 } from './codex-input.js';
+// Both moved out of this file when the Copilot adapter became their second caller;
+// re-exported so the Codex adapter's public surface is unchanged.
+export { MAX_PATCH_PATHS } from './pre-decision.js';
+export { streamResultText as codexResultText } from './tool-result.js';
 
 /** The two Codex events Stroq installs on; any other event is not ours to answer. */
 export const CODEX_EVENTS = ['PreToolUse', 'PostToolUse'] as const;
@@ -54,25 +66,6 @@ export const CodexHookInputSchema = z.looseObject({
   tool_use_id: z.unknown().optional(),
 });
 export type CodexHookInput = z.infer<typeof CodexHookInputSchema>;
-
-/**
- * The text of a completed action. Codex puts the unified shell result in `output`;
- * some builds still send `stdout`/`stderr`. An empty `output` is not the official
- * field being in play — Codex (or a proxy) can send `output: ''` — so it must not
- * shadow the streams that carry the real, possibly poisoned, result.
- */
-export function codexResultText(response: unknown): string {
-  if (response && typeof response === 'object' && !Array.isArray(response)) {
-    const record = response as Record<string, unknown>;
-    const output = record['output'];
-    if (typeof output === 'string' && output !== '') return toolResultToText(output);
-    const streams = [record['stdout'], record['stderr']].filter(
-      (part): part is string => typeof part === 'string' && part.length > 0,
-    );
-    if (streams.length > 0) return toolResultToText(streams.join('\n'));
-  }
-  return toolResultToText(response);
-}
 
 const envelope = (event: CodexEvent, fields: Readonly<Record<string, unknown>>): HookOutput => ({
   stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: event, ...fields } }),
@@ -122,21 +115,6 @@ export function renderDecision(
   return codexDenyOutput(withEvidence(headline, provenance, now, secrets));
 }
 
-interface EngineEvent {
-  readonly sessionId: string;
-  readonly toolName: string;
-  readonly toolInput: Record<string, unknown>;
-  readonly cwd: string;
-}
-
-/**
- * The most a patch may declare before Stroq stops classifying it path by path.
- * Beyond this, the sequential `engine.pre` calls risk running past Codex's hook
- * timeout — and a timed-out hook fails open, which is exactly the outcome a
- * ten-thousand-file patch would be crafted to produce.
- */
-export const MAX_PATCH_PATHS = 64;
-
 /** Recorded (and enforced) when a patch is too large to classify inside the timeout. */
 export const CODEX_PATCH_TOO_LARGE: Decision = {
   effect: 'deny',
@@ -180,48 +158,6 @@ function unreadableInput(input: CodexHookInput, guards: Omit<PreGuards, 'unreada
   return readable ? null : codexUnreadableInput(describeToolInput(input.tool_input));
 }
 
-/**
- * One `toolInput` per thing that has to be classified on its own: every file an
- * `apply_patch` declares, or every field a shell command could have arrived in. The
- * ordinary single-value case is one call with the record untouched, so a normal
- * payload still produces exactly one engine call and one audit entry.
- */
-function preInputs(
-  toolInput: Readonly<Record<string, unknown>>,
-  guards: PreGuards,
-): Record<string, unknown>[] {
-  if (guards.commands.length > 1)
-    return guards.commands.map((command) => ({ ...toolInput, command }));
-  if (guards.patchPaths.length > 1)
-    return guards.patchPaths.map((file_path) => ({ ...toolInput, file_path }));
-  return [{ ...toolInput }];
-}
-
-/** deny beats ask beats allow: a call is only as safe as its worst path or field. */
-const SEVERITY: Readonly<Record<Decision['effect'], number>> = { allow: 0, ask: 1, deny: 2 };
-
-/**
- * Sequential on purpose: the session store is file-locked and the audit log is a
- * hash chain, so the calls cannot overlap — and the order they run in is the order
- * `stroq log` will show the patch's paths. `inputs` is always non-empty in practice —
- * `preInputs` never returns `[]` — the guard exists only to give `first` a real
- * (non-`undefined`) type under `noUncheckedIndexedAccess` without a silent fallback.
- */
-async function decidePre(
-  engine: StroqEngine,
-  event: EngineEvent,
-  inputs: readonly Record<string, unknown>[],
-) {
-  const [first, ...rest] = inputs;
-  if (!first) throw new Error('decidePre: inputs must be non-empty');
-  let worst = await engine.pre({ ...event, toolInput: first });
-  for (const toolInput of rest) {
-    const next = await engine.pre({ ...event, toolInput });
-    if (SEVERITY[next.decision.effect] > SEVERITY[worst.decision.effect]) worst = next;
-  }
-  return worst;
-}
-
 /** An audited deny the engine never made: recorded here so `stroq log`/`why` still explain it. */
 async function denyDirectly(
   event: EngineEvent,
@@ -239,10 +175,7 @@ async function denyDirectly(
   return renderDecision(decision, [], []);
 }
 
-interface PreGuards {
-  /** Every command spelling a shell call carried; empty for any other tool. */
-  readonly commands: readonly string[];
-  readonly patchPaths: readonly string[];
+interface PreGuards extends PreCandidates {
   readonly unreadable: Decision | null;
 }
 
@@ -280,7 +213,7 @@ async function handlePost(
   event: EngineEvent,
   response: unknown,
 ): Promise<HookOutput> {
-  const result = await engine.post({ ...event, toolResultText: codexResultText(response) });
+  const result = await engine.post({ ...event, toolResultText: streamResultText(response) });
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
   return codexContextOutput(warningFor(result.scan, event.toolName));
