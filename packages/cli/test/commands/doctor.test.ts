@@ -357,15 +357,19 @@ describe('doctorReport openclaw plugin', () => {
     expect(detailOf(report, 'hooks')).toBe('not installed (ok: openclaw plugin are)');
   });
 
-  it('does not call a half-install installed', async () => {
+  it('does not call a half-install installed, and names the manifest that is actually wrong', async () => {
     // An entry with no manifest is a directory the Gateway will not load, and a
     // green line beside it would promise protection that is not running.
     const dir = openclawPluginDir();
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'index.js'), 'export const register = () => {};');
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(
-      false,
-    );
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(false);
+    // Task 3 review, minor: `index.js` DOES exist in this half-install, so pointing
+    // the "missing" message at it would name the wrong file — the manifest is what
+    // is actually missing, and is what `isStroqOpenClawPlugin` decides on.
+    expect(detailOf(report, 'openclaw plugin')).toContain('openclaw.plugin.json');
+    expect(detailOf(report, 'openclaw plugin')).not.toContain('index.js');
     install();
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(
       true,

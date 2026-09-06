@@ -30,11 +30,12 @@ describe('the packaged plugin', () => {
     expect(() => packagedPluginDir(tmp('stroq-openclaw-nowhere-'))).toThrow(/cannot find/);
   });
 
-  it('ships exactly the four files the manifest needs', () => {
+  it('ships exactly the five files the manifest needs', () => {
     expect(OPENCLAW_PLUGIN_FILES).toEqual([
       'openclaw.plugin.json',
       'package.json',
       'index.js',
+      'run-stroq.js',
       'README.md',
     ]);
     for (const name of OPENCLAW_PLUGIN_FILES)
@@ -77,9 +78,12 @@ describe('the packaged plugin', () => {
 
   it('is small enough to review in one sitting', () => {
     // Every line here runs inside the Gateway process and is not covered by the
-    // engine's own suite; 200 is the budget the plan sets.
-    const lines = readFileSync(join(packagedPluginDir(), 'index.js'), 'utf8').split('\n').length;
-    expect(lines).toBeLessThanOrEqual(200);
+    // engine's own suite; 200 is the budget the plan sets for the entry, and the
+    // spawn-and-collect helper it was split out of stays well under that too.
+    for (const name of ['index.js', 'run-stroq.js']) {
+      const lines = readFileSync(join(packagedPluginDir(), name), 'utf8').split('\n').length;
+      expect(lines, name).toBeLessThanOrEqual(200);
+    }
   });
 
   it('is listed in the package files, so it actually ships', () => {
@@ -105,7 +109,7 @@ describe('installOpenClawPlugin', () => {
   it('copies the four files, records the command, and is idempotent', () => {
     const dir = join(tmp('stroq-openclaw-install-'), 'openclaw-plugin');
     const written = installOpenClawPlugin(dir, command);
-    expect(written).toHaveLength(5);
+    expect(written).toHaveLength(6);
     for (const name of [...OPENCLAW_PLUGIN_FILES, OPENCLAW_COMMAND_FILE])
       expect(existsSync(join(dir, name)), name).toBe(true);
     expect(JSON.parse(readFileSync(join(dir, OPENCLAW_COMMAND_FILE), 'utf8'))).toEqual({

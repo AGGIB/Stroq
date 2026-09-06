@@ -139,6 +139,15 @@ describe('runInit --agent openclaw', () => {
     await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
     out.restore();
     const printed = out.lines.join('');
+    // Task 3 review, Important: both substrings below also appear in the "not on
+    // PATH" branch's printed instructions, so on their own they cannot tell a
+    // regression that stops running the commands from the case that actually ran
+    // them. The "$ openclaw ..." echo line only appears when a command is actually
+    // run (see `initOpenClaw`), so it — plus the absence of the other branch's own
+    // wording — is what proves this one really executed.
+    expect(printed).not.toContain('not on PATH');
+    expect(printed).toContain('$ openclaw plugins install --link');
+    expect(printed).toContain('$ openclaw plugins enable stroq');
     expect(printed).toContain('plugins install --link');
     expect(printed).toContain('plugins enable stroq');
   });

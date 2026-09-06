@@ -4,6 +4,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+/**
+ * Registration and ordinary decisions. Fail-closed paths, the observe-only
+ * `after_tool_call` contract, and Stroq-binary resolution live in
+ * `plugin-fail-closed.test.ts` (the 400-line-per-test-file budget) — each file
+ * re-declares its own small fixtures rather than importing them from the other, the
+ * way `copilot.test.ts` / `copilot-shapes.test.ts` / `copilot-decisions.test.ts` do.
+ */
+
 const pluginDir = join(import.meta.dirname, '../../openclaw-plugin');
 
 interface Handler {
@@ -40,19 +48,14 @@ const loadPlugin = async (dir: string = pluginDir) =>
 
 /**
  * A `stroq` the plugin can really spawn: a plain Node script — never a POSIX shell
- * script — that records the argv and stdin it was given and then behaves as `script`
- * says. This test environment's sandbox hangs when it executes a shebang script, so
- * the stub cannot be `#!/bin/sh` like a real one might; it is invoked as
- * `node <file>`, which the plugin resolves from a single `stroqBin` string by
- * word-splitting it (see `stroqArgv`), and `argv` below is exposed separately for the
- * `stroq.json` `command` field, which already takes an array natively. Nothing here
- * talks to the real CLI — these tests are about the plugin's own contract.
+ * script, which would hang this sandbox — that records the argv and stdin it was
+ * given and then behaves as `script` says. It is always launched through
+ * `stroq.json`'s `command` array (see `installedWith`), never through `stroqBin`:
+ * Task 3 review found that a real `stroqBin` path can contain a space, so the plugin
+ * treats it as one opaque, unsplit path, and only `stroq.json`'s already-array-shaped
+ * `command` may carry more than one argv element.
  */
-function stubStroq(script: string): {
-  readonly bin: string;
-  readonly argv: string[];
-  readonly log: string;
-} {
+function stubStroq(script: string): { readonly argv: string[]; readonly log: string } {
   const dir = mkdtempSync(join(tmpdir(), 'stroq-openclaw-stub-'));
   const file = join(dir, 'stroq-stub.js');
   const log = join(dir, 'call.log');
@@ -67,7 +70,20 @@ function stubStroq(script: string): {
       `  ${script}\n` +
       '});\n',
   );
-  return { bin: `${process.execPath} ${file}`, argv: [process.execPath, file], log };
+  return { argv: [process.execPath, file], log };
+}
+
+/**
+ * A copy of the plugin with a `stroq.json` beside it recording `argv` as the launch
+ * command — exactly what `stroq init --agent openclaw` materialises. `index.js`'s
+ * ESM `import` syntax needs the copy's own `package.json` (`"type": "module"`) to
+ * load at all, so the whole directory is copied rather than just the entry.
+ */
+function installedWith(argv: readonly string[]): string {
+  const dir = mkdtempSync(join(tmpdir(), 'stroq-openclaw-copy-'));
+  cpSync(pluginDir, dir, { recursive: true });
+  writeFileSync(join(dir, 'stroq.json'), JSON.stringify({ command: [...argv] }));
+  return dir;
 }
 
 const ALLOW = `process.stdout.write('{"decision":"allow"}');`;
@@ -77,9 +93,6 @@ const DENY =
 const ASK =
   'process.stdout.write(\'{"decision":"ask","ruleId":"ask-destructive",' +
   '"reason":"Destructive command requires confirmation"}\');';
-const SUSPECT =
-  'process.stdout.write(\'{"scanned":true,"verdict":"suspect",' +
-  '"warning":"Stroq: untrusted data"}\');';
 
 const event = (fields: Record<string, unknown> = {}) => ({
   toolName: 'exec',
@@ -108,7 +121,12 @@ async function wire(config: Record<string, unknown>, dir?: string) {
   return { api, pre, post };
 }
 
-let stub: ReturnType<typeof stubStroq>;
+/** `wire`, against a fresh copy of the plugin running `script` as its Stroq CLI. */
+async function wireWithStub(script: string, config: Record<string, unknown> = {}) {
+  const { argv, log } = stubStroq(script);
+  const wired = await wire(config, installedWith(argv));
+  return { ...wired, log };
+}
 
 beforeEach(() => {
   delete process.env['STROQ_BIN'];
@@ -136,14 +154,12 @@ describe('registration', () => {
 
 describe('a decision the CLI made', () => {
   it('allows by returning nothing at all', async () => {
-    stub = stubStroq(ALLOW);
-    const { pre } = await wire({ stroqBin: stub.bin });
+    const { pre } = await wireWithStub(ALLOW);
     expect(await pre.handle(event(), ctx())).toBeUndefined();
   });
 
   it('composes the block sentence from the rule id and the reason', async () => {
-    stub = stubStroq(DENY);
-    const { api, pre } = await wire({ stroqBin: stub.bin });
+    const { api, pre } = await wireWithStub(DENY);
     expect(await pre.handle(event({ toolName: 'write' }), ctx())).toEqual({
       block: true,
       blockReason:
@@ -153,8 +169,7 @@ describe('a decision the CLI made', () => {
   });
 
   it('asks for real, inside OpenClaw’s documented caps', async () => {
-    stub = stubStroq(ASK);
-    const { api, pre } = await wire({ stroqBin: stub.bin, askTimeoutMs: 60_000 });
+    const { api, pre } = await wireWithStub(ASK, { askTimeoutMs: 60_000 });
     const answer = (await pre.handle(event(), ctx())) as {
       requireApproval: Record<string, unknown> & { onResolution: (d: string) => void };
     };
@@ -173,12 +188,11 @@ describe('a decision the CLI made', () => {
   it('clips an over-long title and description rather than being rejected', async () => {
     const rule = 'r'.repeat(200);
     const reason = 'x'.repeat(900);
-    stub = stubStroq(
+    const { pre } = await wireWithStub(
       `process.stdout.write(JSON.stringify({ decision: 'ask', ruleId: ${JSON.stringify(
         rule,
       )}, reason: ${JSON.stringify(reason)} }));`,
     );
-    const { pre } = await wire({ stroqBin: stub.bin });
     const answer = (await pre.handle(event(), ctx())) as {
       requireApproval: { title: string; description: string };
     };
@@ -187,159 +201,83 @@ describe('a decision the CLI made', () => {
     expect(answer.requireApproval.description.endsWith('...')).toBe(true);
   });
 
-  it('sends the session key, the tool, the params and the exec cwd', async () => {
-    stub = stubStroq(ALLOW);
-    const { pre } = await wire({ stroqBin: stub.bin, workspace: '/srv/fallback' });
+  it('sends the session key, the tool and the params, and its own cwd — never the tool’s', async () => {
+    const { pre, log } = await wireWithStub(ALLOW, { workspace: '/srv/fallback' });
     await pre.handle(
       event({ toolName: 'exec', params: { command: 'ls', cwd: '/srv/app' } }),
       ctx(),
     );
-    const written = readFileSync(stub.log, 'utf8');
+    const written = readFileSync(log, 'utf8');
     const [argv, ...body] = written.split('\n');
     expect(argv).toBe('ARGS: hook openclaw pre');
     const payload = JSON.parse(body.join('\n')) as Record<string, unknown>;
     // `sessionKey` wins over `sessionId`: it is the stable one across a run.
     expect(payload['sessionId']).toBe('session-key-1');
     expect(payload['toolName']).toBe('exec');
+    // The whole params object, cwd included, is still forwarded — see the
+    // "cwd never comes from the tool call" tests below for why that is safe.
     expect(payload['params']).toEqual({ command: 'ls', cwd: '/srv/app' });
-    expect(payload['cwd']).toBe('/srv/app');
+    expect(payload['cwd']).toBe('/srv/fallback');
     expect(payload['agentId']).toBe('main');
     expect(payload['requester']).toEqual({ channel: 'cli', senderIsOwner: true });
   });
 
   it('falls back to the configured workspace, then to a session id it can use', async () => {
-    stub = stubStroq(ALLOW);
-    const { pre } = await wire({ stroqBin: stub.bin, workspace: '/srv/fallback' });
+    const { pre, log } = await wireWithStub(ALLOW, { workspace: '/srv/fallback' });
     await pre.handle(event(), { sessionId: 'only-session-id' });
-    const payload = JSON.parse(
-      readFileSync(stub.log, 'utf8').split('\n').slice(1).join('\n'),
-    ) as Record<string, unknown>;
+    const payload = JSON.parse(readFileSync(log, 'utf8').split('\n').slice(1).join('\n')) as Record<
+      string,
+      unknown
+    >;
     expect(payload['cwd']).toBe('/srv/fallback');
     expect(payload['sessionId']).toBe('only-session-id');
 
     // Stroq requires a non-empty session id, and a rejected payload would block every
     // call in the session, so a ctx with neither key gets a stable fallback.
     await pre.handle(event(), {});
-    const second = JSON.parse(
-      readFileSync(stub.log, 'utf8').split('\n').slice(1).join('\n'),
-    ) as Record<string, unknown>;
+    const second = JSON.parse(readFileSync(log, 'utf8').split('\n').slice(1).join('\n')) as Record<
+      string,
+      unknown
+    >;
     expect(second['sessionId']).toBe('openclaw');
   });
 });
 
-describe('fail-closed', () => {
-  const failures: [string, string][] = [
-    [
-      'a non-zero exit with a reason on stderr',
-      "process.stderr.write('boom\\n'); process.exit(2);",
-    ],
-    ['any other non-zero exit', 'process.exit(1);'],
-    ['stdout that is not JSON at all', "process.stdout.write('not json {{{');"],
-    ['stdout that is JSON but not an object', "process.stdout.write('[1,2,3]');"],
-    ['no output at all', '// nothing to do: exit cleanly with no output'],
-    ['a decision this plugin does not know', 'process.stdout.write(\'{"decision":"maybe"}\');'],
-  ];
-
-  it.each(failures)('blocks on %s', async (_label, script) => {
-    stub = stubStroq(script);
-    const { api, pre } = await wire({ stroqBin: stub.bin });
-    const answer = (await pre.handle(event(), ctx())) as { block: boolean; blockReason: string };
-    expect(answer.block).toBe(true);
-    expect(answer.blockReason).toContain('Stroq internal error (fail-closed)');
-    expect(api.logs.some((line) => line.startsWith('warn stroq: exec:'))).toBe(true);
-  });
-
-  it('blocks when the binary is not there at all', async () => {
-    const { pre } = await wire({ stroqBin: join(tmpdir(), 'definitely-not-stroq') });
-    const answer = (await pre.handle(event(), ctx())) as { block: boolean; blockReason: string };
-    expect(answer.block).toBe(true);
-    expect(answer.blockReason).toContain('fail-closed');
-  });
-
-  it('blocks when Stroq does not answer in time, and kills the child', async () => {
-    stub = stubStroq(`setTimeout(() => { ${ALLOW} }, 30000);`);
-    const { pre } = await wire({ stroqBin: stub.bin, timeoutMs: 250 });
-    const started = Date.now();
-    const answer = (await pre.handle(event(), ctx())) as { block: boolean; blockReason: string };
-    expect(answer.blockReason).toContain('no answer in 250 ms');
-    expect(Date.now() - started).toBeLessThan(10_000);
-  }, 30_000);
-
-  it('blocks when the run is cancelled', async () => {
-    stub = stubStroq(`setTimeout(() => { ${ALLOW} }, 30000);`);
-    const { pre } = await wire({ stroqBin: stub.bin, timeoutMs: 20_000 });
-    const controller = new AbortController();
-    const pending = pre.handle(event(), ctx({ abortSignal: controller.signal }));
-    controller.abort();
-    const answer = (await pending) as { block: boolean };
-    expect(answer.block).toBe(true);
-  }, 30_000);
-
-  it('blocks a call whose params cannot be serialised', async () => {
-    stub = stubStroq(ALLOW);
-    const { pre } = await wire({ stroqBin: stub.bin });
-    const circular: Record<string, unknown> = { command: 'ls' };
-    circular['self'] = circular;
-    const answer = (await pre.handle(event({ params: circular }), ctx())) as { block: boolean };
-    expect(answer.block).toBe(true);
-  });
-});
-
-describe('after_tool_call is observe-only', () => {
-  it('logs a warning and returns nothing', async () => {
-    stub = stubStroq(SUSPECT);
-    const { api, post } = await wire({ stroqBin: stub.bin });
-    expect(
-      await post.handle(
-        event({ result: { output: 'poison' }, error: undefined, durationMs: 12 }),
-        ctx(),
-      ),
-    ).toBeUndefined();
-    expect(api.logs).toContain('warn stroq: Stroq: untrusted data');
-    const payload = JSON.parse(
-      readFileSync(stub.log, 'utf8').split('\n').slice(1).join('\n'),
-    ) as Record<string, unknown>;
-    expect(readFileSync(stub.log, 'utf8').startsWith('ARGS: hook openclaw post')).toBe(true);
-    expect(payload['result']).toEqual({ output: 'poison' });
-    expect(payload['durationMs']).toBe(12);
-  });
-
-  it('says nothing for a clean scan and never throws on a failure', async () => {
-    stub = stubStroq('process.stdout.write(\'{"scanned":true,"verdict":"clean"}\');');
-    const clean = await wire({ stroqBin: stub.bin });
-    expect(await clean.post.handle(event({ result: 'ok' }), ctx())).toBeUndefined();
-    expect(clean.api.logs).toEqual([]);
-
-    // The tool has already run: a broken scan is a debug line, not a thrown handler.
-    const broken = await wire({ stroqBin: join(tmpdir(), 'definitely-not-stroq') });
-    await expect(broken.post.handle(event({ result: 'ok' }), ctx())).resolves.toBeUndefined();
-    expect(broken.api.logs.some((line) => line.startsWith('debug stroq: post scan failed'))).toBe(
-      true,
+describe('cwd never comes from the tool call (Task 3 review, Critical)', () => {
+  it('ignores params.cwd on a non-exec tool, so it cannot redirect the secret index', async () => {
+    // A model-supplied `cwd` on `write` (or `message`, `browser`, any MCP call) must
+    // never move the directory the secret index and path rules use: pointing it at
+    // an empty directory is exactly how a `deny-secret-egress` probe turned into an
+    // `allow`. `exec` loses nothing — see the next test.
+    const { pre, log } = await wireWithStub(ALLOW, { workspace: '/srv/fallback' });
+    await pre.handle(
+      event({ toolName: 'write', params: { file_path: '/tmp/x', cwd: '/somewhere/else' } }),
+      ctx(),
     );
+    const payload = JSON.parse(readFileSync(log, 'utf8').split('\n').slice(1).join('\n')) as Record<
+      string,
+      unknown
+    >;
+    expect(payload['cwd']).toBe('/srv/fallback');
+    // The whole params object is still forwarded, cwd included: nothing is hidden
+    // from the CLI, only the plugin's OWN top-level cwd stops trusting it.
+    expect(payload['params']).toEqual({ file_path: '/tmp/x', cwd: '/somewhere/else' });
   });
-});
 
-describe('finding the Stroq binary', () => {
-  it('prefers the config, then STROQ_BIN, then the stroq.json init wrote', async () => {
-    const configured = stubStroq(ALLOW);
-    const fromEnv = stubStroq(DENY);
-    process.env['STROQ_BIN'] = fromEnv.bin;
-    const both = await wire({ stroqBin: configured.bin });
-    expect(await both.pre.handle(event(), ctx())).toBeUndefined();
-
-    const envOnly = await wire({});
-    expect(await envOnly.pre.handle(event(), ctx())).toMatchObject({ block: true });
-    delete process.env['STROQ_BIN'];
-
-    // A copy of the plugin with a `stroq.json` beside it, which is exactly what
-    // `stroq init --agent openclaw` materialises.
-    const copied = mkdtempSync(join(tmpdir(), 'stroq-openclaw-copy-'));
-    cpSync(pluginDir, copied, { recursive: true });
-    const recorded = stubStroq(ASK);
-    // `command` is an array already, so the two-part `node <stub.js>` argv this
-    // sandbox needs is written directly — no word-splitting involved on this path.
-    writeFileSync(join(copied, 'stroq.json'), JSON.stringify({ command: recorded.argv }));
-    const installed = await wire({}, copied);
-    expect(await installed.pre.handle(event(), ctx())).toHaveProperty('requireApproval');
+  it('ignores params.cwd on exec too, falling back to process.cwd() with no workspace', async () => {
+    // The CLI adapter still recovers exec's own directory from `params.cwd` itself
+    // (`openclawExecCwd`, covered in test/adapters/openclaw-io.test.ts) — independent
+    // of this top-level field, which is why exec loses nothing from this change.
+    const { pre, log } = await wireWithStub(ALLOW);
+    await pre.handle(
+      event({ toolName: 'exec', params: { command: 'ls', cwd: '/srv/app' } }),
+      ctx(),
+    );
+    const payload = JSON.parse(readFileSync(log, 'utf8').split('\n').slice(1).join('\n')) as Record<
+      string,
+      unknown
+    >;
+    expect(payload['cwd']).toBe(process.cwd());
+    expect(payload['params']).toEqual({ command: 'ls', cwd: '/srv/app' });
   });
 });
