@@ -30,12 +30,29 @@ export type OpenClawKind = ToolKind;
 /**
  * `exec` is the documented shell tool; the rest are defensive aliases. `isBashTool`
  * already covers `shell`, `exec_command` and `local_shell` (plus Codex's capitalised
- * `Bash`), and the three shell names below are added for the same reason: a spelling
- * that misses this set becomes `mcp__openclaw__sh` and the whole shell rule set never
- * runs on it, so `curl … | sh` would be allowed in an untainted session. Reading a
- * name Stroq does not need costs nothing; missing one is a command nobody classified.
+ * `Bash`), and the names below are added for the same reason: a spelling that misses
+ * this set becomes `mcp__openclaw__sh` and the whole shell rule set never runs on it,
+ * so `curl … | sh` would be allowed in an untainted session. Reading a name Stroq
+ * does not need costs nothing; missing one is a command nobody classified.
+ *
+ * `terminal` is here because its input IS a command line — it was an MCP call until
+ * the whole-branch review found exactly the gap above: `terminal { command: 'curl …
+ * | sh' }` was allowed untainted while the identical `exec` call was denied. Its
+ * siblings `process` and `code_execution` deliberately are NOT: their parameter
+ * shapes are undocumented, so the shell kind — which reduces `params` to one
+ * `command` field — would turn every call Stroq cannot read into an
+ * `openclaw-unreadable-input` deny. They stay side-effect MCP tools instead, which
+ * means their command text is not classified by the shell rules when the session is
+ * untainted; see the README's OpenClaw limits.
  */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['exec', 'bash', 'sh', 'zsh', 'run_command']);
+const SHELL_TOOLS: ReadonlySet<string> = new Set([
+  'exec',
+  'bash',
+  'sh',
+  'zsh',
+  'run_command',
+  'terminal',
+]);
 const isShellTool = (rawTool: string): boolean => SHELL_TOOLS.has(rawTool) || isBashTool(rawTool);
 
 const PATCH_TOOLS: ReadonlySet<string> = new Set(['apply_patch']);
@@ -101,7 +118,7 @@ export function openclawToolKind(rawTool: string): OpenClawKind {
 /**
  * OpenClaw's native tool list is documented and finite, so a name that is not in it —
  * or one of the side-effecting natives whose parameter shapes are not documented
- * (`message`, `browser`, `terminal`, `process`, `code_execution`, …) — is treated as
+ * (`message`, `browser`, `process`, `code_execution`, …) — is treated as
  * an MCP call. The mis-guess is safe in one direction only: a native tool classified
  * as `mcp.call` is merely scanned, while a real egress left unclassified is a `.env`
  * value nobody looked at. `Write` and `Edit` classify identically (both are in core's
