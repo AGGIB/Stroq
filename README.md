@@ -20,7 +20,7 @@ Scans what the agent reads. Taints the session. Blocks the dangerous follow-up �
 npx @stroq/cli init
 ```
 
-Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI** (native hooks) · On the roadmap: OpenClaw
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI** (native hooks) · **OpenClaw** (in-process plugin)
 
 **Website:** [stroq.vercel.app](https://stroq.vercel.app)
 
@@ -124,6 +124,7 @@ npx @stroq/cli init                  # Claude Code: writes .claude/settings.json
 npx @stroq/cli init --agent cursor   # Cursor: writes .cursor/hooks.json
 npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
 npx @stroq/cli init --agent copilot  # Copilot CLI: writes .github/hooks/stroq.json
+npx @stroq/cli init --agent openclaw # OpenClaw: installs a plugin into ~/.stroq/openclaw-plugin
 npx @stroq/cli doctor                # check the installation
 ```
 
@@ -256,6 +257,61 @@ The decision is a top-level object, not Claude Code's `hookSpecificOutput` envel
 
 Run the Copilot demo yourself: `pnpm install && pnpm build && ./examples/demo/run-copilot-demo.sh`.
 
+### OpenClaw
+
+```bash
+npx @stroq/cli init --agent openclaw   # installs the plugin, then links and enables it
+```
+
+OpenClaw has no hooks file: it loads **plugins**, in process, from a directory. So `init` does something different here from what it does for the other four agents — it copies the five-file plugin `@stroq/cli` ships into `~/.stroq/openclaw-plugin/` (or `$STROQ_HOME/openclaw-plugin/`), writes a `stroq.json` beside it recording how to start Stroq, and then runs these two for you when `openclaw` is on `PATH`, or prints them when it is not:
+
+```bash
+openclaw plugins install --link ~/.stroq/openclaw-plugin
+openclaw plugins enable stroq
+```
+
+**Restart the Gateway** afterwards: plugins are loaded when it starts. `stroq doctor` then shows an `openclaw plugin` line next to the other four. `--dry-run` prints the directory, the files and the two commands as JSON and writes nothing. There is no project/user split — an OpenClaw plugin belongs to a Gateway host, not to a repository — so `--user` and the default scope write the same directory, and re-running `init` overwrites it, which is what makes the install idempotent.
+
+The plugin's entry point is deliberately tiny — `index.js` is under 200 lines of dependency-free JavaScript, with the spawn-and-parse mechanics factored into a small sibling module, `run-stroq.js` — because it runs **inside the Gateway process**. All it does is spawn `stroq hook openclaw pre|post`, hand it the event as JSON on stdin, and map the reply:
+
+| OpenClaw hook                                 | What Stroq does                                                                                                                                                                                                    | Can it stop the action?                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `before_tool_call` (priority 100, no matcher) | Classifies the shell command, every path a file tool or an `apply_patch` declares, every URL a `web_fetch` carries, or the call and its arguments as an MCP call (secret egress included), and applies your policy | Yes — `block`, and a real `requireApproval` prompt for `ask`                        |
+| `after_tool_call`                             | Scans the command output, the fetched page, the file body or the tool result, taints the session, records provenance                                                                                               | No — observe-only; the warning is logged and the taint is enforced on the next call |
+
+An `ask` becomes a genuine approval request: the run pauses and you answer `/approve <id> allow-once` or `deny` in the chat or the UI. `allow-always` is deliberately not offered — Stroq audits every ask, and a remembered allow is one it would never be asked about again.
+
+No matcher is written, for the same reason as on Copilot: a matcher is a list of the tools Stroq already knows about, and the one it has never heard of would be the one that skipped the gate. **A tool name Stroq does not recognise is treated as an MCP call** and classified as `mcp__openclaw__<tool>`, which is what puts its arguments in front of the secret-egress guard — so a `.env` value inside a `message` body or a `browser` form fill is caught. `exec`, `read`, `write`, `edit`, `apply_patch`, `web_fetch`, `web_search` and `x_search` map onto Stroq's own tool names; `ask_user`, `progress_card`, `heartbeat_respond` and `get_goal` are passed through and classify to nothing — exactly these four, since none of them leaves the session, returns external content, or mutates state. `view_image`, the media generators (`image_generate`, `music_generate`, `video_generate`, `tts`), the `tool_search`/`tool_describe` family and the other goal tools (`create_goal`, `update_goal`) are classified as MCP calls instead, the same as `browser` or `message`: each one returns external content or otherwise warrants the same scrutiny a real MCP call gets, so self-mapping any of them the way `ask_user` is would have exempted it from the scan, the secret-egress guard and the fail-closed path all at once. `exec` is the documented shell tool, and Stroq also treats `bash`, `sh`, `zsh`, `shell`, `exec_command`, `local_shell` and `run_command` as shells: a shell spelling classified as an MCP call would never meet the shell rule set at all. Inside a call, a shell command is read from `command`, `cmd`, `input`, `script` or `raw`, a file path from `path`, `file_path` or `raw`, and a fetched URL from `url`, `uri`, `href` or `raw` — every spelling a payload actually carries is judged on its own and the worst decision wins, so a harmless first field cannot shadow a dangerous later one.
+
+The CLI answers in Stroq's own JSON, because the only thing reading it is the plugin in this repository:
+
+```json
+{
+  "decision": "deny",
+  "ruleId": "deny-self-tamper",
+  "reason": "Modifying agent security configuration is blocked"
+}
+```
+
+`.openclaw/openclaw.json` and the `.openclaw/plugins/` and `.openclaw/extensions/` directories are protected the same way `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` and `.github/hooks/` already were, for every agent — `plugins.entries.stroq.enabled = false` in that config would switch the firewall off, so it is guarded alongside the directories a replacement plugin would be dropped into. Everything else under `.openclaw` — agent instructions, skills, memory — is ordinary work and is not touched.
+
+**Limits.**
+
+- **No warning reaches the model after a suspect result.** `after_tool_call` is an observe hook: OpenClaw ignores what it returns, so a poisoned page or command output taints the session silently and is logged through the plugin's logger. The taint is still enforced on the _next_ tool call, which is where the network command, the secret read or the external push actually happens. `tool_result_persist` and `agentToolResultMiddleware` could carry the warning back to the model and are not used in v1.
+- **`ask` needs somewhere to ask.** `requireApproval` reaches you through the UI or a configured chat channel. With no route, or if nobody answers inside the timeout (2 minutes by default, `askTimeoutMs` to change it), OpenClaw blocks the call — the conservative direction, but it means an unattended Gateway turns every `ask` into a deny.
+- **The plugin spawns a process per tool call.** About 100–200 ms, dominated by Node's start-up. Keep `npm install -g @stroq/cli` on the Gateway host; the plugin blocks the call if Stroq does not answer inside `timeoutMs` (10 s by default), which is fail-closed but also the one way a slow disk can stop your agent.
+- **`STROQ_HOME` is not recorded in the plugin.** `init` writes the plugin under whatever `STROQ_HOME` was set when you ran it, but the plugin spawns a Stroq that reads that variable again at run time. If you use a non-default home, set it for the Gateway process too, or the audit log and sessions the plugin writes will be under `~/.stroq` instead.
+- **MCP tool names are not documented for OpenClaw.** Every non-native tool is classified as `mcp__openclaw__<tool>`, so a policy rule keyed on a _server_ cannot be written the way it can for Claude Code and Cursor. Rules keyed on the tool name, on `mcp.call`/`mcp.side_effect`, and the secret-egress guard all work normally. `terminal`, `process` and `code_execution` are classified this way too rather than as shells: their parameter shapes are undocumented, and a shell classification with no command to read would classify nothing at all.
+- **The working directory is always the plugin's own, never the call's.** Every tool — `exec` included — is judged against `plugins.entries.stroq.config.workspace`, or the Gateway's own directory when that config is unset; a tool call's own `params.cwd` is never read for this, because a model that could point it elsewhere could point the project's `.env*` secret index and path rules at an empty directory and walk a credential straight past the guard. The home-directory sources (`~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, credential-shaped environment variables) are indexed regardless of `cwd` either way. Files on a remote or sandboxed exec host are not indexed at all.
+- **A call Stroq cannot read is blocked, not allowed.** If a tool sends `params` Stroq cannot get a command, a patch path, a file path or a URL out of, the call is denied with `openclaw-unreadable-input`, and the reason names the top-level keys it saw (never their values, which is where a secret would be) so you can report the payload shape. An empty `params` has nothing to act on and is unaffected. A call naming more than 64 files or URLs is denied outright (`openclaw-too-many-targets`) rather than classified one target at a time, because that would risk running past the hook timeout. The list Stroq fans out over is always the one it computed itself; a `urls` or `file_paths` the payload brought with it is dropped, so it can neither add targets nor hide the real one.
+- **Everything fails closed except the reads.** A missing binary, a spawn error, a non-zero exit, a timeout, an aborted run or an answer the plugin cannot parse all block the call — which is also OpenClaw's own policy for this hook. The exception is a `pre` on a tool that only looks at things (`read`, `web_search`, `x_search`, `ask_user` and the other pass-through tools), where a Stroq internal error allows rather than blocking; blocking every read in a session because Stroq failed once buys less than it costs, but it does mean a `read` of `.env` under taint could slip through an internal error.
+- **Plugin loading has its own switches.** `plugins.entries.stroq.enabled` has to be `true`, and `stroq` has to be in `plugins.allow` if you use an allowlist. `openclaw hooks list` may not show hook-only plugins (rtk#1717), so use `openclaw plugins inspect stroq --runtime` to check. `stroq doctor` only tells you the plugin is on disk — it deliberately does not run `openclaw` to find out whether the Gateway loaded it.
+- **The OpenClaw wire format is inferred, not recorded.** It comes from OpenClaw's plugin and tools documentation plus one production hook-only plugin; the fixtures in this repository are hand-written from that reading. That is why the adapter accepts `params` as an object and as a JSON string, reads several field spellings, and denies what it cannot read.
+- **Not used in v1:** `tool_result_persist` and `agentToolResultMiddleware`, trusted tool policies (`api.registerTrustedToolPolicy`), `params` rewriting, `before_agent_run` and the message hooks, and publishing the plugin to ClawHub.
+- **Untested:** Windows. The plugin is plain Node and should work wherever the Gateway does, and nothing here has been exercised there.
+
+Run the OpenClaw demo yourself: `pnpm install && pnpm build && ./examples/demo/run-openclaw-demo.sh`.
+
 ### As a Claude Code plugin
 
 The repository is also a plugin marketplace. Inside Claude Code:
@@ -279,17 +335,17 @@ node packages/cli/dist/index.js doctor
 
 ## Commands
 
-| Command                                                                                                | What it does                                                                                                                                               |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stroq init [--agent claude-code\|cursor\|codex\|copilot] [--user] [--dry-run]`                        | Install hooks into `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` or `.github/hooks/stroq.json` (`--user` for the home-directory copy) |
-| `stroq hook claude-code` / `stroq hook cursor` / `stroq hook codex` / `stroq hook copilot <pre\|post>` | Hook entrypoint (reads the event on stdin; Copilot's events carry no name, so the phase is an argument)                                                    |
-| `stroq doctor`                                                                                         | Check Node version, rules, hooks for every agent, self-test                                                                                                |
-| `stroq log [--count 20]`                                                                               | Show recent audit entries                                                                                                                                  |
-| `stroq verify`                                                                                         | Verify the audit hash chain                                                                                                                                |
-| `stroq untaint [--session <id>] [--all]`                                                               | Clear a false-positive session's taint and provenance, or every session's                                                                                  |
-| `stroq why [--seq <n>]`                                                                                | Explain the most recent denied/asked action: rule, provenance, taint                                                                                       |
-| `stroq canary [--name <NAME>]`                                                                         | Print a canary secret to plant; its outbound use is denied and taints the session                                                                          |
-| `stroq attack [--json] [--only <id>]`                                                                  | Replay 12 recorded incidents against your policy; exit 1 if any gets through                                                                               |
+| Command                                                                                                                                    | What it does                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stroq init [--agent claude-code\|cursor\|codex\|copilot\|openclaw] [--user] [--dry-run]`                                                  | Install hooks into `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` or `.github/hooks/stroq.json`, or the OpenClaw plugin into `~/.stroq/openclaw-plugin/` (`--user` for the home-directory copy) |
+| `stroq hook claude-code` / `stroq hook cursor` / `stroq hook codex` / `stroq hook copilot <pre\|post>` / `stroq hook openclaw <pre\|post>` | Hook entrypoint (reads the event on stdin; Copilot's and OpenClaw's events carry no name, so the phase is an argument)                                                                                              |
+| `stroq doctor`                                                                                                                             | Check Node version, rules, hooks for every agent, self-test                                                                                                                                                         |
+| `stroq log [--count 20]`                                                                                                                   | Show recent audit entries                                                                                                                                                                                           |
+| `stroq verify`                                                                                                                             | Verify the audit hash chain                                                                                                                                                                                         |
+| `stroq untaint [--session <id>] [--all]`                                                                                                   | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                           |
+| `stroq why [--seq <n>]`                                                                                                                    | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                |
+| `stroq canary [--name <NAME>]`                                                                                                             | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                   |
+| `stroq attack [--json] [--only <id>]`                                                                                                      | Replay 12 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                        |
 
 ## Policy
 
@@ -349,6 +405,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 - **Cursor coverage is narrower than Claude Code's:** Stroq v1 installs on no Cursor event that can stop a file edit, so edits made through Cursor's editor are audited (`allow(cursor-edit-unenforced)`) rather than blocked; `afterShellExecution` cannot carry a warning back to the agent, and Cursor's own web reads have no hook at all — the taint, where there is one, is still enforced on the next action. The full table and limits are in [Cursor](#cursor).
 - **Codex cannot be asked, only told:** Codex's hook contract has no `ask`, so every `ask` in the policy is enforced as a deny whose reason says a prompt was not possible and names the rule to relax. Codex also has no `failClosed` knob and fails open on a hook that cannot start; Stroq answers its _own_ errors on high-impact `PreToolUse` events with exit code 2 and the reason on stderr, the one block Codex honours regardless. The full table and limits are in [Codex](#codex).
 - **Copilot can be asked, but not made to wait:** Copilot honours a real `ask`, and a deny travels as a top-level `permissionDecision` (its hook contract does not read Claude Code's envelope for a decision). What it will not do is wait: a hook slower than its timeout is treated as an allow and its late deny is discarded, even on `preToolUse`. Stroq answers in well under a second, and a hook that cannot start at all is a hook error, which denies. Copilot's hooks also never reveal an MCP server name, so every MCP call is classified under a synthetic one. The full table and limits are in [Copilot CLI](#copilot-cli).
+- **OpenClaw is guarded from inside its own process:** there is no hooks file to install, so Stroq ships a plugin that OpenClaw loads into the Gateway and that does nothing but call the same CLI every other adapter calls. `before_tool_call` can block and can raise a real `/approve` prompt, and every failure on that path — a missing binary, a timeout, an unreadable answer — blocks the call, which is OpenClaw's own policy for the hook. What it cannot do is talk back after the fact: `after_tool_call` is observe-only, so a poisoned result taints the session silently and is enforced on the next action rather than announced to the model. The full table and limits are in [OpenClaw](#openclaw).
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
@@ -357,7 +414,6 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 ## Roadmap
 
 - Local daemon with an ONNX-based classifier, replacing per-invocation Node startup and pure regex matching for the content scan.
-- An adapter for OpenClaw.
 - Cursor's generic `preToolUse` hook, so edits and deletes made through Cursor's editor can be blocked rather than only audited.
 - A quote-aware shell lexer and worker-isolated scanning (see Guarantees and limits above).
 - Team control plane: shared policy, fleet-wide audit visibility, and centralized false-positive triage across a team's agents.
