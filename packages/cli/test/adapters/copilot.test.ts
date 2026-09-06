@@ -69,6 +69,14 @@ describe('copilotToolKind', () => {
   it.each([
     ['bash', undefined, 'shell'],
     ['powershell', undefined, 'shell'],
+    // Undocumented aliases. A shell spelling that misses this set is named
+    // `mcp__copilot__<name>` and the shell rule set never runs on it.
+    ['shell', undefined, 'shell'],
+    ['sh', undefined, 'shell'],
+    ['zsh', undefined, 'shell'],
+    ['exec_command', undefined, 'shell'],
+    ['local_shell', undefined, 'shell'],
+    ['run_command', undefined, 'shell'],
     ['apply_patch', undefined, 'patch'],
     ['create', undefined, 'write'],
     ['edit', undefined, 'write'],
@@ -97,6 +105,14 @@ describe('copilotToolName', () => {
     for (const [tool, name] of [
       ['bash', 'Bash'],
       ['powershell', 'Bash'],
+      // Only `bash` and `powershell` are documented by GitHub; these are defensive
+      // aliases, four of them shared with the Codex adapter's `isBashTool`.
+      ['shell', 'Bash'],
+      ['sh', 'Bash'],
+      ['zsh', 'Bash'],
+      ['exec_command', 'Bash'],
+      ['local_shell', 'Bash'],
+      ['run_command', 'Bash'],
       ['view', 'Read'],
       ['create', 'Write'],
       ['edit', 'Edit'],
@@ -248,15 +264,38 @@ describe('copilotToolInput', () => {
   });
 
   it('guarantees web_fetch a string url without losing its other arguments', () => {
-    // `network.fetch` is an egress class, but core's secret guard scans only `url`
-    // and `prompt` for WebFetch, not the whole record — the record is kept whole
-    // here anyway, so a value dropped from the mapping could never be caught
-    // leaving once the guard's coverage widens.
+    // Only `url` and `prompt` feed the secret guard today: core scans those two
+    // fields for WebFetch, not the whole record. The record is kept whole here
+    // anyway, so a value dropped from the mapping could never be caught leaving
+    // once the guard's coverage widens.
     expect(call('web_fetch', { url: 'https://x.example/a', prompt: 'summarise' })).toEqual({
       url: 'https://x.example/a',
       prompt: 'summarise',
     });
-    expect(call('web_fetch', { url: 7 })).toEqual({ url: '' });
+    // Every spelling is a candidate, and a call carrying more than one is judged on
+    // all of them — `url` alone would let the second URL leave unexamined.
+    expect(call('web_fetch', { uri: 'https://x.example/a' })).toEqual({
+      uri: 'https://x.example/a',
+      url: 'https://x.example/a',
+    });
+    expect(call('web_fetch', 'https://x.example/a')).toEqual({
+      raw: 'https://x.example/a',
+      url: 'https://x.example/a',
+    });
+    expect(call('web_fetch', { url: ['https://x.example/a', 'https://y.example/b'] })).toEqual({
+      url: 'https://x.example/a',
+      urls: ['https://x.example/a', 'https://y.example/b'],
+    });
+    expect(call('web_fetch', { url: 'https://x.example/a', href: 'https://y.example/b' })).toEqual({
+      url: 'https://x.example/a',
+      href: 'https://y.example/b',
+      urls: ['https://x.example/a', 'https://y.example/b'],
+    });
+    // A non-string `url` is NOT quietly mapped to `''` and allowed: it yields no
+    // candidate, and the adapter denies the call as `copilot-unreadable-input`
+    // (asserted end to end in copilot-shapes.test.ts). An EMPTY `toolArgs` is a
+    // different thing — nothing to act on — and keeps running through the engine.
+    expect(call('web_fetch', {})).toEqual({ url: '' });
   });
 
   it('keeps MCP and pass-through arguments visible to the secret guard', () => {

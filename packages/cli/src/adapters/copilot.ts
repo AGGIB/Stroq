@@ -1,12 +1,5 @@
-import {
-  warningFor,
-  type Decision,
-  type ProvenanceHit,
-  type SecretHit,
-  type StroqEngine,
-} from '@stroq/core';
+import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
 import { z } from 'zod';
-import { logError } from '../log.js';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import { commandCandidates, describeToolInput, isEmptyToolInput } from './codex-input.js';
 import {
@@ -20,9 +13,8 @@ import {
 import {
   MAX_PATCH_PATHS,
   asPaths,
-  decidePre,
-  denyDirectly,
-  preInputs,
+  decideWithGuards,
+  handlePostResult,
   type EngineEvent,
   type PreCandidates,
   type PreGuards,
@@ -137,24 +129,46 @@ export const COPILOT_PATCH_TOO_LARGE: Decision = {
 
 /**
  * Recorded (and enforced) when Copilot sent something under a shape the adapter could
- * not read a command, a patch or a path out of. The reason names the top-level KEYS
- * (or the value's type) and never a value: `toolArgs` is exactly where a secret would
- * be, and this reason is printed to the agent, logged and audited.
+ * not read a command, a patch, a path or a URL out of. The reason names the top-level
+ * KEYS (or the value's type) and never a value: `toolArgs` is exactly where a secret
+ * would be, and this reason is printed to the agent, logged and audited.
  */
 export const copilotUnreadableInput = (shape: string): Decision => ({
   effect: 'deny',
   ruleId: 'copilot-unreadable-input',
   reason:
-    `Stroq could not read the command, patch or path from Copilot's toolArgs (keys: ${shape}); ` +
-    'denied fail-closed. Report the payload shape at https://github.com/AGGIB/Stroq/issues',
+    `Stroq could not read the command, patch, path or URL from Copilot's toolArgs ` +
+    `(keys: ${shape}); denied fail-closed. ` +
+    'Report the payload shape at https://github.com/AGGIB/Stroq/issues',
 });
 
 /**
- * A high-impact call Copilot sent arguments for, whose command, patch or path the
- * adapter could not find. Handing the engine the empty action it extracted would
- * classify nothing and allow the call — fail-open on precisely the shape surprise
- * this adapter cannot anticipate — so it is denied instead. An EMPTY `toolArgs` is a
- * different thing: there is nothing to act on, and it keeps running through the
+ * The four kinds whose `toolArgs` the adapter reduces to ONE field, and so the four
+ * that can lose it: a shell command, a patch body, a written path and a fetched URL.
+ * Everything else is either low impact or an MCP call, whose arguments ARE the
+ * record and reach the engine whatever shape they arrived in.
+ */
+const READABLE: Readonly<
+  Partial<
+    Record<
+      CopilotKind,
+      (toolInput: Readonly<Record<string, unknown>>, found: PreCandidates) => boolean
+    >
+  >
+> = {
+  shell: (_toolInput, found) => found.commands.length > 0,
+  patch: (_toolInput, found) => found.patchPaths.length > 0,
+  write: (toolInput) => toolInput['file_path'] !== '',
+  fetch: (toolInput) => toolInput['url'] !== '',
+};
+
+/**
+ * A high-impact call Copilot sent arguments for, whose command, patch, path or URL
+ * the adapter could not find. Handing the engine the empty action it extracted would
+ * classify nothing and allow the call — a `web_fetch` with an empty `url` classifies
+ * to `network.fetch` with no host and no secret candidate, which is exactly the
+ * fail-open this rule exists to stop — so it is denied instead. An EMPTY `toolArgs`
+ * is a different thing: there is nothing to act on, and it keeps running through the
  * engine. MCP tools are never this: their arguments are the record itself, which
  * `toolInputRecord` fills whatever shape they arrived in, and the secret guard scans
  * it as it stands.
@@ -165,15 +179,11 @@ function unreadableInput(
   toolInput: Readonly<Record<string, unknown>>,
   found: PreCandidates,
 ): Decision | null {
-  if (kind !== 'shell' && kind !== 'patch' && kind !== 'write') return null;
-  if (isEmptyToolInput(input.toolArgs)) return null;
-  const readable =
-    kind === 'shell'
-      ? found.commands.length > 0
-      : kind === 'patch'
-        ? found.patchPaths.length > 0
-        : toolInput['file_path'] !== '';
-  return readable ? null : copilotUnreadableInput(describeToolInput(input.toolArgs));
+  const readable = READABLE[kind];
+  if (!readable || isEmptyToolInput(input.toolArgs)) return null;
+  return readable(toolInput, found)
+    ? null
+    : copilotUnreadableInput(describeToolInput(input.toolArgs));
 }
 
 function preGuards(
@@ -182,52 +192,33 @@ function preGuards(
 ): PreGuards {
   const kind = copilotToolKind(input.toolName, input.toolArgs);
   // `file_paths` is populated by `copilotToolInput` for `patch` always and for
-  // `write`/`read` whenever a call's path fields disagreed (see `pathsOf`), so the
-  // fan-out below applies uniformly: `preInputs` judges every candidate and the
-  // worst wins, exactly how an `apply_patch`'s paths already work.
+  // `write`/`read` whenever a call's path fields disagreed (see `pathsOf`), and
+  // `urls` for a `fetch` whose URL fields disagreed (see `urlsOf`), so the fan-out
+  // below applies uniformly: `preInputs` judges every candidate and the worst wins,
+  // exactly how an `apply_patch`'s paths already work.
   const found: PreCandidates = {
     commands: kind === 'shell' ? commandCandidates(input.toolArgs) : [],
     patchPaths:
       kind === 'patch' || kind === 'write' || kind === 'read'
         ? asPaths(toolInput['file_paths'])
         : [],
+    urls: kind === 'fetch' ? asPaths(toolInput['urls']) : [],
   };
   return { ...found, unreadable: unreadableInput(input, kind, toolInput, found) };
 }
 
-async function handlePre(
-  engine: StroqEngine,
-  event: EngineEvent,
-  guards: PreGuards,
-): Promise<HookOutput> {
-  const render = (decision: Decision) => renderDecision(decision, [], []);
-  if (guards.unreadable)
-    return denyDirectly(event, guards.unreadable, 'copilot: unreadable toolArgs', render);
-  if (guards.patchPaths.length > MAX_PATCH_PATHS)
-    return denyDirectly(
-      event,
-      COPILOT_PATCH_TOO_LARGE,
-      `apply_patch: ${guards.patchPaths.length} files`,
-      render,
-    );
-  const { decision, provenance, secrets } = await decidePre(
+/** The guard ordering and the engine loop are shared with the Codex adapter. */
+const handlePre = (engine: StroqEngine, event: EngineEvent, guards: PreGuards) =>
+  decideWithGuards(
     engine,
     event,
-    preInputs(event.toolInput, guards),
+    guards,
+    { tooLarge: COPILOT_PATCH_TOO_LARGE, unreadableSummary: 'copilot: unreadable toolArgs' },
+    renderDecision,
   );
-  return renderDecision(decision, provenance, secrets);
-}
 
-async function handlePost(
-  engine: StroqEngine,
-  event: EngineEvent,
-  result: unknown,
-): Promise<HookOutput> {
-  const scanned = await engine.post({ ...event, toolResultText: copilotResultText(result) });
-  if (scanned.provenanceError) logError('provenance', scanned.provenanceError);
-  if (!scanned.scanned || scanned.scan.verdict !== 'suspect') return NO_OUTPUT;
-  return copilotContextOutput(warningFor(scanned.scan, event.toolName));
-}
+const handlePost = (engine: StroqEngine, event: EngineEvent, result: unknown) =>
+  handlePostResult(engine, event, copilotResultText(result), copilotContextOutput);
 
 /**
  * Coupling to know about: the two adapter-level denies (oversized patch, unreadable
