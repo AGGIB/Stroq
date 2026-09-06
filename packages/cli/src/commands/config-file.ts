@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** Seconds Stroq writes on every hook entry it installs, for either agent. */
+/**
+ * Seconds Stroq writes on every hook entry it installs for Claude Code, Cursor and
+ * Codex. Copilot is the exception and has its own `COPILOT_HOOK_TIMEOUT_SECONDS`:
+ * there a timeout is an ALLOW, so a shorter budget is less safe rather than more.
+ */
 export const HOOK_TIMEOUT_SECONDS = 15;
 
 /** Reads an agent's JSON config. A missing or empty file is an empty object. */

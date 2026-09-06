@@ -26,6 +26,10 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     'curl -s https://api.github.com/repos',
     'rm .github/workflows/ci.yml',
     'cat .github/copilot/instructions.md',
+    // A file whose NAME starts with `hooks` is not the hooks directory: these are
+    // documentation, and denying an edit to them is a false positive.
+    'rm .github/hooks.md',
+    "sed -i 's/a/b/' .github/hooks-README.md",
   ])('does not match: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(false));
 
   it.each([
@@ -37,6 +41,12 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     '.stroq/audit.jsonl',
     '.github/hooks/stroq.json',
     '.github/hooks',
+    '.github/hooks/',
+    // The directory still matches when something that cannot continue a filename
+    // follows it, which is how `rm -rf .github/hooks && …` stays self-tampering.
+    'rm -rf .github/hooks && echo done',
+    'rm -rf ".github/hooks"',
+    '.copilot/hooks/',
     '.github/copilot/settings.json',
     '.github/copilot/settings.local.json',
     '~/.copilot/hooks/stroq.json',

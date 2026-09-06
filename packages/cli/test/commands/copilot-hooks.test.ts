@@ -2,10 +2,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { HOOK_TIMEOUT_SECONDS } from '../../src/commands/config-file.js';
 import {
   COPILOT_HOOK_EVENTS,
+  COPILOT_HOOK_TIMEOUT_SECONDS,
   buildCopilotHooks,
   copilotHooksPath,
+  copilotReplacementNotice,
   installCopilotHooks,
   isStroqCopilotHooks,
   readCopilotHooks,
@@ -25,7 +28,7 @@ describe('buildCopilotHooks', () => {
             type: 'command',
             bash: pre,
             powershell: `& ${pre}`,
-            timeoutSec: 15,
+            timeoutSec: 30,
             comment: 'Stroq',
           },
         ],
@@ -34,7 +37,7 @@ describe('buildCopilotHooks', () => {
             type: 'command',
             bash: post,
             powershell: `& ${post}`,
-            timeoutSec: 15,
+            timeoutSec: 30,
             comment: 'Stroq',
           },
         ],
@@ -44,6 +47,18 @@ describe('buildCopilotHooks', () => {
     // reach Stroq, and one it does not care about returns nothing in a few ms.
     expect(JSON.stringify(buildCopilotHooks(pre, post))).not.toContain('matcher');
     expect(COPILOT_HOOK_EVENTS).toEqual(['preToolUse', 'postToolUse']);
+  });
+
+  it('writes Copilot’s own 30 s timeout, not the 15 s the other three agents get', () => {
+    // A Copilot hook that runs past its timeout is treated as an ALLOW and its late
+    // deny is discarded, and hooks are dispatched serially — so a shorter budget is
+    // strictly less safe here, and a single shared number would be the wrong one.
+    expect(COPILOT_HOOK_TIMEOUT_SECONDS).toBe(30);
+    expect(COPILOT_HOOK_TIMEOUT_SECONDS).toBeGreaterThan(HOOK_TIMEOUT_SECONDS);
+    for (const event of COPILOT_HOOK_EVENTS)
+      expect(buildCopilotHooks(pre, post).hooks[event][0]?.timeoutSec, event).toBe(
+        COPILOT_HOOK_TIMEOUT_SECONDS,
+      );
   });
 
   it('recognises only a file carrying both of its own entries', () => {
@@ -149,5 +164,35 @@ describe('installCopilotHooks', () => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
     expect(() => readCopilotHooks(file)).toThrow(/cannot parse/);
+  });
+});
+
+describe('copilotReplacementNotice', () => {
+  const withFile = (contents: string): string => {
+    const file = copilotHooksPath('project', mkdtempSync(join(tmpdir(), 'stroq-copilot-notice-')));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, contents);
+    return file;
+  };
+
+  it('says nothing for a missing file or for Stroq’s own', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-copilot-notice-'));
+    expect(copilotReplacementNotice(copilotHooksPath('project', dir))).toBe('');
+    const mine = withFile(JSON.stringify(buildCopilotHooks(pre, post)));
+    expect(copilotReplacementNotice(mine)).toBe('');
+    expect(copilotReplacementNotice(mine, true)).toBe('');
+  });
+
+  it.each([
+    ['someone else’s hooks', '{ "version": 1, "hooks": { "sessionStart": [] } }'],
+    ['a half-install Stroq would not call installed', '{ "hooks": {} }'],
+    // The overwrite happens either way, so an unparseable file must not throw here.
+    ['a file that is not JSON at all', '{ not json'],
+  ])('names the file it is about to replace: %s', (_label, contents) => {
+    const file = withFile(contents);
+    expect(copilotReplacementNotice(file)).toBe(`replacing ${file}, which Stroq did not write\n`);
+    expect(copilotReplacementNotice(file, true)).toBe(
+      `would replace ${file}, which Stroq did not write\n`,
+    );
   });
 });

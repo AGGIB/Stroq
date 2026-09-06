@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+  mkdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -282,7 +289,9 @@ describe('runInit --agent copilot', () => {
     expect(parsed.version).toBe(1);
     expect(parsed.hooks['preToolUse']?.[0]?.bash).toMatch(/ hook copilot pre$/);
     expect(parsed.hooks['postToolUse']?.[0]?.bash).toMatch(/ hook copilot post$/);
-    expect(parsed.hooks['preToolUse']?.[0]?.timeoutSec).toBe(15);
+    // Copilot's own default, not the 15 s the other three agents get: a timed-out
+    // Copilot hook is an allow, so a shorter budget would be strictly less safe.
+    expect(parsed.hooks['preToolUse']?.[0]?.timeoutSec).toBe(30);
     expect(isStroqCopilotHooks(parsed)).toBe(true);
 
     const again = capture();
@@ -309,5 +318,43 @@ describe('runInit --agent copilot', () => {
     expect(existsSync(settingsPath('project', dir))).toBe(false);
     expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
     expect(existsSync(codexHooksPath('project', dir))).toBe(false);
+  });
+
+  it('says so before replacing a stroq.json Stroq did not write', async () => {
+    // The overwrite stays unconditional — the name is Stroq's by contract — but a
+    // file whose contents nobody recognises is never replaced silently.
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-copilot-'));
+    const file = copilotHooksPath('project', dir);
+    mkdirSync(join(dir, '.github', 'hooks'), { recursive: true });
+    writeFileSync(file, '{ "version": 1, "hooks": { "sessionStart": [] } }');
+    // `init` reports the path it actually wrote, i.e. the resolved cwd: on macOS
+    // the temp directory is reached through a symlink.
+    const shown = copilotHooksPath('project', realpathSync(dir));
+
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'copilot']));
+    out.restore();
+    expect(out.lines.join('')).toContain(`replacing ${shown}, which Stroq did not write`);
+    expect(isStroqCopilotHooks(JSON.parse(readFileSync(file, 'utf8')))).toBe(true);
+
+    // A re-run now finds its own file and says nothing.
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'copilot']));
+    again.restore();
+    expect(again.lines.join('')).not.toContain('which Stroq did not write');
+  });
+
+  it('warns in the conditional tense with --dry-run, and still writes nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-copilot-'));
+    const file = copilotHooksPath('project', dir);
+    mkdirSync(join(dir, '.github', 'hooks'), { recursive: true });
+    writeFileSync(file, '{ "hooks": {} }');
+    const shown = copilotHooksPath('project', realpathSync(dir));
+
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'copilot', '--dry-run']));
+    out.restore();
+    expect(out.lines.join('')).toContain(`would replace ${shown}, which Stroq did not write`);
+    expect(readFileSync(file, 'utf8')).toBe('{ "hooks": {} }');
   });
 });
