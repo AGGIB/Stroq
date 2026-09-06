@@ -82,19 +82,52 @@ export function installOpenClawPlugin(dir: string, command: readonly string[]): 
 }
 
 /**
- * True only for a directory carrying BOTH Stroq's entry and a manifest claiming
- * Stroq's id. An entry with no manifest is a half-install the Gateway will not load,
- * and a manifest belonging to somebody else is not Stroq's plugin at all; reporting
- * either as installed would promise protection that is not running.
+ * The first shipped file `dir` does not have, or `null` when it has them all. Named
+ * separately from the predicate below so `doctor` can point its "missing" line at the
+ * file that is actually absent instead of always at the manifest.
+ */
+export function missingOpenClawPluginFile(dir: string): string | null {
+  return OPENCLAW_PLUGIN_FILES.find((name) => !existsSync(join(dir, name))) ?? null;
+}
+
+/**
+ * True only for a directory carrying EVERY shipped file and a manifest claiming
+ * Stroq's id. It used to check the entry and the manifest alone, which reported a
+ * directory whose `run-stroq.js` had been pruned as installed even though `index.js`
+ * imports that module and the Gateway cannot load it at all; a manifest belonging to
+ * somebody else is not Stroq's plugin either. Reporting any of those as installed
+ * would promise protection that is not running.
  */
 export function isStroqOpenClawPlugin(dir: string): boolean {
-  if (!existsSync(join(dir, PLUGIN_ENTRY))) return false;
+  if (missingOpenClawPluginFile(dir) !== null) return false;
   try {
     const manifest: unknown = JSON.parse(readFileSync(join(dir, PLUGIN_MANIFEST), 'utf8'));
     return isPlainObject(manifest) && manifest['id'] === OPENCLAW_PLUGIN_ID;
   } catch {
     return false;
   }
+}
+
+/**
+ * npm's throwaway install directory, in both separator styles. `npx @stroq/cli init
+ * --agent openclaw` runs from inside it, so the entry `init` records in `stroq.json`
+ * lives there and vanishes the next time the cache is pruned.
+ */
+const NPX_CACHE = /[/\\]_npx[/\\]/;
+
+/**
+ * The warning `init` prints when the command it just recorded points into the npx
+ * cache, or `null` when it does not. The plugin survives the pruning (it falls back
+ * to `stroq` on PATH — see `resolveStroqArgv` in `run-stroq.js`), so this is advice
+ * rather than a failure; but the fallback only finds a Stroq that is actually
+ * installed, and this is the one moment the user can fix that.
+ */
+export function npxCacheWarning(command: readonly string[]): string | null {
+  if (!command.some((arg) => NPX_CACHE.test(arg))) return null;
+  return (
+    'Warning: the recorded stroq entry lives in the npx cache; install @stroq/cli ' +
+    'globally so the plugin survives cache pruning.'
+  );
 }
 
 /**

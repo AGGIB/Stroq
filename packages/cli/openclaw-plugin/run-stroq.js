@@ -4,7 +4,7 @@
 // that is not JSON — becomes an `{ error }` for index.js to turn into a block.
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -12,30 +12,89 @@ const DEFAULT_TIMEOUT_MS = 10000;
 // A reply this large is not a decision Stroq ever sends; it is a hung or misbehaving
 // CLI, and buffering it further would only delay the same block.
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+/** The launch command `stroq init --agent openclaw` records beside this file. */
+const COMMAND_FILE = 'stroq.json';
+/** The last resort: a bare name `spawn` resolves through PATH. */
+const PATH_FALLBACK = 'stroq';
 
 export const text = (value) => (typeof value === 'string' && value !== '' ? value : '');
 export const clip = (value, max) => (value.length <= max ? value : `${value.slice(0, max - 3)}...`);
 
+/** A launch command is a non-empty array of strings; anything else is not one. */
+const isArgv = (value) =>
+  Array.isArray(value) && value.length > 0 && value.every((a) => typeof a === 'string');
+
 /**
- * argv of the Stroq CLI: this plugin's config, then STROQ_BIN, then the `stroq.json`
- * `stroq init --agent openclaw` wrote beside this file, then `stroq` on PATH.
- * `stroqBin`/`STROQ_BIN` is always ONE path and is never split on whitespace: a real
- * install path can legitimately contain a space, and a launch command needing extra
- * arguments belongs in `stroq.json`'s `command` array instead (already written by
- * `stroq init --agent openclaw`), which is array-shaped for exactly this reason.
+ * The file a recorded command would actually run: the LAST absolute path in the argv,
+ * which is the entry rather than the interpreter — `['<node>', '--import', 'tsx',
+ * '/opt/stroq/src/index.ts']` names three paths and only the last one goes stale. A
+ * relative element is never treated as the entry: it resolves against a working
+ * directory this module does not know, so its absence would prove nothing.
  */
-function stroqArgv(config) {
-  const configured = text(config.stroqBin) || text(process.env.STROQ_BIN);
-  if (configured) return [configured];
-  const file = join(HERE, 'stroq.json');
+export const recordedEntry = (argv) => {
+  for (let i = argv.length - 1; i >= 0; i -= 1) if (isAbsolute(argv[i])) return argv[i];
+  return null;
+};
+
+/**
+ * argv of the Stroq CLI, and the recorded entry (if any) that turned out to be gone:
+ * this plugin's config, then `STROQ_BIN`, then the `stroq.json` `stroq init --agent
+ * openclaw` wrote beside this file, then `stroq` on PATH.
+ *
+ * The recorded command is SKIPPED when its entry file no longer exists. `npx
+ * @stroq/cli init --agent openclaw` records a path inside the npx cache, and pruning
+ * that cache used to leave every single tool call blocked on an ENOENT nobody could
+ * read — a firewall bricking the agent because its own installer's temp directory was
+ * cleaned up. Falling back to PATH turns that into one warning plus a working Stroq
+ * wherever one is installed; when there is none, the call still fails closed.
+ *
+ * `stroqBin`/`STROQ_BIN` is always ONE path, never split on whitespace (a real install
+ * path can legitimately contain a space, and a launch command needing extra arguments
+ * belongs in `stroq.json`'s array-shaped `command` instead) and never existence-
+ * checked: an operator who named a binary must see it fail rather than be silently
+ * redirected to some other Stroq that happens to be on PATH.
+ *
+ * Pure — the config, the environment, the recorded command and the existence check
+ * are all parameters — so the whole order is testable without a filesystem.
+ */
+export function resolveStroqArgv({ config = {}, env = {}, recorded = null, exists }) {
+  const configured = text(config.stroqBin) || text(env.STROQ_BIN);
+  if (configured) return { argv: [configured], staleEntry: null };
+  if (!isArgv(recorded)) return { argv: [PATH_FALLBACK], staleEntry: null };
+  const entry = recordedEntry(recorded);
+  if (entry !== null && !exists(entry)) return { argv: [PATH_FALLBACK], staleEntry: entry };
+  return { argv: [...recorded], staleEntry: null };
+}
+
+/** The `command` array `init` recorded, or `null` when there is none to read. */
+function readRecordedCommand(file) {
   try {
-    const argv = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).command : null;
-    if (Array.isArray(argv) && argv.length > 0 && argv.every((a) => typeof a === 'string'))
-      return argv;
+    return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).command : null;
   } catch {
     // unreadable or not JSON: fall through to PATH
+    return null;
   }
-  return ['stroq'];
+}
+
+/** A stale entry is one fact about this install, not one per tool call. */
+let warnedStale = false;
+
+function stroqArgv(config, warn) {
+  const { argv, staleEntry } = resolveStroqArgv({
+    config,
+    env: process.env,
+    recorded: readRecordedCommand(join(HERE, COMMAND_FILE)),
+    exists: existsSync,
+  });
+  if (staleEntry !== null && !warnedStale) {
+    warnedStale = true;
+    warn(
+      `${COMMAND_FILE} records ${staleEntry}, which no longer exists; falling back to ` +
+        `"${PATH_FALLBACK}" on PATH. Install @stroq/cli globally and re-run ` +
+        '"stroq init --agent openclaw".',
+    );
+  }
+  return argv;
 }
 
 /** The child's answer: a reply object, or the reason it is not one. */
@@ -51,13 +110,17 @@ function replyOf(code, stdout, stderr) {
   return { error: `unreadable answer: ${clip(stdout.trim(), 200)}` };
 }
 
-/** Runs one phase and resolves to `{ reply }` or `{ error }`. Never rejects. */
-export function runStroq(config, phase, payload, abortSignal) {
+/**
+ * Runs one phase and resolves to `{ reply }` or `{ error }`. Never rejects. `warn`
+ * carries the one message this module can produce that is not a decision — a
+ * `stroq.json` whose entry is gone — out to the Gateway's own logger.
+ */
+export function runStroq(config, phase, payload, abortSignal, warn = () => {}) {
   return new Promise((resolve) => {
     let argv;
     let stdin;
     try {
-      argv = stroqArgv(config);
+      argv = stroqArgv(config, warn);
       stdin = JSON.stringify(payload);
     } catch (err) {
       resolve({ error: `cannot build the hook call: ${String(err)}` });

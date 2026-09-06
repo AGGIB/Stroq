@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +8,8 @@ import {
   OPENCLAW_PLUGIN_ID,
   installOpenClawPlugin,
   isStroqOpenClawPlugin,
+  missingOpenClawPluginFile,
+  npxCacheWarning,
   openclawInstallArgv,
   openclawInstallCommands,
   openclawOnPath,
@@ -131,6 +133,18 @@ describe('installOpenClawPlugin', () => {
 });
 
 describe('isStroqOpenClawPlugin', () => {
+  it.each(OPENCLAW_PLUGIN_FILES)('is not installed when %s is missing', (name) => {
+    // The predicate used to check `index.js` and the manifest id only, so a directory
+    // whose `run-stroq.js` had been pruned reported installed while the entry could
+    // not even be imported. Every shipped file has to be there.
+    const dir = join(tmp('stroq-openclaw-partial-'), 'openclaw-plugin');
+    installOpenClawPlugin(dir, command);
+    expect(isStroqOpenClawPlugin(dir)).toBe(true);
+    rmSync(join(dir, name));
+    expect(isStroqOpenClawPlugin(dir), name).toBe(false);
+    expect(missingOpenClawPluginFile(dir)).toBe(name);
+  });
+
   it('recognises only a directory carrying Stroq’s own entry and manifest', () => {
     const empty = tmp('stroq-openclaw-empty-');
     expect(isStroqOpenClawPlugin(empty)).toBe(false);
@@ -145,6 +159,25 @@ describe('isStroqOpenClawPlugin', () => {
     expect(isStroqOpenClawPlugin(wrong)).toBe(false);
     writeFileSync(join(wrong, 'openclaw.plugin.json'), '{ not json');
     expect(isStroqOpenClawPlugin(wrong)).toBe(false);
+  });
+});
+
+describe('npxCacheWarning', () => {
+  it('fires for a recorded entry inside the npx cache, in either separator style', () => {
+    for (const entry of [
+      '/Users/dev/.npm/_npx/a1b2/node_modules/@stroq/cli/dist/index.js',
+      'C:\\Users\\dev\\AppData\\npm-cache\\_npx\\a1b2\\node_modules\\@stroq\\cli\\dist\\index.js',
+    ]) {
+      const warning = npxCacheWarning(['/usr/bin/node', entry]);
+      expect(warning, entry).toContain('npx cache');
+      expect(warning, entry).toContain('install @stroq/cli globally');
+    }
+  });
+
+  it('says nothing for a global install, or one whose path merely mentions npx', () => {
+    expect(npxCacheWarning(command)).toBeNull();
+    // `_npx` is the cache; `npx` on its own is an ordinary directory name.
+    expect(npxCacheWarning(['/usr/bin/node', '/opt/npx-tools/stroq/dist/index.js'])).toBeNull();
   });
 });
 

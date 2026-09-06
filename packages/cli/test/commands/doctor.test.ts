@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -374,6 +374,17 @@ describe('doctorReport openclaw plugin', () => {
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(
       true,
     );
+  });
+
+  it('names the shipped file a pruned directory is missing', async () => {
+    // `index.js` cannot load without `run-stroq.js`, so a directory missing it is a
+    // plugin the Gateway fails to register — reporting it as installed would put a
+    // green tick next to a firewall that is not running.
+    install();
+    rmSync(join(openclawPluginDir(), 'run-stroq.js'));
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(false);
+    expect(detailOf(report, 'openclaw plugin')).toContain('run-stroq.js');
   });
 
   it('reports one scope, because OpenClaw plugins are per Gateway host', async () => {

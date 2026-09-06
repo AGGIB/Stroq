@@ -152,6 +152,35 @@ describe('runInit --agent openclaw', () => {
     expect(printed).toContain('plugins enable stroq');
   });
 
+  it('warns when the entry it recorded lives in the npx cache', async () => {
+    // `npx @stroq/cli init --agent openclaw` records a path under `_npx/`, which
+    // vanishes the next time npm prunes that cache. The plugin survives it (it falls
+    // back to `stroq` on PATH), but only a global install keeps the recorded command
+    // itself valid, so `init` says so at the one moment the user can act on it.
+    const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+    const originalEntry = process.argv[1];
+    process.argv[1] = join(tmpdir(), '.npm', '_npx', 'a1b2c3', 'node_modules', '.bin', 'stroq');
+    const out = capture();
+    try {
+      await inHome(home, () => withoutOpenClaw(() => runInit(['--agent', 'openclaw'])));
+    } finally {
+      out.restore();
+      if (originalEntry === undefined) process.argv.length = 1;
+      else process.argv[1] = originalEntry;
+    }
+    const printed = out.lines.join('');
+    expect(printed).toContain('npx cache');
+    expect(printed).toContain('install @stroq/cli globally');
+  });
+
+  it('says nothing about npx for an ordinary install', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+    const out = capture();
+    await inHome(home, () => withoutOpenClaw(() => runInit(['--agent', 'openclaw'])));
+    out.restore();
+    expect(out.lines.join('')).not.toContain('npx cache');
+  });
+
   it('does not touch the other agents', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
     const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-home-'));

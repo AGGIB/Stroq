@@ -88,6 +88,10 @@ export function register(api) {
     logAt(api, 'warn', `stroq: ${text(event && event.toolName) || 'tool'}: ${clipped}`);
     return { block: true, blockReason: `Stroq internal error (fail-closed): ${clipped}` };
   };
+  // How `run-stroq.js` reports the one thing it can find that is not a decision: a
+  // `stroq.json` whose recorded entry is gone. `warn`, not `debug` — the plugin is
+  // running on a fallback the operator did not choose and should repair.
+  const warn = (message) => logAt(api, 'warn', `stroq: ${message}`);
   // Priority 100 so Stroq answers before ordinary hooks, and no matcher: every tool
   // goes through Stroq, and one it does not care about answers allow in ~100 ms.
   api.on(
@@ -96,7 +100,7 @@ export function register(api) {
       let outcome;
       try {
         const payload = payloadFor('pre', event, ctx, config);
-        outcome = await runStroq(config, 'pre', payload, ctx?.abortSignal);
+        outcome = await runStroq(config, 'pre', payload, ctx?.abortSignal, warn);
       } catch (err) {
         return block(event, `cannot read the tool call: ${String(err)}`);
       }
@@ -120,7 +124,7 @@ export function register(api) {
   api.on('after_tool_call', async (event, ctx) => {
     try {
       const payload = payloadFor('post', event, ctx, config);
-      const outcome = await runStroq(config, 'post', payload);
+      const outcome = await runStroq(config, 'post', payload, undefined, warn);
       if (outcome.error) logAt(api, 'debug', `stroq: post scan failed: ${outcome.error}`);
       else if (text(outcome.reply.warning)) logAt(api, 'warn', `stroq: ${outcome.reply.warning}`);
     } catch (err) {
