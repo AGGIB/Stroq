@@ -83,8 +83,14 @@ export function joinArgv(values: readonly unknown[]): string {
   return isShellCall ? rest.join(' ') : argv.map(quoteArg).join(' ');
 }
 
-/** Where a Codex build might put the shell command, most official first. */
-const COMMAND_FIELDS = ['command', 'cmd', 'input', 'script', 'raw'] as const;
+/**
+ * Where an agent might put the shell command, most official first. `command_line` is
+ * Windsurf's documented key for `pre_run_command`; it is in this shared list rather
+ * than in the Windsurf adapter because one list is what keeps every agent's reader
+ * identical, and a spelling can only ADD a candidate — `commandCandidates` returns
+ * all of them and the caller judges each — so no other agent's decision gets weaker.
+ */
+const COMMAND_FIELDS = ['command', 'command_line', 'cmd', 'input', 'script', 'raw'] as const;
 /** The string fields of a nested object that may hold it — one level down only. */
 const NESTED_TEXT_FIELDS = ['text', 'command', 'cmd'] as const;
 
