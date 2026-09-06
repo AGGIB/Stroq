@@ -265,9 +265,12 @@ describe('cwd never comes from the tool call (Task 3 review, Critical)', () => {
   });
 
   it('ignores params.cwd on exec too, falling back to process.cwd() with no workspace', async () => {
-    // The CLI adapter still recovers exec's own directory from `params.cwd` itself
-    // (`openclawExecCwd`, covered in test/adapters/openclaw-io.test.ts) — independent
-    // of this top-level field, which is why exec loses nothing from this change.
+    // The CLI adapter does not recover exec's own directory from `params.cwd` either
+    // (Task 4.5 review, Critical — it used to, via `openclawExecCwd`, which read
+    // `params.cwd` for `exec` ahead of this very field and was the actual bypass:
+    // an attacker-chosen `params.cwd` won over the trusted `cwd` the plugin sends).
+    // Only this top-level, plugin-resolved `cwd` ever feeds the CLI's secret index
+    // and path classification, for every tool including `exec`.
     const { pre, log } = await wireWithStub(ALLOW);
     await pre.handle(
       event({ toolName: 'exec', params: { command: 'ls', cwd: '/srv/app' } }),

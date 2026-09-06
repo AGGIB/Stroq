@@ -134,7 +134,9 @@ export function openclawToolInput(call: OpenClawToolCall): Record<string, unknow
   const kind = openclawToolKind(call.toolName);
   // `cwd` and `timeout` are deliberately not carried into the action: where a command
   // runs is not part of what it does, and `summarizeInput` prefers a key called
-  // `command`, which this is. The directory is read separately by `openclawExecCwd`.
+  // `command`, which this is. `params.cwd` is never read for policy purposes at all
+  // (see `handleOpenClawHook`, which uses only the trusted top-level `cwd`) — it stays
+  // here in `call.params` for the audit trail alone.
   if (kind === 'shell') return { command: commandOf(call.params) };
   if (kind === 'patch') {
     // A fresh object, so nothing of the payload's — a `file_paths` it brought with
@@ -149,19 +151,6 @@ export function openclawToolInput(call: OpenClawToolCall): Record<string, unknow
   // through `mcp.call` — which is what a `message` body and a `browser` form fill are.
   if (kind === 'fetch') return withCandidates(record, 'url', urlsOf(record));
   return record;
-}
-
-/**
- * The directory an `exec` declared for itself, or `''`. OpenClaw's hook `ctx` carries
- * no working directory and only `exec` documents one (`params.cwd`), so only `exec` is
- * read for it. Honouring a `cwd` on any other tool would let a model-chosen field move
- * the project whose `.env*` files the secret index reads, i.e. hide the very value the
- * guard exists to catch; home-directory credential sources are indexed either way.
- */
-export function openclawExecCwd(call: OpenClawToolCall): string {
-  if (openclawToolKind(call.toolName) !== 'shell') return '';
-  const value = toolInputRecord(call.params)['cwd'];
-  return typeof value === 'string' ? value : '';
 }
 
 /** A failed tool's message, preferred over its JSON shape when it has one. */

@@ -40,8 +40,9 @@ function logAt(api, level, message) {
  * else `process.cwd()` — and never a tool call's `params.cwd`: honouring a
  * model-supplied `cwd` here would let any tool point the project directory (and so
  * the secret index) at an empty one and walk straight past a secret-egress guard.
- * `exec` loses nothing: `params` is still forwarded whole, and the CLI adapter reads
- * `params.cwd` for the shell's own directory directly (`openclawExecCwd`).
+ * `exec` is no exception: the CLI adapter also never reads `params.cwd` for this
+ * (Task 4.5 review, Critical — it used to, and that was the actual bypass). `params`
+ * is still forwarded whole regardless, `cwd` included, purely for the audit trail.
  */
 function payloadFor(phase, event, ctx, config) {
   const params = event.params && typeof event.params === 'object' ? event.params : {};
