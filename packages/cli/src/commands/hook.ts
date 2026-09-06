@@ -63,6 +63,10 @@ interface HookAdapter {
    * than with `main`'s exit-1 handler. Claude Code and Cursor keep today's behaviour.
    * OpenClaw is the third: its plugin blocks the call on any non-zero exit, so the
    * exit-1 path would block with no explanation instead of the reason exit 2 carries.
+   * Windsurf is the fourth, and the strictest of the four: Cascade reads ONLY exit 2
+   * as a block, with the reason on stderr, and treats every OTHER non-zero exit —
+   * exit 1 included — as an allow, so `main`'s exit-1 handler would silently let a
+   * real deny through rather than merely losing the explanation.
    */
   readonly stdinFailClosed?: true;
 }
@@ -167,14 +171,16 @@ export async function runHook(agent: string, rawJson: string, arg = ''): Promise
 /**
  * The whole `stroq hook` command, stdin included. `runHook` above answers every
  * failure it can see, but the read itself can still reject, and `main`'s exit-1 path
- * is the wrong answer for three of the five agents: Codex reads an arbitrary non-zero
+ * is the wrong answer for four of the six agents: Codex reads an arbitrary non-zero
  * exit as a hook failure and continues past it, so exit 1 is fail-open on exactly the
  * events Stroq exists to block; Copilot denies on any non-zero exit from a
- * `preToolUse` but surfaces the reason only on exit 2; and OpenClaw's plugin reads
- * exit 2 with a reason on stderr as a block and anything else as an internal error.
- * Those three answer such a rejection with their own fail-closed output
- * (`stdinFailClosed`); the other two re-throw and keep today's behaviour, where
- * `main` prints the error and exits 1.
+ * `preToolUse` but surfaces the reason only on exit 2; OpenClaw's plugin reads exit 2
+ * with a reason on stderr as a block and anything else as an internal error; and
+ * Windsurf's Cascade reads ONLY exit 2 as a block and every other non-zero exit —
+ * exit 1 included — as an allow, so exit 1 there would silently let a real deny
+ * through rather than merely losing the explanation. Those four answer such a
+ * rejection with their own fail-closed output (`stdinFailClosed`); the other two
+ * re-throw and keep today's behaviour, where `main` prints the error and exits 1.
  */
 export async function runHookCommand(
   agent: string,
