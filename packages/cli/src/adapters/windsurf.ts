@@ -207,13 +207,26 @@ function postReadCandidates(toolInput: Readonly<Record<string, unknown>>): reado
  * candidate scans suspect the call answers exit 2 with that warning (the worst wins,
  * the same rule every other fan-out in this adapter uses); only when every candidate
  * came back clean or unscanned does it answer `NO_OUTPUT`.
+ *
+ * Each candidate is scanned under its OWN `file_path`, mirroring how `preInputs`
+ * rewrites `file_path` per candidate on the `pre` side — never the shared `event` as
+ * it stands, whose `toolInput.file_path` is fixed at whichever candidate happened to
+ * be `postReadCandidates`'s first. Core's `summarizeInput` reads that field for both
+ * the audit `summary` and the provenance `source`, so scanning every candidate
+ * against the unmodified `event` would enforce correctly but ATTRIBUTE every scan —
+ * suspect or clean — to that one candidate's path, regardless of which file was
+ * actually read for it.
  */
 async function handlePostRead(engine: StroqEngine, event: EngineEvent): Promise<HookOutput> {
   let warning: string | null = null;
   for (const path of postReadCandidates(event.toolInput)) {
     const text = windsurfReadText(path, event.cwd);
     if (text === '') continue;
-    const outcome = await scanPostResult(engine, event, text);
+    const candidateEvent: EngineEvent = {
+      ...event,
+      toolInput: { ...event.toolInput, file_path: path },
+    };
+    const outcome = await scanPostResult(engine, candidateEvent, text);
     if (outcome.warning !== null && warning === null) warning = outcome.warning;
   }
   return warning === null ? NO_OUTPUT : windsurfBlockOutput(warning);
