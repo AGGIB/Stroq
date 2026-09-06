@@ -95,12 +95,22 @@ export function copilotToolName(rawTool: string, args: unknown = undefined): str
 /** Copilot spells the file argument `path`; every rule, summary and audit line reads `file_path`. */
 const PATH_FIELDS = ['path', 'file_path', 'raw'] as const;
 
-const pathOf = (record: Readonly<Record<string, unknown>>): string => {
+/**
+ * Every distinct non-empty path candidate among `path`, `file_path` and `raw`, in
+ * that order — not just the first: `{ path: 'safe.txt', file_path: '<protected>' }`
+ * would otherwise let the protected value disappear behind whichever field a
+ * first-match reader happened to check first. More than one candidate is judged the
+ * way an `apply_patch`'s paths already are: `copilotToolInput` exposes the whole
+ * list under `file_paths` and `preGuards`/`preInputs` fan out one `engine.pre` per
+ * path, worst wins.
+ */
+const pathsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
+  const found = new Set<string>();
   for (const key of PATH_FIELDS) {
     const value = record[key];
-    if (typeof value === 'string' && value !== '') return value;
+    if (typeof value === 'string' && value !== '') found.add(value);
   }
-  return '';
+  return [...found];
 };
 
 /**
@@ -134,11 +144,19 @@ export function copilotToolInput(call: CopilotToolCall): Record<string, unknown>
     const paths = applyPatchPaths(patchTextOf(call.toolArgs));
     return { file_path: paths[0] ?? '', file_paths: [...paths] };
   }
-  if (kind === 'write' || kind === 'read')
-    return { ...withoutKeys(record, DROPPED_FILE_FIELDS), file_path: pathOf(record) };
-  // Everything else keeps its whole record: `network.fetch` and `mcp.call` are egress
-  // classes, and the secret guard reads `JSON.stringify(toolInput)`, so a field
-  // dropped here is a value that can never be caught leaving through this call.
+  if (kind === 'write' || kind === 'read') {
+    const paths = pathsOf(record);
+    const base = { ...withoutKeys(record, DROPPED_FILE_FIELDS), file_path: paths[0] ?? '' };
+    return paths.length > 1 ? { ...base, file_paths: paths } : base;
+  }
+  // Kept whole, not reduced to `url` alone: an MCP call's secret-egress check reads
+  // `JSON.stringify(toolInput)`, so a field dropped here could never be caught
+  // leaving through `mcp.call`. A `network.fetch` (this `web_fetch` case) is narrower
+  // today — core's secret guard scans only `url` and `prompt` for WebFetch, so a
+  // value placed in another field (e.g. a header) is not caught yet, the same gap
+  // Claude Code's own WebFetch has (see the spec's limits section) — but the record
+  // stays whole here too, so the audit summary carries it and a future widening of
+  // the guard needs no change in this adapter.
   if (kind === 'fetch') return { ...record, url: stringOf(record['url']) };
   return record;
 }

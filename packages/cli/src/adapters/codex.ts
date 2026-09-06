@@ -1,5 +1,4 @@
 import {
-  AuditLog,
   warningFor,
   type Decision,
   type ProvenanceHit,
@@ -8,7 +7,6 @@ import {
 } from '@stroq/core';
 import { z } from 'zod';
 import { logError } from '../log.js';
-import { auditFile } from '../paths.js';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import {
   CODEX_HIGH_IMPACT_TOOL,
@@ -22,10 +20,12 @@ import {
 } from './codex-input.js';
 import {
   MAX_PATCH_PATHS,
+  asPaths,
   decidePre,
+  denyDirectly,
   preInputs,
   type EngineEvent,
-  type PreCandidates,
+  type PreGuards,
 } from './pre-decision.js';
 import { streamResultText } from './tool-result.js';
 
@@ -136,9 +136,6 @@ export const codexUnreadableInput = (shape: string): Decision => ({
     'denied fail-closed. Report the payload shape at https://github.com/AGGIB/Stroq/issues',
 });
 
-const asPaths = (value: unknown): readonly string[] =>
-  Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
-
 /**
  * A high-impact call Codex sent arguments for, whose command or patch the adapter
  * could not find. Handing the engine the empty action it extracted would classify
@@ -158,27 +155,6 @@ function unreadableInput(input: CodexHookInput, guards: Omit<PreGuards, 'unreada
   return readable ? null : codexUnreadableInput(describeToolInput(input.tool_input));
 }
 
-/** An audited deny the engine never made: recorded here so `stroq log`/`why` still explain it. */
-async function denyDirectly(
-  event: EngineEvent,
-  decision: Decision,
-  summary: string,
-): Promise<HookOutput> {
-  await new AuditLog(auditFile()).append({
-    sessionId: event.sessionId,
-    phase: 'pre',
-    tool: event.toolName,
-    summary,
-    classes: [],
-    decision,
-  });
-  return renderDecision(decision, [], []);
-}
-
-interface PreGuards extends PreCandidates {
-  readonly unreadable: Decision | null;
-}
-
 function preGuards(input: CodexHookInput, toolInput: Readonly<Record<string, unknown>>): PreGuards {
   const found = {
     commands: isBashTool(input.tool_name) ? commandCandidates(input.tool_input) : [],
@@ -192,13 +168,15 @@ async function handlePre(
   event: EngineEvent,
   guards: PreGuards,
 ): Promise<HookOutput> {
+  const render = (decision: Decision) => renderDecision(decision, [], []);
   if (guards.unreadable)
-    return denyDirectly(event, guards.unreadable, 'codex: unreadable tool_input');
+    return denyDirectly(event, guards.unreadable, 'codex: unreadable tool_input', render);
   if (guards.patchPaths.length > MAX_PATCH_PATHS)
     return denyDirectly(
       event,
       CODEX_PATCH_TOO_LARGE,
       `apply_patch: ${guards.patchPaths.length} files`,
+      render,
     );
   const { decision, provenance, secrets } = await decidePre(
     engine,
