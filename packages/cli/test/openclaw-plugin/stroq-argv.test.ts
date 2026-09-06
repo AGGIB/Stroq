@@ -61,9 +61,9 @@ describe('resolveStroqArgv', () => {
         exists: always,
       }).argv,
     ).toEqual(['/opt/config/stroq']);
-    expect(resolve({ env: { STROQ_BIN: '/opt/env/stroq' }, recorded, exists: always }).argv).toEqual(
-      ['/opt/env/stroq'],
-    );
+    expect(
+      resolve({ env: { STROQ_BIN: '/opt/env/stroq' }, recorded, exists: always }).argv,
+    ).toEqual(['/opt/env/stroq']);
     expect(resolve({ recorded, exists: always }).argv).toEqual(recorded);
     expect(resolve({ exists: always }).argv).toEqual(['stroq']);
   });

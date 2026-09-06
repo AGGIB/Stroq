@@ -251,10 +251,13 @@ describe('after_tool_call is observe-only', () => {
     expect(await clean.post.handle(event({ result: 'ok' }), ctx())).toBeUndefined();
     expect(clean.api.logs).toEqual([]);
 
-    // The tool has already run: a broken scan is a debug line, not a thrown handler.
+    // The tool has already run: a broken scan is a log line, not a thrown handler —
+    // and a `warn` one, not `debug`. A scan that failed is a result nobody looked at,
+    // so the session is not tainted by it and the follow-up action sails through;
+    // nothing can be blocked here, which is exactly why it has to be visible.
     const broken = await wire({ stroqBin: join(tmpdir(), 'definitely-not-stroq') });
     await expect(broken.post.handle(event({ result: 'ok' }), ctx())).resolves.toBeUndefined();
-    expect(broken.api.logs.some((line) => line.startsWith('debug stroq: post scan failed'))).toBe(
+    expect(broken.api.logs.some((line) => line.startsWith('warn stroq: post scan failed'))).toBe(
       true,
     );
   });

@@ -185,6 +185,27 @@ describe('a decision the CLI made', () => {
     expect(api.logs).toContain('info stroq: approval allow-once for exec');
   });
 
+  it('clamps the approval timeout to the range OpenClaw documents', async () => {
+    // A `timeoutMs` past the documented 600 000 ms maximum is not a longer prompt,
+    // it is a `requireApproval` the Gateway may reject outright — and a rejected
+    // approval is a call nobody was ever asked about.
+    const timeoutOf = async (askTimeoutMs: unknown) => {
+      const { pre } = await wireWithStub(ASK, { askTimeoutMs });
+      const answer = (await pre.handle(event(), ctx())) as {
+        requireApproval: { timeoutMs: number };
+      };
+      return answer.requireApproval.timeoutMs;
+    };
+    expect(await timeoutOf(900_000)).toBe(600_000);
+    expect(await timeoutOf(50)).toBe(1000);
+    expect(await timeoutOf(60_000)).toBe(60_000);
+    // Absent, zero, negative and unreadable all mean "use the default".
+    expect(await timeoutOf(undefined)).toBe(120_000);
+    expect(await timeoutOf(0)).toBe(120_000);
+    expect(await timeoutOf(-1)).toBe(120_000);
+    expect(await timeoutOf('soon')).toBe(120_000);
+  }, 30_000);
+
   it('clips an over-long title and description rather than being rejected', async () => {
     const rule = 'r'.repeat(200);
     const reason = 'x'.repeat(900);
@@ -248,7 +269,12 @@ describe('cwd never comes from the tool call (Task 3 review, Critical)', () => {
     // A model-supplied `cwd` on `write` (or `message`, `browser`, any MCP call) must
     // never move the directory the secret index and path rules use: pointing it at
     // an empty directory is exactly how a `deny-secret-egress` probe turned into an
-    // `allow`. `exec` loses nothing — see the next test.
+    // `allow`. `exec` is no exception, and it DOES lose something by it: a shell
+    // command really can run in a `params.cwd` of its own, and Stroq will still judge
+    // it against the plugin's trusted directory — so a relative path in that command
+    // is classified against the wrong directory. That is the documented trade-off
+    // (see the README's OpenClaw limits), and the safe direction: the alternative is
+    // an attacker-chosen directory deciding what the secret index contains.
     const { pre, log } = await wireWithStub(ALLOW, { workspace: '/srv/fallback' });
     await pre.handle(
       event({ toolName: 'write', params: { file_path: '/tmp/x', cwd: '/somewhere/else' } }),

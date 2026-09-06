@@ -1,14 +1,20 @@
 // Stroq plugin for OpenClaw: turns `before_tool_call` / `after_tool_call` into
 // `stroq hook openclaw pre|post` child-process calls (spawning is in run-stroq.js).
-// Fail-closed by construction: a missing binary, a spawn error, a non-zero exit, a
-// timeout, an aborted run, stdout that is not JSON, or a decision this file does not
-// know all block the call.
+// Fail-closed by construction — every one of these blocks the call: a missing binary,
+// a spawn error, a non-zero exit, a timeout, an aborted run, a reply larger than
+// 1 MiB, params that cannot be serialised, stdout that is not JSON or is JSON but not
+// an object, and a decision this file does not know.
 import { createRequire } from 'node:module';
 import { clip, runStroq, text } from './run-stroq.js';
 
 const DESCRIPTION =
   'Local action firewall for OpenClaw: scans what the agent reads, taints the session, blocks or asks before dangerous tool calls.';
 const DEFAULT_ASK_TIMEOUT_MS = 120000;
+// OpenClaw's own documented bounds for an approval prompt. A `timeoutMs` past the
+// maximum is not a longer prompt, it is a `requireApproval` the Gateway may reject
+// outright — and a rejected approval is a call nobody was ever asked about.
+const MIN_ASK_TIMEOUT_MS = 1000;
+const MAX_ASK_TIMEOUT_MS = 600000;
 const MAX_TITLE = 80;
 const MAX_DESCRIPTION = 512;
 const load = createRequire(import.meta.url);
@@ -62,9 +68,16 @@ function payloadFor(phase, event, ctx, config) {
   return { ...base, result: event.result, error: event.error, durationMs: event.durationMs };
 }
 
-/** `ask` as OpenClaw's approval request, inside its documented 80/512 caps. */
+/** How long the prompt stays open, clamped to the range OpenClaw documents. */
+function askTimeout(config) {
+  const configured = Number(config.askTimeoutMs);
+  if (!(configured > 0)) return DEFAULT_ASK_TIMEOUT_MS;
+  return Math.min(Math.max(configured, MIN_ASK_TIMEOUT_MS), MAX_ASK_TIMEOUT_MS);
+}
+
+/** `ask` as OpenClaw's approval request, inside its documented 80/512/600 000 caps. */
 function approval(api, event, reply, config) {
-  const ms = Number(config.askTimeoutMs) > 0 ? Number(config.askTimeoutMs) : DEFAULT_ASK_TIMEOUT_MS;
+  const ms = askTimeout(config);
   return {
     title: clip(`Stroq: ${text(reply.ruleId) || 'policy'}`, MAX_TITLE),
     description: clip(text(reply.reason) || 'Stroq asks before this action.', MAX_DESCRIPTION),
@@ -125,10 +138,14 @@ export function register(api) {
     try {
       const payload = payloadFor('post', event, ctx, config);
       const outcome = await runStroq(config, 'post', payload, undefined, warn);
-      if (outcome.error) logAt(api, 'debug', `stroq: post scan failed: ${outcome.error}`);
+      // `warn`, not `debug`: a scan that timed out or errored is a result nobody
+      // looked at, so the session is not tainted by it and the follow-up action
+      // sails through. Nothing can be blocked here, which is exactly why the
+      // operator has to be able to see it.
+      if (outcome.error) logAt(api, 'warn', `stroq: post scan failed: ${outcome.error}`);
       else if (text(outcome.reply.warning)) logAt(api, 'warn', `stroq: ${outcome.reply.warning}`);
     } catch (err) {
-      logAt(api, 'debug', `stroq: post scan failed: ${String(err)}`);
+      logAt(api, 'warn', `stroq: post scan failed: ${String(err)}`);
     }
   });
 }

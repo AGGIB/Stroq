@@ -32,7 +32,7 @@ export const OPENCLAW_PLUGIN_FILES: readonly string[] = [
   'README.md',
 ];
 
-/** The fifth file, written by `init` rather than shipped: how to start Stroq. */
+/** The sixth file, written by `init` rather than shipped: how to start Stroq. */
 export const OPENCLAW_COMMAND_FILE = 'stroq.json';
 
 /** `src/commands/` in development and `dist/` in a published install are two levels apart. */
@@ -71,7 +71,7 @@ export function openclawPluginDir(
   return join(home !== undefined && home !== '' ? home : join(homedir(), '.stroq'), PLUGIN_DIRNAME);
 }
 
-/** Copies the four shipped files into `dir` and records `command` beside them. */
+/** Copies the five shipped files into `dir` and records `command` beside them. */
 export function installOpenClawPlugin(dir: string, command: readonly string[]): readonly string[] {
   const source = packagedPluginDir();
   mkdirSync(dir, { recursive: true });
