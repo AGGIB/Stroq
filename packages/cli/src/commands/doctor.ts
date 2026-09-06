@@ -6,6 +6,7 @@ import { secretsFile, stroqHome } from '../paths.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
+import { isStroqWindsurfHooks, readWindsurfHooks, windsurfHooksPath } from './windsurf-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 import {
   OPENCLAW_PLUGIN_MANIFEST,
@@ -67,6 +68,17 @@ function checkCopilotHooks(file: string): {
 } {
   try {
     return { installed: isStroqCopilotHooks(readCopilotHooks(file)), error: null };
+  } catch (err) {
+    return { installed: false, error: (err as Error).message };
+  }
+}
+
+function checkWindsurfHooks(file: string): {
+  readonly installed: boolean;
+  readonly error: string | null;
+} {
+  try {
+    return { installed: isStroqWindsurfHooks(readWindsurfHooks(file)), error: null };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
   }
@@ -184,6 +196,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
     { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks) },
     { name: 'copilot hooks', scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks) },
     { name: 'openclaw plugin', scopes: openclawScopes() },
+    { name: 'windsurf hooks', scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks) },
   ];
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,

@@ -23,6 +23,7 @@ import {
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
+import { isStroqWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -219,7 +220,7 @@ describe('runInit --agent', () => {
     out.restore();
     expect(code).toBe(1);
     expect(out.lines.join('')).toBe(
-      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw)\n',
+      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
     );
   });
 });
@@ -386,5 +387,84 @@ describe('runInit --agent copilot', () => {
     // stdout stays parseable: the preview is the only thing on it.
     expect(JSON.parse(both.out.join('')).version).toBe(1);
     expect(readFileSync(file, 'utf8')).toBe('{ "hooks": {} }');
+  });
+});
+
+describe('hookCommand for windsurf', () => {
+  it('ends with the agent name and carries no phase, because the event names itself', () => {
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js', 'windsurf')).toBe(
+      '"/usr/bin/node" "/opt/stroq/dist/index.js" hook windsurf',
+    );
+    expect(hookCommand('/usr/bin/node', '/w/src/index.ts', 'windsurf')).toBe(
+      '"/usr/bin/node" --import tsx "/w/src/index.ts" hook windsurf',
+    );
+  });
+});
+
+describe('runInit --agent windsurf', () => {
+  it('merges into .windsurf/hooks.json for the project and is idempotent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windsurf-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'windsurf']));
+    out.restore();
+    expect(code).toBe(0);
+    const file = windsurfHooksPath('project', dir);
+    const printed = out.lines.join('');
+    expect(printed).toContain(file);
+    // The four things a Windsurf user has to know that no other agent needs.
+    expect(printed).toContain('Restart Windsurf');
+    expect(printed).toContain('system, user and workspace');
+    expect(printed).toContain('~/.codeium/windsurf/hooks.json');
+    expect(printed).toContain('~/.codeium/hooks.json');
+    const first = readFileSync(file, 'utf8');
+    const parsed = JSON.parse(first) as {
+      hooks: Record<string, { command: string; powershell: string; show_output: boolean }[]>;
+    };
+    expect(parsed.hooks['pre_run_command']?.[0]?.command).toMatch(/ hook windsurf$/);
+    expect(parsed.hooks['post_mcp_tool_use']?.[0]?.show_output).toBe(true);
+    expect(parsed.hooks['pre_write_code']?.[0]?.powershell).toMatch(/^& /);
+    expect(isStroqWindsurfHooks(parsed)).toBe(true);
+
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'windsurf']));
+    again.restore();
+    expect(readFileSync(file, 'utf8')).toBe(first);
+  });
+
+  it('prints the merged file and writes nothing with --dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windsurf-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'windsurf', '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect(JSON.parse(out.lines.join('')).hooks.pre_read_code).toHaveLength(1);
+    expect(existsSync(windsurfHooksPath('project', dir))).toBe(false);
+  });
+
+  it("keeps a hook of the user's own that was already in the file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windsurf-'));
+    const file = windsurfHooksPath('project', dir);
+    mkdirSync(join(dir, '.windsurf'), { recursive: true });
+    writeFileSync(file, '{ "hooks": { "pre_run_command": [{ "command": "echo hi" }] } }');
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'windsurf']));
+    out.restore();
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      hooks: Record<string, { command: string }[]>;
+    };
+    const commands = parsed.hooks['pre_run_command']?.map((e) => e.command) ?? [];
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe('echo hi');
+    expect(commands[1]).toMatch(/ hook windsurf$/);
+  });
+
+  it('does not touch the other agents', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windsurf-'));
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'windsurf']));
+    out.restore();
+    expect(existsSync(settingsPath('project', dir))).toBe(false);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+    expect(existsSync(copilotHooksPath('project', dir))).toBe(false);
   });
 });

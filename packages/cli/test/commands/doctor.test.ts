@@ -6,6 +6,7 @@ import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
 import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
+import { installWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import {
   installOpenClawPlugin,
@@ -154,7 +155,7 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('reports five agents and fails all five lines when none is installed', async () => {
+  it('reports six agents and fails all six lines when none is installed', async () => {
     const report = await doctorReport(cwd);
     expect(report.checks.map((c) => c.name)).toEqual([
       'node',
@@ -165,6 +166,7 @@ describe('doctorReport codex hooks', () => {
       'codex hooks',
       'copilot hooks',
       'openclaw plugin',
+      'windsurf hooks',
       'home',
       'secrets',
     ]);
@@ -392,5 +394,63 @@ describe('doctorReport openclaw plugin', () => {
     // user to look for a per-repository install that does not exist.
     const detail = detailOf(await doctorReport(cwd), 'openclaw plugin');
     expect(detail.split(';')).toHaveLength(1);
+  });
+});
+
+describe('doctorReport windsurf hooks', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+  const cmd = '"/n" "/e.js" hook windsurf';
+
+  it('names the file it looked for when nothing is installed', async () => {
+    const windsurf = (await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')!;
+    expect(windsurf.ok).toBe(false);
+    expect(windsurf.detail).toContain(windsurfHooksPath('project', cwd));
+    expect(windsurf.detail).toContain('project: missing');
+  });
+
+  it('passes every line once Windsurf alone is installed', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    const report = await doctorReport(cwd);
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+    expect(detailOf(report, 'windsurf hooks')).toContain('project: installed');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: windsurf hooks are)');
+  });
+
+  it('reports a half-install as not installed', async () => {
+    // A `pre` without its `post` never taints and a `post` without its `pre` never
+    // blocks, so five events out of six is not partial protection.
+    const file = windsurfHooksPath('project', cwd);
+    installWindsurfHooks(file, cmd);
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    delete parsed.hooks['post_mcp_tool_use'];
+    writeFileSync(file, JSON.stringify(parsed));
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(
+      false,
+    );
+  });
+
+  it('reports a broken windsurf hooks file without failing the other lines', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const file = windsurfHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ not json');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'windsurf hooks')).toMatch(/cannot parse/);
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+  });
+
+  it('ignores a foreign hooks file that Stroq did not write', async () => {
+    const file = windsurfHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ "hooks": { "pre_run_command": [{ "command": "echo hi" }] } }');
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(
+      false,
+    );
   });
 });

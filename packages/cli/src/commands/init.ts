@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
+import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
   HOOK_TIMEOUT_SECONDS,
   readJsonObject,
@@ -38,18 +39,25 @@ import {
   openclawPluginDir,
   runOpenClawInstall,
 } from './openclaw-plugin.js';
+import {
+  installWindsurfHooks,
+  mergeWindsurfHooks,
+  readWindsurfHooks,
+  windsurfHooksPath,
+} from './windsurf-hooks.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
-export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot' | 'openclaw';
+export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot' | 'openclaw' | 'windsurf';
 export const HOOK_AGENTS: readonly HookAgent[] = [
   'claude-code',
   'cursor',
   'codex',
   'copilot',
   'openclaw',
+  'windsurf',
 ];
 
 export interface HookHandler {
@@ -281,6 +289,34 @@ function initOpenClaw(
   return 0;
 }
 
+/**
+ * Four things a Windsurf user has to know that no other agent needs: the docs never
+ * say when `hooks.json` is read, so a restart is the reliable way to make new entries
+ * fire; hooks from all three levels run, so Stroq's entries sit beside whatever else
+ * is installed; the user file is Codeium's directory rather than a `.windsurf` one;
+ * and the JetBrains plugin reads a different file again, which `init` does not write.
+ */
+const WINDSURF_NOTE =
+  'Restart Windsurf (or reload the window) if the hooks do not fire: the docs do not say when hooks.json is read.\n' +
+  'Hooks from the system, user and workspace files all run, in that order; Stroq only adds its own entries and leaves yours alone.\n' +
+  '"stroq init --agent windsurf --user" writes ~/.codeium/windsurf/hooks.json instead.\n' +
+  'The JetBrains plugin reads ~/.codeium/hooks.json, which init does not write — copy the entries there if you use it.\n';
+
+function initWindsurf(scope: 'project' | 'user', command: string, dryRun: boolean): number {
+  const file = windsurfHooksPath(scope);
+  if (dryRun) {
+    process.stdout.write(
+      `${JSON.stringify(mergeWindsurfHooks(readWindsurfHooks(file), command), null, 2)}\n`,
+    );
+    return 0;
+  }
+  installWindsurfHooks(file, command);
+  process.stdout.write(
+    `Stroq hooks installed in ${file}\n  ${WINDSURF_EVENTS.join('\n  ')}\n${WINDSURF_NOTE}Run "stroq doctor" to verify.\n`,
+  );
+  return 0;
+}
+
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -308,6 +344,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
     // The plugin spawns Stroq rather than shelling out, so it gets the command as
     // argv; the quoted line the other four use means nothing to `child_process.spawn`.
     openclaw: (scope, _command, dryRun) => initOpenClaw(scope, hookArgv(node, entry), dryRun),
+    windsurf: initWindsurf,
   };
   return install[agent as HookAgent](scope, command, dryRun);
 }
