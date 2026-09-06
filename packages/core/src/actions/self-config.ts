@@ -47,16 +47,25 @@ import { commandWord } from './shell-segments.js';
  * workspace file (`.windsurf/hooks.json`), both user files (`~/.codeium/windsurf/
  * hooks.json` for the IDE and `~/.codeium/hooks.json` for the JetBrains plugin, which
  * `init` does not write but a tainted agent must still not be able to edit), and the
- * Linux and macOS system files (`/etc/windsurf/hooks.json` and `…/Application
- * Support/Windsurf/hooks.json`). The capitalised `Windsurf` alternative is what
- * matches the macOS system path and, being case-sensitive, matches nothing in the
- * lowercase user paths. `.windsurf/rules/` and `.windsurf/workflows/` stay editable:
- * the match is on `hooks.json`, not on the directory, for exactly the reason the bare
- * `.claude` match was narrowed. The Windows system path uses backslashes and is not
- * matched; that is a stated limit, not an oversight.
+ * Linux and macOS system files. Those last two are anchored rather than matched as bare
+ * substrings: an earlier version matched `etc\/windsurf` and `Windsurf` anywhere in the
+ * text, so `scripts/etc/windsurf/hooks.json` and `docs/Windsurf/hooks.json` — neither
+ * one the real system file — matched too, the same class of false positive the bare
+ * `.claude` match once was. The Linux path requires a literal absolute
+ * `/etc/windsurf/hooks.json` at the start of a token: a negative lookbehind rejects a
+ * preceding word character, `.` or `-`, since those mean the leading slash continues a
+ * relative look-alike rather than starting an absolute path, while nothing, whitespace,
+ * a quote or `=` before the slash all pass. The macOS path is matched through its
+ * parent directory, `Application Support/Windsurf/hooks.json`, with the space either
+ * literal (a quoted path, or a Write tool's `file_path`) or backslash-escaped
+ * (`Application\ Support`), as a shell command line would need. `.windsurf/rules/` and
+ * `.windsurf/workflows/` stay editable: the match is on `hooks.json`, not on the
+ * directory, for exactly the reason the bare `.claude` match was narrowed. The Windows
+ * system path uses backslashes throughout and is not matched; that is a stated limit,
+ * not an oversight.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?|etc\/windsurf|Windsurf)\/hooks\.json|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own

@@ -3406,3 +3406,5 @@ git commit -F "$(git rev-parse --git-dir)/STROQ_COMMIT_MSG"
 ## Post-review amendments
 
 Leave this section empty until the branch has been reviewed. When the code departs from the task text above — as it did for the Copilot and OpenClaw adapters — record each departure here in one bullet, and treat the code and the spec as authoritative where they differ from the tasks. Anyone executing a task out of order reads the tasks; anyone auditing the branch reads this.
+
+- Task 1 (review): the `etc/windsurf` and `Windsurf` alternatives were unanchored substrings; replaced by the token-start-anchored absolute `/etc/windsurf/hooks.json` and `Application Support/Windsurf/hooks.json` (space literal or escaped).
