@@ -14,6 +14,14 @@ import {
   handleCopilotHook,
   isCopilotPhase,
 } from '../adapters/copilot.js';
+import {
+  handleOpenClawHook,
+  isOpenClawPhase,
+  openclawBadPhaseOutput,
+  openclawBlockOutput,
+  openclawFailClosedOutput,
+  openclawPostErrorOutput,
+} from '../adapters/openclaw.js';
 import { cursorDenyOutput, cursorFailClosedOutput, handleCursorHook } from '../adapters/cursor.js';
 import { createEngine } from '../engine-factory.js';
 import { logError } from '../log.js';
@@ -48,6 +56,8 @@ interface HookAdapter {
    * only the other events fail open — but the reason still has to reach the user, and
    * only exit 2 surfaces stderr, so both adapters answer with their own output rather
    * than with `main`'s exit-1 handler. Claude Code and Cursor keep today's behaviour.
+   * OpenClaw is the third: its plugin blocks the call on any non-zero exit, so the
+   * exit-1 path would block with no explanation instead of the reason exit 2 carries.
    */
   readonly stdinFailClosed?: true;
 }
@@ -79,6 +89,19 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     // On `post` there is nothing left to block and a non-zero exit fails open anyway.
     badJson: (reason, arg) => (arg === 'post' ? NO_OUTPUT : copilotBlockOutput(reason)),
     checkArg: (arg) => (isCopilotPhase(arg) ? null : copilotBadPhaseOutput(arg)),
+    stdinFailClosed: true,
+  },
+  // Same shape as Copilot's — the phase rides on the command line — but the answers
+  // are Stroq's own JSON, because the only consumer is the plugin in this repository.
+  // A `post` that fails still replies: the plugin logs it, and there is nothing left
+  // to block once the tool has run.
+  openclaw: {
+    handle: (engine, raw, arg) => handleOpenClawHook(engine, arg === 'post' ? 'post' : 'pre', raw),
+    failClosed: (raw, err, arg) =>
+      openclawFailClosedOutput(arg === 'post' ? 'post' : 'pre', raw, err),
+    badJson: (reason, arg) =>
+      arg === 'post' ? openclawPostErrorOutput(reason) : openclawBlockOutput(reason),
+    checkArg: (arg) => (isOpenClawPhase(arg) ? null : openclawBadPhaseOutput(arg)),
     stdinFailClosed: true,
   },
 };
