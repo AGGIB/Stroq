@@ -1,22 +1,19 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
 import { z } from 'zod';
 import { withEvidence, type HookOutput } from './claude-code.js';
-import { commandCandidates, describeToolInput, isEmptyToolInput } from './codex-input.js';
+import { preCandidatesFor, unreadableGuard } from './kind-input.js';
 import {
   isOpenClawHighImpact,
   openclawResultText,
   openclawToolInput,
   openclawToolKind,
   openclawToolName,
-  type OpenClawKind,
 } from './openclaw-input.js';
 import {
   MAX_PATCH_PATHS,
-  asPaths,
   decideWithGuards,
   scanPostResult,
   type EngineEvent,
-  type PreCandidates,
   type PreGuards,
 } from './pre-decision.js';
 
@@ -177,67 +174,21 @@ export const openclawUnreadableInput = (shape: string): Decision => ({
 });
 
 /**
- * The four kinds whose `params` the adapter reduces to ONE field, and so the four that
- * can lose it: a shell command, a patch body, a written path and a fetched URL.
- * Everything else is either low impact or an MCP call, whose arguments ARE the record
- * and reach the engine whatever shape they arrived in.
+ * The candidate lists and the "could not read it at all" guard are `kind-input.ts`'s,
+ * shared with the Copilot adapter: both ran line-for-line copies of them, and a copy
+ * of a security check is a fix that lands on one agent only. OpenClaw's own part is
+ * the two lines below — which kind its tool name maps to, and how the deny is worded.
  */
-const READABLE: Readonly<
-  Partial<
-    Record<
-      OpenClawKind,
-      (toolInput: Readonly<Record<string, unknown>>, found: PreCandidates) => boolean
-    >
-  >
-> = {
-  shell: (_toolInput, found) => found.commands.length > 0,
-  patch: (_toolInput, found) => found.patchPaths.length > 0,
-  write: (toolInput) => toolInput['file_path'] !== '',
-  fetch: (toolInput) => toolInput['url'] !== '',
-};
-
-/**
- * A high-impact call OpenClaw sent arguments for, whose command, patch, path or URL
- * the adapter could not find. Handing the engine the empty action it extracted would
- * classify nothing and allow the call — a `web_fetch` with an empty `url` classifies
- * to `network.fetch` with no host and no secret candidate, which is exactly the
- * fail-open this rule exists to stop — so it is denied instead. An EMPTY `params` is a
- * different thing: there is nothing to act on, and it keeps running through the
- * engine. MCP tools are never this: their arguments are the record itself, which
- * `toolInputRecord` fills whatever shape they arrived in, and the secret guard scans
- * it as it stands.
- */
-function unreadableInput(
-  input: OpenClawHookInput,
-  kind: OpenClawKind,
-  toolInput: Readonly<Record<string, unknown>>,
-  found: PreCandidates,
-): Decision | null {
-  const readable = READABLE[kind];
-  if (!readable || isEmptyToolInput(input.params)) return null;
-  return readable(toolInput, found)
-    ? null
-    : openclawUnreadableInput(describeToolInput(input.params));
-}
-
 function preGuards(
   input: OpenClawHookInput,
   toolInput: Readonly<Record<string, unknown>>,
 ): PreGuards {
   const kind = openclawToolKind(input.toolName);
-  // `file_paths` is populated by `openclawToolInput` for `patch` always and for
-  // `write`/`read` whenever a call's path fields disagreed (see `pathsOf`), and `urls`
-  // for a `fetch` whose URL fields disagreed (see `urlsOf`), so the fan-out below
-  // applies uniformly: `preInputs` judges every candidate and the worst wins.
-  const found: PreCandidates = {
-    commands: kind === 'shell' ? commandCandidates(input.params) : [],
-    patchPaths:
-      kind === 'patch' || kind === 'write' || kind === 'read'
-        ? asPaths(toolInput['file_paths'])
-        : [],
-    urls: kind === 'fetch' ? asPaths(toolInput['urls']) : [],
+  const found = preCandidatesFor(kind, input.params, toolInput);
+  return {
+    ...found,
+    unreadable: unreadableGuard(kind, input.params, toolInput, found, openclawUnreadableInput),
   };
-  return { ...found, unreadable: unreadableInput(input, kind, toolInput, found) };
 }
 
 /** The guard ordering and the engine loop are shared with the Codex and Copilot adapters. */

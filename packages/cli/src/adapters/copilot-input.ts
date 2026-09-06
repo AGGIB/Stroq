@@ -1,6 +1,7 @@
 import { toolResultToText } from './claude-code.js';
-import { applyPatchPaths, commandOf, isBashTool, patchTextOf } from './codex-input.js';
+import { isBashTool } from './codex-input.js';
 import { mcpToolName } from './cursor-mcp-name.js';
+import { kindToolInput, type ToolKind } from './kind-input.js';
 import { isRecord, toolInputRecord } from './tool-input.js';
 import { streamResultText } from './tool-result.js';
 
@@ -8,15 +9,13 @@ import { streamResultText } from './tool-result.js';
  * Reading a Copilot CLI hook payload: which tool it names, and where in `toolArgs`
  * the shell command, the patch body or the file path actually is.
  *
- * The command, argv and patch readers are Codex's (`codex-input.ts`), not copies:
- * both agents send a shell command under a handful of field spellings and an
- * `apply_patch` body in the same format, and a divergence between the two readers
- * would be a bypass that only reproduces on one agent.
- *
- * `pathsOf`, `urlsOf`, `withCandidates` and `withoutKeys` are exported for the same
- * reason and are read by the OpenClaw adapter (`openclaw-input.ts`): they are about
- * the shape of a tool call, not about Copilot, and `withCandidates` in particular is
- * what stops a payload's own `urls`/`file_paths` from choosing what gets classified.
+ * The command, argv and patch readers are Codex's (`codex-input.ts`) and the
+ * kind-to-record reader is `kind-input.ts`'s, shared with the OpenClaw adapter —
+ * none of them copies: several agents send a shell command under the same handful of
+ * field spellings and an `apply_patch` body in the same format, and a divergence
+ * between two readers of one shape is a bypass that reproduces on one agent only.
+ * What stays here is what is genuinely Copilot's: its tool names, the keys its file
+ * tools have to drop, and where it puts a tool's result text.
  */
 
 /**
@@ -28,8 +27,8 @@ import { streamResultText } from './tool-result.js';
  */
 export const COPILOT_MCP_SERVER = 'copilot';
 
-/** What a native Copilot tool does, which decides both its Stroq name and its input shape. */
-export type CopilotKind = 'shell' | 'patch' | 'write' | 'read' | 'fetch' | 'plain' | 'mcp';
+/** What a native Copilot tool does; the kinds are the shared set every agent maps onto. */
+export type CopilotKind = ToolKind;
 
 /**
  * Shell spellings GitHub does NOT document, on top of the two it does (`bash`,
@@ -113,89 +112,15 @@ export function copilotToolName(rawTool: string, args: unknown = undefined): str
     : mcpToolName(COPILOT_MCP_SERVER, rawTool);
 }
 
-/** Copilot spells the file argument `path`; every rule, summary and audit line reads `file_path`. */
-const PATH_FIELDS = ['path', 'file_path', 'raw'] as const;
-
-/**
- * Every distinct non-empty path candidate among `path`, `file_path` and `raw`, in
- * that order — not just the first: `{ path: 'safe.txt', file_path: '<protected>' }`
- * would otherwise let the protected value disappear behind whichever field a
- * first-match reader happened to check first. More than one candidate is judged the
- * way an `apply_patch`'s paths already are: `copilotToolInput` exposes the whole
- * list under `file_paths` and `preGuards`/`preInputs` fan out one `engine.pre` per
- * path, worst wins.
- */
-export const pathsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
-  const found = new Set<string>();
-  for (const key of PATH_FIELDS) {
-    const value = record[key];
-    if (typeof value === 'string' && value !== '') found.add(value);
-  }
-  return [...found];
-};
-
-/** Where a `web_fetch` call might put the URL, the documented spelling first. */
-const URL_FIELDS = ['url', 'uri', 'href', 'raw'] as const;
-
-/**
- * Every distinct non-empty URL candidate, read exactly the way `pathsOf` reads a
- * path — because the failure mode is the same and worse: core classifies `WebFetch`
- * on `url` alone and scans `url`/`prompt` for secret values, so a URL that does not
- * land in `url` as a string is a fetch with no host, no secret candidate and no
- * reason to deny. A bare-string `toolArgs` arrives under `raw`; an array of strings
- * contributes each element (a two-URL call is judged on both); anything else
- * contributes nothing, and a call left with no candidate at all is denied by
- * `unreadableInput` rather than run through the engine as an empty fetch.
- */
-export const urlsOf = (record: Readonly<Record<string, unknown>>): readonly string[] => {
-  const found = new Set<string>();
-  for (const key of URL_FIELDS) {
-    const value = record[key];
-    if (typeof value === 'string' && value !== '') found.add(value);
-    else if (Array.isArray(value))
-      for (const item of value) if (typeof item === 'string' && item !== '') found.add(item);
-  }
-  return [...found];
-};
-
 /**
  * Dropped from the record a file tool hands the engine. `path` goes because it has
- * just been rewritten as `file_path` and two keys meaning the same thing is how they
- * drift apart; `command` goes because it is `str_replace_editor`'s sub-command, and
- * `summarizeInput` prefers a key of that name — keeping it would label every editor
- * call `str_replace` in `stroq log` instead of naming the file it touched.
+ * just been rewritten as the `file_path` every rule, summary and audit line reads,
+ * and two keys meaning the same thing is how they drift apart; `command` goes because
+ * it is `str_replace_editor`'s sub-command, and `summarizeInput` prefers a key of
+ * that name — keeping it would label every editor call `str_replace` in `stroq log`
+ * instead of naming the file it touched.
  */
 const DROPPED_FILE_FIELDS: readonly string[] = ['command', 'path'];
-
-export const withoutKeys = (
-  record: Readonly<Record<string, unknown>>,
-  drop: readonly string[],
-): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(record).filter(([key]) => !drop.includes(key)));
-
-/**
- * The record the engine sees for a call whose real subject is one of several
- * candidates: the first under the canonical key the classifier reads, and the whole
- * list under `<key>s` when they disagreed, which is what `preInputs` fans out over.
- *
- * The plural key is ALWAYS this function's, never the payload's — a caller-supplied
- * `urls`/`file_paths` is dropped whatever the candidate count. `preInputs` overwrites
- * the singular key with each entry of the plural one, so a payload that brought its
- * own list would decide what gets judged: `{ url: '<exfiltrating>', urls: ['<benign>',
- * '<benign>'] }` would be classified twice on the decoys and never once on the real
- * URL. Deleting the key unconditionally is what makes that impossible — writing the
- * computed list only when there is more than one candidate would still leave the
- * payload's own list in place for the single-candidate case, which is the common one.
- */
-export const withCandidates = (
-  base: Readonly<Record<string, unknown>>,
-  key: 'file_path' | 'url',
-  candidates: readonly string[],
-): Record<string, unknown> => {
-  const plural = `${key}s`;
-  const one = { ...withoutKeys(base, [plural]), [key]: candidates[0] ?? '' };
-  return candidates.length > 1 ? { ...one, [plural]: [...candidates] } : one;
-};
 
 /** The subset of a Copilot event this module reads. */
 export interface CopilotToolCall {
@@ -203,29 +128,21 @@ export interface CopilotToolCall {
   readonly toolArgs?: unknown;
 }
 
-export function copilotToolInput(call: CopilotToolCall): Record<string, unknown> {
-  const record = toolInputRecord(call.toolArgs);
-  const kind = copilotToolKind(call.toolName, call.toolArgs);
-  if (kind === 'shell') return { command: commandOf(call.toolArgs) };
-  if (kind === 'patch') {
-    // A fresh object, so nothing of the payload's — a `file_paths` it brought with
-    // it included — reaches the engine or drives the fan-out; see `withCandidates`.
-    const paths = applyPatchPaths(patchTextOf(call.toolArgs));
-    return { file_path: paths[0] ?? '', file_paths: [...paths] };
-  }
-  if (kind === 'write' || kind === 'read')
-    return withCandidates(withoutKeys(record, DROPPED_FILE_FIELDS), 'file_path', pathsOf(record));
-  // Kept whole, not reduced to `url` alone: an MCP call's secret-egress check reads
-  // `JSON.stringify(toolInput)`, so a field dropped here could never be caught
-  // leaving through `mcp.call`. A `network.fetch` (this `web_fetch` case) is narrower
-  // today — core's secret guard scans only `url` and `prompt` for WebFetch, so a
-  // value placed in another field (e.g. a header) is not caught yet, the same gap
-  // Claude Code's own WebFetch has (see the spec's limits section) — but the record
-  // stays whole here too, so the audit summary carries it and a future widening of
-  // the guard needs no change in this adapter.
-  if (kind === 'fetch') return withCandidates(record, 'url', urlsOf(record));
-  return record;
-}
+/**
+ * The record the engine sees. The reading is `kind-input.ts`'s, shared with OpenClaw;
+ * the only Copilot-specific parts are which kind the tool name maps to and which keys
+ * a file tool drops. One narrowing worth knowing about: a `network.fetch` is scanned
+ * for secret values on `url` and `prompt` alone, so a value placed in another field
+ * (a header, say) is not caught yet — the same gap Claude Code's own `WebFetch` has
+ * (see the spec's limits) — but the whole record still reaches the engine, so the
+ * audit summary carries it and a future widening needs no change here.
+ */
+export const copilotToolInput = (call: CopilotToolCall): Record<string, unknown> =>
+  kindToolInput(
+    copilotToolKind(call.toolName, call.toolArgs),
+    call.toolArgs,
+    DROPPED_FILE_FIELDS,
+  );
 
 /**
  * The text of a completed action. Copilot's own field is `textResultForLlm`; the

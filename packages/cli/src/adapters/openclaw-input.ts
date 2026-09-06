@@ -1,18 +1,19 @@
 import { toolResultToText } from './claude-code.js';
-import { applyPatchPaths, commandOf, isBashTool, patchTextOf } from './codex-input.js';
-import { pathsOf, urlsOf, withCandidates, withoutKeys } from './copilot-input.js';
+import { isBashTool } from './codex-input.js';
 import { mcpToolName } from './cursor-mcp-name.js';
-import { isRecord, toolInputRecord } from './tool-input.js';
+import { kindToolInput, type ToolKind } from './kind-input.js';
+import { isRecord } from './tool-input.js';
 import { streamResultText } from './tool-result.js';
 
 /**
  * Reading an OpenClaw tool call: which tool it names, and where in `params` the shell
  * command, the patch body, the file path or the URL actually is.
  *
- * The command, argv and patch readers are Codex's (`codex-input.ts`) and the path/URL
- * candidate readers are the Copilot adapter's (`copilot-input.ts`), not copies: the
- * shapes are the same shapes, and a divergence between two readers of the same shape
- * is a bypass that only reproduces on one agent.
+ * The command, argv and patch readers are Codex's (`codex-input.ts`) and the
+ * kind-to-record reader — path and URL candidates included — is `kind-input.ts`'s,
+ * shared with the Copilot adapter. None of them is a copy: the shapes are the same
+ * shapes, and a divergence between two readers of one shape is a bypass that only
+ * reproduces on one agent.
  */
 
 /**
@@ -23,8 +24,8 @@ import { streamResultText } from './tool-result.js';
  */
 export const OPENCLAW_MCP_SERVER = 'openclaw';
 
-/** What a native OpenClaw tool does, which decides both its Stroq name and its input shape. */
-export type OpenClawKind = 'shell' | 'patch' | 'write' | 'read' | 'fetch' | 'plain' | 'mcp';
+/** What a native OpenClaw tool does; the kinds are the shared set every agent maps onto. */
+export type OpenClawKind = ToolKind;
 
 /**
  * `exec` is the documented shell tool; the rest are defensive aliases. `isBashTool`
@@ -129,29 +130,20 @@ export interface OpenClawToolCall {
   readonly params?: unknown;
 }
 
-export function openclawToolInput(call: OpenClawToolCall): Record<string, unknown> {
-  const record = toolInputRecord(call.params);
-  const kind = openclawToolKind(call.toolName);
-  // `cwd` and `timeout` are deliberately not carried into the action: where a command
-  // runs is not part of what it does, and `summarizeInput` prefers a key called
-  // `command`, which this is. `params.cwd` is never read for policy purposes at all
-  // (see `handleOpenClawHook`, which uses only the trusted top-level `cwd`) — it stays
-  // here in `call.params` for the audit trail alone.
-  if (kind === 'shell') return { command: commandOf(call.params) };
-  if (kind === 'patch') {
-    // A fresh object, so nothing of the payload's — a `file_paths` it brought with
-    // it included — reaches the engine or drives the fan-out; see `withCandidates`.
-    const paths = applyPatchPaths(patchTextOf(call.params));
-    return { file_path: paths[0] ?? '', file_paths: [...paths] };
-  }
-  if (kind === 'write' || kind === 'read')
-    return withCandidates(withoutKeys(record, DROPPED_FILE_FIELDS), 'file_path', pathsOf(record));
-  // Kept whole, not reduced to `url` alone: an MCP call's secret-egress check reads
-  // `JSON.stringify(toolInput)`, so a field dropped here could never be caught leaving
-  // through `mcp.call` — which is what a `message` body and a `browser` form fill are.
-  if (kind === 'fetch') return withCandidates(record, 'url', urlsOf(record));
-  return record;
-}
+/**
+ * The record the engine sees. The reading is `kind-input.ts`'s, shared with Copilot;
+ * the only OpenClaw-specific parts are which kind the tool name maps to and which
+ * keys a file tool drops. Two consequences worth naming: a shell call is reduced to
+ * `{ command }`, so `cwd` and `timeout` are not carried into the action — where a
+ * command runs is not part of what it does, and `params.cwd` is never read for policy
+ * purposes anywhere (see `handleOpenClawHook`, which uses only the trusted top-level
+ * `cwd`), it stays in `call.params` for the audit trail alone; and a `fetch` or an MCP
+ * call keeps its whole record, since an MCP call's secret-egress check reads
+ * `JSON.stringify(toolInput)` and a field dropped here could never be caught leaving
+ * through `mcp.call` — which is what a `message` body and a `browser` form fill are.
+ */
+export const openclawToolInput = (call: OpenClawToolCall): Record<string, unknown> =>
+  kindToolInput(openclawToolKind(call.toolName), call.params, DROPPED_FILE_FIELDS);
 
 /** A failed tool's message, preferred over its JSON shape when it has one. */
 function errorText(error: unknown): string {
