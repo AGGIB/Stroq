@@ -20,7 +20,7 @@ Scans what the agent reads. Taints the session. Blocks the dangerous follow-up �
 npx @stroq/cli init
 ```
 
-Supported today: **Claude Code**, **Cursor**, **Codex** (native hooks) · On the roadmap: Copilot, OpenClaw
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI** (native hooks) · On the roadmap: OpenClaw
 
 **Website:** [stroq.vercel.app](https://stroq.vercel.app)
 
@@ -123,6 +123,7 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 npx @stroq/cli init                  # Claude Code: writes .claude/settings.json hooks
 npx @stroq/cli init --agent cursor   # Cursor: writes .cursor/hooks.json
 npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
+npx @stroq/cli init --agent copilot  # Copilot CLI: writes .github/hooks/stroq.json
 npx @stroq/cli doctor                # check the installation
 ```
 
@@ -202,6 +203,51 @@ Only `Bash`, `apply_patch` and `mcp__<server>__<tool>` are tool names OpenAI doc
 
 Run the Codex demo yourself: `pnpm install && pnpm build && ./examples/demo/run-codex-demo.sh`.
 
+### Copilot CLI
+
+```bash
+npx @stroq/cli init --agent copilot   # in your project: writes .github/hooks/stroq.json
+```
+
+`--user` writes `$COPILOT_HOME/hooks/stroq.json` (or `~/.copilot/hooks/stroq.json`) instead, `--dry-run` prints the file without writing it. Copilot reads its hooks when the CLI starts, so **restart `copilot`** afterwards; `stroq doctor` then shows a `copilot hooks` line next to the other three.
+
+Copilot loads every `*.json` in its hooks directory independently, so there is nothing to merge: Stroq owns `stroq.json` and rewrites it whole, which makes re-running `init` idempotent by construction and leaves every other file in the directory — and in your repository — untouched. Put hooks of your own in a sibling file, not in `stroq.json`.
+
+Stroq installs on two of Copilot's events, with no `matcher`:
+
+| Copilot event | What Stroq does                                                                                                                                                                         | Can it stop the action?                                          |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `preToolUse`  | Classifies the shell command, the file path, every path an `apply_patch` declares, the fetched URL, or the MCP call and its arguments (secret egress included), and applies your policy | Yes — `deny` and a real `ask`                                    |
+| `postToolUse` | Scans the command output, the file body, the fetched page or the MCP result, taints the session, records provenance                                                                     | No — but a suspect result adds `additionalContext` for the model |
+
+No matcher is written on purpose. A matcher is a regex over the native tool name, and Copilot's hooks never reveal an MCP server, so any list Stroq could write would be a list of the tools it already knows about — and the MCP call it has never heard of would be the one that skipped the hook. Every tool goes through Stroq instead; one it does not care about returns nothing in a few milliseconds.
+
+Two things follow from that same blind spot. First, **a tool name Stroq does not recognise is treated as an MCP call** and classified as `mcp__copilot__<tool>`, because an MCP call has to reach the secret-egress guard; the mis-guess is safe in one direction only, so an unlisted native tool is merely scanned. Second, `str_replace_editor` carries its own sub-command in a field called `command` — `view`, `create`, `str_replace`, `insert`, `undo_edit` — which is **not** a shell command: Stroq reads it only to tell a read from a write, and never hands it to the shell classifier.
+
+The decision is a top-level object, not Claude Code's `hookSpecificOutput` envelope, which Copilot does not honour for a decision:
+
+```json
+{
+  "permissionDecision": "deny",
+  "permissionDecisionReason": "Stroq blocked this action (deny-self-tamper): …"
+}
+```
+
+`.github/hooks/*`, `.github/copilot/settings(.local).json`, `~/.copilot/hooks/*`, `~/.copilot/settings.json` and `~/.copilot/config.json` are protected the same way `.claude/settings.json`, `.cursor/hooks.json` and `.codex/hooks.json` already were, for every agent — `disableAllHooks: true` in Copilot's settings would switch the firewall off, so that file is guarded alongside the hooks themselves.
+
+**Limits.**
+
+- **A hook that times out fails open, and Stroq cannot change that.** Copilot treats a hook slower than `timeoutSec` as an allow and discards its late deny, even on `preToolUse` (github/copilot-cli#2893). Stroq answers in well under a second and installs `timeoutSec: 15`, but Copilot dispatches hooks serially under parallel tool use, so keep `npm install -g @stroq/cli` rather than relying on an `npx` download inside the budget. A hook that cannot _start_ is a different case: Copilot reads that as a hook error and denies, which is the good one.
+- **`ask` is a real prompt in the interactive CLI, and a deny in the cloud.** Copilot's coding agent turns every `ask` into a `deny`, so a destructive command that would prompt you at the terminal simply stops there. That is Copilot's behaviour, and it fails in the conservative direction.
+- **MCP server names are invisible to hooks.** Every MCP call is classified as `mcp__copilot__<tool>`, so a policy rule keyed on a _server_ cannot be written for Copilot the way it can for Claude Code and Cursor. Rules keyed on the tool name, on `mcp.call`/`mcp.side_effect`, and the secret-egress guard all work normally.
+- **A call Stroq cannot read is denied, not allowed.** If Copilot sends a `toolArgs` Stroq cannot get a command, a patch path or a file path out of — a field spelling it does not know, a shape it does not expect — the call is denied with `copilot-unreadable-input`, and the reason names the top-level keys it saw (never their values, which is where a secret would be) so you can report the payload shape. An empty `toolArgs` has nothing to act on and is unaffected. A patch declaring more than 64 files is denied outright (`copilot-patch-too-large`) rather than classified path by path, because the classification would risk running past the timeout — and a timed-out hook fails open.
+- **The Copilot wire format is inferred, not recorded.** It comes from GitHub's hooks reference, the Copilot CLI tutorials and the SDK's `preToolUse` documentation, plus the open issues above; the fixtures in this repository are hand-written from that reading. That is why the adapter accepts `toolArgs` as an object and as a JSON string, reads several field spellings, and denies what it cannot read.
+- **Hooks may not fire everywhere.** Copilot does not run hooks defined by plugins (#2540) and may not run them inside some subagent contexts (#2392) — Stroq installs as a repository or user hook, never as a plugin, which is the path that does fire.
+- **Not used in v1:** `permissionRequest`, `modifiedArgs`/`modifiedResult` rewriting, `postToolUseFailure` (a failed tool's error text is not scanned), the PascalCase (VS Code) event format, inline `hooks` in `settings.json`, the `/etc/github-copilot/policy.d` directory, and plugin packaging.
+- **Untested:** Windows. A `powershell` entry is written beside every `bash` one, and nothing here has been exercised there.
+
+Run the Copilot demo yourself: `pnpm install && pnpm build && ./examples/demo/run-copilot-demo.sh`.
+
 ### As a Claude Code plugin
 
 The repository is also a plugin marketplace. Inside Claude Code:
@@ -225,17 +271,17 @@ node packages/cli/dist/index.js doctor
 
 ## Commands
 
-| Command                                                                | What it does                                                                                                                   |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `stroq init [--agent claude-code\|cursor\|codex] [--user] [--dry-run]` | Install hooks into `.claude/settings.json`, `.cursor/hooks.json` or `.codex/hooks.json` (`--user` for the home-directory copy) |
-| `stroq hook claude-code` / `stroq hook cursor` / `stroq hook codex`    | Hook entrypoint (reads the event on stdin)                                                                                     |
-| `stroq doctor`                                                         | Check Node version, rules, hooks for every agent, self-test                                                                    |
-| `stroq log [--count 20]`                                               | Show recent audit entries                                                                                                      |
-| `stroq verify`                                                         | Verify the audit hash chain                                                                                                    |
-| `stroq untaint [--session <id>] [--all]`                               | Clear a false-positive session's taint and provenance, or every session's                                                      |
-| `stroq why [--seq <n>]`                                                | Explain the most recent denied/asked action: rule, provenance, taint                                                           |
-| `stroq canary [--name <NAME>]`                                         | Print a canary secret to plant; its outbound use is denied and taints the session                                              |
-| `stroq attack [--json] [--only <id>]`                                  | Replay 12 recorded incidents against your policy; exit 1 if any gets through                                                   |
+| Command                                                                                                | What it does                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stroq init [--agent claude-code\|cursor\|codex\|copilot] [--user] [--dry-run]`                        | Install hooks into `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` or `.github/hooks/stroq.json` (`--user` for the home-directory copy) |
+| `stroq hook claude-code` / `stroq hook cursor` / `stroq hook codex` / `stroq hook copilot <pre\|post>` | Hook entrypoint (reads the event on stdin; Copilot's events carry no name, so the phase is an argument)                                                    |
+| `stroq doctor`                                                                                         | Check Node version, rules, hooks for every agent, self-test                                                                                                |
+| `stroq log [--count 20]`                                                                               | Show recent audit entries                                                                                                                                  |
+| `stroq verify`                                                                                         | Verify the audit hash chain                                                                                                                                |
+| `stroq untaint [--session <id>] [--all]`                                                               | Clear a false-positive session's taint and provenance, or every session's                                                                                  |
+| `stroq why [--seq <n>]`                                                                                | Explain the most recent denied/asked action: rule, provenance, taint                                                                                       |
+| `stroq canary [--name <NAME>]`                                                                         | Print a canary secret to plant; its outbound use is denied and taints the session                                                                          |
+| `stroq attack [--json] [--only <id>]`                                                                  | Replay 12 recorded incidents against your policy; exit 1 if any gets through                                                                               |
 
 ## Policy
 
@@ -294,6 +340,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 - **Fail-closed:** if Stroq errors out while handling a high-impact `PreToolUse` call, the action is denied, not silently allowed.
 - **Cursor coverage is narrower than Claude Code's:** Stroq v1 installs on no Cursor event that can stop a file edit, so edits made through Cursor's editor are audited (`allow(cursor-edit-unenforced)`) rather than blocked; `afterShellExecution` cannot carry a warning back to the agent, and Cursor's own web reads have no hook at all — the taint, where there is one, is still enforced on the next action. The full table and limits are in [Cursor](#cursor).
 - **Codex cannot be asked, only told:** Codex's hook contract has no `ask`, so every `ask` in the policy is enforced as a deny whose reason says a prompt was not possible and names the rule to relax. Codex also has no `failClosed` knob and fails open on a hook that cannot start; Stroq answers its _own_ errors on high-impact `PreToolUse` events with exit code 2 and the reason on stderr, the one block Codex honours regardless. The full table and limits are in [Codex](#codex).
+- **Copilot can be asked, but not made to wait:** Copilot honours a real `ask`, and a deny travels as a top-level `permissionDecision` (its hook contract does not read Claude Code's envelope for a decision). What it will not do is wait: a hook slower than its timeout is treated as an allow and its late deny is discarded, even on `preToolUse`. Stroq answers in well under a second, and a hook that cannot start at all is a hook error, which denies. Copilot's hooks also never reveal an MCP server name, so every MCP call is classified under a synthetic one. The full table and limits are in [Copilot CLI](#copilot-cli).
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
@@ -302,7 +349,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 ## Roadmap
 
 - Local daemon with an ONNX-based classifier, replacing per-invocation Node startup and pure regex matching for the content scan.
-- Adapters for Copilot and OpenClaw.
+- An adapter for OpenClaw.
 - Cursor's generic `preToolUse` hook, so edits and deletes made through Cursor's editor can be blocked rather than only audited.
 - A quote-aware shell lexer and worker-isolated scanning (see Guarantees and limits above).
 - Team control plane: shared policy, fleet-wide audit visibility, and centralized false-positive triage across a team's agents.
