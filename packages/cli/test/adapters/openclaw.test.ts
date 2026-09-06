@@ -69,6 +69,9 @@ describe('openclawToolKind', () => {
     ['web_fetch', 'fetch'],
     ['web_search', 'plain'],
     ['x_search', 'plain'],
+    // `terminal` runs a command line, so it is a shell — not an MCP call, which is
+    // what it used to be, and which meant the shell rule set never ran on it.
+    ['terminal', 'shell'],
     // Review ruling (Task 1 review): the pass-through set is exactly these four —
     // none of them leaves the session, returns external content, or mutates state.
     ['ask_user', 'plain'],
@@ -94,8 +97,10 @@ describe('openclawToolKind', () => {
     ['update_goal', 'mcp'],
     ['message', 'mcp'],
     ['browser', 'mcp'],
+    // `process` and `code_execution` stay MCP calls: their parameter shapes are
+    // undocumented, and mapping them to the shell kind would turn every call with a
+    // shape Stroq cannot read into an `openclaw-unreadable-input` deny.
     ['process', 'mcp'],
-    ['terminal', 'mcp'],
     ['code_execution', 'mcp'],
     ['secrets', 'mcp'],
     ['screen', 'mcp'],
@@ -134,6 +139,9 @@ describe('openclawToolName', () => {
       ['exec_command', 'Bash'],
       ['local_shell', 'Bash'],
       ['run_command', 'Bash'],
+      // `terminal` takes a command line, so it is a shell: leaving it an MCP call
+      // meant `curl … | sh` through it never met the shell rule set at all.
+      ['terminal', 'Bash'],
       ['read', 'Read'],
       ['write', 'Write'],
       ['edit', 'Edit'],

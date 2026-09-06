@@ -387,3 +387,23 @@ describe('openclawFailClosedOutput', () => {
     });
   });
 });
+
+describe('terminal is a shell, not an MCP call', () => {
+  it('denies a fetch-and-execute through terminal in an untainted session', async () => {
+    // `terminal` takes a command line exactly as `exec` does. Classified as an MCP
+    // call it met `mcp.call` and the secret guard but never the shell rule set, so
+    // `curl … | sh` through it was allowed in an untainted session while the same
+    // command under `exec` was denied — the one gap the shell aliases exist to close.
+    const out = await pre({ toolName: 'terminal', params: { command: CURL } });
+    expect(decisionOf(out.stdout)).toBe('deny');
+    expect(ruleOf(out.stdout)).toBe('deny-encoded-exec');
+  });
+
+  it.each(['process', 'code_execution'])('leaves %s an MCP call', async (toolName) => {
+    // Their parameter shapes are undocumented: mapping them to the shell kind would
+    // turn every call whose shape Stroq cannot read into an unreadable-input deny.
+    // Untainted, their command text is simply not classified by the shell rules.
+    const out = await pre({ toolName, params: { command: CURL } });
+    expect(decisionOf(out.stdout)).toBe('allow');
+  });
+});
