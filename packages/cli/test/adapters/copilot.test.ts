@@ -248,8 +248,10 @@ describe('copilotToolInput', () => {
   });
 
   it('guarantees web_fetch a string url without losing its other arguments', () => {
-    // `network.fetch` is an egress class, so the whole record is scanned for secret
-    // values; dropping fields here would be a value that can never be caught leaving.
+    // `network.fetch` is an egress class, but core's secret guard scans only `url`
+    // and `prompt` for WebFetch, not the whole record — the record is kept whole
+    // here anyway, so a value dropped from the mapping could never be caught
+    // leaving once the guard's coverage widens.
     expect(call('web_fetch', { url: 'https://x.example/a', prompt: 'summarise' })).toEqual({
       url: 'https://x.example/a',
       prompt: 'summarise',
