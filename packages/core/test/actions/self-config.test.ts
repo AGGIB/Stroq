@@ -87,6 +87,30 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
   ])('matches protected file/dir: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(true));
 });
 
+describe('SELF_CONFIG_FILE anchors the Windsurf system paths (review fix, no bare substring match)', () => {
+  it.each([
+    'scripts/etc/windsurf/hooks.json',
+    'docs/Windsurf/hooks.json',
+    'my-etc/windsurf/hooks.json',
+  ])('does not match a relative look-alike: %s', (text) =>
+    expect(SELF_CONFIG_FILE.test(text)).toBe(false),
+  );
+
+  it.each([
+    '/etc/windsurf/hooks.json',
+    'sudo tee /etc/windsurf/hooks.json',
+    '"/etc/windsurf/hooks.json"',
+    '"/Library/Application Support/Windsurf/hooks.json"',
+    '/Library/Application\\ Support/Windsurf/hooks.json',
+  ])('still matches the anchored absolute path: %s', (text) =>
+    expect(SELF_CONFIG_FILE.test(text)).toBe(true),
+  );
+
+  it('denies a write to the anchored Linux system path', () => {
+    expect(classifySelfConfigSegment('rm -f /etc/windsurf/hooks.json')).toBe('deny');
+  });
+});
+
 describe('PROTECTED_DIRS (F5-2: bare directories, find-only usage)', () => {
   it.each(['.claude -name', '.cursor/', '.stroq', '~/.stroq -delete'])(
     'matches bare protected dir: %s',
