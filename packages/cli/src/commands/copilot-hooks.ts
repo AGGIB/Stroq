@@ -85,18 +85,26 @@ const eventEntries = (json: unknown, event: string): readonly unknown[] => {
 };
 
 /**
- * True only when BOTH events carry a Stroq entry. `init` always writes both, so a
- * file with one of them is a half-install — a `pre` without a `post` never taints,
+ * True only when the file declares `version: 1` AND both events carry a Stroq
+ * entry. Copilot drops a hooks file outright when `version` is missing or is
+ * anything but `1`, so a file lacking it protects no one no matter how correct its
+ * `hooks` block looks, and calling it installed would be reporting protection the
+ * file cannot actually provide. `init` always writes both events, so a file with
+ * only one of them is a half-install too — a `pre` without a `post` never taints,
  * a `post` without a `pre` never blocks — and reporting it as installed would leave
  * a user believing in protection they do not have.
  */
 export const isStroqCopilotHooks = (json: unknown): boolean =>
+  isPlainObject(json) &&
+  json['version'] === 1 &&
   COPILOT_HOOK_EVENTS.every((event) => eventEntries(json, event).some(isStroqEntry));
 
 /**
  * Repository hooks live in `.github/hooks/` — the only location the cloud coding
- * agent reads. The user copy is `$COPILOT_HOME/hooks/` when that variable names a
- * directory, else `~/.copilot/hooks/`.
+ * agent reads. The user copy is `$COPILOT_HOME/hooks/` when that variable is set to
+ * a non-empty string — it is not checked for actually naming a directory, and
+ * `writeJsonObject` creates the tree if it does not already exist — else
+ * `~/.copilot/hooks/`.
  */
 export function copilotHooksPath(
   scope: 'project' | 'user',

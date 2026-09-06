@@ -64,6 +64,16 @@ describe('buildCopilotHooks', () => {
     ).toBe(false);
   });
 
+  it('requires version to be exactly 1, not just both hook entries', () => {
+    // Copilot itself drops a hooks file whose `version` is not 1, so a file
+    // missing it, or carrying the wrong one, is not installed no matter how
+    // correct its `hooks` block looks.
+    const { hooks } = buildCopilotHooks(pre, post);
+    expect(isStroqCopilotHooks({ hooks })).toBe(false);
+    expect(isStroqCopilotHooks({ version: 2, hooks })).toBe(false);
+    expect(isStroqCopilotHooks({ version: 1, hooks })).toBe(true);
+  });
+
   it('survives a hand-mangled file without throwing', () => {
     for (const json of [
       { hooks: 'nope' },
