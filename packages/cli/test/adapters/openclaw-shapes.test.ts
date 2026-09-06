@@ -289,3 +289,26 @@ describe('a command in more than one field is judged on its worst', () => {
     expect(ruleOf(out.stdout)).toBe('deny-encoded-exec');
   });
 });
+
+describe('the gate cannot be switched off through exec (spec §2b)', () => {
+  it.each([
+    'openclaw plugins disable stroq',
+    'openclaw plugins remove stroq',
+    'openclaw plugins uninstall stroq',
+    'openclaw config set plugins.entries.stroq.enabled false',
+  ])('denies "%s", tainted session or not', async (command) => {
+    // Every one of these leaves the Gateway running with no Stroq in front of it,
+    // which is the promise of spec §2b ("a tainted agent cannot disable or replace
+    // the plugin"): the file gate never sees them, because none names a path.
+    await taint();
+    const out = await pre({ toolName: 'exec', params: { command } });
+    expect(ruleOf(out.stdout)).toBe('deny-self-tamper');
+  });
+
+  it('still allows the commands that inspect or repair the install', async () => {
+    expect(await pre({ toolName: 'exec', params: { command: 'openclaw plugins list' } })).toEqual({
+      stdout: '{"decision":"allow"}',
+      exitCode: 0,
+    });
+  });
+});

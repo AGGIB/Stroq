@@ -197,16 +197,46 @@ function isSelfConfigReadOnly(segment: string, word: string): boolean {
   return false;
 }
 
+/**
+ * Turning the firewall off through the AGENT'S OWN CLI, which touches no
+ * protected file at all and so is invisible to every check above.
+ * `openclaw plugins disable stroq` unloads the gate, `remove`/`uninstall`
+ * delete it, and `openclaw config set plugins.…` rewrites exactly the
+ * `plugins.entries.<id>.enabled` key `.openclaw/openclaw.json` is protected
+ * for — each of them leaves the Gateway running with nothing in front of it,
+ * which the spec (§2b) says a tainted agent must not be able to do.
+ *
+ * Matched anywhere in the segment's words rather than on its command word, so
+ * a wrapper (`sudo …`), an absolute path (`/usr/local/bin/openclaw …`) and an
+ * inner `find … -exec openclaw plugins remove …` are all covered — a command
+ * word test would exempt every one of those, and `-exec` in particular is a
+ * real bypass. The cost is a false positive on a segment that only MENTIONS
+ * the text (`grep -r "openclaw plugins disable" docs/`), which is the
+ * conservative direction and the same call the rest of this gate makes.
+ *
+ * Deliberately narrow on the verb: `plugins list|inspect|enable|install` and
+ * `gateway restart` are how an operator checks and repairs the install, and
+ * denying those would deny the fix. `config get` is likewise untouched here.
+ */
+const OPENCLAW_PLUGIN_OFF = /\bopenclaw\s+plugins\s+(?:disable|remove|uninstall)\b/;
+const OPENCLAW_PLUGIN_CONFIG_WRITE = /\bopenclaw\s+config\s+set\s+plugins\./;
+
+/** True when the segment runs the agent's own CLI to unload or delete the gate. */
+export const disablesAgentPlugin = (segment: string): boolean =>
+  OPENCLAW_PLUGIN_OFF.test(segment) || OPENCLAW_PLUGIN_CONFIG_WRITE.test(segment);
+
 export type SelfConfigVerdict = 'deny' | 'ask' | null;
 
 /**
  * Classifies one segment against the self-tamper gate:
- *   - `deny`  — clear write intent against a protected path
+ *   - `deny`  — clear write intent against a protected path, or the agent's
+ *               own CLI switching the plugin off
  *   - `null`  — no protected path mentioned, or a known read-only command
  *   - `ask`   — a protected path is mentioned by something else (unknown
  *               commands, editors, interpreters without inline code)
  */
 export function classifySelfConfigSegment(segment: string): SelfConfigVerdict {
+  if (disablesAgentPlugin(segment)) return 'deny';
   const word = commandWord(segment);
   if (!touchesSelfConfig(segment, word)) return null;
   if (isSelfConfigWriteIntent(segment, word)) return 'deny';
@@ -240,7 +270,9 @@ export function selfTamperSignals(segments: readonly string[]): SelfConfigSignal
   for (const segment of segments) {
     const verdict = classifySelfConfigSegment(segment);
     if (verdict === 'deny' || (verdict === 'ask' && interpreterInlineElsewhere)) {
-      deny.push('self-config-write');
+      // Named apart from a file write so `stroq why` says which kind of tamper
+      // it was: nothing on disk changed, the gate itself was switched off.
+      deny.push(disablesAgentPlugin(segment) ? 'self-config-disable' : 'self-config-write');
     } else if (verdict === 'ask') {
       ask.push('self-config-touch');
     }
