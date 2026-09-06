@@ -1,0 +1,27 @@
+{
+  "id": "stroq",
+  "name": "Stroq",
+  "description": "Local action firewall for OpenClaw: scans what the agent reads, taints the session, blocks or asks before dangerous tool calls.",
+  "version": "0.6.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "stroqBin": { "type": "string" },
+      "workspace": { "type": "string" },
+      "timeoutMs": { "type": "integer", "minimum": 1000 },
+      "askTimeoutMs": { "type": "integer", "minimum": 1000 },
+      "logLevel": { "type": "string", "enum": ["warn", "info", "debug"] }
+    }
+  },
+  "uiHints": {
+    "stroqBin": {
+      "label": "stroq command",
+      "help": "Path to the stroq binary. Defaults to `stroq` on PATH, then the path recorded by `stroq init --agent openclaw`."
+    },
+    "workspace": {
+      "label": "Project directory",
+      "help": "Used for the secret index and path classification when a tool call carries no cwd."
+    }
+  }
+}

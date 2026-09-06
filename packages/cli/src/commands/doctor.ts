@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats } from '@stroq/core';
 import { secretsFile, stroqHome } from '../paths.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
+import { isStroqOpenClawPlugin, openclawPluginDir } from './openclaw-plugin.js';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -62,6 +64,24 @@ function checkCopilotHooks(file: string): {
     return { installed: isStroqCopilotHooks(readCopilotHooks(file)), error: null };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * OpenClaw's plugin has no project/user split — it is one directory per Gateway host
+ * — so this row carries a single scope rather than going through `agentScopes`. It is
+ * deliberately filesystem-only: asking a real `openclaw plugins list` would make
+ * `stroq doctor` spawn another program, and the reminder that the Gateway still has
+ * to enable the plugin belongs in `init`'s note, not in a check that must be fast,
+ * offline and safe to run anywhere.
+ */
+function openclawScopes(): ScopeStatus[] {
+  const dir = openclawPluginDir();
+  const file = join(dir, 'index.js');
+  try {
+    return [{ scope: 'user', file, installed: isStroqOpenClawPlugin(dir), error: null }];
+  } catch (err) {
+    return [{ scope: 'user', file, installed: false, error: (err as Error).message }];
   }
 }
 
@@ -154,6 +174,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
     { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks) },
     { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks) },
     { name: 'copilot hooks', scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks) },
+    { name: 'openclaw plugin', scopes: openclawScopes() },
   ];
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,
