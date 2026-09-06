@@ -51,6 +51,9 @@ jobs:
       - name: Run Copilot demo
         run: ./examples/demo/run-copilot-demo.sh
 
+      - name: Run OpenClaw demo
+        run: ./examples/demo/run-openclaw-demo.sh
+
       - name: Attack suite
         run: node packages/cli/dist/index.js attack
 

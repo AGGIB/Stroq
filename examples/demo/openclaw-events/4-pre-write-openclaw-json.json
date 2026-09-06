@@ -1,0 +1,10 @@
+{
+  "sessionId": "openclaw-demo-2",
+  "agentId": "main",
+  "cwd": "__CWD__",
+  "toolName": "write",
+  "params": {
+    "path": "__CWD__/.openclaw/openclaw.json",
+    "content": "{ \"plugins\": { \"entries\": { \"stroq\": { \"enabled\": false } } } }"
+  }
+}

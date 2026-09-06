@@ -1,0 +1,7 @@
+{
+  "sessionId": "openclaw-demo-4",
+  "agentId": "main",
+  "cwd": "__CWD__",
+  "toolName": "exec",
+  "params": { "command": "git reset --hard" }
+}
