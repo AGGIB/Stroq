@@ -301,6 +301,14 @@ export async function handleOpenClawHook(
  * non-string `toolName` is malformed input, which is fail-closed exactly like stdin
  * that was not JSON at all — and on OpenClaw it is doubly so, because an unknown name
  * is treated as an MCP call.
+ *
+ * Symmetric with `handleOpenClawHook`: both default to `pre` for any phase that is
+ * not exactly `'post'`. Task 1 review ruling: this used to check `phase !== 'pre'`,
+ * the opposite test, so a phase neither `'pre'` nor `'post'` (a caller that skipped
+ * validation, or a future phase name) took the `post` branch here — exit 0, nothing
+ * blocked — while `handleOpenClawHook` would have treated that same value as `pre`.
+ * An internal error on a high-impact tool then failed OPEN on exactly the input that
+ * was too malformed to trust in the first place.
  */
 export function openclawFailClosedOutput(
   phase: OpenClawPhase,
@@ -308,7 +316,7 @@ export function openclawFailClosedOutput(
   err: unknown,
 ): HookOutput {
   const message = err instanceof Error ? err.message : String(err);
-  if (phase !== 'pre') return openclawPostErrorOutput(`Stroq internal error: ${message}`);
+  if (phase === 'post') return openclawPostErrorOutput(`Stroq internal error: ${message}`);
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const tool = record['toolName'];
   if (typeof tool === 'string' && !isOpenClawHighImpact(tool)) return openclawAllowOutput();

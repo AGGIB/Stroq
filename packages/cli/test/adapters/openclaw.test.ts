@@ -69,23 +69,29 @@ describe('openclawToolKind', () => {
     ['web_fetch', 'fetch'],
     ['web_search', 'plain'],
     ['x_search', 'plain'],
+    // Review ruling (Task 1 review): the pass-through set is exactly these four —
+    // none of them leaves the session, returns external content, or mutates state.
     ['ask_user', 'plain'],
-    ['view_image', 'plain'],
-    ['image_generate', 'plain'],
-    ['music_generate', 'plain'],
-    ['video_generate', 'plain'],
-    ['tts', 'plain'],
-    ['tool_search', 'plain'],
-    ['tool_search_code', 'plain'],
-    ['tool_describe', 'plain'],
     ['progress_card', 'plain'],
     ['heartbeat_respond', 'plain'],
     ['get_goal', 'plain'],
-    ['create_goal', 'plain'],
-    ['update_goal', 'plain'],
-    // Every side-effecting native tool, and every name OpenClaw has never
-    // documented, is an MCP call: that is what puts its arguments in front of the
-    // secret-egress guard.
+    // Every side-effecting native tool, every tool that returns external content or
+    // generated media, every tool-introspection call, and every name OpenClaw has
+    // never documented, is an MCP call: that is what puts its arguments in front of
+    // the secret-egress guard and its result in front of the `post` scan
+    // (`SCANNED_TOOLS` matches `mcp__`). Self-mapping any of these instead would
+    // exempt it from both: a `tts` call given a secret value would be silently
+    // allowed, and a poisoned `tool_describe` result would never taint the session.
+    ['view_image', 'mcp'],
+    ['image_generate', 'mcp'],
+    ['music_generate', 'mcp'],
+    ['video_generate', 'mcp'],
+    ['tts', 'mcp'],
+    ['tool_search', 'mcp'],
+    ['tool_search_code', 'mcp'],
+    ['tool_describe', 'mcp'],
+    ['create_goal', 'mcp'],
+    ['update_goal', 'mcp'],
     ['message', 'mcp'],
     ['browser', 'mcp'],
     ['process', 'mcp'],
@@ -102,6 +108,19 @@ describe('openclawToolKind', () => {
     ['mcp__github__add_issue_comment', 'mcp'],
     ['', 'mcp'],
   ])('%s is %s', (tool, kind) => expect(openclawToolKind(tool)).toBe(kind));
+
+  it('normalises case and surrounding whitespace before classifying', () => {
+    // A spelling that misses the shell set for nothing but casing or whitespace
+    // becomes `mcp__openclaw__EXEC`, and the whole shell rule set never runs on it.
+    for (const tool of ['EXEC', 'Exec', 'exec ', ' EXEC', 'BASH', 'Read', 'WRITE '])
+      expect(openclawToolKind(tool), tool).not.toBe('mcp');
+    expect(openclawToolKind('EXEC')).toBe('shell');
+    expect(openclawToolKind('Exec')).toBe('shell');
+    expect(openclawToolKind('exec ')).toBe('shell');
+    expect(openclawToolKind('BASH')).toBe('shell');
+    expect(openclawToolKind('Read')).toBe('read');
+    expect(openclawToolKind('WRITE ')).toBe('write');
+  });
 });
 
 describe('openclawToolName', () => {
@@ -123,12 +142,12 @@ describe('openclawToolName', () => {
       ['web_search', 'WebSearch'],
       ['x_search', 'WebSearch'],
       // Passed through: they classify to nothing, and pretending otherwise would
-      // put an MCP name on a tool that never leaves the session.
+      // put an MCP name on a tool that never leaves the session. Review ruling
+      // (Task 1 review): exactly these four, and no others.
       ['ask_user', 'ask_user'],
-      ['view_image', 'view_image'],
-      ['tts', 'tts'],
-      ['tool_describe', 'tool_describe'],
-      ['create_goal', 'create_goal'],
+      ['progress_card', 'progress_card'],
+      ['heartbeat_respond', 'heartbeat_respond'],
+      ['get_goal', 'get_goal'],
     ] as const)
       expect(openclawToolName(tool), tool).toBe(name);
   });
@@ -139,6 +158,22 @@ describe('openclawToolName', () => {
     expect(openclawToolName('browser')).toBe('mcp__openclaw__browser');
     expect(openclawToolName('send mail')).toBe('mcp__openclaw__send_mail');
     expect(openclawToolName('')).toBe('mcp__openclaw__call');
+    // Review ruling (Task 1 review): these ten used to be self-mapped, which
+    // exempted each of them from the `post` scan, the secret-egress guard and the
+    // fail-closed path all at once. Each now composes an MCP name instead.
+    for (const tool of [
+      'view_image',
+      'image_generate',
+      'music_generate',
+      'video_generate',
+      'tts',
+      'tool_search',
+      'tool_search_code',
+      'tool_describe',
+      'create_goal',
+      'update_goal',
+    ])
+      expect(openclawToolName(tool), tool).toBe(`mcp__openclaw__${tool}`);
     // A name that already carries the prefix keeps its own server, re-sanitised the
     // way the Cursor, Codex and Copilot adapters do it (core splits on the LAST `__`).
     expect(openclawToolName('mcp__sentry__get_issue')).toBe('mcp__sentry__get_issue');
@@ -147,6 +182,28 @@ describe('openclawToolName', () => {
     );
     expect(openclawToolName('mcp__srv__send__data')).toBe('mcp__srv__send_data');
     expect(openclawToolName('mcp__')).toBe('mcp__unknown__call');
+  });
+
+  it('still classifies the narrowed pass-through set to nothing', () => {
+    for (const tool of ['ask_user', 'progress_card', 'heartbeat_respond', 'get_goal'])
+      expect(classifyTool(openclawToolName(tool), { any: 'thing' }, cwd).classes, tool).toEqual([]);
+  });
+
+  it('normalises case and surrounding whitespace, but always emits a canonical name', () => {
+    // The emitted Stroq tool name never reflects the raw casing: it always comes
+    // from a fixed table (`KIND_NAMES`, `PLAIN_NAMES`'s values), never the raw string.
+    for (const [tool, name] of [
+      ['EXEC', 'Bash'],
+      ['Exec', 'Bash'],
+      ['exec ', 'Bash'],
+      [' EXEC', 'Bash'],
+      ['BASH', 'Bash'],
+      ['Read', 'Read'],
+      ['WRITE ', 'Write'],
+      [' Edit', 'Edit'],
+      ['Ask_User', 'ask_user'],
+    ] as const)
+      expect(openclawToolName(tool), tool).toBe(name);
   });
 
   it('keeps the side-effecting native tools classified as side effects', () => {
@@ -209,11 +266,30 @@ describe('isOpenClawHighImpact', () => {
       'browser',
       'code_execution',
       'mcp__github__add_issue_comment',
+      // These used to be self-mapped and low impact; the Task 1 review ruling moved
+      // them onto the MCP path, so a Stroq failure on one of them now fails closed
+      // like any other MCP call rather than silently allowing it through.
+      'tts',
+      'tool_describe',
       // An empty or missing name is unknown, i.e. an MCP call, i.e. high impact.
       '',
     ])
       expect(isOpenClawHighImpact(tool), tool).toBe(true);
-    for (const tool of ['read', 'web_search', 'x_search', 'ask_user', 'tts', 'tool_describe'])
+    for (const tool of [
+      'read',
+      'web_search',
+      'x_search',
+      'ask_user',
+      'progress_card',
+      'heartbeat_respond',
+      'get_goal',
+    ])
       expect(isOpenClawHighImpact(tool), tool).toBe(false);
+  });
+
+  it('normalises case before the lookup, like every other kind check', () => {
+    expect(isOpenClawHighImpact('READ')).toBe(false);
+    expect(isOpenClawHighImpact(' Ask_User ')).toBe(false);
+    expect(isOpenClawHighImpact('EXEC')).toBe(true);
   });
 });
