@@ -17,10 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stroq hook` gains a sixth agent (`stroq hook windsurf`); the five existing agents are byte-for-byte unchanged. A stdin read that rejects is answered with the adapter's own fail-closed output for Windsurf as it already was for Codex, Copilot and OpenClaw — on Windsurf, exit 1 would be an allow.
 - The shared command-field list in `adapters/codex-input.ts` gains `command_line`, Windsurf's documented spelling. It is shared rather than copied so every agent's reader stays identical; a spelling can only add a candidate, never hide one, so no other agent's decision changes.
 
-### Limits
-
-- Windsurf's hooks cannot prompt, so a policy `ask` is enforced as a block; command output never reaches a hook, so only files Cascade reads and MCP results can taint a Windsurf session; there is no hook timeout setting; and any exit other than 0 or 2 is an allow. See the Windsurf section of the README.
-
 ## [0.7.0] - 2026-09-06
 
 ### Added

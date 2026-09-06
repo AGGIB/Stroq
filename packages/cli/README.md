@@ -29,6 +29,8 @@ npx @stroq/cli doctor                # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
+Windsurf note: `post_read_code` cannot scan a directory Cascade reads recursively (it scans the file it names, and a directory reads as empty), and a tainted `pre_read_code` of `~/.ssh` or `~/.aws` without a trailing slash is not classified as a secret path either — see the [Windsurf section of the full README](https://github.com/AGGIB/Stroq#windsurf) for this and every other documented limit.
+
 ## Commands
 
 | Command                                            | What it does                                                                                                                   |
