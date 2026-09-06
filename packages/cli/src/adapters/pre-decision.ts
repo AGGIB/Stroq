@@ -1,6 +1,14 @@
-import { AuditLog, type Decision, type StroqEngine } from '@stroq/core';
+import {
+  AuditLog,
+  warningFor,
+  type Decision,
+  type ProvenanceHit,
+  type SecretHit,
+  type StroqEngine,
+} from '@stroq/core';
+import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
-import type { HookOutput } from './claude-code.js';
+import { NO_OUTPUT, type HookOutput } from './claude-code.js';
 
 /** The subset of a hook event every adapter hands the engine. */
 export interface EngineEvent {
@@ -23,6 +31,8 @@ export interface PreCandidates {
   /** Every command spelling a shell call carried; empty for any other tool. */
   readonly commands: readonly string[];
   readonly patchPaths: readonly string[];
+  /** Every URL a fetch carried when its fields disagreed; empty for any other tool. */
+  readonly urls: readonly string[];
 }
 
 /** `PreCandidates` plus whatever made the call impossible to classify at all. */
@@ -51,6 +61,7 @@ export function preInputs(
     return candidates.commands.map((command) => ({ ...toolInput, command }));
   if (candidates.patchPaths.length > 1)
     return candidates.patchPaths.map((file_path) => ({ ...toolInput, file_path }));
+  if (candidates.urls.length > 1) return candidates.urls.map((url) => ({ ...toolInput, url }));
   return [{ ...toolInput }];
 }
 
@@ -100,4 +111,71 @@ export async function denyDirectly(
     decision,
   });
   return render(decision);
+}
+
+/** How one adapter renders a decision; the two differ in envelope and in ask wording. */
+export type RenderDecision = (
+  decision: Decision,
+  provenance: readonly ProvenanceHit[],
+  secrets: readonly SecretHit[],
+) => HookOutput;
+
+/** The two adapter-level denies, named by the adapter that records them. */
+export interface GuardDenials {
+  /** The decision an oversized patch gets; its rule id names the agent. */
+  readonly tooLarge: Decision;
+  /** The audit summary for an unreadable payload, e.g. `codex: unreadable tool_input`. */
+  readonly unreadableSummary: string;
+}
+
+/**
+ * The whole `pre` answer, in the order it has to happen: a payload the adapter could
+ * not read at all is denied before anything else (there is no action to classify), an
+ * oversized patch next (classifying it is what would run past the hook timeout), and
+ * only then the engine, once per candidate with the worst decision winning.
+ *
+ * ONE implementation on purpose. Codex and Copilot ran near-identical copies of this
+ * ordering, and the two drifting apart is a bypass that reproduces on one agent only —
+ * the same reason their command, argv and patch readers are shared rather than copied.
+ */
+export async function decideWithGuards(
+  engine: StroqEngine,
+  event: EngineEvent,
+  guards: PreGuards,
+  denials: GuardDenials,
+  render: RenderDecision,
+): Promise<HookOutput> {
+  const deny = (decision: Decision) => render(decision, [], []);
+  if (guards.unreadable)
+    return denyDirectly(event, guards.unreadable, denials.unreadableSummary, deny);
+  if (guards.patchPaths.length > MAX_PATCH_PATHS)
+    return denyDirectly(
+      event,
+      denials.tooLarge,
+      `apply_patch: ${guards.patchPaths.length} files`,
+      deny,
+    );
+  const { decision, provenance, secrets } = await decidePre(
+    engine,
+    event,
+    preInputs(event.toolInput, guards),
+  );
+  return render(decision, provenance, secrets);
+}
+
+/**
+ * The whole `post` answer: scan the result text, then say nothing unless the scan came
+ * back suspect. Shared for the same reason as `decideWithGuards`; the adapters differ
+ * only in how they read the result text and how they wrap the warning.
+ */
+export async function handlePostResult(
+  engine: StroqEngine,
+  event: EngineEvent,
+  toolResultText: string,
+  wrap: (context: string) => HookOutput,
+): Promise<HookOutput> {
+  const result = await engine.post({ ...event, toolResultText });
+  if (result.provenanceError) logError('provenance', result.provenanceError);
+  if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
+  return wrap(warningFor(result.scan, event.toolName));
 }

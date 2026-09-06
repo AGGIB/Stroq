@@ -1,12 +1,5 @@
-import {
-  warningFor,
-  type Decision,
-  type ProvenanceHit,
-  type SecretHit,
-  type StroqEngine,
-} from '@stroq/core';
+import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
 import { z } from 'zod';
-import { logError } from '../log.js';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import {
   CODEX_HIGH_IMPACT_TOOL,
@@ -21,9 +14,8 @@ import {
 import {
   MAX_PATCH_PATHS,
   asPaths,
-  decidePre,
-  denyDirectly,
-  preInputs,
+  decideWithGuards,
+  handlePostResult,
   type EngineEvent,
   type PreGuards,
 } from './pre-decision.js';
@@ -159,43 +151,25 @@ function preGuards(input: CodexHookInput, toolInput: Readonly<Record<string, unk
   const found = {
     commands: isBashTool(input.tool_name) ? commandCandidates(input.tool_input) : [],
     patchPaths: isPatchTool(input.tool_name) ? asPaths(toolInput['file_paths']) : [],
+    // Codex has no fetch tool of its own: hosted tools such as WebSearch and the
+    // web fetcher never reach hooks at all (see the README's Codex limits).
+    urls: [],
   };
   return { ...found, unreadable: unreadableInput(input, found) };
 }
 
-async function handlePre(
-  engine: StroqEngine,
-  event: EngineEvent,
-  guards: PreGuards,
-): Promise<HookOutput> {
-  const render = (decision: Decision) => renderDecision(decision, [], []);
-  if (guards.unreadable)
-    return denyDirectly(event, guards.unreadable, 'codex: unreadable tool_input', render);
-  if (guards.patchPaths.length > MAX_PATCH_PATHS)
-    return denyDirectly(
-      event,
-      CODEX_PATCH_TOO_LARGE,
-      `apply_patch: ${guards.patchPaths.length} files`,
-      render,
-    );
-  const { decision, provenance, secrets } = await decidePre(
+/** The guard ordering and the engine loop are shared with the Copilot adapter. */
+const handlePre = (engine: StroqEngine, event: EngineEvent, guards: PreGuards) =>
+  decideWithGuards(
     engine,
     event,
-    preInputs(event.toolInput, guards),
+    guards,
+    { tooLarge: CODEX_PATCH_TOO_LARGE, unreadableSummary: 'codex: unreadable tool_input' },
+    renderDecision,
   );
-  return renderDecision(decision, provenance, secrets);
-}
 
-async function handlePost(
-  engine: StroqEngine,
-  event: EngineEvent,
-  response: unknown,
-): Promise<HookOutput> {
-  const result = await engine.post({ ...event, toolResultText: streamResultText(response) });
-  if (result.provenanceError) logError('provenance', result.provenanceError);
-  if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
-  return codexContextOutput(warningFor(result.scan, event.toolName));
-}
+const handlePost = (engine: StroqEngine, event: EngineEvent, response: unknown) =>
+  handlePostResult(engine, event, streamResultText(response), codexContextOutput);
 
 /**
  * Coupling to know about: the two adapter-level denies (oversized patch, unreadable
