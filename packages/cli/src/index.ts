@@ -29,10 +29,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   switch (command) {
     case 'hook': {
       // Reading stdin happens inside the command so that a rejection there is
-      // answered by the agent's own fail-closed path, not by the exit-1 handler
-      // at the bottom of this file (which Codex and Copilot both read as a hook
-      // failure and continue past). `rest[1]` is Copilot's phase; the other
-      // agents ignore it.
+      // answered by the agent's own fail-closed path, not by the exit-1 handler at
+      // the bottom of this file: Codex reads exit 1 as a hook failure and continues
+      // past it, and Copilot denies on any non-zero exit from a `preToolUse` but
+      // prints the reason only for exit 2 (on its other events, exit 1 fails open).
+      // `rest[1]` is Copilot's phase; the other agents ignore it.
       const out = await runHookCommand(rest[0] ?? '', rest[1] ?? '');
       if (out.stdout) process.stdout.write(out.stdout);
       // Codex and Copilot read the block reason from stderr when the hook exits 2;

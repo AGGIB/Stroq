@@ -41,10 +41,13 @@ interface HookAdapter {
   /**
    * True when a stdin read that REJECTS (a closed or broken stdin, an out-of-memory
    * payload) must still be answered with this adapter's fail-closed output rather
-   * than re-thrown. Codex and Copilot both read a non-zero exit that is not 2 as a
-   * hook failure and continue past it, so for them the unhandled path is fail-open on
-   * exactly the events Stroq exists to block. Claude Code and Cursor do not, so they
-   * keep today's behaviour and `main`'s exit-1 handler.
+   * than re-thrown. Codex reads a non-zero exit that is not 2 as a hook failure and
+   * continues past it, so for Codex the unhandled path is fail-open on exactly the
+   * events Stroq exists to block. Copilot is the other way round on `preToolUse`,
+   * where ANY non-zero exit denies (`Denied by preToolUse hook (hook errored)`) and
+   * only the other events fail open — but the reason still has to reach the user, and
+   * only exit 2 surfaces stderr, so both adapters answer with their own output rather
+   * than with `main`'s exit-1 handler. Claude Code and Cursor keep today's behaviour.
    */
   readonly stdinFailClosed?: true;
 }
@@ -123,11 +126,13 @@ export async function runHook(agent: string, rawJson: string, arg = ''): Promise
 
 /**
  * The whole `stroq hook` command, stdin included. `runHook` above answers every
- * failure it can see, but the read itself can still reject — and for the agents that
- * treat an arbitrary non-zero exit as a hook failure, the unhandled path is fail-open
- * on exactly the events Stroq exists to block. Those adapters answer such a rejection
- * with their own fail-closed output (`stdinFailClosed`); the others re-throw and keep
- * today's behaviour, where `main`'s top-level handler prints the error and exits 1.
+ * failure it can see, but the read itself can still reject, and `main`'s exit-1 path
+ * is the wrong answer for two of the four agents: Codex reads an arbitrary non-zero
+ * exit as a hook failure and continues past it, so exit 1 is fail-open on exactly the
+ * events Stroq exists to block, and Copilot denies on any non-zero exit from a
+ * `preToolUse` but surfaces the reason only on exit 2. Those adapters answer such a
+ * rejection with their own fail-closed output (`stdinFailClosed`); the others
+ * re-throw and keep today's behaviour, where `main` prints the error and exits 1.
  */
 export async function runHookCommand(
   agent: string,

@@ -273,8 +273,13 @@ describe('runHook copilot routing', () => {
     const blocked = await runHook('copilot', '{"toolName":"bash"}', 'pre');
     expect(blocked.exitCode).toBe(2);
     expect(String(blocked.stderr)).toContain('fail-closed');
+    // Exit 2 is the block Copilot honours without parsing stdout, and stdout must
+    // stay empty: a half-written decision object there would be read as a payload.
+    expect(blocked.stdout).toBe('');
     // Unknown names are MCP calls, so they fail closed too.
-    expect((await runHook('copilot', '{"toolName":"add_issue_comment"}', 'pre')).exitCode).toBe(2);
+    const unknown = await runHook('copilot', '{"toolName":"add_issue_comment"}', 'pre');
+    expect(unknown.exitCode).toBe(2);
+    expect(unknown.stdout).toBe('');
     for (const toolName of ['view', 'grep', 'glob', 'web_search'])
       expect(await runHook('copilot', `{"toolName":"${toolName}"}`, 'pre'), toolName).toEqual({
         stdout: '',
