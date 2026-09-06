@@ -10,7 +10,6 @@ import {
   openclawToolInput,
   renderDecision,
 } from '../../src/adapters/openclaw.js';
-import { openclawExecCwd } from '../../src/adapters/openclaw-input.js';
 
 const call = (toolName: string, params?: unknown) => openclawToolInput({ toolName, params });
 const body = (stdout: string) => JSON.parse(stdout) as Record<string, unknown>;
@@ -109,23 +108,6 @@ describe('openclawToolInput', () => {
     expect(call('message')).toEqual({});
     expect(call('web_search', { query: 'stroq' })).toEqual({ query: 'stroq' });
     expect(call('ask_user', { question: 'ok?' })).toEqual({ question: 'ok?' });
-  });
-});
-
-describe('openclawExecCwd', () => {
-  it('reads a working directory from an exec, and from nothing else', () => {
-    expect(openclawExecCwd({ toolName: 'exec', params: { command: 'ls', cwd: '/srv/app' } })).toBe(
-      '/srv/app',
-    );
-    expect(openclawExecCwd({ toolName: 'exec', params: '{"cwd":"/srv/app"}' })).toBe('/srv/app');
-    expect(openclawExecCwd({ toolName: 'exec', params: { command: 'ls' } })).toBe('');
-    expect(openclawExecCwd({ toolName: 'exec', params: { cwd: 7 } })).toBe('');
-    expect(openclawExecCwd({ toolName: 'exec' })).toBe('');
-    // Only `exec` documents a `cwd`. Honouring one anywhere else would let a
-    // model-chosen field point the project part of the secret index at an empty
-    // directory and hide the very value the guard exists to catch.
-    for (const toolName of ['message', 'browser', 'write', 'read', 'web_fetch', 'anything'])
-      expect(openclawExecCwd({ toolName, params: { cwd: '/tmp/empty' } }), toolName).toBe('');
   });
 });
 

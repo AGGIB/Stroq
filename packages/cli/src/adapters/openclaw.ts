@@ -4,7 +4,6 @@ import { withEvidence, type HookOutput } from './claude-code.js';
 import { commandCandidates, describeToolInput, isEmptyToolInput } from './codex-input.js';
 import {
   isOpenClawHighImpact,
-  openclawExecCwd,
   openclawResultText,
   openclawToolInput,
   openclawToolKind,
@@ -286,9 +285,15 @@ export async function handleOpenClawHook(
     sessionId: input.sessionId,
     toolName: openclawToolName(input.toolName),
     toolInput,
-    // An `exec`'s own `cwd` first, then the directory the plugin resolved (its
-    // configured `workspace`, else the Gateway's), then this process's own.
-    cwd: openclawExecCwd(input) || input.cwd || process.cwd(),
+    // The trusted directory always wins: the plugin's own resolved `cwd` (its
+    // configured `workspace`, else the Gateway's) first, then this process's own.
+    // `params.cwd` is never read for this field, on any tool kind — Task 4.5 review,
+    // Critical: an `exec` whose `params.cwd` named an empty directory, while the
+    // trusted `cwd` named the real project, used to let the secret index and path
+    // classification follow the attacker-chosen directory, allowing a secret-egress
+    // command that should have been denied. Nothing strips `cwd` out of `params`
+    // itself here — see `openclawToolInput` — only this field stops trusting it.
+    cwd: input.cwd || process.cwd(),
   };
   if (phase === 'post') return handlePost(engine, event, input);
   return handlePre(engine, event, preGuards(input, toolInput));
