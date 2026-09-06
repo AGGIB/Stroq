@@ -1,4 +1,6 @@
-import type { Decision, StroqEngine } from '@stroq/core';
+import { AuditLog, type Decision, type StroqEngine } from '@stroq/core';
+import { auditFile } from '../paths.js';
+import type { HookOutput } from './claude-code.js';
 
 /** The subset of a hook event every adapter hands the engine. */
 export interface EngineEvent {
@@ -22,6 +24,18 @@ export interface PreCandidates {
   readonly commands: readonly string[];
   readonly patchPaths: readonly string[];
 }
+
+/** `PreCandidates` plus whatever made the call impossible to classify at all. */
+export interface PreGuards extends PreCandidates {
+  readonly unreadable: Decision | null;
+}
+
+/**
+ * Every string in an array-shaped value — the shape a patch's paths, and a file
+ * tool's disagreeing path fields, both arrive in under `toolInput['file_paths']`.
+ */
+export const asPaths = (value: unknown): readonly string[] =>
+  Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
 
 /**
  * One `toolInput` per thing that has to be classified on its own: every file a patch
@@ -63,4 +77,27 @@ export async function decidePre(
     if (SEVERITY[next.decision.effect] > SEVERITY[worst.decision.effect]) worst = next;
   }
   return worst;
+}
+
+/**
+ * An audited deny the engine never made: recorded here so `stroq log`/`why` still
+ * explain it. Shared by Codex and Copilot, whose own `renderDecision` differ (Codex's
+ * envelope and ask-as-deny wording vs Copilot's top-level object and real `ask`), so
+ * the caller supplies its own renderer rather than this module picking one.
+ */
+export async function denyDirectly(
+  event: EngineEvent,
+  decision: Decision,
+  summary: string,
+  render: (decision: Decision) => HookOutput,
+): Promise<HookOutput> {
+  await new AuditLog(auditFile()).append({
+    sessionId: event.sessionId,
+    phase: 'pre',
+    tool: event.toolName,
+    summary,
+    classes: [],
+    decision,
+  });
+  return render(decision);
 }

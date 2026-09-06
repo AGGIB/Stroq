@@ -39,6 +39,7 @@
 
 - **Timeouts fail open** (Copilot's contract, not Stroq's): a hook slower than `timeoutSec` is treated as allow and its late deny is discarded. Stroq's hook answers in well under a second, but under heavy parallel tool use Copilot dispatches hooks serially; keep `@stroq/cli` installed globally so no `npx` download can eat the budget.
 - **MCP server names are not visible to hooks.** An MCP tool is classified as `mcp__copilot__<tool>`; rules keyed on a server name cannot be written for Copilot, and an unlisted native tool would be treated as an MCP call (safe direction).
+- The secret egress guard scans a `web_fetch` call's `url` (and `prompt`) only; values placed in other fields such as headers are not caught — a core limitation shared with Claude Code's `WebFetch`.
 - **`ask` is a real prompt only in the interactive CLI**; the cloud coding agent turns it into a deny.
 - Hooks may not run inside some subagents (#2392) and never from plugins (#2540) — Stroq installs as a repo/user hook, not a plugin.
 - `postToolUseFailure` (a failed tool's error text) is not scanned in v1; `permissionRequest`, `modifiedArgs`, session/compaction/notification events are out of scope.

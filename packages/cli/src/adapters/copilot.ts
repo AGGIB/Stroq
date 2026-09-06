@@ -1,5 +1,4 @@
 import {
-  AuditLog,
   warningFor,
   type Decision,
   type ProvenanceHit,
@@ -8,7 +7,6 @@ import {
 } from '@stroq/core';
 import { z } from 'zod';
 import { logError } from '../log.js';
-import { auditFile } from '../paths.js';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import { commandCandidates, describeToolInput, isEmptyToolInput } from './codex-input.js';
 import {
@@ -21,10 +19,13 @@ import {
 } from './copilot-input.js';
 import {
   MAX_PATCH_PATHS,
+  asPaths,
   decidePre,
+  denyDirectly,
   preInputs,
   type EngineEvent,
   type PreCandidates,
+  type PreGuards,
 } from './pre-decision.js';
 
 export {
@@ -148,13 +149,6 @@ export const copilotUnreadableInput = (shape: string): Decision => ({
     'denied fail-closed. Report the payload shape at https://github.com/AGGIB/Stroq/issues',
 });
 
-interface PreGuards extends PreCandidates {
-  readonly unreadable: Decision | null;
-}
-
-const asPaths = (value: unknown): readonly string[] =>
-  Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : [];
-
 /**
  * A high-impact call Copilot sent arguments for, whose command, patch or path the
  * adapter could not find. Handing the engine the empty action it extracted would
@@ -187,28 +181,18 @@ function preGuards(
   toolInput: Readonly<Record<string, unknown>>,
 ): PreGuards {
   const kind = copilotToolKind(input.toolName, input.toolArgs);
+  // `file_paths` is populated by `copilotToolInput` for `patch` always and for
+  // `write`/`read` whenever a call's path fields disagreed (see `pathsOf`), so the
+  // fan-out below applies uniformly: `preInputs` judges every candidate and the
+  // worst wins, exactly how an `apply_patch`'s paths already work.
   const found: PreCandidates = {
     commands: kind === 'shell' ? commandCandidates(input.toolArgs) : [],
-    patchPaths: kind === 'patch' ? asPaths(toolInput['file_paths']) : [],
+    patchPaths:
+      kind === 'patch' || kind === 'write' || kind === 'read'
+        ? asPaths(toolInput['file_paths'])
+        : [],
   };
   return { ...found, unreadable: unreadableInput(input, kind, toolInput, found) };
-}
-
-/** An audited deny the engine never made: recorded here so `stroq log`/`why` still explain it. */
-async function denyDirectly(
-  event: EngineEvent,
-  decision: Decision,
-  summary: string,
-): Promise<HookOutput> {
-  await new AuditLog(auditFile()).append({
-    sessionId: event.sessionId,
-    phase: 'pre',
-    tool: event.toolName,
-    summary,
-    classes: [],
-    decision,
-  });
-  return renderDecision(decision, [], []);
 }
 
 async function handlePre(
@@ -216,13 +200,15 @@ async function handlePre(
   event: EngineEvent,
   guards: PreGuards,
 ): Promise<HookOutput> {
+  const render = (decision: Decision) => renderDecision(decision, [], []);
   if (guards.unreadable)
-    return denyDirectly(event, guards.unreadable, 'copilot: unreadable toolArgs');
+    return denyDirectly(event, guards.unreadable, 'copilot: unreadable toolArgs', render);
   if (guards.patchPaths.length > MAX_PATCH_PATHS)
     return denyDirectly(
       event,
       COPILOT_PATCH_TOO_LARGE,
       `apply_patch: ${guards.patchPaths.length} files`,
+      render,
     );
   const { decision, provenance, secrets } = await decidePre(
     engine,

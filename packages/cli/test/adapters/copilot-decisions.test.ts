@@ -119,6 +119,26 @@ describe('self-tamper through Copilot’s own file tools', () => {
     expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-self-tamper)');
   });
 
+  it('judges a file tool by every distinct path field, not just the first', async () => {
+    // `path` and `file_path` disagreeing must not let the protected one hide behind
+    // whichever field a first-match reader happens to check first.
+    const out = await pre({
+      toolName: 'create',
+      toolArgs: { path: 'safe.txt', file_path: join(cwd, '.github/hooks/stroq.json') },
+    });
+    expect(decisionOf(out.stdout)).toBe('deny');
+    expect(reasonOf(out.stdout)).toContain('Stroq blocked this action (deny-self-tamper)');
+  });
+
+  it('a single-key payload still produces exactly one audit entry', async () => {
+    await pre({ toolName: 'create', toolArgs: { path: 'safe.txt' } });
+    const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0);
+    expect(lines.length).toBe(1);
+  });
+
   it('denies an apply_patch that deletes the hook file alongside a real edit', async () => {
     const out = await pre({
       toolName: 'apply_patch',
