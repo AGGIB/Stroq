@@ -39,6 +39,14 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     'rm .openclaw/skills/deploy.md',
     'rm .openclaw/plugins.md',
     "sed -i 's/a/b/' .openclaw/extensions-README.md",
+    // `.windsurf` is protected only at its hooks file: rules and workflows under it
+    // are ordinary project content, and denying an edit to them would be the same
+    // false positive the bare `.claude` match once was.
+    'cat .windsurf/rules/style.md',
+    'rm .windsurf/workflows/deploy.md',
+    "sed -i 's/a/b/' .windsurf/hooks.md",
+    // The capitalised system-directory alternative must not fire on a lowercase path.
+    'rm ~/.codeium/windsurf/memories/notes.md',
   ])('does not match: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(false));
 
   it.each([
@@ -68,6 +76,14 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     // The directory still matches when something that cannot continue a filename
     // follows it, which is how `rm -rf ~/.openclaw/plugins && …` stays self-tampering.
     'rm -rf ~/.openclaw/plugins && echo done',
+    '.windsurf/hooks.json',
+    '~/.codeium/windsurf/hooks.json',
+    // The JetBrains plugin's file, which `init` does not write but a tainted agent
+    // must still not be able to edit.
+    '~/.codeium/hooks.json',
+    '/etc/windsurf/hooks.json',
+    '/Library/Application Support/Windsurf/hooks.json',
+    'rm -f .windsurf/hooks.json',
   ])('matches protected file/dir: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(true));
 });
 
@@ -88,6 +104,10 @@ describe('PROTECTED_DIRS (F5-2: bare directories, find-only usage)', () => {
   });
   it.each(['.openclaw -name', '.openclaw/', '~/.openclaw -delete'])(
     'matches a bare OpenClaw dir: %s',
+    (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
+  );
+  it.each(['.windsurf -name', '.windsurf/', '~/.codeium -delete', '.codeium/windsurf/'])(
+    'matches a bare Windsurf dir: %s',
     (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
   );
 });

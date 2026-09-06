@@ -43,9 +43,20 @@ import { commandWord } from './shell-segments.js';
  * alternatives end at `(?![\w.-])` for the same reason `.github/hooks` does, so
  * `.openclaw/plugins.md` is documentation while `rm -rf .openclaw/plugins && …`
  * is not.
+ * Windsurf is protected at its hook FILE in all five locations Cascade merges: the
+ * workspace file (`.windsurf/hooks.json`), both user files (`~/.codeium/windsurf/
+ * hooks.json` for the IDE and `~/.codeium/hooks.json` for the JetBrains plugin, which
+ * `init` does not write but a tainted agent must still not be able to edit), and the
+ * Linux and macOS system files (`/etc/windsurf/hooks.json` and `…/Application
+ * Support/Windsurf/hooks.json`). The capitalised `Windsurf` alternative is what
+ * matches the macOS system path and, being case-sensitive, matches nothing in the
+ * lowercase user paths. `.windsurf/rules/` and `.windsurf/workflows/` stay editable:
+ * the match is on `hooks.json`, not on the directory, for exactly the reason the bare
+ * `.claude` match was narrowed. The Windows system path uses backslashes and is not
+ * matched; that is a stated limit, not an oversight.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?|etc\/windsurf|Windsurf)\/hooks\.json|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -58,7 +69,7 @@ export const SELF_CONFIG_FILE =
  * substring `.claude/settings.json` anywhere in the command text.
  */
 export const PROTECTED_DIRS =
-  /\.(claude|cursor|codex|copilot|openclaw|stroq|github\/(hooks|copilot))(\/|$|\s)/;
+  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|github\/(hooks|copilot))(\/|$|\s)/;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',

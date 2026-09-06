@@ -59,6 +59,10 @@ const taint = () =>
 
 const COMMAND_SHAPES: [string, unknown][] = [
   ['{ command: string }', { command: CURL }],
+  // Windsurf's documented spelling for `pre_run_command`. The field list is shared by
+  // every agent, so reading it here is what stops one adapter from having a private
+  // copy of the command reader.
+  ['{ command_line: string }', { command_line: CURL }],
   ['{ command: argv }', { command: ['bash', '-lc', CURL] }],
   ['{ cmd: string }', { cmd: CURL }],
   ['{ cmd: argv }', { cmd: ['bash', '-lc', CURL] }],
