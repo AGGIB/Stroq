@@ -21,9 +21,16 @@ import { commandWord } from './shell-segments.js';
  * `.codex/config.toml` is listed alongside `.codex/hooks.json` because that file
  * can both define inline `[hooks]` tables and turn the whole hooks feature off,
  * so editing it disables the firewall just as surely as deleting the hook file.
+ * Copilot's hooks live in a directory rather than one file — the CLI loads every
+ * `.github/hooks/*.json` and `~/.copilot/hooks/*.json` independently — so those two
+ * are matched as directory prefixes, and `.copilot/settings.json` is listed beside
+ * them because `disableAllHooks: true` there turns the whole firewall off. The
+ * `.github` alternatives require a literal `/hooks` or `/copilot` after the
+ * directory name: `.github/workflows` is not agent security config, and
+ * `api.github.com` is not a path at all.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(\/|\b)|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(\/|\b)|settings\.json|config\.json)|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -35,7 +42,8 @@ export const SELF_CONFIG_FILE =
  * `find .claude -name 'settings.json' -delete` never has the literal
  * substring `.claude/settings.json` anywhere in the command text.
  */
-export const PROTECTED_DIRS = /\.(claude|cursor|codex|stroq)(\/|$|\s)/;
+export const PROTECTED_DIRS =
+  /\.(claude|cursor|codex|copilot|stroq|github\/(hooks|copilot))(\/|$|\s)/;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',

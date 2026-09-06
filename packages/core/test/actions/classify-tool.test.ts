@@ -122,3 +122,42 @@ describe('Codex security config is self-config', () => {
     expect(classifyTool('Write', { file_path: `${cwd}/.codex/notes.md` }, cwd).classes).toEqual([]);
   });
 });
+
+describe('Copilot security config is self-config', () => {
+  it("flags a write to Copilot's hook files and settings", () => {
+    for (const path of [
+      `${cwd}/.github/hooks/stroq.json`,
+      `${cwd}/.github/copilot/settings.json`,
+      `${cwd}/.github/copilot/settings.local.json`,
+      '/home/dev/.copilot/hooks/stroq.json',
+      '/home/dev/.copilot/settings.json',
+      '/home/dev/.copilot/config.json',
+    ])
+      expect(classifyTool('Write', { file_path: path, content: '{}' }, cwd).classes, path).toEqual([
+        'config.self',
+      ]);
+  });
+
+  it('flags a find -delete against either hooks directory', () => {
+    for (const command of [
+      "find .github/hooks -name 'stroq.json' -delete",
+      "find ~/.copilot -name 'stroq.json' -delete",
+    ])
+      expect(classifyTool('Bash', { command }, cwd).classes, command).toContain('config.self');
+  });
+
+  it('leaves the rest of .github alone', () => {
+    // The alternative is anchored on a literal `/` after `github`, so neither the
+    // workflows directory nor an api.github.com URL becomes self-tampering.
+    expect(
+      classifyTool('Write', { file_path: `${cwd}/.github/workflows/ci.yml` }, cwd).classes,
+    ).toEqual([]);
+    expect(
+      classifyTool('Bash', { command: 'curl -s https://api.github.com/repos' }, cwd).classes,
+    ).not.toContain('config.self');
+    expect(
+      classifyTool('Bash', { command: 'git clone https://raw.githubusercontent.com/a/b' }, cwd)
+        .classes,
+    ).not.toContain('config.self');
+  });
+});
