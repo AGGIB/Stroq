@@ -22,7 +22,12 @@ import {
   mergeCodexHooks,
   readCodexHooks,
 } from './codex-hooks.js';
-import { buildCopilotHooks, copilotHooksPath, installCopilotHooks } from './copilot-hooks.js';
+import {
+  buildCopilotHooks,
+  copilotHooksPath,
+  copilotReplacementNotice,
+  installCopilotHooks,
+} from './copilot-hooks.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
@@ -169,6 +174,11 @@ const COPILOT_NOTE =
 function initCopilot(scope: 'project' | 'user', command: string, dryRun: boolean): number {
   const file = copilotHooksPath(scope);
   const [pre, post] = [`${command} pre`, `${command} post`];
+  // Printed before the file (or the preview) so it is the first thing read: the
+  // overwrite is by contract, but it is never silent. Empty for the common cases —
+  // a fresh install and an idempotent re-run.
+  const notice = copilotReplacementNotice(file, dryRun);
+  if (notice) process.stdout.write(notice);
   if (dryRun) {
     process.stdout.write(`${JSON.stringify(buildCopilotHooks(pre, post), null, 2)}\n`);
     return 0;

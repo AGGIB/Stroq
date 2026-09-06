@@ -1,11 +1,7 @@
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import {
-  HOOK_TIMEOUT_SECONDS,
-  isPlainObject,
-  readJsonObject,
-  writeJsonObject,
-} from './config-file.js';
+import { isPlainObject, readJsonObject, writeJsonObject } from './config-file.js';
 
 /**
  * Copilot loads EVERY `*.json` in its hooks directory independently, so Stroq owns
@@ -18,17 +14,23 @@ import {
 /** The two events Stroq installs on. Copilot spells its events camelCase. */
 export const COPILOT_HOOK_EVENTS = ['preToolUse', 'postToolUse'] as const;
 
+/**
+ * Seconds, and deliberately NOT the `HOOK_TIMEOUT_SECONDS` the other three agents
+ * get. On Copilot a hook that runs past its timeout is treated as an ALLOW and its
+ * late deny is discarded (github/copilot-cli#2893), and hooks are dispatched
+ * serially, so a shorter budget is strictly less safe here — it only makes the one
+ * failure mode Stroq cannot answer from inside the hook more likely. 30 is Copilot's
+ * own default; Stroq answers in well under a second either way, so the extra budget
+ * costs nothing and buys the margin a cold Node start needs.
+ */
+export const COPILOT_HOOK_TIMEOUT_SECONDS = 30;
+
 export interface CopilotHookEntry {
   readonly type: 'command';
   readonly bash: string;
   /** Written for Windows, untested there; Copilot picks the one for the host shell. */
   readonly powershell: string;
-  /**
-   * Seconds. Copilot's default is 30, and a hook that runs past its timeout is
-   * treated as an ALLOW whose late deny is discarded (github/copilot-cli#2893), so a
-   * shorter budget does not make Stroq safer — it is kept at the 15 s the other three
-   * agents get purely so one number describes every install.
-   */
+  /** Seconds; `COPILOT_HOOK_TIMEOUT_SECONDS`, which is not the other agents' value. */
   readonly timeoutSec: number;
   readonly comment: string;
 }
@@ -53,7 +55,7 @@ const entry = (command: string): CopilotHookEntry => ({
   bash: command,
   // `&` is PowerShell's call operator: without it a quoted path is echoed, not run.
   powershell: `& ${command}`,
-  timeoutSec: HOOK_TIMEOUT_SECONDS,
+  timeoutSec: COPILOT_HOOK_TIMEOUT_SECONDS,
   comment: 'Stroq',
 });
 
@@ -122,6 +124,28 @@ export function copilotHooksPath(
 
 export const readCopilotHooks = (file: string): CopilotHooksJson =>
   readJsonObject<CopilotHooksJson>(file);
+
+/**
+ * The one line `init` prints when it is about to overwrite a `stroq.json` that Stroq
+ * did not write. The overwrite itself stays unconditional — the NAME is Stroq's by
+ * contract, and a user's own hooks belong in a sibling file, which is the whole
+ * reason there is nothing to merge — but replacing a file whose contents nobody
+ * recognises should never be silent. Empty for a file that is absent or is already a
+ * Stroq install (the idempotent re-run, which is the common case). A file that
+ * cannot be parsed counts as foreign: it is being replaced either way, and throwing
+ * here would take down an install that is about to fix exactly that.
+ */
+export function copilotReplacementNotice(file: string, dryRun = false): string {
+  if (!existsSync(file)) return '';
+  let existing: unknown = null;
+  try {
+    existing = readCopilotHooks(file);
+  } catch {
+    // unparseable — foreign by the only definition that matters here
+  }
+  if (isStroqCopilotHooks(existing)) return '';
+  return `${dryRun ? 'would replace' : 'replacing'} ${file}, which Stroq did not write\n`;
+}
 
 export function installCopilotHooks(
   file: string,

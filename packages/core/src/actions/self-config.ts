@@ -28,9 +28,15 @@ import { commandWord } from './shell-segments.js';
  * `.github` alternatives require a literal `/hooks` or `/copilot` after the
  * directory name: `.github/workflows` is not agent security config, and
  * `api.github.com` is not a path at all.
+ *
+ * The two `hooks` directory alternatives end at `(?![\w.-])` rather than at `\b`,
+ * so they match the directory (`.github/hooks`, `.github/hooks/stroq.json`,
+ * `rm -rf .github/hooks && …`) but never a FILE whose name merely starts with it:
+ * `.github/hooks.md` and `.github/hooks-README.md` are documentation, and denying
+ * an edit to them is a false positive of the same kind the bare `.claude` match was.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(\/|\b)|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(\/|\b)|settings\.json|config\.json)|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
