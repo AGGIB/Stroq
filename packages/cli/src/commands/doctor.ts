@@ -7,7 +7,11 @@ import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-ho
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
-import { isStroqOpenClawPlugin, openclawPluginDir } from './openclaw-plugin.js';
+import {
+  OPENCLAW_PLUGIN_MANIFEST,
+  isStroqOpenClawPlugin,
+  openclawPluginDir,
+} from './openclaw-plugin.js';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -74,15 +78,18 @@ function checkCopilotHooks(file: string): {
  * `stroq doctor` spawn another program, and the reminder that the Gateway still has
  * to enable the plugin belongs in `init`'s note, not in a check that must be fast,
  * offline and safe to run anywhere.
+ *
+ * `file` names the manifest, not the entry: `isStroqOpenClawPlugin` treats the
+ * manifest as the decisive check (an entry with no manifest, or one belonging to
+ * someone else, is "not installed" either way), so a half-install — the exact case
+ * this line exists to catch — is one where `index.js` is NOT what is actually
+ * missing or wrong, and naming it would point a "missing" line at the wrong file.
+ * No `try/catch` here: neither `openclawPluginDir` nor `isStroqOpenClawPlugin` throws.
  */
 function openclawScopes(): ScopeStatus[] {
   const dir = openclawPluginDir();
-  const file = join(dir, 'index.js');
-  try {
-    return [{ scope: 'user', file, installed: isStroqOpenClawPlugin(dir), error: null }];
-  } catch (err) {
-    return [{ scope: 'user', file, installed: false, error: (err as Error).message }];
-  }
+  const file = join(dir, OPENCLAW_PLUGIN_MANIFEST);
+  return [{ scope: 'user', file, installed: isStroqOpenClawPlugin(dir), error: null }];
 }
 
 interface ScopeStatus {

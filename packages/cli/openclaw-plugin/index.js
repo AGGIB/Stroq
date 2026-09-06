@@ -1,17 +1,13 @@
 // Stroq plugin for OpenClaw: turns `before_tool_call` / `after_tool_call` into
-// `stroq hook openclaw pre|post` child-process calls. Fail-closed by construction:
-// a missing binary, a spawn error, a non-zero exit, a timeout, an aborted run,
-// stdout that is not JSON, or a decision this file does not know all block the call.
-import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+// `stroq hook openclaw pre|post` child-process calls (spawning is in run-stroq.js).
+// Fail-closed by construction: a missing binary, a spawn error, a non-zero exit, a
+// timeout, an aborted run, stdout that is not JSON, or a decision this file does not
+// know all block the call.
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { clip, runStroq, text } from './run-stroq.js';
 
 const DESCRIPTION =
   'Local action firewall for OpenClaw: scans what the agent reads, taints the session, blocks or asks before dangerous tool calls.';
-const HERE = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_ASK_TIMEOUT_MS = 120000;
 const MAX_TITLE = 80;
 const MAX_DESCRIPTION = 512;
@@ -31,9 +27,6 @@ function resolveDefinePluginEntry() {
   return null;
 }
 
-const text = (value) => (typeof value === 'string' && value !== '' ? value : '');
-const clip = (value, max) => (value.length <= max ? value : `${value.slice(0, max - 3)}...`);
-
 /** Logging never decides anything: an absent logger is skipped and a throwing one is swallowed. */
 function logAt(api, level, message) {
   const fn = api && api.logger && api.logger[level];
@@ -43,77 +36,13 @@ function logAt(api, level, message) {
 }
 
 /**
- * argv of the Stroq CLI: this plugin's config, then STROQ_BIN, then the `stroq.json`
- * `stroq init --agent openclaw` wrote beside this file, then `stroq` on PATH.
- * `stroqBin`/`STROQ_BIN` are word-split, so either may also name a full command
- * (e.g. "node /opt/stroq/dist/index.js") rather than only a bare path.
+ * Both phases' payload. `cwd` is always the plugin's OWN directory — `config.workspace`,
+ * else `process.cwd()` — and never a tool call's `params.cwd`: honouring a
+ * model-supplied `cwd` here would let any tool point the project directory (and so
+ * the secret index) at an empty one and walk straight past a secret-egress guard.
+ * `exec` loses nothing: `params` is still forwarded whole, and the CLI adapter reads
+ * `params.cwd` for the shell's own directory directly (`openclawExecCwd`).
  */
-function stroqArgv(config) {
-  const configured = text(config.stroqBin) || text(process.env.STROQ_BIN);
-  if (configured) return configured.split(' ').filter((word) => word !== '');
-  const file = join(HERE, 'stroq.json');
-  try {
-    const argv = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).command : null;
-    if (Array.isArray(argv) && argv.length > 0 && argv.every((a) => typeof a === 'string'))
-      return argv;
-  } catch {
-    // unreadable or not JSON: fall through to PATH
-  }
-  return ['stroq'];
-}
-
-/** The child's answer: a reply object, or the reason it is not one. */
-function replyOf(code, stdout, stderr) {
-  if (code !== 0)
-    return { error: `exit ${code}: ${clip(stderr.trim() || 'no reason given', 300)}` };
-  try {
-    const reply = JSON.parse(stdout);
-    if (reply && typeof reply === 'object') return { reply };
-  } catch {
-    // not an answer at all
-  }
-  return { error: `unreadable answer: ${clip(stdout.trim(), 200)}` };
-}
-
-/** Runs one phase and resolves to `{ reply }` or `{ error }`. Never rejects. */
-function runStroq(config, phase, payload, abortSignal) {
-  return new Promise((resolve) => {
-    let argv;
-    let stdin;
-    try {
-      argv = stroqArgv(config);
-      stdin = JSON.stringify(payload);
-    } catch (err) {
-      resolve({ error: `cannot build the hook call: ${String(err)}` });
-      return;
-    }
-    const [bin, ...rest] = argv;
-    const child = spawn(bin, [...rest, 'hook', 'openclaw', phase], { signal: abortSignal });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    const ms = Number(config.timeoutMs) > 0 ? Number(config.timeoutMs) : DEFAULT_TIMEOUT_MS;
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish({ error: `no answer in ${ms} ms` });
-    }, ms);
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => (stdout += chunk));
-    child.stderr.on('data', (chunk) => (stderr += String(chunk)));
-    child.stdin.on('error', () => {});
-    child.on('error', (err) => finish({ error: `cannot run ${bin}: ${err.message}` }));
-    child.on('close', (code) => finish(replyOf(code, stdout, stderr)));
-    child.stdin.end(stdin);
-  });
-}
-
-/** Both phases' payload; only `exec` declares its own directory, so the rest fall back. */
 function payloadFor(phase, event, ctx, config) {
   const params = event.params && typeof event.params === 'object' ? event.params : {};
   const c = ctx || {};
@@ -126,7 +55,7 @@ function payloadFor(phase, event, ctx, config) {
     requester: c.requester,
     toolName: text(event.toolName),
     params,
-    cwd: text(params.cwd) || text(config.workspace) || process.cwd(),
+    cwd: text(config.workspace) || process.cwd(),
   };
   if (phase === 'pre') return base;
   return { ...base, result: event.result, error: event.error, durationMs: event.durationMs };
@@ -150,9 +79,13 @@ function approval(api, event, reply, config) {
 
 export function register(api) {
   const config = (api && api.pluginConfig) || {};
+  // `detail` is clipped the same way a child's own stderr already is: an internal
+  // `String(err)` can be arbitrarily long (a huge stack, a strange error's toString),
+  // and this line is a block reason shown to a user, not a log sink.
   const block = (event, detail) => {
-    logAt(api, 'warn', `stroq: ${text(event && event.toolName) || 'tool'}: ${detail}`);
-    return { block: true, blockReason: `Stroq internal error (fail-closed): ${detail}` };
+    const clipped = clip(String(detail), 300);
+    logAt(api, 'warn', `stroq: ${text(event && event.toolName) || 'tool'}: ${clipped}`);
+    return { block: true, blockReason: `Stroq internal error (fail-closed): ${clipped}` };
   };
   // Priority 100 so Stroq answers before ordinary hooks, and no matcher: every tool
   // goes through Stroq, and one it does not care about answers allow in ~100 ms.
@@ -180,11 +113,13 @@ export function register(api) {
     { priority: 100 },
   );
   // Observe-only, and it must never throw: the tool has already run, the return value
-  // is ignored, and the taint the scan sets is enforced on the NEXT call.
+  // is ignored, and the taint the scan sets is enforced on the NEXT call. The abort
+  // signal is deliberately NOT forwarded here: the tool's result already happened by
+  // the time this fires, so a cancelled run must still be scanned and tainted.
   api.on('after_tool_call', async (event, ctx) => {
     try {
       const payload = payloadFor('post', event, ctx, config);
-      const outcome = await runStroq(config, 'post', payload, ctx?.abortSignal);
+      const outcome = await runStroq(config, 'post', payload);
       if (outcome.error) logAt(api, 'debug', `stroq: post scan failed: ${outcome.error}`);
       else if (text(outcome.reply.warning)) logAt(api, 'warn', `stroq: ${outcome.reply.warning}`);
     } catch (err) {

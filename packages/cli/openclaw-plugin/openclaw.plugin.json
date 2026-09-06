@@ -21,7 +21,7 @@
     },
     "workspace": {
       "label": "Project directory",
-      "help": "Used for the secret index and path classification when a tool call carries no cwd."
+      "help": "Used for the secret index and path classification. A tool call's own cwd is never used for this — see the plugin README."
     }
   }
 }
