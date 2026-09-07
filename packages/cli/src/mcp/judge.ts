@@ -17,6 +17,12 @@ import {
   type PendingRequest,
   type ScannedMethod,
 } from './framing.js';
+import { MCP_MAX_RESULT_CHARS, mcpResultText, resultTextFor } from './mcp-result-text.js';
+
+// Re-exported unchanged: callers (Task 4's `proxy.ts`) import these from `judge.js`
+// as part of this module's own surface. The implementation lives in
+// `mcp-result-text.ts` only to keep both files under the repo's line cap.
+export { MCP_MAX_RESULT_CHARS, mcpResultText, resultTextFor };
 
 /**
  * Everything the MCP proxy asks the engine, and every shape it writes back. The
@@ -53,12 +59,19 @@ export const mcpMethodToolName = (server: string, method: ScannedMethod): string
  * The arguments as they are, never reduced: the secret-egress guard scans
  * `JSON.stringify(toolInput)`, so a field dropped here is a value that can never be
  * caught leaving through this call. A modern retry's `inputResponses` ride along
- * under their own key so the retry is judged on what it actually carries.
+ * under their own key so the retry is judged on what it actually carries — but a
+ * hostile server can declare a tool parameter literally named `inputResponses` and
+ * tell the model to put a credential there, so the top-level field is never allowed
+ * to overwrite one the arguments already carried: when the key collides, the retry's
+ * value is kept under the next free `inputResponses_…` key instead, so both are seen.
  */
 export function mcpCallInput(params: Record<string, unknown>): Record<string, unknown> {
   const record = toolInputRecord(params['arguments']);
   const responses = params['inputResponses'];
-  return responses === undefined ? record : { ...record, inputResponses: responses };
+  if (responses === undefined) return record;
+  let key = 'inputResponses';
+  while (Object.hasOwn(record, key)) key += '_';
+  return { ...record, [key]: responses };
 }
 
 /**
@@ -217,7 +230,11 @@ export const batchHasToolCall = (items: readonly unknown[]): boolean =>
  * One reply per addressable request in the batch, in the order the batch listed them:
  * an `isError` result for each `tools/call`, a `-32600` for every other request, and
  * nothing at all for a notification, as JSON-RPC requires. The caller writes the
- * array as one line and forwards none of the batch.
+ * array as one line and forwards none of the batch. Every `tools/call` is audited
+ * through `denyDirectly` even when it has no id to answer: it is unanswerable, but
+ * its presence is still why the whole batch was refused, and `stroq log` should be
+ * able to explain that for every tools/call the batch carried, not just the ones a
+ * reply could be sent for.
  */
 export async function refuseBatch(
   ctx: McpContext,
@@ -227,8 +244,9 @@ export async function refuseBatch(
   for (const item of items) {
     if (!isRecord(item) || typeof item['method'] !== 'string') continue;
     const id = asJsonRpcId(item['id']);
-    if (id === null) continue;
     if (item['method'] !== 'tools/call') {
+      // A notification never reached the engine, so there is nothing to audit either.
+      if (id === null) continue;
       replies.push({
         jsonrpc: jsonrpcOf(item),
         id,
@@ -238,130 +256,26 @@ export async function refuseBatch(
     }
     const params = paramsOf(item);
     const name = typeof params['name'] === 'string' ? params['name'] : '';
-    replies.push(
-      await auditedDeny(
-        ctx,
-        mcpToolName(ctx.server, name),
-        mcpCallInput(params),
-        MCP_BATCH_REFUSED,
-        'mcp proxy: tools/call inside a JSON-RPC batch',
-        item,
-        id,
-      ),
-    );
+    const toolName = mcpToolName(ctx.server, name);
+    const toolInput = mcpCallInput(params);
+    const summary = 'mcp proxy: tools/call inside a JSON-RPC batch';
+    if (id === null) {
+      const event: EngineEvent = { sessionId: ctx.sessionId, toolName, toolInput, cwd: ctx.cwd };
+      await denyDirectly(event, MCP_BATCH_REFUSED, summary, () => ({ stdout: '', exitCode: 0 }));
+      continue;
+    }
+    replies.push(await auditedDeny(ctx, toolName, toolInput, MCP_BATCH_REFUSED, summary, item, id));
   }
   return replies;
 }
 
-/** The same bound `toolResultToText` clips a tool result to in the Claude Code adapter. */
-export const MCP_MAX_RESULT_CHARS = 200_000;
-
-const clip = (text: string): string => text.slice(0, MCP_MAX_RESULT_CHARS);
-
-const stringAt = (record: Record<string, unknown>, key: string): string => {
-  const value = record[key];
-  return typeof value === 'string' ? value : '';
-};
-
-const asJson = (value: unknown): string => JSON.stringify(value) ?? '';
-
-/**
- * Every string in one content item the model would read. A text item gives its text;
- * a `resource_link` gives its `uri`, `name` and `description`; an embedded `resource`
- * gives its own `text`, or its `uri` when the body is a blob. `image` and `audio`
- * items carry base64 `data` and a mime type and contribute nothing — there is no
- * instruction text in a JPEG's bytes, and scanning megabytes of base64 on every call
- * is the kind of cost that gets a proxy uninstalled.
- */
-function contentItemText(item: unknown): string {
-  if (!isRecord(item)) return '';
-  const direct = stringAt(item, 'text');
-  if (direct !== '') return direct;
-  const parts = [stringAt(item, 'uri'), stringAt(item, 'name'), stringAt(item, 'description')];
-  const resource = item['resource'];
-  if (isRecord(resource)) {
-    const body = stringAt(resource, 'text');
-    parts.push(body !== '' ? body : stringAt(resource, 'uri'));
-  }
-  return parts.filter((part) => part !== '').join(' ');
-}
-
-/** One item or an array of them, joined a line each. */
-const itemsText = (value: unknown): string =>
-  Array.isArray(value)
-    ? value
-        .map(contentItemText)
-        .filter((text) => text !== '')
-        .join('\n')
-    : contentItemText(value);
-
-const joined = (parts: readonly string[]): string =>
-  clip(parts.filter((part) => part !== '').join('\n'));
-
-/**
- * A `tools/call` result: every content item, `structuredContent` as JSON, and an
- * `input_required` reply's `inputRequests` — the modern shape by which a server asks
- * the model for more input, which is exactly where an injection would sit. `isError`
- * results are scanned too: a poisoned error text is still content the model reads.
- */
-export function mcpResultText(result: unknown): string {
-  if (!isRecord(result)) return '';
-  const structured = result['structuredContent'];
-  const inputRequests = result['inputRequests'];
-  return joined([
-    itemsText(result['content']),
-    structured === undefined ? '' : asJson(structured),
-    inputRequests === undefined ? '' : asJson(inputRequests),
-  ]);
-}
-
-/** A `tools/list` result: the name, title, description and annotations of every tool. */
-function toolsListText(result: unknown): string {
-  if (!isRecord(result) || !Array.isArray(result['tools'])) return '';
-  return joined(
-    result['tools'].map((tool) => {
-      if (!isRecord(tool)) return '';
-      const annotations = tool['annotations'];
-      return [
-        stringAt(tool, 'name'),
-        stringAt(tool, 'title'),
-        stringAt(tool, 'description'),
-        annotations === undefined ? '' : asJson(annotations),
-      ]
-        .filter((part) => part !== '')
-        .join(' ');
-    }),
-  );
-}
-
-/** A `resources/read` result: the text of every entry it returned. */
-function resourcesReadText(result: unknown): string {
-  if (!isRecord(result)) return '';
-  return joined([itemsText(result['contents'])]);
-}
-
-/** A `prompts/get` result: its description and the text of every message. */
-function promptsGetText(result: unknown): string {
-  if (!isRecord(result)) return '';
-  const messages = Array.isArray(result['messages']) ? result['messages'] : [];
-  return joined([
-    stringAt(result, 'description'),
-    ...messages.map((message) => (isRecord(message) ? itemsText(message['content']) : '')),
-  ]);
-}
-
-export function resultTextFor(method: ScannedMethod, result: unknown): string {
-  if (method === 'tools/list') return toolsListText(result);
-  if (method === 'resources/read') return resourcesReadText(result);
-  if (method === 'prompts/get') return promptsGetText(result);
-  return mcpResultText(result);
-}
-
 /**
  * The shared `post` path: scan the result, record provenance, taint the session. The
- * `toolInput` is `{}` on purpose — the arguments were judged and audited on the way
- * in, and repeating them here would put a secret-shaped argument in a second audit
- * line. Returns the warning text when the scan came back suspect, else null.
+ * `toolInput` carries only the method, never the arguments: the arguments were judged
+ * and audited on the way in, and repeating them here would put a secret-shaped
+ * argument in a second audit line. The method still rides along so the post audit
+ * line's summary reads e.g. `{"method":"tools/list"}` rather than the unreadable
+ * `{}`. Returns the warning text when the scan came back suspect, else null.
  */
 export async function scanMcpResult(
   ctx: McpContext,
@@ -371,7 +285,7 @@ export async function scanMcpResult(
   const event: EngineEvent = {
     sessionId: ctx.sessionId,
     toolName: pending.toolName,
-    toolInput: {},
+    toolInput: { method: pending.method },
     cwd: ctx.cwd,
   };
   const outcome = await scanPostResult(ctx.engine, event, resultTextFor(pending.method, result));
@@ -383,11 +297,14 @@ export async function scanMcpResult(
  * own `content`. Nothing else is altered — `structuredContent`, `isError`,
  * `resultType` and every other key are carried through by the spread — and the
  * warning already opens with the warning sign, because core's `warningFor` writes it.
+ * A non-array `content` (a malformed or legacy result) is not noise to discard: it is
+ * kept as the first item, so the warning is appended rather than replacing data.
  */
 export function withWarningBlock(
   result: Record<string, unknown>,
   warning: string,
 ): Record<string, unknown> {
-  const content = Array.isArray(result['content']) ? result['content'] : [];
+  const existing = result['content'];
+  const content = Array.isArray(existing) ? existing : existing === undefined ? [] : [existing];
   return { ...result, content: [...content, { type: 'text', text: warning }] };
 }
