@@ -81,6 +81,16 @@ function handle(line) {
     process.stdout.write(`${GET_TIME_LINE.replace('ID', JSON.stringify(id))}\n`);
     return;
   }
+  if (name === 'huge') {
+    // For the oversize-line test: one line whose `text` field alone is
+    // `arguments.chars` characters (default 10 MiB), well past MAX_LINE_CHARS (8
+    // MiB), so the proxy must stream it through as a run of segments rather than
+    // buffering and parsing it whole.
+    const args = params && typeof params === 'object' ? (params.arguments ?? {}) : {};
+    const chars = typeof args.chars === 'number' ? args.chars : 10 * 1024 * 1024;
+    callResult(id, 'x'.repeat(chars));
+    return;
+  }
   send({ jsonrpc: '2.0', id, error: { code: -32602, message: `no such tool: ${String(name)}` } });
 }
 
