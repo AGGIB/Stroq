@@ -397,7 +397,7 @@ For clients with no hook API at all — Claude Desktop above all — Stroq goes 
 The server's own stderr is inherited and never touched, so its logging reaches the client exactly as before. `--server` is the config key `init` wrapped, so a policy rule keyed on an MCP _server_ works here — the name is never read from the wire, where a hostile server could forge it. All the proxies of one client share one Stroq session, so a poisoned result from server A taints the calls that go to server B.
 
 ```text
-Stroq blocked this action (deny-secret-egress): Arguments contain the value of a known secret; outbound use is blocked Evidence: DEMO_API_KEY from .env
+Stroq blocked this action (deny-secret-egress): Arguments contain the value of a known secret; outbound use is blocked Evidence: the arguments contain the value of DEMO_API_KEY from /Users/me/project/.env.
 ```
 
 `claude_desktop_config.json` and `mcp_config.json` join `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, `.github/hooks/` and the Windsurf hook files as `config.self` paths for **every** adapter: unwrapping the proxy out of a user-level client config switches Stroq off just as surely as deleting a hook file.
