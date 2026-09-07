@@ -3933,3 +3933,5 @@ git commit -F "$msg"
 ## Post-review amendments
 
 Leave this section empty until the branch has been reviewed. When the code departs from the task text above — as it did for the Copilot, OpenClaw and Windsurf adapters — record each departure here in one bullet, and treat the code and the spec as authoritative where they differ from the tasks. Anyone executing a task out of order reads the tasks; anyone auditing the branch reads this.
+
+- Task 2 (review): the line splitter accumulates chunks in an array and streams oversize lines as segments — the brief's string-concat splitter was quadratic and unbounded. Segmenting is opt-in via `createLineSplitter({ streamOversize: true })` (default `false`): the server-side splitter (Task 4) requests it to bound memory near `MAX_LINE_CHARS`, while the client-side splitter keeps the default and always buffers a line whole, because a client line is always parsed and judged in full regardless of size.
