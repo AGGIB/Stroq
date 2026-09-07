@@ -14,6 +14,8 @@ import {
   openclawPluginDir,
 } from '../../src/commands/openclaw-plugin.js';
 import { secretsFile } from '../../src/paths.js';
+import { mcpConfigPath, wrapMcpConfig } from '../../src/commands/mcp-config.js';
+import { writeJsonObject } from '../../src/commands/config-file.js';
 
 let cwd: string;
 beforeEach(() => {
@@ -155,7 +157,7 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('reports six agents and fails all six lines when none is installed', async () => {
+  it('reports six agents plus the MCP proxy and fails every line when none is installed', async () => {
     const report = await doctorReport(cwd);
     expect(report.checks.map((c) => c.name)).toEqual([
       'node',
@@ -167,6 +169,7 @@ describe('doctorReport codex hooks', () => {
       'copilot hooks',
       'openclaw plugin',
       'windsurf hooks',
+      'mcp proxy',
       'home',
       'secrets',
     ]);
@@ -452,5 +455,55 @@ describe('doctorReport windsurf hooks', () => {
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(
       false,
     );
+  });
+});
+
+describe('doctorReport mcp proxy', () => {
+  const wrapOpts = {
+    node: '/usr/bin/node',
+    entryArgv: ['/x/dist/index.js'],
+    client: 'claude-code',
+    cwd: '/w',
+  };
+
+  it('says nothing is installed when no known client config exists', async () => {
+    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('no MCP client config found');
+  });
+
+  it('counts the wrapped stdio servers of every config that exists', async () => {
+    const file = mcpConfigPath('claude-code', 'project', cwd);
+    const wrapped = wrapMcpConfig(
+      {
+        mcpServers: {
+          a: { command: 'x' },
+          b: { command: 'y' },
+          remote: { url: 'https://mcp.example/sse' },
+        },
+      },
+      wrapOpts,
+    );
+    writeJsonObject(file, wrapped.config);
+    const report = await doctorReport(cwd);
+    const check = report.checks.find((c) => c.name === 'mcp proxy');
+    expect(check?.ok).toBe(true);
+    // HTTP entries are not counted: there is no subprocess to wrap.
+    expect(check?.detail).toContain('claude-code: wrapped 2/2 stdio servers');
+    expect(check?.detail).toContain(file);
+    // A proxy install alone carries every other line, exactly as an agent does.
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+  });
+
+  it('reports an unwrapped config as not installed and a broken one as an error', async () => {
+    const file = mcpConfigPath('claude-code', 'project', cwd);
+    writeJsonObject(file, { mcpServers: { a: { command: 'x' } } });
+    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy')?.detail).toContain(
+      'wrapped 0/1 stdio servers',
+    );
+    writeFileSync(file, '{ not json');
+    const broken = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    expect(broken?.ok).toBe(false);
+    expect(broken?.detail).toMatch(/cannot parse/);
   });
 });
