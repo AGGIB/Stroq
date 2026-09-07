@@ -20,7 +20,7 @@ Scans what the agent reads. Taints the session. Blocks the dangerous follow-up �
 npx @stroq/cli init
 ```
 
-Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin)
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy)
 
 **Website:** [stroq.vercel.app](https://stroq.vercel.app)
 
@@ -126,6 +126,7 @@ npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
 npx @stroq/cli init --agent copilot  # Copilot CLI: writes .github/hooks/stroq.json
 npx @stroq/cli init --agent openclaw # OpenClaw: installs a plugin into ~/.stroq/openclaw-plugin
 npx @stroq/cli init --agent windsurf # Windsurf: merges into .windsurf/hooks.json
+npx @stroq/cli init --agent mcp --client claude-desktop   # any MCP client: wraps its stdio servers in a proxy
 npx @stroq/cli doctor                # check the installation
 ```
 
@@ -361,6 +362,62 @@ Stroq blocked this action (deny-self-tamper): Modifying agent security configura
 
 Run the Windsurf demo yourself: `pnpm install && pnpm build && ./examples/demo/run-windsurf-demo.sh`.
 
+### MCP proxy (any MCP client)
+
+```bash
+npx @stroq/cli init --agent mcp --client claude-desktop  # or windsurf, cursor, claude-code
+npx @stroq/cli init --agent mcp --config ~/path/to/mcp.json   # any file with an "mcpServers" object
+```
+
+For clients with no hook API at all — Claude Desktop above all — Stroq goes in front of the MCP server itself. `init` rewrites each stdio entry of the client's config so it launches `stroq mcp -- <the original command>`; the proxy then sits on the two pipes, judging every `tools/call` on its way to the server and scanning every result on its way back. **Restart the client afterwards**: it launches its servers once, when it starts.
+
+```jsonc
+// before
+"github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+// after
+"github": {
+  "command": "/usr/local/bin/node",
+  "args": ["/usr/local/lib/node_modules/@stroq/cli/dist/index.js", "mcp",
+           "--server", "github", "--client", "claude-desktop", "--cwd", "/Users/me/project",
+           "--", "npx", "-y", "@modelcontextprotocol/server-github"]
+}
+```
+
+`--user` picks Cursor's `~/.cursor/mcp.json` over the project file, `--dry-run` prints the rewritten config to stdout (with the per-entry outcome lines on stderr, so `--dry-run | jq` still sees only JSON) and writes nothing, and `--unwrap` puts every entry back the way it was. Re-running `init` replaces Stroq's own wrapper rather than nesting a second one — recognised by a Stroq-shaped entry path immediately followed by `mcp --server <name> --client <client>` — which is how an upgrade updates the recorded entry path; `stroq doctor` then shows an `mcp proxy` line counting the wrapped stdio servers of every client config it finds, and names any wrapper whose recorded entry path no longer exists as stale (an upgrade or uninstall that moved or removed it without `init` being re-run) rather than counting it as protected — re-running `stroq init --agent mcp` replaces it. A config whose `mcpServers` is present but not an object (a hand-edited array, say) is refused — `cannot rewrite <file>: mcpServers is not an object`, exit 1 — rather than guessed at.
+
+| Message                                    | What Stroq does                                                                                                       | Can it stop the action?                                                                     |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `tools/call` request                       | Classifies it as `mcp__<server>__<tool>` and applies your policy to the whole argument object, secret egress included | Yes — the call is never forwarded and the client gets a tool result with `isError: true`    |
+| `tools/call` result                        | Scans every text, structured and embedded-resource field, taints the session, records provenance                      | No — but a suspect result is forwarded with one extra text block carrying the warning       |
+| `tools/list` result                        | Scans every tool's name, title, description, annotations and input schema; taints the session                         | No — the listing is forwarded unchanged, and the next action is where the taint is enforced |
+| `resources/read`, `prompts/get` results    | Scans the contents and the messages, taints the session                                                               | No — same as `tools/list`                                                                   |
+| a JSON-RPC batch containing a `tools/call` | Refuses it whole, one `isError` per call and `-32600` for the rest                                                    | Yes — nothing in the batch is forwarded                                                     |
+| everything else                            | Nothing                                                                                                               | Forwarded byte for byte, key order and whitespace included                                  |
+
+The server's own stderr is inherited and never touched, so its logging reaches the client exactly as before. `--server` is the config key `init` wrapped, so a policy rule keyed on an MCP _server_ works here — the name is never read from the wire, where a hostile server could forge it. All the proxies of one client share one Stroq session, so a poisoned result from server A taints the calls that go to server B.
+
+```text
+Stroq blocked this action (deny-secret-egress): Arguments contain the value of a known secret; outbound use is blocked Evidence: DEMO_API_KEY from .env
+```
+
+`claude_desktop_config.json` and `mcp_config.json` join `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, `.github/hooks/` and the Windsurf hook files as `config.self` paths for **every** adapter: unwrapping the proxy out of a user-level client config switches Stroq off just as surely as deleting a hook file.
+
+**Limits.**
+
+- **No `ask`.** An MCP proxy has no channel to a human, so a policy `ask` is rendered as a blocked tool result naming the rule (`Stroq would ask before this action (<rule>): … An MCP proxy cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.`). The audit keeps the real `ask`.
+- **stdio servers only.** Entries with `url` or `serverUrl` are HTTP servers with no subprocess to wrap: `init` skips them, lists them as skipped, and they are not protected. VS Code's `.vscode/mcp.json` (key `servers`) and Codex's `config.toml` use other shapes and are not rewritten in v1.
+- **The warning block modifies the tool result** the model sees on a suspect scan: one extra `{ "type": "text" }` item appended to `content`. `structuredContent`, `isError` and every other field are untouched. Clients that validate `content` strictly still accept an extra text item.
+- **Results delivered outside the `tools/call` response are not scanned**: the tasks extension (`tasks/get`), resource subscriptions, and sampling or elicitation payloads inside legacy server-initiated requests.
+- **The project directory is the one `init` ran in.** Claude Desktop launches its servers from `/`, so the directory is recorded in the wrapper as `--cwd` and nothing on the wire can change it. A user-level config wrapped from another directory indexes that directory's `.env`, plus the home credential files as always. Re-run `init` from the project you want indexed.
+- **Batches containing a `tools/call` are refused** rather than judged call by call. Batching was removed from the MCP protocol in 2025-06-18, so no current client sends one.
+- **Session taint is per client, not per conversation.** Claude Desktop has no conversation id on the wire, so a taint set in one chat persists into the next until the session expires. `stroq untaint --session mcp:claude-desktop` clears it.
+- **`.mcp.json` and `.cursor/mcp.json` are not self-tamper protected.** Adding an MCP server to a project config is routine agent work, and denying it would be the false positive the protected-path list was narrowed to avoid — so an agent can add an unwrapped server to a project config. The two user-level client configs above are protected. A content-aware check that protects only the wrapped entries is the follow-up.
+- **A `tools/call` Stroq cannot read or address is denied, not allowed.** A call with no string `params.name` is answered with `mcp-proxy-malformed-call`, and a batch containing one with `mcp-proxy-batch`; both name the shape and never a value. A `tools/call` whose request id cannot be classified as a valid JSON-RPC id is dropped and audited as `mcp-proxy-unaddressable-call`, since no reply could ever be addressed to it. A client line that is not valid JSON — after a leading byte-order mark is stripped — is otherwise forwarded unchanged (the client is trusted on framing), UNLESS its text names `tools/call` (matched case-insensitively): that one is dropped and audited as `mcp-proxy-unparseable-call` rather than forwarded unread, since an unreadable line is exactly how a secret-bearing call could otherwise dodge every check above. A server line above 8 MiB is forwarded without being parsed — the bound applies to server output only, so an enormous `tools/call` is still judged.
+- **A throw while judging is a deny (`mcp-proxy-internal-error`); a throw while scanning is a forward.** An engine that cannot answer must never become an allow on the way in; on the way out the result the model asked for still reaches it, and the failure is logged, which is the same observe-only trade-off every hook adapter makes on `post`. A known trigger today: a `tools/call` whose arguments are larger than roughly 4 MiB overflows core's provenance-atom extraction and is refused this way — a core limit tracked as a follow-up, not a bypass, so the call is denied, never let through, while the fix is pending.
+- **The wire handling is built from the specification and three open-source proxies, not recorded from a client**, and the demo's server is hand-written. Windows: the rewritten `command` is Node's absolute path, which works there, but nothing has been exercised on Windows.
+
+Run the MCP demo yourself: `pnpm install && pnpm build && ./examples/demo/run-mcp-demo.sh`.
+
 ### As a Claude Code plugin
 
 The repository is also a plugin marketplace. Inside Claude Code:
@@ -456,6 +513,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 - **Copilot can be asked, but not made to wait:** Copilot honours a real `ask`, and a deny travels as a top-level `permissionDecision` (its hook contract does not read Claude Code's envelope for a decision). What it will not do is wait: a hook slower than its timeout is treated as an allow and its late deny is discarded, even on `preToolUse`. Stroq answers in well under a second, and a hook that cannot start at all is a hook error, which denies. Copilot's hooks also never reveal an MCP server name, so every MCP call is classified under a synthetic one. The full table and limits are in [Copilot CLI](#copilot-cli).
 - **OpenClaw is guarded from inside its own process:** there is no hooks file to install, so Stroq ships a plugin that OpenClaw loads into the Gateway and that does nothing but call the same CLI every other adapter calls. `before_tool_call` can block and can raise a real `/approve` prompt, and every failure on that path — a missing binary, a timeout, an unreadable answer — blocks the call, which is OpenClaw's own policy for the hook. What it cannot do is talk back after the fact: `after_tool_call` is observe-only, so a poisoned result taints the session silently and is enforced on the next action rather than announced to the model. The full table and limits are in [OpenClaw](#openclaw).
 - **Windsurf can be told, but only in one word:** Cascade hooks have no stdout contract and no `ask`, so every answer Stroq can give is an exit code — `0` proceeds, `2` blocks a `pre_*` action and shows the reason, and anything else is an allow. A policy `ask` therefore arrives as a block that names the rule and says how to proceed, and a suspect file or MCP result arrives as an exit 2 whose only job is to put the warning in front of the model. What Windsurf will not show Stroq is command output: `post_run_command` carries the command line alone, so a poisoned command result cannot taint a Windsurf session — files Cascade reads (which Stroq opens and scans itself, from the path in the payload) and MCP results can. The full table and limits are in [Windsurf](#windsurf).
+- **The MCP proxy covers any stdio client, but not HTTP servers or a human's answer:** `stroq init --agent mcp` rewrites a client's stdio MCP server entries to launch through `stroq mcp`, which judges every `tools/call` and scans every result — the same firewall the native adapters give you, for Claude Desktop and any other client with no hook API at all. An MCP proxy has no channel to a human, so a policy `ask` arrives as a blocked tool result naming the rule; entries with `url`/`serverUrl` are HTTP servers with no subprocess to wrap, so `init` skips them and they stay unprotected; and the project directory is the one `init` ran in, recorded in the wrapper, not wherever the client happens to launch the server from. The full table and limits are in [MCP proxy](#mcp-proxy-any-mcp-client).
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
