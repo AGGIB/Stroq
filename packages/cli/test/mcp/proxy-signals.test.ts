@@ -1,10 +1,42 @@
+import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
 import { runMcpProxy } from '../../src/mcp/proxy.js';
+
+/**
+ * Every child `runMcpProxy` spawns for this file, so a failed assertion — which skips
+ * the rest of a test, including the `await` that would have seen the child close —
+ * cannot leave one running past the test that started it. `ignore-sigterm-server.mjs`
+ * ignores both signals and, under `STROQ_MCP_STUB_KEEPALIVE`, no longer exits on
+ * stdin EOF either, so an aborted run would otherwise orphan it for good.
+ *
+ * `runMcpProxy` calls `spawn` itself, so the handle is captured by wrapping the module
+ * rather than by tracking a `spawn` this file made: the wrapper delegates to the real
+ * implementation and only records what comes back.
+ */
+const { liveChildren } = vi.hoisted(() => ({ liveChildren: new Set<ChildProcess>() }));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: (...args: Parameters<typeof actual.spawn>) => {
+      const child = actual.spawn(...args);
+      liveChildren.add(child);
+      child.once('close', () => liveChildren.delete(child));
+      return child;
+    },
+  };
+});
+
+afterEach(() => {
+  for (const child of liveChildren) if (!child.killed) child.kill('SIGKILL');
+  liveChildren.clear();
+});
 
 /**
  * Everything that makes `runMcpProxy` kill the server it wraps: the SIGINT/SIGTERM

@@ -21,12 +21,14 @@ const stringAt = (record: Record<string, unknown>, key: string): string => {
 const asJson = (value: unknown): string => JSON.stringify(value) ?? '';
 
 /**
- * A `text` field's content, whatever shape the server put there. A hostile server
- * that writes an OBJECT or an array under `text` is still writing content a client
- * renders and the model reads, so "not a string" must not mean "scan nothing": the
- * value is read as its JSON instead. `undefined` and `null` carry no text and stay
- * empty. The whole extraction is clipped to `MCP_MAX_RESULT_CHARS` by `joined`, so
- * a large value here costs the same as a large string would.
+ * A NON-STRING `text` field read as text: its JSON. A hostile server that writes an
+ * object or an array under `text` is still writing content a client renders and the
+ * model reads, so "not a string" must not mean "scan nothing". A string is returned
+ * unchanged so the reader is total, but callers handle the string case themselves —
+ * only a real string may stand in for the rest of its item (see `contentItemText`).
+ * `undefined` and `null` carry no text and stay empty. The whole extraction is
+ * clipped to `MCP_MAX_RESULT_CHARS` by `joined`, so a large value here costs the
+ * same as a large string would.
  */
 const textValue = (record: Record<string, unknown>, key: string): string => {
   const value = record[key];
@@ -43,17 +45,30 @@ const textValue = (record: Record<string, unknown>, key: string): string => {
  * body is a blob. `image` and `audio` items carry base64 `data` and a mime type and
  * contribute nothing — there is no instruction text in a JPEG's bytes, and scanning
  * megabytes of base64 on every call is the kind of cost that gets a proxy uninstalled.
+ *
+ * Only a non-empty STRING `text` stands in for the rest of the item. A non-string one
+ * is read BESIDE the other fields, never instead of them: `{ type: 'resource_link',
+ * text: 0, name: '<poison>' }` would otherwise contribute the single character `0` and
+ * suppress the `uri`/`name`/`description` — and, one level down, an embedded
+ * `resource`'s whole body — which is a cheaper way to opt out of the scan than any of
+ * the shapes above. The same rule governs `resource.text` against `resource.uri`.
  */
 function contentItemText(item: unknown): string {
   if (typeof item === 'string') return item;
   if (!isRecord(item)) return '';
-  const direct = textValue(item, 'text');
+  const direct = stringAt(item, 'text');
   if (direct !== '') return direct;
-  const parts = [stringAt(item, 'uri'), stringAt(item, 'name'), stringAt(item, 'description')];
+  const parts = [
+    textValue(item, 'text'),
+    stringAt(item, 'uri'),
+    stringAt(item, 'name'),
+    stringAt(item, 'description'),
+  ];
   const resource = item['resource'];
   if (isRecord(resource)) {
-    const body = textValue(resource, 'text');
-    parts.push(body !== '' ? body : stringAt(resource, 'uri'));
+    const body = stringAt(resource, 'text');
+    if (body !== '') parts.push(body);
+    else parts.push(textValue(resource, 'text'), stringAt(resource, 'uri'));
   }
   return parts.filter((part) => part !== '').join(' ');
 }
