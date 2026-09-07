@@ -21,27 +21,48 @@ const stringAt = (record: Record<string, unknown>, key: string): string => {
 const asJson = (value: unknown): string => JSON.stringify(value) ?? '';
 
 /**
- * Every string in one content item the model would read. A text item gives its text;
- * a `resource_link` gives its `uri`, `name` and `description`; an embedded `resource`
- * gives its own `text`, or its `uri` when the body is a blob. `image` and `audio`
- * items carry base64 `data` and a mime type and contribute nothing — there is no
- * instruction text in a JPEG's bytes, and scanning megabytes of base64 on every call
- * is the kind of cost that gets a proxy uninstalled.
+ * A `text` field's content, whatever shape the server put there. A hostile server
+ * that writes an OBJECT or an array under `text` is still writing content a client
+ * renders and the model reads, so "not a string" must not mean "scan nothing": the
+ * value is read as its JSON instead. `undefined` and `null` carry no text and stay
+ * empty. The whole extraction is clipped to `MCP_MAX_RESULT_CHARS` by `joined`, so
+ * a large value here costs the same as a large string would.
+ */
+const textValue = (record: Record<string, unknown>, key: string): string => {
+  const value = record[key];
+  if (typeof value === 'string') return value;
+  return value === undefined || value === null ? '' : asJson(value);
+};
+
+/**
+ * Every string in one content item the model would read. A bare string is its own
+ * text — an undocumented shape, but one a client renders word for word, so a scanner
+ * that skipped it would be a scanner a server opts out of by malforming its reply. A
+ * text item gives its text; a `resource_link` gives its `uri`, `name` and
+ * `description`; an embedded `resource` gives its own `text`, or its `uri` when the
+ * body is a blob. `image` and `audio` items carry base64 `data` and a mime type and
+ * contribute nothing — there is no instruction text in a JPEG's bytes, and scanning
+ * megabytes of base64 on every call is the kind of cost that gets a proxy uninstalled.
  */
 function contentItemText(item: unknown): string {
+  if (typeof item === 'string') return item;
   if (!isRecord(item)) return '';
-  const direct = stringAt(item, 'text');
+  const direct = textValue(item, 'text');
   if (direct !== '') return direct;
   const parts = [stringAt(item, 'uri'), stringAt(item, 'name'), stringAt(item, 'description')];
   const resource = item['resource'];
   if (isRecord(resource)) {
-    const body = stringAt(resource, 'text');
+    const body = textValue(resource, 'text');
     parts.push(body !== '' ? body : stringAt(resource, 'uri'));
   }
   return parts.filter((part) => part !== '').join(' ');
 }
 
-/** One item or an array of them, joined a line each. */
+/**
+ * One item or an array of them, joined a line each. A bare-string `content` — the
+ * whole field written as one string rather than a list — reaches `contentItemText`
+ * through the non-array branch and is scanned as its own text.
+ */
 const itemsText = (value: unknown): string =>
   Array.isArray(value)
     ? value

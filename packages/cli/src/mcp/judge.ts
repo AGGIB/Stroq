@@ -1,5 +1,7 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
+import { MAX_INPUT_CHARS } from '@stroq/core';
 import { withEvidence } from '../adapters/claude-code.js';
+import { describeToolInput } from '../adapters/codex-input.js';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
 import {
   decidePre,
@@ -56,9 +58,11 @@ export const mcpMethodToolName = (server: string, method: ScannedMethod): string
   mcpToolName(server, MCP_METHOD_TOOL[method]);
 
 /**
- * The arguments as they are, never reduced: the secret-egress guard scans
- * `JSON.stringify(toolInput)`, so a field dropped here is a value that can never be
- * caught leaving through this call. A modern retry's `inputResponses` ride along
+ * The arguments as they are, never reduced: the secret-egress guard scans the first
+ * `MAX_INPUT_CHARS` (256 KiB) of `JSON.stringify(toolInput)`, so a field dropped here
+ * is a value that can never be caught leaving through this call — and a record that
+ * serialises past that window is refused outright by `judgeToolCall` rather than
+ * handed to a scan that would see only part of it. A modern retry's `inputResponses` ride along
  * under their own key so the retry is judged on what it actually carries — but a
  * hostile server can declare a tool parameter literally named `inputResponses` and
  * tell the model to put a credential there, so the top-level field is never allowed
@@ -139,6 +143,27 @@ export const MCP_MALFORMED_CALL: Decision = {
     'The tools/call named no tool (params.name is missing or not a string), so Stroq could not classify it; denied fail-closed.',
 };
 
+/** The scan window as the reason prints it: `262144` characters is 256 KiB. */
+const SCAN_WINDOW_KIB = MAX_INPUT_CHARS / 1024;
+
+/**
+ * A `tools/call` whose serialised arguments are larger than the window core's
+ * secret-egress guard reads. That guard scans the first `MAX_INPUT_CHARS` characters
+ * of `JSON.stringify(toolInput)` — bounding the INPUT rather than the candidate list
+ * is what makes padding useless THERE — but a proxy that forwards the rest anyway
+ * simply moves the padding attack one level up: 300 KiB of filler ahead of a `.env`
+ * value puts that value outside the window, and the call leaves with it. So a call
+ * Stroq cannot scan whole is not forwarded at all. The reason names the window in
+ * KiB and nothing from the arguments themselves, which are exactly where a secret is.
+ */
+export const MCP_ARGUMENTS_TOO_LARGE: Decision = {
+  effect: 'deny',
+  ruleId: 'mcp-proxy-arguments-too-large',
+  reason:
+    `The tools/call arguments serialise to more than ${SCAN_WINDOW_KIB} KiB, the window Stroq's secret-egress guard scans, ` +
+    'so a secret value padded past it would leave unseen; a call Stroq cannot scan whole is not forwarded. Denied fail-closed.',
+};
+
 /** A JSON-RPC batch carrying a `tools/call`; refused whole. */
 export const MCP_BATCH_REFUSED: Decision = {
   effect: 'deny',
@@ -207,6 +232,27 @@ export async function judgeToolCall(
       ),
     };
   const toolName = mcpToolName(ctx.server, rawName);
+  // Before the engine, because the engine is what cannot see past this bound: core
+  // scans `JSON.stringify(toolInput)` only to `MAX_INPUT_CHARS`, so anything longer
+  // would be judged on a prefix of itself. The summary names the argument KEYS and
+  // never their values — `describeToolInput` is the same keys-only reader the Codex
+  // and Copilot unreadable-input denies audit with — so neither the padding nor a
+  // secret hidden behind it reaches the audit log.
+  const serialised = JSON.stringify(toolInput).length;
+  if (serialised > MAX_INPUT_CHARS)
+    return {
+      forward: false,
+      pending: null,
+      reply: await auditedDeny(
+        ctx,
+        toolName,
+        toolInput,
+        MCP_ARGUMENTS_TOO_LARGE,
+        `mcp proxy: tools/call arguments of ${serialised} characters, above the ${MAX_INPUT_CHARS} the secret guard scans (keys: ${describeToolInput(toolInput)})`,
+        message,
+        id,
+      ),
+    };
   const event: EngineEvent = { sessionId: ctx.sessionId, toolName, toolInput, cwd: ctx.cwd };
   const { decision, provenance, secrets } = await decidePre(ctx.engine, event, [toolInput]);
   if (decision.effect === 'allow')

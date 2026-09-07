@@ -1,7 +1,13 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AuditLog, DEFAULT_POLICY, StroqEngine, loadBundledRules } from '@stroq/core';
+import {
+  AuditLog,
+  DEFAULT_POLICY,
+  MAX_INPUT_CHARS,
+  StroqEngine,
+  loadBundledRules,
+} from '@stroq/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
 import type { McpContext } from '../../src/mcp/judge.js';
@@ -125,6 +131,63 @@ describe('the secret egress guard, through nested MCP arguments', () => {
   });
 });
 
+/**
+ * `JSON.stringify` of exactly `size` characters, ending in `tail`: `pad` absorbs the
+ * difference. Both halves are JSON-escape-free, so the serialised length is the
+ * character count core's candidate extraction actually clips at.
+ */
+function paddedArgs(size: number, tail: string): Record<string, unknown> {
+  const build = (pad: string): Record<string, unknown> => ({ pad, note: tail });
+  const overhead = JSON.stringify(build('')).length;
+  return build('a'.repeat(Math.max(0, size - overhead)));
+}
+
+describe('arguments padded past the window the secret guard scans', () => {
+  it('refuses the call rather than scanning only its first 256 KiB', async () => {
+    // The bypass this closes: core reads `JSON.stringify(toolInput)` up to
+    // `MAX_INPUT_CHARS`, so 300 KiB of padding ahead of a `.env` value put that
+    // value outside the scanned window and the call was forwarded, allowed.
+    writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
+    const verdict = await judge(ctx(), 30, 'send_message', paddedArgs(300 * 1024, SECRET_VALUE));
+    expect(verdict.forward).toBe(false);
+    expect(verdict.pending).toBeNull();
+    const text = replyText(verdict.reply);
+    expect(text).toContain('Stroq blocked this action (mcp-proxy-arguments-too-large)');
+    expect(text).not.toContain(SECRET_VALUE);
+    expect(auditText()).toContain('mcp-proxy-arguments-too-large');
+    // The audit summary names the argument KEYS and never their values, so neither
+    // the secret nor 300 KiB of padding lands in the log.
+    expect(auditText()).toContain('note, pad');
+    expect(auditText()).not.toContain(SECRET_VALUE);
+    expect(auditText()).not.toContain('aaaaaaaaaa');
+  });
+
+  it('still catches the same secret just under the window, through the guard itself', async () => {
+    writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
+    const verdict = await judge(
+      ctx(),
+      31,
+      'send_message',
+      paddedArgs(MAX_INPUT_CHARS - 1024, SECRET_VALUE),
+    );
+    expect(verdict.forward).toBe(false);
+    expect(replyText(verdict.reply)).toContain('Stroq blocked this action (deny-secret-egress)');
+    expect(auditText()).not.toContain(SECRET_VALUE);
+  });
+
+  it('forwards a clean call of the same size, so the bound is not a size limit on tools', async () => {
+    writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
+    const verdict = await judge(
+      ctx(),
+      32,
+      'send_message',
+      paddedArgs(MAX_INPUT_CHARS - 1024, 'nothing-secret-here'),
+    );
+    expect(verdict.forward).toBe(true);
+    expect(verdict.reply).toBeNull();
+  });
+});
+
 describe('taint through the proxy, from one server to the next call', () => {
   it('taints on a poisoned tools/list and then asks before a side-effecting call', async () => {
     const context = ctx();
@@ -165,6 +228,18 @@ describe('taint through the proxy, from one server to the next call', () => {
           },
         ],
       },
+    );
+    expect(warning).toContain('untrusted data');
+  });
+
+  it('taints on a poisoned bare-string content, the shape a server would hide text in', async () => {
+    // `{ content: "…" }` is not the documented result shape, but a client that
+    // renders it puts every word in front of the model. Scanning zero characters
+    // here would let a hostile server opt out of the scan by malforming its reply.
+    const warning = await scanMcpResult(
+      ctx(),
+      { method: 'tools/call', toolName: 'mcp__github__read_issue' },
+      { content: POISONED },
     );
     expect(warning).toContain('untrusted data');
   });
