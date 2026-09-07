@@ -5,7 +5,6 @@ import {
   SCANNED_METHODS,
   asJsonRpcId,
   classifyMessage,
-  createLineSplitter,
   hasProtocolMeta,
   isScannedMethod,
   jsonrpcOf,
@@ -13,48 +12,9 @@ import {
   parseLine,
 } from '../../src/mcp/framing.js';
 
-const texts = (lines: readonly { text: string }[]) => lines.map((l) => l.text);
-
-describe('the line splitter, which must never lose or invent a byte', () => {
-  it('reassembles a message split across chunks', () => {
-    // stdio framing is one message per line, but a pipe delivers whatever it likes:
-    // a 200-byte JSON-RPC message routinely arrives as three chunks.
-    const split = createLineSplitter();
-    expect(split.push('{"jsonrpc"')).toEqual([]);
-    expect(split.push(':"2.0","id"')).toEqual([]);
-    expect(texts(split.push(':1}\n'))).toEqual(['{"jsonrpc":"2.0","id":1}']);
-  });
-
-  it('emits several lines from one chunk, in order', () => {
-    const split = createLineSplitter();
-    expect(texts(split.push('a\nb\nc'))).toEqual(['a', 'b']);
-    expect(texts(split.flush())).toEqual(['c']);
-  });
-
-  it('keeps a carriage return and a blank line, because forwarding is byte-exact', () => {
-    // A CRLF client leaves the `\r` inside the line text; re-adding only the `\n`
-    // preserves it. A blank line between two messages is forwarded as a blank line.
-    const split = createLineSplitter();
-    expect(texts(split.push('{"a":1}\r\n\n{"b":2}\n'))).toEqual(['{"a":1}\r', '', '{"b":2}']);
-  });
-
-  it('marks a terminated line and an unterminated remainder differently', () => {
-    // The remainder has no terminator of its own, so forwarding must not add one.
-    const split = createLineSplitter();
-    expect(split.push('one\ntwo')).toEqual([{ text: 'one', eol: '\n', oversize: false }]);
-    expect(split.flush()).toEqual([{ text: 'two', eol: '', oversize: false }]);
-    expect(split.flush()).toEqual([]);
-  });
-
-  it('flags a line past the parse bound and leaves its neighbours alone', () => {
-    // The flag is a property of the line's OWN length: a small line that happens to
-    // share a chunk with a huge one must not inherit the flag.
-    const split = createLineSplitter();
-    const huge = 'x'.repeat(8 * 1024 * 1024 + 1);
-    const lines = split.push(`small\n${huge}\ntail\n`);
-    expect(lines.map((l) => l.oversize)).toEqual([false, true, false]);
-  });
-});
+// The line splitter has its own file, framing-split.test.ts, including the
+// large-input performance cases — keeping it separate keeps both files well
+// under the line-count limit.
 
 describe('parseLine', () => {
   it('reports a line that is not JSON rather than throwing', () => {
@@ -103,6 +63,17 @@ describe('classifyMessage', () => {
     const message = classifyMessage([{ id: 1, method: 'tools/call' }, 7]);
     expect(message.kind).toBe('batch');
     expect(message.kind === 'batch' ? message.items : []).toHaveLength(2);
+  });
+
+  it('treats id 0 as present, not absent — falsy is not the same as missing', () => {
+    expect(classifyMessage({ id: 0, method: 'ping' })).toMatchObject({ kind: 'request', id: 0 });
+    expect(classifyMessage({ id: 0, result: {} })).toMatchObject({ kind: 'response', id: 0 });
+  });
+
+  it('treats an empty array as a batch of nothing', () => {
+    const message = classifyMessage([]);
+    expect(message.kind).toBe('batch');
+    expect(message.kind === 'batch' ? message.items : null).toEqual([]);
   });
 });
 
