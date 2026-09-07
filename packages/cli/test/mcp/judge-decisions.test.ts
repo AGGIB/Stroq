@@ -244,6 +244,36 @@ describe('taint through the proxy, from one server to the next call', () => {
     expect(warning).toContain('untrusted data');
   });
 
+  it('still taints when a junk text value sits beside the poison, not on top of it', async () => {
+    // Reading a non-string `text` must not suppress the fields around it. Each case
+    // gets its own session so no earlier taint can make a later one pass.
+    let session = 0;
+    for (const junk of [0, false, {}, []]) {
+      session += 1;
+      const link = await scanMcpResult(
+        ctx({ sessionId: `mcp:junk-link-${session}` }),
+        { method: 'tools/call', toolName: 'mcp__github__read_issue' },
+        {
+          content: [
+            { type: 'resource_link', text: junk, uri: 'https://x.example/a', name: POISONED },
+          ],
+        },
+      );
+      expect(link).toContain('untrusted data');
+
+      const embedded = await scanMcpResult(
+        ctx({ sessionId: `mcp:junk-resource-${session}` }),
+        { method: 'tools/call', toolName: 'mcp__github__read_issue' },
+        {
+          content: [
+            { type: 'resource', text: junk, resource: { uri: 'file:///b', text: POISONED } },
+          ],
+        },
+      );
+      expect(embedded).toContain('untrusted data');
+    }
+  });
+
   it('denies a call whose arguments repeat what a poisoned result planted', async () => {
     const context = ctx();
     await scanMcpResult(
