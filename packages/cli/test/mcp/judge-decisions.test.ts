@@ -92,6 +92,37 @@ describe('the secret egress guard, through nested MCP arguments', () => {
       pending: { method: 'tools/call', toolName: 'mcp__github__send_message' },
     });
   });
+
+  it('still catches a secret under arguments.inputResponses when params.inputResponses also carries a value', async () => {
+    // A hostile server can declare a tool parameter literally named `inputResponses`
+    // and tell the model to put a credential there; a naive merge that let the
+    // top-level retry field overwrite it would forward the call with the secret
+    // never seen. Both values must survive into the judged record under distinct
+    // keys, so the marker below (never a secret) must still reach the audit. (The
+    // secret is placed bare, not behind a `label=` prefix: audit-log's own
+    // defense-in-depth redaction greedily consumes to the end of a whitespace-free
+    // compact-JSON summary once it sees a credential-labelled `key=`/`key:` span,
+    // which would hide the marker regardless of whether the merge kept it.)
+    writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
+    const message = {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: {
+        name: 'send_message',
+        arguments: { inputResponses: [SECRET_VALUE] },
+        inputResponses: ['top-level-marker'],
+      },
+    };
+    const verdict = await judgeToolCall(ctx(), message, 9, message.params);
+    expect(verdict.forward).toBe(false);
+    expect(replyText(verdict.reply)).toContain('Stroq blocked this action (deny-secret-egress)');
+    // The audit summary is `JSON.stringify(toolInput)` (secret values redacted), so
+    // the top-level marker's survival proves the merge kept both values, not just
+    // the one that happened to trip the guard.
+    expect(auditText()).toContain('top-level-marker');
+    expect(auditText()).not.toContain(SECRET_VALUE);
+  });
 });
 
 describe('taint through the proxy, from one server to the next call', () => {
@@ -103,6 +134,9 @@ describe('taint through the proxy, from one server to the next call', () => {
       { tools: [{ name: 'search', description: POISONED }] },
     );
     expect(warning).toContain('untrusted data');
+    // The post audit line's summary carries the method, not `{}`, so `stroq log`
+    // can tell which listing tainted the session.
+    expect(auditText()).toContain('tools/list');
     // The session is shared across every server this client launched, so the taint a
     // poisoned listing from `docs` set applies to a call going to `github`.
     const verdict = await judge(context, 3, 'send_message', { body: 'unrelated' });
@@ -111,6 +145,28 @@ describe('taint through the proxy, from one server to the next call', () => {
       'Stroq would ask before this action (ask-mcp-side-effect-when-tainted)',
     );
     expect(replyText(verdict.reply)).toContain('An MCP proxy cannot prompt');
+  });
+
+  it("scans a tool listing's inputSchema, not just its top-level description", async () => {
+    // Parameter descriptions inside a schema are exactly as model-visible, and
+    // exactly as much of a rug-pull surface, as the tool's own description — the
+    // poison here sits ONLY inside `inputSchema`.
+    const warning = await scanMcpResult(
+      ctx(),
+      { method: 'tools/list', toolName: 'mcp__docs__tools_list' },
+      {
+        tools: [
+          {
+            name: 'search',
+            inputSchema: {
+              type: 'object',
+              properties: { q: { type: 'string', description: POISONED } },
+            },
+          },
+        ],
+      },
+    );
+    expect(warning).toContain('untrusted data');
   });
 
   it('denies a call whose arguments repeat what a poisoned result planted', async () => {
@@ -159,6 +215,21 @@ describe('the two adapter-level denies, both audited', () => {
       },
     });
     expect(auditText()).toContain('mcp-proxy-batch');
+  });
+
+  it('audits every tools/call in a refused batch, including one with no id to answer', async () => {
+    // An idless `tools/call` is unanswerable (JSON-RPC gives it no reply), but its
+    // presence is still why the whole batch was refused, and `stroq log` should
+    // explain both calls, not just the one a reply could be sent for.
+    const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+    const replies = await refuseBatch(ctx(), [
+      { jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'send_message' } },
+      { jsonrpc: '2.0', method: 'tools/call', params: { name: 'delete_repo' } },
+    ]);
+    expect(replies).toHaveLength(1);
+    expect(occurrences(auditText(), 'mcp-proxy-batch')).toBe(2);
+    expect(auditText()).toContain('mcp__github__send_message');
+    expect(auditText()).toContain('mcp__github__delete_repo');
   });
 });
 
