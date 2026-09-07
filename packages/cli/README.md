@@ -11,7 +11,7 @@
 
 **Local action firewall for AI coding agents.** Stroq scans what your agent reads (files, web pages, MCP tool results, command output) for indirect prompt injection, taints the session when it finds instruction-like text, and deterministically blocks the dangerous follow-up actions an injected agent would take — outbound network commands, secret access, external git pushes, encoded execution, self-tampering. Everything runs locally; nothing is sent to a cloud.
 
-Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin).
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy).
 
 ## Install
 
@@ -22,6 +22,7 @@ npx @stroq/cli init --agent codex    # Codex CLI: writes .codex/hooks.json
 npx @stroq/cli init --agent copilot  # Copilot CLI: writes .github/hooks/stroq.json
 npx @stroq/cli init --agent openclaw # OpenClaw: installs a plugin into ~/.stroq/openclaw-plugin
 npx @stroq/cli init --agent windsurf # Windsurf: merges into .windsurf/hooks.json
+npx @stroq/cli init --agent mcp --client claude-desktop   # any MCP client: wraps its stdio servers
 npx @stroq/cli doctor                # check the installation
 ```
 
@@ -31,17 +32,20 @@ Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` co
 
 Windsurf note: `post_read_code` cannot scan a directory Cascade reads recursively (it scans the file it names, and a directory reads as empty), and a tainted `pre_read_code` of `~/.ssh` or `~/.aws` without a trailing slash is not classified as a secret path either — see the [Windsurf section of the full README](https://github.com/AGGIB/Stroq#windsurf) for this and every other documented limit.
 
+MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client's `mcpServers` entries so each stdio server starts through `stroq mcp`, which judges every `tools/call` and scans every result. There is no way to prompt from inside a proxy, so a policy `ask` arrives as a blocked tool result naming the rule; HTTP (`url`/`serverUrl`) servers are skipped; and the project directory is the one `init` ran in — see the [MCP proxy section of the full README](https://github.com/AGGIB/Stroq#mcp-proxy-any-mcp-client) for this and every other documented limit.
+
 ## Commands
 
-| Command                                            | What it does                                                                                                                   |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `stroq init [--agent <name>] [--user] [--dry-run]` | Install hooks for `claude-code`, `cursor`, `codex`, `copilot`, `openclaw` or `windsurf` (`--user` for the home-directory copy) |
-| `stroq hook <agent>`                               | Hook entrypoint (reads the event on stdin; `copilot` and `openclaw` take a `pre`/`post` argument, the others do not)           |
-| `stroq doctor`                                     | Check Node version, rules, hooks for every agent, self-test                                                                    |
-| `stroq log [--count 20]`                           | Show recent audit entries                                                                                                      |
-| `stroq verify`                                     | Verify the audit hash chain                                                                                                    |
-| `stroq untaint [--session <id>] [--all]`           | Clear a false-positive session's taint and provenance, or every session's                                                      |
-| `stroq why [--seq <n>]`                            | Explain the most recent denied/asked action: rule, provenance, taint                                                           |
+| Command                                            | What it does                                                                                                                                                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stroq init [--agent <name>] [--user] [--dry-run]` | Install hooks for `claude-code`, `cursor`, `codex`, `copilot`, `openclaw` or `windsurf`, or wrap an MCP client's stdio servers with `--agent mcp --client <name>` (`--user` for the home-directory copy) |
+| `stroq hook <agent>`                               | Hook entrypoint (reads the event on stdin; `copilot` and `openclaw` take a `pre`/`post` argument, the others do not)                                                                                     |
+| `stroq mcp --server <name> -- <cmd>`               | MCP stdio proxy: judges every `tools/call` and scans every result for one wrapped server                                                                                                                 |
+| `stroq doctor`                                     | Check Node version, rules, hooks for every agent, self-test                                                                                                                                              |
+| `stroq log [--count 20]`                           | Show recent audit entries                                                                                                                                                                                |
+| `stroq verify`                                     | Verify the audit hash chain                                                                                                                                                                              |
+| `stroq untaint [--session <id>] [--all]`           | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                |
+| `stroq why [--seq <n>]`                            | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                     |
 
 ## Learn more
 

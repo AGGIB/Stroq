@@ -57,6 +57,9 @@ jobs:
       - name: Run Windsurf demo
         run: ./examples/demo/run-windsurf-demo.sh
 
+      - name: Run MCP demo
+        run: ./examples/demo/run-mcp-demo.sh
+
       - name: Attack suite
         run: node packages/cli/dist/index.js attack
 
