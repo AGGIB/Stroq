@@ -459,9 +459,15 @@ describe('doctorReport windsurf hooks', () => {
 });
 
 describe('doctorReport mcp proxy', () => {
+  // A real, existing `index.js`: `countWrapped` now checks that a wrapper's recorded
+  // entry file still exists, so a fixture path that was never meant to exist (like
+  // `/x/dist/index.js` elsewhere in this suite) would wrongly count as stale here.
+  const entryDir = mkdtempSync(join(tmpdir(), 'stroq-mcp-entry-'));
+  const realEntry = join(entryDir, 'index.js');
+  writeFileSync(realEntry, '');
   const wrapOpts = {
     node: '/usr/bin/node',
-    entryArgv: ['/x/dist/index.js'],
+    entryArgv: [realEntry],
     client: 'claude-code',
     cwd: '/w',
   };
@@ -505,5 +511,20 @@ describe('doctorReport mcp proxy', () => {
     const broken = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
     expect(broken?.ok).toBe(false);
     expect(broken?.detail).toMatch(/cannot parse/);
+  });
+
+  it('reports a stale wrapper whose recorded entry file no longer exists', async () => {
+    const file = mcpConfigPath('claude-code', 'project', cwd);
+    const wrapped = wrapMcpConfig(
+      { mcpServers: { a: { command: 'x' }, b: { command: 'y' } } },
+      { ...wrapOpts, entryArgv: ['/does/not/exist/index.js'] },
+    );
+    writeJsonObject(file, wrapped.config);
+    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    // Neither server counts as wrapped — the client would fail to start them — and
+    // the detail says why, rather than silently reporting them as protected.
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('wrapped 0/2 stdio servers');
+    expect(check?.detail).toContain('2 stale wrappers: entry missing');
   });
 });

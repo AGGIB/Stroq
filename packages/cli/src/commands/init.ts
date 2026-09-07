@@ -1,6 +1,5 @@
-import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
@@ -46,14 +45,7 @@ import {
   readWindsurfHooks,
   windsurfHooksPath,
 } from './windsurf-hooks.js';
-import {
-  MCP_CLIENTS,
-  isMcpClient,
-  mcpConfigPath,
-  readMcpConfig,
-  unwrapMcpConfig,
-  wrapMcpConfig,
-} from './mcp-config.js';
+import { initMcp } from './init-mcp.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
@@ -76,6 +68,8 @@ export const HOOK_AGENTS: readonly HookAgent[] = [
  */
 export type InitAgent = HookAgent | 'mcp';
 export const INIT_AGENTS: readonly InitAgent[] = [...HOOK_AGENTS, 'mcp'];
+export const isInitAgent = (value: string): value is InitAgent =>
+  (INIT_AGENTS as readonly string[]).includes(value);
 
 export interface HookHandler {
   readonly type: 'command';
@@ -334,92 +328,6 @@ function initWindsurf(scope: 'project' | 'user', command: string, dryRun: boolea
   return 0;
 }
 
-/**
- * Five things an MCP proxy user has to know that no hook agent needs: the client
- * launches its servers once, at startup; the directory `init` ran in is what the
- * proxy records as the project, because Claude Desktop launches servers from `/`;
- * there is no way to prompt from inside a proxy, so an `ask` arrives as a block; HTTP
- * servers have no subprocess to wrap; and removing Stroq needs `--unwrap`, since the
- * wrapper records an absolute entry path that changes on upgrade.
- */
-const MCP_NOTE =
-  'Restart the MCP client before this takes effect: it launches its servers once, when it starts.\n' +
-  'This directory is recorded as the project for every wrapped server: it is what feeds the secret index and the path rules.\n' +
-  'An MCP proxy cannot prompt, so a policy "ask" arrives as a blocked tool result naming the rule to relax.\n' +
-  'HTTP servers (url/serverUrl) have no subprocess to wrap and are listed as skipped.\n' +
-  '"stroq init --agent mcp --unwrap" restores every wrapped entry to its original command.\n';
-
-interface McpTarget {
-  readonly file: string;
-  /** What `--client` records and what the output names: a client, or a file basename. */
-  readonly label: string;
-}
-
-/** The file `--client`/`--config` names, or null when the client name is not one Stroq knows. */
-function mcpTarget(
-  client: string | undefined,
-  configPath: string | undefined,
-  scope: 'project' | 'user',
-): McpTarget | null {
-  if (client === undefined) {
-    const file = resolve(configPath ?? '');
-    return { file, label: basename(file) };
-  }
-  if (!isMcpClient(client)) return null;
-  return { file: mcpConfigPath(client, scope), label: client };
-}
-
-interface McpOptions {
-  readonly client?: string;
-  readonly config?: string;
-  readonly unwrap: boolean;
-}
-
-function initMcp(
-  scope: 'project' | 'user',
-  argv: readonly string[],
-  dryRun: boolean,
-  options: McpOptions,
-): number {
-  if ((options.client === undefined) === (options.config === undefined)) {
-    process.stdout.write(
-      'stroq init --agent mcp needs exactly one of --client <name> or --config <path>\n',
-    );
-    return 1;
-  }
-  const target = mcpTarget(options.client, options.config, scope);
-  if (target === null) {
-    process.stdout.write(
-      `unknown client "${options.client ?? ''}" (supported: ${MCP_CLIENTS.join(', ')})\n`,
-    );
-    return 1;
-  }
-  // A missing file is nothing to wrap; creating one would look like success while
-  // the client still has no servers and no proxy.
-  if (!existsSync(target.file)) {
-    process.stdout.write(
-      `no MCP config at ${target.file}; add your servers there first, then re-run this command\n`,
-    );
-    return 1;
-  }
-  const [node, ...entryArgv] = argv;
-  if (node === undefined) return 1;
-  const config = readMcpConfig(target.file);
-  const rewrite = options.unwrap
-    ? unwrapMcpConfig(config)
-    : wrapMcpConfig(config, { node, entryArgv, client: target.label, cwd: process.cwd() });
-  if (dryRun) {
-    process.stdout.write(`${JSON.stringify(rewrite.config, null, 2)}\n`);
-    return 0;
-  }
-  writeJsonObject(target.file, rewrite.config);
-  for (const outcome of rewrite.outcomes)
-    process.stdout.write(`${outcome.action} ${outcome.name}\n`);
-  const headline = options.unwrap ? 'Stroq proxy removed from' : 'Stroq proxy installed in';
-  process.stdout.write(`${headline} ${target.file}\n${MCP_NOTE}Run "stroq doctor" to verify.\n`);
-  return 0;
-}
-
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -433,7 +341,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
     },
   });
   const agent = values.agent ?? 'claude-code';
-  if (!INIT_AGENTS.includes(agent as InitAgent)) {
+  if (!isInitAgent(agent)) {
     process.stdout.write(`unknown agent "${agent}" (supported: ${INIT_AGENTS.join(', ')})\n`);
     return 1;
   }
@@ -441,13 +349,17 @@ export async function runInit(args: readonly string[]): Promise<number> {
   const dryRun = values['dry-run'] === true;
   const node = process.execPath;
   const entry = resolve(process.argv[1] ?? '');
-  const command = hookCommand(node, entry, agent as HookAgent);
+  // Checked and delegated before `hookCommand` is ever computed: `mcp` is an
+  // `InitAgent` but not a `HookAgent`, so narrowing it away here — rather than
+  // casting it into `hookCommand` and never using the result — is what lets every
+  // later reference to `agent` be a plain `HookAgent`, no cast required.
   if (agent === 'mcp')
     return initMcp(scope, hookArgv(node, entry), dryRun, {
       ...(values.client === undefined ? {} : { client: values.client }),
       ...(values.config === undefined ? {} : { config: values.config }),
       unwrap: values.unwrap === true,
     });
+  const command = hookCommand(node, entry, agent);
   const install: Readonly<Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number>> = {
     'claude-code': initClaudeCode,
     cursor: initCursor,
@@ -458,5 +370,5 @@ export async function runInit(args: readonly string[]): Promise<number> {
     openclaw: (scope, _command, dryRun) => initOpenClaw(scope, hookArgv(node, entry), dryRun),
     windsurf: initWindsurf,
   };
-  return install[agent as HookAgent](scope, command, dryRun);
+  return install[agent](scope, command, dryRun);
 }

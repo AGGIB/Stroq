@@ -157,12 +157,16 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
     seen.add(file);
     try {
       const counted = countWrapped(readMcpConfig(file));
+      const stale =
+        counted.stale > 0
+          ? ` (${counted.stale} stale wrapper${counted.stale === 1 ? '' : 's'}: entry missing)`
+          : '';
       found.push({
         scope,
         file,
         installed: counted.wrapped > 0,
         error: null,
-        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers (${file})`,
+        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${stale} (${file})`,
       });
     } catch (err) {
       found.push({ scope, file, installed: false, error: (err as Error).message });
