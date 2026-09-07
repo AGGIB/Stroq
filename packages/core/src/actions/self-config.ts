@@ -60,12 +60,23 @@ import { commandWord } from './shell-segments.js';
  * literal (a quoted path, or a Write tool's `file_path`) or backslash-escaped
  * (`Application\ Support`), as a shell command line would need. `.windsurf/rules/` and
  * `.windsurf/workflows/` stay editable: the match is on `hooks.json`, not on the
- * directory, for exactly the reason the bare `.claude` match was narrowed. The Windows
+ * directory, for exactly the reason the bare `.claude` match was narrowed.
+ * The two USER-level MCP client configs — `claude_desktop_config.json` (Claude
+ * Desktop, at three OS-specific paths) and `mcp_config.json` (Windsurf, at either
+ * of its two locations) — are protected as bare filenames, since their directories
+ * differ per platform and per build. Each is anchored with a negative lookbehind so
+ * only a real path segment matches: `old_mcp_config.json` and
+ * `backup.claude_desktop_config.json` are somebody's own files, not the client's.
+ * The PROJECT MCP configs are deliberately absent: adding an MCP server to
+ * `.mcp.json` or `.cursor/mcp.json` is routine agent work, and denying it would be
+ * the bare `.claude` false positive again. That gap is stated in the README and
+ * SECURITY.md; a content-aware check that protects only the wrapped entries is the
+ * follow-up. The Windows
  * system path uses backslashes throughout and is not matched; that is a stated limit,
  * not an oversight.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own

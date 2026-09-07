@@ -47,6 +47,14 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     "sed -i 's/a/b/' .windsurf/hooks.md",
     // The capitalised system-directory alternative must not fire on a lowercase path.
     'rm ~/.codeium/windsurf/memories/notes.md',
+    // A project MCP config is NOT protected: adding an MCP server to `.mcp.json` or
+    // `.cursor/mcp.json` is routine agent work, and denying it would be the bare
+    // `.claude` false positive again. The user-level client configs below are.
+    'rm .mcp.json',
+    "sed -i 's/a/b/' .cursor/mcp.json",
+    // A file whose NAME merely ends with the protected one is not the protected file.
+    'rm old_mcp_config.json',
+    'cat backup.claude_desktop_config.json',
   ])('does not match: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(false));
 
   it.each([
@@ -84,6 +92,11 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     '/etc/windsurf/hooks.json',
     '/Library/Application Support/Windsurf/hooks.json',
     'rm -f .windsurf/hooks.json',
+    '~/Library/Application Support/Claude/claude_desktop_config.json',
+    '~/.config/Claude/claude_desktop_config.json',
+    'rm -f claude_desktop_config.json',
+    '~/.codeium/windsurf/mcp_config.json',
+    '~/.codeium/mcp_config.json',
   ])('matches protected file/dir: %s', (text) => expect(SELF_CONFIG_FILE.test(text)).toBe(true));
 });
 
@@ -251,5 +264,33 @@ describe('switching the gate off through the agent’s own CLI (spec §2b)', () 
       deny: ['self-config-disable'],
       ask: [],
     });
+  });
+});
+
+describe('the two user-level MCP client configs (spec §2d)', () => {
+  it('denies a write to a client config and leaves a read alone', () => {
+    // Unwrapping the proxy out of either file switches Stroq off for that client, so
+    // a write is self-tampering wherever it comes from; reading one is not.
+    expect(
+      classifySelfConfigSegment(
+        'rm -f ~/Library/Application\\ Support/Claude/claude_desktop_config.json',
+      ),
+    ).toBe('deny');
+    expect(classifySelfConfigSegment('cat ~/.codeium/mcp_config.json')).toBe(null);
+    expect(classifySelfConfigSegment('vim ~/.codeium/windsurf/mcp_config.json')).toBe('ask');
+  });
+
+  it('leaves the project MCP configs editable, which is the stated gap', () => {
+    // Stated in the README and SECURITY.md rather than fixed: a content-aware check
+    // that protects only the wrapped entries is the follow-up.
+    expect(classifySelfConfigSegment('echo "{}" > .mcp.json')).toBe(null);
+    expect(classifySelfConfigSegment('echo "{}" > .cursor/mcp.json')).toBe(null);
+  });
+
+  it('does not widen the bare-directory list', () => {
+    // `PROTECTED_DIRS` is consulted for `find` only and gains nothing here: there is
+    // no MCP directory to protect, only two files.
+    expect(PROTECTED_DIRS.test('.mcp.json')).toBe(false);
+    expect(PROTECTED_DIRS.test('Claude -name')).toBe(false);
   });
 });
