@@ -163,6 +163,34 @@ describe('a request method cased differently from tools/call', () => {
   }, 15_000);
 });
 
+describe('a notification method cased differently from notifications/cancelled', () => {
+  it('still drops the pending id, exactly as the canonical casing does', async () => {
+    const { stdin, waitFor, done } = startPump();
+
+    // `tools/list` is remembered as pending the moment it is forwarded, and the
+    // fake server's listing carries a poisoned tool description — so a response
+    // still being tracked when it arrives IS scanned and DOES leave a `post` audit
+    // entry. That entry's absence is what proves the oddly-cased cancellation was
+    // honoured rather than passed through as an ordinary notification.
+    stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`);
+    stdin.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'Notifications/Cancelled',
+        params: { requestId: 1 },
+      })}\n`,
+    );
+    const lines = await waitFor(1);
+    stdin.end();
+    expect(await done).toBe(0);
+
+    // Cancellation is a best-effort hint, not a retroactive un-send: the response
+    // still reaches the client, just untracked and therefore unscanned.
+    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ id: 1 });
+    expect(auditText()).not.toContain('"phase":"post"');
+  }, 15_000);
+});
+
 describe('a client line naming tools/call that still cannot be parsed', () => {
   it('is denied fail-closed and dropped rather than forwarded blind, without stalling the queue', async () => {
     const { stdin, waitFor, serverLog, done } = startPump();

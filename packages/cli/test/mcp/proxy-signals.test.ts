@@ -2,21 +2,25 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
 import { runMcpProxy } from '../../src/mcp/proxy.js';
 
 /**
- * `runMcpProxy` relays a SIGINT/SIGTERM it receives to the server (`process.on`,
- * registered on THIS process — the same one `runMcpProxy` runs in, exactly as it is
- * when `stroq mcp` is a client's own subprocess), which is why these tests deliver
- * the signal to `process.pid` rather than to a child: that IS what the proxy is
- * listening for. `runMcpProxy` deregisters both listeners before returning, so this
- * is self-contained — no listener from one test can affect the next.
+ * Everything that makes `runMcpProxy` kill the server it wraps: the SIGINT/SIGTERM
+ * relay and the timers that escalate a shutdown.
+ *
+ * The relay uses `process.on`, registered on THIS process — the same one
+ * `runMcpProxy` runs in, exactly as it is when `stroq mcp` is a client's own
+ * subprocess — which is why these tests deliver the signal to `process.pid` rather
+ * than to a child: that IS what the proxy is listening for. `runMcpProxy`
+ * deregisters both listeners before returning, so this is self-contained — no
+ * listener from one test can affect the next.
  */
 
 const fakeServer = join(import.meta.dirname, 'fake-server.mjs');
 const ignoreSigtermServer = join(import.meta.dirname, 'ignore-sigterm-server.mjs');
+const exitAfterReplyServer = join(import.meta.dirname, 'exit-after-reply-server.mjs');
 
 let cwd: string;
 
@@ -97,5 +101,57 @@ describe('signal escalation', () => {
 
     expect(code).toBe(1);
     expect(elapsed).toBeLessThan(GRACE_MS / 2);
+  }, 15_000);
+});
+
+describe('the EOF shutdown timers', () => {
+  /** Distinctive, so no unrelated timer in this worker can be mistaken for the proxy's. */
+  const GRACE_MS = 271;
+
+  it('are not armed by a client EOF that arrives once shutdown has already begun', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    // Not inherited from whichever file ran before this one in the same worker.
+    process.env['EXIT_AFTER_REPLY_EXIT_CODE'] = '0';
+
+    const done = runMcpProxy({
+      engine: createEngine(),
+      sessionId: 'mcp:test',
+      server: 'demo',
+      cwd,
+      // Answers one request and exits, so the run is over before the client is.
+      command: process.execPath,
+      args: [exitAfterReplyServer],
+      stdin,
+      stdout,
+      stderr,
+      shutdownGraceMs: GRACE_MS,
+    });
+
+    stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
+    expect(await done).toBe(0);
+
+    // The EOF handler runs inside a QUEUED task, so a client that closes its end
+    // while the proxy is still draining can reach it after shutdown has cleared the
+    // timers — and a kill armed from there is one nothing will ever cancel, holding
+    // the event loop open for twice the grace period after the server it was meant
+    // for is already gone. Emitted directly rather than via `stdin.end()` because
+    // the natural version of this race is a matter of which queue drains first;
+    // this pins the guard itself, deterministically.
+    //
+    // `setTimeout` is the assertion because an uncancellable timer aimed at a dead
+    // child has no other observable effect than the delay it causes: the delays are
+    // matched (not the call count) so an unrelated timer from anywhere else in the
+    // worker cannot make this pass or fail by accident.
+    const armed = vi.spyOn(globalThis, 'setTimeout');
+    stdin.emit('end');
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    const delays = armed.mock.calls.map((call) => call[1]);
+    armed.mockRestore();
+
+    expect(delays).not.toContain(GRACE_MS);
+    expect(delays).not.toContain(GRACE_MS * 2);
   }, 15_000);
 });
