@@ -1,10 +1,12 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   MCP_CLIENTS,
+  claudeDesktopPath,
   countWrapped,
+  hasValidMcpServers,
   isMcpClient,
   mcpConfigPath,
   readMcpConfig,
@@ -54,13 +56,45 @@ describe('the config file each client keeps its stdio servers in', () => {
   });
 });
 
-describe('recognising Stroq own wrapper', () => {
-  it('needs the entry path, the mcp/--server pair and a separator', () => {
-    expect(wrapperIndex(['/x/dist/index.js', 'mcp', '--server', 'a', '--', 'node'])).toBe(1);
+describe('claudeDesktopPath', () => {
+  it('resolves the three documented locations, and falls back when APPDATA is unset', () => {
+    expect(claudeDesktopPath('darwin', {}, '/home/x')).toBe(
+      join('/home/x', 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
+    );
     expect(
-      wrapperIndex(['--import', 'tsx', '/x/src/index.ts', 'mcp', '--server', 'a', '--', 'n']),
+      claudeDesktopPath('win32', { APPDATA: 'C:\\Users\\x\\AppData\\Roaming' }, 'C:\\Users\\x'),
+    ).toBe(join('C:\\Users\\x\\AppData\\Roaming', 'Claude', 'claude_desktop_config.json'));
+    expect(claudeDesktopPath('win32', {}, 'C:\\Users\\x')).toBe(
+      join('C:\\Users\\x', 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'),
+    );
+    expect(claudeDesktopPath('linux', {}, '/home/x')).toBe(
+      join('/home/x', '.config', 'Claude', 'claude_desktop_config.json'),
+    );
+  });
+});
+
+describe('recognising Stroq own wrapper', () => {
+  it('needs the entry path, the mcp/--server/--client run and a separator', () => {
+    expect(
+      wrapperIndex(['/x/dist/index.js', 'mcp', '--server', 'a', '--client', 'c', '--', 'node']),
+    ).toBe(1);
+    expect(
+      wrapperIndex([
+        '--import',
+        'tsx',
+        '/x/src/index.ts',
+        'mcp',
+        '--server',
+        'a',
+        '--client',
+        'c',
+        '--',
+        'n',
+      ]),
     ).toBe(3);
-    expect(wrapperIndex(['/usr/local/bin/stroq', 'mcp', '--server', 'a', '--', 'n'])).toBe(1);
+    expect(
+      wrapperIndex(['/usr/local/bin/stroq', 'mcp', '--server', 'a', '--client', 'c', '--', 'n']),
+    ).toBe(1);
     // A foreign server whose own argv happens to say `mcp --server` is NOT wrapped;
     // without the entry-path test it would read as wrapped and never be protected.
     expect(wrapperIndex(['server.js', 'mcp', '--server', 'x'])).toBeNull();
@@ -69,13 +103,44 @@ describe('recognising Stroq own wrapper', () => {
     expect(wrapperIndex([])).toBeNull();
   });
 
+  it('is not fooled by a foreign entry with an index.js path and mcp/--server but no --client', () => {
+    // Same entry-basename shape and the same `mcp`/`--server` tokens as a real wrap,
+    // but nothing requires `--client` right after the name for a foreign server —
+    // without that extra check this would misread as Stroq's own wrapper and get
+    // destructively "unwrapped" or replaced instead of wrapped fresh.
+    expect(wrapperIndex(['./dist/index.js', 'mcp', '--server', 'foo', '--', 'x'])).toBeNull();
+  });
+
   it('recovers the original command from after the separator', () => {
     expect(
-      unwrapArgs(['/x/dist/index.js', 'mcp', '--server', 'a', '--', 'npx', '-y', 'srv', '--flag']),
+      unwrapArgs([
+        '/x/dist/index.js',
+        'mcp',
+        '--server',
+        'a',
+        '--client',
+        'c',
+        '--',
+        'npx',
+        '-y',
+        'srv',
+        '--flag',
+      ]),
     ).toEqual({ command: 'npx', args: ['-y', 'srv', '--flag'] });
     // A `--` in the SERVER's own arguments is after ours, so it is kept.
     expect(
-      unwrapArgs(['/x/dist/index.js', 'mcp', '--server', 'a', '--', 'npx', '--', 'x']),
+      unwrapArgs([
+        '/x/dist/index.js',
+        'mcp',
+        '--server',
+        'a',
+        '--client',
+        'c',
+        '--',
+        'npx',
+        '--',
+        'x',
+      ]),
     ).toEqual({ command: 'npx', args: ['--', 'x'] });
     expect(unwrapArgs(['server.js'])).toBeNull();
   });
@@ -155,6 +220,38 @@ describe('wrapMcpConfig', () => {
     });
   });
 
+  it('does not mistake a foreign entry that merely looks wrapped for its own', () => {
+    // Same `mcp`/`--server` tokens and an `index.js`-shaped path as a real wrap, but
+    // no `--client` right after the name: a foreign server, not Stroq's own wrapper.
+    // Wrapping it must preserve its command and args verbatim behind the new
+    // wrapper's own `--`, rather than misreading part of them as Stroq's structure.
+    const foreign = wrapMcpConfig(
+      config({ foo: { command: './dist/index.js', args: ['mcp', '--server', 'foo', '--', 'x'] } }),
+      opts,
+    );
+    expect(foreign.outcomes).toEqual([{ name: 'foo', action: 'wrapped' }]);
+    expect(serversOf(foreign.config)['foo']?.['args']).toEqual([
+      '/x/dist/index.js',
+      'mcp',
+      '--server',
+      'foo',
+      '--client',
+      'claude-desktop',
+      '--cwd',
+      '/home/me/project',
+      '--',
+      './dist/index.js',
+      'mcp',
+      '--server',
+      'foo',
+      '--',
+      'x',
+    ]);
+    // A second wrap of the RESULT is correctly recognised as Stroq's own this time.
+    const again = wrapMcpConfig(foreign.config, opts);
+    expect(again.outcomes).toEqual([{ name: 'foo', action: 'already wrapped' }]);
+  });
+
   it('skips HTTP entries and entries with no command, and preserves order and foreign keys', () => {
     const { config: out, outcomes } = wrapMcpConfig(
       config(
@@ -201,6 +298,62 @@ describe('wrapMcpConfig', () => {
     expect(outcomes).toEqual([]);
     expect(out).toEqual({ other: 1, mcpServers: {} });
   });
+
+  it('coerces a non-string arg instead of dropping it', () => {
+    // Node's `child_process.spawn` stringifies argv anyway; dropping a numeric or
+    // boolean element instead of coercing it would silently shorten the server's
+    // real argv (e.g. a dangling `--port` with its value gone).
+    const { outcomes, config: out } = wrapMcpConfig(
+      config({ a: { command: 'node', args: ['s.js', '--port', 8080, '--verbose', true] } }),
+      opts,
+    );
+    expect(outcomes).toEqual([{ name: 'a', action: 'wrapped' }]);
+    expect(serversOf(out)['a']?.['args']).toEqual([
+      '/x/dist/index.js',
+      'mcp',
+      '--server',
+      'a',
+      '--client',
+      'claude-desktop',
+      '--cwd',
+      '/home/me/project',
+      '--',
+      'node',
+      's.js',
+      '--port',
+      '8080',
+      '--verbose',
+      'true',
+    ]);
+    // Unwrapping restores the coerced (now all-string) list, not the original types.
+    const restored = unwrapMcpConfig(out);
+    expect(serversOf(restored.config)['a']).toEqual({
+      command: 'node',
+      args: ['s.js', '--port', '8080', '--verbose', 'true'],
+    });
+  });
+
+  it('refuses to wrap an entry whose args is present but not an array', () => {
+    const { outcomes, config: out } = wrapMcpConfig(
+      config({ a: { command: 'node', args: '--port 8080' } }),
+      opts,
+    );
+    expect(outcomes).toEqual([{ name: 'a', action: 'skipped (args is not an array)' }]);
+    expect(serversOf(out)['a']).toEqual({ command: 'node', args: '--port 8080' });
+  });
+
+  it('never replaces a present-but-invalid mcpServers with an empty object', () => {
+    // A hand edit that turned `mcpServers` into an array (or any other non-object
+    // shape) is real user data; silently rewriting it to `{}` would destroy every
+    // server in the file. This function returns the config untouched instead.
+    const bad = { mcpServers: ['not', 'an', 'object'] } as unknown as McpConfigJson;
+    const { config: out, outcomes } = wrapMcpConfig(bad, opts);
+    expect(outcomes).toEqual([]);
+    expect(out).toEqual(bad);
+    expect(hasValidMcpServers(bad)).toBe(false);
+    expect(hasValidMcpServers({ mcpServers: {} })).toBe(true);
+    expect(hasValidMcpServers({})).toBe(true);
+  });
 });
 
 describe('unwrapMcpConfig', () => {
@@ -232,18 +385,56 @@ describe('unwrapMcpConfig', () => {
     ]);
     expect(serversOf(out)['a']).toEqual({ command: 'srv' });
   });
+
+  it('refuses to unwrap an entry whose args is present but not an array', () => {
+    const { outcomes, config: out } = unwrapMcpConfig(
+      config({ a: { command: 'node', args: '--port 8080' } }),
+    );
+    expect(outcomes).toEqual([{ name: 'a', action: 'skipped (args is not an array)' }]);
+    expect(serversOf(out)['a']).toEqual({ command: 'node', args: '--port 8080' });
+  });
+
+  it('never replaces a present-but-invalid mcpServers with an empty object', () => {
+    const bad = { mcpServers: ['not', 'an', 'object'] } as unknown as McpConfigJson;
+    const { config: out, outcomes } = unwrapMcpConfig(bad);
+    expect(outcomes).toEqual([]);
+    expect(out).toEqual(bad);
+  });
 });
 
 describe('countWrapped, which is what doctor reports', () => {
+  // A real, existing `index.js` — `countWrapped` now checks that a wrapper's
+  // recorded entry file still exists, so a fixture path like `/x/dist/index.js`
+  // (used everywhere else in this file, where existence never mattered) would
+  // wrongly count as stale here.
+  const entryDir = mkdtempSync(join(tmpdir(), 'stroq-mcp-entry-'));
+  const realEntry = join(entryDir, 'index.js');
+  writeFileSync(realEntry, '');
+  const realOpts: WrapOptions = { ...opts, entryArgv: [realEntry] };
+
   it('counts wrapped stdio entries and ignores HTTP ones', () => {
     const wrapped = wrapMcpConfig(
       config({ a: { command: 'x' }, b: { command: 'y' }, remote: { url: 'https://x.example' } }),
-      opts,
+      realOpts,
     );
-    expect(countWrapped(wrapped.config)).toEqual({ wrapped: 2, stdio: 2 });
+    expect(countWrapped(wrapped.config)).toEqual({ wrapped: 2, stdio: 2, stale: 0 });
     // Unwrapping puts both stdio entries back, so none is behind the proxy any more.
-    expect(countWrapped(unwrapMcpConfig(wrapped.config).config)).toEqual({ wrapped: 0, stdio: 2 });
-    expect(countWrapped({ mcpServers: {} })).toEqual({ wrapped: 0, stdio: 0 });
+    expect(countWrapped(unwrapMcpConfig(wrapped.config).config)).toEqual({
+      wrapped: 0,
+      stdio: 2,
+      stale: 0,
+    });
+    expect(countWrapped({ mcpServers: {} })).toEqual({ wrapped: 0, stdio: 0, stale: 0 });
+  });
+
+  it('does not count a wrapper whose recorded entry file no longer exists', () => {
+    // Both entries are recognisably wrapped, but their recorded entry path is gone —
+    // an upgrade or uninstall that removed the old path without re-running `init`.
+    const wrapped = wrapMcpConfig(config({ a: { command: 'x' }, b: { command: 'y' } }), {
+      ...opts,
+      entryArgv: ['/does/not/exist/index.js'],
+    });
+    expect(countWrapped(wrapped.config)).toEqual({ wrapped: 0, stdio: 2, stale: 2 });
   });
 });
 

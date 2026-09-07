@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   POST_MATCHER,
   PRE_MATCHER,
@@ -24,6 +24,15 @@ import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { isStroqWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+
+// Pinned before every test, like `doctor.test.ts` does: several `--client` targets
+// (claude-desktop, windsurf, cursor --user) resolve under the real home directory
+// unless it is overridden, and no test in this file may touch the real one.
+beforeEach(() => {
+  const fakeHome = mkdtempSync(join(tmpdir(), 'stroq-init-home-'));
+  process.env['HOME'] = fakeHome;
+  process.env['STROQ_HOME'] = join(fakeHome, 'stroq-home');
+});
 
 describe('hookCommand', () => {
   it('quotes node and the entry file', () => {
@@ -502,7 +511,8 @@ describe('runInit --agent mcp', () => {
     // An HTTP entry has no subprocess to wrap and is left exactly as it was.
     expect(servers(file)['remote']).toEqual({ url: 'https://mcp.example/sse' });
     expect(out.lines.join('')).toContain('wrapped github');
-    expect(out.lines.join('')).toContain('skipped (http) remote');
+    // The qualifier comes last: "skipped remote (http)", not "skipped (http) remote".
+    expect(out.lines.join('')).toContain('skipped remote (http)');
     expect(out.lines.join('')).toContain('Restart the MCP client');
   });
 
@@ -536,17 +546,21 @@ describe('runInit --agent mcp', () => {
     expect(out.lines.join('')).toContain('unwrapped github');
   });
 
-  it('writes nothing with --dry-run', async () => {
+  it('writes nothing with --dry-run, keeping stdout pure JSON and outcomes on stderr', async () => {
     const dir = project();
     const file = join(dir, 'mcp.json');
     const before = JSON.stringify({ mcpServers: { a: { command: 'srv' } } });
     writeFileSync(file, before);
-    const out = capture();
+    const out = captureBoth();
     const code = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file, '--dry-run']));
     out.restore();
     expect(code).toBe(0);
     expect(readFileSync(file, 'utf8')).toBe(before);
-    expect(out.lines.join('')).toContain('"mcpServers"');
+    // stdout carries only the preview, so a `--dry-run | jq` pipeline still works.
+    expect(() => JSON.parse(out.out.join(''))).not.toThrow();
+    expect(out.out.join('')).toContain('"mcpServers"');
+    // The per-entry line still prints — just not where it would corrupt the JSON.
+    expect(out.err.join('')).toContain('wrapped a');
   });
 
   it('refuses a missing file, an unknown client, and both or neither selector', async () => {
@@ -567,6 +581,45 @@ describe('runInit --agent mcp', () => {
     expect(text).toContain('no MCP config at');
     expect(text).toContain('unknown client "vscode"');
     expect(text).toContain('exactly one of --client <name> or --config <path>');
+  });
+
+  it('reports a directory or an empty --config as a friendly error, not a crash', async () => {
+    // `existsSync` alone says "yes" for a directory; reading it as JSON throws an
+    // uncaught EISDIR unless `initMcp` checks `.isFile()` first. An empty --config
+    // resolves to `process.cwd()` — also a directory — via the same code path.
+    const dir = project();
+    const out = capture();
+    const directory = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', dir]));
+    const empty = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', '']));
+    out.restore();
+    expect([directory, empty]).toEqual([1, 1]);
+    expect(out.lines.join('')).toContain('no MCP config at');
+  });
+
+  it('refuses to rewrite a config whose mcpServers is present but not an object', async () => {
+    const dir = project();
+    const file = join(dir, 'mcp.json');
+    // A hand edit that turned `mcpServers` into an array; rewriting it to `{}` would
+    // destroy every server the user has configured.
+    const before = JSON.stringify({ mcpServers: ['not', 'an', 'object'] });
+    writeFileSync(file, before);
+    const both = captureBoth();
+    const code = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file]));
+    both.restore();
+    expect(code).toBe(1);
+    expect(both.err.join('')).toContain('cannot rewrite');
+    expect(both.err.join('')).toContain('mcpServers is not an object');
+    // The file is untouched byte-for-byte — not even re-serialised unchanged.
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    // --dry-run refuses the same way, before ever printing a preview.
+    const dryOut = captureBoth();
+    const dryCode = await inDir(dir, () =>
+      runInit(['--agent', 'mcp', '--config', file, '--dry-run']),
+    );
+    dryOut.restore();
+    expect(dryCode).toBe(1);
+    expect(dryOut.out.join('')).toBe('');
+    expect(readFileSync(file, 'utf8')).toBe(before);
   });
 
   it('wraps a named client project file and records this directory as the project', async () => {
