@@ -8,6 +8,7 @@ import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqWindsurfHooks, readWindsurfHooks, windsurfHooksPath } from './windsurf-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
+import { countWrapped, mcpConfigPath, readMcpConfig, type McpClient } from './mcp-config.js';
 import {
   OPENCLAW_PLUGIN_MANIFEST,
   isStroqOpenClawPlugin,
@@ -111,6 +112,12 @@ interface ScopeStatus {
   readonly file: string;
   readonly installed: boolean;
   readonly error: string | null;
+  /**
+   * Replaces the default `<scope>: installed/missing (<file>)` rendering. Only the
+   * MCP proxy row sets it — a proxy install is a count of wrapped servers, not a
+   * yes/no — so the six agent lines render exactly as they did before.
+   */
+  readonly detail?: string;
 }
 
 function agentScopes(
@@ -122,6 +129,55 @@ function agentScopes(
     const file = pathFor(scope, cwd);
     return { scope, file, ...check(file) };
   });
+}
+
+/** Every known MCP client config, in the order `doctor` reports them. */
+const MCP_CONFIGS: readonly { readonly client: McpClient; readonly scope: 'project' | 'user' }[] = [
+  { client: 'claude-desktop', scope: 'user' },
+  { client: 'windsurf', scope: 'user' },
+  { client: 'cursor', scope: 'project' },
+  { client: 'cursor', scope: 'user' },
+  { client: 'claude-code', scope: 'project' },
+];
+
+/**
+ * One entry per known client config that EXISTS, carrying how many of its stdio
+ * servers go through the proxy. A config that does not exist is skipped silently:
+ * a Claude Desktop user must not be told their Cursor install is missing. When none
+ * exists there is nothing to count, and the row says so.
+ */
+function mcpProxyScopes(cwd: string): ScopeStatus[] {
+  const found: ScopeStatus[] = [];
+  const seen = new Set<string>();
+  for (const { client, scope } of MCP_CONFIGS) {
+    const file = mcpConfigPath(client, scope, cwd);
+    // Cursor's two scopes resolve to the same file when the project IS the home
+    // directory; counting it twice would report double the servers.
+    if (seen.has(file) || !existsSync(file)) continue;
+    seen.add(file);
+    try {
+      const counted = countWrapped(readMcpConfig(file));
+      found.push({
+        scope,
+        file,
+        installed: counted.wrapped > 0,
+        error: null,
+        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers (${file})`,
+      });
+    } catch (err) {
+      found.push({ scope, file, installed: false, error: (err as Error).message });
+    }
+  }
+  if (found.length > 0) return found;
+  return [
+    {
+      scope: 'user',
+      file: mcpConfigPath('claude-desktop', 'user', cwd),
+      installed: false,
+      error: null,
+      detail: 'not installed (no MCP client config found)',
+    },
+  ];
 }
 
 interface AgentStatus {
@@ -146,7 +202,10 @@ function hooksCheck(
   const installed = scopes.some((s) => s.installed);
   const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopes
-    .map((s) => s.error ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`)
+    .map(
+      (s) =>
+        s.error ?? s.detail ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`,
+    )
     .join('; ');
   return {
     name,
@@ -197,6 +256,7 @@ export async function doctorReport(cwd: string = process.cwd()): Promise<DoctorR
     { name: 'copilot hooks', scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks) },
     { name: 'openclaw plugin', scopes: openclawScopes() },
     { name: 'windsurf hooks', scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks) },
+    { name: 'mcp proxy', scopes: mcpProxyScopes(cwd) },
   ];
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,

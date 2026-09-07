@@ -220,7 +220,7 @@ describe('runInit --agent', () => {
     out.restore();
     expect(code).toBe(1);
     expect(out.lines.join('')).toBe(
-      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
+      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, mcp)\n',
     );
   });
 });
@@ -466,5 +466,122 @@ describe('runInit --agent windsurf', () => {
     expect(existsSync(settingsPath('project', dir))).toBe(false);
     expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
     expect(existsSync(copilotHooksPath('project', dir))).toBe(false);
+  });
+});
+
+describe('runInit --agent mcp', () => {
+  const project = () => mkdtempSync(join(tmpdir(), 'stroq-init-mcp-'));
+  const servers = (file: string) =>
+    (
+      JSON.parse(readFileSync(file, 'utf8')) as {
+        mcpServers: Record<string, Record<string, unknown>>;
+      }
+    ).mcpServers;
+  const argsOf = (file: string, name: string) => servers(file)[name]?.['args'] as string[];
+
+  it('wraps every stdio server of a config file it is pointed at', async () => {
+    const dir = project();
+    const file = join(dir, 'mcp.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          github: { command: 'npx', args: ['-y', 'srv'] },
+          remote: { url: 'https://mcp.example/sse' },
+        },
+      }),
+    );
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file]));
+    out.restore();
+    expect(code).toBe(0);
+    const args = argsOf(file, 'github');
+    expect(args).toContain('mcp');
+    expect(args[args.indexOf('--server') + 1]).toBe('github');
+    expect(args.slice(args.indexOf('--') + 1)).toEqual(['npx', '-y', 'srv']);
+    // An HTTP entry has no subprocess to wrap and is left exactly as it was.
+    expect(servers(file)['remote']).toEqual({ url: 'https://mcp.example/sse' });
+    expect(out.lines.join('')).toContain('wrapped github');
+    expect(out.lines.join('')).toContain('skipped (http) remote');
+    expect(out.lines.join('')).toContain('Restart the MCP client');
+  });
+
+  it('restores the original command with --unwrap', async () => {
+    const dir = project();
+    const file = join(dir, 'mcp.json');
+    writeFileSync(
+      file,
+      JSON.stringify({ mcpServers: { github: { command: 'npx', args: ['srv'] } } }),
+    );
+    const out = capture();
+    // `runInit` derives its own entry from `process.argv[1]`, which under vitest is the
+    // worker's own script rather than a Stroq entry — so the wrapper it writes would not
+    // be recognised as Stroq's own on the second pass (by design: see `wrapperIndex`).
+    // A real `stroq` invocation always has this resolve to `dist/index.js` or
+    // `src/index.ts`, so stub it to that shape here, restoring the real value afterwards
+    // since `process.argv` is shared, mutable state.
+    const originalArgv1 = process.argv[1];
+    process.argv[1] = '/opt/stroq/dist/index.js';
+    let code: number;
+    try {
+      await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file]));
+      code = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file, '--unwrap']));
+    } finally {
+      if (originalArgv1 === undefined) process.argv.splice(1, 1);
+      else process.argv[1] = originalArgv1;
+    }
+    out.restore();
+    expect(code).toBe(0);
+    expect(servers(file)['github']).toEqual({ command: 'npx', args: ['srv'] });
+    expect(out.lines.join('')).toContain('unwrapped github');
+  });
+
+  it('writes nothing with --dry-run', async () => {
+    const dir = project();
+    const file = join(dir, 'mcp.json');
+    const before = JSON.stringify({ mcpServers: { a: { command: 'srv' } } });
+    writeFileSync(file, before);
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'mcp', '--config', file, '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    expect(out.lines.join('')).toContain('"mcpServers"');
+  });
+
+  it('refuses a missing file, an unknown client, and both or neither selector', async () => {
+    const dir = project();
+    const out = capture();
+    // A missing config is nothing to wrap: creating one would look like success.
+    const missing = await inDir(dir, () =>
+      runInit(['--agent', 'mcp', '--config', join(dir, 'none.json')]),
+    );
+    const unknown = await inDir(dir, () => runInit(['--agent', 'mcp', '--client', 'vscode']));
+    const neither = await inDir(dir, () => runInit(['--agent', 'mcp']));
+    const both = await inDir(dir, () =>
+      runInit(['--agent', 'mcp', '--client', 'cursor', '--config', join(dir, 'mcp.json')]),
+    );
+    out.restore();
+    expect([missing, unknown, neither, both]).toEqual([1, 1, 1, 1]);
+    const text = out.lines.join('');
+    expect(text).toContain('no MCP config at');
+    expect(text).toContain('unknown client "vscode"');
+    expect(text).toContain('exactly one of --client <name> or --config <path>');
+  });
+
+  it('wraps a named client project file and records this directory as the project', async () => {
+    const dir = project();
+    const file = join(dir, '.mcp.json');
+    writeFileSync(file, JSON.stringify({ mcpServers: { a: { command: 'srv' } } }));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'mcp', '--client', 'claude-code']));
+    out.restore();
+    expect(code).toBe(0);
+    const args = argsOf(file, 'a');
+    expect(args[args.indexOf('--client') + 1]).toBe('claude-code');
+    // The recorded directory is where `init` ran, which is what feeds the secret index
+    // and the path rules for every wrapped server. `realpathSync` because macOS
+    // resolves the temp directory symlink on chdir.
+    expect(args[args.indexOf('--cwd') + 1]).toBe(realpathSync(dir));
   });
 });
