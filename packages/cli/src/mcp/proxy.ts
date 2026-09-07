@@ -86,12 +86,19 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     for (const line of serverLines.push(chunk)) toClient.run(() => pump.onServerLine(line));
   });
 
+  // Set once the child has closed, right before the timers below are first cleared.
+  // The EOF handler runs inside a QUEUED `toServer` task, so a client that closes
+  // its end while the proxy is still draining can reach it AFTER that clearing —
+  // and a kill armed from there is one nothing will ever cancel, holding the event
+  // loop open for twice the grace period aimed at a server that has already gone.
+  let shuttingDown = false;
   let termTimer: NodeJS.Timeout | null = null;
   let killTimer: NodeJS.Timeout | null = null;
   options.stdin.on('end', () => {
     toServer.run(async () => {
       for (const line of clientLines.flush()) await pump.onClientLine(line);
       serverIn.end();
+      if (shuttingDown) return;
       // The client is gone. The server gets a grace period to notice its stdin
       // closed, then SIGTERM, then SIGKILL: one that ignores both would otherwise
       // outlive the client it was launched for.
@@ -127,6 +134,7 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     });
   });
 
+  shuttingDown = true;
   if (termTimer !== null) clearTimeout(termTimer);
   if (killTimer !== null) clearTimeout(killTimer);
   if (signalKillTimer !== null) clearTimeout(signalKillTimer);
@@ -135,6 +143,13 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
   for (const line of serverLines.flush()) toClient.run(() => pump.onServerLine(line));
   await toClient.idle();
   await toServer.idle();
+  // Cleared a second time, now that both queues have drained. The guard above and
+  // the arming under it are one synchronous block, so the guard alone is what makes
+  // a stale timer impossible — but the clear is a line, and having it here means
+  // "no timer this run armed outlives it" holds by reading this function, rather
+  // than by reasoning about which task ran in which turn.
+  if (termTimer !== null) clearTimeout(termTimer);
+  if (killTimer !== null) clearTimeout(killTimer);
   // A client whose own stdin is still open would keep this process alive forever,
   // now that there is no server left to talk to. Removes only the ONE listener this
   // function registered — `options.stdin` is caller-supplied, and a caller may have
