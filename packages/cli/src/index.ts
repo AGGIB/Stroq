@@ -4,6 +4,7 @@ import { runDoctor } from './commands/doctor.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInit } from './commands/init.js';
 import { runLog } from './commands/log.js';
+import { runMcp } from './commands/mcp.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runWhy } from './commands/why.js';
@@ -13,10 +14,12 @@ const USAGE = `stroq <command>
 Commands:
   init [--agent <name>] [--user] [--dry-run]
                                      install hooks (--agent claude-code | cursor | codex | copilot | openclaw | windsurf; project config by default)
+                                     or wrap a client's MCP servers (--agent mcp --client <name>)
   hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
   hook windsurf                      Windsurf entrypoint: its events name themselves, and a block is exit 2 with the reason on stderr
   hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
   hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
+  mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
   doctor                             check the installation
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
@@ -49,6 +52,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     }
     case 'init':
       return runInit(rest);
+    case 'mcp':
+      return runMcp(rest);
     case 'doctor':
       return runDoctor();
     case 'log':
