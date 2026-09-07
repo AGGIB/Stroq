@@ -7,6 +7,25 @@ import { isRecord } from '../adapters/tool-input.js';
  * Nothing here talks to the engine — see `judge.ts` — and nothing here ever rewrites
  * a line: `SplitLine.text` is the exact text that arrived, and `SplitLine.eol` is the
  * exact terminator that followed it, so forwarding is `text + eol` and nothing else.
+ *
+ * `createLineSplitter` holds pending chunks in an array and joins them at most once
+ * per line — when the line completes, or, in streaming mode, when it first crosses
+ * `MAX_LINE_CHARS` — rather than re-concatenating and re-scanning an ever-growing
+ * string on every chunk, which used to make accumulating one long line quadratic in
+ * its length (and, eventually, an unhandled `RangeError` once the buffer neared V8's
+ * string-length limit).
+ *
+ * That still leaves a choice for a line that crosses `MAX_LINE_CHARS`, and the two
+ * directions need different answers. `createLineSplitter({ streamOversize: true })`
+ * — the server side — bounds memory by emitting the line as a run of consecutive
+ * oversize `SplitLine` segments as data arrives: all but the last have `eol: ''`,
+ * only the last carries the real terminator, and the run is forwarded verbatim and
+ * in order without ever being parsed, because a multi-gigabyte server line is never
+ * going to be judged anyway (see `MAX_LINE_CHARS`). `createLineSplitter()` — the
+ * default, and the client side — always buffers a line whole and emits it as a
+ * single `SplitLine`, however large, because a client line is always parsed and
+ * judged in full; streaming a big `tools/call` through unparsed would be exactly the
+ * bypass this proxy exists to prevent.
  */
 
 /**
@@ -16,8 +35,11 @@ import { isRecord } from '../adapters/tool-input.js';
  * client's session with it. Client lines are always parsed however large they are —
  * a `tools/call` is the thing Stroq exists to judge, and declining to judge a big one
  * is exactly the bypass. This bounds the PARSE, not the buffer: framing has to
- * accumulate a line either way. Measured in decoded UTF-16 code units, which is bytes
- * for the ASCII JSON these streams carry.
+ * accumulate a line either way. Measured in decoded UTF-16 code units, not bytes:
+ * that is the same thing for the ASCII JSON these streams mostly carry, but not in
+ * general — 8,388,608 copies of a non-ASCII character such as 'あ' is exactly
+ * `MAX_LINE_CHARS` UTF-16 code units (so not oversize) while being 24 MiB of UTF-8
+ * on the wire. The bound tracks decoded JS string length, not serialized size.
  */
 export const MAX_LINE_CHARS = 8 * 1024 * 1024;
 
@@ -27,12 +49,19 @@ export interface SplitLine {
   readonly text: string;
   /** `'\n'` for a terminated line, `''` for the final unterminated remainder. */
   readonly eol: '\n' | '';
-  /** True when this line's own length is past `MAX_LINE_CHARS`. */
+  /**
+   * True when this line's own length is past `MAX_LINE_CHARS`, counted the same
+   * way `MAX_LINE_CHARS` is (UTF-16 code units, not bytes). In streaming mode, a
+   * single oversize input line arrives as a run of consecutive `SplitLine` values
+   * that are all `oversize: true`, with `eol: ''` on every one but the last of the
+   * run — treat the whole run as one line: forward each segment verbatim and in
+   * order, and never parse one on its own.
+   */
   readonly oversize: boolean;
 }
 
 export interface LineSplitter {
-  /** Every line this chunk completed, in arrival order. */
+  /** Every line this chunk completed, in arrival order — or, in streaming mode, every oversize segment. */
   push(chunk: string): readonly SplitLine[];
   /** The unterminated remainder at end of stream, or `[]` when there is none. */
   flush(): readonly SplitLine[];
@@ -41,29 +70,80 @@ export interface LineSplitter {
 /**
  * Both streams are read with `setEncoding('utf8')`, so chunks arrive already decoded
  * and a multi-byte character straddling a chunk boundary is never split in half here.
+ *
+ * `options.streamOversize` (default `false`) picks which contract documented on
+ * `SplitLine.oversize` applies — see the module comment above for why the two
+ * directions differ. Only the newly arrived chunk is ever scanned for `\n`, and
+ * pending fragments are joined at most once per line, so accumulating a line costs
+ * work proportional to its length, not its length squared, in either mode.
  */
-export function createLineSplitter(): LineSplitter {
-  let buffer = '';
+export function createLineSplitter(options?: { readonly streamOversize?: boolean }): LineSplitter {
+  const streamOversize = options?.streamOversize ?? false;
+  let pending: string[] = [];
+  let pendingLength = 0;
+  // Streaming mode only: true while the line under construction has already
+  // crossed MAX_LINE_CHARS and is being handed out as it arrives rather than
+  // being buffered further.
+  let inOversizeLine = false;
+
+  /** Joins and clears whatever is pending. Called at most once per line. */
+  const drainPending = (): string => {
+    const text = pending.join('');
+    pending = [];
+    pendingLength = 0;
+    return text;
+  };
+
   return {
     push(chunk: string): readonly SplitLine[] {
-      buffer += chunk;
       const lines: SplitLine[] = [];
-      let start = 0;
+      let searchStart = 0;
       for (;;) {
-        const nl = buffer.indexOf('\n', start);
-        if (nl === -1) break;
-        const text = buffer.slice(start, nl);
-        lines.push({ text, eol: '\n', oversize: text.length > MAX_LINE_CHARS });
-        start = nl + 1;
+        const nl = chunk.indexOf('\n', searchStart);
+        if (nl === -1) {
+          const rest = chunk.slice(searchStart);
+          if (rest.length > 0) {
+            if (streamOversize && inOversizeLine) {
+              // Still inside an oversize line: hand this fragment straight
+              // through rather than adding it to a buffer that would only grow
+              // without bound for a line the server never terminates.
+              lines.push({ text: rest, eol: '', oversize: true });
+            } else {
+              pending.push(rest);
+              pendingLength += rest.length;
+              if (streamOversize && pendingLength > MAX_LINE_CHARS) {
+                inOversizeLine = true;
+                lines.push({ text: drainPending(), eol: '', oversize: true });
+              }
+            }
+          }
+          break;
+        }
+        const segment = chunk.slice(searchStart, nl);
+        if (streamOversize && inOversizeLine) {
+          // The `\n` that ends the oversize line: close out the run.
+          lines.push({ text: segment, eol: '\n', oversize: true });
+          inOversizeLine = false;
+        } else {
+          pending.push(segment);
+          pendingLength += segment.length;
+          const text = drainPending();
+          lines.push({ text, eol: '\n', oversize: text.length > MAX_LINE_CHARS });
+        }
+        searchStart = nl + 1;
       }
-      buffer = buffer.slice(start);
       return lines;
     },
     flush(): readonly SplitLine[] {
-      if (buffer === '') return [];
-      const line: SplitLine = { text: buffer, eol: '', oversize: buffer.length > MAX_LINE_CHARS };
-      buffer = '';
-      return [line];
+      if (inOversizeLine) {
+        // Every byte of the unterminated tail was already streamed out by
+        // push() above; there is nothing left buffered to return.
+        inOversizeLine = false;
+        return [];
+      }
+      if (pending.length === 0) return [];
+      const text = drainPending();
+      return [{ text, eol: '', oversize: text.length > MAX_LINE_CHARS }];
     },
   };
 }
@@ -178,6 +258,15 @@ export class PendingTable {
     return this.entries.size;
   }
 
+  /**
+   * A client reusing an id that is still pending overwrites its entry — the
+   * response is then attributed to this newer request's method and tool name —
+   * but `Map.set` on an existing key does not move it in iteration order, so the
+   * refreshed entry keeps its original, older eviction position rather than being
+   * treated as freshly inserted. That is by design: a well-behaved client never
+   * reuses a pending id, and re-inserting to refresh position would cost more
+   * than the case is worth.
+   */
   set(id: JsonRpcId, entry: PendingRequest): void {
     this.entries.set(keyOf(id), entry);
     // A Map iterates in insertion order, so the first key is always the oldest.
