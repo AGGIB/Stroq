@@ -27,6 +27,8 @@ let cwd: string;
 beforeEach(() => {
   process.env['STROQ_HOME'] = mkdtempSync(join(tmpdir(), 'stroq-mcp-signals-'));
   cwd = mkdtempSync(join(tmpdir(), 'stroq-mcp-signals-cwd-'));
+  // Off unless a test asks for it, so no test inherits the keep-alive from another.
+  process.env['STROQ_MCP_STUB_KEEPALIVE'] = '0';
 });
 
 describe('signal escalation', () => {
@@ -101,6 +103,47 @@ describe('signal escalation', () => {
 
     expect(code).toBe(1);
     expect(elapsed).toBeLessThan(GRACE_MS / 2);
+  }, 15_000);
+});
+
+describe('the EOF shutdown escalation', () => {
+  it('ends the server stdin, then SIGTERMs, then SIGKILLs a server that outlives its client', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const GRACE_MS = 200;
+    // The stub ignores both signals AND keeps its event loop alive past stdin EOF,
+    // so it is exactly the server this path exists for: one that notices neither
+    // its stdin closing nor the SIGTERM that follows. Without the keep-alive it
+    // would exit on EOF by itself and the escalation would never be exercised.
+    process.env['STROQ_MCP_STUB_KEEPALIVE'] = '1';
+
+    const done = runMcpProxy({
+      engine: createEngine(),
+      sessionId: 'mcp:test',
+      server: 'demo',
+      cwd,
+      command: process.execPath,
+      args: [ignoreSigtermServer],
+      stdin,
+      stdout,
+      stderr,
+      shutdownGraceMs: GRACE_MS,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const start = Date.now();
+    // The client is gone: no signal is sent to the proxy at all, so everything that
+    // follows is the EOF path's own escalation.
+    stdin.end();
+
+    const code = await done;
+    const elapsed = Date.now() - start;
+
+    // Killed by SIGKILL, which the proxy arms at twice the grace period.
+    expect(code).toBe(1);
+    expect(elapsed).toBeGreaterThanOrEqual(GRACE_MS * 2 - 30);
+    expect(elapsed).toBeLessThan(5000);
   }, 15_000);
 });
 
