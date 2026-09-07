@@ -1,9 +1,27 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+/**
+ * Every child this file spawns (proxy subprocesses; the fake server is the proxy's
+ * OWN child, not this file's) is tracked here so a failed assertion — which skips
+ * the rest of a test, including any explicit `stdin.end()`/`exit()` — cannot leave a
+ * process running past the test that started it.
+ */
+const liveChildren = new Set<ChildProcess>();
+function tracked<T extends ChildProcess>(child: T): T {
+  liveChildren.add(child);
+  child.once('close', () => liveChildren.delete(child));
+  return child;
+}
+
+afterEach(() => {
+  for (const child of liveChildren) if (!child.killed) child.kill('SIGKILL');
+  liveChildren.clear();
+});
 
 const cliDir = join(import.meta.dirname, '../..');
 const entry = join(cliDir, 'src/index.ts');
@@ -73,33 +91,35 @@ interface Proxy {
 
 function startProxy(project: string, home: string, extra: Record<string, string> = {}): Proxy {
   const serverLog = join(project, 'server-received.log');
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      tsxLoader,
-      entry,
-      'mcp',
-      '--server',
-      'demo',
-      '--client',
-      'e2e',
-      '--cwd',
-      project,
-      '--',
+  const child = tracked(
+    spawn(
       process.execPath,
-      fakeServer,
-    ],
-    {
-      cwd: project,
-      env: {
-        ...process.env,
-        STROQ_HOME: home,
-        TSX_TSCONFIG_PATH: join(cliDir, 'tsconfig.json'),
-        FAKE_SERVER_LOG: serverLog,
-        ...extra,
+      [
+        '--import',
+        tsxLoader,
+        entry,
+        'mcp',
+        '--server',
+        'demo',
+        '--client',
+        'e2e',
+        '--cwd',
+        project,
+        '--',
+        process.execPath,
+        fakeServer,
+      ],
+      {
+        cwd: project,
+        env: {
+          ...process.env,
+          STROQ_HOME: home,
+          TSX_TSCONFIG_PATH: join(cliDir, 'tsconfig.json'),
+          FAKE_SERVER_LOG: serverLog,
+          ...extra,
+        },
       },
-    },
+    ),
   );
   return {
     child,
@@ -231,14 +251,16 @@ describe('stroq mcp (end to end)', () => {
     const dir = project();
     const run = (args: readonly string[]) =>
       new Promise<{ code: number | null; stderr: string }>((resolve) => {
-        const child = spawn(process.execPath, ['--import', tsxLoader, entry, 'mcp', ...args], {
-          cwd: dir,
-          env: {
-            ...process.env,
-            STROQ_HOME: stroqHome(),
-            TSX_TSCONFIG_PATH: join(cliDir, 'tsconfig.json'),
-          },
-        });
+        const child = tracked(
+          spawn(process.execPath, ['--import', tsxLoader, entry, 'mcp', ...args], {
+            cwd: dir,
+            env: {
+              ...process.env,
+              STROQ_HOME: stroqHome(),
+              TSX_TSCONFIG_PATH: join(cliDir, 'tsconfig.json'),
+            },
+          }),
+        );
         let stderr = '';
         child.stderr.on('data', (d: Buffer) => {
           stderr += d.toString();

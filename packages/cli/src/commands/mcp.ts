@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { createEngine } from '../engine-factory.js';
 import { runMcpProxy } from '../mcp/proxy.js';
 
@@ -43,7 +44,11 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     }
     if (!OPTIONS.has(token)) return { ok: false, error: `unknown option "${token}"` };
     const value = argv[i + 1];
-    if (value === undefined || value === '--')
+    // A value starting with `--` (the bare separator included) is always the NEXT
+    // flag or the separator, never a real value — a config with a missing value
+    // (`--server --client x`) would otherwise silently swallow the next flag as
+    // this one's value instead of failing loudly.
+    if (value === undefined || value.startsWith('--'))
       return { ok: false, error: `${token} needs a value` };
     if (token === '--server') server = value;
     if (token === '--client') client = value;
@@ -57,6 +62,16 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   if (command === undefined || command === '')
     return { ok: false, error: 'the server command must follow "--"' };
   return { ok: true, invocation: { server, client, session, cwd, command, args } };
+}
+
+/**
+ * A `--cwd` value made absolute against the proxy's own `process.cwd()`; the
+ * omitted-flag default (`process.cwd()` itself) is already absolute and passes
+ * through `resolve` unchanged. Split out from `runMcp` so the resolution — not the
+ * whole long-running proxy — is what a test exercises directly.
+ */
+export function resolveMcpCwd(cwd: string | null): string {
+  return resolve(cwd ?? process.cwd());
 }
 
 /**
@@ -81,7 +96,7 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     server: invocation.server,
     // Claude Desktop launches its servers from `/`, so the project directory has to
     // be recorded at install time; nothing on the wire can change it.
-    cwd: invocation.cwd ?? process.cwd(),
+    cwd: resolveMcpCwd(invocation.cwd),
     command: invocation.command,
     args: invocation.args,
     stdin: process.stdin,
