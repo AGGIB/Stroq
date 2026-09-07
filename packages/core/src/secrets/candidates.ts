@@ -9,17 +9,33 @@ export interface SecretCandidate {
 }
 
 /**
- * Ceiling on the text taken from one tool input before tokenisation. Bounding the
- * INPUT rather than the candidate count is what makes padding useless: an attacker
- * who could evict candidates by adding text would have a bypass, so the only limit
- * is on how much text is considered at all.
+ * Ceiling on ONE window of the text taken from a tool input. Bounding the INPUT
+ * rather than the candidate count is what makes padding useless inside a window:
+ * an attacker who could evict candidates by adding text would have a bypass, so
+ * the only limit is on how much text one pass considers at all. The whole input
+ * is read as a series of these, up to `MAX_SCAN_CHARS`.
  */
 export const MAX_INPUT_CHARS = 262_144;
 /**
+ * Total text scanned across all windows: eight `MAX_INPUT_CHARS` windows. Text past
+ * this is not scanned at all — the engine denies an egress-shaped action that
+ * reaches it (`secret.unscannable`), so nothing beyond the bound is ever forwarded
+ * on trust. Measured with this loop: 2 MiB of the densest padding tokenises in
+ * ~180 ms, well inside every adapter's hook budget (10 s at the tightest).
+ */
+export const MAX_SCAN_CHARS = 2 * 1024 * 1024;
+/**
+ * Overlap between consecutive windows, so a value straddling a window boundary is
+ * still seen whole by the later window. No credential comes near 4 KiB — the index
+ * refuses whitespace-bearing values and `MIN_SECRET_LENGTH` is 12 — so this is a
+ * generous margin, and the cost is one extra 4 KiB pass per window boundary.
+ */
+export const SCAN_OVERLAP = 4_096;
+/**
  * Pure memory guard on the candidate list, not a security bound. The densest
- * measured padding (`a%41=b%41:c%41` repeated) yields ~0.19 candidates per input
- * character, i.e. ~50k for `MAX_INPUT_CHARS` of text; this ceiling sits four times
- * above that, so ordering never decides what gets looked up.
+ * measured padding yields ~0.15 candidates per input character, i.e. ~38k for
+ * `MAX_INPUT_CHARS` of text; a full 2 MiB of it saturates this ceiling, which is
+ * why it is a memory guard and never the thing that decides what gets looked up.
  */
 export const MAX_CANDIDATES = 200_000;
 // Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
@@ -92,28 +108,53 @@ function withDecoded(spans: readonly string[]): SecretCandidate[] {
 }
 
 /**
- * Substrings of a tool input that could be a secret value: whole value spans
- * that survive an embedded delimiter, plus the coarse/fine delimiter-split
- * pieces (with and without `/` and `@`), each paired with its URL-decoded form.
- * Keeps pieces of secret length and dedupes; the text itself is truncated at
- * `MAX_INPUT_CHARS` so padding cannot push a payload out of the result.
+ * Substrings of a tool input that could be a secret value: whole value spans that
+ * survive an embedded delimiter, plus the coarse/fine delimiter-split pieces (with
+ * and without `/` and `@`), each paired with its URL-decoded form. Keeps pieces of
+ * secret length and dedupes across every window.
+ *
+ * The text is read in `MAX_INPUT_CHARS` windows overlapping by `SCAN_OVERLAP`, up to
+ * `MAX_SCAN_CHARS` in total, so padding cannot push a payload out of the result and
+ * a value on a window boundary is still seen whole. An input longer than the bound
+ * is scanned only to it; `exceedsSecretScan` reports that, and the engine denies
+ * such an action rather than trusting a partial scan.
  */
 export function candidateTokens(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
 ): SecretCandidate[] {
-  const text = textOf(toolName, toolInput).slice(0, MAX_INPUT_CHARS);
-  if (text.trim() === '') return [];
-  const coarse = text.split(DELIMITERS);
-  const fine = coarse.flatMap((piece) => piece.split(SLASH));
+  const text = textOf(toolName, toolInput);
+  const limit = Math.min(text.length, MAX_SCAN_CHARS);
   const seen = new Set<string>();
   const out: SecretCandidate[] = [];
-  for (const candidate of withDecoded([...valueSpans(text), ...coarse, ...fine])) {
-    const key = `${candidate.token}\n${candidate.raw}`;
-    if (candidate.token.length < MIN_SECRET_LENGTH || seen.has(key)) continue;
-    seen.add(key);
-    out.push(candidate);
-    if (out.length >= MAX_CANDIDATES) break;
+  for (let start = 0; start < limit; start += MAX_INPUT_CHARS) {
+    const window = text.slice(
+      Math.max(0, start - SCAN_OVERLAP),
+      Math.min(start + MAX_INPUT_CHARS, limit),
+    );
+    if (window.trim() === '') continue;
+    const coarse = window.split(DELIMITERS);
+    const fine = coarse.flatMap((piece) => piece.split(SLASH));
+    for (const candidate of withDecoded([...valueSpans(window), ...coarse, ...fine])) {
+      const key = `${candidate.token}\n${candidate.raw}`;
+      if (candidate.token.length < MIN_SECRET_LENGTH || seen.has(key)) continue;
+      seen.add(key);
+      out.push(candidate);
+      if (out.length >= MAX_CANDIDATES) return out;
+    }
   }
   return out;
+}
+
+/**
+ * True when the text this tool contributes is longer than the total scan bound, so
+ * `candidateTokens` above saw only its first `MAX_SCAN_CHARS` characters. Shares the
+ * module-private `textOf` with the tokeniser, so the two can never disagree about
+ * what counts as the input — which is the whole point of it living here.
+ */
+export function exceedsSecretScan(
+  toolName: string,
+  toolInput: Readonly<Record<string, unknown>>,
+): boolean {
+  return textOf(toolName, toolInput).length > MAX_SCAN_CHARS;
 }
