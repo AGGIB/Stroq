@@ -32,7 +32,7 @@ export interface EngineOptions {
   readonly audit: AuditLog;
   /** Optional: without it, nothing is recorded and `origin.*` classes never fire. */
   readonly provenance?: ProvenanceStore;
-  /** Optional: without it, `secret.egress` never fires. */
+  /** Optional: without it, neither `secret.egress` nor `secret.unscannable` ever fires. */
   readonly secrets?: SecretIndex;
   readonly now?: () => Date;
 }
