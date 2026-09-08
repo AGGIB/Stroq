@@ -1,5 +1,5 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
-import { MAX_INPUT_CHARS } from '@stroq/core';
+import { MAX_SCAN_CHARS } from '@stroq/core';
 import { withEvidence } from '../adapters/claude-code.js';
 import { describeToolInput } from '../adapters/codex-input.js';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
@@ -58,8 +58,8 @@ export const mcpMethodToolName = (server: string, method: ScannedMethod): string
   mcpToolName(server, MCP_METHOD_TOOL[method]);
 
 /**
- * The arguments as they are, never reduced: the secret-egress guard scans the first
- * `MAX_INPUT_CHARS` (256 KiB) of `JSON.stringify(toolInput)`, so a field dropped here
+ * The arguments as they are, never reduced: the secret-egress guard scans
+ * `JSON.stringify(toolInput)` in windows up to `MAX_SCAN_CHARS` (2 MiB), so a field dropped here
  * is a value that can never be caught leaving through this call — and a record that
  * serialises past that window is refused outright by `judgeToolCall` rather than
  * handed to a scan that would see only part of it. A modern retry's `inputResponses` ride along
@@ -143,24 +143,27 @@ export const MCP_MALFORMED_CALL: Decision = {
     'The tools/call named no tool (params.name is missing or not a string), so Stroq could not classify it; denied fail-closed.',
 };
 
-/** The scan window as the reason prints it: `262144` characters is 256 KiB. */
-const SCAN_WINDOW_KIB = MAX_INPUT_CHARS / 1024;
+/** The scan bound as the reason prints it: `2097152` characters is 2 MiB. */
+const SCAN_BOUND_MIB = MAX_SCAN_CHARS / (1024 * 1024);
 
 /**
- * A `tools/call` whose serialised arguments are larger than the window core's
- * secret-egress guard reads. That guard scans the first `MAX_INPUT_CHARS` characters
- * of `JSON.stringify(toolInput)` — bounding the INPUT rather than the candidate list
- * is what makes padding useless THERE — but a proxy that forwards the rest anyway
- * simply moves the padding attack one level up: 300 KiB of filler ahead of a `.env`
- * value puts that value outside the window, and the call leaves with it. So a call
- * Stroq cannot scan whole is not forwarded at all. The reason names the window in
- * KiB and nothing from the arguments themselves, which are exactly where a secret is.
+ * A `tools/call` whose serialised arguments are larger than everything core's
+ * secret-egress guard reads. That guard scans `JSON.stringify(toolInput)` in
+ * overlapping windows up to `MAX_SCAN_CHARS` — bounding the INPUT rather than the
+ * candidate list is what makes padding useless THERE — but a proxy that forwards
+ * more than that anyway would move the padding attack one level up: filler past the
+ * bound puts a `.env` value outside every window, and the call leaves with it. So a
+ * call Stroq cannot scan whole is not forwarded at all. This is defence in depth —
+ * the engine denies the same call as `secret.unscannable` — kept because refusing
+ * here is cheaper and keeps a 2 MiB serialisation out of the audit summary. The
+ * reason names the bound in MiB and nothing from the arguments themselves, which
+ * are exactly where a secret is.
  */
 export const MCP_ARGUMENTS_TOO_LARGE: Decision = {
   effect: 'deny',
   ruleId: 'mcp-proxy-arguments-too-large',
   reason:
-    `The tools/call arguments serialise to more than ${SCAN_WINDOW_KIB} KiB, the window Stroq's secret-egress guard scans, ` +
+    `The tools/call arguments serialise to more than ${SCAN_BOUND_MIB} MiB, everything Stroq's secret-egress guard scans, ` +
     'so a secret value padded past it would leave unseen; a call Stroq cannot scan whole is not forwarded. Denied fail-closed.',
 };
 
@@ -233,13 +236,13 @@ export async function judgeToolCall(
     };
   const toolName = mcpToolName(ctx.server, rawName);
   // Before the engine, because the engine is what cannot see past this bound: core
-  // scans `JSON.stringify(toolInput)` only to `MAX_INPUT_CHARS`, so anything longer
+  // scans `JSON.stringify(toolInput)` only to `MAX_SCAN_CHARS`, so anything longer
   // would be judged on a prefix of itself. The summary names the argument KEYS and
   // never their values — `describeToolInput` is the same keys-only reader the Codex
   // and Copilot unreadable-input denies audit with — so neither the padding nor a
   // secret hidden behind it reaches the audit log.
   const serialised = JSON.stringify(toolInput).length;
-  if (serialised > MAX_INPUT_CHARS)
+  if (serialised > MAX_SCAN_CHARS)
     return {
       forward: false,
       pending: null,
@@ -248,7 +251,7 @@ export async function judgeToolCall(
         toolName,
         toolInput,
         MCP_ARGUMENTS_TOO_LARGE,
-        `mcp proxy: tools/call arguments of ${serialised} characters, above the ${MAX_INPUT_CHARS} the secret guard scans (keys: ${describeToolInput(toolInput)})`,
+        `mcp proxy: tools/call arguments of ${serialised} characters, above the ${MAX_SCAN_CHARS} the secret guard scans (keys: ${describeToolInput(toolInput)})`,
         message,
         id,
       ),

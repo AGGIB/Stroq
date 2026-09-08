@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   AuditLog,
   DEFAULT_POLICY,
-  MAX_INPUT_CHARS,
+  MAX_SCAN_CHARS,
   StroqEngine,
   loadBundledRules,
 } from '@stroq/core';
@@ -143,12 +143,17 @@ function paddedArgs(size: number, tail: string): Record<string, unknown> {
 }
 
 describe('arguments padded past the window the secret guard scans', () => {
-  it('refuses the call rather than scanning only its first 256 KiB', async () => {
+  it('refuses the call rather than scanning only its first 2 MiB', async () => {
     // The bypass this closes: core reads `JSON.stringify(toolInput)` up to
-    // `MAX_INPUT_CHARS`, so 300 KiB of padding ahead of a `.env` value put that
-    // value outside the scanned window and the call was forwarded, allowed.
+    // `MAX_SCAN_CHARS`, so filler past that put a `.env` value outside every window
+    // and the call was forwarded, allowed.
     writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
-    const verdict = await judge(ctx(), 30, 'send_message', paddedArgs(300 * 1024, SECRET_VALUE));
+    const verdict = await judge(
+      ctx(),
+      30,
+      'send_message',
+      paddedArgs(MAX_SCAN_CHARS + 1, SECRET_VALUE),
+    );
     expect(verdict.forward).toBe(false);
     expect(verdict.pending).toBeNull();
     const text = replyText(verdict.reply);
@@ -156,20 +161,28 @@ describe('arguments padded past the window the secret guard scans', () => {
     expect(text).not.toContain(SECRET_VALUE);
     expect(auditText()).toContain('mcp-proxy-arguments-too-large');
     // The audit summary names the argument KEYS and never their values, so neither
-    // the secret nor 300 KiB of padding lands in the log.
+    // the secret nor the padding lands in the log.
     expect(auditText()).toContain('note, pad');
     expect(auditText()).not.toContain(SECRET_VALUE);
     expect(auditText()).not.toContain('aaaaaaaaaa');
   });
 
-  it('still catches the same secret just under the window, through the guard itself', async () => {
+  it('catches the same secret in the last window, through the guard itself', async () => {
     writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
     const verdict = await judge(
       ctx(),
       31,
       'send_message',
-      paddedArgs(MAX_INPUT_CHARS - 1024, SECRET_VALUE),
+      paddedArgs(MAX_SCAN_CHARS - 1024, SECRET_VALUE),
     );
+    expect(verdict.forward).toBe(false);
+    expect(replyText(verdict.reply)).toContain('Stroq blocked this action (deny-secret-egress)');
+    expect(auditText()).not.toContain(SECRET_VALUE);
+  });
+
+  it('catches a secret behind 1 MiB of padding, which no single window would see', async () => {
+    writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
+    const verdict = await judge(ctx(), 32, 'send_message', paddedArgs(1024 * 1024, SECRET_VALUE));
     expect(verdict.forward).toBe(false);
     expect(replyText(verdict.reply)).toContain('Stroq blocked this action (deny-secret-egress)');
     expect(auditText()).not.toContain(SECRET_VALUE);
@@ -179,9 +192,9 @@ describe('arguments padded past the window the secret guard scans', () => {
     writeFileSync(join(cwd, '.env'), `MCP_API_TOKEN=${SECRET_VALUE}\n`);
     const verdict = await judge(
       ctx(),
-      32,
+      33,
       'send_message',
-      paddedArgs(MAX_INPUT_CHARS - 1024, 'nothing-secret-here'),
+      paddedArgs(MAX_SCAN_CHARS - 1024, 'nothing-secret-here'),
     );
     expect(verdict.forward).toBe(true);
     expect(verdict.reply).toBeNull();

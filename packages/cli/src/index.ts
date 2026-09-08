@@ -26,7 +26,7 @@ Commands:
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
-  attack [--json] [--only <id>]      replay 12 recorded incidents against your policy; exit 1 if any gets through
+  attack [--json] [--only <id>]      replay 13 recorded incidents against your policy; exit 1 if any gets through
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {

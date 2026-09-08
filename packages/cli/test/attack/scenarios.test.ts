@@ -19,12 +19,12 @@ const REAL_SECRET_SHAPES = [
 const lastStep = (s: Scenario) => s.steps[s.steps.length - 1];
 
 describe('attack scenarios', () => {
-  it('ships twelve scenarios with sequential, unique ids', () => {
-    expect(SCENARIOS).toHaveLength(12);
+  it('ships thirteen scenarios with sequential, unique ids', () => {
+    expect(SCENARIOS).toHaveLength(13);
     SCENARIOS.forEach((s, i) =>
       expect(s.id).toMatch(new RegExp(`^${String(i + 1).padStart(2, '0')}-[a-z0-9-]+$`)),
     );
-    expect(new Set(SCENARIOS.map((s) => s.id)).size).toBe(12);
+    expect(new Set(SCENARIOS.map((s) => s.id)).size).toBe(13);
   });
 
   it('cites a dated public incident for each scenario', () => {
