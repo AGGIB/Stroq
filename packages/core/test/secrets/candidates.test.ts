@@ -12,6 +12,23 @@ import {
 const tokensOf = (toolName: string, toolInput: Record<string, unknown>): string[] =>
   candidateTokens(toolName, toolInput).map((c) => c.token);
 
+/**
+ * The densest padding shape measured on this codebase: distinct percent-encoded
+ * words separated by `=`, `:` and a space, so every unit contributes several
+ * DISTINCT candidates (identical repeats would dedupe to one and measure nothing).
+ * Measured yield: ~0.146 candidates per character, ~38k for one full window.
+ */
+function densePadding(chars: number): string {
+  const parts: string[] = [];
+  let total = 0;
+  for (let i = 0; total < chars; i += 1) {
+    const unit = `a%41${i}=b%41${i}:c%41${i} `;
+    parts.push(unit);
+    total += unit.length;
+  }
+  return parts.join('').slice(0, chars);
+}
+
 describe('candidateTokens', () => {
   it('splits a Bash command on shell and URL delimiters, keeps tokens of secret length, dedupes', () => {
     const tokens = tokensOf('Bash', {
@@ -51,10 +68,12 @@ describe('candidateTokens', () => {
     expect(tokensOf('Bash', { command: `${padding} ghp_0123456789abcdefghijklmnop` })).toContain(
       'ghp_0123456789abcdefghijklmnop',
     );
-    // A whole window of padding no longer hides the value: the scan continues into
-    // the next window. Only text past `MAX_SCAN_CHARS` is out of reach, and that
-    // input is denied by the engine rather than scanned in part.
-    const overflow = 'x'.repeat(MAX_INPUT_CHARS);
+    // A whole window of the densest CANDIDATE-GENERATING padding evicts nothing:
+    // the cap is per window, so the ~38k candidates this padding yields cannot
+    // starve the value behind it, and the scan continues into the next window.
+    // Only text past `MAX_SCAN_CHARS` is out of reach, and that input is denied
+    // by the engine rather than scanned in part.
+    const overflow = densePadding(MAX_INPUT_CHARS);
     expect(tokensOf('Bash', { command: `${overflow} ghp_0123456789abcdefghijklmnop` })).toContain(
       'ghp_0123456789abcdefghijklmnop',
     );
@@ -113,22 +132,6 @@ describe('candidateTokens', () => {
   });
 });
 
-/**
- * The densest padding shape measured on this codebase: distinct percent-encoded
- * words separated by `=`, `:` and a space, so every unit contributes several
- * DISTINCT candidates (identical repeats would dedupe to one and measure nothing).
- */
-function densePadding(chars: number): string {
-  const parts: string[] = [];
-  let total = 0;
-  for (let i = 0; total < chars; i += 1) {
-    const unit = `a%41${i}=b%41${i}:c%41${i} `;
-    parts.push(unit);
-    total += unit.length;
-  }
-  return parts.join('').slice(0, chars);
-}
-
 describe('candidateTokens window scanning', () => {
   const SECRET = 'stroq_window_secret_0123456789';
 
@@ -170,12 +173,37 @@ describe('candidateTokens window scanning', () => {
     expect(exceedsSecretScan('Bash', { command: outside })).toBe(true);
   });
 
-  it('tokenises 2 MiB of the densest padding inside the hook budget, still capped', () => {
+  it('finds a value behind 1.6 MiB of the densest padding, inside the bound', () => {
+    // 1.6 MiB of this padding yields ~217k candidates — past a single global cap
+    // of MAX_CANDIDATES, which is what used to abandon every window after it and
+    // let padding hide the value again, one bound further out.
+    const command = `${densePadding(1_600_000)} ${SECRET}`;
+    expect(candidateTokens('Bash', { command }).map((c) => c.token)).toContain(SECRET);
+    expect(exceedsSecretScan('Bash', { command })).toBe(false);
+  });
+
+  it('finds a value at the very end of the bound behind dense padding', () => {
+    const command = `${densePadding(MAX_SCAN_CHARS - SECRET.length - 1)} ${SECRET}`;
+    expect(command).toHaveLength(MAX_SCAN_CHARS);
+    expect(tokensOf('Bash', { command })).toContain(SECRET);
+    expect(exceedsSecretScan('Bash', { command })).toBe(false);
+  });
+
+  it('caps each window on its own count and scans every window', () => {
+    const command = `${densePadding(1_600_000)} ${SECRET}`;
+    const candidates = candidateTokens('Bash', { command });
+    // Every window is scanned, so the value behind the padding is still a candidate…
+    expect(candidates.map((c) => c.token)).toContain(SECRET);
+    // …and the cap still bounds memory: at most one window's share per window.
+    expect(candidates.length).toBeLessThanOrEqual(8 * MAX_CANDIDATES);
+  });
+
+  it('tokenises 2 MiB of the densest padding inside the hook budget', () => {
     const dense = densePadding(MAX_SCAN_CHARS);
     const start = performance.now();
     const candidates = candidateTokens('Bash', { command: dense });
     expect(performance.now() - start).toBeLessThan(2000);
-    expect(candidates).toHaveLength(MAX_CANDIDATES);
+    expect(candidates.length).toBeLessThanOrEqual(8 * MAX_CANDIDATES);
   });
 });
 
