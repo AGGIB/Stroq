@@ -186,7 +186,7 @@ html:not(.js) .copy-btn { display: none; }
 .stat-num-text { font-size: clamp(1.35rem, 1.1rem + .9vw, 1.7rem); line-height: 1.1; letter-spacing: -.015em; }
 .stat-label { color: var(--ink-2); font: 500 .82rem/1.3 var(--font-body); }
 .stat-sub { margin: .3rem 0 0; color: var(--ink-2); font-size: .86rem; line-height: 1.45; }
-.stat:last-child { grid-column: 1 / -1; }
+.stat:last-child { grid-column: auto; }
 
 /* Shared section rhythm */
 .why, .how, .get, .diff, .policy, .roadmap, .open, .install { padding-block: var(--space-section); border-top: 1px solid var(--line); }
@@ -310,7 +310,7 @@ html:not(.js) .copy-btn { display: none; }
 .class-list code { display: inline-block; padding: .3rem .55rem; font-size: .8rem; }
 
 /* 12. Roadmap ---------------------------------------------------------- */
-.timeline { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2rem 1.5rem; margin: 0; padding: 0; list-style: none; }
+.timeline { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2rem 1.5rem; margin: 0; padding: 0; list-style: none; }
 .timeline::before { content: ""; position: absolute; top: 7px; right: 0; left: 0; height: 1px; background: var(--line-2); }
 .rm-item { position: relative; display: flex; flex-direction: column; gap: .6rem; padding-top: 2rem; }
 .rm-item::before { content: ""; position: absolute; top: 0; left: 0; width: 15px; height: 15px; border: 1.5px solid var(--ink); border-radius: 50%; background: var(--paper); }
@@ -349,8 +349,7 @@ html:not(.js) .copy-btn { display: none; }
 
 /* 16. Responsive ------------------------------------------------------- */
 @media (min-width: 880px) {
-  .stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .stat:last-child { grid-column: auto; }
+  .stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 @media (max-width: 960px) {
   .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }

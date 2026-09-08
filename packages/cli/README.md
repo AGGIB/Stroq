@@ -46,6 +46,8 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq verify`                                     | Verify the audit hash chain                                                                                                                                                                                                   |
 | `stroq untaint [--session <id>] [--all]`           | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                                     |
 | `stroq why [--seq <n>]`                            | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                          |
+| `stroq canary [--name <NAME>]`                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                             |
+| `stroq attack [--json] [--only <id>]`              | Replay 13 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                  |
 
 ## Learn more
 
