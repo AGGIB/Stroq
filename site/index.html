@@ -134,7 +134,7 @@
         <div class="stat">
           <dt class="stat-label">Tests</dt>
           <dd class="stat-num">671</dd>
-          <dd class="stat-sub">Across the core engine, the CLI, the rules pipeline and the twelve replayed incidents.</dd>
+          <dd class="stat-sub">Across the core engine, the CLI, the rules pipeline and the thirteen replayed incidents.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -320,8 +320,8 @@
         </li>
         <li class="tile tile-wide reveal">
           <h3><code>stroq attack</code></h3>
-          <p>Twelve recorded incidents — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> and <code>drizzle-kit push --force</code> stories — replayed through <em>your</em> policy in throwaway directories. Exit 1 if anything gets through; CI runs it on every change.</p>
-          <pre class="specimen">12 scenarios: <span class="sp-deny">8 blocked</span>, <span class="sp-ask">4 asked</span>, 0 passed through
+          <p>Thirteen recorded incidents — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> and <code>drizzle-kit push --force</code> stories — replayed through <em>your</em> policy in throwaway directories. Exit 1 if anything gets through; CI runs it on every change.</p>
+          <pre class="specimen">13 scenarios: <span class="sp-deny">9 blocked</span>, <span class="sp-ask">4 asked</span>, 0 passed through
 <span class="sp-dim">— every attack was stopped.</span></pre>
         </li>
         <li class="tile reveal">
@@ -337,7 +337,7 @@
         </li>
         <li class="tile reveal">
           <h3>Taint-aware policy</h3>
-          <p>The decision about an action knows whether the agent has read something suspicious in this session. Thirteen action classes, one ordered YAML policy, first match wins.</p>
+          <p>The decision about an action knows whether the agent has read something suspicious in this session. Fourteen action classes, one ordered YAML policy, first match wins.</p>
           <pre class="specimen">shell.network · taint=suspect  <span class="sp-deny">→ deny</span>
 shell.destructive · any taint  <span class="sp-ask">→ ask</span></pre>
         </li>
@@ -448,11 +448,12 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <div class="container policy-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="policy-title">One YAML file. First match wins.</h2>
-        <p class="section-lead">Thirteen action classes and one ordered policy. A secret value in an outbound call, self-tampering, encoded execution and commands dictated by flagged content are always denied; tainted sessions get <em>deny</em> on network, fetch, secret and external-push actions; destructive commands and commands copied from tool output always <em>ask</em>. Anything unmatched falls through to the default.</p>
+        <p class="section-lead">Fourteen action classes and one ordered policy. A secret value in an outbound call, self-tampering, encoded execution and commands dictated by flagged content are always denied; tainted sessions get <em>deny</em> on network, fetch, secret and external-push actions; destructive commands and commands copied from tool output always <em>ask</em>. Anything unmatched falls through to the default.</p>
         <p class="section-lead">Commands that only read the security config — <code>cat</code>, <code>grep</code>, <code>git diff</code> — stay allowed. Writing to it is what triggers <code>config.self</code>.</p>
         <p class="list-title">Action classes named in the default policy</p>
         <ul class="class-list" aria-label="Action classes named in the default policy">
           <li><code>secret.egress</code></li>
+          <li><code>secret.unscannable</code></li>
           <li><code>config.self</code></li>
           <li><code>shell.exec_encoded</code></li>
           <li><code>origin.suspect</code></li>
@@ -477,6 +478,12 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <span class="y-k">reason</span>: <span class="y-s">Arguments contain the value of a known secret; outbound use is blocked</span>
     <span class="y-k">when</span>:
       <span class="y-k">classes</span>: [secret.egress]
+      <span class="y-k">taint</span>: any
+  - <span class="y-k">id</span>: deny-secret-unscannable
+    <span class="y-k">effect</span>: <span class="y-deny">deny</span>
+    <span class="y-k">reason</span>: <span class="y-s">Arguments are larger than the secret scan window (2 MiB), so Stroq cannot check them for secret values; outbound use is blocked</span>
+    <span class="y-k">when</span>:
+      <span class="y-k">classes</span>: [secret.unscannable]
       <span class="y-k">taint</span>: any
   - <span class="y-k">id</span>: deny-self-tamper
     <span class="y-k">effect</span>: <span class="y-deny">deny</span>
@@ -524,7 +531,7 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
         <li class="rm-item is-done">
           <p class="rm-when"><span class="pill pill-allow">Shipped · 0.3.0</span></p>
           <h3><code>stroq attack</code></h3>
-          <p>Replays twelve recorded 2026 incidents through your actual policy and prints what was blocked, asked or let through. A shareable score, and our own regression suite.</p>
+          <p>Replays thirteen recorded incidents through your actual policy and prints what was blocked, asked or let through. A shareable score, and our own regression suite.</p>
         </li>
         <li class="rm-item is-active">
           <p class="rm-when"><span class="pill pill-ask">Next</span></p>
