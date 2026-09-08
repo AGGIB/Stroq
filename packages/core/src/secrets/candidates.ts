@@ -37,17 +37,17 @@ export const SCAN_OVERLAP = 4_096;
 /**
  * Pure memory guard, applied PER WINDOW and never across them, so it stays a
  * memory guard and never the thing that decides what gets looked up. The densest
- * measured padding yields ~0.15–0.19 candidates per input character, i.e. ~38–50k
- * for one window — four times below this ceiling, so no window can reach it with
- * text an attacker controls. Each window counts only its OWN keeps against the
+ * padding measured in review yields up to ~0.28 candidates per input character,
+ * i.e. ~75k for one window — about 2.7× below this ceiling, so no window can reach
+ * it with text an attacker controls. Each window counts only its OWN keeps against the
  * ceiling and every window is always scanned: a single cap shared across windows
  * would let ~1.5 MiB of dense padding fill it and hide a value inside the bound
  * (found in review of the first windowed implementation), which is the padding
  * bypass this file exists to close, merely moved further out.
  *
  * The price is the list's worst case: 8 × `MAX_CANDIDATES` entries in theory,
- * 283k–374k measured on 2 MiB of the two densest padding shapes — the ceiling is
- * never reached by real text, only by a shape that would have to be ~4× denser.
+ * 283k–473k measured on 2 MiB of the densest padding shapes — the ceiling is
+ * never reached by real text, only by a shape that would have to be ~2.7× denser.
  */
 export const MAX_CANDIDATES = 200_000;
 // Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
