@@ -2,6 +2,7 @@ import type { Scenario } from '../scenario.js';
 import { drizzleForcePush, parentDirWipe, rmRfHome } from './destructive.js';
 import {
   envDumpExfil,
+  paddedSecretExfil,
   roguepilotSchemaUrl,
   s1ngularityPublicRepo,
   tokenInMcpComment,
@@ -28,4 +29,5 @@ export const SCENARIOS: readonly Scenario[] = [
   skillBase64Installer,
   fetchedPageSshKeyUpload,
   parentDirWipe,
+  paddedSecretExfil,
 ];

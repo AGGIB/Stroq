@@ -5,7 +5,7 @@ import type { Decision } from '@stroq/core';
 import {
   AuditLog,
   DEFAULT_POLICY,
-  MAX_INPUT_CHARS,
+  MAX_SCAN_CHARS,
   StroqEngine,
   loadBundledRules,
 } from '@stroq/core';
@@ -137,15 +137,18 @@ describe('arguments larger than the window the secret guard can scan', () => {
       audit: new AuditLog(join(home, 'audit.jsonl')),
     });
 
-  it('refuses the call fail-closed rather than scanning only the first 256 KiB of it', async () => {
-    // Core's candidate extraction reads `JSON.stringify(toolInput)` up to
-    // `MAX_INPUT_CHARS`; 300 KiB of padding ahead of a value would otherwise put
-    // that value outside the window entirely and leave with the call.
+  it('refuses the call fail-closed rather than scanning only the first 2 MiB of it', async () => {
+    // Core's candidate extraction reads `JSON.stringify(toolInput)` in windows up to
+    // `MAX_SCAN_CHARS`; padding past that would otherwise put a value outside every
+    // window and leave with the call.
     const message = {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name: 'send_message', arguments: { pad: 'a'.repeat(300 * 1024), note: 'tail' } },
+      params: {
+        name: 'send_message',
+        arguments: { pad: 'a'.repeat(MAX_SCAN_CHARS + 1), note: 'tail' },
+      },
     };
     const ctx = {
       engine: unreachableEngine(),
@@ -169,9 +172,9 @@ describe('arguments larger than the window the secret guard can scan', () => {
   it('names the window and the fail-closed refusal, and no value at all', () => {
     expect(MCP_ARGUMENTS_TOO_LARGE.effect).toBe('deny');
     expect(MCP_ARGUMENTS_TOO_LARGE.ruleId).toBe('mcp-proxy-arguments-too-large');
-    expect(MCP_ARGUMENTS_TOO_LARGE.reason).toContain('256 KiB');
+    expect(MCP_ARGUMENTS_TOO_LARGE.reason).toContain('2 MiB');
     expect(MCP_ARGUMENTS_TOO_LARGE.reason).toContain('not forwarded');
-    expect(MAX_INPUT_CHARS).toBe(262_144);
+    expect(MAX_SCAN_CHARS).toBe(2_097_152);
   });
 });
 
