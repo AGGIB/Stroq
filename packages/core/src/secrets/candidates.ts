@@ -9,11 +9,14 @@ export interface SecretCandidate {
 }
 
 /**
- * Ceiling on ONE window of the text taken from a tool input. Bounding the INPUT
- * rather than the candidate count is what makes padding useless inside a window:
- * an attacker who could evict candidates by adding text would have a bypass, so
- * the only limit is on how much text one pass considers at all. The whole input
- * is read as a series of these, up to `MAX_SCAN_CHARS`.
+ * The window STRIDE: the text is read in steps of this many characters. Only the
+ * first window spans exactly this much — every later one starts `SCAN_OVERLAP`
+ * characters before its stride boundary, so it spans `MAX_INPUT_CHARS +
+ * SCAN_OVERLAP` (the last one is short whenever the text ends mid-stride).
+ * Bounding the INPUT of one pass rather than the candidate count is what makes
+ * padding useless: an attacker who could evict candidates by adding text would
+ * have a bypass. The whole input is read as a series of these windows, up to
+ * `MAX_SCAN_CHARS`.
  */
 export const MAX_INPUT_CHARS = 262_144;
 /**
@@ -21,7 +24,7 @@ export const MAX_INPUT_CHARS = 262_144;
  * this is not scanned at all — the engine denies an egress-shaped action that
  * reaches it (`secret.unscannable`), so nothing beyond the bound is ever forwarded
  * on trust. Measured with this loop: 2 MiB of the densest padding tokenises in
- * ~180 ms, well inside every adapter's hook budget (10 s at the tightest).
+ * ~230–250 ms, well inside every adapter's hook budget (10 s at the tightest).
  */
 export const MAX_SCAN_CHARS = 2 * 1024 * 1024;
 /**
@@ -32,10 +35,19 @@ export const MAX_SCAN_CHARS = 2 * 1024 * 1024;
  */
 export const SCAN_OVERLAP = 4_096;
 /**
- * Pure memory guard on the candidate list, not a security bound. The densest
- * measured padding yields ~0.15 candidates per input character, i.e. ~38k for
- * `MAX_INPUT_CHARS` of text; a full 2 MiB of it saturates this ceiling, which is
- * why it is a memory guard and never the thing that decides what gets looked up.
+ * Pure memory guard, applied PER WINDOW and never across them, so it stays a
+ * memory guard and never the thing that decides what gets looked up. The densest
+ * measured padding yields ~0.15–0.19 candidates per input character, i.e. ~38–50k
+ * for one window — four times below this ceiling, so no window can reach it with
+ * text an attacker controls. Each window counts only its OWN keeps against the
+ * ceiling and every window is always scanned: a single cap shared across windows
+ * would let ~1.5 MiB of dense padding fill it and hide a value inside the bound
+ * (found in review of the first windowed implementation), which is the padding
+ * bypass this file exists to close, merely moved further out.
+ *
+ * The price is the list's worst case: 8 × `MAX_CANDIDATES` entries in theory,
+ * 283k–374k measured on 2 MiB of the two densest padding shapes — the ceiling is
+ * never reached by real text, only by a shape that would have to be ~4× denser.
  */
 export const MAX_CANDIDATES = 200_000;
 // Shell, JSON and URL delimiters. `/` and `@` are deliberately absent here because
@@ -115,9 +127,16 @@ function withDecoded(spans: readonly string[]): SecretCandidate[] {
  *
  * The text is read in `MAX_INPUT_CHARS` windows overlapping by `SCAN_OVERLAP`, up to
  * `MAX_SCAN_CHARS` in total, so padding cannot push a payload out of the result and
- * a value on a window boundary is still seen whole. An input longer than the bound
- * is scanned only to it; `exceedsSecretScan` reports that, and the engine denies
- * such an action rather than trusting a partial scan.
+ * a value on a window boundary is still seen whole. Every window is scanned and each
+ * keeps at most `MAX_CANDIDATES` of its own, so no window can be starved by an
+ * earlier one. An input longer than the bound is scanned only to it;
+ * `exceedsSecretScan` reports that, and the engine denies such an action rather than
+ * trusting a partial scan.
+ *
+ * The engine calls this and `exceedsSecretScan` once each per action, so `textOf`
+ * runs twice — two `JSON.stringify` for an MCP record, ~18 ms at 16 MiB. Cheap
+ * enough against every hook budget (10 s at the tightest) to be worth keeping the
+ * two functions independent instead of threading a shared text through the engine.
  */
 export function candidateTokens(
   toolName: string,
@@ -132,15 +151,18 @@ export function candidateTokens(
       Math.max(0, start - SCAN_OVERLAP),
       Math.min(start + MAX_INPUT_CHARS, limit),
     );
-    if (window.trim() === '') continue;
     const coarse = window.split(DELIMITERS);
     const fine = coarse.flatMap((piece) => piece.split(SLASH));
+    // This window's own share of the cap. Local to the window on purpose: the next
+    // window starts from zero, so a padded window can never exhaust a later one's.
+    let kept = 0;
     for (const candidate of withDecoded([...valueSpans(window), ...coarse, ...fine])) {
       const key = `${candidate.token}\n${candidate.raw}`;
       if (candidate.token.length < MIN_SECRET_LENGTH || seen.has(key)) continue;
       seen.add(key);
       out.push(candidate);
-      if (out.length >= MAX_CANDIDATES) return out;
+      kept += 1;
+      if (kept >= MAX_CANDIDATES) break;
     }
   }
   return out;
@@ -150,7 +172,9 @@ export function candidateTokens(
  * True when the text this tool contributes is longer than the total scan bound, so
  * `candidateTokens` above saw only its first `MAX_SCAN_CHARS` characters. Shares the
  * module-private `textOf` with the tokeniser, so the two can never disagree about
- * what counts as the input — which is the whole point of it living here.
+ * what counts as the input — which is the whole point of it living here. The engine
+ * calls both per action, so `textOf` runs a second time here; see the note on
+ * `candidateTokens` for why that repeat is affordable.
  */
 export function exceedsSecretScan(
   toolName: string,
