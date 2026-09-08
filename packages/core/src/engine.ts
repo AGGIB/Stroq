@@ -9,7 +9,7 @@ import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import { candidateTokens } from './secrets/candidates.js';
+import { candidateTokens, exceedsSecretScan } from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { SessionStore } from './taint/session-store.js';
 import type {
@@ -76,6 +76,19 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
 ];
 const CANARY_RULE_ID = 'STROQ-CANARY';
+
+/**
+ * The secret guard's verdict on one action: the known values found in its arguments,
+ * and whether those arguments were longer than the guard can scan at all. Both are
+ * empty/false for an action that is not egress-shaped, and for an engine built with
+ * no secret index — without an index there is nothing to check a value against, so
+ * "Stroq could not check these for secret values" is a claim it cannot make.
+ */
+interface SecretCheck {
+  readonly matches: readonly SecretMatch[];
+  readonly unscannable: boolean;
+}
+const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
 
 /**
  * Redacts every match from `summary`. A match's `token` is the candidate that hashed
@@ -163,14 +176,20 @@ export class StroqEngine {
     return hits;
   }
 
-  /** Secret values in the arguments of an egress-shaped action; empty without an index. */
-  private async findSecrets(
+  /**
+   * The secret guard applied to an egress-shaped action: the known values in its
+   * arguments, and whether those arguments ran past `MAX_SCAN_CHARS`, in which case
+   * the matches above came from a prefix of the input and the policy is told so.
+   */
+  private async checkSecrets(
     event: PreToolEvent,
     classes: readonly ActionClass[],
-  ): Promise<SecretMatch[]> {
+  ): Promise<SecretCheck> {
     const index = this.opts.secrets;
-    if (!index || !classes.some((c) => EGRESS_CLASSES.includes(c))) return [];
-    return index.lookup(candidateTokens(event.toolName, event.toolInput), event.cwd);
+    if (!index || !classes.some((c) => EGRESS_CLASSES.includes(c))) return NO_SECRET_CHECK;
+    const candidates = candidateTokens(event.toolName, event.toolInput);
+    const matches = await index.lookup(candidates, event.cwd);
+    return { matches, unscannable: exceedsSecretScan(event.toolName, event.toolInput) };
   }
 
   /**
@@ -210,12 +229,13 @@ export class StroqEngine {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
-    const matches = await this.findSecrets(event, classification.classes);
+    const { matches, unscannable } = await this.checkSecrets(event, classification.classes);
     const secrets = dedupeHits(matches.map(toHit));
     const classes: ActionClass[] = [
       ...classification.classes,
       ...origin.classes,
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
+      ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
     const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
     const provenance = origin.counted.map(toEvidence);

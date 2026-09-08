@@ -11,7 +11,8 @@ export type ActionClass =
   | 'mcp.side_effect'
   | 'origin.untrusted'
   | 'origin.suspect'
-  | 'secret.egress';
+  | 'secret.egress'
+  | 'secret.unscannable';
 
 export const ACTION_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
@@ -27,6 +28,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'origin.untrusted',
   'origin.suspect',
   'secret.egress',
+  'secret.unscannable',
 ];
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
