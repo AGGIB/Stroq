@@ -12,6 +12,13 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['secret.egress'], taint: 'any' },
     },
     {
+      id: 'deny-secret-unscannable',
+      effect: 'deny',
+      reason:
+        'Arguments are larger than the secret scan window (2 MiB), so Stroq cannot check them for secret values; outbound use is blocked',
+      when: { classes: ['secret.unscannable'], taint: 'any' },
+    },
+    {
       id: 'deny-self-tamper',
       effect: 'deny',
       reason: 'Modifying agent security configuration is blocked',

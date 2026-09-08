@@ -17,4 +17,17 @@ describe('policies/default.yaml', () => {
     const rule = DEFAULT_POLICY.rules.find((r) => r.id === 'deny-origin-suspect');
     expect(rule?.reason).toContain('stroq untaint --session <id>');
   });
+
+  it('denies an unscannable egress immediately after the secret-egress rule', () => {
+    const ids = DEFAULT_POLICY.rules.map((r) => r.id);
+    expect(ids.slice(0, 2)).toEqual(['deny-secret-egress', 'deny-secret-unscannable']);
+    const rule = DEFAULT_POLICY.rules[1];
+    expect(rule).toEqual({
+      id: 'deny-secret-unscannable',
+      effect: 'deny',
+      reason:
+        'Arguments are larger than the secret scan window (2 MiB), so Stroq cannot check them for secret values; outbound use is blocked',
+      when: { classes: ['secret.unscannable'], taint: 'any' },
+    });
+  });
 });
