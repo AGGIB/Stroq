@@ -7,15 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The secret egress guard scans the whole argument, not just its first 256 KiB.** `candidateTokens` now reads a tool input as a series of 256 KiB windows overlapping by 4 KiB — so a value straddling a boundary is still seen whole — for a total of 2 MiB per action (`MAX_SCAN_CHARS`), deduping candidates across windows and keeping `MAX_CANDIDATES` as the memory guard. `MAX_INPUT_CHARS` keeps its name and its value, 262 144, but now means one window rather than the whole scan. Measured: 2 MiB of the densest padding tokenises in about 180 ms, well inside every adapter's hook budget.
-- The MCP proxy's own pre-engine refusal (`mcp-proxy-arguments-too-large`) moves from 256 KiB to 2 MiB, and its reason names the new bound. It stays as defence in depth — the engine denies the same call through the rule below — because refusing before the engine is cheaper and keeps a 2 MiB serialisation out of the audit summary.
-- `stroq attack` replays thirteen recorded incidents (`13 scenarios: 9 blocked, 4 asked, 0 passed through`); the new `13-padded-secret-exfil` models the padding bypass rather than a public incident, and cites this release's design spec.
-
 ### Added
 
 - **Action class `secret.unscannable` and the default rule `deny-secret-unscannable`** (the fourteenth class; the rule sits immediately after `deny-secret-egress` in both `policies/default.yaml` and `DEFAULT_POLICY`). `engine.pre` adds the class when an action is egress-shaped (`shell.network`, `network.fetch`, `mcp.call`, `mcp.side_effect`, `git.push_external`, `shell.exec_encoded`) AND its input is longer than the 2 MiB scan bound, so an action Stroq cannot check for secret values is blocked instead of forwarded half-scanned. `secret.egress` can still appear alongside it when the padding failed to push the value past the bound. Users with a custom `~/.stroq/policy.yaml` must add the rule to be protected — `stroq attack` fails their CI until they do. No adapter changed: every one of them already renders a policy deny.
+
+### Changed
+
+- **The secret egress guard scans the whole argument, not just its first 256 KiB.** `candidateTokens` now reads a tool input as a series of 256 KiB windows overlapping by 4 KiB — so a value straddling a boundary is still seen whole — for a total of 2 MiB per action (`MAX_SCAN_CHARS`), deduping candidates across windows and keeping `MAX_CANDIDATES` as the memory guard. `MAX_INPUT_CHARS` keeps its name and its value, 262 144, but now means one window rather than the whole scan. Measured: 2 MiB of the densest padding tokenises in about 250 ms, well inside every adapter's hook budget.
+- The MCP proxy's own pre-engine refusal (`mcp-proxy-arguments-too-large`) moves from 256 KiB to 2 MiB, and its reason names the new bound. It stays as defence in depth — the engine denies the same call through the rule below — because refusing before the engine is cheaper and keeps a 2 MiB serialisation out of the audit summary.
+- `stroq attack` replays thirteen recorded incidents (`13 scenarios: 9 blocked, 4 asked, 0 passed through`); the new `13-padded-secret-exfil` models the padding bypass rather than a public incident, and cites this release's design spec.
 
 ### Fixed
 
