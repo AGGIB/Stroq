@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-09-09
+
+### Changed
+
+- **`stroq attack`'s recorded incident corpus ships as JSON, not bundled JS.** Twelve of the thirteen scenarios (all but `13-padded-secret-exfil`, whose fixture is generated at load time) moved from TS object literals into `packages/cli/src/attack/scenarios/corpus.json`, read and zod-validated at runtime instead of statically imported. Previously tsup/esbuild inlined every recorded attack command — a `curl | sh` README, a base64 shell installer, an SSH-key exfiltration curl — as plain string literals into `dist/index.js`; every npm release since 0.3.0 sat in "Validating" on npmjs.com's Staged Packages review for 24h+ without clearing, and this corpus text was the most plausible signature match left in the bundle. Nothing about the disclosed dual-use content changed — `DISCLOSURE` and `contentPolicy.class: "dual-use"` are unchanged, the corpus still ships in the tarball, `stroq attack` behaves identically — only where the text physically sits moved from executable-looking bundled JS to an inert JSON data file next to it.
+- Drops the shipped sourcemap (`dist/index.js.map`): nothing consumes it for a CLI, and it roughly doubled the unpacked package size. `npm pack` output: 2.4 MB → 1.1 MB (5.2 MB unpacked, down from 12.1 MB).
+
 ## [0.10.0] - 2026-09-08
 
 ### Added
