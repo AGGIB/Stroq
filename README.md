@@ -22,7 +22,7 @@ npx @stroq/cli init
 
 Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy)
 
-**Website:** [stroq.vercel.app](https://stroq.vercel.app)
+**Website:** [stroq.dev](https://stroq.dev)
 
 </div>
 

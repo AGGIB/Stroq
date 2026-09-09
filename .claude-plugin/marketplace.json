@@ -11,7 +11,7 @@
       "source": "./plugins/stroq",
       "description": "Local action firewall for Claude Code: content scan + session taint, instruction provenance, secret egress guard, ordered policy, hash-chained audit. Runs offline through native hooks.",
       "version": "0.10.1",
-      "homepage": "https://stroq.vercel.app",
+      "homepage": "https://stroq.dev",
       "license": "Apache-2.0",
       "keywords": ["security", "firewall", "prompt-injection", "secrets", "provenance", "audit"],
       "category": "security"
