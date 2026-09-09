@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ClaudeHookEvent } from '../adapters/claude-code.js';
 
 /** What a step must produce: a decision effect for `PreToolUse`, a scan verdict for `PostToolUse`. */
@@ -34,3 +35,28 @@ export const CWD_PLACEHOLDER = '__CWD__';
 /** Every secret value in the suite starts with this, so no scenario can ever carry a real credential. */
 export const SYNTHETIC_SECRET_PREFIX = 'stroq_attack_';
 export const SESSION_ID = 'stroq-attack';
+
+const StepExpectationSchema = z.enum(['deny', 'ask', 'allow', 'suspect', 'clean']);
+
+/**
+ * Structural shape of a scenario loaded from `scenarios/corpus.json`. `event` is left
+ * as an untyped record here: `runScenario` already parses it fully against
+ * `ClaudeHookInputSchema` before running it, so this schema only needs to catch a
+ * malformed corpus file, not duplicate that validation.
+ */
+const ScenarioSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  incident: z.object({ name: z.string(), url: z.string(), date: z.string() }),
+  files: z.record(z.string(), z.string()).optional(),
+  steps: z
+    .array(z.object({ event: z.record(z.string(), z.unknown()), expect: StepExpectationSchema }))
+    .min(1),
+});
+
+const ScenarioCorpusSchema = z.array(ScenarioSchema).min(1);
+
+/** Parses and narrows the JSON content of `scenarios/corpus.json` into typed scenarios. */
+export function parseScenarioCorpus(raw: unknown): readonly Scenario[] {
+  return ScenarioCorpusSchema.parse(raw) as unknown as readonly Scenario[];
+}
