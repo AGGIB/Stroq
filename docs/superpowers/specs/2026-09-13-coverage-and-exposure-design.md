@@ -22,7 +22,7 @@ Every row was measured on 2026-09-13 against `packages/core/dist` at main `4bb10
 | E6 | `evaluatePolicy(DEFAULT_POLICY, classes, taint)` over 18 commands at `clean` vs `suspect` | 6 commands allowed at `clean`, denied at `suspect` — `python3 -c urllib`, `curl -X POST -d @.env`, `ssh-keygen -y -f ~/.ssh/id_rsa`, `aws s3 sync`, `nc -e /bin/sh`, `npm publish` | The failure chain is real and complete: a scan miss leaves the session `clean`, and a third of the dangerous surface is then permitted. E3 supplies the scan miss. |
 | E7 | `packages/core/src/engine.ts:304` | `extractAtoms` runs unconditionally; the verdict is passed to `recordProvenance` only as a flag | Provenance survives a scan miss. It is the one content-independent trust signal already shipping. |
 | E8 | `tags.scan_target` across the bundled rules | declared in `packages/core/src/rules/atr-types.ts:22`, unset on 599/599, and dropped by the compiler (compiled rules carry only `id, title, severity, category, condition, tests`) | The surface dimension that would fix E2 exists as a schema stub and was never wired. |
-| E9 | Fresh `npx @stroq/cli@0.10.1` in an empty repo | `--version`, `-v` and `version` all print help; `doctor` shows 6 red `✘` of 11 lines for agents the user does not have installed | The first two screens a new user sees are broken and alarming. |
+| E9 | Fresh `npx @stroq/cli@0.10.1` in an empty repo, before and after `init --agent claude-code` | `--version`, `-v` and `version` all print help in both states. `doctor` **before** any install shows 6 red `✘` of 11 lines, one per agent, each reading `missing`; **after** `init` every line is green, the other agents rendering `✔ not installed (ok: hooks are)` | `--version` is simply absent. The doctor problem is narrower than it first appears and is confined to the pre-install state: `hooksCheck` already passes an agent that another agent carries (`ok: !broken && (installed \|\| carrying.length > 0)`), so the red wall appears only when Stroq is installed in no agent at all — which is exactly when a new user is most likely to run `doctor` first. |
 | E10 | Agent surface on the author's machine | 5 agent config dirs present, Stroq installed in none; 4,824 instruction files from third-party marketplaces; `MEMORY.md` live | `stroq exposure` has real findings to report on a real machine, including the author's. |
 
 ### External findings that shape the design
@@ -55,10 +55,11 @@ Those three are already built. The gap is not capability; it is that no number o
 **Files.** `packages/cli/src/index.ts`, `packages/cli/src/commands/doctor.ts`.
 
 - `stroq --version`, `-v` and `version` print the CLI version and exit 0. The version is read from the package manifest at build time so it cannot drift from the published artifact.
-- `doctor` reports only agents whose config directory is present on the machine. An agent that is not installed produces no line at all. An installed agent without a Stroq hook is the only thing that may render `✘`. A `— not installed` neutral line is available behind `doctor --all` for support cases.
 - `doctor` gains a first line: `stroq <version>`.
+- `doctor`'s pass/fail semantics do not change: a machine carrying Stroq in no agent must still exit 1. Only the rendering of that state changes. When no agent carries Stroq, the six per-agent lines collapse into one `✘ hooks: not installed in any agent` line that names which agents were actually **detected on this machine** (by config-directory presence) and gives the command for each. The post-install rendering, already green and already correct, is untouched.
+- `doctor --all` restores the per-agent, per-scope lines verbatim for support cases.
 
-**Why it is Part 1.** E9 says these are the first two screens after `npx @stroq/cli init`, and E10 says the red wall appears on a correctly configured machine. 678 downloads in the last week passed through them.
+**Why it is Part 1.** `--version` is the first thing typed after an install and it is missing. The collapsed doctor line is a rendering fix to the one state a brand-new user is most likely to see first. 678 downloads in the last week passed through both.
 
 ---
 
@@ -203,7 +204,7 @@ Part 3 before Part 4 is deliberate: the fuzzer's escape list is the specificatio
 
 ## 10. Test strategy
 
-**Part 1.** `--version`/`-v`/`version` print the manifest version and exit 0; `doctor` on a machine with one agent renders one agent line; `doctor --all` renders every agent; the version line is present.
+**Part 1.** `--version`/`-v`/`version` print the manifest version and exit 0, and `--version` is not confusable with `--help`. `doctorReport` on a fixture home where no agent carries Stroq yields one collapsed hooks check, still `ok: false`, whose detail names only the agents whose config directory exists; on a fixture where one agent carries it, the existing per-agent checks and their green `not installed (ok: … are)` details are unchanged. `doctor --all` renders every agent and scope in both states. The version line is first.
 
 **Part 2.** Surface discovery against fixture home and project directories for each agent and MCP client, including a machine with none installed (empty report, exit 0). Redaction: a property test asserting that no `--share` record contains any absolute path, home directory, MCP server name or file name drawn from the fixtures, plus a compile-time test that the shareable type is built field-by-field from the full record. `--probe` against a fixture stdio server that returns a poisoned tool description. Exit code 1 with findings, 0 without.
 
