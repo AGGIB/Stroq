@@ -110,7 +110,7 @@ describe('doctorReport cursor hooks', () => {
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
   it('reports both agents, and fails both lines when neither is installed', async () => {
-    const report = await doctorReport(cwd);
+    const report = await doctorReport(cwd, { all: true });
     const cursor = report.checks.find((c) => c.name === 'cursor hooks')!;
     expect(cursor.ok).toBe(false);
     // A failing line keeps the per-scope paths: there is nothing carrying it.
@@ -157,9 +157,22 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('reports six agents plus the MCP proxy and fails every line when none is installed', async () => {
-    const report = await doctorReport(cwd);
+  it('collapses to one failing hooks line when none is installed, and --all restores all six agents plus the MCP proxy', async () => {
+    const collapsed = await doctorReport(cwd);
+    expect(collapsed.checks.map((c) => c.name)).toEqual([
+      'stroq',
+      'node',
+      'rules',
+      'self-test',
+      'hooks',
+      'home',
+      'secrets',
+    ]);
+    expect(collapsed.checks.find((c) => c.name === 'hooks')?.ok).toBe(false);
+
+    const report = await doctorReport(cwd, { all: true });
     expect(report.checks.map((c) => c.name)).toEqual([
+      'stroq',
       'node',
       'rules',
       'self-test',
@@ -226,7 +239,9 @@ describe('doctorReport codex hooks', () => {
     // the root is reported as not installed rather than as protection a Codex
     // build reading only `hooks` would never actually apply.
     writeFileSync(file, JSON.stringify({ PreToolUse: [stroqGroup] }));
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(false);
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'codex hooks')?.ok,
+    ).toBe(false);
 
     installCodexHooks(file, '"/n" "/e.js" hook codex');
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(true);
@@ -238,7 +253,7 @@ describe('doctorReport codex hooks', () => {
     const file = codexHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({ hooks: { PreToolUse: 'nope' } }));
-    const report = await doctorReport(cwd);
+    const report = await doctorReport(cwd, { all: true });
     const codex = report.checks.find((c) => c.name === 'codex hooks');
     expect(codex?.ok).toBe(false);
     expect(codex?.detail).not.toMatch(/cannot parse/);
@@ -255,7 +270,9 @@ describe('doctorReport copilot hooks', () => {
     installCopilotHooks(copilotHooksPath('project', dir), cmd('pre'), cmd('post'));
 
   it('names the file it looked for when nothing is installed', async () => {
-    const copilot = (await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')!;
+    const copilot = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'copilot hooks',
+    )!;
     expect(copilot.ok).toBe(false);
     expect(copilot.detail).toContain(copilotHooksPath('project', cwd));
     expect(copilot.detail).toContain('project: missing');
@@ -292,9 +309,9 @@ describe('doctorReport copilot hooks', () => {
         hooks: { preToolUse: [{ type: 'command', bash: cmd('pre'), timeoutSec: 15 }] },
       }),
     );
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(
-      false,
-    );
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'copilot hooks')?.ok,
+    ).toBe(false);
     install(cwd);
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(true);
   });
@@ -314,7 +331,7 @@ describe('doctorReport copilot hooks', () => {
         },
       }),
     );
-    const report = await doctorReport(cwd);
+    const report = await doctorReport(cwd, { all: true });
     expect(report.checks.find((c) => c.name === 'copilot hooks')?.ok).toBe(false);
   });
 
@@ -347,7 +364,9 @@ describe('doctorReport openclaw plugin', () => {
     installOpenClawPlugin(openclawPluginDir(), [process.execPath, '/x/index.js']);
 
   it('names the entry it looked for when nothing is installed', async () => {
-    const openclaw = (await doctorReport(cwd)).checks.find((c) => c.name === 'openclaw plugin')!;
+    const openclaw = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'openclaw plugin',
+    )!;
     expect(openclaw.ok).toBe(false);
     expect(openclaw.detail).toContain(openclawPluginDir());
     expect(openclaw.detail).toContain('missing');
@@ -368,7 +387,7 @@ describe('doctorReport openclaw plugin', () => {
     const dir = openclawPluginDir();
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'index.js'), 'export const register = () => {};');
-    const report = await doctorReport(cwd);
+    const report = await doctorReport(cwd, { all: true });
     expect(report.checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(false);
     // Task 3 review, minor: `index.js` DOES exist in this half-install, so pointing
     // the "missing" message at it would name the wrong file — the manifest is what
@@ -387,7 +406,7 @@ describe('doctorReport openclaw plugin', () => {
     // green tick next to a firewall that is not running.
     install();
     rmSync(join(openclawPluginDir(), 'run-stroq.js'));
-    const report = await doctorReport(cwd);
+    const report = await doctorReport(cwd, { all: true });
     expect(report.checks.find((c) => c.name === 'openclaw plugin')?.ok).toBe(false);
     expect(detailOf(report, 'openclaw plugin')).toContain('run-stroq.js');
   });
@@ -395,7 +414,7 @@ describe('doctorReport openclaw plugin', () => {
   it('reports one scope, because OpenClaw plugins are per Gateway host', async () => {
     // No project/user split: there is one directory, and printing two would invite a
     // user to look for a per-repository install that does not exist.
-    const detail = detailOf(await doctorReport(cwd), 'openclaw plugin');
+    const detail = detailOf(await doctorReport(cwd, { all: true }), 'openclaw plugin');
     expect(detail.split(';')).toHaveLength(1);
   });
 });
@@ -408,7 +427,9 @@ describe('doctorReport windsurf hooks', () => {
   const cmd = '"/n" "/e.js" hook windsurf';
 
   it('names the file it looked for when nothing is installed', async () => {
-    const windsurf = (await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')!;
+    const windsurf = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'windsurf hooks',
+    )!;
     expect(windsurf.ok).toBe(false);
     expect(windsurf.detail).toContain(windsurfHooksPath('project', cwd));
     expect(windsurf.detail).toContain('project: missing');
@@ -432,9 +453,9 @@ describe('doctorReport windsurf hooks', () => {
     };
     delete parsed.hooks['post_mcp_tool_use'];
     writeFileSync(file, JSON.stringify(parsed));
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(
-      false,
-    );
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'windsurf hooks')?.ok,
+    ).toBe(false);
   });
 
   it('reports a broken windsurf hooks file without failing the other lines', async () => {
@@ -452,9 +473,9 @@ describe('doctorReport windsurf hooks', () => {
     const file = windsurfHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ "hooks": { "pre_run_command": [{ "command": "echo hi" }] } }');
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'windsurf hooks')?.ok).toBe(
-      false,
-    );
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'windsurf hooks')?.ok,
+    ).toBe(false);
   });
 });
 
@@ -473,7 +494,9 @@ describe('doctorReport mcp proxy', () => {
   };
 
   it('says nothing is installed when no known client config exists', async () => {
-    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    const check = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'mcp proxy',
+    );
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('no MCP client config found');
   });
@@ -504,11 +527,13 @@ describe('doctorReport mcp proxy', () => {
   it('reports an unwrapped config as not installed and a broken one as an error', async () => {
     const file = mcpConfigPath('claude-code', 'project', cwd);
     writeJsonObject(file, { mcpServers: { a: { command: 'x' } } });
-    expect((await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy')?.detail).toContain(
-      'wrapped 0/1 stdio servers',
-    );
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'mcp proxy')?.detail,
+    ).toContain('wrapped 0/1 stdio servers');
     writeFileSync(file, '{ not json');
-    const broken = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    const broken = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'mcp proxy',
+    );
     expect(broken?.ok).toBe(false);
     expect(broken?.detail).toMatch(/cannot parse/);
   });
@@ -520,7 +545,9 @@ describe('doctorReport mcp proxy', () => {
       { ...wrapOpts, entryArgv: ['/does/not/exist/index.js'] },
     );
     writeJsonObject(file, wrapped.config);
-    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'mcp proxy');
+    const check = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'mcp proxy',
+    );
     // Neither server counts as wrapped — the client would fail to start them — and
     // the detail says why, rather than silently reporting them as protected.
     expect(check?.ok).toBe(false);
