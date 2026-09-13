@@ -21,7 +21,7 @@ Commands:
   hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
   hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
   mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
-  doctor                             check the installation
+  doctor [--all]                     check the installation (--all lists every agent and scope)
   log [--count 20]                   show recent audit entries
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
@@ -57,7 +57,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     case 'mcp':
       return runMcp(rest);
     case 'doctor':
-      return runDoctor();
+      return runDoctor(rest);
     case 'log':
       return runLog(rest);
     case 'verify':
