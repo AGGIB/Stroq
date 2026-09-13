@@ -8,6 +8,7 @@ import { runMcp } from './commands/mcp.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runWhy } from './commands/why.js';
+import { stroqVersion } from './version.js';
 
 const USAGE = `stroq <command>
 
@@ -27,6 +28,7 @@ Commands:
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
   attack [--json] [--only <id>]      replay 13 recorded incidents against your policy; exit 1 if any gets through
+  --version                          print the CLI version
 `;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -68,6 +70,11 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runCanary(rest);
     case 'attack':
       return runAttackCommand(rest);
+    case '--version':
+    case '-v':
+    case 'version':
+      process.stdout.write(`${stroqVersion()}\n`);
+      return 0;
     default:
       process.stdout.write(USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;
