@@ -66,6 +66,12 @@ jobs:
       - name: Attack suite
         run: node packages/cli/dist/index.js attack
 
+      - name: Attack suite — mutation fuzz
+        # --allow-escapes until Part 4 closes what this finds: the list is the
+        # specification for that work, and hiding it until then would be worse than
+        # printing it. Drop the flag in the same PR that closes the last escape.
+        run: node packages/cli/dist/index.js attack --fuzz --allow-escapes
+
       - name: Verify npm package contents
         working-directory: packages/cli
         run: npm pack --dry-run
