@@ -18,6 +18,8 @@
     "check:rules": "tsx scripts/build-rules.ts --check",
     "build:atlas": "tsx scripts/build-atlas.ts",
     "check:atlas": "tsx scripts/build-atlas.ts --check",
+    "fetch:bench-corpus": "tsx scripts/fetch-bench-corpus.ts",
+    "check:bench-corpus": "tsx scripts/fetch-bench-corpus.ts --check",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
     "demo:gif": "bash scripts/render-demo-gif.sh",
     "test": "vitest run",

@@ -42,6 +42,9 @@ jobs:
       - name: ATLAS denominator verified
         run: pnpm check:atlas
 
+      - name: Bench corpus verified
+        run: pnpm check:bench-corpus
+
       - name: Run demo
         run: ./examples/demo/run-demo.sh
 
