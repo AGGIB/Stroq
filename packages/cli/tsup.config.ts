@@ -25,5 +25,9 @@ export default defineConfig({
     // reason: it is a hand-authored judgement call, and a reader should be able to
     // diff it directly rather than decompile it out of the bundle.
     copyFileSync('src/coverage/scope.json', 'dist/scope.json');
+    // coverage/asi.ts reads this next to dist/index.js at runtime, for the same
+    // reason: OWASP publishes no machine-readable release, so this is a
+    // hand-transcribed, version-pinned file a reader should be able to diff directly.
+    copyFileSync('src/coverage/asi.json', 'dist/asi.json');
   },
 });
