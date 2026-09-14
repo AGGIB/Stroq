@@ -49,8 +49,12 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq canary [--name <NAME>]`                                   | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                                                                            |
 | `stroq attack [--json] [--only <id>] [--fuzz] [--allow-escapes]` | Replay 20 recorded incidents against your policy; `--fuzz` crosses every scenario with a deterministic mutation set and reports the variants that still reach `allow`, and `--allow-escapes` keeps that exit code at 0 while a known gap is open; exit 1 if any gets through |
 | `stroq exposure [--probe] [--share] [--json]`                    | Map this machine's agent surface and report what reaches you; exit 1 on any finding                                                                                                                                                                                          |
+| `stroq bench [--corpus <dir>] [--json] [--verbose]`              | Measure the shipped rule set's false-positive rate against a corpus of benign developer documentation; `--verbose` lists the flagged files                                                                                                                                   |
+| `stroq coverage [--format <table\|navigator>] [--json]`          | Print the control mapping against MITRE ATLAS and OWASP ASI, built from the attack corpus's own scenario tags; `--format=navigator` emits an ATT&CK Navigator layer                                                                                                          |
 
 `stroq exposure` reads files only. `--probe` is the one flag that starts a process: it launches each configured stdio MCP server, asks once for `tools/list`, scans the tool descriptions and shuts the server down — no tool is ever called. Without it, tool-description poisoning is not covered by the run, and the report says so. `--share` prints a redacted summary built from a whitelist, locally; nothing is transmitted.
+
+The corpus `stroq bench` measures against ships with this repository, not with the npm package; on an installed CLI, point it at your own documentation with `stroq bench --corpus <dir>` — the published number in [`docs/BENCH.md`](https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md) is exactly that command run against the vendored corpus.
 
 ## Learn more
 
