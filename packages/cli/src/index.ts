@@ -1,4 +1,5 @@
 import { runAttackCommand } from './commands/attack.js';
+import { runBenchCommand } from './commands/bench.js';
 import { runCanary } from './commands/canary.js';
 import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
@@ -35,6 +36,8 @@ Commands:
   exposure [--probe] [--share] [--json] [--verbose]
                                      map this machine's agent surface and report what reaches you;
                                      --probe starts your MCP servers to read their tool descriptions
+  bench [--corpus <dir>] [--json] [--verbose]
+                                     measure how much benign developer text the rule set flags
   --version                          print the CLI version
 `;
 
@@ -79,6 +82,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runAttackCommand(rest);
     case 'exposure':
       return runExposure(rest);
+    case 'bench':
+      return runBenchCommand(rest);
     case '--version':
     case '-v':
     case 'version':
