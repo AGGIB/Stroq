@@ -28,7 +28,10 @@ Commands:
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
-  attack [--json] [--only <id>]      replay 13 recorded incidents against your policy; exit 1 if any gets through
+  attack [--json] [--only <id>] [--fuzz] [--allow-escapes]
+                                     replay recorded incidents against your policy; exit 1 if any gets
+                                     through. --fuzz crosses every scenario with every mutation and
+                                     prints the ones that escape
   exposure [--probe] [--share] [--json] [--verbose]
                                      map this machine's agent surface and report what reaches you;
                                      --probe starts your MCP servers to read their tool descriptions
