@@ -2,6 +2,11 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ATLAS_ID } from './atlas.js';
 
+/**
+ * See `SCOPE.md` for the method behind `scope.json`'s decisions and the handful of
+ * calls that were genuinely close — not restated here, since every id already
+ * carries its own `limitation` or exclusion `reason`.
+ */
 export interface ScopedTechnique {
   readonly id: string;
   /** What Stroq does NOT do for this technique, or null when coverage is unqualified. */
