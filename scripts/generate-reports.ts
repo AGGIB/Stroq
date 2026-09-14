@@ -90,6 +90,19 @@ function deriveBench(): string {
     '',
     '## Method',
     '',
+    'Production scans under a 500 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
+      '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
+      "fails closed the moment it runs out — verdict: 'suspect' plus a synthetic " +
+      'STROQ-SCAN-BUDGET match — because a slow scan must never hang a tool call. This ' +
+      'bench deliberately uses a far larger budget, 60,000 ms (`BENCH_BUDGET_MS`, ' +
+      '[`packages/cli/src/bench/run.ts`](../packages/cli/src/bench/run.ts)): it is ' +
+      'measuring which rules match real documentation, not how fast the machine ' +
+      'producing this report happens to be, and a timeout-induced verdict is not a rule ' +
+      'false positive — folding one into the count above would both overstate the rate ' +
+      'and make it depend on the runner rather than the rules. If a scan still exceeds ' +
+      'even the 60 s bench budget, it is reported as a `timedOut` line above rather than ' +
+      "folded silently into a rule's hit count.",
+    '',
     'The corpus is vendored, unmodified, third-party developer documentation — ' +
       'README, CONTRIBUTING, SECURITY and configuration files pulled from real ' +
       'Apache-2.0-licensed projects — fetched at an exact resolved commit and pinned by ' +
