@@ -8,4 +8,5 @@ rules/fixtures/
 rules/atr/
 packages/core/src/rules.bundle.json
 vendor/atlas/ATLAS-2026.08.yaml
+vendor/bench-corpus/files/
 site/
