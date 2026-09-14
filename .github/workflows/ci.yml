@@ -39,6 +39,9 @@ jobs:
       - name: Rules bundle verified
         run: pnpm build:rules --check --advisory-perf
 
+      - name: ATLAS denominator verified
+        run: pnpm check:atlas
+
       - name: Run demo
         run: ./examples/demo/run-demo.sh
 
