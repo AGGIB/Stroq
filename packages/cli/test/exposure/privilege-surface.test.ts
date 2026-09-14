@@ -69,6 +69,22 @@ describe('privilegeSurface', () => {
     );
   });
 
+  it('does not flag project hooks that Stroq installed itself', () => {
+    const cwd = fixture();
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.claude', 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            { matcher: 'Bash', hooks: [{ type: 'command', command: 'stroq hook claude-code' }] },
+          ],
+        },
+      }),
+    );
+    expect(privilegeSurface(cwd, fixture())).toHaveLength(0);
+  });
+
   it('finds chat.tools.autoApprove and runOn folderOpen', () => {
     const cwd = fixture();
     mkdirSync(join(cwd, '.vscode'), { recursive: true });

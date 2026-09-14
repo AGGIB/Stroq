@@ -48,6 +48,9 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq why [--seq <n>]`                            | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                          |
 | `stroq canary [--name <NAME>]`                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                             |
 | `stroq attack [--json] [--only <id>]`              | Replay 13 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                  |
+| `stroq exposure [--probe] [--share] [--json]`      | Map this machine's agent surface and report what reaches you; exit 1 on any finding                                                                                                                                           |
+
+`stroq exposure` reads files only. `--probe` is the one flag that starts a process: it launches each configured stdio MCP server, asks once for `tools/list`, scans the tool descriptions and shuts the server down — no tool is ever called. Without it, tool-description poisoning is not covered by the run, and the report says so. `--share` prints a redacted summary built from a whitelist, locally; nothing is transmitted.
 
 ## Learn more
 

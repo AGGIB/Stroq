@@ -73,6 +73,52 @@ stroq attack: 13 recorded incidents against policy default
 
 Every scenario cites the incident it models (`stroq attack --json` includes the links). The exit code is 1 when any scenario does not behave as expected, so a weakened `policy.yaml` fails your CI, and `--only 05` replays one scenario. The suite is the acceptance test for the default policy: CI runs it on every push to `main` and every pull request. Live mode (driving a real agent session) is not part of it.
 
+## Know your own exposure
+
+`stroq attack` tells you what your policy would do. `stroq exposure` tells you what actually reaches _you_ — which agents this machine runs, which of them Stroq is not installed for, which MCP servers bypass the proxy, how much instruction text the agent reads every session, and which privilege-widening config keys are set.
+
+```text
+stroq exposure — what reaches you on this machine
+
+  Agents detected               3   claude-code, cursor, windsurf
+  protected                     1
+  unprotected                   2   cursor, windsurf
+
+  MCP servers                   4
+  wrapped by Stroq              2
+  stdio, unwrapped              1
+  http (out of reach)           1
+
+  Context the agent reads    1451   12747 KB
+  skills                     1320
+  subagents                    52
+  commands                     79
+  instruction files             0
+  non-Stroq hooks               0
+  flagged by rules            236   expect false positives — see the finding
+
+  Privilege-widening keys       1
+  Incidents reaching you        0   of 13
+
+FINDINGS (3)
+CRITICAL  privilege-widened
+          env.ANTHROPIC_BASE_URL is set in /Users/you/.claude/settings.json — redirects API traffic, and with it credentials, to another host
+CRITICAL  agent-unprotected
+          cursor is used on this machine and Stroq is not installed for it — nothing is enforced there
+          fix: stroq init --agent cursor
+HIGH      mcp-unwrapped
+          1 of 3 stdio MCP servers in cursor (/Users/you/.cursor/mcp.json) do not go through Stroq — their results reach the agent unchecked
+          fix: stroq init --agent mcp --client cursor
+
+Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.
+```
+
+The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect false positives in that count today, because rules are not yet scoped to the surface they were written for. `--json` emits the whole record.
+
+`--share` prints a redacted summary — counts, finding classes, agent names and config key names only. Paths, file names, MCP server names, hostnames and usernames cannot appear in it: the shareable record is built field-by-field from typed data rather than filtered, so a field is absent until someone adds it deliberately. Nothing is ever transmitted; `--share` output is produced locally for you to paste.
+
+`--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
+
 ## How it works
 
 ```mermaid
@@ -467,6 +513,7 @@ node packages/cli/dist/index.js doctor
 | `stroq why [--seq <n>]`                                                                                                                                            | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                                                                                                                              |
 | `stroq canary [--name <NAME>]`                                                                                                                                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                                                                                                                                 |
 | `stroq attack [--json] [--only <id>]`                                                                                                                              | Replay 13 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                                                                                                                      |
+| `stroq exposure [--probe] [--share] [--json] [--verbose]`                                                                                                          | Map this machine's agent surface and report what reaches you; exit 1 on any finding. `--share` prints a redacted summary, `--probe` starts your MCP servers to read their tool descriptions                                                                                                                                       |
 
 ## Policy
 
@@ -532,6 +579,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 - **OpenClaw is guarded from inside its own process:** there is no hooks file to install, so Stroq ships a plugin that OpenClaw loads into the Gateway and that does nothing but call the same CLI every other adapter calls. `before_tool_call` can block and can raise a real `/approve` prompt, and every failure on that path — a missing binary, a timeout, an unreadable answer — blocks the call, which is OpenClaw's own policy for the hook. What it cannot do is talk back after the fact: `after_tool_call` is observe-only, so a poisoned result taints the session silently and is enforced on the next action rather than announced to the model. The full table and limits are in [OpenClaw](#openclaw).
 - **Windsurf can be told, but only in one word:** Cascade hooks have no stdout contract and no `ask`, so every answer Stroq can give is an exit code — `0` proceeds, `2` blocks a `pre_*` action and shows the reason, and anything else is an allow. A policy `ask` therefore arrives as a block that names the rule and says how to proceed, and a suspect file or MCP result arrives as an exit 2 whose only job is to put the warning in front of the model. What Windsurf will not show Stroq is command output: `post_run_command` carries the command line alone, so a poisoned command result cannot taint a Windsurf session — files Cascade reads (which Stroq opens and scans itself, from the path in the payload) and MCP results can. The full table and limits are in [Windsurf](#windsurf).
 - **The MCP proxy covers any stdio client, but not HTTP servers or a human's answer:** `stroq init --agent mcp` rewrites a client's stdio MCP server entries to launch through `stroq mcp`, which judges every `tools/call` and scans every result — the same firewall the native adapters give you, for Claude Desktop and any other client with no hook API at all. An MCP proxy has no channel to a human, so a policy `ask` arrives as a blocked tool result naming the rule; entries with `url`/`serverUrl` are HTTP servers with no subprocess to wrap, so `init` skips them and they stay unprotected; and the project directory is the one `init` ran in, recorded in the wrapper, not wherever the client happens to launch the server from. The full table and limits are in [MCP proxy](#mcp-proxy-any-mcp-client).
+- **Hooks are not an enforcement boundary.** Anthropic's own hooks documentation states that hooks are not a permission enforcement mechanism, and they can be turned off with `disableAllHooks` or bypassed with `bypassPermissions`. That applies to every hook-based tool, Stroq included: Stroq raises the cost of an attack and makes it auditable, it does not make an agent immune. Run `stroq exposure` to see what is actually enforced on your machine rather than assuming.
 - **Latency:** roughly 100–250 ms per hook invocation today (content-heavy `PostToolUse` scans sit at the high end), dominated by Node process startup rather than the scan itself — not "a few milliseconds," and not yet the local daemon described in the roadmap.
 - **Regex denial-of-service is mitigated, not eliminated:** once a match starts, a single pathological regex cannot be interrupted mid-match — the scan's wall-clock budget is only checked _between_ rules and variants. The primary defense is the build-time performance gate described above, which keeps known-slow patterns out of the shipped rule set; if a scan still runs past its budget at runtime, the result fails closed (treated as `suspect`) instead of silently returning clean. True pre-emption via worker-thread isolation is on the [roadmap](#roadmap).
 - **Audit log tail truncation is undetectable today:** the hash chain proves that no _existing_ entry was altered, but an attacker with local write access to `~/.stroq/audit.jsonl` who deletes the newest entries leaves no trace without an external anchor (signed checkpoints are future work).
