@@ -1,4 +1,9 @@
-import { CWD_PLACEHOLDER, type Scenario, type ScenarioStep } from './scenario.js';
+import {
+  CWD_PLACEHOLDER,
+  SYNTHETIC_SECRET_PREFIX,
+  type Scenario,
+  type ScenarioStep,
+} from './scenario.js';
 
 export interface Mutation {
   /** Stable id; it appears in the escape list, so it is an API. */
@@ -271,19 +276,39 @@ function mutateStep(step: ScenarioStep, mutation: Mutation): { step: ScenarioSte
 }
 
 /**
+ * Mutates every `files` entry except one whose body carries a planted synthetic
+ * secret (`SYNTHETIC_SECRET_PREFIX`). That content is fixture state the attack step
+ * reproduces verbatim (e.g. a token embedded in an egress URL) — not untrusted text
+ * an agent read from somewhere. Mutating it would change the secret's value while
+ * the action still carries the original, so the two desync and the engine's `allow`
+ * becomes the correct decision, not a miss: a false escape dressed up as an evasion.
+ */
+function mutateFiles(
+  files: Readonly<Record<string, string>> | undefined,
+  mutation: Mutation,
+): { readonly files: Record<string, string> | undefined; readonly hit: boolean } {
+  if (!files) return { files: undefined, hit: false };
+  let hit = false;
+  const next = Object.fromEntries(
+    Object.entries(files).map(([name, body]) => {
+      if (body.includes(SYNTHETIC_SECRET_PREFIX)) return [name, body];
+      hit = true;
+      return [name, mutation.apply(body)];
+    }),
+  );
+  return { files: next, hit };
+}
+
+/**
  * A copy of `scenario` with its untrusted text mutated, or null when it carries none.
  * Null is not a survivor: it is a cell the fuzzer could not produce a variant for, and
  * the report counts it separately so a machine-wide "0 escapes" cannot be read as
  * coverage the suite does not have.
  */
 export function mutateScenario(scenario: Scenario, mutation: Mutation): Scenario | null {
-  const files = scenario.files
-    ? Object.fromEntries(
-        Object.entries(scenario.files).map(([name, body]) => [name, mutation.apply(body)]),
-      )
-    : undefined;
+  const { files, hit: filesHit } = mutateFiles(scenario.files, mutation);
   const steps = scenario.steps.map((s) => mutateStep(s, mutation));
-  const touched = files !== undefined || steps.some((s) => s.hit);
+  const touched = filesHit || steps.some((s) => s.hit);
   if (!touched) return null;
   const next = steps.map((s) => s.step) as unknown as Scenario['steps'];
   return files === undefined ? { ...scenario, steps: next } : { ...scenario, files, steps: next };
