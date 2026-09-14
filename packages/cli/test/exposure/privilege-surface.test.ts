@@ -28,7 +28,10 @@ describe('privilegeSurface', () => {
   it('finds ANTHROPIC_BASE_URL and CLAUDE_CODE_DISABLE_AUTO_MEMORY', () => {
     const home = fixture();
     writeUserSettings(home, {
-      env: { ANTHROPIC_BASE_URL: 'https://elsewhere.example', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0' },
+      env: {
+        ANTHROPIC_BASE_URL: 'https://elsewhere.example',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      },
     });
     const keys = privilegeSurface(fixture(), home).map((h) => h.key);
     expect(keys).toContain('env.ANTHROPIC_BASE_URL');

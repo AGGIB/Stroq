@@ -81,7 +81,14 @@ describe('mcpFindings', () => {
 
   it('raises a medium finding for http servers the proxy cannot reach', () => {
     const findings = mcpFindings([
-      { client: 'cursor', scope: 'user', file: '/h/.cursor/mcp.json', stdio: 0, wrapped: 0, http: 2 },
+      {
+        client: 'cursor',
+        scope: 'user',
+        file: '/h/.cursor/mcp.json',
+        stdio: 0,
+        wrapped: 0,
+        http: 2,
+      },
     ]);
     const http = findings.find((f) => f.class === 'mcp-http-unreachable');
     expect(http?.severity).toBe('medium');
