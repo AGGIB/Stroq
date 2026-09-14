@@ -1,9 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { loadBundledRules, scanContent } from '@stroq/core';
 import { describe, expect, it } from 'vitest';
-import { defaultCorpusDir, formatBench, runBench, type BenchReport } from '../../src/bench/run.js';
+import {
+  BENCH_BUDGET_MS,
+  defaultCorpusDir,
+  formatBench,
+  runBench,
+  type BenchReport,
+} from '../../src/bench/run.js';
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-bench-'));
 
@@ -75,6 +82,55 @@ describe('runBench', () => {
     expect(report.flagged).toBe(1);
     expect(report.flaggedFiles[0]).toContain('big.md');
   });
+
+  it('reports zero timeouts against the vendored corpus at the bench budget', () => {
+    const dir = defaultCorpusDir();
+    expect(dir).not.toBeNull();
+    expect(runBench(dir as string).timedOut).toBe(0);
+  });
+});
+
+describe('the bench scan budget', () => {
+  // Regression pin for the CI failure this fixes: `runBench` used to call
+  // `scanContent` with no budget, so it inherited the scanner's 500 ms production
+  // default (`DEFAULT_BUDGET_MS`), a latency bound that is a function of wall-clock
+  // time — and so of the machine running the scan. On a slow-enough runner the
+  // corpus's largest file (prometheus-prometheus/configuration.md, ~206 KB) can cross
+  // that budget, and the scanner fails closed by appending a synthetic
+  // STROQ-SCAN-BUDGET match, making the published false-positive report depend on how
+  // fast the machine generating it happened to be. `runBench` now passes
+  // `BENCH_BUDGET_MS` (60 s) explicitly, which the first assertion proves is enough to
+  // finish this file with no synthetic match.
+  //
+  // The second assertion proves the failure mode is real by reproducing it with
+  // `budgetMs: 0` — deliberately not a duration sized for "the old default" or "this
+  // machine today", because a regression guard whose own pass/fail depends on machine
+  // speed is the same class of bug this fix addresses. `scanContent` reads
+  // `opts.budgetMs ?? DEFAULT_BUDGET_MS`: nullish coalescing treats `0` as a real,
+  // supplied budget rather than falling back to the default (confirmed directly
+  // against this file: `budgetMs: 0` and `budgetMs: 1` both produce
+  // `timedOut: true` with only STROQ-SCAN-BUDGET in `matches`, since the check inside
+  // the scan loop trips before any rule/variant is even tested), so this budget cannot
+  // be met on any machine, present or future.
+  const root = resolve(import.meta.dirname, '../../../..');
+  const largestFile = join(
+    root,
+    'vendor/bench-corpus/files/prometheus-prometheus/configuration.md',
+  );
+  const rules = loadBundledRules();
+  const text = readFileSync(largestFile, 'utf8');
+
+  it('does not produce a STROQ-SCAN-BUDGET match at the bench budget', () => {
+    const result = scanContent(rules, text, { budgetMs: BENCH_BUDGET_MS });
+    expect(result.timedOut).toBeFalsy();
+    expect(result.matches.map((m) => m.ruleId)).not.toContain('STROQ-SCAN-BUDGET');
+  });
+
+  it('does produce a STROQ-SCAN-BUDGET match at a budget no machine can meet (0ms), proving the failure mode is real', () => {
+    const result = scanContent(rules, text, { budgetMs: 0 });
+    expect(result.timedOut).toBe(true);
+    expect(result.matches.map((m) => m.ruleId)).toContain('STROQ-SCAN-BUDGET');
+  });
 });
 
 describe('defaultCorpusDir', () => {
@@ -99,6 +155,7 @@ const report = (over: Partial<BenchReport> = {}): BenchReport => ({
   rules: 599,
   flagged: 3,
   rate: 0.125,
+  timedOut: 0,
   byRule: [{ ruleId: 'ATR-2026-00161', title: 'MCP Tool Description — IMPORTANT Tag', files: 2 }],
   flaggedFiles: ['/repo/vendor/bench-corpus/files/apache-airflow/README.md'],
   ...over,
@@ -124,5 +181,19 @@ describe('formatBench', () => {
     expect(formatBench(report({ flagged: 0, rate: 0, byRule: [], flaggedFiles: [] }))).toMatch(
       /nothing in this corpus/i,
     );
+  });
+
+  it('says nothing about timeouts in the normal case', () => {
+    expect(formatBench(report())).not.toMatch(/timedOut|timed out/i);
+  });
+
+  it('states the timeout count when non-zero, without folding it into byRule', () => {
+    const out = formatBench(report({ timedOut: 1 }));
+    expect(out).toMatch(/timedOut:\s+1 scan/);
+    expect(out).not.toContain('STROQ-SCAN-BUDGET');
+  });
+
+  it('pluralizes the timeout line for more than one', () => {
+    expect(formatBench(report({ timedOut: 2 }))).toMatch(/2 scans/);
   });
 });

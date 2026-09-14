@@ -1,10 +1,27 @@
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadBundledRules, scanContent } from '@stroq/core';
+import { BUDGET_MATCH, loadBundledRules, scanContent } from '@stroq/core';
 
 /** Text extensions only: the corpus is documentation, and a binary would measure nothing. */
 const TEXT = /\.(?:md|rst|txt|adoc)$/i;
+/**
+ * Wall-clock scan budget the bench passes to `scanContent`, deliberately far above
+ * production's `DEFAULT_BUDGET_MS` (500 ms, `packages/core/src/scan/scanner.ts`).
+ * Production fails a scan closed — verdict: 'suspect' plus a synthetic
+ * STROQ-SCAN-BUDGET match — the moment it runs long, because a slow scan must never
+ * hang a tool call; that is a latency trade-off, not a judgement about the text. The
+ * bench is measuring a different thing: which rules match real documentation, not how
+ * fast the machine producing this report happens to be. Passing no budget here would
+ * inherit the 500 ms production one, and a timeout-induced 'suspect' is not a rule
+ * false-positive — it would both overstate the reported rate and make the published
+ * number depend on the CI runner's clock speed rather than on the rules, which is
+ * exactly what made `docs/BENCH.md` drift between machines. 60 s is comfortably above
+ * anything in the vendored corpus takes to scan (its slowest file measures well under
+ * 1 s locally), so it should never be hit in practice — see `timedOut` on
+ * `BenchReport` for what happens if it somehow is.
+ */
+export const BENCH_BUDGET_MS = 60_000;
 /**
  * The most of a file `runBench` will ever read, comfortably above `scanContent`'s own
  * 200,000-character scan window for any realistic text. Production never skips large
@@ -33,6 +50,16 @@ export interface BenchReport {
   readonly flagged: number;
   /** flagged / files, computed — never typed by a human. */
   readonly rate: number;
+  /**
+   * How many files' scans hit `BENCH_BUDGET_MS` and were forced 'suspect' by the
+   * scanner's fail-closed timeout behaviour rather than by a rule genuinely matching.
+   * Should be 0 — `BENCH_BUDGET_MS` is chosen so this never happens in practice — and
+   * `formatBench` says nothing about it when it is. A non-zero value here means the
+   * bench's own measurement was degraded on this run; `byRule` never attributes these
+   * scans to a rule, since STROQ-SCAN-BUDGET is not one of the `rules` the bundle
+   * shipped.
+   */
+  readonly timedOut: number;
   /** Most files first, so the worst offender is the headline. */
   readonly byRule: readonly RuleHit[];
   readonly flaggedFiles: readonly string[];
@@ -104,16 +131,24 @@ export function runBench(dir: string): BenchReport {
   const perRule = new Map<string, RuleHit>();
   const flaggedFiles: string[] = [];
   let bytes = 0;
+  let timedOut = 0;
 
   for (const file of files) {
     const size = statSync(file).size;
     bytes += size;
-    const result = scanContent(rules, readPrefix(file, MAX_READ_BYTES));
+    const result = scanContent(rules, readPrefix(file, MAX_READ_BYTES), {
+      budgetMs: BENCH_BUDGET_MS,
+    });
+    if (result.timedOut) timedOut += 1;
     if (result.verdict !== 'suspect') continue;
     flaggedFiles.push(file);
     // Attribute the file to every rule that fired on it, deduped: one file that trips
-    // the same rule through two variants is one file for that rule, not two.
+    // the same rule through two variants is one file for that rule, not two. The
+    // synthetic STROQ-SCAN-BUDGET match is excluded: it is not one of the `rules` the
+    // bundle shipped, and folding it into this table would misreport a timeout as a
+    // rule false-positive. `timedOut` above is where it is counted instead.
     for (const id of new Set(result.matches.map((m) => m.ruleId))) {
+      if (id === BUDGET_MATCH.ruleId) continue;
       const match = result.matches.find((m) => m.ruleId === id);
       const prev = perRule.get(id);
       perRule.set(id, {
@@ -132,6 +167,7 @@ export function runBench(dir: string): BenchReport {
     rules: rules.length,
     flagged: flaggedFiles.length,
     rate: files.length === 0 ? 0 : flaggedFiles.length / files.length,
+    timedOut,
     byRule: [...perRule.values()].sort((a, b) => b.files - a.files),
     flaggedFiles,
   };
@@ -147,6 +183,13 @@ export function formatBench(
     `stroq bench: ${report.files} files, ${Math.round(report.bytes / 1024)} KB, ${report.rules} rules`,
     `flagged:   ${report.flagged} / ${report.files}   (${percent(report.rate)})`,
   ];
+  if (report.timedOut > 0) {
+    const noun = report.timedOut === 1 ? 'scan' : 'scans';
+    lines.push(
+      `timedOut:  ${report.timedOut} ${noun} hit the bench's scan budget and were forced ` +
+        `suspect by that alone, not by a rule match — see docs/BENCH.md's Method section.`,
+    );
+  }
   if (report.byRule.length === 0) {
     lines.push('', 'Nothing in this corpus trips a rule.');
   } else {
