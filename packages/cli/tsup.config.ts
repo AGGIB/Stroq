@@ -21,5 +21,9 @@ export default defineConfig({
     // reason corpus.json is not bundled: it is data, and data belongs beside the
     // bundle where a reader can diff it against the vendored source.
     copyFileSync('src/coverage/atlas.json', 'dist/atlas.json');
+    // coverage/scope.ts reads this next to dist/index.js at runtime, for the same
+    // reason: it is a hand-authored judgement call, and a reader should be able to
+    // diff it directly rather than decompile it out of the bundle.
+    copyFileSync('src/coverage/scope.json', 'dist/scope.json');
   },
 });

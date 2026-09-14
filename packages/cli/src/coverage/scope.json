@@ -1,0 +1,408 @@
+{
+  "atlasRelease": "2026.08",
+  "inScope": [
+    {
+      "id": "AML.T0010",
+      "limitation": "Stroq sees the agent’s own install or load of a supply-chain artifact (a package, model, container image, or tool); compromise introduced before the agent ever touches the artifact (e.g. at the origin registry) is addressed under supply-chain staging, not here."
+    },
+    {
+      "id": "AML.T0010.001",
+      "limitation": "Covers the package-install and load commands the agent runs; a compromised dependency pulled in transitively by another tool without the agent’s own visible install step is not separately detected."
+    },
+    {
+      "id": "AML.T0010.003",
+      "limitation": "Covers the agent’s own download and load of a model file; whether the loaded weights are themselves poisoned is a model-attack-surface question this file cannot answer, only that the load and any embedded executable payload are visible."
+    },
+    {
+      "id": "AML.T0010.004",
+      "limitation": "Covers a `docker pull` or equivalent the agent runs; an image pulled by a CI/CD pipeline outside the agent’s own tool calls is invisible."
+    },
+    {
+      "id": "AML.T0010.005",
+      "limitation": "Covers installing or connecting a poisoned tool through the agent’s own tool calls; a tool added directly through an IDE or platform UI outside those calls is not seen."
+    },
+    {
+      "id": "AML.T0011",
+      "limitation": "Covers execution the agent itself triggers via a tool call; execution a human user triggers directly, outside the agent, is not this product’s surface."
+    },
+    {
+      "id": "AML.T0011.000",
+      "limitation": "Covers the agent loading or executing the artifact via a tool call; a runtime that deserializes the artifact internally, with no distinct tool call for the load, is invisible."
+    },
+    {
+      "id": "AML.T0011.001",
+      "limitation": "Covers the install and any immediate execution the agent’s tool calls perform; a package that behaves maliciously only long after install, with no further agent-visible action, is not caught at install time."
+    },
+    {
+      "id": "AML.T0011.002",
+      "limitation": "Covers invocation of the poisoned tool through the agent’s own tool-call channel; a tool that behaves normally when called but corrupts state elsewhere with no reflected content is not distinguishable from a benign one."
+    },
+    {
+      "id": "AML.T0050",
+      "limitation": "Covers commands submitted through the agent’s own shell or interpreter tool call; a command an interpreter runs internally, without a distinct tool-call boundary, is invisible."
+    },
+    {
+      "id": "AML.T0051",
+      "limitation": "Covers injected instructions in content the agent reads back through a tool call; instructions injected purely in a user’s own conversational turn, never touching a tool, are not this surface."
+    },
+    {
+      "id": "AML.T0051.000",
+      "limitation": "Direct injection happens in the user’s own prompt to the model, a channel Stroq’s hooks do not see; Stroq can only act once the injected instruction drives a subsequent tool call."
+    },
+    {
+      "id": "AML.T0051.001",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0051.002",
+      "limitation": "Covers the triggering event when it arrives as tool-call content (a file change, an incoming message ingested via a tool); an event source entirely outside any tool call is invisible."
+    },
+    {
+      "id": "AML.T0068",
+      "limitation": "Stroq’s normalization pipeline targets the known obfuscation classes (hidden text, encoding, confusables); its own mutation fuzzer has already demonstrated encodings that evade it, so this is a claim of intent to detect, not of catching every encoding."
+    },
+    {
+      "id": "AML.T0078",
+      "limitation": "Covers the case where the malicious page is fetched by the agent as ordinary web content and its prompt injection is evaluated like any other; a browser exploit unrelated to AI content, or a page visited by the human directly, is outside this product’s surface."
+    },
+    {
+      "id": "AML.T0093",
+      "limitation": "Covers the moment the planted content is later read back by the agent through a tool call; the initial planting on the public-facing application itself is not something a developer’s local hook observes."
+    },
+    {
+      "id": "AML.T0094",
+      "limitation": "Stroq evaluates each tool call independently and does not track that a delayed instruction seen earlier in a session is about to fire; a rule that would catch the instruction immediately can still miss it once its execution is deferred past the point of first exposure."
+    },
+    {
+      "id": "AML.T0123",
+      "limitation": "Same limitation as prompt obfuscation: Stroq’s normalization and decode-and-rescan logic targets known encodings, and its own fuzzer has shown specific encodings that currently evade it."
+    },
+    {
+      "id": "AML.T0053",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0086",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0101",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0108",
+      "limitation": "Stroq evaluates each tool call the compromised agent makes on its own merits (a fetch, then a destructive or exfiltrating action); it does not itself recognize a fetch-and-execute loop as a C2 beacon pattern across a session."
+    },
+    {
+      "id": "AML.T0080",
+      "limitation": "Covers poisoning delivered through content the agent reads via a tool call; poisoning injected purely through direct conversation with no tool-call boundary is not this surface."
+    },
+    {
+      "id": "AML.T0080.000",
+      "limitation": "Covers a memory write that flows through a tool call Stroq can inspect; a memory feature implemented as an opaque internal model state with no corresponding tool call is invisible."
+    },
+    {
+      "id": "AML.T0080.001",
+      "limitation": "Covers thread content the agent reads back through a tool call; instructions injected purely as user conversation turns are not visible to a hook that only sees tool calls."
+    },
+    {
+      "id": "AML.T0081",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0083",
+      "limitation": "Covers the agent’s own read of its configuration file through a tool call; credentials extracted by a process outside the agent’s tool-call surface (e.g. a separate script reading the same file) are invisible."
+    },
+    {
+      "id": "AML.T0084",
+      "limitation": "Covers configuration discovered by reading a file through a tool call; configuration details volunteered by the model when a user simply asks it questions, with no tool call involved, are not visible."
+    },
+    {
+      "id": "AML.T0084.000",
+      "limitation": "Same limitation as the parent: visible only when discovery happens via a file or tool-call read, not via conversational questioning of the model."
+    },
+    {
+      "id": "AML.T0084.001",
+      "limitation": "Visible when tool definitions are read from a configuration file via a tool call; definitions the model recites from its own loaded context, with no corresponding file read, are not visible."
+    },
+    {
+      "id": "AML.T0084.002",
+      "limitation": "Visible when trigger configuration is read via a tool call; triggers inferred purely by observing agent behavior over time are not something a per-call hook reconstructs."
+    },
+    {
+      "id": "AML.T0084.003",
+      "limitation": "Visible when call-chain information is read from configuration or source files via a tool call; chains inferred by static analysis of code never read through the agent’s own tools are not covered."
+    },
+    {
+      "id": "AML.T0070",
+      "limitation": "Covers the poisoned content once the agent’s tool retrieves and surfaces it for the model to read; the initial placement of that content into the RAG store is a separate action outside the developer’s machine."
+    },
+    {
+      "id": "AML.T0071",
+      "limitation": "Same limitation as RAG Poisoning: Stroq sees the retrieved content when a tool surfaces it, not the injection into the RAG store itself."
+    },
+    {
+      "id": "AML.T0082",
+      "limitation": "Covers the retrieval tool call and the credential-shaped content it returns; credentials mixed into a huge, unremarkable-looking retrieval result may not be distinguishable from ordinary document content by a content rule alone."
+    },
+    {
+      "id": "AML.T0085",
+      "limitation": "Covers data movement visible through the agent’s own tool calls to connected services; data the AI service itself discloses through a channel outside any tool call is not visible."
+    },
+    {
+      "id": "AML.T0085.000",
+      "limitation": "Same limitation as the parent: visible through the retrieval tool call and its returned content, not through any other access path to the RAG store."
+    },
+    {
+      "id": "AML.T0085.001",
+      "limitation": "Same limitation as the parent: visible through the tool invocation itself, not through any access path outside the agent’s own tool calls."
+    },
+    {
+      "id": "AML.T0098",
+      "limitation": "Covers credential-shaped content returned by a tool call Stroq inspects; credentials embedded in a format or encoding a content rule does not recognize may pass unflagged."
+    },
+    {
+      "id": "AML.T0099",
+      "limitation": "Covers the poisoned content once an agent tool retrieves it; the poisoning of the underlying data source itself happens outside the developer’s machine and is not directly observed."
+    },
+    {
+      "id": "AML.T0110",
+      "limitation": "Covers a poisoned tool’s effects once it is invoked or its response is read through a tool call; a tool’s static, model-visible description that is never reflected back through a hook-observed call may not be inspected at all."
+    },
+    {
+      "id": "AML.T0110.000",
+      "limitation": "Stroq observes a tool’s invocation and its response, not necessarily the static tool definition or schema loaded into the model’s context at session start; a poisoned description that never causes an anomalous call or response can be invisible."
+    },
+    {
+      "id": "AML.T0110.001",
+      "limitation": "Covers the tool’s actual invocation and response as Stroq sees them; hidden side effects that do not alter the visible request or response content (e.g. a silent blind-copy on an email send that never appears in the response) may not be distinguishable from normal use."
+    },
+    {
+      "id": "AML.T0110.002",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0037",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0055",
+      "limitation": "Covers credentials Stroq’s rules recognize by pattern (keys, tokens, known formats) in content a tool call returns; a credential in a format or location the rule set does not recognize will not be flagged."
+    },
+    {
+      "id": "AML.T0090",
+      "limitation": "Covers credential material read through the agent’s own tool calls (files, command output); dumping performed by a separate process outside the agent, with no reflected content, is invisible."
+    },
+    {
+      "id": "AML.T0035",
+      "limitation": "Covers artifact collection performed through the agent’s own file and tool operations; Stroq cannot distinguish routine, legitimate bulk file handling from adversarial collection except by the content and destination involved."
+    },
+    {
+      "id": "AML.T0126",
+      "limitation": "Same limitation as artifact collection: visible as a sequence of ordinary-looking tool calls, which a per-call hook does not aggregate into a pattern of automated collection on its own."
+    },
+    {
+      "id": "AML.T0025",
+      "limitation": null
+    },
+    {
+      "id": "AML.T0034.002",
+      "limitation": "Stroq can flag an individual costly tool call but does not implement session-level rate-limiting or a budget; a large number of individually unremarkable calls induced across a long session is not aggregated into a single verdict."
+    },
+    {
+      "id": "AML.T0125",
+      "limitation": "Covers account creation performed through the agent’s own tools (an IAM or platform API call); account creation through a channel outside the agent, such as a compromised admin console, is invisible."
+    }
+  ],
+  "outOfScope": [
+    {
+      "reason": "These techniques interact directly with the model itself — training or querying a proxy, crafting and verifying adversarial or jailbreak inputs, poisoning weights or training data, or inferring and extracting what the model knows via its inference API and conversational responses — and happen through direct model access or the prompt/response channel between a user and the model, not through an agent's tool calls or the content those calls return, which is the only surface a hook observes.",
+      "ids": [
+        "AML.T0005",
+        "AML.T0005.000",
+        "AML.T0005.001",
+        "AML.T0005.002",
+        "AML.T0013",
+        "AML.T0014",
+        "AML.T0015",
+        "AML.T0018",
+        "AML.T0018.000",
+        "AML.T0018.001",
+        "AML.T0018.002",
+        "AML.T0018.003",
+        "AML.T0020",
+        "AML.T0010.002",
+        "AML.T0024",
+        "AML.T0024.000",
+        "AML.T0024.001",
+        "AML.T0024.002",
+        "AML.T0031",
+        "AML.T0040",
+        "AML.T0042",
+        "AML.T0043",
+        "AML.T0043.000",
+        "AML.T0043.001",
+        "AML.T0043.002",
+        "AML.T0043.003",
+        "AML.T0043.004",
+        "AML.T0044",
+        "AML.T0046",
+        "AML.T0047",
+        "AML.T0054",
+        "AML.T0056",
+        "AML.T0057",
+        "AML.T0059",
+        "AML.T0061",
+        "AML.T0062",
+        "AML.T0063",
+        "AML.T0065",
+        "AML.T0066",
+        "AML.T0067",
+        "AML.T0067.000",
+        "AML.T0069",
+        "AML.T0069.000",
+        "AML.T0069.001",
+        "AML.T0069.002",
+        "AML.T0076",
+        "AML.T0102"
+      ]
+    },
+    {
+      "reason": "These are open-source reconnaissance and resource-development activities — searching public research and repositories, scanning or profiling a target, and acquiring infrastructure, accounts, hardware, or attack capabilities — that adversaries carry out on their own systems before ever interacting with the victim's agent, producing no tool call or content for a hook to observe.",
+      "ids": [
+        "AML.T0000",
+        "AML.T0000.000",
+        "AML.T0000.001",
+        "AML.T0000.002",
+        "AML.T0001",
+        "AML.T0002",
+        "AML.T0002.000",
+        "AML.T0002.001",
+        "AML.T0002.002",
+        "AML.T0003",
+        "AML.T0004",
+        "AML.T0006",
+        "AML.T0007",
+        "AML.T0008",
+        "AML.T0008.000",
+        "AML.T0008.001",
+        "AML.T0008.002",
+        "AML.T0008.003",
+        "AML.T0008.004",
+        "AML.T0008.005",
+        "AML.T0010.000",
+        "AML.T0016",
+        "AML.T0016.000",
+        "AML.T0016.001",
+        "AML.T0016.002",
+        "AML.T0016.003",
+        "AML.T0016.004",
+        "AML.T0017",
+        "AML.T0017.000",
+        "AML.T0017.001",
+        "AML.T0017.002",
+        "AML.T0021",
+        "AML.T0041",
+        "AML.T0064",
+        "AML.T0095",
+        "AML.T0095.000",
+        "AML.T0128"
+      ]
+    },
+    {
+      "reason": "These describe publishing, rug-pulling, or building fake reputation for a malicious package, model, dataset, or agent tool on public infrastructure the developer's machine has no view of; the moment Stroq can act is when the agent actually installs or invokes the resulting artifact, which is covered separately under AI Supply Chain Compromise and User Execution.",
+      "ids": [
+        "AML.T0060",
+        "AML.T0074",
+        "AML.T0079",
+        "AML.T0109",
+        "AML.T0111",
+        "AML.T0115",
+        "AML.T0115.000",
+        "AML.T0115.001",
+        "AML.T0115.002"
+      ]
+    },
+    {
+      "reason": "These target a human being directly through phishing, impersonation, deepfakes, or a malicious link a person is persuaded to click, using channels such as email, voice, and video that never pass through an agent's tool calls.",
+      "ids": [
+        "AML.T0011.003",
+        "AML.T0052",
+        "AML.T0052.000",
+        "AML.T0052.001",
+        "AML.T0073",
+        "AML.T0087",
+        "AML.T0088"
+      ]
+    },
+    {
+      "reason": "These are conventional network and infrastructure attacks — exploiting an application or remote service, flooding or overloading a hosted AI service, evading sandboxes, escaping a container, generic credential or defense-evasion exploits, and command-and-control relayed through an AI service's API or web interface — that target infrastructure generally rather than the specific tool calls an agent's hook observes, and remain the domain of conventional network and host security tooling.",
+      "ids": [
+        "AML.T0036",
+        "AML.T0049",
+        "AML.T0072",
+        "AML.T0089",
+        "AML.T0096",
+        "AML.T0097",
+        "AML.T0105",
+        "AML.T0106",
+        "AML.T0107",
+        "AML.T0114",
+        "AML.T0119",
+        "AML.T0120",
+        "AML.T0122",
+        "AML.T0127",
+        "AML.T0029",
+        "AML.T0034",
+        "AML.T0034.000",
+        "AML.T0034.001",
+        "AML.T0075"
+      ]
+    },
+    {
+      "reason": "These classify the outcome of a successful attack — financial, reputational, societal, or user harm, intellectual property theft, or full compromise of a machine via its local agent — rather than describing a distinct observable action; the actions that produce these outcomes are addressed separately under their own techniques.",
+      "ids": [
+        "AML.T0048",
+        "AML.T0048.000",
+        "AML.T0048.001",
+        "AML.T0048.002",
+        "AML.T0048.003",
+        "AML.T0048.004",
+        "AML.T0112",
+        "AML.T0112.000",
+        "AML.T0112.001"
+      ]
+    },
+    {
+      "reason": "These exploit a chat client's or webpage's rendering layer — an auto-loaded markdown image that exfiltrates data through its URL, or on-screen content baiting a computer-using agent into clicking or copying something — which a hook inspecting structured tool calls and their text content does not parse.",
+      "ids": [
+        "AML.T0077",
+        "AML.T0100"
+      ]
+    },
+    {
+      "reason": "These use a stolen session cookie or access token directly against the AI service's backend, or edit chat history through that same access, bypassing the coding agent entirely rather than acting through its tool calls.",
+      "ids": [
+        "AML.T0091",
+        "AML.T0091.000",
+        "AML.T0091.001",
+        "AML.T0092",
+        "AML.T0113",
+        "AML.T0012"
+      ]
+    },
+    {
+      "reason": "These describe coordinated behavior across one or many autonomous agent runs — independent reconnaissance, attack-path replanning, inter-agent communication, environment reconstruction, or orchestration — as an emergent property of a whole run rather than any single tool call; Stroq evaluates one action at a time and does not mediate coordination between agents today.",
+      "ids": [
+        "AML.T0103",
+        "AML.T0116",
+        "AML.T0117",
+        "AML.T0118",
+        "AML.T0118.000",
+        "AML.T0118.001",
+        "AML.T0121",
+        "AML.T0124"
+      ]
+    }
+  ]
+}
