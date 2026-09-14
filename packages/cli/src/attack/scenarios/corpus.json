@@ -63,7 +63,7 @@
     "encoding": "plain",
     "effect": "exec",
     "atlas": ["AML.T0051.001", "AML.T0011.001"],
-    "asi": ["ASI01", "ASI04"],
+    "asi": ["ASI01", "ASI04", "ASI05"],
     "steps": [
       {
         "event": {
@@ -272,7 +272,7 @@
     "encoding": "plain",
     "effect": "self-tamper",
     "atlas": ["AML.T0051.001", "AML.T0081"],
-    "asi": ["ASI01", "ASI06"],
+    "asi": ["ASI01"],
     "steps": [
       {
         "event": {
@@ -493,7 +493,7 @@
     "encoding": "invisible",
     "effect": "policy-weakening",
     "atlas": ["AML.T0051.001", "AML.T0068", "AML.T0081"],
-    "asi": ["ASI01", "ASI06"],
+    "asi": ["ASI01"],
     "steps": [
       {
         "event": {
