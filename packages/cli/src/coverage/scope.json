@@ -203,7 +203,7 @@
     },
     {
       "id": "AML.T0025",
-      "limitation": null
+      "limitation": "Covers the one channel the corpus currently exercises — a shell-invoked `gh repo create --push` publishing harvested data to a public repository; 'traditional cyber means' also spans exfiltration by direct HTTP request, DNS, email, or cloud-storage upload, none of which any scenario in the suite currently drives through this technique."
     },
     {
       "id": "AML.T0034.002",
