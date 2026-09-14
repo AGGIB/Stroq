@@ -83,6 +83,11 @@ function deriveBench(): string {
     formatBench(report, { verbose: true }).trimEnd(),
     '```',
     '',
+    'Every file the list above names is unmodified, ordinary documentation belonging to ' +
+      'its own project. Appearing in it means a Stroq rule fired in error on that file — ' +
+      'it is not a statement that the file, or the project it comes from, did anything ' +
+      'wrong.',
+    '',
     '## Method',
     '',
     'The corpus is vendored, unmodified, third-party developer documentation — ' +
