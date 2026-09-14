@@ -59,6 +59,26 @@ describe('stroq attack', () => {
     expect(out.lines.join('')).toContain('no scenario matches "nope"');
     expect(out.lines.join('')).toContain('01-readme-pipe-to-shell');
   });
+
+  // Runs the real mutation fuzzer (350 variants) through the actual engine, so it is
+  // slow — but this is the exact path CI's fuzz-gate step depends on, and a renamed
+  // flag or a flipped condition here would silently turn that gate into a no-op with
+  // no other test catching it.
+  it('--fuzz exits 1 on the real corpus, which is known to still have escapes', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--fuzz']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.lines.join('')).toContain('stroq attack --fuzz:');
+  }, 120_000);
+
+  it('--fuzz --allow-escapes exits 0 despite those same known escapes', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--fuzz', '--allow-escapes']);
+    out.restore();
+    expect(code).toBe(0);
+    expect(out.lines.join('')).toContain('stroq attack --fuzz:');
+  }, 120_000);
 });
 
 describe('displayPath', () => {

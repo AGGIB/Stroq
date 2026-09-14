@@ -38,7 +38,9 @@ function derive(): string {
   const release = String(doc.collection?.version ?? '');
   const techniques = Object.entries(doc.techniques ?? {})
     .map(([id, t]) => ({ id, name: String(t.name ?? ''), parent: parentOf(id) }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    // Ordinal, not localeCompare: this script's entire job is byte-identical
+    // reproduction verified by --check in CI, and localeCompare is host-locale-sensitive.
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (formatVersion === '' || release === '' || techniques.length === 0) {
     throw new Error(`${sourceFile}: not an ATLAS distribution (no version or no techniques)`);
   }

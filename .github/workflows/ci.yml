@@ -67,10 +67,39 @@ jobs:
         run: node packages/cli/dist/index.js attack
 
       - name: Attack suite — mutation fuzz
-        # --allow-escapes until Part 4 closes what this finds: the list is the
-        # specification for that work, and hiding it until then would be worse than
-        # printing it. Drop the flag in the same PR that closes the last escape.
-        run: node packages/cli/dist/index.js attack --fuzz --allow-escapes
+        # Baseline of 11 known escapes: the list `attack --fuzz` prints is the
+        # specification for the work that closes them one at a time (Part 4). This
+        # step fails only once the escape count grows past that baseline, so known
+        # gaps stay non-blocking while a new one is still caught. Drop the whole step
+        # in the same PR that gets the baseline to 0.
+        #
+        # `attack --fuzz --json` exits 1 whenever anything escaped, which is the
+        # expected case today, so the run itself must not fail the step — but a
+        # genuine crash (any exit code other than 0 or 1, or a report that doesn't
+        # parse) still must. Exactly one fuzz run: it takes about a minute.
+        run: |
+          set +e
+          node packages/cli/dist/index.js attack --fuzz --json > fuzz-report.json
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "attack --fuzz crashed (exit $status):" >&2
+            cat fuzz-report.json >&2
+            exit "$status"
+          fi
+          node -e '
+            const fs = require("node:fs");
+            const BASELINE = 11;
+            const report = JSON.parse(fs.readFileSync("fuzz-report.json", "utf8"));
+            const escaped = report.escaped;
+            if (!Array.isArray(escaped)) throw new Error("fuzz-report.json has no escaped array");
+            for (const v of escaped) console.log(`${v.scenarioId} ${v.mutationId}`);
+            console.log(`escaped ${escaped.length} of ${report.variants} variants (baseline ${BASELINE})`);
+            if (escaped.length > BASELINE) {
+              console.error(`escape count ${escaped.length} exceeds the baseline of ${BASELINE} — a new escape was introduced`);
+              process.exit(1);
+            }
+          '
 
       - name: Verify npm package contents
         working-directory: packages/cli
