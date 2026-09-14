@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { formatBench, runBench, type BenchReport } from '../../src/bench/run.js';
+import { defaultCorpusDir, formatBench, runBench, type BenchReport } from '../../src/bench/run.js';
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-bench-'));
 
@@ -58,6 +59,35 @@ describe('runBench', () => {
     const dir = fixture();
     writeFileSync(join(dir, 'a.md'), BENIGN);
     expect(runBench(dir).rules).toBeGreaterThan(500);
+  });
+
+  it('scans a truncated prefix of an oversized file instead of skipping it, matching what production would see', () => {
+    // Production (scanContent) never skips large input — it truncates to its first
+    // 200,000-character window and scans that. A file above the 1 MiB read bound
+    // whose injection text sits at the very start must therefore still be flagged,
+    // not silently dropped as clean because it was too big to read in full.
+    const dir = fixture();
+    const filler = 'the quick brown fox jumps over the lazy dog. '.repeat(30_000); // > 1 MiB
+    writeFileSync(join(dir, 'big.md'), `${FLAGGED}\n${filler}`);
+    const report = runBench(dir);
+    expect(report.files).toBe(1);
+    expect(report.bytes).toBeGreaterThan(1024 * 1024);
+    expect(report.flagged).toBe(1);
+    expect(report.flaggedFiles[0]).toContain('big.md');
+  });
+});
+
+describe('defaultCorpusDir', () => {
+  it('resolves to an existing vendor/bench-corpus/files directory when run from this checkout', () => {
+    const dir = defaultCorpusDir();
+    expect(dir).not.toBeNull();
+    expect(dir).toMatch(/vendor[\\/]bench-corpus[\\/]files$/);
+    expect(existsSync(dir as string)).toBe(true);
+  });
+
+  it('returns null when neither offset finds a vendor/bench-corpus/files near the given base', () => {
+    const base = pathToFileURL(join(tmpdir(), 'stroq-bench-nowhere', 'src', 'bench', 'run.ts'));
+    expect(defaultCorpusDir(base)).toBeNull();
   });
 });
 
