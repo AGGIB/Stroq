@@ -36,7 +36,7 @@ Stroq sits on the agent's own tool-call hooks and enforces a deterministic, loca
 
 ## See it block an attack
 
-<img src="docs/assets/demo.gif" alt="Stroq in Claude Code: a poisoned README taints the session, curl | sh is denied, an npx copied from an MCP result is asked about with its provenance, a curl carrying a .env value is denied by deny-secret-egress, and stroq attack reports 9 blocked, 4 asked, 0 passed through" width="800">
+<img src="docs/assets/demo.gif" alt="Stroq in Claude Code: a poisoned README taints the session, curl | sh is denied, an npx copied from an MCP result is asked about with its provenance, a curl carrying a .env value is denied by deny-secret-egress, and stroq attack replaying recorded incidents against the default policy" width="800">
 
 1. Claude Code reads a dependency's `README.md` that hides an instruction to run `curl | sh` and a base64-encoded command to exfiltrate `~/.ssh/id_rsa`.
 2. Stroq's `PostToolUse` scan matches 13 rules across two rule sets, marks the session `suspect`, and hands the agent an inline warning to treat the file as untrusted.
