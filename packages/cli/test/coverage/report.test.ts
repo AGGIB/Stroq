@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { CoverageStatus } from '../../src/coverage/report.js';
 import { buildCoverage, formatCoverage, toNavigatorLayer } from '../../src/coverage/report.js';
 import { loadScope } from '../../src/coverage/scope.js';
 import { SCENARIOS } from '../../src/attack/scenarios/index.js';
@@ -13,6 +14,19 @@ describe('buildCoverage', () => {
   it('adds up: covered plus partial plus not-covered is the in-scope set', () => {
     const s = buildCoverage().summary;
     expect(s.covered + s.partial + s.notCovered).toBe(s.inScope);
+  });
+
+  it('each summary count matches the techniques actually carrying that status', () => {
+    // A self-consistent hardcode (covered + partial + notCovered === inScope, with
+    // inScope pinned to loadScope().inScope.length) would pass the two tests above
+    // without ever touching `techniques`. This one recomputes each count directly
+    // from `report.techniques` so a literal in place of the `reduce` cannot pass.
+    const report = buildCoverage();
+    const countOf = (status: CoverageStatus): number =>
+      report.techniques.filter((t) => t.status === status).length;
+    expect(report.summary.covered).toBe(countOf('covered'));
+    expect(report.summary.partial).toBe(countOf('partial'));
+    expect(report.summary.notCovered).toBe(countOf('not_covered'));
   });
 
   it('marks a technique covered only when a scenario tags it', () => {

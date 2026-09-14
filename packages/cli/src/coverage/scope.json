@@ -107,7 +107,7 @@
     },
     {
       "id": "AML.T0081",
-      "limitation": null
+      "limitation": "Covers the one configuration surface the corpus currently exercises — the `hooks` block of `.claude/settings.json`, overwritten via a `Write` tool call; the technique's own description also spans the system prompt, knowledge sources, and other connected-tool settings, none of which any scenario in the suite currently drives through this technique."
     },
     {
       "id": "AML.T0083",
