@@ -164,7 +164,7 @@ function agentScopes(
 }
 
 /** Every known MCP client config, in the order `doctor` reports them. */
-const MCP_CONFIGS: readonly { readonly client: McpClient; readonly scope: 'project' | 'user' }[] = [
+export const MCP_CONFIGS: readonly { readonly client: McpClient; readonly scope: 'project' | 'user' }[] = [
   { client: 'claude-desktop', scope: 'user' },
   { client: 'windsurf', scope: 'user' },
   { client: 'cursor', scope: 'project' },
