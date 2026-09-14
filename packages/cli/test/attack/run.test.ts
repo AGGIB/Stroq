@@ -7,6 +7,18 @@ import { runAttack, runScenario, substituteCwd } from '../../src/attack/run.js';
 import { SESSION_ID, type Scenario } from '../../src/attack/scenario.js';
 import { SCENARIOS } from '../../src/attack/scenarios/index.js';
 
+// Shared taxonomy axes for the probe scenarios below: none of them carry injected
+// content, so `direct-user`/`plain` is the honest choice, and the exact `atlas` id
+// does not matter for what these probes are testing (runScenario's own validation).
+const PROBE_AXES = {
+  class: null,
+  origin: 'direct-user',
+  encoding: 'plain',
+  effect: 'exec',
+  atlas: ['AML.T0050'],
+  asi: [],
+} as const;
+
 // `runScenario` roots itself at `os.tmpdir()`. Redirecting TMPDIR/TMP/TEMP (which
 // os.tmpdir() reads at call time) to a private directory per test keeps this file's
 // stroq-attack-* counts from racing with commands/attack.test.ts running the same
@@ -99,6 +111,7 @@ describe('runScenario isolation', () => {
     id: '99-isolation-probe',
     title: 'probe: posts a value that only exists in the real home',
     incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+    ...PROBE_AXES,
     steps: [
       {
         event: {
@@ -153,6 +166,7 @@ describe('runScenario validates its input', () => {
       id: '99-bad-last-step',
       title: 'probe: the last step is a PostToolUse, not the attack itself',
       incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      ...PROBE_AXES,
       steps: [
         {
           event: {
@@ -175,6 +189,7 @@ describe('runScenario validates its input', () => {
       id: '99-malformed-step',
       title: 'probe: the recorded event fails schema validation',
       incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      ...PROBE_AXES,
       steps: [
         {
           event: {
@@ -197,6 +212,7 @@ describe('runScenario validates its input', () => {
       id: '99-allow-last-step',
       title: 'probe: the attack step is expected to be allowed, not denied or asked',
       incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      ...PROBE_AXES,
       steps: [
         {
           event: {
@@ -221,6 +237,7 @@ describe('runScenario validates its input', () => {
       id: '99-escaping-fixture',
       title: 'probe: a fixture path walks out of the project directory',
       incident: { name: 'test', url: 'https://example.com/', date: '2026-09' },
+      ...PROBE_AXES,
       files: { '../escape.txt': 'x' },
       steps: [
         {

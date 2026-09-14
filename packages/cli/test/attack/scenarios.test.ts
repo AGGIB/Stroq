@@ -27,8 +27,12 @@ describe('attack scenarios', () => {
     expect(new Set(SCENARIOS.map((s) => s.id)).size).toBe(13);
   });
 
-  it('cites a dated public incident for each scenario', () => {
+  it('cites a dated public incident for each scenario, except the one synthetic cell', () => {
     for (const s of SCENARIOS) {
+      if (s.incident === null) {
+        expect(s.class).not.toBeNull();
+        continue;
+      }
       expect(s.incident.url).toMatch(/^https:\/\//);
       expect(s.incident.date).toMatch(/^\d{4}-\d{2}$/);
       expect(s.incident.name.length).toBeGreaterThan(5);

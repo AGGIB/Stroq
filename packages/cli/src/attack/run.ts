@@ -26,7 +26,9 @@ export interface StepResult {
 export interface ScenarioResult {
   readonly id: string;
   readonly title: string;
-  readonly incident: Incident;
+  readonly incident: Incident | null;
+  /** What class of attack a synthetic cell models. Null exactly when `incident` is set. */
+  readonly class: string | null;
   readonly outcome: Outcome;
   /** True when every step produced what the scenario expects. */
   readonly ok: boolean;
@@ -178,6 +180,7 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
       id: scenario.id,
       title: scenario.title,
       incident: scenario.incident,
+      class: scenario.class,
       outcome: outcomeOf(last),
       ok: steps.every((s) => s.actual === s.expect),
       ruleId: last.ruleId,

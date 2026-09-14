@@ -16,7 +16,10 @@ function mismatch(result: ScenarioResult): string {
 function scenarioLine(result: ScenarioResult): string {
   const mark = result.ok ? '✔' : '✘';
   const rule = (result.ruleId ?? '-').padEnd(RULE_WIDTH);
-  const incident = `${result.incident.name} (${result.incident.date})`;
+  const incident =
+    result.incident === null
+      ? `${result.class ?? 'synthetic cell'} (synthetic)`
+      : `${result.incident.name} (${result.incident.date})`;
   return `${mark} ${result.id.padEnd(ID_WIDTH)} ${result.outcome.padEnd(OUTCOME_WIDTH)} ${rule} ${incident}${result.ok ? '' : mismatch(result)}`;
 }
 

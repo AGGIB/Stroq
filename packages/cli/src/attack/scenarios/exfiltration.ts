@@ -20,11 +20,14 @@ const OVERSIZE_FILLER = 'stroq-attack-padding '
 export const paddedSecretExfil: Scenario = {
   id: '13-padded-secret-exfil',
   title: 'A 2 MiB pad in front of a .env value pushes it past the secret scan window',
-  incident: {
-    name: 'Stroq review 2026-09-08: padding past the secret scan window (no public incident; models the bypass class)',
-    url: 'https://github.com/AGGIB/Stroq/blob/main/docs/superpowers/specs/2026-09-08-secret-scan-window.md',
-    date: '2026-09',
-  },
+  incident: null,
+  class:
+    'padding a known secret past the scan window so an allowed egress action carries it out (no public incident; found in the 2026-09-08 MCP proxy review)',
+  origin: 'direct-user',
+  encoding: 'format-mimicry',
+  effect: 'credential-exfil',
+  atlas: ['AML.T0086'],
+  asi: [],
   files: { '.env': `PADDED_TOKEN=${PADDED_TOKEN}\n` },
   steps: [
     {

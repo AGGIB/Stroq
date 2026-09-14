@@ -7,6 +7,7 @@ const blocked: ScenarioResult = {
   id: '01-readme-pipe-to-shell',
   title: 't',
   incident,
+  class: null,
   outcome: 'blocked',
   ok: true,
   ruleId: 'deny-encoded-exec',
@@ -22,6 +23,12 @@ const passed: ScenarioResult = {
   ok: false,
   ruleId: null,
   steps: [{ phase: 'pre', tool: 'Bash', expect: 'ask', actual: 'allow', ruleId: null }],
+};
+const synthetic: ScenarioResult = {
+  ...blocked,
+  id: '13-padded-secret-exfil',
+  incident: null,
+  class: 'padding a known secret past the scan window',
 };
 
 const report = (scenarios: ScenarioResult[], ok: boolean): AttackReport => ({
@@ -64,5 +71,13 @@ describe('formatReport', () => {
     // says an attack got through. formatReport must not trust `ok` alone for this claim.
     const text = formatReport(report([passed], true));
     expect(text).not.toContain('every attack was stopped');
+  });
+
+  it('renders a null incident as its class, marked synthetic, never as a citation', () => {
+    const text = formatReport(report([synthetic], true));
+    expect(text).toMatch(
+      /✔ 13-padded-secret-exfil\s+blocked\s+deny-encoded-exec\s+padding a known secret past the scan window \(synthetic\)/,
+    );
+    expect(text).not.toContain('Some incident');
   });
 });
