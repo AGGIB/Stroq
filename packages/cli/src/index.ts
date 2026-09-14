@@ -1,6 +1,7 @@
 import { runAttackCommand } from './commands/attack.js';
 import { runCanary } from './commands/canary.js';
 import { runDoctor } from './commands/doctor.js';
+import { runExposure } from './commands/exposure.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInit } from './commands/init.js';
 import { runLog } from './commands/log.js';
@@ -28,6 +29,9 @@ Commands:
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
   attack [--json] [--only <id>]      replay 13 recorded incidents against your policy; exit 1 if any gets through
+  exposure [--probe] [--share] [--json] [--verbose]
+                                     map this machine's agent surface and report what reaches you;
+                                     --probe starts your MCP servers to read their tool descriptions
   --version                          print the CLI version
 `;
 
@@ -70,6 +74,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runCanary(rest);
     case 'attack':
       return runAttackCommand(rest);
+    case 'exposure':
+      return runExposure(rest);
     case '--version':
     case '-v':
     case 'version':

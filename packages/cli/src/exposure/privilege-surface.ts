@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isPlainObject, readJsonObject } from '../commands/config-file.js';
+import { isStroqHandler } from '../commands/init.js';
 import type { Finding } from './findings.js';
 
 export interface PrivilegeHit {
@@ -17,6 +18,25 @@ const read = (file: string): Record<string, unknown> | null => {
     return null;
   }
 };
+
+/**
+ * A hook in project settings is a finding because it arrives with the repository
+ * (GHSA-ph6w-f82w-28w6) — but Stroq's own entry is the thing `stroq init` writes
+ * there by default, and reporting it would mean every protected project showed a
+ * critical finding caused by Stroq itself. Only a handler Stroq does not own counts.
+ */
+function hasForeignHandler(hooks: Record<string, unknown>): boolean {
+  return Object.values(hooks).some(
+    (groups) =>
+      Array.isArray(groups) &&
+      groups.some(
+        (group) =>
+          isPlainObject(group) &&
+          Array.isArray(group['hooks']) &&
+          group['hooks'].some((handler) => !isStroqHandler(handler)),
+      ),
+  );
+}
 
 /**
  * The keys below are the whole argument for an action firewall over a content filter:
@@ -39,7 +59,7 @@ function claudeHits(
         file,
         why: 'its output is injected before every prompt, in every project and every session',
       });
-    if (scope === 'project')
+    if (scope === 'project' && hasForeignHandler(hooks))
       hits.push({
         key: 'hooks (project-controlled)',
         file,

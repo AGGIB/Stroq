@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`stroq exposure`** — what actually reaches you on this machine, rather than what a policy would do. Five blocks: which agents are used here and which of them carry no Stroq hook; how many stdio MCP servers bypass the proxy, plus the HTTP entries it cannot reach at all; how many skills, subagents, commands and instruction files the agent reads every session and how many trip a content rule; which privilege-widening config keys are set (`hooks.UserPromptSubmit` in user settings, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `enableAllProjectMcpServers`, `enabledMcpjsonServers`, a `hooks` key in repository-controlled settings, `chat.tools.autoApprove`, a `folderOpen` task); and how many of the 13 recorded incidents reach this user given what is actually enforced here. Exit code 1 on any finding, so it works in CI or a pre-commit hook. `--verbose` lists flagged files, `--json` emits the record, and `--share` emits a redacted summary built field-by-field from a whitelist — counts, finding classes, agent names and config key names survive; paths, file names, server names, hostnames and usernames cannot appear by construction. `--probe` is the only path that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, sends exactly one `tools/list`, scans the tool descriptions and kills the child. No tool is ever called, `--probe` is never implied by another flag, and the report states in both modes which one produced it, so the absence of a tool-poisoning finding never reads as a clean bill. Everything runs offline; nothing is transmitted.
+- **`stroq --version`, `-v` and `version`** print the CLI version. All three previously fell through to the usage text, so a freshly installed CLI had no way to report its own version. The version is read from the package manifest, so it cannot drift from the published artifact.
+- **`stroq doctor --all`** restores the per-agent, per-scope lines for support cases.
+
+### Changed
+
+- **`doctor`'s pre-install output no longer opens with a wall of red.** When Stroq is installed in no agent at all — exactly the state a new user is most likely to run `doctor` in first — the six per-agent lines collapse into one `✘ hooks: not installed in any agent` line naming only the agents whose config directory exists on this machine, each with the command to fix it. Pass/fail semantics are unchanged: a machine carrying Stroq nowhere still exits 1, and the post-install rendering is untouched.
+- README now states plainly that hooks are not an enforcement boundary. Anthropic's own hooks documentation says hooks are not a permission enforcement mechanism and can be disabled with `disableAllHooks` or `bypassPermissions`; that applies to every hook-based tool, Stroq included.
+
 ## [0.10.1] - 2026-09-09
 
 ### Changed
