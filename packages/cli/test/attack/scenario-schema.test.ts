@@ -61,15 +61,20 @@ describe('the shipped corpus', () => {
     }
   });
 
-  it('keeps every launch scenario documented, with a reachable-looking citation', () => {
-    for (const s of SCENARIOS.filter((x) => x.id !== '13-padded-secret-exfil')) {
+  it('keeps every documented scenario cited, with a reachable-looking citation', () => {
+    // Scoped by `incident !== null` itself rather than an excluded-id list, so this
+    // stays correct as more synthetic cells join the corpus.
+    for (const s of SCENARIOS.filter((x) => x.incident !== null)) {
       expect(s.incident).not.toBeNull();
       expect(s.incident?.url).toMatch(/^https:\/\//);
       expect(s.class).toBeNull();
     }
   });
 
-  it('keeps the one synthetic launch cell synthetic', () => {
+  it('keeps every synthetic cell synthetic, with a class', () => {
+    for (const s of SCENARIOS.filter((x) => x.incident === null)) {
+      expect(s.class).not.toBeNull();
+    }
     const padded = SCENARIOS.find((s) => s.id === '13-padded-secret-exfil');
     expect(padded?.incident).toBeNull();
     expect(padded?.class).toMatch(/padding/i);
