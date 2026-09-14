@@ -50,4 +50,15 @@ describe('runBenchCommand', () => {
     await runBenchCommand(['--corpus', dir, '--verbose']);
     expect(out.join('')).toContain('bad.md');
   });
+
+  it('uses the vendored corpus end to end when no --corpus is given, in a checkout that has one', async () => {
+    // This checkout has vendor/bench-corpus/files (it is a Task 1 artifact committed
+    // to the repository), so defaultCorpusDir() should find it and this should behave
+    // exactly like a real `stroq bench` invocation with no flags: exit 0, report on
+    // stdout, nothing on stderr.
+    expect(await runBenchCommand([])).toBe(0);
+    expect(out.join('')).toContain('stroq bench:');
+    expect(out.join('')).toContain('vendor/bench-corpus/files');
+    expect(err.join('')).toBe('');
+  });
 });
