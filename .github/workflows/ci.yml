@@ -45,6 +45,9 @@ jobs:
       - name: Bench corpus verified
         run: pnpm check:bench-corpus
 
+      - name: Generated reports current
+        run: pnpm check:reports
+
       - name: Run demo
         run: ./examples/demo/run-demo.sh
 

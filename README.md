@@ -88,6 +88,14 @@ The escape list is the deliverable, not the percentage. A mutation that destroys
 
 `--allow-escapes` keeps the exit code at 0 while a known gap is open; without it, any escape is exit 1, which is how the list becomes a regression gate once the gaps are closed.
 
+## What the corpus proves, and doesn't
+
+The attack suite above ships 20 scenarios — 12 documented public incidents, 8 synthetic matrix cells — and two commands report what that corpus actually demonstrates, both regenerated in CI from their own live output so the published documents can never drift from the code that produces them: `stroq bench` measures the shipped rule set's false-positive rate against a vendored corpus of real developer documentation, and `stroq coverage` maps the same 20 scenarios against MITRE ATLAS and OWASP's Agentic Security Initiative taxonomy.
+
+The coverage artifact is a control mapping with evidence, not a compliance claim: a technique reads `covered` only when a scenario exercises it end to end with no stated limitation, and every other row names the limitation that qualifies it. `stroq bench`'s number is ours — measured by a method we publish, on a corpus we vendor — not a third-party audit; `stroq bench --corpus <dir>` reproduces the same measurement on your own files, and the vendored corpus that produced the published number ships with this repository, not with the npm package.
+
+Full reports, generated: [`docs/COVERAGE.md`](docs/COVERAGE.md) · [`docs/BENCH.md`](docs/BENCH.md)
+
 ## Know your own exposure
 
 `stroq attack` tells you what your policy would do. `stroq exposure` tells you what actually reaches _you_ — which agents this machine runs, which of them Stroq is not installed for, which MCP servers bypass the proxy, how much instruction text the agent reads every session, and which privilege-widening config keys are set.
