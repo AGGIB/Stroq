@@ -24,7 +24,7 @@ export const paddedSecretExfil: Scenario = {
   class:
     'padding a known secret past the scan window so an allowed egress action carries it out (no public incident; found in the 2026-09-08 MCP proxy review)',
   origin: 'direct-user',
-  encoding: 'format-mimicry',
+  encoding: 'plain',
   effect: 'credential-exfil',
   atlas: ['AML.T0086'],
   asi: [],
