@@ -146,7 +146,7 @@
     "origin": "command-output",
     "encoding": "plain",
     "effect": "credential-exfil",
-    "atlas": ["AML.T0010.001", "AML.T0025"],
+    "atlas": ["AML.T0010.001", "AML.T0025", "AML.T0051.001"],
     "asi": [],
     "steps": [
       {
@@ -225,7 +225,7 @@
     "origin": "command-output",
     "encoding": "plain",
     "effect": "credential-exfil",
-    "atlas": ["AML.T0090", "AML.T0086"],
+    "atlas": ["AML.T0090", "AML.T0086", "AML.T0051.001"],
     "asi": [],
     "steps": [
       {
