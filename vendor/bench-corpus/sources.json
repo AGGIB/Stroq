@@ -1,0 +1,205 @@
+{
+  "note": "Real third-party developer documentation, used to measure how much benign text the shipped rule set flags. Disjoint from rules/fixtures/benign by construction: that directory is a build-time gate that DISABLES any rule firing on it, so measuring against it would report ~0% by construction.",
+  "sources": [
+    {
+      "repo": "apache/airflow",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "2c9088e078de7acc297a998a611490632cd1fa29",
+      "sha256": "eac37b3407be0ce890f9873115a7c575991ce80c9ba88dc8c9fd47fca5781ebf"
+    },
+    {
+      "repo": "apache/superset",
+      "ref": "master",
+      "path": "CONTRIBUTING.md",
+      "license": "Apache-2.0",
+      "commit": "96ef982d24e2e1c3cc1f17dde676142ae8a4f8e1",
+      "sha256": "99ab83007bc4b45e65d27f6dee4390ec3c297ab991dc8751069552dea8873340"
+    },
+    {
+      "repo": "apache/spark",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "2e9203687fa1dbfc9970ddd957279c8dc1a04cef",
+      "sha256": "29f014aae8b7a9f0f146188a73619d260a375fcfda1eb8e6b0fe28a74b357612"
+    },
+    {
+      "repo": "kubernetes/kubectl",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "1c6bcb51f7256f4115ecd1797c44b57afd4b60e3",
+      "sha256": "a2924dceebf3b63922216f33ad6c49a1b79d39a7d8f1d1764c197c2fc34a6d1e"
+    },
+    {
+      "repo": "grpc/grpc",
+      "ref": "master",
+      "path": "SECURITY.md",
+      "license": "Apache-2.0",
+      "commit": "34ebde810827e2fce4e1ea4b21c98a8de90dcd2a",
+      "sha256": "ecfe6919e90d83a4fcfe2caf13e023d5c9260ba2c54c8b221ce0bcdabd710b77"
+    },
+    {
+      "repo": "apache/superset",
+      "ref": "master",
+      "path": "SECURITY.md",
+      "license": "Apache-2.0",
+      "commit": "96ef982d24e2e1c3cc1f17dde676142ae8a4f8e1",
+      "sha256": "212086f2a4c8e2c352b5f983c48331825b0ba8eeb368e0f5dd57dceb5eed2ef4"
+    },
+    {
+      "repo": "apache/nifi",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "8a5aebefab8e7f834aa5cfead4f4ce83b1ed114b",
+      "sha256": "0d1019aa65d49b67dc6afbb1de85c597bfe925abb242ec547a8fe6796b655303"
+    },
+    {
+      "repo": "apache/rocketmq",
+      "ref": "develop",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "923a80e9f49cf79b3424efb3228c602afb46c35b",
+      "sha256": "059527d7884b317b455549e6c62cdb96b69d2710a981fc6ef88d4f79b1f3b28f"
+    },
+    {
+      "repo": "apache/apisix",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "d5ea736a7d1219b7730e20fe067b2449485d6f5b",
+      "sha256": "d0853e33d6d6d4bf3a514326584e2e8deb40a5e62c24f3cb6102e41c25dc7e43"
+    },
+    {
+      "repo": "apache/apisix",
+      "ref": "master",
+      "path": "docs/en/latest/admin-api.md",
+      "license": "Apache-2.0",
+      "commit": "d5ea736a7d1219b7730e20fe067b2449485d6f5b",
+      "sha256": "634ed01bf4bdb717d0b92f7fab72cfd9eec52bde61e43a34ebaca996c36f5f9b"
+    },
+    {
+      "repo": "apache/kafka",
+      "ref": "trunk",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f87be3370f50d953c4f84f9c39412d941823ac02",
+      "sha256": "5550c38ce0519656f04aab69250ae7cdff499040bcb67c95bfb34f1b0dfc7e9a"
+    },
+    {
+      "repo": "grpc/grpc",
+      "ref": "master",
+      "path": "CONTRIBUTING.md",
+      "license": "Apache-2.0",
+      "commit": "34ebde810827e2fce4e1ea4b21c98a8de90dcd2a",
+      "sha256": "171d18ce4cb16f4b1a52fb616d33f106d610a683c8a9aee02cf796a25bca3e40"
+    },
+    {
+      "repo": "prometheus/prometheus",
+      "ref": "main",
+      "path": "docs/configuration/configuration.md",
+      "license": "Apache-2.0",
+      "commit": "b0f312ba48c9d31dad04e7014bfb0fa300153a07",
+      "sha256": "d7403d2e6c06b7fad6ebf0ce8326d10580ffe835f7101d0ad6f2d00b61928ab9"
+    },
+    {
+      "repo": "huggingface/huggingface_hub",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "bd9ece0951270a472dc3233a0861128e813b0d2d",
+      "sha256": "8c77b9f44339ce377dea262879ee735e34aa8491ad65727d5db1e35c96a3dce3"
+    },
+    {
+      "repo": "huggingface/huggingface_hub",
+      "ref": "main",
+      "path": "docs/source/en/quick-start.md",
+      "license": "Apache-2.0",
+      "commit": "bd9ece0951270a472dc3233a0861128e813b0d2d",
+      "sha256": "a30b9fd89e2a46a0b8f3c947a56ddd6c47f9c748aba3cbb0977b85834cc9990b"
+    },
+    {
+      "repo": "huggingface/transformers",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dbbd551285e9d591a5c9692154341531531dac6c",
+      "sha256": "9f745fda7e49125b047e41f99ff1bf67b1c092c34c61bdfda1c3460feaa95382"
+    },
+    {
+      "repo": "google/adk-python",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "6ac2e7805b85e2068d3ae1b96635959ebe3f418a",
+      "sha256": "39143e73e1f1e476392b3ca649fc20cd2b5ce8ce7ad52fcc87ad9242e0f11665"
+    },
+    {
+      "repo": "google-gemini/gemini-cli",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "9c1b0a610534d6f8120964cf2672c07807d8fc90",
+      "sha256": "bacf354f3f674d57679ebf7b42dd69311bb9ef14200e18ca703d82aba48bf833"
+    },
+    {
+      "repo": "google-github-actions/auth",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "12060449e87204eca501a11f2f7f1483024afff0",
+      "sha256": "9bba6d0b9b94238eff59599f1ce002378b2943b81455690242ae18956949e343"
+    },
+    {
+      "repo": "pulumi/pulumi",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f4c5b540841370ed543d2951a644b30376a37381",
+      "sha256": "3561156e8678a0af1f9289b80d128d64be1a9dfc7fb5f367a75d7dc2608f59d2"
+    },
+    {
+      "repo": "open-telemetry/opentelemetry-collector",
+      "ref": "main",
+      "path": "CONTRIBUTING.md",
+      "license": "Apache-2.0",
+      "commit": "a35b7a8db49df923c5add3dc34872b6e0b3af683",
+      "sha256": "c6907af3a4c3d841867eb067d6aa747afa1b7a197d1be92ee249e17d3afca833"
+    },
+    {
+      "repo": "argoproj/argo-cd",
+      "ref": "master",
+      "path": "docs/operator-manual/security.md",
+      "license": "Apache-2.0",
+      "commit": "ffe66fff46708bbbe4183b13f3d2cde657664c4b",
+      "sha256": "a0ccc8179fee8d17669ca113325d45d76240d859edc270fac45c4faa7b2a0867"
+    },
+    {
+      "repo": "ray-project/ray",
+      "ref": "master",
+      "path": "doc/source/ray-core/configure.rst",
+      "license": "Apache-2.0",
+      "commit": "03aa07f1bf9f6168cc94d98c09d0b348cb6c3e84",
+      "sha256": "b7f70015f93aeec908fca3c705b22c3c3f41cb27b3284da53e7e50db017d62d7"
+    },
+    {
+      "repo": "envoyproxy/envoy",
+      "ref": "main",
+      "path": "SECURITY.md",
+      "license": "Apache-2.0",
+      "commit": "92fafdf80d9d9c57d9bb368b3cb3c9b14b077b2d",
+      "sha256": "6e1e883fe8d360cc2ccccc26996ca1c8b87445f883c9e8330577972b90920f75"
+    },
+    {
+      "repo": "apache/druid",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "d480d66e7fe52ef5daa46eb1af9f33f954be9b7c",
+      "sha256": "8e365a76ed4c6b117cd5e4b81f78a80f43fe97ebaac8b93a7bd9cfe493ae7bd9"
+    }
+  ]
+}
