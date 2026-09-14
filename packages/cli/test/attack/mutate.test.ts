@@ -102,6 +102,52 @@ describe('mutateScenario', () => {
     expect(response.file.filePath).toBe('__CWD__/README.md');
   });
 
+  it('leaves all four SKIP_KEYS alone, including one nested inside an array', () => {
+    // filePath is covered above; this covers file_path, path and command explicitly,
+    // plus an array-nested occurrence of path and command — mutateValue re-derives the
+    // key for every array element, so a skip key buried in an array is the case most
+    // likely to regress silently and manufacture a false escape.
+    const upper = MUTATIONS.find((m) => m.id === 'uppercase');
+    const withSkipKeys = scenario({
+      steps: [
+        {
+          event: {
+            session_id: 'stroq-attack',
+            hook_event_name: 'PostToolUse',
+            tool_name: 'Read',
+            tool_input: { file_path: '__CWD__/README.md' },
+            cwd: '__CWD__',
+            tool_response: {
+              type: 'text',
+              file: {
+                filePath: '__CWD__/README.md',
+                file_path: 'sibling/file_path.md',
+                content: PAYLOAD,
+              },
+              matches: [
+                { path: 'nested/array/path.md', command: 'echo nested command', note: PAYLOAD },
+              ],
+            },
+          },
+          expect: 'suspect',
+        },
+      ],
+    } as Partial<Scenario>);
+    const out = mutateScenario(withSkipKeys, upper!);
+    const response = out?.steps[0]?.event['tool_response'] as {
+      file: { filePath: string; file_path: string; content: string };
+      matches: readonly { path: string; command: string; note: string }[];
+    };
+    expect(response.file.filePath).toBe('__CWD__/README.md');
+    expect(response.file.file_path).toBe('sibling/file_path.md');
+    expect(response.file.content).toBe(PAYLOAD.toUpperCase());
+    expect(response.matches[0]?.path).toBe('nested/array/path.md');
+    expect(response.matches[0]?.command).toBe('echo nested command');
+    // The sibling non-skip key inside the same array element still mutates, proving the
+    // skip is keyed, not a blanket "arrays are untouched" behavior.
+    expect(response.matches[0]?.note).toBe(PAYLOAD.toUpperCase());
+  });
+
   it('returns null when a scenario carries no untrusted text', () => {
     const bare = scenario({
       steps: [
