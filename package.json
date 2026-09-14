@@ -16,6 +16,8 @@
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
     "check:rules": "tsx scripts/build-rules.ts --check",
+    "build:atlas": "tsx scripts/build-atlas.ts",
+    "check:atlas": "tsx scripts/build-atlas.ts --check",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
     "demo:gif": "bash scripts/render-demo-gif.sh",
     "test": "vitest run",
@@ -31,6 +33,7 @@
     "tsup": "8.5.1",
     "tsx": "4.23.13",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
   }
 }

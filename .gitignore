@@ -1,6 +1,12 @@
 node_modules/
 dist/
-coverage/
+# Anchored to the repo root: this is vitest's coverage-report output
+# (pnpm test:coverage), the only place it's ever written (see
+# vitest.config.ts — no reportsDirectory override, no per-package
+# configs). An unanchored coverage/ would also swallow
+# packages/cli/{src,test}/coverage/, which are source directories for
+# the ATLAS taxonomy denominator, not report output.
+/coverage/
 .stroq/
 *.tgz
 .DS_Store

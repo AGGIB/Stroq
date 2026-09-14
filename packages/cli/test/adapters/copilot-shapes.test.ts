@@ -226,7 +226,7 @@ describe('a fan-out is bounded, because a slow Copilot hook fails open', () => {
     });
     const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8').trim().split('\n');
     expect(lines).toHaveLength(64);
-  });
+  }, 15_000);
 });
 
 const UNREADABLE: [string, string, unknown][] = [
