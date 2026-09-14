@@ -37,6 +37,8 @@ Flagged files:
 corpus: vendor/bench-corpus/files
 ```
 
+Every file the list above names is unmodified, ordinary documentation belonging to its own project. Appearing in it means a Stroq rule fired in error on that file — it is not a statement that the file, or the project it comes from, did anything wrong.
+
 ## Method
 
 The corpus is vendored, unmodified, third-party developer documentation — README, CONTRIBUTING, SECURITY and configuration files pulled from real Apache-2.0-licensed projects — fetched at an exact resolved commit and pinned by sha256 for every file in [`vendor/bench-corpus/sources.json`](../vendor/bench-corpus/sources.json); `pnpm check:bench-corpus` fails CI if a committed file no longer matches the hash the manifest recorded for it. See [`vendor/bench-corpus/PROVENANCE.md`](../vendor/bench-corpus/PROVENANCE.md) for why each source was chosen.
