@@ -1,12 +1,20 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadBundledRules, scanContent } from '@stroq/core';
 
 /** Text extensions only: the corpus is documentation, and a binary would measure nothing. */
 const TEXT = /\.(?:md|rst|txt|adoc)$/i;
-/** Files larger than this are skipped and reported as skipped; docs are small. */
-const MAX_FILE_BYTES = 1024 * 1024;
+/**
+ * The most of a file `runBench` will ever read, comfortably above `scanContent`'s own
+ * 200,000-character scan window for any realistic text. Production never skips large
+ * input — `scanContent` truncates it and scans the truncated text — so `runBench` does
+ * the same rather than dropping an oversized file from the count entirely: a file this
+ * large read in full would still only ever contribute its first ~200,000 characters to
+ * a verdict, so reading further buys nothing but risk (a pathological input pulling
+ * unbounded memory into the process). The full file size is still counted in `bytes`.
+ */
+const MAX_READ_BYTES = 1024 * 1024;
 
 export interface RuleHit {
   readonly ruleId: string;
@@ -39,6 +47,23 @@ function walk(dir: string, out: string[]): void {
 }
 
 /**
+ * Reads at most `MAX_READ_BYTES` of `file`, via a bounded fixed-size buffer rather than
+ * `readFileSync` — so a multi-gigabyte file cannot be pulled into memory whole just
+ * because it happens to sit in the corpus directory. For a file at or under the bound
+ * this reads the entire file, identically to `readFileSync(file, 'utf8')`.
+ */
+function readPrefix(file: string, maxBytes: number): string {
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const bytesRead = readSync(fd, buffer, 0, maxBytes, 0);
+    return buffer.toString('utf8', 0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
  * The vendored corpus, or null when it is not on disk — which is the normal case for
  * an npm install, since `vendor/` is outside the published package. The caller turns
  * that null into a message naming `--corpus`.
@@ -50,13 +75,18 @@ function walk(dir: string, out: string[]): void {
  * directory — differs by one level between the two, so both offsets are tried and
  * whichever exists on disk wins. A single hard-coded offset would silently resolve to
  * nothing in one of the two run modes, which `--corpus`-only tests would never catch.
+ *
+ * `base` defaults to this module's own `import.meta.url` and exists as a seam for
+ * testing: a test can pass a `base` under a directory that has no `vendor/` anywhere
+ * near it to exercise the null branch deterministically, without depending on the
+ * disk layout the test happens to run from.
  */
-export function defaultCorpusDir(): string | null {
+export function defaultCorpusDir(base: string | URL = import.meta.url): string | null {
   const candidates = [
     // packages/cli/src/bench/run.ts -> repository root (4 levels up)
-    new URL('../../../../vendor/bench-corpus/files', import.meta.url),
+    new URL('../../../../vendor/bench-corpus/files', base),
     // packages/cli/dist/index.js (bundled) -> repository root (3 levels up)
-    new URL('../../../vendor/bench-corpus/files', import.meta.url),
+    new URL('../../../vendor/bench-corpus/files', base),
   ];
   for (const url of candidates) {
     const dir = fileURLToPath(url);
@@ -78,8 +108,7 @@ export function runBench(dir: string): BenchReport {
   for (const file of files) {
     const size = statSync(file).size;
     bytes += size;
-    if (size > MAX_FILE_BYTES) continue;
-    const result = scanContent(rules, readFileSync(file, 'utf8'));
+    const result = scanContent(rules, readPrefix(file, MAX_READ_BYTES));
     if (result.verdict !== 'suspect') continue;
     flaggedFiles.push(file);
     // Attribute the file to every rule that fired on it, deduped: one file that trips
