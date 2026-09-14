@@ -20,6 +20,8 @@
     "check:atlas": "tsx scripts/build-atlas.ts --check",
     "fetch:bench-corpus": "tsx scripts/fetch-bench-corpus.ts",
     "check:bench-corpus": "tsx scripts/fetch-bench-corpus.ts --check",
+    "generate:reports": "tsx scripts/generate-reports.ts",
+    "check:reports": "tsx scripts/generate-reports.ts --check",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
     "demo:gif": "bash scripts/render-demo-gif.sh",
     "test": "vitest run",
