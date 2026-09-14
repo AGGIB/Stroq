@@ -1,19 +1,11 @@
 import { homedir } from 'node:os';
-import {
-  codexHooksPath,
-  hasStroqCodexHook,
-  readCodexHooks,
-} from '../commands/codex-hooks.js';
+import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from '../commands/codex-hooks.js';
 import {
   copilotHooksPath,
   isStroqCopilotHooks,
   readCopilotHooks,
 } from '../commands/copilot-hooks.js';
-import {
-  cursorHooksPath,
-  isStroqCursorHook,
-  readCursorHooks,
-} from '../commands/cursor-hooks.js';
+import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from '../commands/cursor-hooks.js';
 import { detectedAgents } from '../commands/doctor.js';
 import { HOOK_AGENTS, isStroqHandler, readSettings, settingsPath } from '../commands/init.js';
 import { isStroqOpenClawPlugin, openclawPluginDir } from '../commands/openclaw-plugin.js';

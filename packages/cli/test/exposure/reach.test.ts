@@ -38,7 +38,8 @@ describe('reachFrom', () => {
 
   it('reports a policy that lets scenarios through even when an agent is protected', () => {
     expect(
-      reachFrom(report(8, 4, 1), [{ agent: 'codex', detected: true, protected: true }]).passedPolicy,
+      reachFrom(report(8, 4, 1), [{ agent: 'codex', detected: true, protected: true }])
+        .passedPolicy,
     ).toBe(1);
   });
 });
