@@ -212,6 +212,30 @@
     {
       "id": "AML.T0125",
       "limitation": "Covers account creation performed through the agent’s own tools (an IAM or platform API call); account creation through a channel outside the agent, such as a compromised admin console, is invisible."
+    },
+    {
+      "id": "AML.T0056",
+      "limitation": "Covers the case where the system prompt is extracted by reading a configuration file through a tool call; extraction induced through prompt injection that the model reveals only in its own conversational response is not visible."
+    },
+    {
+      "id": "AML.T0069",
+      "limitation": "Covers system information discovered by reading a file through a tool call; information volunteered by the model when a user simply asks it questions, with no tool call involved, is not visible."
+    },
+    {
+      "id": "AML.T0069.000",
+      "limitation": "Same limitation as the parent: visible only when discovered via a file or tool-call read, not via conversational probing of the model."
+    },
+    {
+      "id": "AML.T0069.001",
+      "limitation": "Same limitation as the parent: visible only when discovered via a file or tool-call read, not via conversational probing of the model."
+    },
+    {
+      "id": "AML.T0069.002",
+      "limitation": "Same limitation as the parent: visible only when the system prompt is read from a configuration file via a tool call, not when extracted through conversation with the model."
+    },
+    {
+      "id": "AML.T0074",
+      "limitation": "Covers file-metadata and type-masquerading content a tool call returns, the same surface as prompt obfuscation; reclaiming a stale, previously-trusted package or model namespace after it is deleted or renamed is adversary-side registry activity outside the developer’s machine and is not covered."
     }
   ],
   "outOfScope": [
@@ -249,7 +273,6 @@
         "AML.T0046",
         "AML.T0047",
         "AML.T0054",
-        "AML.T0056",
         "AML.T0057",
         "AML.T0059",
         "AML.T0061",
@@ -259,10 +282,6 @@
         "AML.T0066",
         "AML.T0067",
         "AML.T0067.000",
-        "AML.T0069",
-        "AML.T0069.000",
-        "AML.T0069.001",
-        "AML.T0069.002",
         "AML.T0076",
         "AML.T0102"
       ]
@@ -313,7 +332,6 @@
       "reason": "These describe publishing, rug-pulling, or building fake reputation for a malicious package, model, dataset, or agent tool on public infrastructure the developer's machine has no view of; the moment Stroq can act is when the agent actually installs or invokes the resulting artifact, which is covered separately under AI Supply Chain Compromise and User Execution.",
       "ids": [
         "AML.T0060",
-        "AML.T0074",
         "AML.T0079",
         "AML.T0109",
         "AML.T0111",
