@@ -1,6 +1,7 @@
 import { runAttackCommand } from './commands/attack.js';
 import { runBenchCommand } from './commands/bench.js';
 import { runCanary } from './commands/canary.js';
+import { runCoverageCommand } from './commands/coverage.js';
 import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
 import { runHookCommand } from './commands/hook.js';
@@ -38,6 +39,8 @@ Commands:
                                      --probe starts your MCP servers to read their tool descriptions
   bench [--corpus <dir>] [--json] [--verbose]
                                      measure how much benign developer text the rule set flags
+  coverage [--format table|navigator] [--json]
+                                     control mapping against MITRE ATLAS and OWASP ASI
   --version                          print the CLI version
 `;
 
@@ -84,6 +87,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runExposure(rest);
     case 'bench':
       return runBenchCommand(rest);
+    case 'coverage':
+      return runCoverageCommand(rest);
     case '--version':
     case '-v':
     case 'version':
