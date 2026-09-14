@@ -277,6 +277,16 @@ function wrappedEntryPath(args: readonly unknown[]): string | null {
 }
 
 /**
+ * HTTP entries in a config: they name a URL rather than a command, so there is no
+ * subprocess for the stdio proxy to wrap and `countWrapped` excludes them. Exported
+ * so `exposure` can report that gap from the same predicate `countWrapped` uses to
+ * exclude it, rather than from a second opinion about what "HTTP" means.
+ */
+export function countHttp(config: McpConfigJson): number {
+  return Object.values(serversOf(config)).filter(isPlainObject).filter(isHttpEntry).length;
+}
+
+/**
  * How many of a config's stdio servers go through the proxy; HTTP entries are not
  * counted. A wrapper counts as `wrapped` only when its recorded entry file still
  * exists — one pointing at a path that is gone would fail at startup, so it is
