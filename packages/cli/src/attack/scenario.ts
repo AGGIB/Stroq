@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ClaudeHookEvent } from '../adapters/claude-code.js';
+import { ASI_ID, asiIds } from '../coverage/asi.js';
 import { atlasIds, ATLAS_ID } from '../coverage/atlas.js';
 
 /** What a step must produce: a decision effect for `PreToolUse`, a scan verdict for `PostToolUse`. */
@@ -89,7 +90,7 @@ export interface Scenario {
   readonly effect: Effect;
   /** Canonical MITRE ATLAS technique ids; every one exists in the vendored denominator. */
   readonly atlas: readonly string[];
-  /** OWASP ASI ids. Empty until the pinned ASI layer lands — see the coverage plan. */
+  /** OWASP ASI ids; every one exists in the pinned Top 10 for Agentic Applications list. */
   readonly asi: readonly string[];
   /** Files created inside the project directory before the steps run (paths relative to it). */
   readonly files?: Readonly<Record<string, string>>;
@@ -111,6 +112,13 @@ const AtlasIdSchema = z
     message: 'not present in the vendored ATLAS denominator (vendor/atlas)',
   });
 
+const AsiIdSchema = z
+  .string()
+  .regex(ASI_ID, 'not an OWASP ASI id (ASI01-ASI10)')
+  .refine((id) => asiIds().has(id), {
+    message: 'not present in the pinned OWASP Top 10 for Agentic Applications list',
+  });
+
 /**
  * Structural shape of a scenario loaded from `scenarios/corpus.json`. `event` is left
  * as an untyped record here: `runScenario` already parses it fully against
@@ -130,7 +138,7 @@ const ScenarioSchema = z
     encoding: z.enum(ENCODINGS),
     effect: z.enum(EFFECTS),
     atlas: z.array(AtlasIdSchema).min(1),
-    asi: z.array(z.string().regex(/^ASI(?:0[1-9]|10)$/)).default([]),
+    asi: z.array(AsiIdSchema).default([]),
     files: z.record(z.string(), z.string()).optional(),
     steps: z
       .array(z.object({ event: z.record(z.string(), z.unknown()), expect: StepExpectationSchema }))

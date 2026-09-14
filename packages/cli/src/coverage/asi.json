@@ -1,0 +1,19 @@
+{
+  "source": "OWASP GenAI Security Project — OWASP Top 10 for Agentic Applications for 2026",
+  "edition": "2026",
+  "published": "2025-12-09",
+  "url": "https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/",
+  "note": "Unlike MITRE ATLAS, OWASP publishes this list as a PDF only — the OWASP Agentic Security Initiative has no machine-readable release. The ten ids and names below are transcribed by hand from that document, which is why this layer is secondary and version-pinned rather than vendored and hashed like atlas.json. This is a different taxonomy from the earlier OWASP 'Agentic AI Threats and Mitigations' (v1.0, February 2025), which numbers its threats T1 through T15; the ASI-prefixed ids here belong only to the 2026 Top 10 for Agentic Applications.",
+  "risks": [
+    { "id": "ASI01", "name": "Agent Goal Hijack" },
+    { "id": "ASI02", "name": "Tool Misuse" },
+    { "id": "ASI03", "name": "Identity & Privilege Abuse" },
+    { "id": "ASI04", "name": "Agentic Supply Chain Compromise" },
+    { "id": "ASI05", "name": "Unexpected Code Execution" },
+    { "id": "ASI06", "name": "Memory & Context Poisoning" },
+    { "id": "ASI07", "name": "Insecure Inter-Agent Communication" },
+    { "id": "ASI08", "name": "Cascading Agent Failures" },
+    { "id": "ASI09", "name": "Human-Agent Trust Exploitation" },
+    { "id": "ASI10", "name": "Rogue Agents" }
+  ]
+}
