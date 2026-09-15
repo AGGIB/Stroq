@@ -7,6 +7,15 @@ date: '2026/09/03'
 schema_version: '1.0'
 tags:
   category: tool-poisoning
+  # Stated, not inherited: this rule reads every surface, and the three documentation
+  # false positives `stroq bench` attributes to it are a loose pattern, not a rule
+  # reading the wrong surface. `curl … | sh` is byte-identical in a README's install
+  # line and in an injected instruction, so no surface separates them — and narrowing
+  # it was tried: at `command_output` it lost three recorded attack scenarios outright
+  # (10-skill-base64-installer, 15-issue-title-pipe-to-shell, 20-pdf-text-exec), whose
+  # payloads arrive on an instruction file, an MCP result and a PDF respectively.
+  # Fixing this rule means a tighter pattern, not a narrower surface.
+  scan_target: any
 detection:
   condition: any
   conditions:

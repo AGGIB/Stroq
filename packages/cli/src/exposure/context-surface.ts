@@ -142,7 +142,10 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
     } catch {
       continue;
     }
-    if (scanContent(rules, text).verdict === 'suspect') flagged.push(file);
+    // Every file walked above is an instruction file, a skill, a subagent or a slash
+    // command: text the agent is meant to obey, not repository material.
+    if (scanContent(rules, text, {}, { target: 'instruction_file' }).verdict === 'suspect')
+      flagged.push(file);
   }
 
   return {

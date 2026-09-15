@@ -148,6 +148,7 @@ const slowRule = (id: string): CompiledRule => ({
   title: 'slow stub',
   severity: 'low',
   category: 'test',
+  scanTarget: 'any',
   condition: 'any',
   tests: [{ field: 'content', kind: 'regex', regex: busyRegex(30), value: 'stub' }],
 });

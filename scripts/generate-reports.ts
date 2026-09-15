@@ -90,6 +90,29 @@ function deriveBench(): string {
     '',
     '## Method',
     '',
+    'The bench declares the surface it is scanning — `repo_content`, because the corpus ' +
+      'is documentation — and rules scoped to a different surface are not counted ' +
+      'against it. **This changed what the number means.** Before the surface was ' +
+      'declared, every rule the bundle ships was measured against documentation, ' +
+      'including any rule written to read something else; now the rate is a rate for the ' +
+      'rules that read documentation. Compare this figure with one published before ' +
+      "2026-09-15 and you are comparing two slightly different denominators, so don't. " +
+      'As it happens the rate did not move when the surface was declared (40.0% before ' +
+      'and after): every rule this corpus convicts reads every surface, which is the ' +
+      'point below.',
+    '',
+    'None of the rules named above is scoped away from documentation, and that is a ' +
+      'deliberate choice rather than an oversight. Each was examined and classified as a ' +
+      'loose pattern rather than a rule reading the wrong surface — a pattern that would ' +
+      'be just as wrong on a tool description or a command line, so declaring a surface ' +
+      'for it would remove it from this measurement while leaving it exactly as wrong ' +
+      'everywhere else. The candidate this test was hardest on is ' +
+      '`STROQ-2026-00005` (`curl … | sh`): scoping it to command output cleared three ' +
+      'documentation false positives and lost three recorded attack scenarios with it, ' +
+      'because `curl … | sh` is byte-identical in a README install line and in an ' +
+      'injected instruction. These rules need tighter patterns, not narrower surfaces, ' +
+      'and until they get them the number above stays where the measurement puts it.',
+    '',
     'Production scans under a 500 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
       "fails closed the moment it runs out — verdict: 'suspect' plus a synthetic " +

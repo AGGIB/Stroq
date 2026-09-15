@@ -88,7 +88,7 @@ function flaggedTools(
     .filter(
       (t) =>
         typeof t.description === 'string' &&
-        scanContent(rules, t.description).verdict === 'suspect',
+        scanContent(rules, t.description, {}, { target: 'tool_description' }).verdict === 'suspect',
     )
     .map((t) => (typeof t.name === 'string' ? t.name : '(unnamed)'));
 }

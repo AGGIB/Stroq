@@ -136,9 +136,16 @@ export function runBench(dir: string): BenchReport {
   for (const file of files) {
     const size = statSync(file).size;
     bytes += size;
-    const result = scanContent(rules, readPrefix(file, MAX_READ_BYTES), {
-      budgetMs: BENCH_BUDGET_MS,
-    });
+    // `repo_content`: the corpus is third-party documentation, and naming that surface
+    // is what makes the reported rate a rate *for documentation* rather than for every
+    // rule the bundle ships regardless of where it was written to read. It also changes
+    // what the number means — see docs/BENCH.md's Method section.
+    const result = scanContent(
+      rules,
+      readPrefix(file, MAX_READ_BYTES),
+      { budgetMs: BENCH_BUDGET_MS },
+      { target: 'repo_content' },
+    );
     if (result.timedOut) timedOut += 1;
     if (result.verdict !== 'suspect') continue;
     flaggedFiles.push(file);
