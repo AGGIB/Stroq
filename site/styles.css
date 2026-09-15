@@ -296,7 +296,7 @@ html:not(.js) .fork-replay { display: none; }
 
 /* 9. What you get (bento) ---------------------------------------------- */
 .bento { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
-.tile { display: flex; flex-direction: column; gap: .8rem; min-height: 250px; padding: 1.5rem 1.5rem 1.4rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); }
+.tile { display: flex; flex-direction: column; gap: .8rem; min-height: 200px; padding: 1.4rem 1.4rem 1.3rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); }
 .tile-wide { grid-column: span 2; }
 .tile-prov { border: 1.5px solid var(--allow); }
 .tile-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }
