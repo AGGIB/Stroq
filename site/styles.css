@@ -180,17 +180,31 @@ html:not(.js) .copy-btn { display: none; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
 .ic-gh { flex: none; }
 
-/* 5b. The fork: one poisoned file, two outcomes ------------------------- */
-.fork { position: relative; margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
-.fork-source { border: 1px solid var(--line-2); border-radius: var(--radius-lg); background: var(--paper-2); overflow: hidden; }
-.fork-source-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); }
-.fork-file { font: 500 .8rem/1 var(--font-mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fork-tag { flex: none; padding: .2rem .55rem; border-radius: 999px; background: var(--deny-tint); color: var(--deny-text); font: 500 .7rem/1.5 var(--font-body); letter-spacing: .02em; }
-.fork-code { margin: 0; padding: 1rem 1.15rem 1.15rem; overflow-x: auto; font: 500 .82rem/1.65 var(--font-mono); color: var(--ink-2); }
-.c-str { color: var(--info-text); }
-.c-inj { display: block; margin-top: .4rem; padding-left: .7rem; border-left: 2px solid var(--deny); color: var(--deny-text); }
+/* 5b. The hero scene: six agents, one gate, one poisoned file ----------- */
+.hero-scene { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.hs { display: block; width: 100%; min-width: 460px; height: auto; overflow: visible; font-family: var(--font-display); }
+.hs-logo { color: var(--ink); }
+.hs-gate { fill: var(--paper-2); stroke: var(--ink); stroke-width: 1.5; }
+.hs-box { fill: var(--paper); stroke: var(--line-2); stroke-width: 1.25; }
+.hs-name { fill: var(--ink); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }
+.hs-mark { color: var(--ink); fill: currentColor; }
+.hs-line { stroke: var(--line-2); stroke-width: 1.5; }
+.hs-drift { stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: .035 .05; }
+.hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+.hs-machine path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
+.hs-cap { fill: var(--ink-2); font-size: 12px; font-weight: 500; font-family: var(--font-body); }
+.hs-agent-target .hs-box { fill: var(--ask-tint); stroke: var(--ask); }
+.hs-box-bad { fill: var(--deny-tint); stroke: var(--deny); stroke-dasharray: 4 3; }
+.hs-name-bad { fill: var(--deny-text); }
+.hs-tendril, .hs-taint { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.hs-x circle { fill: var(--deny); }
+.hs-x path { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+.hs-x { transform-box: fill-box; transform-origin: center; }
+.hs-verdict { fill: var(--deny-text); font-size: 12px; font-weight: 500; font-family: var(--font-mono); }
+.hs-attacker { transform-box: fill-box; transform-origin: center; }
 
-/* The visual fork itself — two lines splitting from the file into the panes. */
+/* 5c. The fork: one poisoned file, two outcomes ------------------------- */
+.fork { position: relative; margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
 
 .fork-panes { margin-top: clamp(1rem, 1.5vw, 1.5rem); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1rem, 2vw, 1.75rem); }
 .pane { position: relative; padding: clamp(1.1rem, 1vw + .8rem, 1.6rem); border: 1px solid var(--line-2); border-radius: var(--radius-lg); background: var(--paper); }
@@ -204,8 +218,6 @@ html:not(.js) .copy-btn { display: none; }
   display: flex; align-items: flex-start; gap: .55rem;
   padding: .5rem .65rem; border-radius: var(--radius-sm);
   font: 500 .86rem/1.5 var(--font-body); color: var(--ink-2);
-  /* Visible by default: the sequence emphasises, it never reveals. */
-  opacity: 1; transition: opacity var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out);
 }
 .fstep-text { min-width: 0; }
 .fstep code { padding: .05rem .3rem; border-radius: 4px; background: var(--code-bg); font: 500 .92em/1.4 var(--font-mono); overflow-wrap: anywhere; }
@@ -216,30 +228,11 @@ html:not(.js) .copy-btn { display: none; }
 .fstep-good { background: var(--allow-tint); color: var(--allow-text); }
 .fstep-bad code, .fstep-good code, .fstep-warn code { background: rgba(255, 255, 255, .45); }
 .fork-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .75rem; margin: 1.25rem 0 0; color: var(--ink-2); font: 500 .88rem/1.5 var(--font-body); text-align: center; }
-.fork-replay { min-height: 34px; padding: .25rem .85rem; border: 1px solid var(--line-2); border-radius: 999px; background: transparent; color: var(--ink); font: 500 .82rem/1 var(--font-body); cursor: pointer; transition: border-color var(--dur-fast); }
-.fork-replay:hover { border-color: var(--ink); }
-html:not(.js) .fork-replay { display: none; }
 
-/* While the sequence plays, steps not yet reached recede. */
-.js .fork.is-playing .fstep { opacity: .32; }
-.js .fork.is-playing .fstep.is-reached { opacity: 1; }
 
 .works-with { margin: clamp(2.5rem, 2rem + 2vw, 3.5rem) 0 0; color: var(--ink-2); font: 500 .88rem/1.7 var(--font-body); text-align: center; }
 .works-with b { color: var(--ink); font-weight: 500; }
 
-.term { overflow: hidden; border: 1px solid var(--term-line); border-radius: var(--radius-lg); background: var(--term); color: var(--term-fg); box-shadow: var(--shadow-term); font: 500 .85rem/1.7 var(--font-mono); }
-.term-bar { display: flex; align-items: center; gap: .8rem; padding: .65rem 1rem; border-bottom: 1px solid var(--term-line); background: var(--term-2); color: var(--term-dim); font: 500 .78rem/1 var(--font-body); }
-.term-dots { display: inline-block; width: 10px; height: 10px; margin-right: 32px; border-radius: 50%; background: var(--term-line); box-shadow: 16px 0 0 var(--term-line), 32px 0 0 var(--term-line); }
-.term-pause { display: none; align-items: center; min-height: 28px; margin-left: auto; padding: .2rem .7rem; border: 1px solid var(--term-line); border-radius: 999px; background: transparent; color: var(--term-fg); font: 500 .74rem/1 var(--font-body); cursor: pointer; }
-.term-pause:hover { border-color: var(--term-dim); }
-.term-body { margin: 0; padding: 1.1rem 1.15rem 1rem; list-style: none; }
-.tl { min-height: 1.7em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.tl-cmd { color: var(--term-fg); }
-.tl-ask { color: var(--t-ask); }
-.tl-deny { color: var(--t-deny); }
-.tl-allow { color: var(--t-allow); }
-.tl.is-typing::after { content: ""; display: inline-block; width: .55em; height: 1em; margin-left: 1px; vertical-align: -.12em; background: currentColor; animation: caret 1s step-end infinite; }
-.term-foot { padding: .6rem 1.15rem .7rem; border-top: 1px solid var(--term-line); color: var(--term-dim); font: 500 .74rem/1.45 var(--font-body); }
 
 /* 6. Proof strip ------------------------------------------------------- */
 .proof { padding: calc(var(--overlap) + 2.25rem) 0 3.5rem; }
@@ -496,7 +489,6 @@ html:not(.js) .fork-replay { display: none; }
      read rather than a side-by-side the viewport cannot hold. */
   .fork-panes { grid-template-columns: 1fr; }
   .fork-code { font-size: .74rem; }
-  .fork-source-head { flex-wrap: wrap; gap: .4rem; }
   .fork-file { white-space: normal; overflow-wrap: anywhere; }
 }
 @media (max-width: 700px) {
@@ -516,14 +508,20 @@ html:not(.js) .fork-replay { display: none; }
   .tile { min-height: 0; }
   .install-pill { width: 100%; }
   .hero-actions .btn { flex: 1 1 auto; justify-content: center; }
-  .term { font-size: .82rem; }
 }
 
 /* 17. Motion ----------------------------------------------------------- */
 @keyframes caret { 50% { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  .js .term-pause { display: inline-flex; }
+  .hs-drift { animation: hs-drift 1.2s linear infinite; }
+  .hs-attacker { animation: hs-attacker 9s var(--ease-out) infinite; }
+  .hs-tendril { animation: hs-tendril 9s linear infinite; }
+  .hs-taint { animation: hs-taint 9s linear infinite; }
+  .hs-agent-target .hs-box { animation: hs-suspect 9s steps(1, end) infinite; }
+  .hs-gate { animation: hs-gate 9s linear infinite; }
+  .hs-x { animation: hs-x 9s cubic-bezier(.34, 1.56, .64, 1) infinite; }
+  .hs-verdict { animation: hs-verdict 9s linear infinite; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
@@ -535,6 +533,15 @@ html:not(.js) .fork-replay { display: none; }
   .tl.is-typing::after { animation: none; }
   .btn:hover, .copy-btn:hover { transform: none; }
 }
+
+@keyframes hs-drift { to { stroke-dashoffset: -.085; } }
+@keyframes hs-attacker { 0%, 16% { opacity: 0; transform: translateY(8px); } 21%, 62% { opacity: 1; transform: none; } 67%, 100% { opacity: 0; transform: none; } }
+@keyframes hs-tendril { 0%, 22% { stroke-dashoffset: 1; opacity: 1; } 33%, 62% { stroke-dashoffset: 0; opacity: 1; } 67%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hs-taint { 0%, 33% { stroke-dashoffset: 1; opacity: 1; } 50%, 58% { stroke-dashoffset: 0; opacity: 1; } 64%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hs-suspect { 0%, 33% { fill: var(--paper); stroke: var(--line-2); } 36%, 93% { fill: var(--ask-tint); stroke: var(--ask); } 100% { fill: var(--paper); stroke: var(--line-2); } }
+@keyframes hs-gate { 0%, 50% { fill: var(--paper-2); } 51.5% { fill: var(--deny-tint); } 57%, 100% { fill: var(--paper-2); } }
+@keyframes hs-x { 0%, 50% { transform: scale(0); } 55%, 93% { transform: scale(1); } 100% { transform: scale(0); } }
+@keyframes hs-verdict { 0%, 54% { opacity: 0; } 58%, 93% { opacity: 1; } 100% { opacity: 0; } }
 
 /* 18. Dark theme ------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {

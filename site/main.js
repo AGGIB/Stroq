@@ -1,6 +1,6 @@
 /* Stroq site — progressive enhancement only.
    Everything renders without this file; it adds the menu toggle, copy buttons,
-   scroll reveals and the hero terminal animation. No storage. The only network
+   scroll reveals and the header install command. No storage. The only network
    call is Vercel Web Analytics (cookieless page views, first-party route),
    whose deferred script loads after this file. */
 window.va =
@@ -145,60 +145,4 @@ window.va =
     navCmd.classList.add('is-shown');
   }
 
-  /* The steps are readable without this: CSS leaves every one at full opacity
-     and the sequence only ever *emphasises* the order they happen in. With no
-     JS, reduced motion, or no IntersectionObserver, the reader simply sees the
-     finished comparison, which is the point of it anyway. */
-  var fork = doc.querySelector('[data-fork]');
-  if (fork && !reduceMotion.matches && 'IntersectionObserver' in window) {
-    var steps = fork.querySelectorAll('.fstep');
-    var replayBtn = fork.querySelector('[data-fork-replay]');
-    var STEP_MS = 620, HOLD_MS = 2600;
-    var fTimer = null, played = false;
-
-    function reach(n) {
-      each(steps, function (el) {
-        el.classList.toggle('is-reached', Number(el.getAttribute('data-step')) <= n);
-      });
-    }
-
-    function play() {
-      window.clearTimeout(fTimer);
-      fork.classList.add('is-playing');
-      var n = 0;
-      (function tick() {
-        n += 1;
-        reach(n);
-        if (n < 4) {
-          fTimer = window.setTimeout(tick, STEP_MS);
-        } else {
-          /* Land on the finished state and stay there. A landing page loop that
-             restarts while someone is reading the outcome is a distraction. */
-          fTimer = window.setTimeout(function () { fork.classList.remove('is-playing'); }, HOLD_MS);
-        }
-      })();
-    }
-
-    if (replayBtn) {
-      replayBtn.addEventListener('click', function () {
-        played = true;
-        play();
-        announce('Replaying the comparison.');
-      });
-    }
-
-    new IntersectionObserver(function (entries, obs) {
-      if (!entries[0].isIntersecting || played) { return; }
-      played = true;
-      obs.disconnect();
-      play();
-    }, { threshold: 0.4 }).observe(fork);
-
-    doc.addEventListener('visibilitychange', function () {
-      if (doc.hidden) {
-        window.clearTimeout(fTimer);
-        fork.classList.remove('is-playing');
-      }
-    });
-  }
 })();
