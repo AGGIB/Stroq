@@ -1,5 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import { displayPath, runAttackCommand } from '../../src/commands/attack.js';
+import type { FuzzReport } from '../../src/attack/fuzz.js';
+
+// A mutable hoisted handle the mocked `runFuzz` below can read on every call. Left
+// null, the mock is a transparent pass-through to the real fuzzer — every existing
+// test still runs the real 350-variant corpus. Only the escape/exit-code test sets
+// it, and only for the duration of that one test.
+const fuzzState = vi.hoisted(() => ({ forcedReport: null as FuzzReport | null }));
+
+// `runAttackCommand`'s --fuzz path has no seam for injecting a report: it always
+// builds one from the real corpus and the real policy. Mocking `runFuzz` at the
+// module boundary — rather than adding an export, parameter, or DI hook to
+// production code just to make this testable — lets this test construct a report
+// with a known escape and drive it straight through the exit-code branch the
+// comment below is guarding, without touching attack.ts or fuzz.ts.
+vi.mock('../../src/attack/fuzz.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/attack/fuzz.js')>();
+  return {
+    ...actual,
+    runFuzz: async (...args: Parameters<typeof actual.runFuzz>) =>
+      fuzzState.forcedReport ?? actual.runFuzz(...args),
+  };
+});
 
 function capture(): { lines: string[]; restore: () => void } {
   const lines: string[] = [];
@@ -79,6 +101,55 @@ describe('stroq attack', () => {
     expect(code).toBe(0);
     expect(out.lines.join('')).toContain('stroq attack --fuzz:');
   }, 120_000);
+
+  // The two corpus tests above no longer contrast: both exit 0, because the real
+  // corpus has no escapes left. That pair used to be the proof that the exit-code
+  // branch in runAttackCommand (`report.ok || values['allow-escapes'] === true`)
+  // actually works — a renamed flag or a flipped condition would have flipped one
+  // of the two exit codes and been caught. This test restores that contrast by
+  // forcing `runFuzz` (mocked above) to return a report with a genuine escape,
+  // independent of what the corpus currently finds, so a broken exit-code branch
+  // is still caught even after every real escape is closed.
+  it('--fuzz exits 1 when the report carries an escape, and 0 for that same report under --allow-escapes', async () => {
+    fuzzState.forcedReport = {
+      version: 1,
+      policy: 'default',
+      scenarios: 1,
+      mutations: 1,
+      variants: 1,
+      survived: 0,
+      escaped: [
+        {
+          scenarioId: 'fixture-scenario',
+          mutationId: 'fixture-mutation',
+          preserving: true,
+          outcome: 'passed',
+          ruleId: null,
+          error: null,
+        },
+      ],
+      recorded: [],
+      errored: [],
+      notApplicable: 0,
+      textless: [],
+      ok: false,
+    };
+    try {
+      let out = capture();
+      let code = await runAttackCommand(['--fuzz']);
+      out.restore();
+      expect(code).toBe(1);
+      expect(out.lines.join('')).toContain('fixture-scenario');
+
+      out = capture();
+      code = await runAttackCommand(['--fuzz', '--allow-escapes']);
+      out.restore();
+      expect(code).toBe(0);
+      expect(out.lines.join('')).toContain('fixture-scenario');
+    } finally {
+      fuzzState.forcedReport = null;
+    }
+  });
 });
 
 describe('displayPath', () => {
