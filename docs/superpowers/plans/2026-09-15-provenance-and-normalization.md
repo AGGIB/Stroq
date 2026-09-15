@@ -364,14 +364,25 @@ The second test is the one that matters. If your collapsed pass cannot satisfy i
 
 **The defect, with its cost measured.** `tags.scan_target` is declared in `atr-types.ts`, unset on all 599 rules, and dropped by the compiler. The bench convicts two rules of six of its ten flagged files, and both are surface confusions rather than bad patterns: `STROQ-2026-00005` ("Remote script piped into a shell") firing on README install lines, and `ATR-2026-00142` ("Data Piggybacking via Casual Transition Words") on the phrase "In addition to…".
 
-**Scope discipline — read this before planning your work.** Assigning a surface to all 599 rules by hand is not this task, and pretending otherwise would produce 599 unreviewed judgements. This task:
+**Every rule gets a surface. All 608 of them.** An earlier draft of this plan scoped only the rules the bench convicts and left the rest at `any`; the plan's owner overruled that, and was right to. A partial migration leaves the mechanism in place with nothing behind it, and the next person has to redo the survey anyway.
 
-1. Makes `scan_target` survive compilation and be honoured at match time, with `any` as the behaviour-preserving default.
-2. Assigns a real surface to **the nine `STROQ-*` rules** — they are ours, they are few, and each can be justified in one line.
-3. Assigns a surface to **every ATR rule the bench currently flags**, which the `byRule` table names for you.
-4. Leaves every other rule at `any`, and records in the commit body that the migration is deliberately partial, how many rules remain unassigned, and that each assignment is a judgement a reviewer can check.
+**It is seven decisions, not 608 guesses.** Every rule carries `tags.category`, and the distribution is:
 
-A rule you cannot justify scoping, leave at `any`. `any` is the honest default; a wrong narrow scope is a hole.
+| rules | category | the surface it obviously is |
+| --- | --- | --- |
+| 247 | `prompt-injection` | arrives anywhere untrusted text does |
+| 119 | `context-exfiltration` | |
+| 108 | `agent-manipulation` | |
+| 90 | `tool-poisoning` | a tool's *description* — that is what the category means |
+| 42 | `skill-compromise` | an instruction file |
+| 1 | `privilege-escalation` | |
+| 1 | `excessive-autonomy` | |
+
+So: decide a surface per category, apply it as the default, then override per rule where the rule's own title or pattern says otherwise — `STROQ-2026-00005` matching `curl … | sh` belongs to a command line whatever its category says. Record the seven category decisions and every per-rule override in the commit body, so a reviewer checks seven judgements plus a short exception list rather than a wall.
+
+Do not leave a category at `any` because deciding is hard. `any` is correct only where the pattern genuinely can arrive on every surface — say which of the seven those are and why, in one line each.
+
+A wrong narrow scope is a hole, so where you override a category default, the rule's own text must justify it. Where you are unsure between two surfaces, pick the wider one and note it.
 
 - [ ] **Step 1: Write the failing test**
 
