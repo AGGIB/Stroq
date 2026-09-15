@@ -8,10 +8,16 @@ export interface Variant {
 
 // Zero-width and invisible characters used to hide instructions: soft hyphen,
 // zero-width space/joiners and bidi marks, invisible operators, BOM,
-// variation selectors (U+FE00-FE0F) and Unicode tag characters
-// (U+E0000-E007F, the "ASCII smuggling" block). The `u` flag is required
-// for the astral \u{...} range syntax.
-const ZERO_WIDTH = /[\u00AD\u200B-\u200F\u2060-\u2064\uFE00-\uFE0F\uFEFF\u{E0000}-\u{E007F}]/gu;
+// variation selectors VS1-16 (U+FE00-FE0F) and their supplement VS17-256
+// (U+E0100-E01EF), and Unicode tag characters (U+E0000-E007F, the "ASCII
+// smuggling" block). \uD800-\uDFFF strips an unpaired (orphaned) surrogate;
+// under the `u` flag a *paired* surrogate is matched as its single combined
+// code point (e.g. an emoji, which is above 0xFFFF), so this never touches a
+// real astral character -- only a half left over from a mangled encoding.
+// The `u` flag is required for both that and the astral \u{...} range
+// syntax.
+const ZERO_WIDTH =
+  /[\u00AD\u200B-\u200F\u2060-\u2064\uFE00-\uFE0F\uFEFF\uD800-\uDFFF\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 // Greek and Coptic (\u0370-\u03FF) plus Cyrillic (\u0400-\u04FF): the two
 // non-Latin scripts covered by the HOMOGLYPHS table below. A token qualifies
 // for folding only when it mixes one of these scripts with Latin \u2014 a token
@@ -88,8 +94,36 @@ function foldToken(token: string): string {
   return out;
 }
 
-export function normalizeText(text: string): string {
+function normalizeOnce(text: string): string {
   return text.replace(ZERO_WIDTH, '').normalize('NFKC').split(/(\s+)/).map(foldToken).join('');
+}
+
+// Bounded so a pathological input can't loop unboundedly; three passes is
+// generous headroom over the one pass this pipeline ever actually needs (see
+// below).
+const MAX_NORMALIZE_PASSES = 3;
+
+// Re-runs strip+NFKC+fold until the output stops changing, instead of
+// applying it once. As things stand this closes no live gap: a sweep of
+// every Unicode code point (0..0x10FFFF, surrogates excluded) found that no
+// character's NFKC expansion contains a zero-width character it did not
+// already contain, and HOMOGLYPHS only ever emits plain ASCII, which strip
+// and NFKC both leave untouched -- so `normalizeOnce` is already a fixed
+// point for every input this function can be given today, and a second pass
+// only ever reconfirms the first one's output rather than changing it. This
+// loop is insurance against a future change to the pipeline (a new fold
+// emitting non-ASCII, or a reordering of the stages), not a fix for an
+// escape that exists now. For text the first pass leaves unchanged --
+// ordinary benign text -- the loop still costs only a single string
+// comparison before returning.
+export function normalizeText(text: string): string {
+  let current = text;
+  for (let pass = 0; pass < MAX_NORMALIZE_PASSES; pass += 1) {
+    const next = normalizeOnce(current);
+    if (next === current) return next;
+    current = next;
+  }
+  return current;
 }
 
 function looksLikeText(s: string): boolean {
