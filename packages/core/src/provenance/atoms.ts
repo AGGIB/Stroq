@@ -257,9 +257,13 @@ export function extractAtoms(text: string): Atom[] {
  * collapsed text (see `collapseContinuations`), recovering a package name split across
  * lines — by the `split-across-lines` mutation, or by ordinary wrapping — that
  * `LINE_END` would otherwise hide from `restOfLine`. It merges into the same deduped,
- * capped set and is skipped entirely, same as a further variant would be, once the cap
- * is already reached or when collapsing changed nothing, so it never pays for a scan it
- * cannot use.
+ * capped set, and is skipped only when the cap is already saturated or when collapsing
+ * happens to change nothing — neither is the common case. Real markdown routinely
+ * indents continuations, so on realistic prose this pass generally does run: measured at
+ * ~3.2 ms against the 210 KB `vendor/bench-corpus/files/prometheus-prometheus/configuration.md`
+ * latency reference (154 atoms recovered, under `MAX_ATOMS`, so the pass is never
+ * short-circuited there). The guard exists for the cases where the pass genuinely has
+ * nothing to add, not as a promise that it usually skips.
  */
 export function extractAtomsDeep(text: string): Atom[] {
   const seen = new Set<string>();
@@ -279,9 +283,11 @@ export function extractAtomsDeep(text: string): Atom[] {
     merge(extractAtoms(variant.text));
   }
 
-  const collapsed = collapseContinuations(text);
-  if (out.length < MAX_ATOMS && collapsed !== text) {
-    merge(extractAtoms(collapsed));
+  if (out.length < MAX_ATOMS) {
+    const collapsed = collapseContinuations(text);
+    if (collapsed !== text) {
+      merge(extractAtoms(collapsed));
+    }
   }
 
   return out;
