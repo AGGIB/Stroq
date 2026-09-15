@@ -136,7 +136,7 @@ HIGH      mcp-unwrapped
 Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.
 ```
 
-The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect some false positives in that count. Every shipped rule now declares the surface it reads — an instruction file scans as `instruction_file`, a probed tool description as `tool_description` — but all 599 deliberately resolve to "any surface", because the false positives measured against the bench corpus (see [`docs/BENCH.md`](docs/BENCH.md)) come from loose patterns, not from a rule reading the wrong surface, and the one rule ever scoped narrower (`STROQ-2026-00009`) turned out to read a generic hidden-instruction shape that has to see every surface too; scoping does not make most false positives go away, and it can quietly create a hole. `--json` emits the whole record.
+The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect some false positives in that count. Every shipped rule now declares the surface it reads — an instruction file scans as `instruction_file`, a probed tool description as `tool_description` — but all 639 deliberately resolve to "any surface", because the false positives measured against the bench corpus (see [`docs/BENCH.md`](docs/BENCH.md)) come from loose patterns, not from a rule reading the wrong surface, and the one rule ever scoped narrower (`STROQ-2026-00009`) turned out to read a generic hidden-instruction shape that has to see every surface too; scoping does not make most false positives go away, and it can quietly create a hole. `--json` emits the whole record.
 
 `--share` prints a redacted summary — counts, finding classes, agent names and config key names only. Paths, file names, MCP server names, hostnames and usernames cannot appear in it: the shareable record is built field-by-field from typed data rather than filtered, so a field is absent until someone adds it deliberately. Nothing is ever transmitted; `--share` output is produced locally for you to paste.
 
@@ -148,7 +148,7 @@ The exit code is 1 when there is any finding, so `stroq exposure` works in CI or
 flowchart LR
     subgraph read [" PostToolUse · what the agent reads "]
         R[Read · WebFetch · Bash output · mcp__*] --> N[Normalize<br/>zero-width, homoglyphs, base64 / hex / url]
-        N --> S[Scan<br/>599 rules]
+        N --> S[Scan<br/>639 rules]
     end
     S -- "score ≥ threshold" --> T[(Session taint<br/>suspect)]
     subgraph act [" PreToolUse · what the agent wants to do "]
@@ -177,7 +177,7 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 - **Secret egress guard: Stroq knows where your secrets are going.** The values of secrets on this machine — the project's `.env*` files, `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json`, and credential-shaped environment variables — are indexed as salted hashes. An outbound action (network command, web fetch, MCP call, external push, encoded exec) whose arguments contain one of those values is denied and the reason names the secret and its file, never the value. `stroq canary` prints a decoy secret to plant; any outbound use of it is a certain positive that also taints the session. The whole argument is scanned, in overlapping windows up to 2 MiB; an outbound argument larger than that is denied as unscannable rather than sent half-checked.
 - **Twenty scenarios you can replay.** `stroq attack` runs recorded hook events from public incidents and synthetic matrix cells through your own policy and reports `blocked` / `asked` / `passed` per scenario, with the source of each. It is how we check that a change to the classifier or the default policy does not silently let an old attack back in.
 - **Content scanning with real normalization.** Zero-width and tag characters stripped, homoglyphs folded, nested base64/hex/URL decoding — so `сurl` with a Cyrillic `с`, or a command hidden in base64, is matched like the plain text it decodes to.
-- **599 gated rules.** 12 hand-written Stroq rules plus 596 vendored [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules), every one of them passed through a benign-corpus false-positive gate and a regex performance gate before it ships. Russian-language rule variants included.
+- **639 gated rules.** 12 hand-written Stroq rules plus 627 of the 636 vendored [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules) — every one of them passed through a benign-corpus false-positive gate and a regex performance gate before it ships, and the 9 that did not are held back. Russian-language rule variants included.
 - **Taint-aware policy.** The decision about an action knows whether the agent has read something suspicious in this session. Fourteen action classes, one ordered YAML policy, first match wins.
 - **Self-protection.** An agent that has been tainted cannot edit Stroq's own policy, hooks, or `.claude/settings.json` (`config.self` → deny); touching them at all asks first.
 - **Tamper-evident audit.** Hash-chained JSONL with structural redaction, `0600` permissions, and `stroq verify`.
@@ -580,14 +580,14 @@ Commands that only read the security config — `cat`, `grep`, `git status`/`dif
 
 ## Rules
 
-Stroq ships 12 hand-written rules in [`rules/stroq/`](rules/stroq/) (Apache-2.0) targeting instruction override, hidden directives to the agent, secret exfiltration, encoded execution, and related prompt-injection patterns — some with Russian-language rule alternatives and matching fixtures alongside the English ones. [`rules/atr/`](rules/atr/) vendors 596 more from [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules) (MIT).
+Stroq ships 12 hand-written rules in [`rules/stroq/`](rules/stroq/) (Apache-2.0) targeting instruction override, hidden directives to the agent, secret exfiltration, encoded execution, and related prompt-injection patterns — some with Russian-language rule alternatives and matching fixtures alongside the English ones. [`rules/atr/`](rules/atr/) vendors 636 more from [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules) (MIT).
 
 Every rule is built through two gates, run locally by a maintainer (`pnpm build:rules`):
 
 - **Benign-corpus gate:** any rule that fires on [`rules/fixtures/benign/`](rules/fixtures/benign/) is a false positive. A vendored ATR rule that fails this is disabled automatically ([`rules/atr-disabled.json`](rules/atr-disabled.json) currently lists 9); a Stroq-authored rule held to the same bar is never auto-disabled — a false positive fails the build instead, so the rule gets fixed.
 - **Regex performance gate:** every rule is timed against adversarial blobs (repeated base64 alphabet, repeated characters, repeated URLs) at increasing sizes; anything over 25 ms is disabled before it ships, rather than shipping a rule that could stall a hook on real input.
 
-That leaves 599 active rules at runtime out of 608 defined.
+That leaves 639 active rules at runtime out of 648 defined.
 
 The performance gate's timings are machine-dependent, so CI never re-measures them: `pnpm build:rules --check` re-verifies rule compilation and the benign-corpus scan against the committed [`rules/atr-disabled.json`](rules/atr-disabled.json) and byte-compares the result against the committed bundle, deterministically and without timing anything. CI runs it with `--advisory-perf`, which additionally times every rule and prints a warning for anything over threshold that isn't already disabled, without failing the build — a rule that's consistently slow gets caught and disabled the next time a maintainer runs `pnpm build:rules` locally.
 
