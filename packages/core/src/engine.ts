@@ -78,15 +78,27 @@ export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
  * rules that matter there and therefore the safe way to be wrong.
  */
 const INSTRUCTION_FILE =
-  /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|[/\\]\.(?:claude|cursor|codex|windsurf)[/\\]/i;
+  /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]/i;
 
 /**
  * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
  * about it — under which every rule fires, exactly as before surfaces existed.
- * A wrong narrow answer here is a hole, so each case is one the tool name settles:
+ * A wrong narrow answer here is a hole, so each case below is one the tool name
+ * settles, with one named exception:
  *
  * - `tools/list` through the MCP proxy returns the servers' tool *descriptions*, which
- *   is where tool poisoning lives; every other `mcp__` call returns a tool result.
+ *   is where tool poisoning lives; every other `mcp__` call returns `tool_result` —
+ *   including `resources/read` and `prompts/get`, minted as
+ *   `mcp__<srv>__resources_read` and `mcp__<srv>__prompts_get` by `MCP_METHOD_TOOL` in
+ *   `packages/cli/src/mcp/judge.ts`. Those two are not actually settled by the tool
+ *   name: a prompt template is text the agent is meant to obey, which by this
+ *   codebase's own definition is `instruction_file`, and a resource read is closer to
+ *   `repo_content` than to a tool call's own result. They share `tool_result` today as
+ *   a placeholder, which costs nothing measurable because nothing is scoped to
+ *   `instruction_file` or `repo_content` in a way that a stray `mcp__` result could
+ *   wrongly feed — but the day a rule category such as `skill-compromise` is scoped
+ *   away from `any`, these two need their own branch here rather than continuing to
+ *   share `tool_result` with `tools/call`.
  * - `Bash` returns a command's output.
  * - `Read` returns a file, classified by path (see `INSTRUCTION_FILE`); `Grep` returns
  *   repository lines.
