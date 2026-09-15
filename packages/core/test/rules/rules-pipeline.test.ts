@@ -6,10 +6,14 @@ import {
   assembleBundle,
   compareWithCommitted,
   compileRules,
+  DEFAULT_SLOW_MS,
+  deriveThresholdMs,
   loadRuleSources,
   RulesBuildError,
   runBenignGate,
+  SLOW_FACTOR,
   type Bundle,
+  type RuleTiming,
 } from '../../../../scripts/lib/rules-pipeline.js';
 
 // Minimal ATR-format rule bodies. `id` must match /^[A-Z]+-\d{4}-\d{5}$/
@@ -188,6 +192,79 @@ describe('rules-pipeline', () => {
       const committedJson = JSON.stringify({ ...bundle, disabled: ['ATR-9999-00000'] });
 
       expect(compareWithCommitted(bundle, committedJson).equal).toBe(false);
+    });
+  });
+
+  describe('deriveThresholdMs', () => {
+    // A population shaped like the real one: a long body of fast rules and a
+    // short pathological tail. `slowFactor` scales every time, standing in for
+    // running the same corpus on slower hardware.
+    const population = (scale: number): RuleTiming[] => {
+      const t = (ms: number, i: number): RuleTiming => ({
+        ruleId: `ATR-2026-${String(i).padStart(5, '0')}`,
+        ms: ms * scale,
+        blob: 'letter-a',
+        size: 8_192,
+      });
+      // Proportions matter, not just shape: the real corpus is 648 rules of which
+      // 8 are pathological — 1.23%, just over the 1% a p99 anchor excludes, which
+      // is exactly why p99 landed inside the tail. A fixture with a thinner tail
+      // passes under either anchor and pins nothing.
+      const body = Array.from({ length: 640 }, (_, i) => t(0.002 + (i / 640) * 0.23, i));
+      const tail = [21.3, 21.5, 25.5, 25.5, 33.7, 34.4, 156.4, 1926.4].map((ms, i) =>
+        t(ms, 900 + i),
+      );
+      return [...body, ...tail];
+    };
+
+    it('scales with the machine, so the same rules are convicted on slower hardware', () => {
+      const fast = deriveThresholdMs(population(1));
+      const slow = deriveThresholdMs(population(3));
+      expect(slow).toBeGreaterThan(fast);
+
+      // What matters is not the threshold but the verdict: the tail is convicted
+      // and the body is not, on both machines.
+      for (const scale of [1, 3]) {
+        const measurements = population(scale);
+        const threshold = deriveThresholdMs(measurements);
+        const convicted = measurements.filter((m) => m.ms > threshold);
+        expect(convicted).toHaveLength(8);
+        expect(convicted.every((m) => m.ruleId >= 'ATR-2026-00900')).toBe(true);
+      }
+    });
+
+    it('never exceeds the absolute ceiling, so a slow machine cannot loosen the gate', () => {
+      expect(deriveThresholdMs(population(1_000))).toBe(DEFAULT_SLOW_MS);
+    });
+
+    it('anchors below the tail it exists to detect', () => {
+      // The regression this guards: anchoring at p99 put the anchor *inside* the
+      // pathological tail (1.2% of the population is pathological), so the
+      // threshold scaled with the outliers and convicted nothing.
+      const measurements = population(1);
+      const threshold = deriveThresholdMs(measurements);
+      const slowestConvicted = Math.min(
+        ...measurements.filter((m) => m.ms > threshold).map((m) => m.ms),
+      );
+      const fastestCleared = Math.max(
+        ...measurements.filter((m) => m.ms <= threshold).map((m) => m.ms),
+      );
+      expect(threshold).toBeLessThan(slowestConvicted);
+      expect(threshold).toBeGreaterThan(fastestCleared);
+    });
+
+    it('falls back to the ceiling when there is nothing to measure', () => {
+      expect(deriveThresholdMs([])).toBe(DEFAULT_SLOW_MS);
+    });
+
+    it('derives the threshold from the anchor and the factor, not from a constant', () => {
+      const flat = Array.from({ length: 100 }, (_, i) => ({
+        ruleId: `ATR-2026-${String(i).padStart(5, '0')}`,
+        ms: 0.1,
+        blob: 'letter-a',
+        size: 2_048,
+      }));
+      expect(deriveThresholdMs(flat)).toBeCloseTo(Math.min(DEFAULT_SLOW_MS, 0.1 * SLOW_FACTOR), 5);
     });
   });
 });
