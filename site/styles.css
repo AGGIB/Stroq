@@ -180,35 +180,36 @@ html:not(.js) .copy-btn { display: none; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
 .ic-gh { flex: none; }
 
-/* 5b. The hero scene: six agents, one gate, one poisoned file ----------- */
+/* 5b. The hero scene: six agents, one firewall, one poisoned file ------- */
 .hero-scene { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 .hs { display: block; width: 100%; min-width: 460px; height: auto; overflow: visible; font-family: var(--font-display); }
-.hs-gate { fill: var(--ink); }
-.hs-gate-mark { color: var(--paper); }
-.hs-hit { fill: var(--deny); opacity: 0; }
+.hs-core { fill: var(--ink); }
+.hs-core-mark { color: var(--paper); }
+.hs-field { fill: none; stroke: var(--line-2); stroke-width: 1.25; stroke-linecap: round; stroke-dasharray: 2.5 7; transform-box: fill-box; transform-origin: center; }
 .hs-box { fill: var(--paper); stroke: var(--line-2); stroke-width: 1.25; }
 .hs-name { fill: var(--ink); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }
 .hs-mark { color: var(--ink); fill: currentColor; }
-.hs-line { stroke: var(--line-2); stroke-width: 1.5; }
-.hs-pk { opacity: 0; transform-box: fill-box; }
-.hs-pk-in { fill: var(--ink-2); }
+.hs-line { stroke: var(--line-2); stroke-width: 1.5; stroke-linecap: round; }
+.hs-pk { opacity: 0; }
+.hs-pk-in, .hs-pk-oc { fill: var(--ink-2); }
 .hs-pk-out { fill: var(--allow); }
-.hs-bad { fill: var(--deny); opacity: 0; }
-.hs-pulse { fill: none; stroke: var(--deny); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
 .hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 .hs-machine path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
 .hs-cap { fill: var(--ink-2); font-size: 12px; font-weight: 500; font-family: var(--font-body); }
 .hs-agent-target .hs-box { fill: var(--ask-tint); stroke: var(--ask); }
 .hs-box-bad { fill: var(--deny-tint); stroke: var(--deny); stroke-dasharray: 4 3; }
 .hs-name-bad { fill: var(--deny-text); }
-.hs-tendril, .hs-taint { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.hs-attacker { transform-box: fill-box; transform-origin: center; }
+.hs-tendril { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.hs-taint { stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; }
+.hs-hit { fill: var(--deny); opacity: 0; }
+.hs-pulse { fill: none; stroke: var(--deny); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.hs-x { transform-box: fill-box; transform-origin: center; }
 .hs-x circle { fill: var(--deny); }
 .hs-x path { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
-.hs-x { transform-box: fill-box; transform-origin: center; }
 .hs-verdict rect { fill: var(--deny-tint); stroke: var(--deny); stroke-width: 1.25; }
 .hs-verdict-word { fill: var(--deny-text); font-size: 13px; font-weight: 700; }
 .hs-verdict-rule { fill: var(--deny-text); font-size: 11px; font-weight: 500; font-family: var(--font-mono); }
-.hs-attacker { transform-box: fill-box; transform-origin: center; }
 
 /* 5c. The fork: one poisoned file, two outcomes ------------------------- */
 .fork { position: relative; margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
@@ -521,12 +522,13 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes caret { 50% { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  .hs-pk-in { animation: hs-pk-in 2.4s linear var(--pd, 0s) infinite; }
+  .hs-field { animation: hs-field 28s linear infinite; }
+  .hs-pk-in { animation: hs-pk-in 2s linear var(--pd, 0s) infinite; }
   .hs-pk-out { animation: hs-pk-out 1.6s linear var(--pd, 0s) infinite; }
+  .hs-pk-oc { animation: hs-pk-oc 8s linear infinite; }
   .hs-attacker { animation: hs-attacker 8s linear infinite; }
   .hs-tendril { animation: hs-tendril 8s linear infinite; }
   .hs-agent-target .hs-box { animation: hs-suspect 8s steps(1, end) infinite; }
-  .hs-bad { animation: hs-bad 8s linear infinite; }
   .hs-taint { animation: hs-taint 8s linear infinite; }
   .hs-hit { animation: hs-hit 8s linear infinite; }
   .hs-pulse { animation: hs-pulse 8s linear infinite; }
@@ -544,14 +546,21 @@ html:not(.js) .copy-btn { display: none; }
   .btn:hover, .copy-btn:hover { transform: none; }
 }
 
-@keyframes hs-pk-in { 0% { transform: translateX(0); opacity: 0; } 6% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(170px); opacity: 0; } }
-@keyframes hs-pk-out { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(74px); opacity: 0; } }
+@keyframes hs-field { to { transform: rotate(360deg); } }
+@keyframes hs-pk-in { 0% { transform: translate(0, 0); opacity: 0; } 5% { opacity: 1; } 93% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+@keyframes hs-pk-out { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(var(--dx)); opacity: 0; } }
+@keyframes hs-pk-oc {
+  0% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); } 1% { opacity: 1; } 19% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 19.5% { opacity: 0; }
+  20% { transform: translate(0, 0); opacity: 0; } 21% { opacity: 1; } 39% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 39.5% { opacity: 0; fill: var(--ink-2); }
+  40% { transform: translate(0, 0); opacity: 0; fill: var(--deny); } 41% { opacity: 1; } 54% { transform: translate(var(--dx), var(--dy)); opacity: 1; fill: var(--deny); animation-timing-function: var(--ease-out); } 58% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 1; } 62% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 0; fill: var(--deny); }
+  62.5% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); } 64% { opacity: 1; } 79% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 79.5% { opacity: 0; }
+  80% { transform: translate(0, 0); opacity: 0; } 81% { opacity: 1; } 99% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 100% { opacity: 0; }
+}
 @keyframes hs-attacker { 0%, 20% { opacity: 0; transform: translateY(14px); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 27%, 55% { opacity: 1; transform: none; } 56.5% { transform: translateX(-4px); } 58% { transform: translateX(3px); } 59.5% { transform: translateX(-2px); } 61%, 82% { opacity: 1; transform: none; } 90%, 100% { opacity: 0; transform: translateY(14px); } }
 @keyframes hs-tendril { 0%, 27% { stroke-dashoffset: 1; opacity: 1; animation-timing-function: var(--ease-out); } 38%, 82% { stroke-dashoffset: 0; opacity: 1; } 90%, 100% { stroke-dashoffset: 0; opacity: 0; } }
 @keyframes hs-suspect { 0%, 38% { fill: var(--paper); stroke: var(--line-2); } 39%, 88% { fill: var(--ask-tint); stroke: var(--ask); } 100% { fill: var(--paper); stroke: var(--line-2); } }
-@keyframes hs-bad { 0%, 39% { transform: translateX(0); opacity: 0; } 40% { opacity: 1; } 54% { transform: translateX(90px); opacity: 1; animation-timing-function: var(--ease-out); } 58% { transform: translateX(72px); opacity: 1; } 63%, 100% { transform: translateX(72px); opacity: 0; } }
-@keyframes hs-taint { 0%, 39% { stroke-dashoffset: 1; } 54%, 57% { stroke-dashoffset: 0; animation-timing-function: var(--ease-out); } 70%, 100% { stroke-dashoffset: 1; } }
-@keyframes hs-hit { 0%, 54% { opacity: 0; } 55% { opacity: .95; } 68%, 100% { opacity: 0; } }
+@keyframes hs-taint { 0%, 38% { opacity: 0; } 40%, 82% { opacity: 1; } 90%, 100% { opacity: 0; } }
+@keyframes hs-hit { 0%, 54% { opacity: 0; } 55% { opacity: .9; } 68%, 100% { opacity: 0; } }
 @keyframes hs-pulse { 0%, 54% { transform: scale(.6); opacity: 0; } 55% { transform: scale(.6); opacity: .55; animation-timing-function: var(--ease-out); } 65%, 100% { transform: scale(3); opacity: 0; } }
 @keyframes hs-x { 0%, 54% { transform: scale(0); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 58%, 88% { transform: scale(1); } 92%, 100% { transform: scale(0); } }
 @keyframes hs-verdict { 0%, 56% { opacity: 0; } 60%, 88% { opacity: 1; } 92%, 100% { opacity: 0; } }
