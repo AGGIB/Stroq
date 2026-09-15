@@ -12,9 +12,14 @@ export interface Variant {
 // (U+E0000-E007F, the "ASCII smuggling" block). The `u` flag is required
 // for the astral \u{...} range syntax.
 const ZERO_WIDTH = /[\u00AD\u200B-\u200F\u2060-\u2064\uFE00-\uFE0F\uFEFF\u{E0000}-\u{E007F}]/gu;
-const CYRILLIC = /[\u0400-\u04FF]/;
+// Greek and Coptic (\u0370-\u03FF) plus Cyrillic (\u0400-\u04FF): the two
+// non-Latin scripts covered by the HOMOGLYPHS table below. A token qualifies
+// for folding only when it mixes one of these scripts with Latin \u2014 a token
+// written wholly in Greek or Cyrillic is real text, not a disguise.
+const NON_LATIN_CONFUSABLE = /[\u0370-\u03FF\u0400-\u04FF]/;
 const LATIN = /[A-Za-z]/;
 const HOMOGLYPHS: Readonly<Record<string, string>> = {
+  // Cyrillic lookalikes
   а: 'a',
   е: 'e',
   о: 'o',
@@ -39,6 +44,32 @@ const HOMOGLYPHS: Readonly<Record<string, string>> = {
   Т: 'T',
   Х: 'X',
   І: 'I',
+  // Greek lookalikes -- unambiguous Latin mappings only
+  ο: 'o',
+  α: 'a',
+  ε: 'e',
+  ρ: 'p',
+  γ: 'y',
+  ι: 'i',
+  κ: 'k',
+  ν: 'v',
+  τ: 't',
+  χ: 'x',
+  μ: 'u',
+  Α: 'A',
+  Β: 'B',
+  Ε: 'E',
+  Ζ: 'Z',
+  Η: 'H',
+  Ι: 'I',
+  Κ: 'K',
+  Μ: 'M',
+  Ν: 'N',
+  Ο: 'O',
+  Ρ: 'P',
+  Τ: 'T',
+  Υ: 'Y',
+  Χ: 'X',
 };
 
 const BASE64_TOKEN = /[A-Za-z0-9+/]{24,}={0,2}/g;
@@ -47,7 +78,7 @@ const URL_ENCODED = /%[0-9A-Fa-f]{2}[\s\S]*?%[0-9A-Fa-f]{2}/;
 const MAX_TOKENS_PER_LAYER = 50;
 
 function foldToken(token: string): string {
-  if (!(CYRILLIC.test(token) && LATIN.test(token))) return token;
+  if (!(NON_LATIN_CONFUSABLE.test(token) && LATIN.test(token))) return token;
   let out = '';
   for (const ch of token) out += HOMOGLYPHS[ch] ?? ch;
   return out;
