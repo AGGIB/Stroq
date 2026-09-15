@@ -1,6 +1,6 @@
 /* Stroq site — progressive enhancement only.
    Everything renders without this file; it adds the menu toggle, copy buttons,
-   scroll reveals and the hero terminal animation. No storage. The only network
+   scroll reveals and the header install command. No storage. The only network
    call is Vercel Web Analytics (cookieless page views, first-party route),
    whose deferred script loads after this file. */
 window.va =
@@ -131,72 +131,18 @@ window.va =
     }
   }
 
-  /* Hero terminal ------------------------------------------------------ */
-  var term = doc.querySelector('[data-term]');
-  if (term && !reduceMotion.matches && 'IntersectionObserver' in window) {
-    var script = Array.prototype.map.call(term.querySelectorAll('.tl'), function (li) {
-      return { el: li, text: li.textContent, typed: li.hasAttribute('data-typed') };
-    });
-    var TYPE_MS = 24, LINE_PAUSE = 420, TYPED_PAUSE = 380, HOLD = 4100;
-    var timer = null, visible = false, running = false, userPaused = false, cur = 0;
-    var pauseBtn = term.querySelector('.term-pause');
-
-    function later(ms, fn) { timer = window.setTimeout(fn, ms); }
-
-    function clearLines() {
-      each(script, function (s) { s.el.textContent = ''; s.el.classList.remove('is-typing'); });
-    }
-
-    function step(i) {
-      cur = i;
-      if (!visible || doc.hidden || userPaused) { running = false; return; }
-      if (i >= script.length) {
-        later(HOLD, function () { clearLines(); step(0); });
-        return;
-      }
-      var s = script[i];
-      if (!s.typed) {
-        s.el.textContent = s.text;
-        later(LINE_PAUSE, function () { step(i + 1); });
-        return;
-      }
-      var n = 0;
-      s.el.classList.add('is-typing');
-      (function tick() {
-        n += 1;
-        s.el.textContent = s.text.slice(0, n);
-        if (n < s.text.length) {
-          later(TYPE_MS + Math.random() * 28, tick);
-        } else {
-          s.el.classList.remove('is-typing');
-          later(TYPED_PAUSE, function () { step(i + 1); });
-        }
-      })();
-    }
-
-    function resume() {
-      if (visible && !doc.hidden && !userPaused && !running) { running = true; step(cur); }
-    }
-    function pause() { window.clearTimeout(timer); running = false; }
-
-    clearLines();
-    if (pauseBtn) {
-      pauseBtn.addEventListener('click', function () {
-        userPaused = !userPaused;
-        pauseBtn.setAttribute('aria-pressed', userPaused ? 'true' : 'false');
-        pauseBtn.setAttribute('aria-label', (userPaused ? 'Play' : 'Pause') + ' the terminal animation');
-        pauseBtn.textContent = userPaused ? 'Play' : 'Pause';
-        if (userPaused) { pause(); } else { resume(); }
-      });
-    }
-
+  /* The fork: one poisoned file, two outcomes -------------------------- */
+  /* The command in the header duplicates the one in the hero while both are on
+     screen. Hand it over only once the hero's has scrolled away. It keeps its space
+     in the row either way, so the links never shift when it appears. */
+  var navCmd = doc.querySelector('[data-nav-install]');
+  var heroCmd = doc.querySelector('.hero .install-pill');
+  if (navCmd && heroCmd && 'IntersectionObserver' in window) {
     new IntersectionObserver(function (entries) {
-      visible = entries[0].isIntersecting;
-      if (visible) { resume(); } else { pause(); }
-    }, { threshold: 0.35 }).observe(term);
-
-    doc.addEventListener('visibilitychange', function () {
-      if (doc.hidden) { pause(); } else { resume(); }
-    });
+      navCmd.classList.toggle('is-shown', !entries[0].isIntersecting);
+    }, { threshold: 0 }).observe(heroCmd);
+  } else if (navCmd) {
+    navCmd.classList.add('is-shown');
   }
+
 })();
