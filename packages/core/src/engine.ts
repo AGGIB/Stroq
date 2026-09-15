@@ -4,7 +4,7 @@ import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
-import { atomHash, extractAtoms } from './provenance/atoms.js';
+import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { CompiledRule } from './rules/compile.js';
@@ -301,7 +301,10 @@ export class StroqEngine {
     // like `atomsForAction` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
     // same atom as the plain command the agent then runs, in both directions.
-    const atoms = extractAtoms(normalizeText(event.toolResultText));
+    // Deep, not raw: a tool result the agent is told to "decode and run" hides
+    // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
+    // them the same way the scanner already does via expandVariants.
+    const atoms = extractAtomsDeep(normalizeText(event.toolResultText));
     const provenanceError = await this.recordProvenance(
       event,
       summary,

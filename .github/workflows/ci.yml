@@ -73,11 +73,15 @@ jobs:
         run: node packages/cli/dist/index.js attack
 
       - name: Attack suite — mutation fuzz
-        # Baseline of 11 known escapes: the list `attack --fuzz` prints is the
+        # Baseline of 5 known escapes: the list `attack --fuzz` prints is the
         # specification for the work that closes them one at a time (Part 4). This
         # step fails only once the escape count grows past that baseline, so known
         # gaps stay non-blocking while a new one is still caught. Drop the whole step
         # in the same PR that gets the baseline to 0.
+        #
+        # Was 11 until provenance atoms started extracting over decoded variants
+        # (`extractAtomsDeep`), which closed the base64/hex/url-encoded escapes on
+        # scenarios 02 and 16 — leaving 4 homoglyph-greek and 1 split-across-lines.
         #
         # `attack --fuzz --json` exits 1 whenever anything escaped, which is the
         # expected case today, so the run itself must not fail the step — but a
@@ -95,7 +99,7 @@ jobs:
           fi
           node -e '
             const fs = require("node:fs");
-            const BASELINE = 11;
+            const BASELINE = 5;
             const report = JSON.parse(fs.readFileSync("fuzz-report.json", "utf8"));
             const escaped = report.escaped;
             if (!Array.isArray(escaped)) throw new Error("fuzz-report.json has no escaped array");
