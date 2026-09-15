@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { expandVariants } from '../normalize/normalizer.js';
 import type { Atom } from '../types.js';
 
 /** Upper bound on atoms extracted from one text (first N in text order, after dedupe). */
@@ -211,4 +212,34 @@ export function extractAtoms(text: string): Atom[] {
     if (unique.length >= MAX_ATOMS) break;
   }
   return unique;
+}
+
+/**
+ * Atoms from `text` and from every decoded variant the scanner already expands.
+ *
+ * `extractAtoms` matches raw-text patterns — a URL, an `npx <pkg>`, an installer — so
+ * base64-encoding a tool result destroys every atom in it, and with it the link between
+ * "this package name arrived from an untrusted source" and "the agent is now running
+ * it". The mutation fuzzer found exactly that: encoding a payload three different ways
+ * let a recorded incident through with no rule firing, because provenance had nothing
+ * left to match on. Decoding first is what makes provenance content-independent in the
+ * way the design always claimed it was — not an optimisation, but the fix for the one
+ * property (surviving where content rules don't) the whole feature is supposed to have.
+ *
+ * Variants are taken in order and the existing `MAX_ATOMS` bound applies to the total,
+ * so a later decode can never displace an atom found in the raw text.
+ */
+export function extractAtomsDeep(text: string): Atom[] {
+  const seen = new Set<string>();
+  const out: Atom[] = [];
+  for (const variant of expandVariants(text)) {
+    for (const atom of extractAtoms(variant.text)) {
+      if (out.length >= MAX_ATOMS) return out;
+      const key = atomHash(atom);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(atom);
+    }
+  }
+  return out;
 }
