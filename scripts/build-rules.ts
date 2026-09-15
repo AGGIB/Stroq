@@ -20,9 +20,11 @@ import {
   compareWithCommitted,
   compileRules,
   DEFAULT_SLOW_MS,
+  SLOW_FACTOR,
   loadBenignFixtures,
   loadRuleSources,
-  measureRuleTimings,
+  deriveThresholdMs,
+  measureRuleTimingsStable,
   runBenignGate,
   runTimingGate,
   RulesBuildError,
@@ -77,7 +79,7 @@ function runDefault(): void {
 
   let timing;
   try {
-    timing = runTimingGate(compiled, DEFAULT_SLOW_MS);
+    timing = runTimingGate(compiled);
   } catch (err) {
     if (err instanceof RulesBuildError) fail(`performance gate failed: ${err.message}`);
     throw err;
@@ -106,7 +108,10 @@ function runDefault(): void {
   mkdirSync(join(root, 'packages/core/src'), { recursive: true });
   writeFileSync(outFile, JSON.stringify(bundle));
   writeFileSync(disabledReport, JSON.stringify(Object.fromEntries(disabled), null, 2) + '\n');
-  console.log(`perf gate: ${timing.disabled.size} slow rule(s) disabled (> ${DEFAULT_SLOW_MS} ms)`);
+  console.log(
+    `perf gate: ${timing.disabled.size} slow rule(s) disabled ` +
+      `(> ${timing.thresholdMs.toFixed(2)} ms — this machine's p95 x ${SLOW_FACTOR}, capped at ${DEFAULT_SLOW_MS} ms)`,
+  );
   console.log(`bundle: ${bundle.rules.length} rules, ${disabled.size} disabled → ${outFile}`);
 }
 
@@ -129,9 +134,17 @@ function runAdvisoryPerf(
   compiled: ReturnType<typeof loadCompiled>['compiled'],
   committedDisabled: ReadonlySet<string>,
 ): void {
-  const timings = measureRuleTimings(compiled, DEFAULT_SLOW_MS);
+  // Same measurement and same derivation the write path uses, so a warning here
+  // means the machine running CI would have disabled that rule — not merely that
+  // it is slower than some absolute number chosen on different hardware.
+  const timings = measureRuleTimingsStable(compiled);
+  const thresholdMs = deriveThresholdMs(timings);
+  console.warn(
+    `advisory perf: threshold ${thresholdMs.toFixed(2)} ms on this runner ` +
+      `(p95 x ${SLOW_FACTOR}, capped at ${DEFAULT_SLOW_MS} ms)`,
+  );
   for (const t of timings) {
-    if (t.ms > DEFAULT_SLOW_MS && !committedDisabled.has(t.ruleId)) {
+    if (t.ms > thresholdMs && !committedDisabled.has(t.ruleId)) {
       console.warn(`WARNING: slow rule ${t.ruleId}: ${t.ms.toFixed(1)} ms on ${t.blob}@${t.size}`);
     }
   }

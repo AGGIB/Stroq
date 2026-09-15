@@ -75,10 +75,68 @@ export const DEFAULT_BLOBS: readonly BlobSpec[] = [
   { name: 'urls', build: (size) => repeatTo('http://a.example/x ', size) },
 ];
 
-/** Local build default: a rule slower than this on the adversarial blobs is
- *  disabled. Lower than the previous 50 ms specifically to leave margin for
- *  machines slower than the one that ran the build (see --advisory-perf). */
+/**
+ * Ceiling for the disable threshold: no machine gets a *looser* gate than this,
+ * however slow it is. It is no longer the threshold itself — see
+ * `deriveThresholdMs`, which tightens it on faster hardware.
+ */
 export const DEFAULT_SLOW_MS = 25;
+
+/**
+ * The percentile of the rule population used as this machine's speed anchor.
+ *
+ * Deliberately not p99: the gate measures all 648 rules *including* the slow
+ * ones it exists to catch, and there are 8 of them — 1.2% of the population —
+ * so p99 lands inside the tail it is supposed to detect. Measured here, p99 is
+ * 21.5 ms while p95 is 0.232 ms. An anchor contaminated by the outliers scales
+ * with them and the gate stops convicting anything.
+ *
+ * p95 sits in open space. The population's slowest non-pathological rule is
+ * 0.6 ms and the slowest pathological one 1926 ms; the cliff between them
+ * (0.6 → 21.3 ms) is a factor of 35, so nothing lives near the boundary.
+ */
+export const ANCHOR_PERCENTILE = 0.95;
+
+/**
+ * The disable threshold, in multiples of this machine's own anchor rule time.
+ *
+ * An absolute millisecond threshold does not mean the same thing on two
+ * machines, and the gate's verdict moved with the builder's laptop: measured on
+ * the same two rules, the same blob, `ATR-2026-00141` timed 21 ms here and
+ * 55.9 ms on a CI runner, `ATR-2026-00149` 21 ms here and 70.2 ms there — a
+ * 2.7–3.3x spread straddling the 25 ms line, so whoever ran `build:rules` last
+ * decided whether those rules shipped. Anchoring to a percentile of the same
+ * population, measured in the same process, removes the hardware from the
+ * verdict: a slow rule is slow *relative to the other 640 rules on this
+ * machine*.
+ *
+ * 30 lands in the middle of that cliff. Measured here after warm-up: p95 is
+ * 0.232 ms, so the threshold is 7.0 ms — twelve times the slowest rule that
+ * should ship (0.6 ms) and a third of the slowest that should not (21.3 ms).
+ * Any factor from roughly 5 to 90 returns the same verdict on this population,
+ * so this is not a number tuned to produce an answer.
+ */
+export const SLOW_FACTOR = 30;
+
+/** Timing passes per rule. The reported figure is the fastest — noise on a wall
+ *  clock is one-sided, so the minimum is the closest estimate of the real cost. */
+export const TIMING_PASSES = 3;
+
+/**
+ * Derives this machine's disable threshold from its own measurements.
+ *
+ * Capped by `DEFAULT_SLOW_MS` so a slow machine can only ever be *stricter*
+ * than the historical absolute gate, never more permissive: the scan budget a
+ * rule eventually competes with (`DEFAULT_BUDGET_MS`) is wall-clock on the
+ * *user's* machine, so a fast builder must not be able to bless a rule that is
+ * catastrophic for everyone else.
+ */
+export function deriveThresholdMs(measurements: readonly RuleTiming[]): number {
+  if (measurements.length === 0) return DEFAULT_SLOW_MS;
+  const sorted = [...measurements].map((m) => m.ms).sort((a, b) => a - b);
+  const anchor = sorted[Math.floor(sorted.length * ANCHOR_PERCENTILE)] ?? 0;
+  return Math.min(DEFAULT_SLOW_MS, SLOW_FACTOR * anchor);
+}
 
 export interface RuleTiming {
   readonly ruleId: string;
@@ -115,9 +173,44 @@ export function measureRuleTimings(
   });
 }
 
+/**
+ * `measureRuleTimings` made reproducible: one discarded warm-up pass, then the
+ * fastest of `TIMING_PASSES` measurements per rule.
+ *
+ * A single cold pass is not a measurement, it is a coin toss. Three consecutive
+ * single-pass runs of this corpus on one unchanged machine reported p99 of
+ * 1.558, 0.398 and 0.372 ms and a slowest rule of 24.9, 23.9 and 27.7 ms — the
+ * last of which crosses the 25 ms line the gate used to decide on, so the same
+ * machine disabled different rules depending on when it was asked. Most of the
+ * spread is JIT warm-up: the first pass over 641 rules cost 162 ms against 71
+ * and 76 ms for the two that followed. Warmed and taken as a minimum, the same
+ * figures repeat within about 2% (p99 0.298–0.312 ms, slowest 21.3–21.7 ms).
+ *
+ * `capMs` only bounds the escalation to larger blobs, so a catastrophic rule
+ * still terminates early; the verdict itself is `deriveThresholdMs`'s.
+ */
+export function measureRuleTimingsStable(
+  rules: readonly CompiledRule[],
+  capMs: number = DEFAULT_SLOW_MS,
+  blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
+  stages: readonly number[] = DEFAULT_STAGES,
+): readonly RuleTiming[] {
+  measureRuleTimings(rules, capMs, blobs, stages);
+  const best = new Map<string, RuleTiming>();
+  for (let pass = 0; pass < TIMING_PASSES; pass += 1) {
+    for (const m of measureRuleTimings(rules, capMs, blobs, stages)) {
+      const seen = best.get(m.ruleId);
+      if (!seen || m.ms < seen.ms) best.set(m.ruleId, m);
+    }
+  }
+  return rules.map((r) => best.get(r.id) ?? { ruleId: r.id, ms: -1, blob: '', size: 0 });
+}
+
 export interface TimingGateResult {
   readonly disabled: ReadonlyMap<string, string>;
   readonly measurements: readonly RuleTiming[];
+  /** What this machine derived as its own threshold, for the build to report. */
+  readonly thresholdMs: number;
 }
 
 /**
@@ -129,19 +222,23 @@ export interface TimingGateResult {
  */
 export function runTimingGate(
   rules: readonly CompiledRule[],
-  thresholdMs: number,
+  capMs: number = DEFAULT_SLOW_MS,
   blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
   stages: readonly number[] = DEFAULT_STAGES,
 ): TimingGateResult {
-  const measurements = measureRuleTimings(rules, thresholdMs, blobs, stages);
+  const measurements = measureRuleTimingsStable(rules, capMs, blobs, stages);
+  const thresholdMs = deriveThresholdMs(measurements);
   const disabled = new Map<string, string>();
   for (const m of measurements) {
     if (m.ms <= thresholdMs) continue;
-    const reason = `slow on ${m.blob}@${m.size} (>${thresholdMs} ms)`;
+    // The reason stays free of measured values on purpose: it is committed to
+    // rules/atr-disabled.json, and a rerun that changed nothing real must leave
+    // that file byte-identical.
+    const reason = `slow on ${m.blob}@${m.size} (relative perf gate)`;
     if (m.ruleId.startsWith(STROQ_PREFIX)) throw new RulesBuildError(`${m.ruleId} — ${reason}`);
     disabled.set(m.ruleId, reason);
   }
-  return { disabled, measurements };
+  return { disabled, measurements, thresholdMs };
 }
 
 // --- Benign-corpus gate --------------------------------------------------
