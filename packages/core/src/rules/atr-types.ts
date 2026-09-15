@@ -2,6 +2,32 @@ import { z } from 'zod';
 
 export const SeveritySchema = z.enum(['critical', 'high', 'medium', 'low', 'informational']);
 
+/**
+ * The surfaces untrusted text reaches an agent on. A rule declares the one it reads;
+ * a caller declares the one it is scanning; a rule whose surface is not the caller's
+ * does not fire. `any` means the pattern genuinely arrives everywhere — the default,
+ * and today's behaviour for every rule that does not say otherwise.
+ *
+ * A closed vocabulary rather than a free string, because a typo'd surface is worse
+ * than no surface at all: the rule would match nothing and go dark silently. The
+ * enforcement point is `compileRules` (see `resolveScanTarget` in compile.ts), not
+ * this schema — the shipped ATR corpus already carries a `tags.scan_target` in its
+ * own, different vocabulary, and validating it here would make 589 vendored rules
+ * fail to *parse*, which the loader turns into a silent skip. A compile-time throw
+ * is loud; a skipped rule is exactly the hole this vocabulary exists to close.
+ */
+export const SCAN_TARGETS = [
+  'tool_description',
+  'tool_result',
+  'instruction_file',
+  'repo_content',
+  'command_output',
+  'any',
+] as const;
+
+export const ScanTargetSchema = z.enum(SCAN_TARGETS);
+export type ScanTarget = z.infer<typeof ScanTargetSchema>;
+
 export const ConditionSchema = z.object({
   field: z.string().default('content'),
   operator: z.enum(['regex', 'contains', 'exact', 'starts_with']),

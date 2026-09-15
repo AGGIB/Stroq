@@ -290,6 +290,9 @@ export async function doctorReport(
 ): Promise<DoctorReport> {
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
+  // Deliberately names no surface: this is the "are the rules loaded and matching at
+  // all" self-test, and SAMPLE is a synthetic payload that belongs to no surface in
+  // particular. Scoping it would turn an unrelated scoping change into a doctor failure.
   const injectionDetected = scanContent(rules, SAMPLE).verdict === 'suspect';
   const agents = [
     { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks) },

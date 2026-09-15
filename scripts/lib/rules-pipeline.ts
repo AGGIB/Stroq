@@ -159,6 +159,11 @@ export interface BenignGateResult {
  * Callers decide which rules are candidates: `--check` mode excludes
  * anything already in the committed disabled list before calling this, so
  * an already-known firing rule never reaches it (see build-rules.ts).
+ *
+ * Surface-blind on purpose: the scan below names no `scan_target`, so every rule is
+ * measured against every fixture whatever surface it reads. A rule must be benign
+ * everywhere to ship enabled — otherwise declaring a surface would become a way to
+ * get a rule that fires on benign text past the gate, which is the gate inverted.
  */
 export function runBenignGate(
   rules: readonly CompiledRule[],

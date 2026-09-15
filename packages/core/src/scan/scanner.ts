@@ -1,7 +1,7 @@
 import { expandVariants } from '../normalize/normalizer.js';
 import type { CompiledRule } from '../rules/compile.js';
 import type { RuleMatch, ScanResult, Severity } from '../types.js';
-import { ruleMatches, type MatchContext } from './matcher.js';
+import { appliesTo, ruleMatches, type MatchContext } from './matcher.js';
 
 export interface ScanOptions {
   readonly threshold?: number;
@@ -63,8 +63,12 @@ export function scanContent(
   const input = text.length > maxChars ? text.slice(0, maxChars) : text;
   const seen = new Set<string>();
   const matches: RuleMatch[] = [];
+  // Filtered once, not per variant: a rule that does not read this surface cannot
+  // match any encoding of the text either. `ruleMatches` re-checks, so a caller
+  // reaching it by another path is scoped too; this only saves the work.
+  const applicable = rules.filter((rule) => appliesTo(rule, context.target));
   for (const variant of expandVariants(input)) {
-    for (const rule of rules) {
+    for (const rule of applicable) {
       if (performance.now() - startedAt > budgetMs) return timedOutResult(matches);
       const key = `${rule.id}@${variant.kind}`;
       if (seen.has(key) || !ruleMatches(rule, variant.text, context)) continue;

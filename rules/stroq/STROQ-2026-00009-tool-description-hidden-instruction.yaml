@@ -7,7 +7,10 @@ date: '2026/09/03'
 schema_version: '1.0'
 tags:
   category: tool-poisoning
-  scan_target: mcp
+  # `mcp` was the vendored ATR vocabulary's spelling; the Stroq surface is the
+  # description itself, which is also this category's default. Stated explicitly
+  # because the rule's title names it.
+  scan_target: tool_description
 detection:
   condition: any
   conditions:

@@ -7,6 +7,7 @@ import { atomsForAction, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
+import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
 import { candidateTokens, exceedsSecretScan } from './secrets/candidates.js';
@@ -63,6 +64,54 @@ export interface PostResult {
 }
 
 export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
+
+/**
+ * Names of files whose *content* is instructions to the agent rather than repository
+ * material, so a `Read` of one is an `instruction_file` and not `repo_content`. The
+ * distinction matters because a rule scoped to instruction files would otherwise go
+ * dark exactly where those files are read at run time — the tool name alone cannot
+ * tell `CLAUDE.md` from `README.md`, but the path can.
+ *
+ * Kept deliberately narrow (the well-known agent instruction files, plus anything under
+ * a `.claude`/`.cursor`/`.codex`/`.windsurf` directory, plus `SKILL.md`): a file this
+ * does not recognise is read as `repo_content`, which is the wider surface for the
+ * rules that matter there and therefore the safe way to be wrong.
+ */
+const INSTRUCTION_FILE =
+  /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|[/\\]\.(?:claude|cursor|codex|windsurf)[/\\]/i;
+
+/**
+ * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
+ * about it — under which every rule fires, exactly as before surfaces existed.
+ * A wrong narrow answer here is a hole, so each case is one the tool name settles:
+ *
+ * - `tools/list` through the MCP proxy returns the servers' tool *descriptions*, which
+ *   is where tool poisoning lives; every other `mcp__` call returns a tool result.
+ * - `Bash` returns a command's output.
+ * - `Read` returns a file, classified by path (see `INSTRUCTION_FILE`); `Grep` returns
+ *   repository lines.
+ * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
+ *   the surface the published false-positive rate is measured on.
+ */
+export function scanTargetForTool(
+  toolName: string,
+  toolInput: Readonly<Record<string, unknown>> = {},
+): ScanTarget {
+  if (toolName.startsWith('mcp__')) {
+    return toolName.endsWith('__tools_list') ? 'tool_description' : 'tool_result';
+  }
+  if (toolName === 'Bash') return 'command_output';
+  if (toolName === 'Read') {
+    const path = toolInput.file_path ?? toolInput.notebook_path;
+    return typeof path === 'string' && INSTRUCTION_FILE.test(path)
+      ? 'instruction_file'
+      : 'repo_content';
+  }
+  if (toolName === 'Grep' || toolName === 'WebFetch' || toolName === 'WebSearch') {
+    return 'repo_content';
+  }
+  return 'any';
+}
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 const MAX_STORED_CHARS = 120;
 
@@ -274,9 +323,12 @@ export class StroqEngine {
       return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
     const summary = summarizeInput(event.toolName, event.toolInput);
-    const scan = scanContent(this.opts.rules, event.toolResultText, {
-      threshold: this.opts.policy.threshold,
-    });
+    const scan = scanContent(
+      this.opts.rules,
+      event.toolResultText,
+      { threshold: this.opts.policy.threshold },
+      { target: scanTargetForTool(event.toolName, event.toolInput) },
+    );
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
     // The audit entry is the forensic record and must be durable before we
     // derive and persist taint from it: if markSuspect ran first and the
