@@ -189,7 +189,11 @@ html:not(.js) .copy-btn { display: none; }
 .hs-name { fill: var(--ink); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }
 .hs-mark { color: var(--ink); fill: currentColor; }
 .hs-line { stroke: var(--line-2); stroke-width: 1.5; }
-.hs-drift { stroke: var(--ink-2); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: .035 .05; }
+.hs-pk { opacity: 0; transform-box: fill-box; }
+.hs-pk-in { fill: var(--ink-2); }
+.hs-pk-out { fill: var(--allow); }
+.hs-bad { fill: var(--deny); opacity: 0; }
+.hs-pulse { fill: none; stroke: var(--deny); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
 .hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 .hs-machine path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
 .hs-cap { fill: var(--ink-2); font-size: 12px; font-weight: 500; font-family: var(--font-body); }
@@ -514,14 +518,17 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes caret { 50% { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  .hs-drift { animation: hs-drift 1.2s linear infinite; }
-  .hs-attacker { animation: hs-attacker 9s var(--ease-out) infinite; }
-  .hs-tendril { animation: hs-tendril 9s linear infinite; }
-  .hs-taint { animation: hs-taint 9s linear infinite; }
-  .hs-agent-target .hs-box { animation: hs-suspect 9s steps(1, end) infinite; }
-  .hs-gate { animation: hs-gate 9s linear infinite; }
-  .hs-x { animation: hs-x 9s cubic-bezier(.34, 1.56, .64, 1) infinite; }
-  .hs-verdict { animation: hs-verdict 9s linear infinite; }
+  .hs-pk-in { animation: hs-pk-in 2.4s linear var(--pd, 0s) infinite; }
+  .hs-pk-out { animation: hs-pk-out 1.6s linear var(--pd, 0s) infinite; }
+  .hs-attacker { animation: hs-attacker 8s linear infinite; }
+  .hs-tendril { animation: hs-tendril 8s linear infinite; }
+  .hs-agent-target .hs-box { animation: hs-suspect 8s steps(1, end) infinite; }
+  .hs-bad { animation: hs-bad 8s linear infinite; }
+  .hs-taint { animation: hs-taint 8s linear infinite; }
+  .hs-gate { animation: hs-gate 8s linear infinite; }
+  .hs-pulse { animation: hs-pulse 8s linear infinite; }
+  .hs-x { animation: hs-x 8s linear infinite; }
+  .hs-verdict { animation: hs-verdict 8s linear infinite; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
@@ -534,14 +541,17 @@ html:not(.js) .copy-btn { display: none; }
   .btn:hover, .copy-btn:hover { transform: none; }
 }
 
-@keyframes hs-drift { to { stroke-dashoffset: -.085; } }
-@keyframes hs-attacker { 0%, 16% { opacity: 0; transform: translateY(8px); } 21%, 62% { opacity: 1; transform: none; } 67%, 100% { opacity: 0; transform: none; } }
-@keyframes hs-tendril { 0%, 22% { stroke-dashoffset: 1; opacity: 1; } 33%, 62% { stroke-dashoffset: 0; opacity: 1; } 67%, 100% { stroke-dashoffset: 0; opacity: 0; } }
-@keyframes hs-taint { 0%, 33% { stroke-dashoffset: 1; opacity: 1; } 50%, 58% { stroke-dashoffset: 0; opacity: 1; } 64%, 100% { stroke-dashoffset: 0; opacity: 0; } }
-@keyframes hs-suspect { 0%, 33% { fill: var(--paper); stroke: var(--line-2); } 36%, 93% { fill: var(--ask-tint); stroke: var(--ask); } 100% { fill: var(--paper); stroke: var(--line-2); } }
-@keyframes hs-gate { 0%, 50% { fill: var(--paper-2); } 51.5% { fill: var(--deny-tint); } 57%, 100% { fill: var(--paper-2); } }
-@keyframes hs-x { 0%, 50% { transform: scale(0); } 55%, 93% { transform: scale(1); } 100% { transform: scale(0); } }
-@keyframes hs-verdict { 0%, 54% { opacity: 0; } 58%, 93% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes hs-pk-in { 0% { transform: translateX(0); opacity: 0; } 6% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(176px); opacity: 0; } }
+@keyframes hs-pk-out { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(80px); opacity: 0; } }
+@keyframes hs-attacker { 0%, 20% { opacity: 0; transform: translateY(14px); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 27%, 82% { opacity: 1; transform: none; } 90%, 100% { opacity: 0; transform: none; } }
+@keyframes hs-tendril { 0%, 27% { stroke-dashoffset: 1; opacity: 1; animation-timing-function: var(--ease-out); } 38%, 82% { stroke-dashoffset: 0; opacity: 1; } 90%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hs-suspect { 0%, 38% { fill: var(--paper); stroke: var(--line-2); } 39%, 88% { fill: var(--ask-tint); stroke: var(--ask); } 100% { fill: var(--paper); stroke: var(--line-2); } }
+@keyframes hs-bad { 0%, 39% { transform: translateX(0); opacity: 0; } 40% { opacity: 1; } 54% { transform: translateX(96px); opacity: 1; } 55%, 100% { transform: translateX(96px); opacity: 0; } }
+@keyframes hs-taint { 0%, 39% { stroke-dashoffset: 1; opacity: 1; } 54%, 82% { stroke-dashoffset: 0; opacity: 1; } 90%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hs-gate { 0%, 54% { fill: var(--paper-2); } 55.5% { fill: var(--deny-tint); } 61%, 100% { fill: var(--paper-2); } }
+@keyframes hs-pulse { 0%, 54% { transform: scale(.6); opacity: 0; } 55% { transform: scale(.6); opacity: .55; animation-timing-function: var(--ease-out); } 65%, 100% { transform: scale(3); opacity: 0; } }
+@keyframes hs-x { 0%, 54% { transform: scale(0); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 58%, 88% { transform: scale(1); } 92%, 100% { transform: scale(0); } }
+@keyframes hs-verdict { 0%, 56% { opacity: 0; } 60%, 88% { opacity: 1; } 92%, 100% { opacity: 0; } }
 
 /* 18. Dark theme ------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
