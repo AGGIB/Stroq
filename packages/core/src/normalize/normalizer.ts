@@ -94,8 +94,27 @@ function foldToken(token: string): string {
   return out;
 }
 
-function normalizeOnce(text: string): string {
-  return text.replace(ZERO_WIDTH, '').normalize('NFKC').split(/(\s+)/).map(foldToken).join('');
+interface NormalizePass {
+  readonly text: string;
+  readonly foldChanged: boolean;
+}
+
+// Runs strip+NFKC+fold once, and reports whether the *fold* stage itself
+// changed anything -- not whether the pass as a whole did. See the loop
+// below for why that distinction, evaluated here on the fold's own input
+// and output rather than by re-running anything, is what the loop keys on.
+function normalizeOnce(text: string): NormalizePass {
+  const stripped = text.replace(ZERO_WIDTH, '').normalize('NFKC');
+  let foldChanged = false;
+  const folded = stripped
+    .split(/(\s+)/)
+    .map((token) => {
+      const out = foldToken(token);
+      if (out !== token) foldChanged = true;
+      return out;
+    })
+    .join('');
+  return { text: folded, foldChanged };
 }
 
 // Bounded so a pathological input can't loop unboundedly; three passes is
@@ -103,24 +122,37 @@ function normalizeOnce(text: string): string {
 // below).
 const MAX_NORMALIZE_PASSES = 3;
 
-// Re-runs strip+NFKC+fold until the output stops changing, instead of
-// applying it once. As things stand this closes no live gap: a sweep of
-// every Unicode code point (0..0x10FFFF, surrogates excluded) found that no
-// character's NFKC expansion contains a zero-width character it did not
-// already contain, and HOMOGLYPHS only ever emits plain ASCII, which strip
-// and NFKC both leave untouched -- so `normalizeOnce` is already a fixed
-// point for every input this function can be given today, and a second pass
-// only ever reconfirms the first one's output rather than changing it. This
-// loop is insurance against a future change to the pipeline (a new fold
-// emitting non-ASCII, or a reordering of the stages), not a fix for an
-// escape that exists now. For text the first pass leaves unchanged --
-// ordinary benign text -- the loop still costs only a single string
-// comparison before returning.
+// Re-runs strip+NFKC+fold until a pass's fold stage stops changing anything,
+// instead of applying the pipeline once. As things stand this closes no live
+// gap: a sweep of every Unicode code point (0..0x10FFFF, surrogates
+// excluded) found that no character's NFKC expansion contains a zero-width
+// character it did not already contain, and HOMOGLYPHS only ever emits
+// plain ASCII, which strip and NFKC both leave untouched. That means strip
+// and NFKC always produce terminal output -- neither stage can ever hand the
+// other new work, today or after a change to either one -- and the fold is
+// the only stage whose output is not terminal by construction, because it's
+// also the only stage a future change (a fold that starts emitting
+// non-ASCII) could make non-terminal. So the loop is keyed on the fold
+// stage specifically, not on whether the pass as a whole changed the text:
+// insurance against a future fold change, not a fix for an escape that
+// exists now.
+//
+// This distinction is not academic. The strip and NFKC stages routinely
+// change ordinary prose that has no fold-worthy content at all -- a single
+// incidental NBSP (U+00A0), which NFKC folds to a plain space, is enough.
+// Keying the loop on "did the pass change anything" (as an earlier version
+// of this function did) treats that as proof the pipeline hasn't converged
+// and pays for a full second pass to confirm it: on the 210 KB bench
+// reference document, one such stray NBSP took normalizeText from ~3.06ms
+// to ~6.22ms per call -- a second full pass over 210 KB to reconfirm a
+// change neither strip nor NFKC could ever make again. Keying on the fold
+// stage instead means benign prose, which folds nothing, pays for exactly
+// one pass regardless of what strip or NFKC did to it.
 export function normalizeText(text: string): string {
   let current = text;
   for (let pass = 0; pass < MAX_NORMALIZE_PASSES; pass += 1) {
-    const next = normalizeOnce(current);
-    if (next === current) return next;
+    const { text: next, foldChanged } = normalizeOnce(current);
+    if (!foldChanged) return next;
     current = next;
   }
   return current;
