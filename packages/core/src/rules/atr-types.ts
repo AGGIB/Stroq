@@ -35,7 +35,29 @@ export const ConditionSchema = z.object({
   description: z.string().optional(),
 });
 
-export const TestCaseSchema = z.object({ input: z.string(), expected: z.string() });
+/**
+ * A rule's own self-test fixture. Nothing reads it: not the engine, not the benign
+ * gate, not the perf gate — both of those scan `rules/fixtures/benign` and generated
+ * adversarial blobs, never a rule's own `test_cases`.
+ *
+ * `input` is therefore optional, and unknown keys pass through. It was once required
+ * as a string, which made this inert field the only one that could delete a rule:
+ * the vendored ATR corpus writes a fixture's payload under whichever key names the
+ * surface it models (`content`, `tool_response`, `tool_description`, `tool_args`,
+ * `agent_output`, `user_input`), or as a structured `input` object, and any of those
+ * failed the schema — so `loadRulesFromDir` dropped the whole document, taking the
+ * detection with it. A fixture the schema cannot read is a fixture that goes unused.
+ * It must never be a rule that goes missing.
+ */
+export const TestCaseSchema = z.looseObject({
+  // `.catch(undefined)` rather than a union with `unknown`: a payload this schema
+  // cannot read as a string (the corpus also writes `input` as a
+  // `{ tool_name, tool_args }` object) degrades to "no readable fixture here" and
+  // keeps the field's type honest at `string | undefined`, instead of widening it
+  // and pushing the narrowing onto every future reader.
+  input: z.string().optional().catch(undefined),
+  expected: z.string(),
+});
 
 export const AtrRuleSchema = z.looseObject({
   id: z.string().regex(/^[A-Z]+-\d{4}-\d{5}$/, 'id must look like ATR-2026-00001'),
