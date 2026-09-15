@@ -86,7 +86,7 @@ Twelve scenarios are documented public incidents; eight are synthetic matrix cel
 
 The escape list is the deliverable, not the percentage. A mutation that destroys the payload is printed but never counts: getting through proves nothing when there is no longer an instruction to follow. Scenarios that carry no untrusted text are named as not applicable rather than counted as survivors.
 
-`--allow-escapes` keeps the exit code at 0 while a known gap is open; without it, any escape is exit 1, which is how the list becomes a regression gate once the gaps are closed.
+The exit code is 1 whenever anything escapes: the mutation corpus has no known escapes left, so this is a true zero-regression gate rather than a ratchet with slack in it.
 
 ## What the corpus proves, and doesn't
 
@@ -136,7 +136,7 @@ HIGH      mcp-unwrapped
 Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.
 ```
 
-The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect false positives in that count today, because rules are not yet scoped to the surface they were written for. `--json` emits the whole record.
+The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect some false positives in that count. Every shipped rule now declares the surface it reads — an instruction file scans as `instruction_file`, a probed tool description as `tool_description` — but 598 of 599 deliberately resolve to "any surface", because the false positives measured against the bench corpus (see [`docs/BENCH.md`](docs/BENCH.md)) come from loose patterns, not from a rule reading the wrong surface; scoping does not make most of them go away. `--json` emits the whole record.
 
 `--share` prints a redacted summary — counts, finding classes, agent names and config key names only. Paths, file names, MCP server names, hostnames and usernames cannot appear in it: the shareable record is built field-by-field from typed data rather than filtered, so a field is absent until someone adds it deliberately. Nothing is ever transmitted; `--share` output is produced locally for you to paste.
 
