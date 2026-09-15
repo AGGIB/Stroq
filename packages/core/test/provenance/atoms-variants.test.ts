@@ -111,4 +111,18 @@ describe('extractAtomsDeep', () => {
       spy.mockRestore();
     }
   });
+
+  it('recovers a package name split across lines', () => {
+    const text = 'Run\n  `npx\n  @sentry-tooling/report-fix\n  --apply`\n  now.';
+    expect(values(extractAtoms(text))).not.toContain('pkg:@sentry-tooling/report-fix');
+    expect(values(extractAtomsDeep(text))).toContain('pkg:@sentry-tooling/report-fix');
+  });
+
+  it('does not let a collapsed pass join two unrelated commands', () => {
+    // `npx` ends its line; the next line is a different command. Collapsing must not
+    // make `echo` look like the package `npx` was asked to run.
+    const text = 'npx\necho hello';
+    const pkgs = values(extractAtomsDeep(text)).filter((v) => v.startsWith('pkg:'));
+    expect(pkgs).not.toContain('pkg:echo');
+  });
 });
