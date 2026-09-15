@@ -64,15 +64,15 @@ describe('stroq attack', () => {
   // slow — but this is the exact path CI's fuzz-gate step depends on, and a renamed
   // flag or a flipped condition here would silently turn that gate into a no-op with
   // no other test catching it.
-  it('--fuzz exits 1 on the real corpus, which is known to still have escapes', async () => {
+  it('--fuzz exits 0 on the real corpus, which has zero escapes', async () => {
     const out = capture();
     const code = await runAttackCommand(['--fuzz']);
     out.restore();
-    expect(code).toBe(1);
+    expect(code).toBe(0);
     expect(out.lines.join('')).toContain('stroq attack --fuzz:');
   }, 120_000);
 
-  it('--fuzz --allow-escapes exits 0 despite those same known escapes', async () => {
+  it('--fuzz --allow-escapes still exits 0 once the corpus has none to allow', async () => {
     const out = capture();
     const code = await runAttackCommand(['--fuzz', '--allow-escapes']);
     out.restore();

@@ -24,6 +24,14 @@ const RUNNER = /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run)(?=
 const INSTALLER =
   /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/gi;
 const LINE_END = /[\n|;`]|&&|\|\|/;
+// A newline immediately followed by indentation (a space or tab) is a wrapped
+// continuation of the same command, not a new one — the `split-across-lines`
+// mutation (and ordinary word-wrapping) produces exactly this shape by turning
+// every space into `\n  `. A bare newline followed by non-whitespace still
+// starts a new, unrelated command and must stay a hard stop: that is what
+// `LINE_END` is for, and this pass never touches it. Indentation is the
+// discriminator between "the same command, wrapped" and "a new command".
+const CONTINUATION_NEWLINE = /\r?\n[ \t]+/g;
 const FLAGS_WITH_VALUE = new Set([
   '-r',
   '--requirement',
@@ -65,6 +73,18 @@ function restOfLine(text: string, from: number): string {
   const rest = text.slice(from, from + MAX_LINE_SCAN);
   const stop = rest.search(LINE_END);
   return (stop === -1 ? rest : rest.slice(0, stop)).trim();
+}
+
+/**
+ * Collapses wrapped line continuations to a single space so `restOfLine` can
+ * recover a package name an attacker (or a word-wrapping renderer) split across
+ * lines. Used only inside `extractAtomsDeep`, for provenance atoms — never fed
+ * to rule matching — because a wrong atom here costs a false `ask`, while
+ * loosening `LINE_END` itself would risk a false `deny` on a genuinely
+ * unrelated next command.
+ */
+function collapseContinuations(text: string): string {
+  return text.replace(CONTINUATION_NEWLINE, ' ');
 }
 
 function isPackageToken(token: string): boolean {
@@ -232,19 +252,37 @@ export function extractAtoms(text: string): Atom[] {
  * a saturated cap still pays for a full regex pass over every remaining variant only to
  * throw the result away, which is real amplification on attacker-controlled `PostToolUse`
  * content: base64 padding costs nothing to produce but full price to scan.
+ *
+ * One more pass runs after the variants: `extractAtoms` on the whitespace-continuation-
+ * collapsed text (see `collapseContinuations`), recovering a package name split across
+ * lines — by the `split-across-lines` mutation, or by ordinary wrapping — that
+ * `LINE_END` would otherwise hide from `restOfLine`. It merges into the same deduped,
+ * capped set and is skipped entirely, same as a further variant would be, once the cap
+ * is already reached or when collapsing changed nothing, so it never pays for a scan it
+ * cannot use.
  */
 export function extractAtomsDeep(text: string): Atom[] {
   const seen = new Set<string>();
   const out: Atom[] = [];
-  for (const variant of expandVariants(text)) {
-    if (out.length >= MAX_ATOMS) break;
-    for (const atom of extractAtoms(variant.text)) {
-      if (out.length >= MAX_ATOMS) return out;
+  const merge = (atoms: readonly Atom[]): void => {
+    for (const atom of atoms) {
+      if (out.length >= MAX_ATOMS) return;
       const key = atomHash(atom);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(atom);
     }
+  };
+
+  for (const variant of expandVariants(text)) {
+    if (out.length >= MAX_ATOMS) break;
+    merge(extractAtoms(variant.text));
   }
+
+  const collapsed = collapseContinuations(text);
+  if (out.length < MAX_ATOMS && collapsed !== text) {
+    merge(extractAtoms(collapsed));
+  }
+
   return out;
 }
