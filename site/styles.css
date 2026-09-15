@@ -200,7 +200,7 @@ html:not(.js) .copy-btn { display: none; }
 .hs-box-bad { fill: var(--deny-tint); stroke: var(--deny); stroke-dasharray: 4 3; }
 .hs-name-bad { fill: var(--deny-text); }
 .hs-attacker { transform-box: fill-box; transform-origin: center; }
-.hs-tendril { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 0; }
+.hs-tendril { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1 2; stroke-dashoffset: 0; }
 .hs-taint { stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; }
 .hs-hit { fill: var(--deny); opacity: 0; }
 .hs-pulse { fill: none; stroke: var(--deny); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
@@ -550,14 +550,14 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes hs-pk-in { 0% { transform: translate(0, 0); opacity: 0; } 5% { opacity: 1; } 93% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
 @keyframes hs-pk-out { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(var(--dx)); opacity: 0; } }
 @keyframes hs-pk-oc {
-  0% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); } 1% { opacity: 1; } 19% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 19.5% { opacity: 0; }
-  20% { transform: translate(0, 0); opacity: 0; } 21% { opacity: 1; } 39% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 39.5% { opacity: 0; fill: var(--ink-2); }
-  40% { transform: translate(0, 0); opacity: 0; fill: var(--deny); } 41% { opacity: 1; } 54% { transform: translate(var(--dx), var(--dy)); opacity: 1; fill: var(--deny); animation-timing-function: var(--ease-out); } 58% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 1; } 62% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 0; fill: var(--deny); }
+  0% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); } 1% { opacity: 1; } 19% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 19.5% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
+  20% { transform: translate(0, 0); opacity: 0; } 21% { opacity: 1; } 39% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 39.5% { transform: translate(var(--dx), var(--dy)); opacity: 0; fill: var(--ink-2); }
+  40% { transform: translate(0, 0); opacity: 0; fill: var(--deny); } 41% { opacity: 1; } 54% { transform: translate(var(--dx), var(--dy)); opacity: 1; fill: var(--deny); animation-timing-function: var(--ease-out); } 58% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 1; fill: var(--deny); } 62% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 0; fill: var(--deny); }
   62.5%, 79.5% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); }
-  80% { transform: translate(0, 0); opacity: 0; } 81% { opacity: 1; } 99% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 100% { opacity: 0; }
+  80% { transform: translate(0, 0); opacity: 0; } 81% { opacity: 1; } 99% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
 }
 @keyframes hs-attacker { 0%, 20% { opacity: 0; transform: translateY(14px); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 27%, 55% { opacity: 1; transform: none; } 56.5% { transform: translateX(-4px); } 58% { transform: translateX(3px); } 59.5% { transform: translateX(-2px); } 61%, 74% { opacity: 1; transform: none; } 80%, 100% { opacity: 0; transform: translateY(14px); } }
-@keyframes hs-tendril { 0%, 27% { stroke-dashoffset: 1; opacity: 1; animation-timing-function: var(--ease-out); } 38%, 74% { stroke-dashoffset: 0; opacity: 1; } 80%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes hs-tendril { 0%, 26.9% { stroke-dashoffset: 1; opacity: 0; } 27% { stroke-dashoffset: 1; opacity: 1; animation-timing-function: var(--ease-out); } 38%, 74% { stroke-dashoffset: 0; opacity: 1; } 80%, 100% { stroke-dashoffset: 0; opacity: 0; } }
 @keyframes hs-suspect { 0%, 38% { fill: var(--paper); stroke: var(--line-2); } 39%, 79% { fill: var(--ask-tint); stroke: var(--ask); } 80%, 100% { fill: var(--paper); stroke: var(--line-2); } }
 @keyframes hs-taint { 0%, 38% { opacity: 0; } 40%, 74% { opacity: 1; } 80%, 100% { opacity: 0; } }
 @keyframes hs-hit { 0%, 54% { opacity: 0; } 55% { opacity: .9; } 68%, 100% { opacity: 0; } }
