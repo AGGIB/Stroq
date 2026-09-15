@@ -168,7 +168,7 @@ describe('probeServers', () => {
   });
 
   // `flaggedTools` (packages/cli/src/exposure/probe.ts) passes
-  // `{ target: 'tool_description' }` to `scanContent`. 598 of 599 shipped rules
+  // `{ target: 'tool_description' }` to `scanContent`. 599 of 599 shipped rules
   // resolve to `any`, which applies on every surface regardless, so a probe rule
   // scoped away from `tool_description` is the only kind that can tell this argument
   // was actually passed from one that was silently dropped. Removing the 4th

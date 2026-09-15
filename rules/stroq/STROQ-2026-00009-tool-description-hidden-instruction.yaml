@@ -7,10 +7,16 @@ date: '2026/09/03'
 schema_version: '1.0'
 tags:
   category: tool-poisoning
-  # `mcp` was the vendored ATR vocabulary's spelling; the Stroq surface is the
-  # description itself, which is also this category's default. Stated explicitly
-  # because the rule's title names it.
-  scan_target: tool_description
+  # any, like every other rule in this bundle (see compile.ts's CATEGORY_DEFAULT
+  # and its tool-poisoning note: narrowing this category would take ~80 CVE-
+  # signature rules dark). This rule's title names a tool description, but its
+  # first condition is a generic hidden-instruction-block detector — the
+  # canonical poisoned-SKILL.md shape, not a description-only one — so it must
+  # also read instruction files (a poisoned SKILL.md) and repo content (a
+  # poisoned README), not only a probed tool description. It was scoped to
+  # `tool_description` once; that let both payloads through undetected. See
+  # the regression pinned in packages/core/test/scan/scan-target.test.ts.
+  scan_target: any
 detection:
   condition: any
   conditions:

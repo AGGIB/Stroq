@@ -121,7 +121,7 @@ describe('runBench', () => {
   );
 
   // `runBench` passes `{ target: 'repo_content' }` to `scanContent` (packages/cli/src/
-  // bench/run.ts). Nothing else in this file exercises that argument: 598 of 599
+  // bench/run.ts). Nothing else in this file exercises that argument: 599 of 599
   // shipped rules resolve to `any`, which applies on every surface regardless, so a
   // rule scoped away from `repo_content` is the only kind of probe that can tell the
   // argument was actually passed from one that was silently dropped. Removing the

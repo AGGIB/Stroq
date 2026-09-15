@@ -95,7 +95,7 @@ describe('contextSurface', () => {
 
   // `contextSurface` passes `{ target: 'instruction_file' }` to `scanContent` for
   // every file it walks — skills, subagents, commands and instruction files alike
-  // (packages/cli/src/exposure/context-surface.ts). 598 of 599 shipped rules resolve
+  // (packages/cli/src/exposure/context-surface.ts). 599 of 599 shipped rules resolve
   // to `any`, which applies on every surface regardless, so a probe rule scoped away
   // from `instruction_file` is the only kind that can tell this argument was
   // actually passed from one that was silently dropped. Removing the 4th argument at
