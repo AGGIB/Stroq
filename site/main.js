@@ -131,72 +131,61 @@ window.va =
     }
   }
 
-  /* Hero terminal ------------------------------------------------------ */
-  var term = doc.querySelector('[data-term]');
-  if (term && !reduceMotion.matches && 'IntersectionObserver' in window) {
-    var script = Array.prototype.map.call(term.querySelectorAll('.tl'), function (li) {
-      return { el: li, text: li.textContent, typed: li.hasAttribute('data-typed') };
-    });
-    var TYPE_MS = 24, LINE_PAUSE = 420, TYPED_PAUSE = 380, HOLD = 4100;
-    var timer = null, visible = false, running = false, userPaused = false, cur = 0;
-    var pauseBtn = term.querySelector('.term-pause');
+  /* The fork: one poisoned file, two outcomes -------------------------- */
+  /* The steps are readable without this: CSS leaves every one at full opacity
+     and the sequence only ever *emphasises* the order they happen in. With no
+     JS, reduced motion, or no IntersectionObserver, the reader simply sees the
+     finished comparison, which is the point of it anyway. */
+  var fork = doc.querySelector('[data-fork]');
+  if (fork && !reduceMotion.matches && 'IntersectionObserver' in window) {
+    var steps = fork.querySelectorAll('.fstep');
+    var replayBtn = fork.querySelector('[data-fork-replay]');
+    var STEP_MS = 620, HOLD_MS = 2600;
+    var fTimer = null, played = false;
 
-    function later(ms, fn) { timer = window.setTimeout(fn, ms); }
-
-    function clearLines() {
-      each(script, function (s) { s.el.textContent = ''; s.el.classList.remove('is-typing'); });
+    function reach(n) {
+      each(steps, function (el) {
+        el.classList.toggle('is-reached', Number(el.getAttribute('data-step')) <= n);
+      });
     }
 
-    function step(i) {
-      cur = i;
-      if (!visible || doc.hidden || userPaused) { running = false; return; }
-      if (i >= script.length) {
-        later(HOLD, function () { clearLines(); step(0); });
-        return;
-      }
-      var s = script[i];
-      if (!s.typed) {
-        s.el.textContent = s.text;
-        later(LINE_PAUSE, function () { step(i + 1); });
-        return;
-      }
+    function play() {
+      window.clearTimeout(fTimer);
+      fork.classList.add('is-playing');
       var n = 0;
-      s.el.classList.add('is-typing');
       (function tick() {
         n += 1;
-        s.el.textContent = s.text.slice(0, n);
-        if (n < s.text.length) {
-          later(TYPE_MS + Math.random() * 28, tick);
+        reach(n);
+        if (n < 4) {
+          fTimer = window.setTimeout(tick, STEP_MS);
         } else {
-          s.el.classList.remove('is-typing');
-          later(TYPED_PAUSE, function () { step(i + 1); });
+          /* Land on the finished state and stay there. A landing page loop that
+             restarts while someone is reading the outcome is a distraction. */
+          fTimer = window.setTimeout(function () { fork.classList.remove('is-playing'); }, HOLD_MS);
         }
       })();
     }
 
-    function resume() {
-      if (visible && !doc.hidden && !userPaused && !running) { running = true; step(cur); }
-    }
-    function pause() { window.clearTimeout(timer); running = false; }
-
-    clearLines();
-    if (pauseBtn) {
-      pauseBtn.addEventListener('click', function () {
-        userPaused = !userPaused;
-        pauseBtn.setAttribute('aria-pressed', userPaused ? 'true' : 'false');
-        pauseBtn.setAttribute('aria-label', (userPaused ? 'Play' : 'Pause') + ' the terminal animation');
-        pauseBtn.textContent = userPaused ? 'Play' : 'Pause';
-        if (userPaused) { pause(); } else { resume(); }
+    if (replayBtn) {
+      replayBtn.addEventListener('click', function () {
+        played = true;
+        play();
+        announce('Replaying the comparison.');
       });
     }
 
-    new IntersectionObserver(function (entries) {
-      visible = entries[0].isIntersecting;
-      if (visible) { resume(); } else { pause(); }
-    }, { threshold: 0.35 }).observe(term);
+    new IntersectionObserver(function (entries, obs) {
+      if (!entries[0].isIntersecting || played) { return; }
+      played = true;
+      obs.disconnect();
+      play();
+    }, { threshold: 0.4 }).observe(fork);
 
     doc.addEventListener('visibilitychange', function () {
-      if (doc.hidden) { pause(); } else { resume(); }
+      if (doc.hidden) {
+        window.clearTimeout(fTimer);
+        fork.classList.remove('is-playing');
+      }
     });
   }
 })();
