@@ -2,8 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { loadBundledRules, scanContent } from '@stroq/core';
-import { describe, expect, it } from 'vitest';
+import {
+  compileRules,
+  loadBundledRules,
+  scanContent,
+  type AtrRule,
+  type CompiledRule,
+} from '@stroq/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BENCH_BUDGET_MS,
   defaultCorpusDir,
@@ -11,6 +17,21 @@ import {
   runBench,
   type BenchReport,
 } from '../../src/bench/run.js';
+
+/**
+ * Lets one test inject extra rules into what `loadBundledRules()` returns, without
+ * touching the shipped bundle. Empty by default, so every other test in this file
+ * scans against the real bundle exactly as before.
+ */
+const probeRuleState = vi.hoisted(() => ({ rules: [] as CompiledRule[] }));
+
+vi.mock('@stroq/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@stroq/core')>();
+  return {
+    ...actual,
+    loadBundledRules: () => [...actual.loadBundledRules(), ...probeRuleState.rules],
+  };
+});
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-bench-'));
 
@@ -98,6 +119,45 @@ describe('runBench', () => {
     },
     BENCH_BUDGET_MS * 2,
   );
+
+  // `runBench` passes `{ target: 'repo_content' }` to `scanContent` (packages/cli/src/
+  // bench/run.ts). Nothing else in this file exercises that argument: 598 of 599
+  // shipped rules resolve to `any`, which applies on every surface regardless, so a
+  // rule scoped away from `repo_content` is the only kind of probe that can tell the
+  // argument was actually passed from one that was silently dropped. Removing the
+  // 4th argument at the call site — or replacing it with `'any'` — makes both files
+  // below flag, since `appliesTo` applies every rule when the caller names no surface
+  // (or `any`); this test was confirmed to fail that way before being kept.
+  it("pins the target argument runBench passes to scanContent — 'repo_content', not dropped or widened", () => {
+    const probe = (id: string, target: string, phrase: string): AtrRule =>
+      ({
+        id,
+        title: `probe ${id}`,
+        severity: 'critical',
+        tags: { category: 'injection', scan_target: target },
+        detection: {
+          condition: 'any',
+          conditions: [{ field: 'content', operator: 'contains', value: phrase }],
+        },
+      }) as unknown as AtrRule;
+
+    probeRuleState.rules = compileRules([
+      probe('PROBE-BENCH-00001', 'repo_content', 'STROQ_PROBE_REPO_CONTENT_9f31'),
+      probe('PROBE-BENCH-00002', 'command_output', 'STROQ_PROBE_COMMAND_OUTPUT_2c7e'),
+    ]).compiled;
+
+    const dir = fixture();
+    writeFileSync(join(dir, 'pos.md'), 'See STROQ_PROBE_REPO_CONTENT_9f31 for details.');
+    writeFileSync(join(dir, 'neg.md'), 'See STROQ_PROBE_COMMAND_OUTPUT_2c7e for details.');
+    const report = runBench(dir);
+
+    expect(report.flaggedFiles.some((f) => f.endsWith('pos.md'))).toBe(true);
+    expect(report.flaggedFiles.some((f) => f.endsWith('neg.md'))).toBe(false);
+  });
+});
+
+afterEach(() => {
+  probeRuleState.rules = [];
 });
 
 describe('the bench scan budget', () => {

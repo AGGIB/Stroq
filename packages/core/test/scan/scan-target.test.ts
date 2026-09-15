@@ -141,6 +141,21 @@ describe('scanTargetForTool', () => {
     expect(scanTargetForTool('Read', { file_path: '/repo/README.md' })).toBe('repo_content');
   });
 
+  it('anchors the dot-directory match at the start of a relative path too, not only after a preceding separator', () => {
+    // Regression pin: INSTRUCTION_FILE's dot-directory alternative used to be a bare
+    // `[/\\]\.(?:claude|...)[/\\]`, so an absolute path matched (the "/" before
+    // ".claude" satisfied it) but a relative path starting with the dot directory
+    // itself did not — an arbitrary asymmetry hook events never hit, since Claude Code
+    // always sends absolute paths, but a caller building its own path string would not
+    // have been so lucky.
+    expect(scanTargetForTool('Read', { file_path: '.claude/settings.json' })).toBe(
+      'instruction_file',
+    );
+    expect(scanTargetForTool('Read', { file_path: '/repo/.claude/settings.json' })).toBe(
+      'instruction_file',
+    );
+  });
+
   it('reads a Read with no usable path, and fetched pages, as repository material', () => {
     expect(scanTargetForTool('Read', {})).toBe('repo_content');
     expect(scanTargetForTool('WebFetch', { url: 'https://x.example' })).toBe('repo_content');

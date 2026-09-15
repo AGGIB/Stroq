@@ -107,11 +107,16 @@ function deriveBench(): string {
       'be just as wrong on a tool description or a command line, so declaring a surface ' +
       'for it would remove it from this measurement while leaving it exactly as wrong ' +
       'everywhere else. The candidate this test was hardest on is ' +
-      '`STROQ-2026-00005` (`curl … | sh`): scoping it to command output cleared three ' +
-      'documentation false positives and lost three recorded attack scenarios with it, ' +
-      'because `curl … | sh` is byte-identical in a README install line and in an ' +
-      'injected instruction. These rules need tighter patterns, not narrower surfaces, ' +
-      'and until they get them the number above stays where the measurement puts it.',
+      '`STROQ-2026-00005` (`curl … | sh`): scoping it to command output cleared two ' +
+      'documentation false positives, not three — a third flagged file, ' +
+      '`apache-apisix/README.md`, stays flagged by `ATR-2026-00142` regardless of this ' +
+      "rule's scope — and cost two recorded attack scenarios, not three: a third, " +
+      '`10-skill-base64-installer`, still passes because `STROQ-2026-00006` catches its ' +
+      'base64-encoded payload independently, on the raw, undecoded text. For the two ' +
+      'scenarios it does cost, `curl … | sh` is byte-identical in a README install line ' +
+      'and in an injected instruction, so no surface separates them. These rules need ' +
+      'tighter patterns, not narrower surfaces, and until they get them the number above ' +
+      'stays where the measurement puts it.',
     '',
     'Production scans under a 500 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
