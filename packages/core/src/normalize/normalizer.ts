@@ -55,7 +55,11 @@ const HOMOGLYPHS: Readonly<Record<string, string>> = {
   ν: 'v',
   τ: 't',
   χ: 'x',
-  μ: 'u',
+  // μ (U+03BC) has no fold, deliberately: NFKC rewrites the correct MICRO
+  // SIGN (U+00B5, as in "240µs" or "10µF") onto this same codepoint before
+  // the fold table runs, so mapping it to 'u' corrupts real text. The
+  // fuzzer's Greek mutation table never emits μ either, so folding it never
+  // convicted anything.
   Α: 'A',
   Β: 'B',
   Ε: 'E',
