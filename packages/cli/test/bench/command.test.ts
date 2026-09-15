@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BENCH_BUDGET_MS } from '../../src/bench/run.js';
 import { runBenchCommand } from '../../src/commands/bench.js';
 
 describe('runBenchCommand', () => {
@@ -51,14 +52,20 @@ describe('runBenchCommand', () => {
     expect(out.join('')).toContain('bad.md');
   });
 
-  it('uses the vendored corpus end to end when no --corpus is given, in a checkout that has one', async () => {
-    // This checkout has vendor/bench-corpus/files (it is a Task 1 artifact committed
-    // to the repository), so defaultCorpusDir() should find it and this should behave
-    // exactly like a real `stroq bench` invocation with no flags: exit 0, report on
-    // stdout, nothing on stderr.
-    expect(await runBenchCommand([])).toBe(0);
-    expect(out.join('')).toContain('stroq bench:');
-    expect(out.join('')).toContain('vendor/bench-corpus/files');
-    expect(err.join('')).toBe('');
-  });
+  it(
+    'uses the vendored corpus end to end when no --corpus is given, in a checkout that has one',
+    async () => {
+      // This checkout has vendor/bench-corpus/files (it is a Task 1 artifact committed
+      // to the repository), so defaultCorpusDir() should find it and this should behave
+      // exactly like a real `stroq bench` invocation with no flags: exit 0, report on
+      // stdout, nothing on stderr.
+      expect(await runBenchCommand([])).toBe(0);
+      expect(out.join('')).toContain('stroq bench:');
+      expect(out.join('')).toContain('vendor/bench-corpus/files');
+      expect(err.join('')).toBe('');
+    },
+    // Scans the whole vendored corpus, like the run.test.ts case above: ~4.5 s on a
+    // developer laptop against vitest's 5 s default, which is not a margin.
+    BENCH_BUDGET_MS * 2,
+  );
 });

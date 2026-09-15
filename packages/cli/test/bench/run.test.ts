@@ -83,11 +83,21 @@ describe('runBench', () => {
     expect(report.flaggedFiles[0]).toContain('big.md');
   });
 
-  it('reports zero timeouts against the vendored corpus at the bench budget', () => {
-    const dir = defaultCorpusDir();
-    expect(dir).not.toBeNull();
-    expect(runBench(dir as string).timedOut).toBe(0);
-  });
+  // The harness timeout must outlast the budget this test is about. Vitest's 5 s
+  // default is shorter than the scan it wraps — the corpus runs ~3 s on a developer
+  // laptop and crossed 5 s on a CI runner — so a slow machine reported a harness
+  // timeout instead of this assertion, and a breach of BENCH_BUDGET_MS itself could
+  // never be reported as the failure it is. Twice the budget, so the scan always
+  // reaches the assertion and `timedOut` is what fails when it should.
+  it(
+    'reports zero timeouts against the vendored corpus at the bench budget',
+    () => {
+      const dir = defaultCorpusDir();
+      expect(dir).not.toBeNull();
+      expect(runBench(dir as string).timedOut).toBe(0);
+    },
+    BENCH_BUDGET_MS * 2,
+  );
 });
 
 describe('the bench scan budget', () => {
