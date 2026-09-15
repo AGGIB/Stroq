@@ -19,7 +19,11 @@ export const SEVERITY_WEIGHT: Readonly<Record<Severity, number>> = {
 };
 
 const DEFAULT_THRESHOLD = 0.6;
-const DEFAULT_MAX_CHARS = 200_000;
+// Shared with `extractAtomsDeep` (packages/core/src/provenance/atoms.ts), which
+// bounds its input to the same prefix so the two halves of `engine.post` — the
+// content scan and provenance atom extraction — never read a different amount of
+// the same untrusted text. See the comment there for why that symmetry is safe.
+export const DEFAULT_MAX_CHARS = 200_000;
 // 500 ms, not 200 ms: a spurious fail-closed (timedOut → suspect) on a
 // slow/loaded machine is worse than a scan that occasionally takes longer.
 export const DEFAULT_BUDGET_MS = 500;
