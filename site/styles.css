@@ -80,6 +80,8 @@ a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .18em
 a:hover { text-decoration-color: currentColor; }
 :focus-visible { outline: 2px solid var(--info); outline-offset: 3px; }
 ::selection { background: var(--ink); color: var(--paper); }
+html { scrollbar-color: var(--line-2) transparent; }
+body { caret-color: var(--ink); }
 code, pre, kbd, samp { font-family: var(--font-mono); font-size: .92em; }
 :not(pre) > code { padding: .1em .38em; border-radius: 5px; background: var(--code-bg); font-weight: 500; }
 img, svg { max-width: 100%; }
@@ -296,20 +298,16 @@ html:not(.js) .fork-replay { display: none; }
 
 /* 9. What you get (bento) ---------------------------------------------- */
 .bento { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
-.tile { display: flex; flex-direction: column; gap: .8rem; min-height: 200px; padding: 1.4rem 1.4rem 1.3rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); }
+.tile { display: flex; flex-direction: column; justify-content: flex-start; gap: .8rem; min-height: 200px; padding: 1.4rem 1.4rem 1.3rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); }
 .tile-wide { grid-column: span 2; }
-.tile-prov { border: 1.5px solid var(--allow); }
-.tile-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }
+.tile-prov { border-color: var(--line-2); }
 .tile h3 { font-size: 1.22rem; }
 .tile p { color: var(--ink-2); font-size: .96rem; line-height: 1.5; }
-.specimen { margin: auto 0 0; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-2); color: var(--ink); font: 500 .8rem/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.specimen { margin: .35rem 0 0; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-2); color: var(--ink); font: 500 .8rem/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sp-dim { color: var(--ink-2); }
 .sp-deny { color: var(--deny-text); font-weight: 700; }
 .sp-ask { color: var(--ask-text); font-weight: 700; }
 .sp-allow { color: var(--allow-text); font-weight: 700; }
-.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .7rem; border: 1px solid; border-radius: 999px; font: 500 .76rem/1 var(--font-body); white-space: nowrap; }
-.pill-ask { border-color: var(--ask); background: var(--ask-tint); color: var(--ask-text); }
-.pill-allow { border-color: var(--allow); background: var(--allow-tint); color: var(--allow-text, var(--allow)); }
 
 /* 9b. Incident scoreboard ---------------------------------------------- */
 .sc-board { margin-bottom: clamp(2rem, 1.5rem + 1.5vw, 3rem); }
@@ -325,28 +323,37 @@ html:not(.js) .fork-replay { display: none; }
 .sc-zero { max-width: 68ch; margin-top: 1.1rem; color: var(--ink-2); font-size: .97rem; }
 .sc-zero-n { color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 
-.sc-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; margin: 0; padding: 0; list-style: none; }
-.sc-row {
-  display: grid; min-width: 0; grid-template-columns: 2.1rem minmax(0, 1fr) auto;
-  grid-template-areas: "n what verdict" "n meta meta";
-  gap: .3rem .8rem; align-items: baseline;
-  padding: .6rem .85rem; border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--radius-sm);
-  background: var(--paper);
+.sc-list {
+  margin: 0; padding: 0; list-style: none;
+  border-top: 1px solid var(--ink);
 }
-.sc-deny { border-left-color: var(--deny); }
-.sc-ask { border-left-color: var(--ask); }
-.sc-n { grid-area: n; color: var(--ink-2); font: 700 .95rem/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
-.sc-what { grid-area: what; font-size: .93rem; line-height: 1.35; }
-.sc-verdict { grid-area: verdict; display: inline-flex; align-items: center; gap: .3rem; font: 600 .78rem/1 var(--font-body); white-space: nowrap; }
-.sc-verdict .ic { padding: 2px; border-radius: 50%; }
+.sc-row {
+  display: grid; min-width: 0;
+  grid-template-columns: 2.25rem minmax(0, 1fr) 8.5rem 11.5rem 5.75rem;
+  gap: 0 1.5rem; align-items: baseline;
+  padding: .72rem .35rem;
+  border-bottom: 1px solid var(--line);
+  transition: background-color var(--dur-fast);
+}
+.sc-row:hover { background: var(--paper-2); }
+.sc-legend {
+  padding-top: .5rem; padding-bottom: .5rem;
+  border-bottom-color: var(--line-2);
+  color: var(--ink-2); font: 500 .74rem/1 var(--font-body);
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.sc-legend:hover { background: none; }
+.sc-legend .sc-n, .sc-legend .sc-what, .sc-legend .sc-effect, .sc-legend .sc-src, .sc-legend .sc-verdict { all: unset; }
+.sc-n { color: var(--ink-2); font: 500 .82rem/1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+.sc-what { font-size: .95rem; line-height: 1.4; }
+.sc-effect { color: var(--ink-2); font-size: .82rem; }
+.sc-src { min-width: 0; color: var(--ink-2); font-size: .82rem; line-height: 1.35; }
+.sc-src .ic-ext { margin-left: .2rem; vertical-align: -1px; }
+.sc-src-own { font-style: italic; opacity: .7; }
+.sc-verdict { display: inline-flex; align-items: baseline; gap: .35rem; font: 600 .82rem/1.4 var(--font-body); }
 .sc-deny .sc-verdict { color: var(--deny-text); }
-.sc-deny .sc-verdict .ic { background: var(--deny-tint); }
 .sc-ask .sc-verdict { color: var(--ask-text); }
-.sc-ask .sc-verdict .ic { background: var(--ask-tint); }
-.sc-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; font-size: .8rem; }
-.sc-effect { padding: .12rem .45rem; border-radius: 4px; background: var(--code-bg); color: var(--ink-2); font-family: var(--font-mono); font-size: .92em; }
-.sc-src { display: inline-flex; align-items: center; gap: .25rem; color: var(--ink-2); }
-.sc-src-own { opacity: .75; font-style: italic; text-decoration: none; }
+.sc-verdict .ic { align-self: center; }
 
 /* 10. Comparison: the prompt against the same moment with Stroq --------- */
 .versus { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
@@ -432,10 +439,12 @@ html:not(.js) .fork-replay { display: none; }
 }
 @media (max-width: 960px) {
   .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .sc-list, .versus { grid-template-columns: 1fr; }
+  .versus { grid-template-columns: 1fr; }
   .tile:last-child { grid-column: span 2; }
 }
 @media (max-width: 900px) {
+  .sc-row { grid-template-columns: 2rem minmax(0, 1fr) 7rem 5.25rem; }
+  .sc-src { display: none; }
   .proof { padding-top: 3rem; }
   .section-head, .policy-grid, .install-grid { grid-template-columns: 1fr; }
   .section-head { gap: 1rem; }
@@ -471,8 +480,12 @@ html:not(.js) .fork-replay { display: none; }
 @media (max-width: 600px) {
   .bento { grid-template-columns: 1fr; }
   .sc-seg b { font-size: clamp(2.2rem, 1.6rem + 3vw, 3.4rem); }
-  .sc-row { grid-template-columns: 1.9rem minmax(0, 1fr); grid-template-areas: "n what" "n verdict" "n meta"; }
-  .sc-verdict { justify-self: start; }
+  .sc-legend { display: none; }
+  .sc-row { grid-template-columns: 1.9rem minmax(0, 1fr) auto; gap: .25rem .75rem; padding-block: .8rem; }
+  .sc-what { grid-column: 2; }
+  .sc-verdict { grid-column: 3; grid-row: 1; justify-self: end; }
+  .sc-effect { grid-column: 2; }
+  .sc-src { display: block; grid-column: 2; }
   .cta-pair .btn { flex: 1 1 100%; justify-content: center; }
   .tile-wide, .tile:last-child { grid-column: auto; }
   .tile { min-height: 0; }
