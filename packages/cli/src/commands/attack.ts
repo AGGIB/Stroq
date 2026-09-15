@@ -45,16 +45,23 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
     return 1;
   }
   if (values.fuzz) {
+    // A `\r`-updating progress line only reads as one line on a TTY, where the
+    // carriage return overwrites in place. Piped to a file or captured by a
+    // test runner, there is no cursor to overwrite, so every write accumulates
+    // into hundreds of lines of noise — the vitest suite drives this command
+    // directly (attack.test.ts), and so does the CI fuzz gate. Draw progress
+    // only when there is a terminal to draw it on.
+    const showProgress = values.json !== true && process.stderr.isTTY === true;
     const report = await runFuzz(
       selected,
       MUTATIONS,
       loadPolicy(),
       displayPath(policySource()),
-      values.json === true
-        ? undefined
-        : (done, total) => process.stderr.write(`\rfuzzing ${done}/${total}`),
+      showProgress
+        ? (done, total) => process.stderr.write(`\rfuzzing ${done}/${total}`)
+        : undefined,
     );
-    if (values.json !== true) process.stderr.write('\r');
+    if (showProgress) process.stderr.write('\r');
     process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatFuzz(report));
     // --allow-escapes exists so the gate can be introduced before Part 4 closes what
     // it finds. It never changes the report, only the exit code.
