@@ -75,6 +75,8 @@ h1, h2, h3 { margin: 0; font-family: var(--font-display); font-weight: 700; lett
 h1 { font-size: var(--text-h1); line-height: .98; letter-spacing: -.028em; }
 h2 { font-size: var(--text-h2); line-height: 1.04; }
 h3 { font-size: 1.25rem; line-height: 1.25; letter-spacing: -.012em; }
+.hi-deny { color: var(--deny-text); }
+.hi-ask { color: var(--ask-text); }
 p { margin: 0; }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .18em; text-decoration-color: var(--line-2); transition: text-decoration-color var(--dur-fast); }
 a:hover { text-decoration-color: currentColor; }
@@ -127,6 +129,11 @@ button { font: inherit; color: inherit; }
 .btn-primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .btn-primary:hover { background: var(--ink-2); border-color: var(--ink-2); }
 .btn-nav { min-height: 40px; padding: .5rem 1rem; font-size: .9rem; }
+.install-pill-nav { min-width: 0; padding: .2rem .2rem .2rem .85rem; background: transparent; }
+.js .install-pill-nav { opacity: 0; pointer-events: none; transition: opacity var(--dur) var(--ease-out); }
+.js .install-pill-nav.is-shown { opacity: 1; pointer-events: auto; }
+.install-pill-nav .install-cmd { font-size: .86rem; }
+.copy-btn-sm { min-height: 34px; padding: 0 .75rem 0 .65rem; font-size: .82rem; }
 .btn-gh .ic { stroke: none; fill: currentColor; }
 .cta-pair { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: clamp(2rem, 1.5rem + 1.5vw, 3rem); }
 .cta-pair .btn { min-height: 48px; padding: .7rem 1.3rem; }
@@ -418,6 +425,15 @@ html:not(.js) .fork-replay { display: none; }
 .install-note strong { color: var(--deny-text); }
 .install-note code { color: var(--ink); }
 
+/* 14b. Colophon --------------------------------------------------------- */
+.colophon { padding-block: var(--space-section); border-top: 1px solid var(--line); }
+.colophon-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 1.5rem clamp(2rem, 1.5rem + 3vw, 4rem); align-items: start; }
+.colophon h2 { font-size: clamp(1.5rem, 1.2rem + 1.1vw, 2.1rem); }
+.colophon-body { display: grid; gap: 1rem; max-width: 68ch; color: var(--ink-2); font-size: 1rem; line-height: 1.6; }
+.colophon-body em { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.colophon-links { display: flex; flex-wrap: wrap; gap: .5rem 1.75rem; margin-top: .35rem; font-size: .95rem; }
+.colophon-links a { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink); }
+
 /* 15. Footer ----------------------------------------------------------- */
 .site-foot { padding: 3.5rem 0 3rem; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .92rem; }
 .foot-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2rem 3rem; align-items: start; }
@@ -428,6 +444,15 @@ html:not(.js) .fork-replay { display: none; }
 .foot-meta { grid-column: 1 / -1; padding-top: 1.5rem; border-top: 1px solid var(--line); font-size: .86rem; }
 .foot-meta span { display: block; max-width: 70ch; }
 .scroll-hint { display: none; margin: 0 0 .6rem; color: var(--ink-2); font-size: .85rem; }
+
+@media (max-width: 1080px) {
+  .install-pill-nav .copy-label { display: none; }
+  .copy-btn-sm { padding: 0 .55rem; }
+}
+
+@media (max-width: 900px) {
+  .colophon-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 980px) {
   .hero-top { grid-template-columns: minmax(0, 1fr); gap: 2rem; }

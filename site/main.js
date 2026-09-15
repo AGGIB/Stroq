@@ -132,6 +132,19 @@ window.va =
   }
 
   /* The fork: one poisoned file, two outcomes -------------------------- */
+  /* The command in the header duplicates the one in the hero while both are on
+     screen. Hand it over only once the hero's has scrolled away. It keeps its space
+     in the row either way, so the links never shift when it appears. */
+  var navCmd = doc.querySelector('[data-nav-install]');
+  var heroCmd = doc.querySelector('.hero .install-pill');
+  if (navCmd && heroCmd && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (entries) {
+      navCmd.classList.toggle('is-shown', !entries[0].isIntersecting);
+    }, { threshold: 0 }).observe(heroCmd);
+  } else if (navCmd) {
+    navCmd.classList.add('is-shown');
+  }
+
   /* The steps are readable without this: CSS leaves every one at full opacity
      and the sequence only ever *emphasises* the order they happen in. With no
      JS, reduced motion, or no IntersectionObserver, the reader simply sees the

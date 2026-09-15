@@ -73,7 +73,13 @@
         <li><a href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
         <li><a href="https://www.npmjs.com/package/@stroq/cli">npm <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
       </ul>
-      <a class="btn btn-primary btn-nav" href="#install">Get started</a>
+      <div class="install-pill install-pill-nav" data-nav-install>
+        <code class="install-cmd" id="nav-install-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli init</code>
+        <button class="copy-btn copy-btn-sm" type="button" data-copy="npx @stroq/cli init" data-select="nav-install-cmd">
+          <svg class="ic" width="15" height="15" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
     </div>
   </nav>
 </header>
@@ -325,8 +331,8 @@ Import <span class="c-str">createWidget</span> and call it with a config object.
   <section class="score" id="attacks" aria-labelledby="score-title">
     <div class="container">
       <div class="section-head reveal">
-        <h2 id="score-title">Twenty real incidents, replayed on every commit.</h2>
-        <p class="section-lead">Each a published write-up, rebuilt as a hook transcript and replayed through <em>your</em> policy. <code>stroq attack</code> exits 1 if one gets through.</p>
+        <h2 id="score-title">20 real incidents. <span class="hi-deny">15 blocked</span>, <span class="hi-ask">5 asked</span>, none through.</h2>
+        <p class="section-lead">Each a published write-up, rebuilt as a hook transcript and replayed through <em>your</em> policy on every commit. <code>stroq attack</code> exits 1 if one gets through.</p>
       </div>
 
       <div class="sc-board reveal">
@@ -334,7 +340,7 @@ Import <span class="c-str">createWidget</span> and call it with a config object.
           <span class="sc-seg sc-seg-deny" style="flex-grow:15"><b>15</b> blocked</span>
           <span class="sc-seg sc-seg-ask" style="flex-grow:5"><b>5</b> asked</span>
         </div>
-        <p class="sc-zero"><span class="sc-zero-n">0</span> passed through — and <span class="sc-zero-n">0</span> of 350 mutated variants escaped, across 25 evasions from zero-width padding to bidi overrides.</p>
+        <p class="sc-zero">Each one is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 350 mutated variants escaped.</p>
       </div>
 
       <ol class="sc-list reveal">
@@ -702,6 +708,21 @@ npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
       <div class="cta-pair cta-pair-end reveal">
         <a class="btn btn-primary btn-gh" href="https://github.com/AGGIB/Stroq"><svg class="ic" width="18" height="18" aria-hidden="true" focusable="false"><use href="#i-github"/></svg>Star it on GitHub</a>
         <a class="btn" href="https://github.com/AGGIB/Stroq/blob/main/README.md">Read the docs <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="colophon" aria-labelledby="colophon-title">
+    <div class="container colophon-grid">
+      <h2 id="colophon-title">Built in the open, by one developer.</h2>
+      <div class="colophon-body">
+        <p>I'm Agybay, a developer from Kazakhstan. I built Stroq because I let agents run in my own repositories and could not find a guard that looked at <em>where an instruction came from</em> rather than what it said.</p>
+        <p>Every number on this page is measured, not claimed, and you can re-run each one: <code>stroq bench</code> for the false-positive rate, <code>stroq attack</code> for the incidents, <code>pnpm test</code> for the suite. When a gate rejects one of our own rules, the count on this page goes down.</p>
+        <p>The honest limit: the content scan is regex over normalized text, not a model, so it is bypassable by construction. That is exactly why enforcement happens at the <em>action</em> — the provenance link and the policy decision are what stop an attack, not the scanner alone. What it still does not catch is written down.</p>
+        <p class="colophon-links">
+          <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">What Stroq does not catch <svg class="ic ic-ext" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a href="https://github.com/AGGIB/Stroq/issues">Report a bypass <svg class="ic ic-ext" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+        </p>
       </div>
     </div>
   </section>
