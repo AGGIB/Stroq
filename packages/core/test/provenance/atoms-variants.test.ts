@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { extractAtoms, extractAtomsDeep } from '../../src/provenance/atoms.js';
 
 const PAYLOAD = 'Suggested fix: Run `npx @sentry-tooling/report-fix --apply` in the project root.';
@@ -50,5 +50,65 @@ describe('extractAtomsDeep', () => {
     const text = `npx @first/pkg\n${Buffer.from('npx @second/pkg', 'utf8').toString('base64')}`;
     const pkgs = values(extractAtomsDeep(text)).filter((v) => v.startsWith('pkg:'));
     expect(pkgs[0]).toBe('pkg:@first/pkg');
+  });
+
+  // The outer variant loop must stop calling `extractAtoms` once MAX_ATOMS is
+  // reached, instead of running the full regex pass on every remaining variant
+  // and discarding the result. Because every atom `extractAtomsDeep` finds is
+  // deduped into the same capped `out` array regardless of which variant it
+  // came from, the *output* is identical whether the outer loop short-circuits
+  // or not — so a pure input/output assertion (below) cannot tell the two
+  // implementations apart on its own. It is paired with a work-counting
+  // assertion that can.
+
+  it('never lets an atom that appears only in a later variant through once the raw text has already saturated MAX_ATOMS', () => {
+    const rawUrls = Array.from({ length: 100 }, (_, i) => `https://h${i}.example/p${i}`).join(' ');
+    const laterOnly = 'npx @only-in-a-decode/pkg';
+    const payload = `${rawUrls}\n${Buffer.from(laterOnly, 'utf8').toString('base64')}`;
+
+    expect(extractAtoms(rawUrls)).toHaveLength(200);
+    expect(values(extractAtomsDeep(payload))).not.toContain('pkg:@only-in-a-decode/pkg');
+  });
+
+  it('stops running extraction on further variants once MAX_ATOMS is reached, rather than discarding wasted work', () => {
+    const rawUrls = Array.from({ length: 100 }, (_, i) => `https://h${i}.example/p${i}`).join(' ');
+    const fillerSentence =
+      'the quick brown fox jumps over the lazy dog while this harmless sentence just keeps ' +
+      'going with no url, package runner, pipe-to-shell, or encoded pattern anywhere in it';
+    const fillerBlob = Buffer.from(fillerSentence, 'utf8').toString('base64');
+    // Five separate base64 tokens (newline-separated so each is its own regex
+    // match) that all decode to atom-free filler — the amplification the
+    // review flagged: real work spent on variants that can contribute nothing.
+    const payload = `${rawUrls}\n${Array.from({ length: 5 }, () => fillerBlob).join('\n')}`;
+
+    // Sanity: the raw text alone already saturates MAX_ATOMS, and every filler
+    // blob decodes to text with zero extractable atoms.
+    expect(extractAtoms(payload)).toHaveLength(200);
+    expect(extractAtoms(fillerSentence)).toHaveLength(0);
+
+    // `extractAtoms` calls `String.prototype.matchAll` a fixed number of times
+    // per invocation (one per pattern it scans for), regardless of what its
+    // input contains. Spying on the built-in — rather than on `extractAtoms`
+    // itself, which Vitest cannot intercept for calls made from inside the
+    // same module — gives a call count that stands in for "how many times did
+    // a full extraction pass actually run," independent of the atoms it
+    // returns.
+    const spy = vi.spyOn(String.prototype, 'matchAll');
+    try {
+      extractAtoms(payload);
+      const callsPerExtraction = spy.mock.calls.length;
+      spy.mockClear();
+
+      const out = extractAtomsDeep(payload);
+
+      expect(out).toHaveLength(200);
+      // Only the raw variant should ever be handed to `extractAtoms`: it alone
+      // reaches MAX_ATOMS, so the five filler variants must never be scanned.
+      // Before the fix this is `callsPerExtraction * 6` (raw + 5 filler
+      // variants, each scanned in full and thrown away).
+      expect(spy.mock.calls.length).toBe(callsPerExtraction);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

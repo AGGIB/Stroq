@@ -227,12 +227,17 @@ export function extractAtoms(text: string): Atom[] {
  * property (surviving where content rules don't) the whole feature is supposed to have.
  *
  * Variants are taken in order and the existing `MAX_ATOMS` bound applies to the total,
- * so a later decode can never displace an atom found in the raw text.
+ * so a later decode can never displace an atom found in the raw text. The outer loop
+ * checks that bound too, before running `extractAtoms` on the next variant — otherwise
+ * a saturated cap still pays for a full regex pass over every remaining variant only to
+ * throw the result away, which is real amplification on attacker-controlled `PostToolUse`
+ * content: base64 padding costs nothing to produce but full price to scan.
  */
 export function extractAtomsDeep(text: string): Atom[] {
   const seen = new Set<string>();
   const out: Atom[] = [];
   for (const variant of expandVariants(text)) {
+    if (out.length >= MAX_ATOMS) break;
     for (const atom of extractAtoms(variant.text)) {
       if (out.length >= MAX_ATOMS) return out;
       const key = atomHash(atom);
