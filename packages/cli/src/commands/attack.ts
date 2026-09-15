@@ -35,7 +35,6 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
       json: { type: 'boolean', default: false },
       only: { type: 'string' },
       fuzz: { type: 'boolean', default: false },
-      'allow-escapes': { type: 'boolean', default: false },
     },
   });
   const selected = select(values.only);
@@ -63,13 +62,7 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
     );
     if (showProgress) process.stderr.write('\r');
     process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatFuzz(report));
-    // --allow-escapes never changes the report, only the exit code. It originally
-    // existed so the CI gate could ship before Part 4 closed every escape it found;
-    // that work is done and the corpus has none left, but the flag stays as the
-    // escape hatch for whoever needs to unblock CI against a newly discovered escape
-    // while it's being fixed. It's a public CLI flag — removing it is a release
-    // decision, not something to fold into this fix.
-    return report.ok || values['allow-escapes'] === true ? 0 : 1;
+    return report.ok ? 0 : 1;
   }
   const report = await runAttack(selected, loadPolicy(), displayPath(policySource()));
   process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));

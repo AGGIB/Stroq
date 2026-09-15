@@ -94,23 +94,15 @@ describe('stroq attack', () => {
     expect(out.lines.join('')).toContain('stroq attack --fuzz:');
   }, 120_000);
 
-  it('--fuzz --allow-escapes still exits 0 once the corpus has none to allow', async () => {
-    const out = capture();
-    const code = await runAttackCommand(['--fuzz', '--allow-escapes']);
-    out.restore();
-    expect(code).toBe(0);
-    expect(out.lines.join('')).toContain('stroq attack --fuzz:');
-  }, 120_000);
-
-  // The two corpus tests above no longer contrast: both exit 0, because the real
-  // corpus has no escapes left. That pair used to be the proof that the exit-code
-  // branch in runAttackCommand (`report.ok || values['allow-escapes'] === true`)
-  // actually works — a renamed flag or a flipped condition would have flipped one
-  // of the two exit codes and been caught. This test restores that contrast by
-  // forcing `runFuzz` (mocked above) to return a report with a genuine escape,
-  // independent of what the corpus currently finds, so a broken exit-code branch
-  // is still caught even after every real escape is closed.
-  it('--fuzz exits 1 when the report carries an escape, and 0 for that same report under --allow-escapes', async () => {
+  // The corpus test above no longer contrasts with anything: it exits 0 because the
+  // real corpus has no escapes left, so nothing here proves the exit-1 branch in
+  // runAttackCommand (`report.ok ? 0 : 1`) still works — a flipped condition would
+  // pass unnoticed. This test restores that contrast by forcing `runFuzz` (mocked
+  // above) to return a report with a genuine escape, independent of what the corpus
+  // currently finds, so a broken exit-code branch is still caught even after every
+  // real escape is closed. It is also, now that `--allow-escapes` is gone, the only
+  // thing proving the gate can fail at all.
+  it('--fuzz exits 1 when the report carries an escape', async () => {
     fuzzState.forcedReport = {
       version: 1,
       policy: 'default',
@@ -135,16 +127,10 @@ describe('stroq attack', () => {
       ok: false,
     };
     try {
-      let out = capture();
-      let code = await runAttackCommand(['--fuzz']);
+      const out = capture();
+      const code = await runAttackCommand(['--fuzz']);
       out.restore();
       expect(code).toBe(1);
-      expect(out.lines.join('')).toContain('fixture-scenario');
-
-      out = capture();
-      code = await runAttackCommand(['--fuzz', '--allow-escapes']);
-      out.restore();
-      expect(code).toBe(0);
       expect(out.lines.join('')).toContain('fixture-scenario');
     } finally {
       fuzzState.forcedReport = null;
