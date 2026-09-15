@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { expandVariants } from '../normalize/normalizer.js';
+import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { Atom } from '../types.js';
 
 /** Upper bound on atoms extracted from one text (first N in text order, after dedupe). */
@@ -264,8 +265,25 @@ export function extractAtoms(text: string): Atom[] {
  * latency reference (154 atoms recovered, under `MAX_ATOMS`, so the pass is never
  * short-circuited there). The guard exists for the cases where the pass genuinely has
  * nothing to add, not as a promise that it usually skips.
+ *
+ * Bounded to `DEFAULT_MAX_CHARS`, the same prefix `scanContent` already truncates
+ * `event.toolResultText` to (`scanner.ts`), so both halves of `engine.post` read the
+ * identical amount of untrusted text. Before this bound this was the one unbounded
+ * regex path over attacker-controlled `PostToolUse` content: `expandVariants` walks
+ * every base64/hex/url token it finds and recurses two layers deep, so on adversarial
+ * nested-base64 filler with no atoms in it at all, extraction cost scaled with input
+ * size with no ceiling — measured on 2.8 MB and 14.0 MB filler, ~4x slower than plain
+ * `extractAtoms` on the same input (101ms vs 25ms; 459ms vs 124ms) and roughly 2.3x
+ * more memory from the materialised variant strings, linear in both cases but
+ * unbounded. Truncating first caps both.
+ *
+ * This can only lose a real atom past `DEFAULT_MAX_CHARS` — exactly where
+ * `scanContent`'s own rule matching is already blind to it, since the two now read the
+ * same bounded prefix of the same text. Provenance never sees further than content
+ * rules already don't, so the bound costs nothing a rule wasn't already going to miss.
  */
 export function extractAtomsDeep(text: string): Atom[] {
+  const bounded = text.length > DEFAULT_MAX_CHARS ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const seen = new Set<string>();
   const out: Atom[] = [];
   const merge = (atoms: readonly Atom[]): void => {
@@ -278,14 +296,14 @@ export function extractAtomsDeep(text: string): Atom[] {
     }
   };
 
-  for (const variant of expandVariants(text)) {
+  for (const variant of expandVariants(bounded)) {
     if (out.length >= MAX_ATOMS) break;
     merge(extractAtoms(variant.text));
   }
 
   if (out.length < MAX_ATOMS) {
-    const collapsed = collapseContinuations(text);
-    if (collapsed !== text) {
+    const collapsed = collapseContinuations(bounded);
+    if (collapsed !== bounded) {
       merge(extractAtoms(collapsed));
     }
   }
