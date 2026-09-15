@@ -54,7 +54,7 @@ describe('normalizeText', () => {
     expect(normalizeText('a\u{1F600}b')).toBe('a\u{1F600}b');
   });
 
-  it('recursively re-applies normalization until the output stops changing, bounded to a few passes', () => {
+  it('recursively re-applies normalization until the fold stage stops changing anything, bounded to a few passes', () => {
     // `.normalize('NFKC')` is called exactly once per internal pass. Benign
     // text is already a fixed point after the first pass, so the loop exits
     // having made only that one pass -- one call, one comparison.
@@ -65,7 +65,8 @@ describe('normalizeText', () => {
       spy.mockClear();
 
       // A payload combining two disguise techniques (a zero-width character
-      // and a homoglyph) changes on the first pass, so the loop makes a
+      // and a homoglyph) changes on the first pass, and specifically its
+      // *fold* stage changes something (the homoglyph), so the loop makes a
       // second pass to confirm the result is stable -- and it is: a third
       // pass would be redundant, which is exactly what "converges" means
       // here.
@@ -79,6 +80,36 @@ describe('normalizeText', () => {
       spy.mockClear();
       expect(normalizeText(normalized)).toBe(normalized);
       expect(spy.mock.calls.length).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('loops only when the fold stage changes something, not on every strip/NFKC change', () => {
+    // The loop is keyed on the fold stage specifically, not on whether the
+    // pass as a whole changed the text. A non-breaking space has no fold to
+    // trigger -- NFKC rewrites it to a plain space, strip leaves it alone,
+    // and the fold stage sees only plain ASCII tokens on both sides -- so
+    // this converges after a single pass even though the pass did change
+    // the text. This is the exact shape of the cost regression traced on
+    // the 210 KB bench reference document: one incidental NBSP there forced
+    // a second full pass under the old "did anything change" condition,
+    // taking normalizeText from ~3.06ms to ~6.22ms per call on that
+    // document; keying on the fold stage instead keeps this case at one
+    // pass.
+    const spy = vi.spyOn(String.prototype, 'normalize');
+    try {
+      const nbsp = 'a\u00A0b';
+      expect(normalizeText(nbsp)).toBe('a b');
+      expect(spy.mock.calls.length).toBe(1);
+      spy.mockClear();
+
+      // By contrast, a bare homoglyph swap with no other disguise changes
+      // nothing in strip or NFKC -- only the fold stage acts on it -- and
+      // that alone is enough to force the confirming second pass.
+      const homoglyph = 'ign\u043Ere';
+      expect(normalizeText(homoglyph)).toBe('ignore');
+      expect(spy.mock.calls.length).toBe(2);
     } finally {
       spy.mockRestore();
     }
