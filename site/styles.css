@@ -192,7 +192,21 @@ html:not(.js) .copy-btn { display: none; }
 .hs-line { stroke: var(--line-2); stroke-width: 1.5; stroke-linecap: round; }
 .hs-pk { opacity: 0; }
 .hs-pk-in, .hs-pk-oc { fill: var(--ink-2); }
-.hs-pk-out { fill: var(--allow); }
+.hs-pk-out { fill: var(--allow); --dx: 62px; }
+/* Per-packet geometry: how far along its own line each packet travels, and when it
+   sets off. These live here rather than in a style="" attribute on each circle
+   because the site is served with `style-src 'self'` and no 'unsafe-inline', which
+   blocks the attribute outright — the custom properties then resolve to nothing,
+   `translate(var(--dx), var(--dy))` becomes invalid, and every packet sits at the
+   start of its line. Values come from the row geometry in the markup: dx/dy is the
+   vector from the agent box edge to the orb's rim. */
+.hs-pk-r1 { --dx: 148.7px; --dy: 92.4px; --pd: 0s; }
+.hs-pk-r2 { --dx: 143.8px; --dy: 54.5px; --pd: .4s; }
+.hs-pk-r3 { --dx: 140.5px; --dy: 19.2px; --pd: .8s; }
+.hs-pk-r4 { --dx: 140.3px; --dy: -14.9px; --pd: 1.2s; }
+.hs-pk-r5 { --dx: 143.2px; --dy: -49.9px; --pd: 1.6s; }
+.hs-pk-oc { --dx: 148.1px; --dy: -87.5px; }
+.hs-pk-out-b { --pd: .8s; }
 .hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 .hs-machine path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
 .hs-cap { fill: var(--ink-2); font-size: 12px; font-weight: 500; font-family: var(--font-body); }
@@ -326,8 +340,12 @@ html:not(.js) .copy-btn { display: none; }
   font: 500 .92rem/1.2 var(--font-body); white-space: nowrap;
 }
 .sc-seg b { display: block; font: 700 clamp(2.4rem, 1.6rem + 3.2vw, 4rem)/.85 var(--font-display); letter-spacing: -.04em; }
-.sc-seg-deny { background: var(--deny-tint); color: var(--deny-text); box-shadow: inset 0 0 0 1px var(--deny); }
-.sc-seg-ask { background: var(--ask-tint); color: var(--ask-text); box-shadow: inset 0 0 0 1px var(--ask); }
+/* The two segments are sized in proportion to the tally each one prints, for the
+   same CSP reason as the packets above. site/test/csp-safe.test.ts keeps these two
+   numbers equal to the ones in the markup, which the scoreboard generator writes
+   from the attack corpus. */
+.sc-seg-deny { background: var(--deny-tint); color: var(--deny-text); box-shadow: inset 0 0 0 1px var(--deny); flex-grow: 15; }
+.sc-seg-ask { background: var(--ask-tint); color: var(--ask-text); box-shadow: inset 0 0 0 1px var(--ask); flex-grow: 5; }
 .sc-zero { max-width: 68ch; margin-top: 1.1rem; color: var(--ink-2); font-size: .97rem; }
 .sc-zero-n { color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 
