@@ -5,6 +5,7 @@
 // exercised directly from a test with a temp directory.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { loadRulesFromDir, type SkippedRule } from '../../packages/core/src/rules/atr-loader.js';
 import { compileRules, type CompiledRule } from '../../packages/core/src/rules/compile.js';
 import type { AtrRule } from '../../packages/core/src/rules/atr-types.js';
@@ -40,6 +41,144 @@ export function loadRuleSources(dirs: readonly string[]): LoadResult {
     rules: perDir.flatMap((r) => r.rules),
     skipped: perDir.flatMap((r) => r.skipped),
   };
+}
+
+// --- Vendored-rule pattern overrides -----------------------------------------
+
+/**
+ * One condition's regex, replaced at build time. See rules/atr-overrides.yaml for
+ * why this exists at all rather than editing the vendored file or disabling the
+ * rule outright.
+ */
+export interface OverrideCondition {
+  readonly index: number;
+  /** The value as currently parsed from the vendored rule. A mismatch fails the build. */
+  readonly from: string;
+  readonly to: string;
+}
+
+export interface RuleOverride {
+  readonly reason: string;
+  readonly conditions: readonly OverrideCondition[];
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+/**
+ * Parses rules/atr-overrides.yaml; an absent file means no overrides.
+ *
+ * Validated by hand rather than with zod, which is a dependency of @stroq/core and
+ * not of the build scripts. Malformed input throws: this file changes what ships in
+ * the bundle, so a typo must stop the build rather than silently apply nothing.
+ */
+export function loadRuleOverrides(file: string): ReadonlyMap<string, RuleOverride> {
+  if (!existsSync(file)) return new Map();
+  let doc: unknown;
+  try {
+    doc = parseYaml(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new RulesBuildError(`${file}: invalid YAML: ${(err as Error).message}`);
+  }
+  if (doc === null || doc === undefined) return new Map();
+  if (!isObject(doc))
+    throw new RulesBuildError(`${file}: expected a mapping of rule id to override`);
+
+  const out = new Map<string, RuleOverride>();
+  for (const [id, raw] of Object.entries(doc)) {
+    const where = `${file}: ${id}`;
+    if (!isObject(raw)) throw new RulesBuildError(`${where}: expected a mapping`);
+    if (!isNonEmptyString(raw['reason'])) {
+      throw new RulesBuildError(`${where}: "reason" must be a non-empty string`);
+    }
+    const conditions = raw['conditions'];
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      throw new RulesBuildError(`${where}: "conditions" must be a non-empty list`);
+    }
+    const parsed = conditions.map((c, i) => {
+      const at = `${where}.conditions[${i}]`;
+      if (!isObject(c)) throw new RulesBuildError(`${at}: expected a mapping`);
+      const index = c['index'];
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+        throw new RulesBuildError(`${at}: "index" must be a non-negative integer`);
+      }
+      if (!isNonEmptyString(c['from']))
+        throw new RulesBuildError(`${at}: "from" must be a non-empty string`);
+      if (!isNonEmptyString(c['to']))
+        throw new RulesBuildError(`${at}: "to" must be a non-empty string`);
+      const unknown = Object.keys(c).filter((k) => !['index', 'from', 'to'].includes(k));
+      if (unknown.length > 0)
+        throw new RulesBuildError(`${at}: unknown field(s): ${unknown.join(', ')}`);
+      return { index, from: c['from'], to: c['to'] } satisfies OverrideCondition;
+    });
+    const unknown = Object.keys(raw).filter((k) => !['reason', 'conditions'].includes(k));
+    if (unknown.length > 0)
+      throw new RulesBuildError(`${where}: unknown field(s): ${unknown.join(', ')}`);
+    out.set(id, { reason: raw['reason'], conditions: parsed });
+  }
+  return out;
+}
+
+/**
+ * Returns `rules` with each override applied, and the ids it touched.
+ *
+ * Every failure mode is a build error rather than a skipped override, because the
+ * situation an override has to survive is a re-import at a new upstream version:
+ * an entry that no longer applies has to be read by a human, not dropped. In
+ * particular `from` must still match — upstream may have fixed the pattern itself,
+ * or moved the defect somewhere this override no longer addresses.
+ */
+export function applyRuleOverrides(
+  rules: readonly AtrRule[],
+  overrides: ReadonlyMap<string, RuleOverride>,
+): { readonly rules: readonly AtrRule[]; readonly applied: readonly string[] } {
+  if (overrides.size === 0) return { rules, applied: [] };
+  const byId = new Map(rules.map((r) => [r.id, r]));
+  for (const id of overrides.keys()) {
+    if (id.startsWith(STROQ_PREFIX)) {
+      throw new RulesBuildError(
+        `rule override for ${id}: ${id} is Stroq-authored — edit its rule file instead of overriding it`,
+      );
+    }
+    if (!byId.has(id)) {
+      throw new RulesBuildError(
+        `rule override for ${id}: no such rule in the loaded sources (was it renamed or dropped upstream?)`,
+      );
+    }
+  }
+
+  const applied: string[] = [];
+  const out = rules.map((rule) => {
+    const override = overrides.get(rule.id);
+    if (!override) return rule;
+    const conditions = [...rule.detection.conditions];
+    for (const c of override.conditions) {
+      const current = conditions[c.index];
+      if (!current) {
+        throw new RulesBuildError(
+          `rule override for ${rule.id}: condition ${c.index} does not exist (the rule has ${conditions.length})`,
+        );
+      }
+      if (current.value !== c.from) {
+        throw new RulesBuildError(
+          `rule override for ${rule.id} condition ${c.index}: the vendored pattern is no longer the one this override was written against.\n` +
+            `  expected: ${c.from}\n` +
+            `  found:    ${current.value}\n` +
+            `Re-read the upstream rule and either update or delete the entry in rules/atr-overrides.yaml.`,
+        );
+      }
+      if (c.to === c.from) {
+        throw new RulesBuildError(
+          `rule override for ${rule.id} condition ${c.index}: "to" is identical to "from", so the entry changes nothing`,
+        );
+      }
+      conditions[c.index] = { ...current, value: c.to };
+    }
+    applied.push(rule.id);
+    return { ...rule, detection: { ...rule.detection, conditions } };
+  });
+  return { rules: out, applied };
 }
 
 export interface BenignFixture {

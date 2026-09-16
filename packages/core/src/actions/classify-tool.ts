@@ -1,5 +1,6 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
+import { isGitExecPath } from './git-exec.js';
 import { SELF_CONFIG_FILE } from './self-config.js';
 
 export interface ToolClassification extends CommandClassification {
@@ -39,6 +40,13 @@ function classifyPath(path: string, write: boolean): ToolClassification {
   if (write && SELF_CONFIG_FILE.test(path)) {
     classes.push('config.self');
     signals.push('self-config-write');
+  }
+  // A Write or Edit is how an agent installs repository-supplied execution without
+  // ever running `git config`: the file is plain text and the hook that would notice
+  // the command never sees one.
+  if (write && isGitExecPath(path)) {
+    classes.push('config.git_exec');
+    signals.push('git-exec-file');
   }
   if (SECRET_PATH.test(path)) {
     classes.push('fs.secrets');

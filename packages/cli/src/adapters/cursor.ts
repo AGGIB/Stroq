@@ -1,6 +1,7 @@
 import {
   AuditLog,
   classifyTool,
+  taintSource,
   warningFor,
   type Decision,
   type ProvenanceHit,
@@ -285,7 +286,7 @@ async function handleAfterMcp(
 ): Promise<HookOutput> {
   const result = await scanOutput(engine, event, text);
   if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
-  return json({ additional_context: warningFor(result.scan, event.toolName) });
+  return json({ additional_context: warningFor(result.scan, event.toolName, taintSource(result)) });
 }
 
 /**

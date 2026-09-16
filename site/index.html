@@ -149,35 +149,35 @@
               <text class="hs-name" x="52" y="81.5">Claude Code</text>
             </g>
             <line class="hs-line" x1="152" y1="77" x2="300.7" y2="169.4"/>
-            <circle class="hs-pk hs-pk-in" cx="152" cy="77" r="3.2" style="--dx: 148.7px; --dy: 92.4px; --pd: 0.0s"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r1" cx="152" cy="77" r="3.2"/>
             <g class="hs-agent">
               <rect class="hs-box" x="16" y="110" width="136" height="30" rx="8"/>
               <use href="#mark-cursor" class="hs-mark" x="28" y="117" width="16" height="16"/>
               <text class="hs-name" x="52" y="129.5">Cursor</text>
             </g>
             <line class="hs-line" x1="152" y1="125" x2="295.8" y2="179.5"/>
-            <circle class="hs-pk hs-pk-in" cx="152" cy="125" r="3.2" style="--dx: 143.8px; --dy: 54.5px; --pd: 0.4s"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r2" cx="152" cy="125" r="3.2"/>
             <g class="hs-agent">
               <rect class="hs-box" x="16" y="158" width="136" height="30" rx="8"/>
               <use href="#mark-codex" class="hs-mark" x="28" y="165" width="16" height="16"/>
               <text class="hs-name" x="52" y="177.5">Codex</text>
             </g>
             <line class="hs-line" x1="152" y1="173" x2="292.5" y2="192.2"/>
-            <circle class="hs-pk hs-pk-in" cx="152" cy="173" r="3.2" style="--dx: 140.5px; --dy: 19.2px; --pd: 0.8s"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r3" cx="152" cy="173" r="3.2"/>
             <g class="hs-agent">
               <rect class="hs-box" x="16" y="206" width="136" height="30" rx="8"/>
               <use href="#mark-copilot-cli" class="hs-mark" x="28" y="213" width="16" height="16"/>
               <text class="hs-name" x="52" y="225.5">Copilot CLI</text>
             </g>
             <line class="hs-line" x1="152" y1="221" x2="292.3" y2="206.1"/>
-            <circle class="hs-pk hs-pk-in" cx="152" cy="221" r="3.2" style="--dx: 140.3px; --dy: -14.9px; --pd: 1.2s"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r4" cx="152" cy="221" r="3.2"/>
             <g class="hs-agent">
               <rect class="hs-box" x="16" y="254" width="136" height="30" rx="8"/>
               <use href="#mark-windsurf" class="hs-mark" x="28" y="261" width="16" height="16"/>
               <text class="hs-name" x="52" y="273.5">Windsurf</text>
             </g>
             <line class="hs-line" x1="152" y1="269" x2="295.2" y2="219.1"/>
-            <circle class="hs-pk hs-pk-in" cx="152" cy="269" r="3.2" style="--dx: 143.2px; --dy: -49.9px; --pd: 1.6s"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r5" cx="152" cy="269" r="3.2"/>
             <g class="hs-agent hs-agent-target">
               <rect class="hs-box" x="16" y="302" width="136" height="30" rx="8"/>
               <use href="#mark-openclaw" class="hs-mark" x="28" y="309" width="16" height="16"/>
@@ -185,11 +185,11 @@
             </g>
             <line class="hs-line" x1="152" y1="317" x2="300.1" y2="229.5"/>
             <line class="hs-taint" x1="152" y1="317" x2="300.1" y2="229.5"/>
-            <circle class="hs-pk hs-pk-oc" cx="152" cy="317" r="3.4" style="--dx: 148.1px; --dy: -87.5px"/>
+            <circle class="hs-pk hs-pk-oc" cx="152" cy="317" r="3.4"/>
 
             <line class="hs-line" x1="408" y1="200" x2="470" y2="200"/>
-            <circle class="hs-pk hs-pk-out" cx="408" cy="200" r="3.2" style="--dx: 62px; --pd: 0s"/>
-            <circle class="hs-pk hs-pk-out" cx="408" cy="200" r="3.2" style="--dx: 62px; --pd: .8s"/>
+            <circle class="hs-pk hs-pk-out" cx="408" cy="200" r="3.2"/>
+            <circle class="hs-pk hs-pk-out hs-pk-out-b" cx="408" cy="200" r="3.2"/>
 
             <circle class="hs-field" cx="350" cy="200" r="72"/>
             <circle class="hs-core" cx="350" cy="200" r="58"/>
@@ -280,7 +280,7 @@
         </div>
         <div class="stat">
           <dt class="stat-label">Tests</dt>
-          <dd class="stat-num">1,899</dd>
+          <dd class="stat-num">1,973</dd>
           <dd class="stat-sub">Engine, CLI, six adapters, the proxy, the rules pipeline, twenty replayed incidents.</dd>
         </div>
         <div class="stat">
@@ -432,8 +432,8 @@
 
       <div class="sc-board reveal">
         <div class="sc-bar" role="img" aria-label="Of 20 replayed incidents, 15 were blocked outright, 5 were turned into a prompt, and none passed through.">
-          <span class="sc-seg sc-seg-deny" style="flex-grow:15"><b>15</b> blocked</span>
-          <span class="sc-seg sc-seg-ask" style="flex-grow:5"><b>5</b> asked</span>
+          <span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>
+          <span class="sc-seg sc-seg-ask"><b>5</b> asked</span>
         </div>
         <p class="sc-zero">Each one is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 350 mutated variants escaped.</p>
       </div>
@@ -695,12 +695,13 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
     <div class="container policy-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="policy-title">One YAML file. First match wins.</h2>
-        <p class="section-lead">Fourteen action classes, one ordered file, first match wins.</p>
+        <p class="section-lead">Fifteen action classes, one ordered file, first match wins.</p>
         <p class="list-title">Action classes named in the default policy</p>
         <ul class="class-list" aria-label="Action classes named in the default policy">
           <li><code>secret.egress</code></li>
           <li><code>secret.unscannable</code></li>
           <li><code>config.self</code></li>
+          <li><code>config.git_exec</code></li>
           <li><code>shell.exec_encoded</code></li>
           <li><code>origin.suspect</code></li>
           <li><code>origin.untrusted</code></li>

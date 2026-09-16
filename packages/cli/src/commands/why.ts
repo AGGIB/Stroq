@@ -17,10 +17,23 @@ function verdictLine(entry: AuditEntry): string {
   return `${entry.scan?.verdict ?? '-'} (score ${(entry.scan?.score ?? 0).toFixed(2)})`;
 }
 
-function taintLine(state: SessionState): string {
-  if (!state.taint) return '  taint:   none';
-  const sources = state.taint.sources.map((s) => `${s.tool}: ${s.ruleIds.join(', ')}`).join('; ');
-  return `  taint:   suspect since ${state.taint.since} (${sources})`;
+/**
+ * One line per thing that tainted the session, naming what it was reading.
+ *
+ * The tool and rule id alone cannot answer the question a blocked user actually has
+ * — "was that my own README or an attack?" — so each source names its file, URL or
+ * command too, redacted and clipped where it was recorded. Sessions tainted before
+ * that field existed simply print without it.
+ */
+function taintLines(state: SessionState): string[] {
+  if (!state.taint) return ['  taint:   none'];
+  const head = `  taint:   suspect since ${state.taint.since}`;
+  return [
+    head,
+    ...state.taint.sources.map(
+      (s) => `    from:  ${s.tool}${s.source ? ` ${s.source}` : ''} — ${s.ruleIds.join(', ')}`,
+    ),
+  ];
 }
 
 export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): string {
@@ -37,7 +50,7 @@ export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): st
     ...because,
     ...secretLines,
     ...fallback,
-    taintLine(state),
+    ...taintLines(state),
   ].join('\n')}\n`;
 }
 

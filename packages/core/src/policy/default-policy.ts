@@ -25,6 +25,17 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['config.self'], taint: 'any' },
     },
     {
+      // Denied at any taint, like self-tamper: setting `core.fsmonitor` or writing
+      // `.git/hooks/pre-commit` mid-session is not something an agent does on the
+      // way to a legitimate task, and the key set is small enough that the false
+      // positive this could cost has not been observed.
+      id: 'deny-git-exec',
+      effect: 'deny',
+      reason:
+        'Installing repository-supplied execution (git exec-on-read config or hook file) is blocked',
+      when: { classes: ['config.git_exec'], taint: 'any' },
+    },
+    {
       id: 'deny-encoded-exec',
       effect: 'deny',
       reason: 'Executing decoded or remotely fetched code is blocked',

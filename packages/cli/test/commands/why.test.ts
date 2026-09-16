@@ -47,6 +47,7 @@ async function seed(): Promise<void> {
     tool: 'Read',
     ruleIds: ['STROQ-2026-00001'],
     at: '2026-09-04T10:00:00.000Z',
+    source: 'README.md',
   });
 }
 
@@ -62,7 +63,9 @@ describe('stroq why', () => {
     expect(text).toMatch(/because: "@evil\/pkg" appeared in the output of Read \(README\.md\)/);
     expect(text).toContain('Stroq flagged that content as suspicious');
     expect(text).toContain('taint:   suspect since ');
-    expect(text).toContain('Read: STROQ-2026-00001');
+    // The file, not just the tool and rule id: without it the reader cannot tell a
+    // false positive on their own documentation from a poisoned file.
+    expect(text).toContain('from:  Read README.md — STROQ-2026-00001');
   });
 
   it('explains a specific entry by seq, with a plain fallback when no provenance was involved', async () => {

@@ -2,6 +2,7 @@ import {
   describeEvidence,
   describeSecretHit,
   toEvidence,
+  taintSource,
   warningFor,
   type Atom,
   type AtomKind,
@@ -192,7 +193,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
       : postOutput({ classifierContext: { stroq } });
   }
   return postOutput({
-    additionalContext: warningFor(result.scan, input.tool_name),
+    additionalContext: warningFor(result.scan, input.tool_name, taintSource(result)),
     classifierContext: { stroq },
   });
 }

@@ -97,26 +97,41 @@ function deriveBench(): string {
       'including any rule written to read something else; now the rate is a rate for the ' +
       'rules that read documentation. Compare this figure with one published before ' +
       "2026-09-15 and you are comparing two slightly different denominators, so don't. " +
-      'As it happens the rate did not move when the surface was declared (40.0% before ' +
-      'and after): every rule this corpus convicts reads every surface, which is the ' +
-      'point below.',
+      'Declaring the surface did not itself move the rate — it was 40.0% before and ' +
+      'after — because every rule this corpus convicts reads every surface. What moved ' +
+      'the rate afterwards was narrowing six of those rules, described below.',
     '',
-    'None of the rules named above is scoped away from documentation, and that is a ' +
-      'deliberate choice rather than an oversight. Each was examined and classified as a ' +
+    'None of the rules named above is scoped away from documentation, and that is still a ' +
+      'deliberate choice rather than an oversight: every rule this corpus convicts is a ' +
       'loose pattern rather than a rule reading the wrong surface — a pattern that would ' +
       'be just as wrong on a tool description or a command line, so declaring a surface ' +
       'for it would remove it from this measurement while leaving it exactly as wrong ' +
-      'everywhere else. The candidate this test was hardest on is ' +
-      '`STROQ-2026-00005` (`curl … | sh`): scoping it to command output cleared two ' +
-      'documentation false positives, not three — a third flagged file, ' +
-      '`apache-apisix/README.md`, stays flagged by `ATR-2026-00142` regardless of this ' +
-      "rule's scope — and cost two recorded attack scenarios, not three: a third, " +
-      '`10-skill-base64-installer`, still passes because `STROQ-2026-00006` catches its ' +
-      'base64-encoded payload independently, on the raw, undecoded text. For the two ' +
-      'scenarios it does cost, `curl … | sh` is byte-identical in a README install line ' +
-      'and in an injected instruction, so no surface separates them. These rules need ' +
-      'tighter patterns, not narrower surfaces, and until they get them the number above ' +
-      'stays where the measurement puts it.',
+      'everywhere else. What changed is that six of them stopped being loose. The ' +
+      'measurement said tighter patterns, not narrower surfaces, and six patterns were ' +
+      'tightened: the transition-word list in `ATR-2026-00142` no longer reads the "ps" ' +
+      'inside "https"; `ATR-2026-00113` no longer takes an HTTP method table row for a ' +
+      'command; the framing `ATR-2026-00117` exists to detect is no longer optional, so ' +
+      'the bare phrase "system command" is not a match; the final word of ' +
+      '`ATR-2026-00030`\'s "on behalf of" clause is no longer optional; `run` in ' +
+      '`STROQ-2026-00002` no longer matches the `RUN` in `RE-RUN`; and `email` in ' +
+      '`STROQ-2026-00004` now needs a direct object, which the noun on every service ' +
+      "account never has. Each was verified against the rule's own documented true " +
+      'positives before and after, and each pair is pinned in ' +
+      '[`packages/core/test/rules/pattern-regressions.test.ts`]' +
+      '(../packages/core/test/rules/pattern-regressions.test.ts) so a later edit cannot ' +
+      'quietly widen it back. The four vendored rules are patched through ' +
+      '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml) rather than by editing ' +
+      'rules/atr, which is imported verbatim from upstream.',
+    '',
+    'The two that remain are the two no pattern separates. `STROQ-2026-00005` ' +
+      '(`curl … | sh`) is byte-identical in a README install line and in an injected ' +
+      'instruction: scoping it to command output cleared two documentation false ' +
+      'positives and cost two recorded attack scenarios, and a third flagged file stays ' +
+      'flagged either way. `ATR-2026-00150` matches a bare ' +
+      '`-----BEGIN PRIVATE KEY-----` header, and its own documented true positives are ' +
+      'bare headers too, with no key body — exactly like the TLS configuration example ' +
+      'it flags. The difference between those two is the surface the text arrived on, ' +
+      'which is a scan_target question rather than a regex one, and it is open.',
     '',
     'Production scans under a 500 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +

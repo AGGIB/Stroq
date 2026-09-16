@@ -1,5 +1,6 @@
 import {
   AuditLog,
+  taintSource,
   warningFor,
   type Decision,
   type ProvenanceHit,
@@ -205,7 +206,7 @@ export async function scanPostResult(
   return {
     scanned: true,
     verdict: 'suspect',
-    warning: warningFor(result.scan, event.toolName),
+    warning: warningFor(result.scan, event.toolName, taintSource(result)),
   };
 }
 
