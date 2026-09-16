@@ -47,14 +47,40 @@ describe('the site survives its own Content-Security-Policy', () => {
 
   it('defines every custom property the keyframes read', () => {
     // Each `var(--x)` a keyframe uses must be set by a rule in the stylesheet,
-    // because there is nowhere else left to set it.
-    for (const prop of ['--dx', '--dy', '--pd']) {
+    // because under this policy there is nowhere else left to set it. The list is
+    // derived from the CSS rather than written down, so the check keeps holding
+    // when the hero animation is replaced — which is exactly when it last broke.
+    const keyframes = [...css.matchAll(/@keyframes\s+[\w-]+\s*\{/g)].map((m) => {
+      let depth = 0;
+      let i = m.index + m[0].length - 1;
+      const from = i;
+      do {
+        if (css[i] === '{') depth += 1;
+        else if (css[i] === '}') depth -= 1;
+        i += 1;
+      } while (depth > 0 && i < css.length);
+      return css.slice(from, i);
+    });
+    expect(keyframes.length, 'no @keyframes found — did the stylesheet move?').toBeGreaterThan(0);
+
+    const read = new Set<string>();
+    for (const block of keyframes) {
+      for (const use of block.matchAll(/var\(\s*(--[\w-]+)/g)) read.add(use[1]);
+    }
+    for (const prop of read) {
       const declared = new RegExp(`${prop}\\s*:`).test(css);
       expect(declared, `${prop} is read by a keyframe but never declared`).toBe(true);
     }
-    for (const cls of ['hs-pk-r1', 'hs-pk-r2', 'hs-pk-r3', 'hs-pk-r4', 'hs-pk-r5']) {
-      expect(html, `${cls} is styled but not used`).toContain(cls);
-      expect(css, `${cls} is used but not styled`).toContain(`.${cls}`);
+  });
+
+  it('animates only elements the markup actually ships', () => {
+    // A rule that animates a class no longer in the HTML is dead motion, and the
+    // reverse — markup expecting an animation that was deleted — is a frozen hero.
+    const animated = [...css.matchAll(/^\s*\.([\w-]+)[^{\n]*\{[^}]*animation:/gm)].map(
+      (m) => m[1],
+    );
+    for (const cls of new Set(animated)) {
+      expect(html, `.${cls} is animated but never used in the markup`).toContain(cls);
     }
   });
 

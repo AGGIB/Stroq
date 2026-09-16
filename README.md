@@ -5,9 +5,9 @@
   <img src="docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### Local action firewall for AI coding agents
+### Know what told your agent to do that
 
-Scans what the agent reads. Taints the session. Blocks the dangerous follow-up — before anything leaves your machine.
+Every guard judges the command in front of it. Stroq is the only one that can name the page, file or tool result that put the command there, and stop the action because of it.
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: all stopped](https://img.shields.io/badge/stroq%20attack-all%20stopped-1f9d55)](#replay-twenty-real-and-synthetic-attacks)
@@ -30,9 +30,11 @@ Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Wind
 
 ## Why
 
-Coding agents read untrusted content constantly — web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that dutifully follows what it reads can turn them into real actions: outbound network requests, secret reads, external git pushes, arbitrary shell execution.
+Coding agents read untrusted content constantly: web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that follows what it reads turns them into real actions — outbound requests, secret reads, external pushes, arbitrary shell.
 
-Stroq sits on the agent's own tool-call hooks and enforces a deterministic, local policy on those actions. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.
+Every guard in this field answers the same question: is the command in front of me dangerous? That question cannot be answered from the command alone. An `npx` that installs an attacker's package looks exactly like an `npx` that installs a dependency; what separates them is that one of them was dictated by something the agent had just read.
+
+Stroq is built around that difference. It sits on the agent's own tool-call hooks, remembers what the session took in, and when an action matches something that arrived in untrusted output it says so by name: which file, which tool result, how long ago. `stroq replay` then reconstructs the whole chain for a session after the fact — including sessions that ran before Stroq was installed. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.
 
 ## See it block an attack
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-16
+
 ### Added
 
 - **`stroq replay` — the causal history of a session.** Every guard, ours included, has so far answered one question: should this call be allowed. Once the session is over nobody could answer the question that actually matters after an incident — which piece of text the agent read turned into which action. `stroq replay` answers it. It groups a session into the content the agent read and, under each, the actions that traced back to it, naming the exact fragment that was carried over, how long afterwards, and the rule that stopped it. Actions with no untrusted origin are listed apart, so the graph shows what an attack looks like next to what ordinary work looks like.
