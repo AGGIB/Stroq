@@ -198,11 +198,11 @@ html:not(.js) .copy-btn { display: none; }
 .hs-road { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
 .hs-flow { stroke: var(--paper); stroke-width: 1; stroke-linecap: round; stroke-dasharray: 1.5 9; opacity: .9; }
 
-.hs-agent { fill: var(--ink); }
+.hs-agent { fill: var(--ink); transform-box: fill-box; transform-origin: center; }
 .hs-agent-ring { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; transform-box: fill-box; transform-origin: center; }
 .hs-agent-label { fill: var(--paper); font-size: 12.5px; font-weight: 600; text-anchor: middle; }
 
-.hs-gate-bar { fill: var(--ink-2); }
+.hs-gate-bar { fill: var(--ink-2); transform-box: fill-box; transform-origin: center; }
 .hs-gate-glow { fill: var(--ask); opacity: 0; }
 .hs-gate-cap { text-anchor: middle; font-weight: 600; fill: var(--ink); }
 .hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
@@ -212,7 +212,7 @@ html:not(.js) .copy-btn { display: none; }
 .hs-pk-b, .hs-pk-c { fill: var(--ink-2); }
 .hs-pk-a { fill: var(--ask); }
 .hs-pk-pass { fill: var(--allow); }
-.hs-pk-act { fill: var(--ink); }
+.hs-pk-act { fill: var(--ink); transform-box: fill-box; transform-origin: center; }
 .hs-halo { opacity: 0; }
 .hs-pk-act.hs-halo { fill: var(--ask); }
 
@@ -220,19 +220,26 @@ html:not(.js) .copy-btn { display: none; }
    from it. Dashed, because neither is traffic — they are knowledge. The dots that
    ride them are the token itself, falling in, and the gate's question, going down. */
 .hs-drop, .hs-probe { fill: none; stroke: var(--ask); stroke-width: 1.75; stroke-linecap: round; stroke-dasharray: 3 4; opacity: 0; }
-.hs-tokdrop, .hs-probedot { fill: var(--ask); opacity: 0; }
+.hs-tokdrop { fill: var(--ask); opacity: 0; }
+/* The probe is not another falling dot. It is a beam: a short bright stroke the
+   gate fires down the lane, so the eye reads "question", not "second token". */
+.hs-probebeam { stroke: var(--ask); stroke-width: 3; stroke-linecap: round; opacity: 0; }
+/* Rings mark the two impacts: the token landing in memory, the probe finding it. */
+.hs-land, .hs-match { fill: none; stroke: var(--ask); stroke-width: 1.75; opacity: 0; transform-box: fill-box; transform-origin: center; }
+/* The leader ties the verdict to the gate that produced it. */
+.hs-leader { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 30; stroke-dashoffset: 30; opacity: 0; }
 
 .hs-mem { fill: var(--ask-tint); stroke: var(--ask); stroke-width: 1.25; stroke-dasharray: 5 4; }
 .hs-mem-hatch { opacity: .35; }
 .hs-lane-hair { stroke: var(--ask); stroke-width: 1; }
 .hs-mem-cap { fill: var(--ask-text); font-weight: 600; }
-.hs-chip { opacity: 0; }
+.hs-chip { opacity: 0; transform-box: fill-box; transform-origin: center; }
 .hs-chip-box { fill: var(--paper); stroke: var(--ask); stroke-width: 1.25; }
 .hs-chip-text { fill: var(--ask-text); font-size: 11.5px; font-weight: 600; font-family: var(--font-mono); }
 
 /* The verdict is what `stroq why` prints, so it is drawn as the terminal: the one
    dark object on a paper scene, and therefore the one the eye lands on last. */
-.hs-verdict { opacity: 0; }
+.hs-verdict { opacity: 0; transform-box: fill-box; transform-origin: center bottom; }
 .hs-verdict rect { fill: var(--term); }
 .hs-verdict-prompt { fill: var(--term-dim); font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); }
 .hs-verdict-word { fill: var(--t-ask); font-size: 14px; font-weight: 700; font-family: var(--font-mono); }
@@ -265,10 +272,8 @@ html:not(.js) .copy-btn { display: none; }
 .fstep-bad code, .fstep-good code, .fstep-warn code { background: rgba(255, 255, 255, .45); }
 .fork-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .75rem; margin: 1.25rem 0 0; color: var(--ink-2); font: 500 .88rem/1.5 var(--font-body); text-align: center; }
 
-
 .works-with { margin: clamp(2.5rem, 2rem + 2vw, 3.5rem) 0 0; color: var(--ink-2); font: 500 .88rem/1.7 var(--font-body); text-align: center; }
 .works-with b { color: var(--ink); font-weight: 500; }
-
 
 /* 6. Proof strip ------------------------------------------------------- */
 .proof { padding: calc(var(--overlap) + 2.25rem) 0 3.5rem; }
@@ -557,26 +562,34 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes caret { 50% { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  /* One 11s loop. Reads land, the token falls into memory, ordinary traffic keeps
-     passing the gate on its own faster clock — and only when the action arrives
-     does the gate send its question down the lane, light up, and hold. */
+  /* One 11s loop, every object on a purposeful curve: reads decelerate as they
+     arrive, the token accelerates as it falls, the probe is fired, the gate snaps
+     and then blooms, the verdict overshoots in. Traffic runs on its own clock. */
   .hs-flow { animation: hs-flow 1.6s linear infinite; }
   .hs-pk-a { animation: hs-read-a 11s linear infinite; }
   .hs-pk-b { animation: hs-read-b 11s linear infinite; }
   .hs-pk-c { animation: hs-read-c 11s linear infinite; }
+  .hs-agent { animation: hs-agent 11s linear infinite; }
   .hs-agent-ring { animation: hs-ring 11s linear infinite; }
+  .hs-agent-ring-2 { animation: hs-ring 11s linear .18s infinite; }
   .hs-drop { animation: hs-drop 11s linear infinite; }
-  .hs-tokdrop { animation: hs-tokdrop 11s cubic-bezier(.4, 0, .9, .6) infinite; }
-  .hs-chip { animation: hs-chip 11s var(--ease-out) infinite; }
-  .hs-chip-box { animation: hs-chipflash 11s linear infinite; }
+  .hs-tokdrop { animation: hs-tokdrop 11s linear infinite; }
+  .hs-land { animation: hs-land 11s linear infinite; }
+  .hs-chip { animation: hs-chip 11s linear infinite; }
+  .hs-chip-box { animation: hs-chipbox 11s linear infinite; }
+  .hs-chip-text { animation: hs-chiptext 11s linear infinite; }
   .hs-pk-pass-1 { animation: hs-pass 3.4s linear infinite; }
-  .hs-pk-pass-2 { animation: hs-pass 3.4s linear -1.7s infinite; }
+  .hs-pk-pass-2 { animation: hs-pass 3.4s linear -1.15s infinite; }
+  .hs-pk-pass-3 { animation: hs-pass 3.4s linear -2.3s infinite; }
   .hs-pk-act { animation: hs-act 11s linear infinite; }
-  .hs-probe { animation: hs-probe 11s linear infinite; }
-  .hs-probedot { animation: hs-probedot 11s cubic-bezier(.4, 0, .9, .6) infinite; }
+  .hs-pk-act.hs-halo { animation: hs-acthalo 11s linear infinite; }
   .hs-gate-bar { animation: hs-gate 11s linear infinite; }
   .hs-gate-glow { animation: hs-gateglow 11s linear infinite; }
-  .hs-verdict { animation: hs-verdict 11s var(--ease-out) infinite; }
+  .hs-probe { animation: hs-probe 11s linear infinite; }
+  .hs-probebeam { animation: hs-probebeam 11s linear infinite; }
+  .hs-match { animation: hs-match 11s linear infinite; }
+  .hs-leader { animation: hs-leader 11s linear infinite; }
+  .hs-verdict { animation: hs-verdict 11s linear infinite; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
@@ -586,16 +599,19 @@ html:not(.js) .copy-btn { display: none; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   /* Nothing travels, but the finished state is the one that carries the meaning:
-     the token is in memory, both links are drawn, and the gate is holding the action. */
-  .hs-chip, .hs-verdict, .hs-drop, .hs-probe, .hs-pk-act { opacity: 1; }
+     the token is in memory and lit, both links are drawn, the gate is holding the
+     action, and the verdict is tied to it. */
+  .hs-chip, .hs-verdict, .hs-drop, .hs-probe, .hs-pk-act, .hs-leader { opacity: 1; }
+  .hs-leader { stroke-dashoffset: 0; }
   .hs-pk-act.hs-halo { opacity: .35; }
   .hs-pk-act { transform: translateX(100px); }
   .hs-gate-bar { fill: var(--ask); }
   .hs-gate-glow { opacity: .55; }
+  .hs-chip-box { fill: var(--ask); }
+  .hs-chip-text { fill: var(--ink); }
   .tl.is-typing::after { animation: none; }
   .btn:hover, .copy-btn:hover { transform: none; }
 }
-
 
 /* 18. Dark theme ------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
@@ -625,32 +641,52 @@ html:not(.js) .copy-btn { display: none; }
   .copy-btn.is-failed { color: var(--paper); }
 }
 
-
-
 /* Ordinary work keeps flowing through the gate the whole time. */
+
+/* The road's centre line, always moving. */
+
+/* Ordinary work keeps flowing through the gate the whole time, on its own clock. */
 
 /* The road's centre line, always moving. */
 @keyframes hs-flow { to { stroke-dashoffset: -10.5; } }
 
-/* Reads: three packets up the converging roads, the issue's one already marked. */
-@keyframes hs-read-a { 0% { transform: translate(0, 0); opacity: 0; } 3% { opacity: 1; } 14% { opacity: 1; } 15%, 100% { transform: translate(96px, 42px); opacity: 0; } }
-@keyframes hs-read-b { 0%, 4% { transform: translate(0, 0); opacity: 0; } 7% { opacity: 1; } 18% { opacity: 1; } 19%, 100% { transform: translate(96px, 0); opacity: 0; } }
-@keyframes hs-read-c { 0%, 8% { transform: translate(0, 0); opacity: 0; } 11% { opacity: 1; } 22% { opacity: 1; } 23%, 100% { transform: translate(96px, -42px); opacity: 0; } }
-@keyframes hs-ring { 0%, 14% { transform: scale(1); opacity: 0; } 15% { transform: scale(1); opacity: .55; } 32%, 100% { transform: scale(1.9); opacity: 0; } }
+/* Reads: three packets up the converging roads, overlapping so two are usually in
+   flight, each decelerating into the agent. The issue's packet is already marked. */
+@keyframes hs-read-a { 0% { transform: translate(0, 0); opacity: 0; animation-timing-function: var(--ease-out); } 2% { opacity: 1; } 13% { opacity: 1; } 14%, 100% { transform: translate(96px, 42px); opacity: 0; } }
+@keyframes hs-read-b { 0%, 3% { transform: translate(0, 0); opacity: 0; animation-timing-function: var(--ease-out); } 5% { opacity: 1; } 16% { opacity: 1; } 17%, 100% { transform: translate(96px, 0); opacity: 0; } }
+@keyframes hs-read-c { 0%, 6% { transform: translate(0, 0); opacity: 0; animation-timing-function: var(--ease-out); } 8% { opacity: 1; } 19% { opacity: 1; } 20%, 100% { transform: translate(96px, -42px); opacity: 0; } }
 
-/* What no other guard does: the token falls out of the read and into memory. */
-@keyframes hs-tokdrop { 0%, 15% { transform: translateY(0); opacity: 0; } 16% { opacity: 1; } 23% { transform: translateY(62px); opacity: 1; } 24%, 100% { transform: translateY(62px); opacity: 0; } }
-@keyframes hs-drop { 0%, 15% { opacity: 0; stroke-dashoffset: 62; } 17% { opacity: 1; } 24%, 92% { opacity: 1; stroke-dashoffset: 0; } 96%, 100% { opacity: 0; } }
-@keyframes hs-chip { 0%, 23% { opacity: 0; transform: translateY(-4px); } 27%, 92% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; transform: none; } }
-@keyframes hs-chipflash { 0%, 63% { fill: var(--paper); } 65% { fill: var(--ask); } 70%, 100% { fill: var(--paper); } }
+/* The agent takes the marked read in: a swell, and two rings let go of it. */
+@keyframes hs-agent { 0%, 13% { transform: scale(1); } 15% { transform: scale(1.08); animation-timing-function: var(--ease-out); } 19%, 100% { transform: scale(1); } }
+@keyframes hs-ring { 0%, 13% { transform: scale(1); opacity: 0; } 14% { transform: scale(1); opacity: .55; animation-timing-function: var(--ease-out); } 30%, 100% { transform: scale(2); opacity: 0; } }
+
+/* What no other guard does: the token falls out of the read and into memory. It
+   accelerates like a dropped thing, and the lane rings where it lands. */
+@keyframes hs-tokdrop { 0%, 15% { transform: translateY(0); opacity: 0; animation-timing-function: cubic-bezier(.5, 0, 1, .5); } 15.5% { opacity: 1; } 22% { transform: translateY(62px); opacity: 1; } 22.5%, 100% { transform: translateY(62px); opacity: 0; } }
+@keyframes hs-drop { 0%, 15% { opacity: 0; stroke-dashoffset: 62; animation-timing-function: cubic-bezier(.5, 0, 1, .5); } 16% { opacity: 1; } 22%, 92% { opacity: 1; stroke-dashoffset: 0; } 96%, 100% { opacity: 0; } }
+@keyframes hs-land { 0%, 22% { transform: scale(1); opacity: 0; } 22.5% { transform: scale(1); opacity: .8; animation-timing-function: var(--ease-out); } 32%, 100% { transform: scale(4.5); opacity: 0; } }
+@keyframes hs-chip { 0%, 22% { opacity: 0; transform: scale(.86); } 22.5% { opacity: 1; animation-timing-function: var(--ease-out); } 27%, 92% { opacity: 1; transform: scale(1); } 96%, 100% { opacity: 0; transform: scale(1); } }
 
 /* Ordinary work keeps flowing through the gate the whole time, on its own clock. */
 @keyframes hs-pass { 0% { transform: translateX(0); opacity: 0; } 8% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(188px); opacity: 0; } }
 
-/* The action itself: indistinguishable, right up to the gate, where it stops. */
-@keyframes hs-act { 0%, 38% { transform: translateX(0); opacity: 0; } 41% { opacity: 1; } 52%, 88% { transform: translateX(100px); opacity: 1; } 93%, 100% { transform: translateX(100px); opacity: 0; } }
-@keyframes hs-probedot { 0%, 55% { transform: translateY(0); opacity: 0; } 56% { opacity: 1; } 63% { transform: translateY(54px); opacity: 1; } 64%, 100% { transform: translateY(54px); opacity: 0; } }
-@keyframes hs-probe { 0%, 55% { opacity: 0; stroke-dashoffset: 54; } 57% { opacity: 1; } 63%, 88% { opacity: 1; stroke-dashoffset: 0; } 93%, 100% { opacity: 0; } }
-@keyframes hs-gate { 0%, 64% { fill: var(--ink-2); } 66%, 90% { fill: var(--ask); } 95%, 100% { fill: var(--ink-2); } }
-@keyframes hs-gateglow { 0%, 64% { opacity: 0; } 67%, 88% { opacity: .55; } 93%, 100% { opacity: 0; } }
-@keyframes hs-verdict { 0%, 68% { opacity: 0; transform: translateY(-6px); } 73%, 90% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; transform: none; } }
+/* The action itself: indistinguishable, right up to the gate — where it hits.
+   It squashes against the bar, the bar shudders, and it stays held. */
+@keyframes hs-act { 0%, 38% { transform: translateX(0); opacity: 0; animation-timing-function: var(--ease-out); } 40% { opacity: 1; } 52% { transform: translateX(100px) scale(1); animation-timing-function: var(--ease-out); } 53.2% { transform: translateX(100px) scale(1.55, .62); } 55% { transform: translateX(100px) scale(.92, 1.06); } 57%, 88% { transform: translateX(100px) scale(1); opacity: 1; } 93%, 100% { transform: translateX(100px) scale(1); opacity: 0; } }
+@keyframes hs-acthalo { 0%, 52% { transform: translateX(100px); opacity: 0; } 53% { transform: translateX(100px); opacity: .5; } 60%, 88% { transform: translateX(100px); opacity: .28; } 93%, 100% { transform: translateX(100px); opacity: 0; } }
+@keyframes hs-gate { 0%, 52.4% { transform: translateX(0); fill: var(--ink-2); } 52.8% { transform: translateX(-1.6px); } 53.4% { transform: translateX(1.2px); } 54% { transform: translateX(-.6px); } 54.6%, 61.9% { transform: translateX(0); fill: var(--ink-2); } 62%, 90% { transform: translateX(0); fill: var(--ask); } 95%, 100% { transform: translateX(0); fill: var(--ink-2); } }
+@keyframes hs-gateglow { 0%, 62% { opacity: 0; animation-timing-function: var(--ease-out); } 70%, 88% { opacity: .6; } 93%, 100% { opacity: 0; } }
+
+/* The gate's question: a beam fired down the lane, fast, and the chip answers by
+   lighting up — and staying lit, because the match is the reason for everything
+   that follows. */
+@keyframes hs-probebeam { 0%, 55% { transform: translateY(0); opacity: 0; animation-timing-function: cubic-bezier(.5, 0, 1, .5); } 55.5% { opacity: 1; } 59% { transform: translateY(40px); opacity: 1; } 59.5%, 100% { transform: translateY(40px); opacity: 0; } }
+@keyframes hs-probe { 0%, 55% { opacity: 0; stroke-dashoffset: 54; animation-timing-function: cubic-bezier(.5, 0, 1, .5); } 56% { opacity: 1; } 59%, 88% { opacity: 1; stroke-dashoffset: 0; } 93%, 100% { opacity: 0; } }
+@keyframes hs-match { 0%, 59% { transform: scale(1); opacity: 0; } 59.5% { transform: scale(1); opacity: .85; animation-timing-function: var(--ease-out); } 68%, 100% { transform: scale(5); opacity: 0; } }
+@keyframes hs-chipbox { 0%, 59% { fill: var(--paper); } 59.6%, 92% { fill: var(--ask); } 96%, 100% { fill: var(--paper); } }
+@keyframes hs-chiptext { 0%, 59% { fill: var(--ask-text); } 59.6%, 92% { fill: var(--ink); } 96%, 100% { fill: var(--ask-text); } }
+
+/* The verdict is tied to the gate that produced it: the leader draws up out of the
+   bar, and the card drops in on it with a small overshoot. */
+@keyframes hs-leader { 0%, 64% { opacity: 0; stroke-dashoffset: 30; } 64.5% { opacity: 1; animation-timing-function: var(--ease-out); } 68%, 90% { opacity: 1; stroke-dashoffset: 0; } 95%, 100% { opacity: 0; } }
+@keyframes hs-verdict { 0%, 67% { opacity: 0; transform: translateY(-14px); } 67.5% { opacity: 1; animation-timing-function: var(--ease-out); } 72%, 90% { opacity: 1; transform: translateY(0); } 95%, 100% { opacity: 0; transform: translateY(0); } }
