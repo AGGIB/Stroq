@@ -29,6 +29,12 @@ const base: ExposureReport = {
       why: 'redirects API traffic',
     },
   ],
+  repo: {
+    isRepo: true,
+    preTrust: [{ kind: 'git-config-exec', file: '.git/config', what: 'core.fsmonitor' }],
+    onOpen: [{ kind: 'husky-hook', file: '.husky/pre-commit', what: 'pre-commit' }],
+    capped: false,
+  },
   reach: { total: 13, passedPolicy: 0, anyAgentProtected: true },
   findings: [
     {

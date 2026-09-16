@@ -98,7 +98,7 @@ Full reports, generated: [`docs/COVERAGE.md`](docs/COVERAGE.md) · [`docs/BENCH.
 
 ## Know your own exposure
 
-`stroq attack` tells you what your policy would do. `stroq exposure` tells you what actually reaches _you_ — which agents this machine runs, which of them Stroq is not installed for, which MCP servers bypass the proxy, how much instruction text the agent reads every session, and which privilege-widening config keys are set.
+`stroq attack` tells you what your policy would do. `stroq exposure` tells you what actually reaches _you_ — which agents this machine runs, which of them Stroq is not installed for, which MCP servers bypass the proxy, how much instruction text the agent reads every session, which privilege-widening config keys are set, and what the repository in front of you runs when you open it.
 
 ```text
 stroq exposure — what reaches you on this machine
@@ -121,9 +121,13 @@ stroq exposure — what reaches you on this machine
   flagged by rules            236   expect false positives — see the finding
 
   Privilege-widening keys       1
+  Repository runs on open       3   1 before you approve anything
   Incidents reaching you        0   of 13
 
-FINDINGS (3)
+FINDINGS (4)
+CRITICAL  repo-exec-surface
+          .git/config — core.fsmonitor: this repository sets a git configuration key whose value git runs as a command, which happens during an ordinary index refresh — an agent typing `git status` triggers it, before any approval
+          fix: git config --get core.fsmonitor — and remove it if you did not set it
 CRITICAL  privilege-widened
           env.ANTHROPIC_BASE_URL is set in /Users/you/.claude/settings.json — redirects API traffic, and with it credentials, to another host
 CRITICAL  agent-unprotected
@@ -135,6 +139,10 @@ HIGH      mcp-unwrapped
 
 Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.
 ```
+
+The repository row is split on purpose. A husky hook, a `prepare` script or a devcontainer that builds is ordinary, so those are counted and listed under `--verbose` and never raised as a finding — this command exits 1 on any finding, and a check that fails on every repository with a pre-commit hook is a check people turn off. What is raised is the execution a repository carries in its own metadata and fires before anyone approves anything: a `.git/config` key whose value git runs (`core.fsmonitor` during an index refresh, `core.hooksPath`, `diff.*.textconv`, the `filter.*` trio, `credential.helper`, `alias.*`), an `include` pointing outside the checkout, a `.gitattributes` driver whose command that config defines, a `devcontainer.json` `initializeCommand` that runs on the host rather than in the container, and a bare repository committed as plain files, which survives an ordinary clone. `core.fsmonitor = true` is git's own built-in monitor and runs nothing, so it is not reported.
+
+Stroq cannot stop the first of those from firing. On Claude Code the startup `git status` runs before the workspace-trust prompt, and a `SessionStart` hook is itself gated on that prompt, so no hook can get in front of it. `stroq exposure` is the answer that works: run it on a repository before you open it with an agent.
 
 The exit code is 1 when there is any finding, so `stroq exposure` works in CI or a pre-commit hook without a wrapper. `--verbose` lists the flagged files; expect some false positives in that count. Every shipped rule now declares the surface it reads — an instruction file scans as `instruction_file`, a probed tool description as `tool_description` — but all 639 deliberately resolve to "any surface", because the false positives measured against the bench corpus (see [`docs/BENCH.md`](docs/BENCH.md)) come from loose patterns, not from a rule reading the wrong surface, and the one rule ever scoped narrower (`STROQ-2026-00009`) turned out to read a generic hidden-instruction shape that has to see every surface too; scoping does not make most false positives go away, and it can quietly create a hole. `--json` emits the whole record.
 

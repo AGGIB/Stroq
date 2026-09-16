@@ -8,6 +8,7 @@ import { mcpFindings, mcpSurface } from '../exposure/mcp-surface.js';
 import { privilegeFindings, privilegeSurface } from '../exposure/privilege-surface.js';
 import { probeFindings, probeServers } from '../exposure/probe.js';
 import { reachFindings, reachFrom } from '../exposure/reach.js';
+import { repoFindings, repoSurface } from '../exposure/repo-surface.js';
 import { formatShareable, toShareable } from '../exposure/redact.js';
 import { formatExposure, type ExposureReport } from '../exposure/report.js';
 import { agentFindings, agentSurface } from '../exposure/surface.js';
@@ -21,6 +22,7 @@ export async function buildExposureReport(
   const mcp = mcpSurface(cwd);
   const context = contextSurface(cwd, home);
   const privilege = privilegeSurface(cwd, home);
+  const repo = repoSurface(cwd);
   const attack = await runAttack(SCENARIOS, loadPolicy(), policySource());
   const reach = reachFrom(attack, agents);
   const probes = opts.probe === true ? await probeServers(mcp) : [];
@@ -29,6 +31,7 @@ export async function buildExposureReport(
     ...mcpFindings(mcp),
     ...contextFindings(context),
     ...privilegeFindings(privilege),
+    ...repoFindings(repo),
     ...reachFindings(reach),
     ...probeFindings(probes),
   ];
@@ -39,6 +42,7 @@ export async function buildExposureReport(
     mcp,
     context,
     privilege,
+    repo,
     reach,
     findings,
   };
