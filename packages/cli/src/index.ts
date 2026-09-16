@@ -63,6 +63,12 @@ export async function main(argv: readonly string[]): Promise<number> {
       // Windsurf's Cascade reads ONLY exit 2 as a block, with the reason on stderr,
       // and treats every other non-zero exit — exit 1 included — as an allow.
       if (out.stderr) process.stderr.write(out.stderr);
+      // The watchdog answered while the real work was still running, and that work
+      // can hold the event loop open. Setting an exit code and returning would leave
+      // the process alive past its own verdict, until the agent's timeout fired and
+      // treated the whole call as an allow — the exact outcome the watchdog exists to
+      // prevent. Flush both streams, then leave.
+      if (out.timedOut) await exitNow(out.exitCode);
       return out.exitCode;
     }
     case 'init':
@@ -98,6 +104,21 @@ export async function main(argv: readonly string[]): Promise<number> {
       process.stdout.write(USAGE);
       return command === undefined || command === '--help' || command === '-h' ? 0 : 1;
   }
+}
+
+/** Waits for stdout and stderr to drain, then exits. Never resolves. */
+async function exitNow(code: number): Promise<never> {
+  await Promise.all(
+    [process.stdout, process.stderr].map(
+      (stream) =>
+        new Promise<void>((resolve) => {
+          // `write('')` resolves once everything queued before it has been flushed,
+          // which a pipe does asynchronously — process.exit on its own can truncate.
+          stream.write('', () => resolve());
+        }),
+    ),
+  );
+  process.exit(code);
 }
 
 main(process.argv.slice(2)).then(

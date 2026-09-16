@@ -10,9 +10,11 @@ export function stroqHome(): string {
 export const sessionsDirIn = (home: string): string => join(home, 'sessions');
 export const auditFileIn = (home: string): string => join(home, 'audit.jsonl');
 export const secretsFileIn = (home: string): string => join(home, 'secrets.json');
+export const installRecordFileIn = (home: string): string => join(home, 'install.json');
 
 export const sessionsDir = (): string => sessionsDirIn(stroqHome());
 export const auditFile = (): string => auditFileIn(stroqHome());
 export const logFile = (): string => join(stroqHome(), 'stroq.log');
 export const policyFile = (): string => join(stroqHome(), 'policy.yaml');
 export const secretsFile = (): string => secretsFileIn(stroqHome());
+export const installRecordFile = (): string => installRecordFileIn(stroqHome());

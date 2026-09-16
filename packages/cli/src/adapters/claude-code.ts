@@ -41,6 +41,13 @@ export interface HookOutput {
    */
   readonly stderr?: string;
   readonly exitCode: number;
+  /**
+   * Set only by the watchdog in `runHook`. The answer is complete and safe to print,
+   * but the work behind it is still running and may hold the event loop open, so the
+   * command layer flushes and exits rather than waiting for a process that has
+   * already said what it had to say.
+   */
+  readonly timedOut?: boolean;
 }
 
 export const NO_OUTPUT: HookOutput = { stdout: '', exitCode: 0 };
