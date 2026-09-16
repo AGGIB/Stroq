@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Three classification gaps, each of which left a protection the README describes silently inapplicable.** All three were recorded as known limits and are now closed; `SECURITY.md` no longer lists two of them as out of scope, because they are in it again.
+
+  **A protected directory named as a whole was not self-tamper.** `rm -rf .claude/settings.json` was denied and `rm -rf .claude` — which destroys the same file, the hook entry and everything beside them — was classified as nothing at all. `SELF_CONFIG_FILE` protects files, and the protected-directory list was consulted only by the `find` write-intent rule. The write commands now consult it too, for a bare directory only: `rm -rf .claude`, `mv .cursor /tmp`, `chmod 000 .codex` and the glob form `rm -rf .windsurf/*` are denied, while `.claude/CLAUDE.md`, `.claude/skills/x` and `rm -rf .claude/plugins/cache/old` stay the ordinary work they are — the bare `.claude` match was narrowed once for exactly that reason and this does not undo it. `.github` is the exception that proves the rule: `.github/hooks` and `.github/copilot` are Stroq's and are covered, a bare `.github` is not, because deleting a CI workflow is not a claim this project makes.
+
+  **A protected file reached by another spelling was not matched.** `.claude//settings.json`, `.claude/./settings.json` and, on macOS and Windows, `.CLAUDE/settings.json` all name the file that `.claude/settings.json` names, and all reached the filesystem while only the last was classified. Tool paths are now normalised lexically before matching — repeated slashes collapsed, `/./` removed, `..` resolved, case folded. Lexical rather than `realpath`: resolving on disk would follow symlinks and stat a path the agent chose, which is both slow on a hot path and a way to be pointed somewhere. A symlink into a protected directory therefore remains uncovered, and is recorded as a limit rather than implied away.
+
+  **A bare credential directory carried no class.** `SECRET_PATH` required something after `/.ssh/` or `/.aws/`, so a `Read` or `Grep` pointed at the directory itself — which returns the key files' names, and for `Grep` their contents — was allowed in a tainted session. The bare form now matches, ending at the token so `/.sshconfig` and `myaws/notes.md` do not.
+
+  Examined and deliberately not changed: `SELF_CONFIG_FILE` has no terminator, so a write to `hooks.json.bak` is also denied. That is an over-match rather than a hole, and adding a terminator to a fail-closed pattern to remove a mild false positive is the wrong trade. Also examined and found already closed: the post-phase audit summary of an MCP call, which the 2026-09-07 review recorded as unredacted — `redact()` runs over it and removes bearer tokens, provider-prefixed keys and values under credential-shaped keys.
+
 ## [0.12.1] - 2026-09-16
 
 ### Fixed
