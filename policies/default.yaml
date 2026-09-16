@@ -20,6 +20,12 @@ rules:
     when:
       classes: [config.self]
       taint: any
+  - id: deny-git-exec
+    effect: deny
+    reason: Installing repository-supplied execution (git exec-on-read config or hook file) is blocked
+    when:
+      classes: [config.git_exec]
+      taint: any
   - id: deny-encoded-exec
     effect: deny
     reason: Executing decoded or remotely fetched code is blocked

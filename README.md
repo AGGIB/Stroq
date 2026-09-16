@@ -178,7 +178,7 @@ If Stroq itself crashes while handling a high-impact tool call, it fails **close
 - **Twenty scenarios you can replay.** `stroq attack` runs recorded hook events from public incidents and synthetic matrix cells through your own policy and reports `blocked` / `asked` / `passed` per scenario, with the source of each. It is how we check that a change to the classifier or the default policy does not silently let an old attack back in.
 - **Content scanning with real normalization.** Zero-width and tag characters stripped, homoglyphs folded, nested base64/hex/URL decoding — so `сurl` with a Cyrillic `с`, or a command hidden in base64, is matched like the plain text it decodes to.
 - **639 gated rules.** 12 hand-written Stroq rules plus 627 of the 636 vendored [Agent Threat Rules](https://github.com/Agent-Threat-Rule/agent-threat-rules) — every one of them passed through a benign-corpus false-positive gate and a regex performance gate before it ships, and the 9 that did not are held back. Russian-language rule variants included.
-- **Taint-aware policy.** The decision about an action knows whether the agent has read something suspicious in this session. Fourteen action classes, one ordered YAML policy, first match wins.
+- **Taint-aware policy.** The decision about an action knows whether the agent has read something suspicious in this session. Fifteen action classes, one ordered YAML policy, first match wins.
 - **Self-protection.** An agent that has been tainted cannot edit Stroq's own policy, hooks, or `.claude/settings.json` (`config.self` → deny); touching them at all asks first.
 - **Tamper-evident audit.** Hash-chained JSONL with structural redaction, `0600` permissions, and `stroq verify`.
 - **Fail-closed.** Engine error on a high-impact `PreToolUse` call means deny, not allow.
@@ -551,6 +551,7 @@ Generated from [`policies/default.yaml`](policies/default.yaml); rules are evalu
 | `deny-secret-egress`               | deny      | `secret.egress`, any taint           |
 | `deny-secret-unscannable`          | deny      | `secret.unscannable`, any taint      |
 | `deny-self-tamper`                 | deny      | `config.self`, any taint             |
+| `deny-git-exec`                    | deny      | `config.git_exec`, any taint         |
 | `deny-encoded-exec`                | deny      | `shell.exec_encoded`, any taint      |
 | `deny-origin-suspect`              | deny      | `origin.suspect`, any taint          |
 | `deny-network-when-tainted`        | deny      | `shell.network`, taint = suspect     |

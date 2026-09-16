@@ -13,6 +13,7 @@ export interface CommandClassification {
 }
 
 export { commandWord, splitSegments } from './shell-segments.js';
+import { gitExecSignals } from './git-exec.js';
 
 const SHELLS = new Set([
   'sh',
@@ -328,6 +329,7 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
     ['git.push_external', pushExternalSignals(segments)],
     ['config.self', selfConfig.deny],
     ['config.self_touch', selfConfig.ask],
+    ['config.git_exec', gitExecSignals(segments)],
   ];
   const active = groups.filter(([, signals]) => signals.length > 0);
   return {
