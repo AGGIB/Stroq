@@ -29,6 +29,8 @@ import {
   windsurfFailClosedOutput,
 } from '../adapters/windsurf.js';
 import { createEngine } from '../engine-factory.js';
+import { COPILOT_HOOK_TIMEOUT_SECONDS } from './copilot-hooks.js';
+import { HOOK_TIMEOUT_SECONDS, hookDeadlineMs } from './config-file.js';
 import { logError } from '../log.js';
 
 export async function readStdin(stream: NodeJS.ReadableStream = process.stdin): Promise<string> {
@@ -69,14 +71,34 @@ interface HookAdapter {
    * real deny through rather than merely losing the explanation.
    */
   readonly stdinFailClosed?: true;
+  /**
+   * How long this agent's hook may take before Stroq answers with its own fail-closed
+   * verdict. Derived from the timeout the installer writes for the same agent, so the
+   * two cannot drift apart.
+   */
+  readonly deadlineMs: number;
 }
 
+/**
+ * Windsurf's hook format carries no timeout key, so Cascade never gives up on its own
+ * and this deadline is the only one there is. OpenClaw's is the budget the plugin
+ * wrapper enforces (`run-stroq.js`), which is shorter than the other agents'.
+ */
+const WINDSURF_NOTIONAL_TIMEOUT_SECONDS = 15;
+const OPENCLAW_WRAPPER_TIMEOUT_SECONDS = 10;
+
 const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
-  'claude-code': { handle: handleClaudeHook, failClosed: failClosedOutput, badJson: denyOutput },
+  'claude-code': {
+    handle: handleClaudeHook,
+    failClosed: failClosedOutput,
+    badJson: denyOutput,
+    deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_SECONDS),
+  },
   cursor: {
     handle: handleCursorHook,
     failClosed: cursorFailClosedOutput,
     badJson: cursorDenyOutput,
+    deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_SECONDS),
   },
   // Codex answers a block with exit code 2 and the reason on stderr, not with JSON:
   // stdin that was not JSON at all is exactly the case where a JSON deny would be
@@ -86,6 +108,7 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     failClosed: codexFailClosedOutput,
     badJson: codexBlockOutput,
     stdinFailClosed: true,
+    deadlineMs: hookDeadlineMs(HOOK_TIMEOUT_SECONDS),
   },
   // Copilot's events carry no event name, so the phase rides on the command line and
   // every entry here takes it. `checkArg` has already rejected anything but `pre` and
@@ -99,6 +122,7 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     badJson: (reason, arg) => (arg === 'post' ? NO_OUTPUT : copilotBlockOutput(reason)),
     checkArg: (arg) => (isCopilotPhase(arg) ? null : copilotBadPhaseOutput(arg)),
     stdinFailClosed: true,
+    deadlineMs: hookDeadlineMs(COPILOT_HOOK_TIMEOUT_SECONDS),
   },
   // Same shape as Copilot's — the phase rides on the command line — but the answers
   // are Stroq's own JSON, because the only consumer is the plugin in this repository.
@@ -112,6 +136,7 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
       arg === 'post' ? openclawPostErrorOutput(reason) : openclawBlockOutput(reason),
     checkArg: (arg) => (isOpenClawPhase(arg) ? null : openclawBadPhaseOutput(arg)),
     stdinFailClosed: true,
+    deadlineMs: hookDeadlineMs(OPENCLAW_WRAPPER_TIMEOUT_SECONDS),
   },
   // Windsurf's payload names its own event (`agent_action_name`), so there is no
   // phase argument and no `checkArg`: one command answers all six installed events,
@@ -124,6 +149,7 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     failClosed: windsurfFailClosedOutput,
     badJson: windsurfBlockOutput,
     stdinFailClosed: true,
+    deadlineMs: hookDeadlineMs(WINDSURF_NOTIONAL_TIMEOUT_SECONDS),
   },
 };
 
@@ -140,7 +166,12 @@ const lookup = (agent: string): HookAdapter | undefined =>
   // module actually registered.
   Object.hasOwn(ADAPTERS, agent) ? ADAPTERS[agent] : undefined;
 
-export async function runHook(agent: string, rawJson: string, arg = ''): Promise<HookOutput> {
+export async function runHook(
+  agent: string,
+  rawJson: string,
+  arg = '',
+  opts: { readonly deadlineMs?: number } = {},
+): Promise<HookOutput> {
   const adapter = lookup(agent);
   if (!adapter)
     return {
@@ -161,10 +192,51 @@ export async function runHook(agent: string, rawJson: string, arg = ''): Promise
     return adapter.badJson(BAD_JSON, arg);
   }
   try {
-    return await adapter.handle(createEngine(), raw, arg);
+    return await withDeadline(
+      adapter.handle(createEngine(), raw, arg),
+      opts.deadlineMs ?? adapter.deadlineMs,
+      () => {
+        const err = new Error(
+          `hook did not answer within ${opts.deadlineMs ?? adapter.deadlineMs} ms; answering fail-closed`,
+        );
+        logError(context, err);
+        return { ...adapter.failClosed(raw, err, arg), timedOut: true };
+      },
+    );
   } catch (err) {
     logError(context, err);
     return adapter.failClosed(raw, err, arg);
+  }
+}
+
+/**
+ * Resolves with `onTimeout()` if `work` has not settled within `ms`.
+ *
+ * The work is not cancellable and keeps running; that is deliberate and is why the
+ * result is marked `timedOut`. What matters is that an answer exists before the host
+ * agent's own timeout fires, because every agent treats its own timeout as an allow.
+ * A rejection from `work` after the deadline has already been answered is swallowed
+ * here rather than left to become an unhandled rejection that outlives the verdict.
+ */
+export async function withDeadline(
+  work: Promise<HookOutput>,
+  ms: number,
+  onTimeout: () => HookOutput,
+): Promise<HookOutput> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<HookOutput>((resolve) => {
+        timer = setTimeout(() => resolve(onTimeout()), ms);
+      }),
+    ]);
+  } finally {
+    // The timer is the only thing here that would hold the event loop open after an
+    // answer. The work itself is not cancellable and keeps running, which is what
+    // `timedOut` tells the caller; `Promise.race` has already subscribed to it, so a
+    // rejection arriving after the deadline is handled rather than unhandled.
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

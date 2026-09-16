@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
+import { recordInstall } from './install-record.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
   HOOK_TIMEOUT_SECONDS,
@@ -370,5 +371,13 @@ export async function runInit(args: readonly string[]): Promise<number> {
     openclaw: (scope, _command, dryRun) => initOpenClaw(scope, hookArgv(node, entry), dryRun),
     windsurf: initWindsurf,
   };
-  return install[agent](scope, command, dryRun);
+  const code = install[agent](scope, command, dryRun);
+  // Recorded only on a real install that succeeded, so `--dry-run` leaves no trace
+  // and a failed install does not claim a hook that is not there. `doctor` compares
+  // the agent's config against this later; see install-record.ts for why matching the
+  // ownership suffix is not the same as knowing the entry was not replaced.
+  if (code === 0 && !dryRun) {
+    recordInstall(agent, scope, agent === 'openclaw' ? hookArgv(node, entry).join(' ') : command);
+  }
+  return code;
 }

@@ -8,6 +8,24 @@ import { dirname } from 'node:path';
  */
 export const HOOK_TIMEOUT_SECONDS = 15;
 
+/**
+ * How much of the host agent's timeout Stroq allows itself before answering with a
+ * fail-closed verdict of its own.
+ *
+ * Every agent that times a hook out treats the timeout as an allow — Claude Code
+ * cancels the hook and lets the tool call continue through the normal permission
+ * flow, Codex reports a hook failure and proceeds, Copilot discards the late deny —
+ * so a hook that runs long does not merely lose its explanation, it loses its
+ * verdict. Stroq answers first: 60% leaves room for process teardown and for a
+ * machine slower than the one that measured this, and the margin over real work is
+ * large, since the only wall-clock budget in the decision path is the scanner's 500
+ * ms and a cold Node start is around 100 ms.
+ */
+export const HOOK_DEADLINE_FRACTION = 0.6;
+
+export const hookDeadlineMs = (agentTimeoutSeconds: number): number =>
+  Math.round(agentTimeoutSeconds * 1000 * HOOK_DEADLINE_FRACTION);
+
 /** Reads an agent's JSON config. A missing or empty file is an empty object. */
 export function readJsonObject<T extends object>(file: string): T {
   if (!existsSync(file)) return {} as T;

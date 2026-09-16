@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats } from '@stroq/core';
@@ -16,6 +16,7 @@ import {
   openclawPluginDir,
 } from './openclaw-plugin.js';
 import { stroqVersion } from '../version.js';
+import { installDrift, readInstallRecord, type InstallDrift } from './install-record.js';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -150,16 +151,32 @@ interface ScopeStatus {
    * yes/no — so the six agent lines render exactly as they did before.
    */
   readonly detail?: string;
+  /**
+   * Whether the installed entry is still the one `stroq init` wrote. Absent when the
+   * scope carries no Stroq hook at all, or when nothing was ever recorded for it —
+   * an install from before this record existed reads as `unrecorded`, not as drift.
+   */
+  readonly drift?: InstallDrift;
 }
 
 function agentScopes(
   cwd: string,
   pathFor: (scope: 'project' | 'user', cwd: string) => string,
   check: (file: string) => { readonly installed: boolean; readonly error: string | null },
+  agent?: string,
 ): ScopeStatus[] {
+  const record = readInstallRecord();
   return (['project', 'user'] as const).map((scope) => {
     const file = pathFor(scope, cwd);
-    return { scope, file, ...check(file) };
+    const status = { scope, file, ...check(file) };
+    if (!status.installed || agent === undefined) return status;
+    let text: string;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      return status;
+    }
+    return { ...status, drift: installDrift(agent, scope, text, record) };
   });
 }
 
@@ -239,16 +256,28 @@ function hooksCheck(
 ): DoctorCheck {
   const broken = scopes.some((s) => s.error !== null);
   const installed = scopes.some((s) => s.installed);
+  // A rewritten entry is worse than a missing one: the agent reports a hook, the user
+  // believes they are covered, and whatever is on the other end runs on every tool
+  // call. It fails the line on its own, whatever the other scopes say.
+  const changed = scopes.some((s) => s.drift === 'changed');
   const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopes
     .map(
       (s) =>
-        s.error ?? s.detail ?? `${s.scope}: ${s.installed ? 'installed' : 'missing'} (${s.file})`,
+        s.error ??
+        s.detail ??
+        `${s.scope}: ${
+          s.installed
+            ? s.drift === 'changed'
+              ? 'CHANGED since stroq init — the entry is no longer the command Stroq wrote'
+              : 'installed'
+            : 'missing'
+        } (${s.file})`,
     )
     .join('; ');
   return {
     name,
-    ok: !broken && (installed || carrying.length > 0),
+    ok: !broken && !changed && (installed || carrying.length > 0),
     detail:
       !broken && !installed && carrying.length > 0
         ? `not installed (ok: ${carrying.join(', ')} are)`
@@ -295,12 +324,18 @@ export async function doctorReport(
   // particular. Scoping it would turn an unrelated scoping change into a doctor failure.
   const injectionDetected = scanContent(rules, SAMPLE).verdict === 'suspect';
   const agents = [
-    { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks) },
-    { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks) },
-    { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks) },
-    { name: 'copilot hooks', scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks) },
+    { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks, 'claude-code') },
+    { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks, 'cursor') },
+    { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks, 'codex') },
+    {
+      name: 'copilot hooks',
+      scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks, 'copilot'),
+    },
     { name: 'openclaw plugin', scopes: openclawScopes() },
-    { name: 'windsurf hooks', scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks) },
+    {
+      name: 'windsurf hooks',
+      scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf'),
+    },
     { name: 'mcp proxy', scopes: mcpProxyScopes(cwd) },
   ];
   const statuses: AgentStatus[] = agents.map((a) => ({
