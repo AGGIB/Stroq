@@ -1,3 +1,24 @@
+# Stroq's default policy. First match wins; anything unmatched is allowed.
+#
+# Five classes are `allow` at clean taint and `deny` at suspect: shell.network,
+# network.fetch, fs.secrets, git.push_external and mcp.side_effect. That asymmetry is
+# deliberate and was re-examined once `stroq bench` produced a number to examine it
+# against (docs/BENCH.md).
+#
+# The case for moving them to `ask` at clean is that a scan miss then costs a prompt
+# rather than a breach. The case against is what the prompt would cost: `curl`, `git
+# push` and reading a `.env` are the texture of ordinary work, and a guard that asks
+# about each of them is a guard people turn off — after which nothing is enforced at
+# any taint. The measured false-positive rate is 16.0% of benign documentation files,
+# which says the taint signal is worth acting on, not that a clean session should be
+# treated as a suspect one.
+#
+# They therefore stay `allow` at clean, and the reason is recorded here rather than
+# left implicit. What backs that choice is the depth on the other side: the classes
+# denied at ANY taint — secret.egress, secret.unscannable, config.self,
+# config.git_exec, shell.exec_encoded, origin.suspect — do not depend on the scan
+# having caught anything, and `stroq attack --fuzz` reports zero escapes across 350
+# mutated variants of the recorded corpus.
 version: 1
 threshold: 0.6
 default: allow

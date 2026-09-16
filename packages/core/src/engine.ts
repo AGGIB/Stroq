@@ -12,6 +12,7 @@ import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
 import { candidateTokens, exceedsSecretScan } from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
+import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
 import type {
   ActionClass,
@@ -35,6 +36,11 @@ export interface EngineOptions {
   readonly provenance?: ProvenanceStore;
   /** Optional: without it, neither `secret.egress` nor `secret.unscannable` ever fires. */
   readonly secrets?: SecretIndex;
+  /**
+   * Optional: content the user judged benign after Stroq flagged it. Without it every
+   * suspect verdict taints, which is the behaviour before this existed.
+   */
+  readonly trust?: TrustStore;
   readonly now?: () => Date;
 }
 
@@ -61,6 +67,12 @@ export interface PostResult {
    * suppress the scan verdict or taint above.
    */
   readonly provenanceError: string | null;
+  /**
+   * True when the scan said suspect and a trusted entry, pinned to these exact bytes
+   * from this exact source, stopped it tainting the session. The verdict in `scan` is
+   * left as it was: what the rules said is a fact, and only its consequence changed.
+   */
+  readonly trusted?: boolean;
 }
 
 export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
@@ -359,6 +371,14 @@ export class StroqEngine {
       { target: scanTargetForTool(event.toolName, event.toolInput) },
     );
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
+    // Same derivation as a provenance record's `source` (see recordProvenance):
+    // structurally redacted and clipped, so a taint source can no more carry a secret
+    // into ~/.stroq than a provenance record can.
+    const source = redact(summary).slice(0, MAX_STORED_CHARS);
+    // A trusted entry is pinned to the exact bytes it was added for, so this asks
+    // about the text actually scanned rather than about the path alone.
+    const trusted =
+      scan.verdict === 'suspect' && this.opts.trust?.trusts(source, event.toolResultText) === true;
     // The audit entry is the forensic record and must be durable before we
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
@@ -368,18 +388,15 @@ export class StroqEngine {
       phase: 'post',
       tool: event.toolName,
       summary,
-      scan: { verdict: scan.verdict, score: scan.score, ruleIds },
+      scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },
     });
     const state =
-      scan.verdict === 'suspect'
+      scan.verdict === 'suspect' && !trusted
         ? await this.opts.sessions.markSuspect(event.sessionId, {
             tool: event.toolName,
             ruleIds,
             at: this.now(),
-            // Same derivation as a provenance record's `source` (see recordProvenance):
-            // structurally redacted and clipped, so a taint source can no more carry a
-            // secret into ~/.stroq than a provenance record can.
-            source: redact(summary).slice(0, MAX_STORED_CHARS),
+            source,
           })
         : await this.opts.sessions.get(event.sessionId);
     // Atoms come from the *normalized* text, exactly like the scan above and
@@ -396,6 +413,6 @@ export class StroqEngine {
       atoms,
       scan.verdict === 'suspect',
     );
-    return { scan, taint: state.taint, scanned: true, atoms, provenanceError };
+    return { scan, taint: state.taint, scanned: true, atoms, provenanceError, trusted };
   }
 }

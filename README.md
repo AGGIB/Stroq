@@ -179,6 +179,27 @@ $ eval "$(stroq inspect --env)"
 
 `--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
+## When a rule is wrong about your file
+
+`stroq untaint` clears a session and forgets. Re-reading the same file re-taints it, so a false positive on something the agent opens every session is not a one-off annoyance — it is a session tainted from the first minute, every time, and the way people escape that is by removing Stroq.
+
+```console
+$ stroq trust docs/SECURITY.md
+trusted /repo/docs/SECURITY.md
+  rules waived: ATR-2026-00142, ATR-2026-00113
+  pinned to this exact content — any change to the file taints again
+```
+
+An exemption list is also the first thing an attacker wants to write to, so three things hold it down.
+
+- **Pinned to the bytes.** The entry records the sha256 of the file as it is now, and a verdict is waived only when the source and the digest both match. Trusting a README today says nothing about the README in tomorrow's pull request; change one character and it taints again.
+- **Protected.** The list lives in `~/.stroq/trust.json`, which `config.self` already covers, so a tainted agent asking to add itself an exemption is denied like any other attempt to edit Stroq's own configuration.
+- **Visible.** A waiver is written into the audit chain next to the verdict it waived, and `stroq log` prints it as `suspect(1.00) trusted` rather than as a clean line. `stroq trust --list` shows every entry with the rules it waives. An exemption nobody can read back is a hole, not a setting.
+
+Waiving a taint is not waiving the policy. The classes that are denied at any taint — `secret.egress`, `config.self`, `config.git_exec`, `shell.exec_encoded` — are unaffected: trusting the file that mentioned `curl … | sh` does not let the agent run it.
+
+`stroq trust` refuses to record a file no rule flags, which would be an entry that waives nothing today and becomes a blanket exemption the day the file changes.
+
 ## How it works
 
 ```mermaid
@@ -570,6 +591,7 @@ node packages/cli/dist/index.js doctor
 | `stroq log [--count 20]`                                                                                                                                           | Show recent audit entries                                                                                                                                                                                                                                                                                                         |
 | `stroq verify`                                                                                                                                                     | Verify the audit hash chain                                                                                                                                                                                                                                                                                                       |
 | `stroq untaint [--session <id>] [--all]`                                                                                                                           | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                                                                                                                                         |
+| `stroq trust [<file>] [--list] [--remove <file>] [--json]`                                                                                                         | Waive a false positive on a file's exact content; the entry is pinned to its sha256, so any change to the file taints again                                                                                                                                                                                                       |
 | `stroq why [--seq <n>]`                                                                                                                                            | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                                                                                                                              |
 | `stroq canary [--name <NAME>]`                                                                                                                                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                                                                                                                                 |
 | `stroq attack [--json] [--only <id>]`                                                                                                                              | Replay 20 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                                                                                                                      |

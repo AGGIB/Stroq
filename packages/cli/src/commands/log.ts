@@ -3,9 +3,13 @@ import { AuditLog, type AuditEntry } from '@stroq/core';
 import { auditFile } from '../paths.js';
 
 export function formatEntry(entry: AuditEntry): string {
+  // A waived verdict is printed as what it is: the rules still said suspect, and a
+  // trusted entry stopped it tainting. Rendering it as a clean line would make an
+  // exemption invisible in the one place a reader goes to check what happened.
+  const waived = entry.scan?.trusted === true ? ' trusted' : '';
   const outcome = entry.decision
     ? `${entry.decision.effect}(${entry.decision.ruleId ?? 'default'})`
-    : `${entry.scan?.verdict ?? '-'}(${(entry.scan?.score ?? 0).toFixed(2)})`;
+    : `${entry.scan?.verdict ?? '-'}(${(entry.scan?.score ?? 0).toFixed(2)})${waived}`;
   const classes = entry.classes && entry.classes.length > 0 ? ` [${entry.classes.join(',')}]` : '';
   return `${entry.ts} #${entry.seq} ${entry.phase.padEnd(4)} ${entry.tool.padEnd(10)} [${entry.sessionId}] ${outcome}${classes} ${entry.summary}`;
 }

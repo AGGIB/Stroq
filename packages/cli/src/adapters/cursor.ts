@@ -240,7 +240,9 @@ async function handleReadFile(
   const result = await scanOutput(engine, event, text);
   const messages = [
     ...(rendered === null ? [] : [rendered.user_message]),
-    ...(result.scanned && result.scan.verdict === 'suspect' ? [readWarning(result.scan)] : []),
+    ...(result.scanned && result.scan.verdict === 'suspect' && result.trusted !== true
+      ? [readWarning(result.scan)]
+      : []),
   ];
   return messages.length === 0
     ? NO_OUTPUT
@@ -285,7 +287,8 @@ async function handleAfterMcp(
   text: string,
 ): Promise<HookOutput> {
   const result = await scanOutput(engine, event, text);
-  if (!result.scanned || result.scan.verdict !== 'suspect') return NO_OUTPUT;
+  if (!result.scanned || result.scan.verdict !== 'suspect' || result.trusted === true)
+    return NO_OUTPUT;
   return json({ additional_context: warningFor(result.scan, event.toolName, taintSource(result)) });
 }
 

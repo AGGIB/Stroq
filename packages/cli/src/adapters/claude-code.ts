@@ -194,7 +194,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     ruleIds,
     atoms,
   };
-  if (result.scan.verdict !== 'suspect') {
+  if (result.scan.verdict !== 'suspect' || result.trusted === true) {
     return Object.keys(atoms).length === 0
       ? NO_OUTPUT
       : postOutput({ classifierContext: { stroq } });

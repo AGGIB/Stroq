@@ -202,7 +202,8 @@ export async function scanPostResult(
   const result = await engine.post({ ...event, toolResultText });
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
-  if (result.scan.verdict !== 'suspect') return { scanned: true, verdict: 'clean', warning: null };
+  if (result.scan.verdict !== 'suspect' || result.trusted === true)
+    return { scanned: true, verdict: 'clean', warning: null };
   return {
     scanned: true,
     verdict: 'suspect',

@@ -9,6 +9,7 @@ export * from './scan/scanner.js';
 export * from './actions/classify-bash.js';
 export * from './actions/classify-tool.js';
 export * from './actions/git-exec.js';
+export * from './taint/trust.js';
 export * from './policy/policy-types.js';
 export * from './policy/default-policy.js';
 export * from './policy/evaluate.js';
