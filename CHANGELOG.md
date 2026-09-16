@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq replay` — the causal history of a session.** Every guard, ours included, has so far answered one question: should this call be allowed. Once the session is over nobody could answer the question that actually matters after an incident — which piece of text the agent read turned into which action. `stroq replay` answers it. It groups a session into the content the agent read and, under each, the actions that traced back to it, naming the exact fragment that was carried over, how long afterwards, and the rule that stopped it. Actions with no untrusted origin are listed apart, so the graph shows what an attack looks like next to what ordinary work looks like.
+
+  It adds no telemetry. Both halves of the link were already on disk: a `post` audit entry records what was read and how it scanned, a `pre` entry records the action plus the provenance evidence tying it back, so the command reconstructs the graph from the existing log and works on sessions recorded by earlier versions. `--json` emits the model, `--list` names the sessions in the log, and a positional argument replays one by id.
+
+  One action commonly carries several atoms out of a single read — the host, the URL containing it, and the whole pipe-to-shell line — which is one causal link rather than three. The most specific atom represents the link and the rest are counted, so the graph shows causes rather than a row per pattern match.
+
 ### Fixed
 
 - **Three classification gaps, each of which left a protection the README describes silently inapplicable.** All three were recorded as known limits and are now closed; `SECURITY.md` no longer lists two of them as out of scope, because they are in it again.
