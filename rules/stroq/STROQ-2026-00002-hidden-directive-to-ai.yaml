@@ -13,9 +13,13 @@ detection:
     - field: content
       operator: regex
       value: "(?i)\\b(ai|assistant|claude|gpt|copilot|cursor|agent|model|llm)\\b[^\\n]{0,40}\\b(you\\s+must|must\\s+now|should\\s+now|are\\s+now\\s+required|have\\s+to)\\b"
+    # `run` carries a negative lookbehind for a hyphen: `\b` treats "RE-RUN" as a
+    # word boundary, so the plain alternation convicted Airflow's doctoc marker,
+    # "<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->". A
+    # directive to the assistant says "run", not "re-run".
     - field: content
       operator: regex
-      value: "(?i)<!--[^>]*\\b(ignore|instruction|assistant|you\\s+must|run|execute|curl|wget)\\b[^>]*-->"
+      value: "(?i)<!--[^>]*(\\bignore\\b|\\binstruction|\\bassistant\\b|you\\s+must|(?<!-)\\brun\\b|\\bexecute\\b|\\bcurl\\b|\\bwget\\b)[^>]*-->"
     - field: content
       operator: regex
       value: "(?i)\\b(if\\s+you\\s+are\\s+an?\\s+(ai|llm|language\\s+model|assistant|agent))\\b"

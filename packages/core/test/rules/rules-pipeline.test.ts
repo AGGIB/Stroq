@@ -3,15 +3,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  applyRuleOverrides,
   assembleBundle,
   compareWithCommitted,
   compileRules,
   DEFAULT_SLOW_MS,
   deriveThresholdMs,
+  loadRuleOverrides,
   loadRuleSources,
   RulesBuildError,
   runBenignGate,
   SLOW_FACTOR,
+  type AtrRule,
   type Bundle,
   type RuleTiming,
 } from '../../../../scripts/lib/rules-pipeline.js';
@@ -265,6 +268,126 @@ describe('rules-pipeline', () => {
         size: 2_048,
       }));
       expect(deriveThresholdMs(flat)).toBeCloseTo(Math.min(DEFAULT_SLOW_MS, 0.1 * SLOW_FACTOR), 5);
+    });
+  });
+
+  describe('rule overrides', () => {
+    function tempOverrides(yaml: string): string {
+      const dir = mkdtempSync(join(tmpdir(), 'stroq-rules-overrides-'));
+      tempDirs.push(dir);
+      const file = join(dir, 'atr-overrides.yaml');
+      writeFileSync(file, yaml);
+      return file;
+    }
+
+    const RULE = `
+id: ATR-2099-00002
+title: Overridable rule
+severity: medium
+detection:
+  condition: any
+  conditions:
+    - operator: regex
+      value: "upstream-pattern"
+    - operator: regex
+      value: "second-pattern"
+`;
+
+    function loadOne(): readonly AtrRule[] {
+      return loadRuleSources([tempRuleDir({ 'r.yaml': RULE })]).rules;
+    }
+
+    it('returns no overrides when the file does not exist', () => {
+      expect(loadRuleOverrides(join(tmpdir(), 'stroq-no-such-overrides.yaml')).size).toBe(0);
+    });
+
+    it('replaces the named condition and leaves the others alone', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: narrowed\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      to: tightened-pattern\n',
+      );
+      const { rules, applied } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      expect(applied).toEqual(['ATR-2099-00002']);
+      expect(rules[0]?.detection.conditions[0]?.value).toBe('tightened-pattern');
+      expect(rules[0]?.detection.conditions[1]?.value).toBe('second-pattern');
+    });
+
+    // The point of `from`: a re-import at a new upstream version must fail loudly
+    // rather than reapply a patch written against a pattern that no longer exists.
+    it('fails when the vendored pattern is no longer the one the override expects', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: stale\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: what-upstream-used-to-say\n' +
+          '      to: tightened-pattern\n',
+      );
+      expect(() => applyRuleOverrides(loadOne(), loadRuleOverrides(file))).toThrow(
+        /no longer the one this override was written against/,
+      );
+    });
+
+    it('fails when the overridden rule is gone from the sources', () => {
+      const file = tempOverrides(
+        'ATR-2099-09999:\n' +
+          '  reason: renamed upstream\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: a\n' +
+          '      to: b\n',
+      );
+      expect(() => applyRuleOverrides(loadOne(), loadRuleOverrides(file))).toThrow(/no such rule/);
+    });
+
+    it('fails when the condition index does not exist', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: out of range\n' +
+          '  conditions:\n' +
+          '    - index: 7\n' +
+          '      from: upstream-pattern\n' +
+          '      to: tightened-pattern\n',
+      );
+      expect(() => applyRuleOverrides(loadOne(), loadRuleOverrides(file))).toThrow(
+        /condition 7 does not exist/,
+      );
+    });
+
+    it('refuses to override a Stroq-authored rule, which is ours to edit directly', () => {
+      const file = tempOverrides(
+        'STROQ-2026-90001:\n' +
+          '  reason: should be rejected\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: a\n' +
+          '      to: b\n',
+      );
+      const rules = loadRuleSources([tempRuleDir({ 's.yaml': STROQ_RULE })]).rules;
+      expect(() => applyRuleOverrides(rules, loadRuleOverrides(file))).toThrow(
+        /edit its rule file instead/,
+      );
+    });
+
+    it('rejects a malformed entry rather than silently applying nothing', () => {
+      const file = tempOverrides('ATR-2099-00002:\n  reason: no conditions\n');
+      expect(() => loadRuleOverrides(file)).toThrow(/"conditions" must be a non-empty list/);
+    });
+
+    it('rejects an unknown field, which is usually a typo in a field that matters', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: typo\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      form: upstream-pattern\n' +
+          '      to: tightened-pattern\n',
+      );
+      expect(() => loadRuleOverrides(file)).toThrow(/"from" must be a non-empty string/);
     });
   });
 });

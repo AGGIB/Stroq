@@ -16,9 +16,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
+  applyRuleOverrides,
   assembleBundle,
   compareWithCommitted,
   compileRules,
+  loadRuleOverrides,
   DEFAULT_SLOW_MS,
   SLOW_FACTOR,
   loadBenignFixtures,
@@ -36,6 +38,7 @@ import {
 const root = resolve(import.meta.dirname, '..');
 const sources = ['rules/stroq', 'rules/atr'].map((d) => join(root, d));
 const benignDir = join(root, 'rules/fixtures/benign');
+const overridesFile = join(root, 'rules/atr-overrides.yaml');
 const outFile = join(root, 'packages/core/src/rules.bundle.json');
 const disabledReport = join(root, 'rules/atr-disabled.json');
 
@@ -53,8 +56,11 @@ function fail(message: string): never {
 
 /** Loads + compiles the rule sources, printing skip/uncompilable warnings. */
 function loadCompiled() {
-  const loaded = loadRuleSources(sources);
-  for (const s of loaded.skipped) console.warn(`skip ${s.file}: ${s.reason}`);
+  const raw = loadRuleSources(sources);
+  for (const s of raw.skipped) console.warn(`skip ${s.file}: ${s.reason}`);
+  const { rules, applied } = applyRuleOverrides(raw.rules, loadRuleOverrides(overridesFile));
+  if (applied.length > 0) console.log(`overrides applied: ${applied.join(', ')}`);
+  const loaded = { ...raw, rules };
   const { compiled, errors } = compileRules(loaded.rules);
   for (const e of errors) console.warn(`uncompilable ${e.id}: ${e.error}`);
   return { loaded, compiled, errors };

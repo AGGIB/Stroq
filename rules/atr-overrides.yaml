@@ -1,0 +1,108 @@
+# Pattern overrides for vendored ATR rules.
+#
+# rules/atr is imported verbatim from agent-threat-rules (see rules/atr/README.md)
+# and must not be hand-edited, so a vendored rule whose pattern misfires has had
+# exactly one remedy until now: rules/atr-disabled.json, which removes the whole
+# rule. That is the wrong instrument for a rule that is right about its threat and
+# wrong about one character class — disabling ATR-2026-00142 to stop it matching
+# the "ps" inside "https" would also stop it matching a real key exfiltrated after
+# "P.S.".
+#
+# An entry here replaces one condition's regex at build time. The vendored file
+# stays byte-identical to upstream, so `scripts/import-atr-rules.sh` can be re-run
+# at any version, and the override is one auditable line rather than a diff hidden
+# in a 200-line vendored document.
+#
+# `from` is the load-bearing field: it must equal the value currently parsed out of
+# the vendored rule, or the build fails. That makes a re-import that changes an
+# overridden pattern a loud failure rather than a silently reapplied stale patch —
+# upstream may have fixed it, or moved the defect somewhere this override no longer
+# addresses, and either way a human has to look. Note `from` is the *parsed* string:
+# YAML folded scalars (`>-`) in the vendored file arrive here with their line breaks
+# already folded into single spaces.
+#
+# Every override below was measured, not reasoned about: each one takes its rule's
+# hits on vendor/bench-corpus to zero while matching exactly the same set of the
+# rule's own documented true_positives as the upstream pattern did. Overrides for
+# STROQ-authored rules are rejected — those files are ours, so fix them in place.
+#
+# What is deliberately NOT overridden, though both fire on the corpus:
+#
+#   ATR-2026-00150 condition 0, a bare `-----BEGIN PRIVATE KEY-----` header. Its
+#   own true_positives are bare headers too, with no key body, exactly like the TLS
+#   configuration example it flags in prometheus/configuration.md. No pattern
+#   separates them because there is no textual difference; the difference is the
+#   surface the text arrived on, which is a scan_target question and not a regex
+#   one.
+#
+#   STROQ-2026-00005, `curl … | sh`. Byte-identical in a README install line and in
+#   an injected instruction; see docs/BENCH.md, which reports what scoping it cost.
+
+ATR-2026-00142:
+  reason: >-
+    The transition-word alternation admits `p\.?\s*s\.?`, which matches the bare
+    letters "ps" — including the ones inside "https", whose following ":" then
+    satisfies the `[\s,.:]+` separator. Any line mentioning a URL and a private key
+    matched: three corpus files did, on "ps://www.vaultproject.io", "HTTPS
+    certificate private key", and "steps: first, it generates a 2048-bit RSA private
+    key". A negative lookbehind for a letter fixes it; the rule's own five
+    true_positives are unaffected, because a real "P.S." follows a sentence end.
+    Applied to both conditions: only the first fires on this corpus, but the
+    alternation is copied verbatim into the second.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)(?:oh,?\s+and|p\.?\s*s\.?|btw|interestingly|as it happens|incidentally|on another note|speaking of which|while I.m at it|worth noting)[\s,.:]+.*(?:\.ssh|id_rsa|private.?key|BEGIN.*(?:RSA|OPENSSH|EC).*KEY)
+      to: |-
+        (?i)(?<![A-Za-z])(?:oh,?\s+and|p\.?\s*s\.?|btw|interestingly|as it happens|incidentally|on another note|speaking of which|while I.m at it|worth noting)[\s,.:]+.*(?:\.ssh|id_rsa|private.?key|BEGIN.*(?:RSA|OPENSSH|EC).*KEY)
+    - index: 1
+      from: |-
+        (?i)(?:oh,?\s+and|p\.?\s*s\.?|btw|interestingly|as it happens)[\s,.:]+.*(?:api[_\s-]?key|access[_\s-]?token|secret[_\s-]?key|password|credentials?)\s*(?:is|are|was|contains?|shows?|reads?|=|:)
+      to: |-
+        (?i)(?<![A-Za-z])(?:oh,?\s+and|p\.?\s*s\.?|btw|interestingly|as it happens)[\s,.:]+.*(?:api[_\s-]?key|access[_\s-]?token|secret[_\s-]?key|password|credentials?)\s*(?:is|are|was|contains?|shows?|reads?|=|:)
+
+ATR-2026-00113:
+  reason: >-
+    "Reading credential or private key files" is expressed as an English verb, then
+    `.*`, then a credential noun, so any prose or table putting the two within a line
+    of each other matched: an HTTP method table row, "GET | /apisix/admin/consumers/
+    {username}/credentials", and the sentence "Read the secret key". The target is
+    now required to be a local path — a `~`, `/` or `./` prefix — and the span
+    between verb and target may no longer cross a `|`, which is what separates a
+    command from a table cell. The one true_positive this condition carried,
+    "Read the file at ~/.aws/credentials", still matches, as does condition 0.
+  conditions:
+    - index: 1
+      from: |-
+        (?i)(?:cat|read|open|load|get)\s+.*(?:credentials|id_rsa|private[_\s]?key|secret[_\s]?key)
+      to: |-
+        (?i)(?:cat|read|open|load|get)\s+[^\n|]{0,60}(?:[~/]|\.\/)[\w./\\-]*(?:credentials|id_rsa|id_ed25519|private[_\s]?key|secret[_\s]?key)
+
+ATR-2026-00117:
+  reason: >-
+    The framing this condition exists to detect — "this is a system level override" —
+    is optional in the pattern, and so is the "level" qualifier, which leaves the bare
+    noun phrase "system command" matching. Apache NiFi's README uses it in its
+    ordinary sense. One of the two qualifiers is now required. The condition's single
+    true_positive has both.
+  conditions:
+    - index: 3
+      from: |-
+        (?i)(?:this\s+is\s+a\s+)?(?:system|admin|supervisor|emergency)\s+(?:level\s+)?(?:command|directive|override)
+      to: |-
+        (?i)(?:this\s+is\s+an?\s+(?:system|admin|supervisor|emergency)\s+(?:level\s+)?(?:command|directive|override)|(?:system|admin|supervisor|emergency)\s+level\s+(?:command|directive|override))
+
+ATR-2026-00030:
+  reason: >-
+    "Agent claiming to act on behalf of another agent" ends in `\s*(?:agent)?`, and an
+    optional final token means the condition really matches "acting on behalf of"
+    followed by any word at all — Superset's SECURITY.md says it about a person. An
+    agent-role noun is now required. This condition matched none of the rule's five
+    true_positives before the change and none after it, so the recall it contributes
+    is unmeasured either way; what changes is that it no longer convicts English.
+  conditions:
+    - index: 6
+      from: |-
+        (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+[a-zA-Z0-9_-]+\s*(?:agent)?
+      to: |-
+        (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+(?:the\s+)?(?:[a-zA-Z0-9_-]+\s+)?(?:agent|orchestrator|supervisor|coordinator|controller|assistant)\b

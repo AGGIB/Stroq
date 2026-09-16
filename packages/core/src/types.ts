@@ -6,6 +6,7 @@ export type ActionClass =
   | 'git.push_external'
   | 'config.self'
   | 'config.self_touch'
+  | 'config.git_exec'
   | 'network.fetch'
   | 'mcp.call'
   | 'mcp.side_effect'
@@ -22,6 +23,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'git.push_external',
   'config.self',
   'config.self_touch',
+  'config.git_exec',
   'network.fetch',
   'mcp.call',
   'mcp.side_effect',
@@ -47,6 +49,17 @@ export interface TaintSource {
   readonly tool: string;
   readonly ruleIds: readonly string[];
   readonly at: string;
+  /**
+   * What the tool was reading — the file path, URL, pattern or command, redacted and
+   * clipped exactly like a provenance record's `source`. Optional because session
+   * files written before this field existed do not carry it.
+   *
+   * Without it a tainted session names a tool and a rule id and nothing else, which
+   * is not enough to tell a false positive from an attack: "Read: ATR-2026-00142"
+   * could be a poisoned README or the project's own documentation, and the user has
+   * no way to find out which.
+   */
+  readonly source?: string;
 }
 
 export interface Taint {
