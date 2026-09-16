@@ -7,8 +7,16 @@ export interface ToolClassification extends CommandClassification {
   readonly mcp?: { readonly server: string; readonly tool: string };
 }
 
+/**
+ * The credential directories are matched bare as well as with a trailing slash.
+ *
+ * `/\.ssh\/` needed something after the directory, so `Read` or `Grep` pointed at
+ * `~/.ssh` itself — which returns the key files' names, and for `Grep` their
+ * contents — carried no class at all and stayed allowed in a tainted session. The
+ * bare form ends at the token so `/.sshconfig` and `myaws/` do not match.
+ */
 const SECRET_PATH =
-  /(\/\.ssh\/|\bid_(rsa|ed25519|ecdsa|dsa)\b|\/\.aws\/|(^|\/)\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|\/\.(npmrc|netrc|pgpass|git-credentials)$|\/\.kube\/config$|\/\.config\/gcloud\/|\/etc\/(shadow|passwd)$)/;
+  /(\/\.ssh(\/|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|\/\.aws(\/|$)|(^|\/)\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|\/\.(npmrc|netrc|pgpass|git-credentials)$|\/\.kube(\/config$|$)|\/\.config\/gcloud(\/|$)|\/etc\/(shadow|passwd)$)/;
 const SIDE_EFFECT_TOOL =
   /(send|post|publish|upload|email|mail|message|notify|pay|transfer|purchase|delete|remove|drop|deploy|execute|exec|run|shell|write|update|create|comment|merge|push)/i;
 // `config.self` on an MCP call requires BOTH a write-shaped tool name and the
@@ -34,7 +42,38 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
   return typeof candidate === 'string' ? candidate : '';
 }
 
-function classifyPath(path: string, write: boolean): ToolClassification {
+/**
+ * Lexical normalisation before matching, because the patterns below describe paths
+ * and the tool argument is a string.
+ *
+ * `.claude//settings.json` and `.claude/./settings.json` name the file that
+ * `.claude/settings.json` names, and every one of those reached the filesystem while
+ * only the last was classified. `..` is resolved for the same reason. Case is folded
+ * too: macOS and Windows resolve `.CLAUDE/settings.json` to the same file, and on a
+ * case-sensitive filesystem folding can only over-match, which is the direction this
+ * gate is supposed to err in.
+ *
+ * Lexical, not `realpath`: resolving on disk would follow symlinks and stat files the
+ * agent named, which is both slow on a hot path and a way to be pointed at something.
+ * A symlink into a protected directory is therefore still uncovered, and is recorded
+ * as a limit rather than implied away.
+ */
+export function normalizePathForMatch(path: string): string {
+  // `/./` first, then the `//` it leaves behind — the other order leaves a double slash.
+  const collapsed = path.replace(/(^|\/)\.(?=\/)/g, '$1').replace(/\/{2,}/g, '/');
+  const segments: string[] = [];
+  for (const segment of collapsed.split('/')) {
+    if (segment === '..' && segments.length > 0 && segments[segments.length - 1] !== '..') {
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join('/').toLowerCase();
+}
+
+function classifyPath(rawPath: string, write: boolean): ToolClassification {
+  const path = normalizePathForMatch(rawPath);
   const classes: ActionClass[] = [];
   const signals: string[] = [];
   if (write && SELF_CONFIG_FILE.test(path)) {

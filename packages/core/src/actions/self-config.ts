@@ -91,6 +91,26 @@ export const SELF_CONFIG_FILE =
 export const PROTECTED_DIRS =
   /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|github\/(hooks|copilot))(\/|$|\s)/;
 
+/**
+ * A protected directory named as a whole, rather than a path into one.
+ *
+ * `SELF_CONFIG_FILE` protects specific files, so `rm -rf .claude/settings.json` was
+ * denied while `rm -rf .claude` — which destroys the same file and everything beside
+ * it, Stroq's hook entry included — was not classified at all. The distinction that
+ * matters is bare-versus-deeper: the directory itself is never ordinary agent work,
+ * while paths inside it very much are. `.claude/CLAUDE.md` is the reason the bare
+ * `.claude` match was narrowed in the first place, and this must not undo that, so
+ * the match ends at the token: `.claude`, `.claude/` and `.claude/*` hit, while
+ * `.claude/CLAUDE.md` and `.claude/skills/x` do not. The glob is included because the
+ * shell expands it to exactly the files this protects.
+ *
+ * `.github` is the exception that proves the rule: `.github/hooks` and
+ * `.github/copilot` are Stroq's, so they are here, while a bare `.github` is not —
+ * deleting a CI workflow is not a claim this project makes about self-tamper.
+ */
+export const PROTECTED_DIR_BARE =
+  /(^|[\s"'=(])(?:[\w.~/-]*\/)?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium)|\.github\/(hooks|copilot))(?:\/\*?|\*)?(?=$|[\s"';|&)])/i;
+
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',
   'less',
@@ -209,7 +229,12 @@ function isFindWriteIntent(segment: string): boolean {
  */
 function touchesSelfConfig(segment: string, word: string): boolean {
   if (SELF_CONFIG_FILE.test(segment)) return true;
-  return word === 'find' && PROTECTED_DIRS.test(segment);
+  if (word === 'find' && PROTECTED_DIRS.test(segment)) return true;
+  // A whole-directory command needs no protected FILENAME in the segment to destroy
+  // every protected file at once: `rm -rf .claude` and `mv .claude /tmp` take the
+  // hook entry with them. Restricted to the write commands and to a bare directory,
+  // so editing `.claude/CLAUDE.md` stays the ordinary work it is.
+  return SELF_CONFIG_WRITE_COMMANDS.has(word) && PROTECTED_DIR_BARE.test(segment);
 }
 
 function isSelfConfigWriteIntent(segment: string, word: string): boolean {
