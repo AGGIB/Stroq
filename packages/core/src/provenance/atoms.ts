@@ -188,8 +188,28 @@ function pipeShellAtoms(text: string): Positioned[] {
   }));
 }
 
+/**
+ * A filesystem path passes every base64 test by accident, because `/` is in the
+ * base64 alphabet: `/Users/dev/Documents/stroq` is mixed case, is not hex, and its
+ * own separators satisfy the "has a digit or symbol" requirement. Treating it as an
+ * encoded atom made ordinary work look copied from untrusted output — a path printed
+ * by one tool and then used in a command scored `origin.untrusted`.
+ *
+ * Real base64 places a `/` about once every 64 characters, so its slash-free runs
+ * stay long, while a path is short word segments between separators. Requiring at
+ * least two separators keeps that distinction from firing on a base64 token that
+ * merely happens to contain one slash.
+ */
+const PATH_SEGMENT_MAX = 16;
+
+function looksLikePath(body: string): boolean {
+  const parts = body.split('/');
+  return parts.length >= 3 && parts.every((part) => part.length <= PATH_SEGMENT_MAX);
+}
+
 function looksBase64(token: string): boolean {
   const body = token.replace(/=+$/, '');
+  if (looksLikePath(body)) return false;
   return !HEX.test(body) && /[a-z]/.test(body) && /[A-Z]/.test(body) && /[0-9+/]/.test(body);
 }
 

@@ -9,6 +9,7 @@ import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { runReplay } from './commands/replay.js';
 import { runTrust } from './commands/trust.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
@@ -31,6 +32,10 @@ Commands:
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
+  replay [<session>] [--last] [--transcript <path>] [--json] [--list]
+                                     rebuild a session's causal history: which content the agent read,
+                                     and which actions came out of it. --last reads the agent's own
+                                     transcript, so it works on sessions that ran before you installed
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
   attack [--json] [--only <id>] [--fuzz]
                                      replay recorded incidents against your policy; exit 1 if any gets
@@ -94,6 +99,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runTrust(rest);
     case 'untaint':
       return runUntaint(rest);
+    case 'replay':
+      return runReplay(rest);
     case 'why':
       return runWhy(rest);
     case 'canary':
