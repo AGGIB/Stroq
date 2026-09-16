@@ -148,6 +148,35 @@ The exit code is 1 when there is any finding, so `stroq exposure` works in CI or
 
 `--share` prints a redacted summary — counts, finding classes, agent names and config key names only. Paths, file names, MCP server names, hostnames and usernames cannot appear in it: the shareable record is built field-by-field from typed data rather than filtered, so a field is absent until someone adds it deliberately. Nothing is ever transmitted; `--share` output is produced locally for you to paste.
 
+## Before you open a repository
+
+`stroq exposure` reads the directory you are already in. `stroq inspect` reads one you have not opened yet, which for one class of attack is the only moment that helps.
+
+```text
+stroq inspect — what /tmp/some-clone runs when you open it
+
+BEFORE YOU APPROVE ANYTHING (2)
+  .git/config — core.fsmonitor: this repository sets a git configuration key whose value git runs as a command, which happens during an ordinary index refresh — an agent typing `git status` triggers it, before any approval
+    fix: git config --get core.fsmonitor — and remove it if you did not set it
+  docs/archive — HEAD, objects, refs: a bare repository is committed here as plain files, which survives a clone and can carry its own executable configuration
+    fix: inspect and remove docs/archive before opening this repository with an agent
+
+When you open or build it (1, ordinary — not findings)
+  .husky/pre-commit — pre-commit
+```
+
+Exit 1 on anything in the first group, 0 otherwise; the second group never fails the command.
+
+**Stroq's hooks cannot cover that moment, and this is the honest reason the command exists.** Agents run `git status` at startup to orient themselves. On Claude Code that happens before the workspace-trust prompt, and a `SessionStart` hook is gated on that same prompt, so no hook Stroq installs can get in front of it. A command you run first can.
+
+The other half is `--env`, which prints two git settings:
+
+```console
+$ eval "$(stroq inspect --env)"
+```
+
+`core.fsmonitor=false` and `safe.bareRepository=explicit`, exported as `GIT_CONFIG_*`, which git applies at command scope — above anything a repository's own config says. Measured against git 2.53.0 and pinned in the test suite: with `core.fsmonitor` pointing at a script, a plain `git status` runs it twice, and the same command under these variables does not run it at all; a nested bare repository that `git rev-parse` otherwise treats as a repository is refused outright. Deliberately only those two — `core.hooksPath` is how husky installs itself, and `core.pager`, `core.editor` and `diff.external` are ordinary preferences, so overriding them would break real work to close a narrower hole than the report above already names.
+
 `--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
 ## How it works
@@ -545,6 +574,7 @@ node packages/cli/dist/index.js doctor
 | `stroq canary [--name <NAME>]`                                                                                                                                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                                                                                                                                 |
 | `stroq attack [--json] [--only <id>]`                                                                                                                              | Replay 20 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                                                                                                                      |
 | `stroq exposure [--probe] [--share] [--json] [--verbose]`                                                                                                          | Map this machine's agent surface and report what reaches you; exit 1 on any finding. `--share` prints a redacted summary, `--probe` starts your MCP servers to read their tool descriptions                                                                                                                                       |
+| `stroq inspect [<dir>] [--json] [--env]`                                                                                                                           | Read what a repository runs when you open it, before you point an agent at it; exit 1 when something runs before you could approve it. `--env` prints the git settings that neutralise it                                                                                                                                         |
 
 ## Policy
 
