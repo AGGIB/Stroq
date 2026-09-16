@@ -139,89 +139,86 @@
         </div>
 
         <div class="hero-scene" tabindex="0" role="region" aria-label="Diagram; scrolls sideways on small screens">
-          <svg class="hs" viewBox="0 0 580 300" role="img" aria-labelledby="hs-title hs-desc">
-            <title id="hs-title">Stroq traces a command back to the text that dictated it</title>
-            <desc id="hs-desc">The agent reads three sources. One of them, a Sentry issue, carries a package name, which Stroq drops into the session's memory lane below the road. Forty seconds later the agent sends an ordinary-looking npx command down the same road. At the gate Stroq reaches down into the memory lane, finds that the package name came from the issue, and holds the action for confirmation while unrelated commands keep passing through to the machine.</desc>
-            <defs>
-              <filter id="hs-blur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.2"/></filter>
-              <filter id="hs-blur-lg" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="7"/></filter>
-              <filter id="hs-shadow" x="-20%" y="-30%" width="140%" height="180%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-opacity=".22"/></filter>
-              <pattern id="hs-lane" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-                <line class="hs-lane-hair" x1="0" y1="0" x2="0" y2="7"/>
-              </pattern>
-            </defs>
+          <svg class="hs" viewBox="0 0 580 400" role="img" aria-labelledby="hs-title hs-desc">
+            <title id="hs-title">Six coding agents run through one Stroq firewall</title>
+            <desc id="hs-desc">Claude Code, Cursor, Codex, Copilot CLI, Windsurf and OpenClaw each stream actions into a Stroq firewall, which forwards allowed ones to your machine. A poisoned README latches onto OpenClaw's stream and taints it; OpenClaw's next action, dictated by that file, is stopped at the firewall — denied by deny-encoded-exec. Nothing from it reaches the machine.</desc>
 
-            <g class="hs-verdict" filter="url(#hs-shadow)">
-              <rect x="286" y="8" width="276" height="70" rx="10"/>
-              <text class="hs-verdict-prompt" x="302" y="27">$ stroq why</text>
-              <text class="hs-verdict-word" x="302" y="47">ask</text>
-              <text class="hs-verdict-rule" x="338" y="46.5">ask-origin-untrusted</text>
-              <text class="hs-verdict-why" x="302" y="66">because it came from the issue, 40 s earlier</text>
+            <g class="hs-agent">
+              <rect class="hs-box" x="16" y="62" width="136" height="30" rx="8"/>
+              <use href="#mark-claude-code" class="hs-mark" x="28" y="69" width="16" height="16"/>
+              <text class="hs-name" x="52" y="81.5">Claude Code</text>
             </g>
-
-            <g class="hs-src">
-              <rect class="hs-box" x="16" y="88" width="124" height="28" rx="8"/>
-              <text class="hs-name" x="29" y="106.5">sentry issue</text>
+            <line class="hs-line" x1="152" y1="77" x2="300.7" y2="169.4"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r1" cx="152" cy="77" r="3.2"/>
+            <g class="hs-agent">
+              <rect class="hs-box" x="16" y="110" width="136" height="30" rx="8"/>
+              <use href="#mark-cursor" class="hs-mark" x="28" y="117" width="16" height="16"/>
+              <text class="hs-name" x="52" y="129.5">Cursor</text>
             </g>
-            <g class="hs-src">
-              <rect class="hs-box" x="16" y="130" width="124" height="28" rx="8"/>
-              <text class="hs-name" x="29" y="148.5">README.md</text>
+            <line class="hs-line" x1="152" y1="125" x2="295.8" y2="179.5"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r2" cx="152" cy="125" r="3.2"/>
+            <g class="hs-agent">
+              <rect class="hs-box" x="16" y="158" width="136" height="30" rx="8"/>
+              <use href="#mark-codex" class="hs-mark" x="28" y="165" width="16" height="16"/>
+              <text class="hs-name" x="52" y="177.5">Codex</text>
             </g>
-            <g class="hs-src">
-              <rect class="hs-box" x="16" y="172" width="124" height="28" rx="8"/>
-              <text class="hs-name" x="29" y="190.5">docs page</text>
+            <line class="hs-line" x1="152" y1="173" x2="292.5" y2="192.2"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r3" cx="152" cy="173" r="3.2"/>
+            <g class="hs-agent">
+              <rect class="hs-box" x="16" y="206" width="136" height="30" rx="8"/>
+              <use href="#mark-copilot-cli" class="hs-mark" x="28" y="213" width="16" height="16"/>
+              <text class="hs-name" x="52" y="225.5">Copilot CLI</text>
             </g>
-            <text class="hs-cap" x="16" y="219">what the agent reads</text>
+            <line class="hs-line" x1="152" y1="221" x2="292.3" y2="206.1"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r4" cx="152" cy="221" r="3.2"/>
+            <g class="hs-agent">
+              <rect class="hs-box" x="16" y="254" width="136" height="30" rx="8"/>
+              <use href="#mark-windsurf" class="hs-mark" x="28" y="261" width="16" height="16"/>
+              <text class="hs-name" x="52" y="273.5">Windsurf</text>
+            </g>
+            <line class="hs-line" x1="152" y1="269" x2="295.2" y2="219.1"/>
+            <circle class="hs-pk hs-pk-in hs-pk-r5" cx="152" cy="269" r="3.2"/>
+            <g class="hs-agent hs-agent-target">
+              <rect class="hs-box" x="16" y="302" width="136" height="30" rx="8"/>
+              <use href="#mark-openclaw" class="hs-mark" x="28" y="309" width="16" height="16"/>
+              <text class="hs-name" x="52" y="321.5">OpenClaw</text>
+            </g>
+            <line class="hs-line" x1="152" y1="317" x2="300.1" y2="229.5"/>
+            <line class="hs-taint" x1="152" y1="317" x2="300.1" y2="229.5"/>
+            <circle class="hs-pk hs-pk-oc" cx="152" cy="317" r="3.4"/>
 
-            <line class="hs-line" x1="140" y1="102" x2="236" y2="144"/>
-            <line class="hs-line" x1="140" y1="144" x2="236" y2="144"/>
-            <line class="hs-line" x1="140" y1="186" x2="236" y2="144"/>
+            <line class="hs-line" x1="408" y1="200" x2="470" y2="200"/>
+            <circle class="hs-pk hs-pk-out" cx="408" cy="200" r="3.2"/>
+            <circle class="hs-pk hs-pk-out hs-pk-out-b" cx="408" cy="200" r="3.2"/>
 
-            <circle class="hs-pk hs-pk-a hs-halo" cx="140" cy="102" r="9" filter="url(#hs-blur)"/>
-            <circle class="hs-pk hs-pk-a" cx="140" cy="102" r="3.6"/>
-            <circle class="hs-pk hs-pk-b" cx="140" cy="144" r="3.2"/>
-            <circle class="hs-pk hs-pk-c" cx="140" cy="186" r="3.2"/>
-
-            <circle class="hs-agent-ring" cx="264" cy="144" r="28"/>
-            <circle class="hs-agent-ring hs-agent-ring-2" cx="264" cy="144" r="28"/>
-            <circle class="hs-agent" cx="264" cy="144" r="28"/>
-            <text class="hs-agent-label" x="264" y="149">agent</text>
-
-            <line class="hs-road" x1="292" y1="144" x2="396" y2="144"/>
-            <line class="hs-road" x1="410" y1="144" x2="480" y2="144"/>
-            <line class="hs-flow" x1="292" y1="144" x2="396" y2="144"/>
-            <line class="hs-flow" x1="410" y1="144" x2="480" y2="144"/>
-
-            <ellipse class="hs-gate-glow" cx="401" cy="144" rx="14" ry="44" filter="url(#hs-blur-lg)"/>
-            <rect class="hs-gate-bar" x="397" y="108" width="8" height="72" rx="4"/>
-            <text class="hs-cap hs-gate-cap" x="401" y="100">Stroq</text>
+            <circle class="hs-field" cx="350" cy="200" r="72"/>
+            <circle class="hs-core" cx="350" cy="200" r="58"/>
+            <use href="#logo-mark" class="hs-core-mark" x="308" y="183" width="84" height="34"/>
 
             <g class="hs-machine">
-              <rect x="480" y="124" width="70" height="40" rx="8"/>
-              <path d="M496 142h38M496 152h22"/>
+              <rect x="470" y="168" width="90" height="64" rx="8"/>
+              <path d="M515 232v12M499 244h32"/>
+              <text class="hs-cap" x="515" y="270" text-anchor="middle">your machine</text>
             </g>
-            <text class="hs-cap" x="480" y="181">your machine</text>
 
-            <circle class="hs-pk hs-pk-pass hs-pk-pass-1" cx="292" cy="144" r="3.2"/>
-            <circle class="hs-pk hs-pk-pass hs-pk-pass-2" cx="292" cy="144" r="3.2"/>
-            <circle class="hs-pk hs-pk-pass hs-pk-pass-3" cx="292" cy="144" r="3.2"/>
-            <circle class="hs-pk hs-pk-act hs-halo" cx="292" cy="144" r="10" filter="url(#hs-blur)"/>
-            <circle class="hs-pk hs-pk-act" cx="292" cy="144" r="4.2"/>
+            <g class="hs-attacker">
+              <rect class="hs-box hs-box-bad" x="16" y="350" width="136" height="30" rx="8"/>
+              <text class="hs-name hs-name-bad" x="84" y="369.5" text-anchor="middle">poisoned README</text>
+            </g>
+            <path class="hs-tendril" d="M152 365 C 158.4 365, 180 300.5, 202.4 287.3" pathLength="1"/>
 
-            <path class="hs-drop" d="M264 172 L264 234"/>
-            <circle class="hs-tokdrop" cx="264" cy="172" r="3.6"/>
-            <circle class="hs-land" cx="264" cy="236" r="4"/>
-            <path class="hs-probe" d="M401 180 L401 234"/>
-            <line class="hs-probebeam" x1="401" y1="180" x2="401" y2="196"/>
-            <circle class="hs-match" cx="401" cy="236" r="4"/>
-            <path class="hs-leader" d="M401 108 L401 78"/>
-
-            <text class="hs-cap hs-mem-cap" x="150" y="228">session memory</text>
-            <rect class="hs-mem" x="150" y="234" width="300" height="46" rx="10"/>
-            <rect class="hs-mem-hatch" x="150" y="234" width="300" height="46" rx="10" fill="url(#hs-lane)"/>
-            <g class="hs-chip">
-              <rect class="hs-chip-box" x="164" y="245" width="272" height="24" rx="6"/>
-              <text class="hs-chip-text" x="176" y="261.5">pkg  @sentry-tooling/report-fix</text>
+            <circle class="hs-hit" cx="300.1" cy="229.5" r="15"/>
+            <circle class="hs-pulse" cx="300.1" cy="229.5" r="10"/>
+            <g transform="translate(300.1 229.5)">
+              <g class="hs-x">
+                <circle r="11"/>
+                <path d="M-4.5 -4.5l9 9M4.5 -4.5l-9 9"/>
+              </g>
+            </g>
+            <g class="hs-verdict" transform="translate(234 300)">
+              <rect width="164" height="38" rx="7"/>
+              <text class="hs-verdict-word" x="12" y="16">✖ denied</text>
+              <text class="hs-verdict-rule" x="12" y="31">deny-encoded-exec</text>
             </g>
           </svg>
         </div>
