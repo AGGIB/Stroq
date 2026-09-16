@@ -3,6 +3,7 @@ import { sortFindings, type Finding } from './findings.js';
 import type { McpSurface } from './mcp-surface.js';
 import type { PrivilegeHit } from './privilege-surface.js';
 import type { Reach } from './reach.js';
+import type { RepoSurface } from './repo-surface.js';
 import type { AgentSurface } from './surface.js';
 
 export interface ExposureReport {
@@ -13,6 +14,7 @@ export interface ExposureReport {
   readonly mcp: readonly McpSurface[];
   readonly context: ContextSurface;
   readonly privilege: readonly PrivilegeHit[];
+  readonly repo: RepoSurface;
   readonly reach: Reach;
   readonly findings: readonly Finding[];
 }
@@ -63,12 +65,30 @@ export function formatExposure(
     ),
     '',
     row('Privilege-widening keys', report.privilege.length),
+    row(
+      'Repository runs on open',
+      report.repo.isRepo ? report.repo.onOpen.length + report.repo.preTrust.length : 0,
+      report.repo.isRepo
+        ? `${report.repo.preTrust.length} before you approve anything${report.repo.capped ? ' — a lower bound: the walk hit its cap' : ''}`
+        : 'not a git repository',
+    ),
     row('Incidents reaching you', report.reach.passedPolicy, `of ${report.reach.total}`),
     '',
   ];
 
   if (opts.verbose && ctx.flagged.length > 0) {
     lines.push('Flagged files:', ...ctx.flagged.map((f) => `  ${f}`), '');
+  }
+
+  // The on-open list is surface, not a finding: a husky hook or a `prepare` script is
+  // ordinary, and raising one would fail this command on most honest repositories.
+  // It is still worth seeing, so --verbose prints it.
+  if (opts.verbose && report.repo.onOpen.length > 0) {
+    lines.push(
+      'Runs when you open or build this repository:',
+      ...report.repo.onOpen.map((h) => `  ${h.file} — ${h.what}`),
+      '',
+    );
   }
 
   const findings = sortFindings(report.findings);

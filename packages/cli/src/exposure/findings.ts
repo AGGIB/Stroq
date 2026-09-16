@@ -7,6 +7,7 @@ export type FindingClass =
   | 'context-flagged'
   | 'hook-foreign'
   | 'privilege-widened'
+  | 'repo-exec-surface'
   | 'incident-reaches-you';
 
 export type FindingSeverity = 'critical' | 'high' | 'medium';

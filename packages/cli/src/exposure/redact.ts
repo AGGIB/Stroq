@@ -22,6 +22,9 @@ export interface ShareableExposure {
   readonly contextFlagged: number;
   readonly foreignHooks: number;
   readonly privilegeKeys: readonly string[];
+  /** Kinds only: a kind is a fixed vocabulary, a path is the user's disk. */
+  readonly repoPreTrust: readonly string[];
+  readonly repoOnOpen: number;
   readonly reachTotal: number;
   readonly reachPassed: number;
   readonly findings: readonly { readonly class: string; readonly severity: string }[];
@@ -42,6 +45,8 @@ export function toShareable(report: ExposureReport): ShareableExposure {
     contextFlagged: c.flagged.length,
     foreignHooks: c.foreignHooks,
     privilegeKeys: report.privilege.map((p) => p.key),
+    repoPreTrust: report.repo.preTrust.map((h) => h.kind),
+    repoOnOpen: report.repo.onOpen.length,
     reachTotal: report.reach.total,
     reachPassed: report.reach.passedPolicy,
     findings: report.findings.map((f) => ({ class: f.class, severity: f.severity })),
@@ -57,6 +62,7 @@ export function formatShareable(share: ShareableExposure): string {
     `  instruction files      ${share.contextFiles}, flagged ${share.contextFlagged}`,
     `  non-Stroq hooks        ${share.foreignHooks}`,
     `  privilege keys set     ${share.privilegeKeys.length > 0 ? share.privilegeKeys.join(', ') : 'none'}`,
+    `  repo runs on open      ${share.repoOnOpen}, before approval ${share.repoPreTrust.length > 0 ? share.repoPreTrust.join(', ') : 'none'}`,
     `  incidents reaching me  ${share.reachPassed} of ${share.reachTotal}`,
     '',
     share.findings.length === 0

@@ -49,6 +49,17 @@ const GIT_DASH_C = /\bgit\s+(?:\S+\s+)*?-c\s*[\w.-]+=/i;
 export const GIT_EXEC_FILE =
   /(?<![\w.-])(\.git\/(config|hooks)|\.gitattributes|\.gitmodules|\.husky|\.devcontainer|\.envrc)(?![\w.-])/;
 
+/**
+ * True for a dotted git configuration key whose value git executes.
+ *
+ * Takes the key on its own, as an INI parser produces it, rather than a whole command
+ * line — `stroq exposure` reads `.git/config` directly and needs to ask about
+ * `filter.lfs.clean`, not about a segment that happens to mention it.
+ */
+export function isGitExecKey(dottedKey: string): boolean {
+  return new RegExp(`^(?:${GIT_EXEC_KEY.source.replace(/^\\b|\\b$/g, '')})$`, 'i').test(dottedKey);
+}
+
 /** True for a path a repository can use to make git, or an editor, run a command. */
 export function isGitExecPath(path: string): boolean {
   return GIT_EXEC_FILE.test(path);
