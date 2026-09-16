@@ -73,6 +73,26 @@ describe('the site survives its own Content-Security-Policy', () => {
     }
   });
 
+  it('parses as one stylesheet, with every brace closed', () => {
+    // An orphaned `}` is not a syntax error the browser reports: CSS error
+    // recovery swallows whatever follows it up to the next balanced block, which
+    // once ate the first @keyframes of the hero and left its packet frozen at
+    // opacity 0 while every other packet moved.
+    const opens = (css.match(/\{/g) ?? []).length;
+    const closes = (css.match(/\}/g) ?? []).length;
+    expect(opens, `${opens} "{" but ${closes} "}"`).toBe(closes);
+  });
+
+  it('defines a @keyframes for every animation name a rule uses', () => {
+    const defined = new Set([...css.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]));
+    const used = [...css.matchAll(/animation:\s*([\w-]+)/g)].map((m) => m[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const name of new Set(used)) {
+      if (name === 'none') continue;
+      expect(defined.has(name), `animation "${name}" is used but never defined`).toBe(true);
+    }
+  });
+
   it('animates only elements the markup actually ships', () => {
     // A rule that animates a class no longer in the HTML is dead motion, and the
     // reverse — markup expecting an animation that was deleted — is a frozen hero.
