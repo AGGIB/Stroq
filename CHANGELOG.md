@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-09-16
+
+### Fixed
+
+- **`@stroq/cli@0.12.0` on npm carries 0.11.0's code, and this release is how to get 0.12.0's.** The published tarball contains none of that release: no `config.git_exec`, no `stroq inspect`, no `stroq trust`, no hook watchdog, no install record. `npm view` reports the version, `stroq --version` prints it, and the usage text lists the old command set. Anyone who installed 0.12.0 has the label without the contents.
+
+  The cause is packaging, not process. `packages/cli` ships `dist` through its `files` field and had no `prepublishOnly`, so `npm publish` packs whatever happens to be sitting in `dist` at that moment rather than building first. A publish from a working tree whose `dist` predates the merge therefore produces a correct version number over stale code, silently. `prepublishOnly` now runs the workspace build, so every publish path rebuilds — including the one that caused this.
+
+  The tag-triggered workflow is not what went wrong: it builds from a clean checkout, and on finding 0.12.0 already on the registry it correctly skipped rather than trying to publish over it. The tarball attached to the v0.12.0 GitHub Release was built from `main` and does contain the release; for a few hours the two artifacts disagreed, which is the other reason to replace the npm one rather than leave it.
+
+  0.12.0 cannot be corrected in place: npm refuses a second publish of a version, and unpublishing burns the number permanently. It is deprecated on the registry instead, pointing here.
+
 ## [0.12.0] - 2026-09-16
 
 ### Added

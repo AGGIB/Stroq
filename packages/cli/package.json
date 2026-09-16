@@ -1,6 +1,6 @@
 {
   "name": "@stroq/cli",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Local action firewall for AI agents: scans what the agent reads, taints the session, blocks dangerous follow-up actions",
   "license": "Apache-2.0",
   "type": "module",
@@ -43,6 +43,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "prepack": "pnpm -w run build",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
