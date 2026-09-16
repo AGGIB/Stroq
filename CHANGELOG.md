@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   One action commonly carries several atoms out of a single read — the host, the URL containing it, and the whole pipe-to-shell line — which is one causal link rather than three. The most specific atom represents the link and the rest are counted, so the graph shows causes rather than a row per pattern match.
 
+- **`stroq replay --last` reads the agent's own transcript, so it answers for sessions that ran before Stroq was installed.** The live hooks can only describe sessions they were present for, which left the question unanswerable exactly when it is first asked — after something has already gone wrong, by someone who has not installed anything yet. Claude Code records every session under `~/.claude/projects/`, and those records carry both halves the hooks would have seen: an assistant message's `tool_use` block is the call, the matching `tool_result` is the output that came back. Replaying them through the engine reconstructs the same graph retroactively. `--transcript <path>` replays a specific file.
+
+  The replay runs against a throwaway home, exactly as `stroq attack` does: sessions, provenance, audit and the secret index all live under a temporary root that is removed afterwards. Analysing what already happened must never taint a live session or append to the chain that records real decisions.
+
+### Fixed
+
+- **A filesystem path was extracted as a base64 atom, so ordinary work scored `origin.untrusted`.** `/` is in the base64 alphabet, which made a whole absolute path a single candidate token, and the path's own separators then satisfied the "contains a digit or symbol" test that was supposed to distinguish an encoded payload from a long word. `/Users/dev/Documents/stroq` is mixed case and not hex, so it passed. The cost was paid on every ordinary session: a path printed by one tool and then used in a later command matched as an atom carried over from untrusted output, and the action was raised to `ask`.
+
+  Real base64 places a `/` about once every 64 characters, so its slash-free runs stay long, while a path is short word segments between separators. A candidate with at least two separators whose every segment is 16 characters or shorter is now treated as a path. Requiring two separators keeps the guard from firing on a genuine base64 token that happens to contain one slash, which is pinned by its own test.
+
+  Found by `stroq replay` on its first run against a real recorded session: on that transcript the fix removed 139 of 261 `ask` decisions, none of which were attacks. `stroq bench` never measured this because it exercises the content scanner, not the provenance path.
+
 ### Fixed
 
 - **Three classification gaps, each of which left a protection the README describes silently inapplicable.** All three were recorded as known limits and are now closed; `SECURITY.md` no longer lists two of them as out of scope, because they are in it again.

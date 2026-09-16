@@ -7,6 +7,9 @@
 // `pre` entry records the action plus the provenance evidence that links it
 // back — so this command reconstructs the graph from data already on disk. It
 // adds no telemetry and works on sessions recorded by earlier versions.
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   AuditLog,
@@ -16,7 +19,9 @@ import {
   type ProvenanceEvidence,
   type SecretHit,
 } from '@stroq/core';
-import { auditFile } from '../paths.js';
+import { createEngineAt, loadPolicy } from '../engine-factory.js';
+import { auditFile, auditFileIn } from '../paths.js';
+import { findTranscripts, readTranscript, type Transcript } from '../replay/transcript.js';
 
 /** One action that traced back to something the agent had read. */
 export interface ReplayConsequence {
@@ -293,12 +298,82 @@ export function sessionsIn(entries: readonly AuditEntry[]): string[] {
   return [...lastSeen.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
+/**
+ * Replays a recorded transcript through the engine in a throwaway home and returns
+ * the audit log it produced.
+ *
+ * The user's real `~/.stroq` is never touched: sessions, provenance, audit and the
+ * secret index all live under a temporary root that is removed afterwards, exactly
+ * as `stroq attack` does. Analysing what already happened must not taint a live
+ * session or append to the chain that records real decisions.
+ */
+export async function replayTranscript(transcript: Transcript): Promise<AuditEntry[]> {
+  const root = await mkdtemp(join(tmpdir(), 'stroq-replay-'));
+  try {
+    const home = join(root, 'home');
+    const engine = createEngineAt({
+      home,
+      userHome: join(root, 'user'),
+      policy: loadPolicy(),
+      env: {},
+    });
+    const cwd = transcript.cwd ?? process.cwd();
+    for (const ev of transcript.events) {
+      const base = {
+        sessionId: transcript.sessionId,
+        toolName: ev.tool,
+        toolInput: ev.input,
+        cwd,
+      };
+      try {
+        if (ev.kind === 'pre') await engine.pre(base);
+        else await engine.post({ ...base, toolResultText: ev.resultText });
+      } catch {
+        // One malformed recorded call must not abandon the rest of the history.
+      }
+    }
+    return await new AuditLog(auditFileIn(home)).readAll();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 export async function runReplay(args: readonly string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: [...args],
-    options: { json: { type: 'boolean' }, list: { type: 'boolean' } },
+    options: {
+      json: { type: 'boolean' },
+      list: { type: 'boolean' },
+      transcript: { type: 'string' },
+      last: { type: 'boolean' },
+    },
     allowPositionals: true,
   });
+
+  // A transcript is the agent's own recording, so this path works on sessions that
+  // ran before Stroq was ever installed — the one question no live hook can answer
+  // after the fact.
+  if (values.transcript !== undefined || values.last === true) {
+    const path = values.transcript ?? (await findTranscripts(process.cwd()))[0]?.path;
+    if (path === undefined) {
+      process.stdout.write('no agent transcript found — looked under ~/.claude/projects\n');
+      return 1;
+    }
+    const transcript = await readTranscript(path);
+    if (transcript.events.length === 0) {
+      process.stdout.write(`no tool calls recorded in ${path}\n`);
+      return 1;
+    }
+    const replayed = await replayTranscript(transcript);
+    const model = buildReplay(replayed, transcript.sessionId);
+    if (values.json === true) {
+      process.stdout.write(`${JSON.stringify(model, null, 2)}\n`);
+      return 0;
+    }
+    process.stdout.write(`${formatReplay(model)}\nreplayed from ${path}\n`);
+    return 0;
+  }
+
   const entries = await new AuditLog(auditFile()).readAll();
   const sessions = sessionsIn(entries);
 

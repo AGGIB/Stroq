@@ -32,9 +32,10 @@ Commands:
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
-  replay [<session>] [--json] [--list]
+  replay [<session>] [--last] [--transcript <path>] [--json] [--list]
                                      rebuild a session's causal history: which content the agent read,
-                                     and which actions came out of it
+                                     and which actions came out of it. --last reads the agent's own
+                                     transcript, so it works on sessions that ran before you installed
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
   attack [--json] [--only <id>] [--fuzz]
                                      replay recorded incidents against your policy; exit 1 if any gets
