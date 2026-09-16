@@ -15,6 +15,12 @@ export interface AuditEntryInput {
     readonly verdict: string;
     readonly score: number;
     readonly ruleIds: readonly string[];
+    /**
+     * True when a trusted entry stopped a suspect verdict from tainting the session.
+     * Recorded because an exemption nobody can see afterwards is a hole rather than a
+     * setting: the verdict, the rules and the fact it was waived all stay in the chain.
+     */
+    readonly trusted?: boolean;
   };
   /** Provenance evidence that contributed `origin.*` classes to `decision`. */
   readonly provenance?: readonly ProvenanceEvidence[];

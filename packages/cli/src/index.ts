@@ -9,6 +9,7 @@ import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { runTrust } from './commands/trust.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runWhy } from './commands/why.js';
@@ -40,6 +41,9 @@ Commands:
                                      --probe starts your MCP servers to read their tool descriptions
   inspect [<dir>] [--json] [--env]   read what a repository runs before you open it with an agent;
                                      --env prints the git settings that neutralise it
+  trust [<file>] [--list] [--remove <file>] [--json]
+                                     waive a false positive on a file's exact content; without
+                                     arguments, list what is trusted
   bench [--corpus <dir>] [--json] [--verbose]
                                      measure how much benign developer text the rule set flags
   coverage [--format table|navigator] [--json]
@@ -86,6 +90,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runLog(rest);
     case 'verify':
       return runVerify();
+    case 'trust':
+      return runTrust(rest);
     case 'untaint':
       return runUntaint(rest);
     case 'why':

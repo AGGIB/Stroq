@@ -6,12 +6,20 @@ import {
   FileProvenanceStore,
   FileSecretIndex,
   FileSessionStore,
+  FileTrustStore,
   StroqEngine,
   loadBundledRules,
   loadPolicyFile,
   type Policy,
 } from '@stroq/core';
-import { auditFileIn, policyFile, secretsFileIn, sessionsDirIn, stroqHome } from './paths.js';
+import {
+  auditFileIn,
+  policyFile,
+  secretsFileIn,
+  sessionsDirIn,
+  stroqHome,
+  trustFileIn,
+} from './paths.js';
 
 export function loadPolicy(): Policy {
   const file = policyFile();
@@ -47,6 +55,9 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
       location.userHome,
       location.env ?? process.env,
     ),
+    // `stroq attack` builds its engine at a throwaway home, so a scenario can never
+    // be waived by an entry the operator added to their own list.
+    trust: new FileTrustStore(trustFileIn(location.home)),
   });
 }
 
