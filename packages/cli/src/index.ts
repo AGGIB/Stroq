@@ -6,6 +6,7 @@ import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInit } from './commands/init.js';
+import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
 import { runUntaint } from './commands/untaint.js';
@@ -37,6 +38,8 @@ Commands:
   exposure [--probe] [--share] [--json] [--verbose]
                                      map this machine's agent surface and report what reaches you;
                                      --probe starts your MCP servers to read their tool descriptions
+  inspect [<dir>] [--json] [--env]   read what a repository runs before you open it with an agent;
+                                     --env prints the git settings that neutralise it
   bench [--corpus <dir>] [--json] [--verbose]
                                      measure how much benign developer text the rule set flags
   coverage [--format table|navigator] [--json]
@@ -71,6 +74,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       if (out.timedOut) await exitNow(out.exitCode);
       return out.exitCode;
     }
+    case 'inspect':
+      return runInspect(rest);
     case 'init':
       return runInit(rest);
     case 'mcp':
