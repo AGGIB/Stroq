@@ -227,6 +227,51 @@
     </div>
   </section>
 
+  <section class="film" id="case" aria-labelledby="film-title">
+    <div class="container">
+      <div class="section-head reveal">
+        <h2 id="film-title">A stranger opened an issue. Your agent read all of it.</h2>
+        <p class="section-lead">
+          Nobody on the team wrote that command. It sat in issue #482 under a heading
+          addressed to <em>automated tooling</em>, below the reproduction steps the
+          maintainer actually read. Fifty seconds, one real session, recorded through
+          the hooks against a real <code>.env</code>.
+        </p>
+      </div>
+
+      <figure class="film-frame reveal">
+        <div class="film-stage">
+          <video
+            class="film-video"
+            id="case-video"
+            poster="/case-study-poster.jpg"
+            preload="none"
+            controls
+            playsinline
+            width="1920"
+            height="1080"
+          >
+            <source src="/case-study.mp4" type="video/mp4" />
+            Your browser cannot play this video.
+            <a href="/case-study.mp4">Download it instead.</a>
+          </video>
+          <button class="film-play" type="button" data-play="case-video" aria-label="Play the case study">
+            <svg class="film-play-ic" width="34" height="34" viewBox="0 0 34 34" aria-hidden="true" focusable="false">
+              <path d="M12 8.5 26 17 12 25.5Z" fill="currentColor"/>
+            </svg>
+            <span class="film-play-text">Watch the 50 s case</span>
+          </button>
+        </div>
+        <figcaption class="film-cap">
+          The scan of that issue came back <b>clean</b>. No rule matched it, because there is
+          nothing to match: a plausible note in a plausible bug report, and an
+          <code>npx</code> that looks like any other install. Every guard that judges the
+          command in front of it lets both commands through.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
   <section class="why" id="why" aria-labelledby="why-title">
     <div class="container">
       <div class="section-head reveal">

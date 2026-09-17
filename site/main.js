@@ -145,4 +145,30 @@ window.va =
     navCmd.classList.add('is-shown');
   }
 
+  /* The case-study player.
+
+     The overlay button exists only to make the poster obviously clickable; the
+     native controls do the actual work, so a visitor without JS still gets a
+     working player rather than a dead image. `preload="none"` is deliberate:
+     nothing downloads until someone asks. */
+  var playBtn = doc.querySelector('[data-play]');
+  if (playBtn) {
+    var video = doc.getElementById(playBtn.getAttribute('data-play'));
+    var stage = playBtn.parentNode;
+    if (video) {
+      playBtn.addEventListener('click', function () {
+        video.play();
+      });
+      video.addEventListener('play', function () {
+        stage.classList.add('is-playing');
+      });
+      /* Back to the poster when it ends, so the section reads as an invitation
+         again rather than a stalled last frame. */
+      video.addEventListener('ended', function () {
+        stage.classList.remove('is-playing');
+        video.currentTime = 0;
+      });
+    }
+  }
+
 })();
