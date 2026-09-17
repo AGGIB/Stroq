@@ -236,6 +236,49 @@ html:not(.js) .copy-btn { display: none; }
 }
 .tt figcaption code { background: rgba(255, 255, 255, .08); color: var(--term-fg); }
 
+/* 5bb. The case study: a framed player, not a bare <video> ---------------
+   The poster carries the question the film answers, so nothing autoplays and
+   nothing loads until someone asks for it: `preload="none"` means a visitor who
+   never clicks pays nothing for a 13 MB file. */
+.film { padding-block: clamp(3rem, 2rem + 4vw, 5.5rem); border-top: 1px solid var(--line); }
+.film-frame { margin: clamp(1.75rem, 1rem + 2vw, 2.75rem) 0 0; }
+.film-stage {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--term-line); border-radius: var(--radius-lg);
+  background: var(--term); box-shadow: var(--shadow-term);
+  aspect-ratio: 16 / 9;
+}
+.film-video { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--term); }
+
+/* The overlay is an affordance, not a replacement: the native controls stay,
+   and with JS off the button simply never appears. */
+.film-play {
+  position: absolute; inset: 0; display: none;
+  flex-direction: column; align-items: center; justify-content: center; gap: .9rem;
+  width: 100%; border: 0; cursor: pointer;
+  background: linear-gradient(to bottom, rgba(7, 8, 11, .1), rgba(7, 8, 11, .55));
+  color: var(--term-fg); font: 600 1rem/1 var(--font-body);
+  transition: background-color var(--dur-fast);
+}
+.js .film-play { display: flex; }
+.film-play:hover, .film-play:focus-visible { background: rgba(7, 8, 11, .32); }
+.film-play-ic {
+  display: grid; place-items: center; flex: none;
+  width: clamp(64px, 6vw, 84px); height: clamp(64px, 6vw, 84px);
+  padding: clamp(14px, 1.4vw, 20px);
+  border-radius: 50%; background: var(--paper); color: var(--ink);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.film-play:hover .film-play-ic, .film-play:focus-visible .film-play-ic { transform: scale(1.07); }
+.film-play-text { padding: .4rem .9rem; border-radius: 999px; background: rgba(7, 8, 11, .7); }
+.film-stage.is-playing .film-play { display: none; }
+.film-cap {
+  max-width: 72ch; margin: 1.25rem auto 0;
+  color: var(--ink-2); font-size: .95rem; line-height: 1.55; text-align: center;
+}
+.film-cap b { color: var(--allow-text); }
+
 /* 5c. The fork: one poisoned file, two outcomes ------------------------- */
 /* The gap is measured from the fold, not from the element above it. At the old
    fixed spacing the red and green panes peeked over the bottom edge on a laptop,
