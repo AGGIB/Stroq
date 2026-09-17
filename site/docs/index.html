@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — Stroq</title>
+<meta name="description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command. The reference for the tool, not the pitch.">
+<link rel="canonical" href="https://stroq.dev/docs/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3ee">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0f12">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Stroq">
+<meta property="og:url" content="https://stroq.dev/docs/">
+<meta property="og:title" content="Docs — Stroq">
+<meta property="og:description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command.">
+<meta property="og:image" content="https://stroq.dev/assets/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Stroq — know what told your AI agent to do that">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Docs — Stroq">
+<meta name="twitter:description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command.">
+<meta name="twitter:image" content="https://stroq.dev/assets/social-preview.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script src="/main.js" defer></script>
+<script src="/docs/docs.js" defer></script>
+<script src="/_vercel/insights/script.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="logo-mark" viewBox="311.24 739.83 1424.07 579.46">
+    <g fill="currentColor">
+      <path d="M 455.696 782.43 C 483.886 781.306 517.678 782.14 546.255 782.137 L 715.278 782.013 C 686.153 811.335 656.639 841.748 627.299 870.663 C 571.104 869.248 513.873 871.674 457.605 870.779 C 432.847 871.205 422.582 889.881 425.104 912.405 C 428.975 946.974 458.266 943.094 484.499 943.02 L 558.199 942.913 C 600.668 942.871 635.484 938.298 670.646 967.674 C 719.173 1008.22 723.213 1089.15 682.397 1136.46 C 658.414 1164.25 633.919 1174.72 597.813 1177.88 C 512.11 1178.76 421.986 1178.13 336.265 1177.51 L 422.448 1090.93 C 477.212 1090.06 532.689 1091.18 587.507 1090.76 C 598.802 1090.94 611.71 1087.52 619.314 1078.63 C 633.228 1062.35 627.614 1032.42 606.496 1025.31 C 594.159 1021.16 578.301 1022.44 565.627 1022.45 L 494.396 1022.52 C 450.43 1022.51 415.76 1025.88 379.072 995.09 C 355.552 974.686 342.952 946.12 340.632 915.529 C 335.236 844.372 384.504 787.225 455.696 782.43 z"/>
+      <path fill-rule="evenodd" d="M 1192.51 883.241 C 1209.19 881.213 1299.58 881.828 1314.33 884.723 C 1326.92 887.23 1338.87 892.332 1349.39 899.703 C 1392.81 930.04 1403.43 978.339 1401.86 1027.36 C 1400.58 1067.25 1403.63 1096.57 1378.01 1131.25 C 1358.32 1157.91 1338.57 1171.14 1306.24 1176.71 C 1292.68 1177.94 1270.82 1177.68 1256.83 1177.08 C 1218.51 1175.47 1182.87 1184.34 1149.4 1161.25 C 1103.86 1129.83 1094.5 1087.02 1095.87 1034.98 C 1096.83 998.272 1093.47 966.536 1117.03 934.521 C 1137.57 906.463 1158.17 889.561 1192.51 883.241 z M 1206.76 968.274 C 1222.88 967.357 1289.4 965.87 1302.2 972.352 C 1309.47 976.033 1315.16 981.609 1317.7 989.469 C 1320.94 999.499 1320.85 1043.63 1319.47 1055.91 C 1318.88 1061.13 1317.69 1066.21 1315.18 1070.86 C 1310.22 1080.04 1302.13 1084.35 1292.46 1087.06 C 1264.03 1087.98 1231.48 1087.38 1202.96 1086.43 C 1184.2 1085.81 1174.71 1063.1 1176.51 1045.69 C 1179.47 1017.14 1166.12 975.032 1206.76 968.274 z"/>
+      <path d="M 813.644 763.829 C 816.866 767.013 812.417 847.171 815.835 860.058 C 823.576 889.248 855.289 882.786 881.027 882.744 C 903.949 882.606 926.872 882.698 949.792 883.02 C 943.55 890.162 933.159 899.583 926.117 906.353 C 913.417 918.491 900.838 930.754 888.381 943.141 C 847.592 944.698 808.509 932.871 814.498 991.998 C 817.597 1022.6 805.348 1058.89 832.704 1083.28 C 849.317 1098.09 866.039 1098.21 886.766 1097.35 L 887.02 1177.21 L 872.102 1177.24 C 866.423 1177.3 860.743 1177.23 855.067 1177.03 C 777.421 1173.6 723.317 1104.42 729.865 1029.34 C 731.064 1015.59 729.158 998.343 729.994 984.616 C 733.417 928.449 702.921 934.084 661.405 933.509 L 661.181 917.323 C 710.407 866.813 763.02 812.855 813.644 763.829 z"/>
+      <path d="M 1525.2 884.362 C 1538.61 883.01 1571.66 883.817 1586.68 883.807 C 1628.22 883.722 1669.77 883.854 1711.31 884.204 C 1685.1 909.685 1653.08 945.273 1626.4 969.004 L 1563.63 968.791 C 1527.94 968.689 1500.9 965.2 1500.87 1012.41 C 1500.84 1048.47 1492.17 1097.74 1545.28 1092.97 C 1553.69 1092.21 1567.62 1092.94 1576.5 1092.91 L 1598.4 1092.97 L 1598.32 1177.83 C 1584.22 1178.39 1569.76 1177.54 1555.7 1177.85 C 1522.73 1178.54 1494.44 1178.18 1467.64 1156.59 C 1422.25 1120.01 1419.48 1072.5 1420.93 1018.73 C 1421.89 983.074 1426.18 956.454 1449.35 927.261 C 1469.13 902.352 1493.98 888.241 1525.2 884.362 z"/>
+      <path d="M 1708.88 926.136 C 1709.61 927.182 1709.84 1186.44 1709.51 1213.26 C 1685.37 1237.31 1655.11 1270.07 1632.11 1295.29 L 1630.62 1295.26 C 1628.74 1288.6 1630.05 1226.53 1630.07 1216.3 L 1630.07 998.793 C 1654.25 975.603 1680.75 942.749 1708.88 926.136 z"/>
+      <path d="M 996.868 878.799 C 999.14 888.336 997.402 944.517 997.382 957.049 L 997.125 1177.33 C 969.821 1177 942.515 1176.88 915.209 1176.96 C 914.191 1171.76 914.779 1121.61 914.846 1113.49 C 915.266 1062.5 913.875 1010.5 914.915 959.645 C 924.468 952.042 935.619 939.211 944.567 930.291 C 961.774 913.138 978.821 895.051 996.868 878.799 z"/>
+      <path d="M 1071.35 882.428 C 1090.83 881.97 1114.65 883.814 1133.59 882.123 C 1100.84 903.124 1088.51 925.218 1079.84 963.01 L 1045.25 963.205 C 1025.97 965.293 1019.61 974.984 1010.36 990.117 C 1011.05 981.902 1010.75 972.21 1010.93 963.862 C 1011.78 925.046 1027.02 885.538 1071.35 882.428 z"/>
+    </g>
+  </symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 16 16"><path d="M4 12l8-8M6.5 4H12v5.5"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></symbol>
+  <symbol id="i-cross" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+</svg>
+
+<header class="site-head" id="top">
+  <nav class="nav container" aria-label="Main navigation">
+    <a class="brand" href="/" aria-label="Stroq — home">
+      <svg class="brand-logo" width="84" height="34" aria-hidden="true" focusable="false"><use href="#logo-mark"/></svg>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-menu">
+      <svg class="ic ic-menu" width="20" height="20" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+      <svg class="ic ic-close" width="20" height="20" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>
+      <span class="sr-only">Menu</span>
+    </button>
+    <div class="nav-menu" id="nav-menu">
+      <ul class="nav-links">
+        <li><a href="/#how">How it works</a></li>
+        <li><a href="/#attacks">Attacks</a></li>
+        <li><a href="/docs/" aria-current="page">Docs</a></li>
+        <li><a href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
+        <li><a href="https://www.npmjs.com/package/@stroq/cli">npm <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
+      </ul>
+      <div class="install-pill install-pill-nav" data-nav-install>
+        <code class="install-cmd" id="nav-install-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli init</code>
+        <button class="copy-btn copy-btn-sm" type="button" data-copy="npx @stroq/cli init" data-select="nav-install-cmd">
+          <svg class="ic" width="15" height="15" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<main id="main">
+<div class="container docs-shell">
+
+<nav class="docs-nav" aria-label="Docs sections">
+  <div class="docs-nav-group">
+    <p class="docs-nav-heading">Start</p>
+    <ul class="docs-nav-list">
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#agents">Per-agent notes</a></li>
+    </ul>
+  </div>
+  <div class="docs-nav-group">
+    <p class="docs-nav-heading">How it decides</p>
+    <ul class="docs-nav-list">
+      <li><a href="#how-it-works">How it works</a></li>
+      <li><a href="#policy">Policy</a></li>
+      <li><a href="#provenance">Provenance</a></li>
+      <li><a href="#secret-egress">Secret egress guard</a></li>
+    </ul>
+  </div>
+  <div class="docs-nav-group">
+    <p class="docs-nav-heading">Use it</p>
+    <ul class="docs-nav-list">
+      <li><a href="#commands">Commands</a></li>
+      <li><a href="#replay">Replay</a></li>
+      <li><a href="#attack">Attack corpus</a></li>
+      <li><a href="#exposure">Exposure &amp; inspect</a></li>
+      <li><a href="#trust">Trust</a></li>
+    </ul>
+  </div>
+  <div class="docs-nav-group">
+    <p class="docs-nav-heading">Evidence</p>
+    <ul class="docs-nav-list">
+      <li><a href="#coverage">Coverage &amp; bench</a></li>
+      <li><a href="#limits">Guarantees &amp; limits</a></li>
+    </ul>
+  </div>
+</nav>
+
+<article class="docs-main">
+
+<div class="docs-lead">
+  <span class="docs-kicker">Documentation</span>
+  <h1>How Stroq actually works.</h1>
+  <p>Every hook event it installs on, the default policy, provenance and the secret egress guard, and every command. This is the reference; <a href="/#how">the front page</a> is the pitch.</p>
+</div>
+
+<section class="docs-section" id="overview" aria-labelledby="overview-title">
+  <h2 id="overview-title">Overview</h2>
+  <p>Coding agents read untrusted content constantly: web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that follows what it reads turns them into real actions — outbound requests, secret reads, external pushes, arbitrary shell.</p>
+  <p>Every guard in this field answers the same question: is the command in front of me dangerous? That question cannot be answered from the command alone. An <code>npx</code> that installs an attacker's package looks exactly like an <code>npx</code> that installs a dependency; what separates them is that one of them was dictated by something the agent had just read.</p>
+  <p>Stroq is built around that difference. It sits on the agent's own tool-call hooks, remembers what the session took in, and when an action matches something that arrived in untrusted output it says so by name: which file, which tool result, how long ago. <a href="#replay"><code>stroq replay</code></a> then reconstructs the whole chain for a session after the fact — including sessions that ran before Stroq was installed. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.</p>
+  <div class="docs-note">
+    <p><strong>Six agents and any MCP client, one engine.</strong> Native hooks for Claude Code, Cursor, Codex, Copilot CLI and Windsurf, an in-process plugin for OpenClaw, and a stdio proxy for any other MCP client (Claude Desktop included) — the same classifier, policy, taint and audit everywhere.</p>
+  </div>
+</section>
+
+<section class="docs-section" id="install" aria-labelledby="install-title">
+  <h2 id="install-title">Install</h2>
+  <pre class="code" tabindex="0" role="region" aria-label="Install for Claude Code"><code>npx @stroq/cli init                  <span class="tt-dim"># Claude Code: writes .claude/settings.json hooks</span>
+npx @stroq/cli doctor                <span class="tt-dim"># check the installation</span></code></pre>
+  <p><code>init</code> writes hooks into the project's <code>.claude/settings.json</code> by default; pass <code>--user</code> to install into <code>~/.claude/settings.json</code> instead, or <code>--dry-run</code> to preview the change without writing anything.</p>
+  <p>Prefer a persistent install? <code>npm install -g @stroq/cli</code> installs the <code>stroq</code> command globally — then run <code>stroq init</code> and <code>stroq doctor</code> directly.</p>
+  <h3>Coverage by agent</h3>
+  <div class="docs-table-wrap">
+    <table class="docs-table">
+      <caption>What each host lets Stroq do. Full event tables and every documented limit are in the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md">per-agent reference on GitHub</a>.</caption>
+      <thead>
+        <tr><th>Agent</th><th>Installs as</th><th>Blocks shell/MCP</th><th>Blocks writes</th><th><code>ask</code></th><th>On Stroq's own error</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Claude Code</td><td><code>.claude/settings.json</code> hooks, or the plugin</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Deny on high-impact calls</td></tr>
+        <tr><td>Cursor</td><td><code>.cursor/hooks.json</code></td><td>Yes</td><td>Audited only</td><td>Yes</td><td>Deny on shell/MCP; allow elsewhere</td></tr>
+        <tr><td>Codex</td><td><code>.codex/hooks.json</code></td><td>Yes</td><td>Yes</td><td>Rendered as deny</td><td>Exit 2 on high-impact calls</td></tr>
+        <tr><td>Copilot CLI</td><td><code>.github/hooks/stroq.json</code></td><td>Yes</td><td>Yes</td><td>Yes (deny in cloud agent)</td><td>Exit 2 on <code>preToolUse</code></td></tr>
+        <tr><td>OpenClaw</td><td>In-process plugin</td><td>Yes</td><td>Yes</td><td>Yes, real <code>/approve</code></td><td>Block on every path except reads</td></tr>
+        <tr><td>Windsurf</td><td><code>.windsurf/hooks.json</code></td><td>Yes</td><td>Yes</td><td>Rendered as block</td><td>Exit 2 on high-impact <code>pre_*</code></td></tr>
+        <tr><td>Any MCP client</td><td><code>stroq mcp</code> proxy</td><td><code>tools/call</code> only</td><td>Through <code>tools/call</code></td><td>Blocked tool result</td><td>Deny while judging</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="docs-section" id="agents" aria-labelledby="agents-title">
+  <h2 id="agents-title">Per-agent notes</h2>
+  <p>One install command per agent, and the one limit worth knowing before you rely on it. <strong>Full event tables, wire formats and every documented limit are in <a href="https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md">docs/AGENTS.md on GitHub</a></strong> — that file runs to 280 lines for a reason, and belongs there, not compressed onto this page.</p>
+  <div class="agent-grid">
+    <div class="agent-card">
+      <h3>Cursor</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent cursor</code>
+      <p>Six of Cursor's hook events, <code>failClosed</code> on the two that block.</p>
+      <p class="agent-limit"><strong>Limit:</strong> no Cursor event can block an editor-made file edit — it's audited, not stopped.</p>
+    </div>
+    <div class="agent-card">
+      <h3>Codex</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent codex</code>
+      <p><code>PreToolUse</code>/<code>PostToolUse</code> on shell, <code>apply_patch</code> and MCP calls.</p>
+      <p class="agent-limit"><strong>Limit:</strong> no <code>ask</code> in Codex's hook contract — every policy <code>ask</code> is enforced as a deny.</p>
+    </div>
+    <div class="agent-card">
+      <h3>Copilot CLI</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent copilot</code>
+      <p>Two events, no matcher — every tool goes through Stroq.</p>
+      <p class="agent-limit"><strong>Limit:</strong> a hook slower than the timeout is treated as an allow, and the late deny is discarded.</p>
+    </div>
+    <div class="agent-card">
+      <h3>OpenClaw</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent openclaw</code>
+      <p>In-process plugin; <code>before_tool_call</code> can raise a real <code>/approve</code> prompt.</p>
+      <p class="agent-limit"><strong>Limit:</strong> <code>after_tool_call</code> is observe-only — a poisoned result taints silently, enforced on the next call.</p>
+    </div>
+    <div class="agent-card">
+      <h3>Windsurf</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent windsurf</code>
+      <p>Six of Cascade's twelve events; every answer is an exit code.</p>
+      <p class="agent-limit"><strong>Limit:</strong> command output is invisible to hooks, so it can't taint a session the way it does elsewhere.</p>
+    </div>
+    <div class="agent-card">
+      <h3>Any MCP client</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent mcp --client claude-desktop</code>
+      <p>A stdio proxy in front of the server — for clients with no hook API at all.</p>
+      <p class="agent-limit"><strong>Limit:</strong> stdio only; entries with <code>url</code>/<code>serverUrl</code> (HTTP servers) are skipped, unprotected.</p>
+    </div>
+  </div>
+  <p>Also available: <a href="https://github.com/AGGIB/Stroq#as-a-claude-code-plugin">as a Claude Code plugin</a> (<code>/plugin marketplace add AGGIB/Stroq</code>), or <a href="https://github.com/AGGIB/Stroq#from-source">from source</a>.</p>
+</section>
+
+<hr class="docs-divider">
+
+<section class="docs-section" id="how-it-works" aria-labelledby="how-it-works-title">
+  <h2 id="how-it-works-title">How it works</h2>
+  <ol>
+    <li><strong><code>PostToolUse</code> — scan and taint.</strong> The output of <code>Read</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Bash</code>, <code>Grep</code>, and every <code>mcp__*</code> tool is normalized (zero-width characters and variation-selector code points stripped, homoglyphs folded, base64/hex/URL-encoded content decoded up to two levels) and matched against the rule set. If the highest-severity match scores at or above <code>threshold</code> (0.6 by default), the session is marked <code>suspect</code> and the agent gets an inline warning to treat the content as untrusted.</li>
+    <li><strong><code>PreToolUse</code> — classify and decide.</strong> <code>Bash</code>, file writes, <code>Read</code>, <code>WebFetch</code>, and <code>mcp__*</code> calls are classified into action classes (<code>shell.network</code>, <code>shell.destructive</code>, <code>shell.exec_encoded</code>, <code>fs.secrets</code>, <code>git.push_external</code>, <code>config.self</code>, <code>mcp.side_effect</code>, and more) and evaluated against an ordered policy — first matching rule wins, otherwise the configured default (<code>allow</code>).</li>
+    <li><strong>Audit.</strong> Every decision, on both hooks, is appended to a hash-chained JSONL log (<code>~/.stroq/audit.jsonl</code>), sensitive values redacted before they're written. <code>stroq verify</code> checks the chain hasn't been tampered with.</li>
+  </ol>
+  <p>The phase names are Claude Code's; every other adapter maps its host's events onto the same pair — Cursor's <code>beforeShellExecution</code>/<code>afterMCPExecution</code>, Codex's and Copilot's <code>PreToolUse</code>/<code>PostToolUse</code>, OpenClaw's <code>before_tool_call</code>/<code>after_tool_call</code>, Windsurf's <code>pre_*</code>/<code>post_*</code> events, the MCP proxy's request and its response — so one policy file, one taint store and one audit log govern all of them.</p>
+  <p>If Stroq itself crashes while handling a high-impact tool call, it fails <strong>closed</strong> — deny — rather than silently letting the action through.</p>
+</section>
+
+<section class="docs-section" id="policy" aria-labelledby="policy-title">
+  <h2 id="policy-title">Policy</h2>
+  <p>Copy <a href="https://github.com/AGGIB/Stroq/blob/main/policies/default.yaml"><code>policies/default.yaml</code></a> to <code>~/.stroq/policy.yaml</code> and edit it — rules are evaluated in order, the first match wins, and anything unmatched falls through to <code>default</code>. A custom policy replaces the default wholesale, so provenance and the secret egress guard are enforced only if you keep their rules (<code>deny-origin-suspect</code>, <code>ask-origin-untrusted</code>, <code>deny-secret-egress</code>, <code>deny-secret-unscannable</code>) — ahead of the <code>ask-*</code> rules. <code>threshold</code> (0–1) is the minimum scan score before a result taints a session as <code>suspect</code>. Set <code>STROQ_HOME</code> to relocate all state to a different directory.</p>
+  <h3>Default policy</h3>
+  <p>Generated from <code>policies/default.yaml</code>; evaluated top to bottom, first match wins.</p>
+  <div class="docs-table-wrap">
+    <table class="docs-table">
+      <thead><tr><th>Rule id</th><th>Effect</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td>deny-secret-egress</td><td class="tag-deny">deny</td><td><code>secret.egress</code>, any taint</td></tr>
+        <tr><td>deny-secret-unscannable</td><td class="tag-deny">deny</td><td><code>secret.unscannable</code>, any taint</td></tr>
+        <tr><td>deny-self-tamper</td><td class="tag-deny">deny</td><td><code>config.self</code>, any taint</td></tr>
+        <tr><td>deny-git-exec</td><td class="tag-deny">deny</td><td><code>config.git_exec</code>, any taint</td></tr>
+        <tr><td>deny-encoded-exec</td><td class="tag-deny">deny</td><td><code>shell.exec_encoded</code>, any taint</td></tr>
+        <tr><td>deny-origin-suspect</td><td class="tag-deny">deny</td><td><code>origin.suspect</code>, any taint</td></tr>
+        <tr><td>deny-network-when-tainted</td><td class="tag-deny">deny</td><td><code>shell.network</code>, taint = suspect</td></tr>
+        <tr><td>deny-fetch-when-tainted</td><td class="tag-deny">deny</td><td><code>network.fetch</code>, taint = suspect</td></tr>
+        <tr><td>deny-secrets-when-tainted</td><td class="tag-deny">deny</td><td><code>fs.secrets</code>, taint = suspect</td></tr>
+        <tr><td>deny-push-external-when-tainted</td><td class="tag-deny">deny</td><td><code>git.push_external</code>, taint = suspect</td></tr>
+        <tr><td>ask-origin-untrusted</td><td class="tag-ask">ask</td><td><code>origin.untrusted</code>, any taint</td></tr>
+        <tr><td>ask-mcp-side-effect-when-tainted</td><td class="tag-ask">ask</td><td><code>mcp.side_effect</code>, taint = suspect</td></tr>
+        <tr><td>ask-self-touch</td><td class="tag-ask">ask</td><td><code>config.self_touch</code>, any taint</td></tr>
+        <tr><td>ask-destructive</td><td class="tag-ask">ask</td><td><code>shell.destructive</code>, any taint</td></tr>
+        <tr><td>ask-push-external</td><td class="tag-ask">ask</td><td><code>git.push_external</code>, any taint</td></tr>
+        <tr><td><em>(no rule matched)</em></td><td class="tag-allow">allow</td><td>default</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Commands that only read the security config — <code>cat</code>, <code>grep</code>, <code>git status</code>/<code>diff</code>/<code>add</code>, and the like — are classified as ordinary reads, not <code>config.self</code>, so they stay allowed; opening it in an editor or otherwise writing to it is what triggers <code>config.self</code> (deny) or <code>config.self_touch</code> (ask).</p>
+</section>
+
+<section class="docs-section" id="provenance" aria-labelledby="provenance-title">
+  <h2 id="provenance-title">Provenance</h2>
+  <p><code>origin.untrusted</code> fires when a proposed action contains an atom that appeared in an earlier tool output of the same session; <code>origin.suspect</code> additionally requires that output to have scanned as <code>suspect</code>. Only some atoms count: package specs (<code>npx</code>, <code>pnpm dlx</code>, <code>uvx</code>, <code>npm install</code>, <code>pip install</code>, <code>cargo install</code>, …), <code>curl</code>/<code>wget</code> piped into a shell, and base64 blobs always do; URLs and hosts count only when the action is already network-shaped, so following a documentation link with <code>WebFetch</code> never asks.</p>
+  <p>Package atoms already in the project's <code>package.json</code>, <code>node_modules/.bin</code>, <code>requirements.txt</code> or <code>pyproject.toml</code> are not counted for shell commands. Traces live in <code>~/.stroq/sessions/&lt;hash&gt;.prov.json</code> (redacted excerpt ≤ 120 chars, at most 2,000 per session, mode <code>0600</code>). The recovery for a false positive is <code>stroq untaint --session &lt;id&gt;</code>, which clears both the taint and the provenance trace.</p>
+  <p>Provenance is text-level: an agent that reads a poisoned page and then writes its <em>own</em> command is not attributed this way — that is what taint and the policy rules above are for.</p>
+</section>
+
+<section class="docs-section" id="secret-egress" aria-labelledby="secret-egress-title">
+  <h2 id="secret-egress-title">Secret egress guard</h2>
+  <p><code>secret.egress</code> fires when an egress-shaped action (<code>shell.network</code>, <code>network.fetch</code>, <code>mcp.call</code>, <code>mcp.side_effect</code>, <code>git.push_external</code>, <code>shell.exec_encoded</code>) carries the exact value of a known secret. Known secrets are the credential-named or vendor-shaped values found in the working directory's <code>.env*</code> files, <code>~/.aws/credentials</code>, <code>~/.npmrc</code>, <code>~/.netrc</code>, <code>~/.docker/config.json</code>, and credential-named environment variables.</p>
+  <p>The index at <code>~/.stroq/secrets.json</code> holds only <code>sha256(salt + value)</code>, the key name and the file path — never the value itself. The whole argument is scanned in overlapping 256&nbsp;KiB windows, up to 2&nbsp;MiB total, so padding buys an attacker nothing up to that size; past it, the action is denied as unscannable rather than let through half-checked. The matched value is redacted from the audit summary as <code>[REDACTED:&lt;name&gt;]</code>.</p>
+  <div class="docs-note">
+    <p><strong>What it doesn't catch:</strong> the guard matches secret <em>values in the arguments</em> of an outbound call, so it doesn't know what a command will go on to read — <code>curl -d @~/.aws/credentials …</code> is covered by <code>fs.secrets</code>, not this. Matching is exact: a value split across arguments, base64-encoded, or DNS-encoded is not matched. <code>$VAR</code> shell expansion happens after Stroq sees the command, so <code>curl -H "Authorization: Bearer $TOKEN"</code> is never flagged — the recommended way to pass a credential. Full limits: <a href="https://github.com/AGGIB/Stroq#secret-egress-guard">README on GitHub</a>.</p>
+  </div>
+</section>
+
+<hr class="docs-divider">
+
+<section class="docs-section" id="commands" aria-labelledby="commands-title">
+  <h2 id="commands-title">Commands</h2>
+  <div class="docs-table-wrap">
+    <table class="docs-table">
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>stroq init</td><td>Install hooks for an agent, or wrap an MCP client's stdio servers in the proxy</td></tr>
+        <tr><td>stroq hook &lt;agent&gt;</td><td>Hook entrypoint (reads the event on stdin)</td></tr>
+        <tr><td>stroq mcp</td><td>The stdio MCP proxy that <code>init --agent mcp</code> writes into a client config</td></tr>
+        <tr><td>stroq doctor</td><td>Check Node version, rules, hooks for every agent, self-test</td></tr>
+        <tr><td>stroq log</td><td>Show recent audit entries</td></tr>
+        <tr><td>stroq verify</td><td>Verify the audit hash chain</td></tr>
+        <tr><td>stroq untaint</td><td>Clear a false-positive session's taint and provenance, or every session's</td></tr>
+        <tr><td>stroq trust</td><td>Waive a false positive on a file's exact content, pinned to its sha256</td></tr>
+        <tr><td>stroq why</td><td>Explain the most recent denied/asked action: rule, provenance, taint</td></tr>
+        <tr><td>stroq replay</td><td>Rebuild a session's causal history — which content produced which action</td></tr>
+        <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
+        <tr><td>stroq attack</td><td>Replay 20 recorded incidents against your policy; exit 1 if any gets through</td></tr>
+        <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>
+        <tr><td>stroq inspect</td><td>Read what a repository runs when you open it, before you point an agent at it</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Full flags for every command: <a href="https://github.com/AGGIB/Stroq#commands">README on GitHub</a>.</p>
+</section>
+
+<section class="docs-section" id="replay" aria-labelledby="replay-title">
+  <h2 id="replay-title">Replay</h2>
+  <p>Every guard, ours included, answers one question in the moment: should this call be allowed. After the session is over a different question is the one that matters, and nothing answers it — the agent worked for hours, something went wrong at the end, and the transcript doesn't say which piece of text it read turned into which action.</p>
+  <p><code>stroq replay</code> reconstructs that. It groups the session into the content the agent read and, under each, the actions that traced back to it: the exact fragment carried over, how long afterwards, and the rule that stopped it. It adds no telemetry — both halves of the link were already on disk.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Replaying the most recent session"><code>npx @stroq/cli replay --last</code></pre>
+  <p>It reads the transcripts your agent already keeps, so it answers for sessions that ran <strong>before Stroq was installed</strong> — no install, no config, nothing to set up first. It runs against a throwaway home and never taints a live session. <code>--transcript &lt;path&gt;</code> replays a specific file, <code>--json</code> emits the model, <code>--list</code> names the sessions in the log.</p>
+</section>
+
+<section class="docs-section" id="attack" aria-labelledby="attack-title">
+  <h2 id="attack-title">Attack corpus</h2>
+  <p><code>stroq attack</code> replays recorded hook events from twelve public incidents and eight synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>20 scenarios: 15 blocked, 5 asked, 0 passed through — every attack was stopped.</code></pre>
+  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq#replay-twenty-real-and-synthetic-attacks">README on GitHub</a>.</p>
+</section>
+
+<section class="docs-section" id="exposure" aria-labelledby="exposure-title">
+  <h2 id="exposure-title">Exposure &amp; inspect</h2>
+  <p><code>stroq attack</code> tells you what your policy would do. <code>stroq exposure</code> tells you what actually reaches <em>you</em> on this machine — which agents run here, which of them Stroq isn't installed for, which MCP servers bypass the proxy, what config keys widen privilege, and what the repository in front of you runs when you open it. Exit code 1 on any finding, so it works in CI or a pre-commit hook.</p>
+  <p><code>stroq inspect &lt;dir&gt;</code> answers the same question for a repository you haven't opened yet, which matters because agents run <code>git status</code> at startup — before any trust prompt a hook could gate on. <code>stroq inspect --env</code> prints two <code>GIT_CONFIG_*</code> exports that neutralise a hostile <code>.git/config</code> before the agent ever touches it.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Inspect a repository before opening it"><code>npx @stroq/cli inspect ./that-repo-someone-sent-me</code></pre>
+</section>
+
+<section class="docs-section" id="trust" aria-labelledby="trust-title">
+  <h2 id="trust-title">Trust</h2>
+  <p><code>stroq untaint</code> clears a session and forgets — re-reading the same file re-taints it. <code>stroq trust &lt;file&gt;</code> waives a false positive permanently, pinned to the file's exact sha256, so any change to the file taints again. The list lives in <code>~/.stroq/trust.json</code>, itself protected as <code>config.self</code>, and every waiver is written into the audit chain next to the verdict it waived — never a silent hole. Waiving a taint never waives the always-deny classes (<code>secret.egress</code>, <code>config.self</code>, <code>shell.exec_encoded</code>).</p>
+</section>
+
+<hr class="docs-divider">
+
+<section class="docs-section" id="coverage" aria-labelledby="coverage-title">
+  <h2 id="coverage-title">Coverage &amp; bench</h2>
+  <p>Two commands report what the attack corpus actually demonstrates, both regenerated in CI from their own live output so the published numbers can never drift from the code that produces them.</p>
+  <h3>stroq bench — false-positive rate</h3>
+  <div class="report-stat"><span class="n">16%</span><span class="label">flagged on 25 files of real, benign developer documentation</span></div>
+  <p>Measured by a method we publish, on a corpus we vendor — not a third-party audit. <code>stroq bench --corpus &lt;dir&gt;</code> reproduces the same measurement on your own files. Full method and the files it flags: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md">docs/BENCH.md</a>.</p>
+  <h3>stroq coverage — technique mapping</h3>
+  <p>Maps the 20 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
+</section>
+
+<section class="docs-section" id="limits" aria-labelledby="limits-title">
+  <h2 id="limits-title">Guarantees &amp; limits</h2>
+  <p>Stroq is young; here's what it actually gives you today, and the honest edges.</p>
+  <ul>
+    <li><strong>Fail-closed:</strong> if Stroq errors out while handling a high-impact <code>PreToolUse</code> call, the action is denied, not silently allowed — including on a hook timeout, where a watchdog answers first at 60% of the agent's own timeout.</li>
+    <li><strong><code>stroq doctor</code> checks that the hook is still Stroq's</strong>, not just that one is there — a config rewritten to point at a different binary with the same command tail fails the check.</li>
+    <li><strong>Every adapter's hook contract is narrower than Claude Code's</strong>, in its own way — see <a href="#agents">per-agent notes</a> above and the full detail in <a href="https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md">docs/AGENTS.md</a>.</li>
+    <li><strong>Hooks are not an enforcement boundary.</strong> They can be turned off or bypassed by the agent's own settings. Stroq raises the cost of an attack and makes it auditable — it doesn't make an agent immune. Run <code>stroq exposure</code> to see what's actually enforced on your machine.</li>
+    <li><strong>Latency:</strong> roughly 100–250&nbsp;ms per hook invocation, dominated by Node process start-up rather than the scan itself.</li>
+    <li><strong>Regex denial-of-service is mitigated, not eliminated:</strong> a build-time performance gate keeps known-slow patterns out of the shipped rule set; a scan that still runs past budget at runtime fails closed rather than returning clean.</li>
+    <li><strong>Shell quote-splicing evasions are known</strong> (for example <code>c"u"rl</code>) — see <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">SECURITY.md</a> for the current out-of-scope list.</li>
+  </ul>
+  <p>Full list, unabridged: <a href="https://github.com/AGGIB/Stroq#guarantees-and-limits">README on GitHub</a>.</p>
+</section>
+
+</article>
+</div>
+</main>
+
+<footer class="site-foot">
+  <div class="container foot-grid">
+    <div class="foot-brand">
+      <svg class="brand-logo" width="84" height="34" role="img" aria-labelledby="foot-logo-title" focusable="false"><title id="foot-logo-title">Stroq</title><use href="#logo-mark"/></svg>
+      <p class="foot-line">Built for developers who let agents run.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="https://github.com/AGGIB/Stroq">GitHub</a></li>
+        <li><a href="https://www.npmjs.com/package/@stroq/cli">npm</a></li>
+        <li><a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">Security policy</a></li>
+        <li><a href="https://github.com/AGGIB/Stroq/blob/main/CHANGELOG.md">Changelog</a></li>
+        <li><a href="https://github.com/AGGIB/Stroq/blob/main/LICENSE">License Apache-2.0</a></li>
+      </ul>
+    </nav>
+    <p class="foot-meta"><span>Report vulnerabilities privately through GitHub Security Advisories. A bypass of a documented protection is a vulnerability, not a feature request.</span></p>
+  </div>
+</footer>
+
+<div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+
+</body>
+</html>

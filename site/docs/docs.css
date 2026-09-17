@@ -1,0 +1,181 @@
+/* Stroq docs — layout only. Tokens, header, footer, buttons and the .code-fig
+   terminal panels all come from /styles.css; this file adds the two-column
+   docs shell, the side nav, and article typography on top of it. */
+
+/* 1. Shell ---------------------------------------------------------------- */
+.docs-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: clamp(1.5rem, 3vw, 3.5rem);
+  align-items: start;
+  padding-block: clamp(1.75rem, 1.5rem + 1.5vw, 3rem) var(--space-section);
+}
+
+/* 2. Side nav --------------------------------------------------------------- */
+.docs-nav {
+  position: sticky;
+  top: calc(64px + 1.5rem);
+  max-height: calc(100vh - 64px - 3rem);
+  overflow-y: auto;
+  padding-right: .5rem;
+  font-size: .89rem;
+}
+.docs-nav-group + .docs-nav-group { margin-top: 1.35rem; }
+.docs-nav-heading {
+  margin: 0 0 .5rem;
+  color: var(--ink-2);
+  font: 600 .74rem/1 var(--font-body);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.docs-nav-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.docs-nav-list a {
+  display: block;
+  padding: .32rem 0 .32rem .85rem;
+  border-left: 1.5px solid var(--line);
+  color: var(--ink-2);
+  text-decoration: none;
+  line-height: 1.3;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.docs-nav-list a:hover { color: var(--ink); }
+.docs-nav-list a.is-active { border-left-color: var(--ink); color: var(--ink); font-weight: 500; }
+
+/* 3. Article ---------------------------------------------------------------- */
+.docs-main { min-width: 0; max-width: 46rem; }
+.docs-lead {
+  margin: 0 0 var(--space-head);
+  padding-bottom: var(--space-head);
+  border-bottom: 1px solid var(--line);
+}
+.docs-kicker {
+  display: inline-block;
+  margin-bottom: .9rem;
+  color: var(--ink-2);
+  font: 600 .78rem/1 var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.docs-lead h1 { font-size: clamp(2.1rem, 1.6rem + 1.8vw, 3.1rem); line-height: 1.02; }
+.docs-lead p { margin-top: 1rem; max-width: 42rem; color: var(--ink-2); font-size: var(--text-lead); line-height: 1.5; }
+
+/* No scroll-margin-top here: /styles.css already sets `scroll-padding-top:
+   5rem` on <html>, and Chromium adds the two rather than taking the larger
+   one, so a second offset here would double it (measured: 84px + 80px =
+   164px land point, confirmed against the sticky header's real 65px). */
+.docs-section { margin-top: var(--space-head); }
+.docs-section:first-of-type { margin-top: 0; }
+.docs-section h2 { font-size: clamp(1.35rem, 1.15rem + .7vw, 1.75rem); }
+.docs-section h3 { margin-top: 1.75rem; font-size: 1.05rem; }
+.docs-section > h2 { margin-bottom: .9rem; }
+.docs-section > h2 + p { margin-top: 0; }
+.docs-section p { margin-top: .85rem; color: var(--ink-2); line-height: 1.62; }
+.docs-section p code,
+.docs-section li code { color: var(--ink); overflow-wrap: anywhere; }
+.docs-section strong { color: var(--ink); font-weight: 600; }
+.docs-section > .code-fig,
+.docs-section > pre.code,
+.docs-section > table,
+.docs-section > ul,
+.docs-section > ol {
+  margin-top: 1.1rem;
+}
+.docs-section ul, .docs-section ol { padding-left: 1.15rem; color: var(--ink-2); line-height: 1.6; }
+.docs-section li + li { margin-top: .4rem; }
+.docs-section a:not(.btn) { color: var(--ink); text-decoration-color: var(--line-2); }
+.docs-section a:not(.btn):hover { text-decoration-color: currentColor; }
+
+.docs-divider { margin: var(--space-head) 0 0; border: none; border-top: 1px solid var(--line); }
+
+/* Standalone code block, not wrapped in a figure (used for one-liners). */
+pre.code {
+  border: 1px solid var(--term-line);
+  border-radius: var(--radius-lg);
+  background: var(--term);
+  color: var(--term-fg);
+  box-shadow: var(--shadow-term);
+}
+
+/* 4. Docs tables -------------------------------------------------------- */
+.docs-table-wrap { overflow-x: auto; }
+.docs-table { width: 100%; margin-top: 1.1rem; border-collapse: collapse; font-size: .87rem; }
+.docs-table caption { margin-bottom: .5rem; color: var(--ink-2); font-size: .82rem; text-align: left; }
+.docs-table th, .docs-table td { padding: .55rem .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.docs-table th { color: var(--ink-2); font: 600 .74rem/1.3 var(--font-body); letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+.docs-table td:first-child { white-space: nowrap; font-family: var(--font-mono); font-size: .86em; }
+.docs-table tbody tr:last-child td { border-bottom: none; }
+.docs-table .tag-deny { color: var(--deny-text); font-weight: 600; }
+.docs-table .tag-ask { color: var(--ask-text); font-weight: 600; }
+.docs-table .tag-allow { color: var(--allow-text); font-weight: 600; }
+
+/* 5. Agent cards ---------------------------------------------------------- */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.agent-card {
+  padding: 1.1rem 1.2rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper-2);
+}
+.agent-card h3 { margin: 0; font-size: 1rem; }
+.agent-card .install-cmd-block {
+  display: block;
+  margin: .7rem 0 .8rem;
+  padding: .5rem .65rem;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.agent-card p { margin: 0; color: var(--ink-2); font-size: .87rem; line-height: 1.55; }
+.agent-card .agent-limit { margin-top: .6rem; color: var(--ink-2); font-size: .82rem; line-height: 1.5; }
+.agent-card .agent-limit strong { color: var(--ink); }
+
+/* 6. Callouts --------------------------------------------------------------- */
+.docs-note {
+  margin-top: 1.1rem;
+  padding: .9rem 1.1rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  font-size: .88rem;
+  line-height: 1.55;
+}
+.docs-note p { margin-top: 0; color: var(--ink-2); }
+.docs-note p + p { margin-top: .5rem; }
+.docs-note strong { color: var(--ink); }
+
+/* 7. Report summary card (bench / coverage) ------------------------------ */
+.report-stat {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  margin-top: 1.1rem;
+  font-family: var(--font-display);
+}
+.report-stat .n { font-size: clamp(2rem, 1.6rem + 1vw, 2.6rem); font-weight: 700; letter-spacing: -.01em; }
+.report-stat .label { color: var(--ink-2); font-family: var(--font-body); font-size: .92rem; }
+
+/* 8. Mobile ------------------------------------------------------------- */
+@media (max-width: 860px) {
+  .docs-shell { grid-template-columns: 1fr; }
+  .docs-nav {
+    position: static;
+    max-height: none;
+    padding: 0 0 1rem;
+    margin-bottom: .5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .docs-nav-group { display: inline; }
+  .docs-nav-heading { display: none; }
+  .docs-nav-list { flex-direction: row; flex-wrap: wrap; gap: .3rem .5rem; margin-bottom: .6rem; }
+  .docs-nav-list a { padding: .3rem .6rem; border: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: 999px; }
+  .docs-nav-list a.is-active { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+}
