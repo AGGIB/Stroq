@@ -180,50 +180,61 @@ html:not(.js) .copy-btn { display: none; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
 .ic-gh { flex: none; }
 
-/* 5b. The hero scene: six agents, one firewall, one poisoned file ------- */
-.hero-scene { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-.hs { display: block; width: 100%; min-width: 460px; height: auto; overflow: visible; font-family: var(--font-display); }
-.hs-core { fill: var(--ink); }
-.hs-core-mark { color: var(--paper); }
-.hs-field { fill: none; stroke: var(--line-2); stroke-width: 1.25; stroke-linecap: round; stroke-dasharray: 2.5 7; transform-box: fill-box; transform-origin: center; }
-.hs-box { fill: var(--paper); stroke: var(--line-2); stroke-width: 1.25; }
-.hs-name { fill: var(--ink); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }
-.hs-mark { color: var(--ink); fill: currentColor; }
-.hs-line { stroke: var(--line-2); stroke-width: 1.5; stroke-linecap: round; }
-.hs-pk { opacity: 0; }
-.hs-pk-in, .hs-pk-oc { fill: var(--ink-2); }
-.hs-pk-out { fill: var(--allow); --dx: 62px; }
-/* Per-packet geometry: how far along its own line each packet travels, and when it
-   sets off. These live here rather than in a style="" attribute on each circle
-   because the site is served with `style-src 'self'` and no 'unsafe-inline', which
-   blocks the attribute outright — the custom properties then resolve to nothing,
-   `translate(var(--dx), var(--dy))` becomes invalid, and every packet sits at the
-   start of its line. Values come from the row geometry in the markup: dx/dy is the
-   vector from the agent box edge to the orb's rim. */
-.hs-pk-r1 { --dx: 148.7px; --dy: 92.4px; --pd: 0s; }
-.hs-pk-r2 { --dx: 143.8px; --dy: 54.5px; --pd: .4s; }
-.hs-pk-r3 { --dx: 140.5px; --dy: 19.2px; --pd: .8s; }
-.hs-pk-r4 { --dx: 140.3px; --dy: -14.9px; --pd: 1.2s; }
-.hs-pk-r5 { --dx: 143.2px; --dy: -49.9px; --pd: 1.6s; }
-.hs-pk-oc { --dx: 148.1px; --dy: -87.5px; }
-.hs-pk-out-b { --pd: .8s; }
-.hs-machine rect { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
-.hs-machine path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
-.hs-cap { fill: var(--ink-2); font-size: 12px; font-weight: 500; font-family: var(--font-body); }
-.hs-agent-target .hs-box { fill: var(--ask-tint); stroke: var(--ask); }
-.hs-box-bad { fill: var(--deny-tint); stroke: var(--deny); stroke-dasharray: 4 3; }
-.hs-name-bad { fill: var(--deny-text); }
-.hs-attacker { transform-box: fill-box; transform-origin: center; }
-.hs-tendril { fill: none; stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; stroke-dasharray: 1 2; stroke-dashoffset: 0; }
-.hs-taint { stroke: var(--deny); stroke-width: 2.25; stroke-linecap: round; }
-.hs-hit { fill: var(--deny); opacity: 0; }
-.hs-pulse { fill: none; stroke: var(--deny); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
-.hs-x { transform-box: fill-box; transform-origin: center; }
-.hs-x circle { fill: var(--deny); }
-.hs-x path { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; }
-.hs-verdict rect { fill: var(--deny-tint); stroke: var(--deny); stroke-width: 1.25; }
-.hs-verdict-word { fill: var(--deny-text); font-size: 13px; font-weight: 700; }
-.hs-verdict-rule { fill: var(--deny-text); font-size: 11px; font-weight: 500; font-family: var(--font-mono); }
+/* 5b. The hero terminal: one command, its real output, typed in front of you.
+   The headline promises "know what told your agent to do that"; the terminal
+   shows it being answered. Every line below the prompt is verbatim output from
+   `stroq replay` on a recorded session — the colours are the only thing added. */
+.hero-scene { min-width: 0; }
+.tt {
+  margin: 0; min-width: 0; overflow: hidden;
+  border: 1px solid var(--term-line); border-radius: var(--radius-lg);
+  background: var(--term); color: var(--term-fg); box-shadow: var(--shadow-term);
+}
+.tt-bar {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  height: 38px; border-bottom: 1px solid var(--term-line); background: var(--term-2);
+  color: var(--term-dim); font: 500 .76rem/1 var(--font-mono);
+}
+.tt-dots { position: absolute; left: .85rem; top: 50%; display: flex; gap: .45rem; translate: 0 -50%; }
+.tt-dots span { width: 12px; height: 12px; border-radius: 50%; background: var(--term-line); }
+.tt-dots span:nth-child(1) { background: #ff5f57; }
+.tt-dots span:nth-child(2) { background: #febc2e; }
+.tt-dots span:nth-child(3) { background: #28c840; }
+.tt-screen {
+  margin: 0; padding: 1rem 1.15rem 1.1rem; min-width: 0;
+  font: 500 .735rem/1.5 var(--font-mono); white-space: normal;
+}
+/* Each line is its own block with its own preserved spacing, so the source can
+   break between lines without a <pre> rendering those breaks as blank rows. */
+.tt-l { display: block; min-height: 1.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tt-cmd, .tt-cur { --n: 28; }
+
+/* The prompt, and the command that types itself into it. The typed text is
+   revealed with a clip, not a width, and the cursor steps alongside it. */
+.tt-ps { color: var(--term-dim); }
+.tt-cmdwrap { position: relative; display: inline-block; }
+.tt-cmd { display: inline-block; clip-path: inset(0 100% 0 0); }
+.tt-cur { position: absolute; left: 0; top: .1em; width: .6em; height: 1.15em; background: var(--term-fg); opacity: 0; }
+.tt-cur-end { display: inline-block; width: .6em; height: 1.15em; vertical-align: -.15em; background: var(--term-fg); opacity: 0; }
+
+/* Output arrives in bursts, the way a process prints. */
+.tt-l { opacity: 0; }
+.tt-l.tt-l0 { opacity: 1; }
+.tt-dim { color: var(--term-dim); }
+.tt-h { color: var(--term-fg); font-weight: 700; letter-spacing: .02em; }
+.tt-src { color: var(--term-fg); font-weight: 700; }
+.tt-suspect { color: var(--t-ask); font-weight: 700; }
+.tt-clean { color: var(--t-allow); font-weight: 700; }
+.tt-deny { color: var(--t-deny); font-weight: 700; }
+.tt-ask { color: var(--t-ask); font-weight: 700; }
+.tt-allow { color: var(--t-allow); }
+.tt-q { color: var(--term-fg); }
+.tt-sum { color: var(--term-fg); font-weight: 700; }
+.tt figcaption {
+  padding: .8rem 1.15rem .9rem; border-top: 1px solid var(--term-line);
+  color: var(--term-dim); font-size: .84rem; line-height: 1.5;
+}
+.tt figcaption code { background: rgba(255, 255, 255, .08); color: var(--term-fg); }
 
 /* 5c. The fork: one poisoned file, two outcomes ------------------------- */
 .fork { position: relative; margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
@@ -520,6 +531,11 @@ html:not(.js) .copy-btn { display: none; }
 }
 @media (max-width: 600px) {
   .bento { grid-template-columns: 1fr; }
+  /* Wrapping breaks the tree: a wrapped `└─►` line loses the indent that says
+     which read produced which action. The site already scrolls its code blocks
+     sideways rather than reflow them, so the terminal does the same. */
+  .tt-screen { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--term-line) transparent; }
+  .tt-l { white-space: pre; }
   /* The timecode rail costs 84px a narrow screen cannot spare, and the line it
      was pushing off-screen is the payoff. The timecode moves above its shot and
      the rail goes; the sequence still reads, and the sentence fits. */
@@ -541,18 +557,22 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes caret { 50% { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
-  .hs-field { animation: hs-field 28s linear infinite; }
-  .hs-pk-in { animation: hs-pk-in 2s linear var(--pd, 0s) infinite; }
-  .hs-pk-out { animation: hs-pk-out 1.6s linear var(--pd, 0s) infinite; }
-  .hs-pk-oc { animation: hs-pk-oc 8s linear infinite; }
-  .hs-attacker { animation: hs-attacker 8s linear infinite; }
-  .hs-tendril { animation: hs-tendril 8s linear infinite; }
-  .hs-agent-target .hs-box { animation: hs-suspect 8s steps(1, end) infinite; }
-  .hs-taint { animation: hs-taint 8s linear infinite; }
-  .hs-hit { animation: hs-hit 8s linear infinite; }
-  .hs-pulse { animation: hs-pulse 8s linear infinite; }
-  .hs-x { animation: hs-x 8s linear infinite; }
-  .hs-verdict { animation: hs-verdict 8s linear infinite; }
+  /* One 16s loop. Idle prompt, then the command types over 1.6s, then output in
+     nine bursts, then the prompt returns and blinks while the result holds. The
+     whole screen fades at the end so the loop restarts on an empty prompt. */
+  .tt-screen { animation: tt-screen 16s linear infinite; }
+  .tt-cmd { animation: tt-type 16s steps(var(--n), end) infinite; }
+  .tt-cur { animation: tt-cur 16s steps(var(--n), end) infinite; }
+  .tt-cur-end { animation: tt-curend 16s linear infinite; }
+  .tt-b1 { animation: tt-b1 16s linear infinite; }
+  .tt-b2 { animation: tt-b2 16s linear infinite; }
+  .tt-b3 { animation: tt-b3 16s linear infinite; }
+  .tt-b4 { animation: tt-b4 16s linear infinite; }
+  .tt-b5 { animation: tt-b5 16s linear infinite; }
+  .tt-b6 { animation: tt-b6 16s linear infinite; }
+  .tt-b7 { animation: tt-b7 16s linear infinite; }
+  .tt-b8 { animation: tt-b8 16s linear infinite; }
+  .tt-b9 { animation: tt-b9 16s linear infinite; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
@@ -561,6 +581,11 @@ html:not(.js) .copy-btn { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
+  /* No typing and no bursts: the command is already entered and the whole
+     result is on screen, which is the state that carries the meaning. */
+  .tt-cmd { clip-path: none; }
+  .tt-l { opacity: 1; }
+  .tt-cur-end { opacity: 1; }
   /* Nothing travels, but the finished state is the one that carries the meaning:
      the token is in memory and lit, both links are drawn, the gate is holding the
      action, and the verdict is tied to it. */
@@ -596,21 +621,18 @@ html:not(.js) .copy-btn { display: none; }
   .copy-btn.is-failed { color: var(--paper); }
 }
 
-@keyframes hs-field { to { transform: rotate(360deg); } }
-@keyframes hs-pk-in { 0% { transform: translate(0, 0); opacity: 0; } 5% { opacity: 1; } 93% { opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
-@keyframes hs-pk-out { 0% { transform: translateX(0); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(var(--dx)); opacity: 0; } }
-@keyframes hs-pk-oc {
-  0% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); } 1% { opacity: 1; } 19% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 19.5% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
-  20% { transform: translate(0, 0); opacity: 0; } 21% { opacity: 1; } 39% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 39.5% { transform: translate(var(--dx), var(--dy)); opacity: 0; fill: var(--ink-2); }
-  40% { transform: translate(0, 0); opacity: 0; fill: var(--deny); } 41% { opacity: 1; } 54% { transform: translate(var(--dx), var(--dy)); opacity: 1; fill: var(--deny); animation-timing-function: var(--ease-out); } 58% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 1; fill: var(--deny); } 62% { transform: translate(calc(var(--dx) * .88), calc(var(--dy) * .88)); opacity: 0; fill: var(--deny); }
-  62.5%, 79.5% { transform: translate(0, 0); opacity: 0; fill: var(--ink-2); }
-  80% { transform: translate(0, 0); opacity: 0; } 81% { opacity: 1; } 99% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
-}
-@keyframes hs-attacker { 0%, 20% { opacity: 0; transform: translateY(14px); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 27%, 55% { opacity: 1; transform: none; } 56.5% { transform: translateX(-4px); } 58% { transform: translateX(3px); } 59.5% { transform: translateX(-2px); } 61%, 74% { opacity: 1; transform: none; } 80%, 100% { opacity: 0; transform: translateY(14px); } }
-@keyframes hs-tendril { 0%, 26.9% { stroke-dashoffset: 1; opacity: 0; } 27% { stroke-dashoffset: 1; opacity: 1; animation-timing-function: var(--ease-out); } 38%, 74% { stroke-dashoffset: 0; opacity: 1; } 80%, 100% { stroke-dashoffset: 0; opacity: 0; } }
-@keyframes hs-suspect { 0%, 38% { fill: var(--paper); stroke: var(--line-2); } 39%, 79% { fill: var(--ask-tint); stroke: var(--ask); } 80%, 100% { fill: var(--paper); stroke: var(--line-2); } }
-@keyframes hs-taint { 0%, 38% { opacity: 0; } 40%, 74% { opacity: 1; } 80%, 100% { opacity: 0; } }
-@keyframes hs-hit { 0%, 54% { opacity: 0; } 55% { opacity: .9; } 68%, 100% { opacity: 0; } }
-@keyframes hs-pulse { 0%, 54% { transform: scale(.6); opacity: 0; } 55% { transform: scale(.6); opacity: .55; animation-timing-function: var(--ease-out); } 65%, 100% { transform: scale(3); opacity: 0; } }
-@keyframes hs-x { 0%, 54% { transform: scale(0); animation-timing-function: cubic-bezier(.34, 1.56, .64, 1); } 58%, 74% { transform: scale(1); } 78%, 100% { transform: scale(0); } }
-@keyframes hs-verdict { 0%, 56% { opacity: 0; } 60%, 74% { opacity: 1; } 78%, 100% { opacity: 0; } }
+/* The terminal loop. Percentages are seconds over 16: typing 0.6–2.2 s, output
+   bursts from 2.5 s, prompt back at 7 s, hold, fade from 14.4 s. */
+@keyframes tt-screen { 0%, 90% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes tt-type { 0%, 3.75% { clip-path: inset(0 100% 0 0); } 13.75%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes tt-cur { 0% { opacity: 1; transform: translateX(0); } 1.2% { opacity: 0; } 2.4% { opacity: 1; } 3.6% { opacity: 0; transform: translateX(0); } 3.75% { opacity: 1; transform: translateX(0); } 13.75% { opacity: 1; transform: translateX(calc(var(--n) * 1ch)); } 14%, 100% { opacity: 0; transform: translateX(calc(var(--n) * 1ch)); } }
+@keyframes tt-curend { 0%, 43.7% { opacity: 0; } 43.75%, 47% { opacity: 1; } 47.1%, 50% { opacity: 0; } 50.1%, 53.5% { opacity: 1; } 53.6%, 57% { opacity: 0; } 57.1%, 60.5% { opacity: 1; } 60.6%, 64% { opacity: 0; } 64.1%, 67.5% { opacity: 1; } 67.6%, 71% { opacity: 0; } 71.1%, 74.5% { opacity: 1; } 74.6%, 78% { opacity: 0; } 78.1%, 81.5% { opacity: 1; } 81.6%, 85% { opacity: 0; } 85.1%, 89.9% { opacity: 1; } 90%, 100% { opacity: 0; } }
+@keyframes tt-b1 { 0%, 15.6% { opacity: 0; } 15.7%, 100% { opacity: 1; } }
+@keyframes tt-b2 { 0%, 18.1% { opacity: 0; } 18.2%, 100% { opacity: 1; } }
+@keyframes tt-b3 { 0%, 20.6% { opacity: 0; } 20.7%, 100% { opacity: 1; } }
+@keyframes tt-b4 { 0%, 23.1% { opacity: 0; } 23.2%, 100% { opacity: 1; } }
+@keyframes tt-b5 { 0%, 28.7% { opacity: 0; } 28.8%, 100% { opacity: 1; } }
+@keyframes tt-b6 { 0%, 31.2% { opacity: 0; } 31.3%, 100% { opacity: 1; } }
+@keyframes tt-b7 { 0%, 36.9% { opacity: 0; } 37%, 100% { opacity: 1; } }
+@keyframes tt-b8 { 0%, 41.2% { opacity: 0; } 41.3%, 100% { opacity: 1; } }
+@keyframes tt-b9 { 0%, 43.7% { opacity: 0; } 43.8%, 100% { opacity: 1; } }
