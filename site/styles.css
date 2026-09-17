@@ -237,7 +237,14 @@ html:not(.js) .copy-btn { display: none; }
 .tt figcaption code { background: rgba(255, 255, 255, .08); color: var(--term-fg); }
 
 /* 5c. The fork: one poisoned file, two outcomes ------------------------- */
-.fork { position: relative; margin-top: clamp(1.5rem, 1rem + 1.5vw, 2.25rem); }
+/* The gap is measured from the fold, not from the element above it. At the old
+   fixed spacing the red and green panes peeked over the bottom edge on a laptop,
+   so the first thing a visitor saw under the pitch was two coloured slivers that
+   read as a rendering fault. `100vh - 46rem` is the distance from the bottom of
+   the install row to the fold, so the panes start just past it at any window
+   height; the clamp is the floor for short windows, where the hero already
+   overflows and there is nothing left to push. */
+.fork { position: relative; margin-top: max(clamp(2.25rem, 1rem + 6vh, 5rem), calc(100vh - 46rem)); }
 
 .fork-panes { margin-top: clamp(1rem, 1.5vw, 1.5rem); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1rem, 2vw, 1.75rem); }
 .pane { position: relative; padding: clamp(1.1rem, 1vw + .8rem, 1.6rem); border: 1px solid var(--line-2); border-radius: var(--radius-lg); background: var(--paper); }
