@@ -37,19 +37,29 @@ Every guard in this field answers the same question: is the command in front of 
 
 Stroq is built around that difference. It sits on the agent's own tool-call hooks, remembers what the session took in, and when an action matches something that arrived in untrusted output it says so by name: which file, which tool result, how long ago. `stroq replay` then reconstructs the whole chain for a session after the fact — including sessions that ran before Stroq was installed. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.
 
-## See what told your agent to do it
+## A stranger opened an issue. Your agent read all of it.
 
-<img src="docs/assets/demo.gif" alt="stroq replay --last on a recorded session: a poisoned README scores SUSPECT and the curl | sh it dictated is denied 12 seconds later; an MCP issue result that no rule flags still produces an npx command 40 seconds later, which is asked about and traced back to that result; an unrelated pnpm test is allowed" width="800">
+<img src="docs/assets/case-study.gif" alt="An agent fixing a bug runs a helper package named in a GitHub issue, reads .env, and POSTs an AWS secret key to an unknown collector, which returns HTTP 200. stroq replay --last then traces both the npx and the curl back to that one issue, and with Stroq installed the same request is denied by deny-secret-egress, naming the variable, the file and the issue it came from." width="820">
 
-That is `stroq replay --last` on a real session, and every line in it is that command's own output. Read the second trace: **no rule flagged the issue**, and the `npx` it produced looks like an ordinary install. Every guard that judges the command alone allows it. Stroq asks, because it remembers that the package name arrived in a tool result forty seconds earlier.
+Nobody on the team wrote that command. It was in issue #482, under a heading addressed to "automated tooling", below the reproduction steps the maintainer actually read. The agent read the whole thing.
 
-The elapsed times are measured, not written: the session was driven through the hooks with real pauses between events.
+Watch what the scan says: **the issue is `clean`**. No rule matched it, because there is nothing to match — it is a plausible note in a plausible bug report, and the `npx` it asks for looks like any other install. Every guard that judges the command in front of it lets both commands through. Stroq stops the second one because it remembers that the collector's address arrived in a tool result thirty-five seconds earlier, and the argument carries the value of a real key from a real file.
+
+That session was recorded through the hooks with real pauses between events, so `18 s later`, `35 s later` and `35 s long` are measured. Every line of `stroq replay` output above is that command's own.
+
+<sub>Full 50-second version with narration: [stroq-case-study.mp4](https://github.com/AGGIB/Stroq/releases/download/v0.13.0/stroq-case-study.mp4)</sub>
+
+## Run it on the session you ran this morning
 
 ```bash
 npx @stroq/cli replay --last
 ```
 
-It reads the transcripts your agent already keeps, so it answers for sessions that ran **before Stroq was installed** — including the one you ran this morning. Nothing is sent anywhere: the replay runs against a throwaway home and never touches your audit log or taints a live session.
+It reads the transcripts your agent already keeps, so it answers for sessions that ran **before Stroq was installed** — no install, no config, nothing to set up first. Nothing is sent anywhere: the replay runs against a throwaway home and never touches your audit log or taints a live session.
+
+<img src="docs/assets/demo.gif" alt="stroq replay --last on a recorded session: a poisoned README scores SUSPECT and the curl | sh it dictated is denied 12 seconds later; an MCP issue result that no rule flags still produces an npx command 40 seconds later, which is asked about and traced back to that result; an unrelated pnpm test is allowed" width="800">
+
+A second session, same command. A poisoned dependency README this time, and the same shape of answer: the read that scored `SUSPECT`, the `curl | sh` it dictated twelve seconds later, and an unrelated `pnpm test` left alone.
 
 ### And what it does while the session is live
 
