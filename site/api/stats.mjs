@@ -5,6 +5,12 @@
  * keeps every visitor's IP off a third-party service, which matters more
  * than usual for a security tool.
  *
+ * The `.mjs` extension is deliberate: Vercel's Root Directory is `site`,
+ * which has no package.json of its own, so a `.js` file here is treated as
+ * CommonJS and `export default` throws at invocation. It works locally only
+ * because `vercel dev` runs from the repo root, where "type": "module" is
+ * set — a difference that production is the first place to show.
+ *
  * npm's `point` endpoints have been stale for days (they still report the
  * week ending 2026-09-11 while `range` has data through yesterday), so the
  * total is summed from the daily range instead. The package's first

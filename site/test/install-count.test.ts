@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+const apiPath = (name: string) => fileURLToPath(new URL(`../api/${name}`, import.meta.url));
 
 const read = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
@@ -8,7 +10,7 @@ const read = (name: string) =>
 const html = read('index.html');
 const css = read('styles.css');
 const main = read('main.js');
-const api = read('api/stats.js');
+const api = read('api/stats.mjs');
 const vercel = JSON.parse(read('vercel.json')) as {
   headers?: { headers?: { key: string; value: string }[] }[];
 };
@@ -23,6 +25,18 @@ const csp = (): string => {
 };
 
 describe('the hero install count', () => {
+  // Vercel's Root Directory for this project is `site`, which has no
+  // package.json, so a `.js` function here is loaded as CommonJS and any
+  // `export default` throws ReferenceError at invocation. `vercel dev` runs
+  // from the repo root, where "type": "module" applies, so local and preview
+  // both pass and only production fails — which is exactly how it shipped
+  // once. The extension is the fix, so the extension is the test.
+  it('is an .mjs file, because site/ has no package.json to make .js ESM', () => {
+    expect(existsSync(apiPath('stats.mjs'))).toBe(true);
+    expect(existsSync(apiPath('stats.js'))).toBe(false);
+    expect(existsSync(fileURLToPath(new URL('../package.json', import.meta.url)))).toBe(false);
+  });
+
   // The whole reason the number goes through our own function rather than a
   // fetch to api.npmjs.org: a visitor to a security tool's page should not have
   // their IP handed to a third party to render a decoration. If connect-src ever
