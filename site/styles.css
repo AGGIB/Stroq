@@ -178,6 +178,16 @@ button { font: inherit; color: inherit; }
 html:not(.js) .copy-btn { display: none; }
 .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.5rem; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
+
+/* The install count sits in the same quiet line as the licence, so the number
+   reads as one more fact about the tool rather than a badge asking to be
+   believed. It is hidden until /api/stats answers; the line keeps its height
+   either way, so nothing below it moves. */
+.hero-meta { margin-top: 1.1rem; font-size: .9rem; color: var(--ink-2); letter-spacing: .01em; }
+.hero-installs { display: inline; }
+.hero-installs[hidden] { display: none; }
+.hero-installs::after { content: " · "; }
+.hero-installs-n { font-family: var(--font-display); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ic-gh { flex: none; }
 
 /* 5b. The hero terminal: one command, its real output, typed in front of you.
