@@ -171,4 +171,22 @@ window.va =
     }
   }
 
+  /* The install count ------------------------------------------------- */
+  /* /api/stats reads npm server-side, so the page's `connect-src 'self'`
+     stays intact and no visitor's request reaches a third party. The line
+     already reads correctly without the number, so any failure is silent. */
+  var installsEl = doc.querySelector('[data-installs]');
+  if (installsEl && window.fetch) {
+    fetch('/api/stats', { headers: { accept: 'application/json' } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || typeof data.installs !== 'number' || data.installs <= 0) { return; }
+        var n = installsEl.querySelector('.hero-installs-n');
+        if (!n) { return; }
+        n.textContent = data.installs.toLocaleString('en-US');
+        installsEl.hidden = false;
+      })
+      .catch(function () { /* the line stands on its own */ });
+  }
+
 })();
