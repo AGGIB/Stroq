@@ -306,19 +306,31 @@ export function sessionsIn(entries: readonly AuditEntry[]): string[] {
  * secret index all live under a temporary root that is removed afterwards, exactly
  * as `stroq attack` does. Analysing what already happened must not taint a live
  * session or append to the chain that records real decisions.
+ *
+ * The engine's clock is driven from the transcript rather than left on the wall
+ * clock, because everything this command prints about time — "carried over … 47 s
+ * later", "3 m long" — is read back out of the entries it writes here. On the wall
+ * clock those numbers silently measure how fast the machine re-ran the session
+ * instead of the session itself.
  */
 export async function replayTranscript(transcript: Transcript): Promise<AuditEntry[]> {
   const root = await mkdtemp(join(tmpdir(), 'stroq-replay-'));
   try {
     const home = join(root, 'home');
+    // Advanced to each event's own timestamp just before that event is judged. A
+    // recorded moment that will not parse leaves the clock where it was, so the
+    // entry lands next to its neighbours rather than at the epoch.
+    let at = transcript.events[0]?.at ?? new Date().toISOString();
     const engine = createEngineAt({
       home,
       userHome: join(root, 'user'),
       policy: loadPolicy(),
       env: {},
+      now: () => new Date(at),
     });
     const cwd = transcript.cwd ?? process.cwd();
     for (const ev of transcript.events) {
+      if (!Number.isNaN(Date.parse(ev.at))) at = ev.at;
       const base = {
         sessionId: transcript.sessionId,
         toolName: ev.tool,

@@ -40,16 +40,30 @@ export interface EngineLocation {
   readonly policy: Policy;
   /** Environment to hash credential-shaped variables from; defaults to the process environment. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The clock every store stamps with; defaults to the wall clock.
+   *
+   * `stroq replay` re-runs a session that already happened, and its output is a
+   * claim about elapsed time — "carried over … 47 s later". Left on the wall clock
+   * those numbers measure the replay instead of the session, so the transcript path
+   * drives this from each recorded event's own timestamp.
+   */
+  readonly now?: () => Date;
 }
 
 /** An engine with all stores under `home`; `stroq attack` points this at throwaway directories. */
 export function createEngineAt(location: EngineLocation): StroqEngine {
+  const now = location.now;
   return new StroqEngine({
     rules: loadBundledRules(),
     policy: location.policy,
-    sessions: new FileSessionStore(sessionsDirIn(location.home)),
-    provenance: new FileProvenanceStore(sessionsDirIn(location.home)),
-    audit: new AuditLog(auditFileIn(location.home)),
+    // Spread rather than `now` so the key is absent when the caller gave none:
+    // under exactOptionalPropertyTypes an explicit `undefined` is not the same as
+    // leaving an optional property off.
+    ...(now === undefined ? {} : { now }),
+    sessions: new FileSessionStore(sessionsDirIn(location.home), now),
+    provenance: new FileProvenanceStore(sessionsDirIn(location.home), now),
+    audit: new AuditLog(auditFileIn(location.home), now),
     secrets: new FileSecretIndex(
       secretsFileIn(location.home),
       location.userHome,
