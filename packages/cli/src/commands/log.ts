@@ -7,11 +7,22 @@ export function formatEntry(entry: AuditEntry): string {
   // trusted entry stopped it tainting. Rendering it as a clean line would make an
   // exemption invisible in the one place a reader goes to check what happened.
   const waived = entry.scan?.trusted === true ? ' trusted' : '';
+  // A cloak entry records a substitution rather than a verdict, so it has neither a
+  // decision nor a scan. Falling through to the scan branch printed it as `-(0.00)`,
+  // which reads as "nothing happened" for the one line that says a value was
+  // replaced. It names the direction instead, and the placeholders follow below.
   const outcome = entry.decision
     ? `${entry.decision.effect}(${entry.decision.ruleId ?? 'default'})`
-    : `${entry.scan?.verdict ?? '-'}(${(entry.scan?.score ?? 0).toFixed(2)})${waived}`;
+    : entry.scan === undefined && entry.cloak !== undefined
+      ? `cloak(${entry.cloak[0]?.direction ?? 'cloak'})`
+      : `${entry.scan?.verdict ?? '-'}(${(entry.scan?.score ?? 0).toFixed(2)})${waived}`;
   const classes = entry.classes && entry.classes.length > 0 ? ` [${entry.classes.join(',')}]` : '';
-  return `${entry.ts} #${entry.seq} ${entry.phase.padEnd(4)} ${entry.tool.padEnd(10)} [${entry.sessionId}] ${outcome}${classes} ${entry.summary}`;
+  // Placeholders and kinds only — the values are never in the chain (see `CloakEvent`).
+  const cloak =
+    entry.cloak && entry.cloak.length > 0
+      ? ` {${entry.cloak.map((c) => `${c.kind}:${c.placeholder}×${c.count}`).join(' ')}}`
+      : '';
+  return `${entry.ts} #${entry.seq} ${entry.phase.padEnd(4)} ${entry.tool.padEnd(10)} [${entry.sessionId}] ${outcome}${classes} ${entry.summary}${cloak}`;
 }
 
 export async function runLog(args: readonly string[]): Promise<number> {

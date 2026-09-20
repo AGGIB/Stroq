@@ -378,6 +378,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
       client: { type: 'string' },
       config: { type: 'string' },
       unwrap: { type: 'boolean', default: false },
+      cloak: { type: 'boolean', default: false },
     },
   });
   const agent = values.agent ?? 'claude-code';
@@ -398,6 +399,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
       ...(values.client === undefined ? {} : { client: values.client }),
       ...(values.config === undefined ? {} : { config: values.config }),
       unwrap: values.unwrap === true,
+      cloak: values.cloak === true,
     });
   const command = hookCommand(node, entry, agent);
   const install: Readonly<Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number>> = {

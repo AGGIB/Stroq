@@ -72,7 +72,22 @@ export interface McpOptions {
   readonly client?: string;
   readonly config?: string;
   readonly unwrap: boolean;
+  /** `--cloak`: see `MCP_CLOAK_NOTE`. Off unless this run asked for it. */
+  readonly cloak: boolean;
 }
+
+/**
+ * Printed only when `--cloak` was asked for, because everything it says is a
+ * consequence nobody should discover afterwards: values leave the server's results
+ * before the model reads them, the dictionary that can put them back is on disk, and
+ * the byte-for-byte forwarding the proxy otherwise guarantees no longer holds for the
+ * two message kinds it rewrites.
+ */
+const MCP_CLOAK_NOTE =
+  '--cloak is ON for the entries above: detected values in a tools/call result are replaced with placeholders before the model reads them, and restored on the way back to that server.\n' +
+  'This writes a REVERSIBLE dictionary under ~/.stroq/cloak (mode 0600, one file per server, entries forgotten after 12 idle hours) — the only place Stroq keeps a value it can restore. See the "Cloak dictionary" section of SECURITY.md.\n' +
+  'A cloaked result and a restored call are re-serialised, so those two message kinds are no longer forwarded byte for byte; everything else still is.\n' +
+  'Re-run this command WITHOUT --cloak to switch it back off.\n';
 
 export function initMcp(
   scope: 'project' | 'user',
@@ -116,7 +131,13 @@ export function initMcp(
   }
   const rewrite = options.unwrap
     ? unwrapMcpConfig(config)
-    : wrapMcpConfig(config, { node, entryArgv, client: target.label, cwd: process.cwd() });
+    : wrapMcpConfig(config, {
+        node,
+        entryArgv,
+        client: target.label,
+        cwd: process.cwd(),
+        cloak: options.cloak,
+      });
   // Under --dry-run stdout carries only the JSON preview, so a `--dry-run | jq`
   // pipeline still works; the per-entry lines still print, just on stderr instead of
   // vanishing (the Copilot installer's replacement notice follows the same split).
@@ -128,6 +149,9 @@ export function initMcp(
   }
   writeJsonObject(target.file, rewrite.config);
   const headline = options.unwrap ? 'Stroq proxy removed from' : 'Stroq proxy installed in';
-  process.stdout.write(`${headline} ${target.file}\n${MCP_NOTE}Run "stroq doctor" to verify.\n`);
+  const cloakNote = options.cloak && !options.unwrap ? MCP_CLOAK_NOTE : '';
+  process.stdout.write(
+    `${headline} ${target.file}\n${MCP_NOTE}${cloakNote}Run "stroq doctor" to verify.\n`,
+  );
   return 0;
 }

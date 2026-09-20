@@ -3,6 +3,8 @@ import { mcpToolName } from '../adapters/cursor-mcp-name.js';
 import { denyDirectly } from '../adapters/pre-decision.js';
 import { isRecord } from '../adapters/tool-input.js';
 import { logError } from '../log.js';
+import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloak.js';
+import { OrderedQueue, writeBackpressured } from './pump-stream.js';
 import {
   MAX_LINE_CHARS,
   asJsonRpcId,
@@ -15,6 +17,7 @@ import {
 } from './framing.js';
 import {
   batchHasToolCall,
+  decisionText,
   errorResponse,
   judgeToolCall,
   mcpCallInput,
@@ -56,101 +59,45 @@ const MCP_UNPARSEABLE_CALL: Decision = {
     'A client line naming tools/call could not be parsed as JSON, so Stroq could not classify or judge it; denied fail-closed rather than forwarded unread.',
 };
 
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+/**
+ * `--cloak` only. A `tools/call` carrying a placeholder that stands for the value of
+ * a credential this machine holds. The model never saw that value — it only ever saw
+ * the placeholder — so restoring it here would be Stroq itself putting the credential
+ * on the wire, which is the exact action `deny-secret-egress` exists to stop. The
+ * reason names the credential the same way that rule does, and never its value.
+ */
+const cloakSecretRestore = (labels: readonly string[]): Decision => ({
+  effect: 'deny',
+  ruleId: 'mcp-cloak-secret-restore',
+  reason:
+    `The arguments carry a Stroq cloak placeholder standing for the value of a known secret (${labels.join(', ')}). ` +
+    'Restoring it would send that value to this server, so the call is denied and the placeholder is not restored. ' +
+    'Use the data the placeholder came from some other way, or turn the cloak off for this server if sending it is intended.',
+});
 
 /**
- * One queue per direction, so lines are handled strictly in arrival order: the
- * session store is file-locked and the audit log is a hash chain, so two engine calls
- * must never overlap, and the order they run in is the order `stroq log` shows. A
- * task that throws is swallowed here — every task answers its own failures first — so
- * one bad line can never stall the stream behind it.
+ * `--cloak` only. A server result the cloak could not read whole — an oversize line
+ * (above `MAX_LINE_CHARS`, never parsed at all) or one that serialises past what the
+ * detector scans. Delivering it would hand the model the very values the cloak was
+ * turned on to withhold, so it is dropped instead. The client's request for it goes
+ * unanswered, which is exactly what a server that never replied would cost, and a
+ * hostile server can already do that at will.
  */
-export class OrderedQueue {
-  private tail: Promise<void> = Promise.resolve();
-
-  run(task: () => Promise<void>): void {
-    this.tail = this.tail.then(task).then(
-      () => undefined,
-      () => undefined,
-    );
-  }
-
-  idle(): Promise<void> {
-    return this.tail;
-  }
-}
-
-/**
- * Whether a sink can still take anything at all. `writable` is the only one of these
- * the `NodeJS.WritableStream` interface itself declares; `destroyed`, `closed` and
- * `writableEnded` are what a real Node stream adds, and a `ChildProcess`'s stdin
- * carries all four the moment the child exits (measured: `destroyed` and `closed`
- * true, `writable` false, `writableEnded` false — the pipe was killed, not ended).
- * A caller's own minimal stream may expose none of them, in which case it is treated
- * as alive, which is exactly the wait-for-an-event behaviour below and unchanged.
- */
-const isDeadSink = (sink: NodeJS.WritableStream): boolean => {
-  if (sink.writable === false) return true;
-  const flags = sink as {
-    readonly destroyed?: boolean;
-    readonly closed?: boolean;
-    readonly writableEnded?: boolean;
-  };
-  return flags.destroyed === true || flags.closed === true || flags.writableEnded === true;
+const CLOAK_UNSCANNABLE_RESULT: Decision = {
+  effect: 'deny',
+  ruleId: 'mcp-cloak-unscannable-result',
+  reason:
+    'The server result is larger than the cloak can read whole, so its values could not be replaced before the model saw them; the result is dropped rather than delivered uncloaked. Without --cloak this result would be forwarded unscanned.',
 };
 
-/**
- * Honours backpressure in BOTH directions: `sink.write()` returning false means the
- * DESTINATION cannot keep up, so `source` — whichever stream is feeding the queue
- * that produced this write — is paused until the write actually drains. Without
- * this, a fast writer paired with a slow reader grows the queue without bound
- * (measured before this fix: 100k lines from a fast server against a slow-reading
- * client pushed this process's RSS past 380 MiB, with the server never slowed by
- * anything the proxy did).
- *
- * A sink that is already GONE — the MCP server exited, so its stdin is destroyed,
- * or the client disconnected, so its stdout closed — also reports `write()`
- * returning false, but then never emits `drain`, `error` or `close` again: all
- * three fired ONCE, as the stream died, and an `EventEmitter` does not replay a
- * past event to a listener attached afterwards. Waiting on them there hangs
- * forever, leaves `source` paused for good and stalls the caller's
- * `OrderedQueue.idle()` at shutdown, so the proxy never exits at all while a client
- * keeps writing to a server that has died (measured: no exit within 20 s, against
- * 131 ms for the same run with nothing sent after the death). So death is checked
- * BEFORE writing — a dead sink is never even written to — and again the moment a
- * write reports backpressure, since that write can itself be what observes the
- * death. Either way the line is DROPPED: there is no destination left to deliver it
- * to, and the proxy is on its way out. `source` is resumed on that path too, so a
- * pause left by an earlier write can never outlive the sink it was waiting for.
- */
-export async function writeBackpressured(
-  sink: NodeJS.WritableStream,
-  text: string,
-  source: NodeJS.ReadableStream,
-): Promise<void> {
-  if (isDeadSink(sink)) {
-    source.resume();
-    return;
-  }
-  if (sink.write(text)) return;
-  if (isDeadSink(sink)) {
-    source.resume();
-    return;
-  }
-  source.pause();
-  await new Promise<void>((resolve) => {
-    const done = (): void => {
-      sink.off('drain', done);
-      sink.off('error', done);
-      sink.off('close', done);
-      resolve();
-    };
-    sink.once('drain', done);
-    sink.once('error', done);
-    sink.once('close', done);
-  });
-  source.resume();
-}
+const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+// Re-exported unchanged: `proxy.ts` imports `OrderedQueue` from here and
+// `proxy-backpressure.test.ts` imports `writeBackpressured` from here, both as part
+// of this module's own surface. The implementation lives in `pump-stream.ts` only to
+// keep both files under the repo's line cap — the same split `judge.ts` makes with
+// `mcp-result-text.ts`.
+export { OrderedQueue, writeBackpressured };
 
 const BOM = '﻿';
 const TOOLS_CALL_LIKE = /tools\/call/i;
@@ -169,6 +116,14 @@ export interface PumpDeps {
   readonly serverOut: NodeJS.ReadableStream;
   /** `options.stdout`: where every reply and every forwarded server line goes. */
   readonly clientOut: NodeJS.WritableStream;
+  /**
+   * `--cloak`, or null when the flag is absent — the default, and the shape every
+   * pre-cloak test still exercises. When it is present, a `tools/call` RESULT is
+   * rewritten before the model sees it and the forwarded REQUEST is rewritten before
+   * the server does, so on those two paths the byte-exact forwarding this proxy
+   * otherwise guarantees no longer holds. See the note in `framing.ts`.
+   */
+  readonly cloak?: McpCloak | null;
 }
 
 export interface Pump {
@@ -178,6 +133,7 @@ export interface Pump {
 
 export function createPump(deps: PumpDeps): Pump {
   const { ctx, pending, clientIn, serverIn, serverOut, clientOut } = deps;
+  const cloak = deps.cloak ?? null;
 
   // Every write triggered by handling a CLIENT line — a forward to the server, or a
   // reply written straight back to the client — is paused against `clientIn`:
@@ -221,6 +177,28 @@ export function createPump(deps: PumpDeps): Pump {
       summary,
       () => ({ stdout: '', exitCode: 0 }),
     );
+
+  /**
+   * Forwards an allowed `tools/call`, restoring any cloaked values it carries. With
+   * nothing to restore — every call when `--cloak` is off, and most of them when it
+   * is on — the ORIGINAL line goes through byte for byte, key order and whitespace
+   * included, exactly as it always has. Only a line that actually changed is
+   * re-serialised, and only then is byte-exactness knowingly given up.
+   */
+  async function forwardWithRestores(
+    line: SplitLine,
+    message: Record<string, unknown>,
+    params: Record<string, unknown>,
+    plan: UncloakPlan,
+  ): Promise<void> {
+    if (cloak === null || plan.values.size === 0) {
+      if (cloak !== null) await cloak.auditUncloak(callAuditFields(params).toolName, plan, []);
+      return forwardToServer(line);
+    }
+    const applied = cloak.applyUncloak(params, plan);
+    await cloak.auditUncloak(callAuditFields(params).toolName, plan, applied.replacements);
+    return fromClient(serverIn, `${JSON.stringify({ ...message, params: applied.value })}\n`);
+  }
 
   async function handleClientLine(line: SplitLine): Promise<void> {
     // Some servers (Jackson/.NET stacks are documented offenders) reject JSON
@@ -278,9 +256,31 @@ export function createPump(deps: PumpDeps): Pump {
     if (isToolsCall(message.method)) {
       const params = paramsOf(message.value);
       try {
+        // Resolved BEFORE the engine runs, but applied only after it allows. A
+        // placeholder standing for a credential refuses the call outright; the rest
+        // are restored on the forwarded line, which is safe in this order because the
+        // kinds v1 restores carry no action class and no provenance atom — see the
+        // ordering note at the top of `cloak.ts`.
+        const plan = cloak === null ? EMPTY_PLAN : await cloak.planUncloak(params);
+        if (plan.refused.length > 0) {
+          const { toolName, toolInput } = callAuditFields(params);
+          const decision = cloakSecretRestore(plan.refused);
+          await auditDrop(
+            toolName,
+            toolInput,
+            decision,
+            `mcp cloak: tools/call carrying a secret placeholder (${plan.refused.join(', ')})`,
+          );
+          // Rendered through `decisionText` like every other deny this proxy writes,
+          // so the model reads the same `Stroq blocked this action (<rule>): …` shape
+          // and `stroq why` and the wire agree on the rule id.
+          return replyToClient(
+            errorResponse(message.value, message.id, decisionText(decision, [], [])),
+          );
+        }
         const verdict = await judgeToolCall(ctx, message.value, message.id, params);
         if (verdict.pending !== null) pending.set(message.id, verdict.pending);
-        if (verdict.forward) return forwardToServer(line);
+        if (verdict.forward) return forwardWithRestores(line, message.value, params, plan);
         return verdict.reply === null ? undefined : replyToClient(verdict.reply);
       } catch (err) {
         // An engine that cannot answer must not become an allow: the call is
@@ -318,16 +318,33 @@ export function createPump(deps: PumpDeps): Pump {
       // legitimate mid-run chunk boundary can produce. Without this, one 10 MiB
       // line arriving as dozens of chunks logs dozens of times, each a synchronous
       // append carrying a full stack trace.
-      if (!inLoggedOversizeRun) {
+      const first = !inLoggedOversizeRun;
+      if (first) {
         logError(
           'mcp proxy',
-          new Error(`server line above ${MAX_LINE_CHARS} characters forwarded without parsing`),
+          new Error(
+            cloak === null
+              ? `server line above ${MAX_LINE_CHARS} characters forwarded without parsing`
+              : `server line above ${MAX_LINE_CHARS} characters dropped: --cloak cannot read it`,
+          ),
         );
         inLoggedOversizeRun = true;
       }
       // `eol === '\n'` — never text emptiness — is what closes the run.
       if (line.eol === '\n') inLoggedOversizeRun = false;
-      return forwardToClient(line);
+      if (cloak === null) return forwardToClient(line);
+      // Under --cloak the run is DROPPED, every segment of it: the line is never
+      // parsed, so its values can neither be found nor replaced, and forwarding it
+      // would deliver in full exactly what the cloak was switched on to withhold.
+      // Audited once per run, on the same first segment the log fires on.
+      if (first)
+        await auditDrop(
+          mcpToolName(ctx.server, 'oversize_result'),
+          {},
+          CLOAK_UNSCANNABLE_RESULT,
+          `mcp cloak: a server line above ${MAX_LINE_CHARS} characters was dropped unread`,
+        );
+      return;
     }
     const value = parseLine(line.text);
     if (value === undefined) return forwardToClient(line);
@@ -347,11 +364,42 @@ export function createPump(deps: PumpDeps): Pump {
       logError('mcp proxy post', err);
       return forwardToClient(line);
     }
+    // The cloak runs AFTER the scan, and on a `tools/call` result only. After,
+    // because the scan and the provenance atoms are a record of what the server
+    // actually sent — rewriting first would make `stroq log` describe Stroq's own
+    // output. `tools/call` only, because a `tools/list` is a schema the client caches
+    // and validates against, and rewriting a tool description or an input schema
+    // would break the client rather than protect anyone.
+    let cloaked: unknown = result;
+    let notice: string | null = null;
+    if (cloak !== null && entry.method === 'tools/call' && isRecord(result)) {
+      const outcome = await cloak.cloakResult(result);
+      if (outcome.kind === 'refused') {
+        await auditDrop(
+          entry.toolName,
+          { method: entry.method },
+          CLOAK_UNSCANNABLE_RESULT,
+          `mcp cloak: a tools/call result was dropped unsent (${outcome.reason})`,
+        );
+        return;
+      }
+      if (outcome.kind === 'cloaked') {
+        await cloak.auditCloak(entry.toolName, outcome);
+        cloaked = outcome.result;
+        notice = cloakNotice(outcome.replacements);
+      }
+    }
     // Only a `tools/call` result carries the warning: a listing or a resource
     // taints the session, and the next action is where that is enforced.
-    if (warning === null || entry.method !== 'tools/call' || !isRecord(result))
-      return forwardToClient(line);
-    return replyFromResult({ ...message.value, result: withWarningBlock(result, warning) });
+    const warns = warning !== null && entry.method === 'tools/call' && isRecord(result);
+    if (!warns && notice === null) return forwardToClient(line);
+    // `cloaked` came from `result`, which `isRecord` already accepted, and
+    // `mapStrings` preserves the shape — so this is a record whenever either branch
+    // above put something in it.
+    let out = isRecord(cloaked) ? cloaked : (result as Record<string, unknown>);
+    if (warns && warning !== null) out = withWarningBlock(out, warning);
+    if (notice !== null) out = withWarningBlock(out, notice);
+    return replyFromResult({ ...message.value, result: out });
   }
 
   return {

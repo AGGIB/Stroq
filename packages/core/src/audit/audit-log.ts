@@ -4,6 +4,25 @@ import { dirname } from 'node:path';
 import type { ActionClass, Decision, ProvenanceEvidence, SecretHit } from '../types.js';
 import { withLock } from '../util/lock.js';
 
+/**
+ * One reversible substitution the MCP cloak made, as the audit records it.
+ *
+ * The value is deliberately absent. A cloak substitution is the one operation in
+ * Stroq that has a value on both sides, and the audit log is permanent, world-shaped
+ * forensic evidence — so what is written here is what was replaced (`kind`), what
+ * stood in for it (`placeholder`) and how many times, which is enough to reconstruct
+ * a session's behaviour and not enough to reconstruct anybody's data. The value lives
+ * only in the TTL'd dictionary the cloak store writes; see `cloak/store.ts`.
+ */
+export interface CloakEvent {
+  /** `cloak` replaced a value on the way in; `uncloak` restored one on the way out. */
+  readonly direction: 'cloak' | 'uncloak';
+  readonly kind: string;
+  readonly placeholder: string;
+  /** Occurrences substituted on this one message. */
+  readonly count: number;
+}
+
 export interface AuditEntryInput {
   readonly sessionId: string;
   readonly phase: 'pre' | 'post';
@@ -26,6 +45,8 @@ export interface AuditEntryInput {
   readonly provenance?: readonly ProvenanceEvidence[];
   /** Known secrets whose values appeared in the arguments (names and sources only). */
   readonly secrets?: readonly SecretHit[];
+  /** Cloak substitutions this message carried (kinds and placeholders only). */
+  readonly cloak?: readonly CloakEvent[];
 }
 
 export interface AuditEntry extends AuditEntryInput {

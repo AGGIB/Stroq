@@ -3,7 +3,7 @@ import { createEngine } from '../engine-factory.js';
 import { runMcpProxy } from '../mcp/proxy.js';
 
 export const MCP_USAGE =
-  'usage: stroq mcp --server <name> [--client <name>] [--cwd <dir>] [--session <id>] [--pass-env <names>] -- <command> [args...]\n';
+  'usage: stroq mcp --server <name> [--client <name>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] -- <command> [args...]\n';
 
 /** What `--client` becomes when the flag is absent; `init` always writes it. */
 export const DEFAULT_MCP_CLIENT = 'unknown';
@@ -20,6 +20,11 @@ export interface McpInvocation {
    * flag existed and knows nothing either way.
    */
   readonly passEnv: readonly string[] | null;
+  /**
+   * `--cloak`: rewrite detected values out of this server's `tools/call` results
+   * before the model reads them, and back in on the way out. Off unless asked for.
+   */
+  readonly cloak: boolean;
   readonly command: string;
   readonly args: readonly string[];
 }
@@ -29,6 +34,8 @@ export type McpArgvResult =
   | { readonly ok: false; readonly error: string };
 
 const OPTIONS = new Set(['--server', '--client', '--cwd', '--session', '--pass-env']);
+/** Flags that take no value; kept separate so the "needs a value" check stays exact. */
+const FLAGS = new Set(['--cloak']);
 
 /**
  * `--pass-env` is a comma-separated list of variable NAMES. Blank members are
@@ -55,12 +62,17 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   let session: string | null = null;
   let cwd: string | null = null;
   let passEnv: readonly string[] | null = null;
+  let cloak = false;
   let rest: readonly string[] | null = null;
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i] ?? '';
     if (token === '--') {
       rest = argv.slice(i + 1);
       break;
+    }
+    if (FLAGS.has(token)) {
+      if (token === '--cloak') cloak = true;
+      continue;
     }
     if (!OPTIONS.has(token)) return { ok: false, error: `unknown option "${token}"` };
     const value = argv[i + 1];
@@ -82,7 +94,7 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   const [command, ...args] = rest;
   if (command === undefined || command === '')
     return { ok: false, error: 'the server command must follow "--"' };
-  return { ok: true, invocation: { server, client, session, cwd, passEnv, command, args } };
+  return { ok: true, invocation: { server, client, session, cwd, passEnv, cloak, command, args } };
 }
 
 /**
@@ -132,6 +144,7 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     // be recorded at install time; nothing on the wire can change it.
     cwd: resolveMcpCwd(invocation.cwd),
     passEnv: invocation.passEnv,
+    cloak: invocation.cloak,
     command: invocation.command,
     args: invocation.args,
     stdin: process.stdin,

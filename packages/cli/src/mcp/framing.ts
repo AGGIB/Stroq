@@ -8,6 +8,18 @@ import { isRecord } from '../adapters/tool-input.js';
  * a line: `SplitLine.text` is the exact text that arrived, and `SplitLine.eol` is the
  * exact terminator that followed it, so forwarding is `text + eol` and nothing else.
  *
+ * BYTE-EXACT FORWARDING, AND THE TWO PLACES IT IS GIVEN UP. The proxy's default is
+ * that an allowed line reaches the other side as the bytes that arrived — key order,
+ * whitespace and all — and every test that pins a forwarded line character for
+ * character rests on it. Three features re-serialise instead, each deliberately and
+ * each only on the line it changed: the taint warning block (`withWarningBlock` in
+ * `judge.ts`, on a suspect `tools/call` RESULT), and, under the opt-in `--cloak`,
+ * a cloaked `tools/call` result and a `tools/call` REQUEST whose placeholders were
+ * restored (`cloak.ts`, applied in `proxy-pump.ts`). A message the cloak did not
+ * change is still forwarded byte for byte, so turning the flag on does not silently
+ * re-serialise the whole stream. Anything that would re-serialise a line Stroq did
+ * not deliberately rewrite is a bug in this proxy, not a style choice.
+ *
  * `createLineSplitter` holds pending chunks in an array and joins them at most once
  * per line — when the line completes, or, in streaming mode, when it first crosses
  * `MAX_LINE_CHARS` — rather than re-concatenating and re-scanning an ever-growing

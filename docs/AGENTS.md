@@ -320,6 +320,44 @@ Stroq blocked this action (deny-secret-egress): Arguments contain the value of a
 
 `claude_desktop_config.json` and `mcp_config.json` join `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, `.github/hooks/` and the Windsurf hook files as `config.self` paths for **every** adapter: unwrapping the proxy out of a user-level client config switches Stroq off just as surely as deleting a hook file.
 
+#### `--cloak`: keeping the server's data away from the model provider
+
+```bash
+npx @stroq/cli init --agent mcp --client claude-desktop --cloak
+```
+
+Everything above is about what the agent is allowed to *do*. `--cloak` is about what the model provider gets to *see*. With it on, the proxy replaces values it can identify in a `tools/call` result with stable placeholders before the model reads them, and restores them on the way back to that same server:
+
+```text
+server result → [cloak] → model sees [STROQ_EMAIL_1] → model emits tools/call using [STROQ_EMAIL_1] → [uncloak] → real value → server
+```
+
+So the agent can act on a customer record it was never shown. It is **off by default**: it changes what a third-party server receives and it writes a reversible dictionary to disk, and neither should happen because a default said so.
+
+What it detects: the **exact values** of credentials this machine holds (the same `.env*`, `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json` and environment index the egress guard uses — strictly stronger than any pattern), plus `email`, `phone` (E.164's 7–15 digit window), `iban` (ISO 13616 mod-97), `card` (Luhn) and `ssn` (the SSA allocation rules, ITINs included). What it does **not** detect: person names and street addresses. Those need NER, and the credible offline option would be this project's first native runtime dependency — the same call that made `stroq run --sandbox` shell out to `srt` rather than link it. Run the MCP demo and you will see `Peter Parker` travel untouched while his email, phone, card and SSN are all replaced; that is the gap, left visible on purpose. [docs/CLOAK-COMPARISON.md](CLOAK-COMPARISON.md) puts this next to AgentCloak Desktop row by row.
+
+A credential is cloaked on the way **in** and **never restored on the way out**. The model only ever saw the placeholder, so restoring it would be Stroq itself sending your credential to a third party — the exact thing `deny-secret-egress` exists to stop. Such a call is denied as `mcp-cloak-secret-restore`, naming the credential and never its value.
+
+Every substitution is in the audit log, by placeholder and kind, never by value:
+
+```text
+#3 post mcp__crm__get_customer [mcp:demo] cloak(cloak)   mcp cloak: 3 value(s) replaced in a tools/call result {email:[STROQ_EMAIL_1]×2 card:[STROQ_CARD_2]×1 ssn:[STROQ_SSN_3]×1}
+#5 pre  mcp__crm__send_message [mcp:demo] cloak(uncloak) mcp uncloak: 1 placeholder(s) restored, 0 unresolved and forwarded as written {email:[STROQ_EMAIL_1]×1}
+```
+
+**Cloak limits.**
+
+- **`tools/call` results only.** A `tools/list` is a schema the client caches and validates against, so rewriting a tool description or an input schema would break the client rather than protect anyone. `resources/read` and `prompts/get` are not cloaked in v1 either, and their values reach the model intact.
+- **Object keys are never rewritten.** A key is structure: a record keyed by email address would come back with a key the server cannot look up. A *secret* placeholder hidden in a key is still found and still refuses the call — it is just never resolved.
+- **A result Stroq cannot read whole is dropped, not forwarded.** Above 8 MiB on the wire it is never parsed; above 2 MiB once parsed it is past what the detector scans. Either way it would be delivered with exactly the values the cloak was switched on to withhold, so it is dropped and audited as `mcp-cloak-unscannable-result` — and the client's request for it goes unanswered. That costs what a server which never replied would cost, and a hostile server can already do that at will. Without `--cloak` the same result is forwarded unscanned, as it always was.
+- **A placeholder the dictionary has forgotten travels as literal text.** The server receives `[STROQ_EMAIL_9]`. That is the fail-safe direction: a lost dictionary can never mean the *wrong* value is restored.
+- **The dictionary is reversible, and it is on disk.** `~/.stroq/cloak/`, mode `0600` in a `0700` directory, one file per (session, server), entries forgotten 12 idle hours after they were last used, at most 2000 of them. It is the only reversible record Stroq keeps; `rm -rf ~/.stroq/cloak` removes all of them. [SECURITY.md](../SECURITY.md#the-cloak-dictionary-stroqcloak) has its own section on it.
+- **No cross-server restore.** The dictionary is per server, so a placeholder minted from server A's data and echoed into a call to server B is not resolved — B never heard of it. Deliberate, and the safe direction.
+- **Two message kinds stop being forwarded byte for byte.** A cloaked result and a restored call are re-serialised. Everything else, `--cloak` on or off, is still forwarded exactly as it arrived.
+- **The model has to echo the placeholder verbatim.** It is text; a model that paraphrases it loses the link, and the call goes out with a broken placeholder rather than with a value. The cloak appends one text block to each rewritten result saying exactly this.
+- **EIN (`NN-NNNNNNN`) is not detected.** It has no checksum, and the IRS campus-prefix list is the kind of table that goes stale inside a shipped binary — where a stale list is a silent miss. ITINs are covered, since they share the SSN shape.
+- **URLs are deliberately not cloaked**, unlike AgentCloak. A URL carries action classification in Stroq — `origin.*` provenance, `shell.network` — so cloaking one would blind the firewall the cloak is bolted onto.
+
 **Limits.**
 
 - **No `ask`.** An MCP proxy has no channel to a human, so a policy `ask` is rendered as a blocked tool result naming the rule (`Stroq would ask before this action (<rule>): … An MCP proxy cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.`). The audit keeps the real `ask`.

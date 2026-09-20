@@ -85,3 +85,25 @@ describe('log and verify', () => {
     expect(out.lines.join('')).toContain('BROKEN');
   });
 });
+
+describe('formatEntry for a cloak substitution', () => {
+  it('names the direction and the placeholders rather than printing an empty verdict', () => {
+    const line = formatEntry({
+      seq: 9,
+      ts: '2026-09-21T10:00:00.000Z',
+      prevHash: 'p',
+      hash: 'h',
+      sessionId: 'mcp:demo',
+      phase: 'post',
+      tool: 'mcp__crm__get_customer',
+      summary: 'mcp cloak: 2 value(s) replaced in a tools/call result',
+      cloak: [
+        { direction: 'cloak', kind: 'email', placeholder: '[STROQ_EMAIL_1]', count: 2 },
+        { direction: 'cloak', kind: 'ssn', placeholder: '[STROQ_SSN_2]', count: 1 },
+      ],
+    });
+    expect(line).toContain('cloak(cloak)');
+    expect(line).toContain('{email:[STROQ_EMAIL_1]×2 ssn:[STROQ_SSN_2]×1}');
+    expect(line).not.toContain('-(0.00)');
+  });
+});

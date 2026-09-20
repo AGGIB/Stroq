@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { StroqEngine } from '@stroq/core';
 import { logError } from '../log.js';
+import { createMcpCloak } from './cloak-factory.js';
 import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
@@ -42,6 +43,13 @@ export interface McpProxyOptions {
   readonly stderr: NodeJS.WritableStream;
   /** Overrides `SHUTDOWN_GRACE_MS` for both the EOF and the signal-escalation shutdown paths; tests only. */
   readonly shutdownGraceMs?: number;
+  /**
+   * `--cloak`: replace detected values in a `tools/call` result before the model
+   * reads it, and restore them on the way back to this server. OFF by default,
+   * because it changes what a third-party server receives and writes a reversible
+   * dictionary to disk; both are decisions to be asked for, not defaults.
+   */
+  readonly cloak?: boolean;
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
@@ -86,6 +94,7 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     serverIn,
     serverOut,
     clientOut: options.stdout,
+    cloak: options.cloak === true ? createMcpCloak(ctx) : null,
   });
 
   // A server that dies mid-write makes these emit `EPIPE`; an unhandled `error` on a
