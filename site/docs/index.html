@@ -288,6 +288,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>stroq trust</td><td>Waive a false positive on a file's exact content, pinned to its sha256</td></tr>
         <tr><td>stroq why</td><td>Explain the most recent denied/asked action: rule, provenance, taint</td></tr>
         <tr><td>stroq replay</td><td>Rebuild a session's causal history — which content produced which action</td></tr>
+        <tr><td>stroq sent</td><td>Which of your credentials already reached a model provider, in which past session, put there by which tool call — it reads this machine's credential files to match values, and reports names and sources only</td></tr>
         <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
         <tr><td>stroq attack</td><td>Replay 20 recorded incidents against your policy; exit 1 if any gets through</td></tr>
         <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>

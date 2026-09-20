@@ -170,8 +170,14 @@ const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
  * `%77Jalr…`); so each match is redacted in its `raw` spelling from the input, its
  * decoded token, that token's URL-encoding, and the encoding with lowercase hex
  * escapes, skipping any form identical to one already applied.
+ *
+ * Exported because the engine is no longer the only place that has to print text a
+ * known value was found in: `stroq sent` describes the call a credential turned up in
+ * and must scrub it by exactly the same rule. A second implementation of this would be
+ * a second chance to get it wrong, in the one place where getting it wrong writes a
+ * credential to the user's terminal.
  */
-function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
+export function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
   return matches.reduce((text, m) => {
     const encoded = encodeURIComponent(m.token);
     const lowerEncoded = encoded.replace(/%[0-9A-F]{2}/g, (hex) => hex.toLowerCase());
