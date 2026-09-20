@@ -1,4 +1,9 @@
 import { homedir } from 'node:os';
+import {
+  antigravityHooksPath,
+  isStroqAntigravityHooks,
+  readAntigravityHooks,
+} from '../commands/antigravity-hooks.js';
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from '../commands/codex-hooks.js';
 import {
   copilotHooksPath,
@@ -64,6 +69,10 @@ function isProtected(agent: string, cwd: string): boolean {
     case 'windsurf':
       return SCOPES.some((s) =>
         safe(() => isStroqWindsurfHooks(readWindsurfHooks(windsurfHooksPath(s, cwd)))),
+      );
+    case 'antigravity':
+      return SCOPES.some((s) =>
+        safe(() => isStroqAntigravityHooks(readAntigravityHooks(antigravityHooksPath(s, cwd)))),
       );
     case 'openclaw':
       return safe(() => isStroqOpenClawPlugin(openclawPluginDir()));

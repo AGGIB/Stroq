@@ -21,7 +21,7 @@ npx @stroq/cli replay --last   # what already happened, no install
 npx @stroq/cli init            # guard what happens next
 ```
 
-Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy)
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf**, **Google Antigravity** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy)
 
 **Website:** [stroq.dev](https://stroq.dev)
 
@@ -360,6 +360,7 @@ What each host lets Stroq do, in one table. [docs/AGENTS.md](docs/AGENTS.md) has
 | Copilot CLI    | `.github/hooks/stroq.json`                                       | Yes                                                | Yes (file tools, `apply_patch`)            | Yes in the interactive CLI; a deny in the cloud agent | Files, fetched pages, command output, MCP results                                            | Exit 2 on `preToolUse`; a timeout is Copilot's allow                   |
 | OpenClaw       | In-process plugin, `before_tool_call` at priority 100            | Yes                                                | Yes                                        | Yes, a real `/approve` prompt                         | Files, fetched pages, command output, tool results — silently, the hook is observe-only      | Block on every path except reads                                       |
 | Windsurf       | `.windsurf/hooks.json`, six Cascade events                       | Yes                                                | Yes (`pre_write_code`)                     | Rendered as a block                                   | Files (opened by path) and MCP results — command output and web pages are invisible to hooks | Exit 2 on high-impact `pre_*` events                                   |
+| Antigravity    | `.agents/hooks.json`, under the `stroq` hook name                | Yes                                                | Yes (`create_file`/`edit_file`)            | Yes, a real prompt — and a `force_ask`                | Files (opened by path) and a failed call's error — no result reaches `PostToolUse` at all    | Deny on stdout for a high-impact `PreToolUse`; never an exit code      |
 | Any MCP client | `stroq mcp` in front of each stdio server in the client's config | `tools/call` only                                  | Through `tools/call` only                  | Rendered as a blocked tool result                     | `tools/call`, `tools/list`, `resources/read` and `prompts/get` results                       | Deny while judging a call; forward while scanning a result             |
 
 ```bash
@@ -368,10 +369,11 @@ npx @stroq/cli init --agent codex     # Codex CLI: writes .codex/hooks.json
 npx @stroq/cli init --agent copilot   # Copilot CLI: writes .github/hooks/stroq.json
 npx @stroq/cli init --agent openclaw  # OpenClaw: installs a plugin into ~/.stroq/openclaw-plugin
 npx @stroq/cli init --agent windsurf  # Windsurf: merges into .windsurf/hooks.json
+npx @stroq/cli init --agent antigravity  # Google Antigravity: merges into .agents/hooks.json
 npx @stroq/cli init --agent mcp --client claude-desktop   # any MCP client: wraps its stdio servers in a proxy
 ```
 
-Each adapter installs on the events listed in the coverage table above, restart the agent afterwards, and `stroq doctor` reports it once it has. Every adapter also has documented limits — a hook contract with no `ask`, a tool whose output never reaches a hook, a wire format inferred rather than recorded from a real session. **[docs/AGENTS.md](docs/AGENTS.md)** has the full event table, the wire format, and every limit for each of the six, plus the demo command for each (`./examples/demo/run-<agent>-demo.sh`).
+Each adapter installs on the events listed in the coverage table above, restart the agent afterwards, and `stroq doctor` reports it once it has. Every adapter also has documented limits — a hook contract with no `ask`, a tool whose output never reaches a hook, a wire format inferred rather than recorded from a real session. **[docs/AGENTS.md](docs/AGENTS.md)** has the full event table, the wire format, and every limit for each of the seven, plus the demo command where there is one (`./examples/demo/run-<agent>-demo.sh`).
 
 ### As a Claude Code plugin
 

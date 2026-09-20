@@ -7,6 +7,10 @@ import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-h
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { installWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+import {
+  antigravityHooksPath,
+  installAntigravityHooks,
+} from '../../src/commands/antigravity-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import {
   installOpenClawPlugin,
@@ -157,7 +161,7 @@ describe('doctorReport codex hooks', () => {
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
 
-  it('collapses to one failing hooks line when none is installed, and --all restores all six agents plus the MCP proxy', async () => {
+  it('collapses to one failing hooks line when none is installed, and --all restores all seven agents plus the MCP proxy', async () => {
     const collapsed = await doctorReport(cwd);
     expect(collapsed.checks.map((c) => c.name)).toEqual([
       'stroq',
@@ -182,6 +186,7 @@ describe('doctorReport codex hooks', () => {
       'copilot hooks',
       'openclaw plugin',
       'windsurf hooks',
+      'antigravity hooks',
       'mcp proxy',
       'home',
       'secrets',
@@ -475,6 +480,85 @@ describe('doctorReport windsurf hooks', () => {
     writeFileSync(file, '{ "hooks": { "pre_run_command": [{ "command": "echo hi" }] } }');
     expect(
       (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'windsurf hooks')?.ok,
+    ).toBe(false);
+  });
+});
+
+describe('doctorReport antigravity hooks', () => {
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+  const cmd = '"/n" "/e.js" hook antigravity';
+
+  it('names the file it looked for when nothing is installed', async () => {
+    const antigravity = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'antigravity hooks',
+    )!;
+    expect(antigravity.ok).toBe(false);
+    expect(antigravity.detail).toContain(antigravityHooksPath('project', cwd));
+    expect(antigravity.detail).toContain('project: missing');
+  });
+
+  it('passes every line once Antigravity alone is installed', async () => {
+    installAntigravityHooks(antigravityHooksPath('project', cwd), cmd);
+    const report = await doctorReport(cwd);
+    expect(report.checks.every((c) => c.ok)).toBe(true);
+    expect(detailOf(report, 'antigravity hooks')).toContain('project: installed');
+    expect(detailOf(report, 'hooks')).toBe('not installed (ok: antigravity hooks are)');
+  });
+
+  it('reports an entry switched off as not installed', async () => {
+    // `enabled: false` leaves the handlers in place and looking correct while
+    // Antigravity runs none of them; calling that installed would report protection
+    // the file cannot provide.
+    const file = antigravityHooksPath('project', cwd);
+    installAntigravityHooks(file, cmd);
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      stroq: Record<string, unknown>;
+    };
+    parsed.stroq['enabled'] = false;
+    writeFileSync(file, JSON.stringify(parsed));
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'antigravity hooks')
+        ?.ok,
+    ).toBe(false);
+  });
+
+  it('reports a half-install as not installed', async () => {
+    // Without `PreInvocation` a taint reaches the model through nothing at all on
+    // this agent: `PostToolUse` stdout must be `{}`.
+    const file = antigravityHooksPath('project', cwd);
+    installAntigravityHooks(file, cmd);
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      stroq: Record<string, unknown>;
+    };
+    delete parsed.stroq['PreInvocation'];
+    writeFileSync(file, JSON.stringify(parsed));
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'antigravity hooks')
+        ?.ok,
+    ).toBe(false);
+  });
+
+  it('reports a broken antigravity hooks file without failing the other lines', async () => {
+    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    const file = antigravityHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ not json');
+    const report = await doctorReport(cwd);
+    expect(report.checks.find((c) => c.name === 'antigravity hooks')?.ok).toBe(false);
+    expect(detailOf(report, 'antigravity hooks')).toMatch(/cannot parse/);
+    expect(report.checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+  });
+
+  it("ignores a hooks file that only carries someone else's hook", async () => {
+    const file = antigravityHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '{ "my-linter-hook": { "PostToolUse": [] } }');
+    expect(
+      (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'antigravity hooks')
+        ?.ok,
     ).toBe(false);
   });
 });

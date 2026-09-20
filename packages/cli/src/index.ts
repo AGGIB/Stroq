@@ -20,12 +20,15 @@ const USAGE = `stroq <command>
 
 Commands:
   init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw | windsurf; project config by default)
+                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw | windsurf | antigravity; project config by default)
                                      or wrap a client's MCP servers (--agent mcp --client <name>)
   hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
   hook windsurf                      Windsurf entrypoint: its events name themselves, and a block is exit 2 with the reason on stderr
   hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
   hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
+  hook antigravity <pre|post|preinvocation>
+                                     Antigravity entrypoint: same, plus PreInvocation, where a tainted
+                                     session's status is stated to the model before it is called
   mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
   doctor [--all]                     check the installation (--all lists every agent and scope)
   log [--count 20]                   show recent audit entries

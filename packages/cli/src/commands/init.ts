@@ -46,13 +46,21 @@ import {
   readWindsurfHooks,
   windsurfHooksPath,
 } from './windsurf-hooks.js';
+import {
+  ANTIGRAVITY_HOOK_EVENTS,
+  antigravityHooksPath,
+  installAntigravityHooks,
+  mergeAntigravityHooks,
+  readAntigravityHooks,
+} from './antigravity-hooks.js';
 import { initMcp } from './init-mcp.js';
 
 export const PRE_MATCHER = 'Bash|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
-export type HookAgent = 'claude-code' | 'cursor' | 'codex' | 'copilot' | 'openclaw' | 'windsurf';
+export type HookAgent =
+  'claude-code' | 'cursor' | 'codex' | 'copilot' | 'openclaw' | 'windsurf' | 'antigravity';
 export const HOOK_AGENTS: readonly HookAgent[] = [
   'claude-code',
   'cursor',
@@ -60,6 +68,7 @@ export const HOOK_AGENTS: readonly HookAgent[] = [
   'copilot',
   'openclaw',
   'windsurf',
+  'antigravity',
 ];
 
 /**
@@ -329,6 +338,36 @@ function initWindsurf(scope: 'project' | 'user', command: string, dryRun: boolea
   return 0;
 }
 
+/**
+ * Four things an Antigravity user has to know that no other agent needs: the hooks
+ * file is keyed by a hook NAME, so Stroq owns one key and a hook of your own belongs
+ * under another; the global alternative lives in the Gemini CLI's directory rather
+ * than an Antigravity one; `PreInvocation` is installed on and states a tainted
+ * session's status to the model, which is a thing no other adapter does; and the
+ * terminal sandbox is on by default, so a command Stroq allows may still be refused
+ * by Antigravity itself — and a request to leave the sandbox is one to read closely.
+ */
+const ANTIGRAVITY_NOTE =
+  'Stroq owns the "stroq" key in this file and rewrites it whole; put hooks of your own under another name.\n' +
+  '"stroq init --agent antigravity --user" writes ~/.gemini/config/hooks.json instead.\n' +
+  'PreInvocation is installed on: once a session is tainted, Stroq states that fact to the model before each turn. It never instructs the model.\n' +
+  "Antigravity's terminal sandbox is separate from Stroq: a request from the agent to run unsandboxed is worth reading before you grant it.\n";
+
+function initAntigravity(scope: 'project' | 'user', command: string, dryRun: boolean): number {
+  const file = antigravityHooksPath(scope);
+  if (dryRun) {
+    process.stdout.write(
+      `${JSON.stringify(mergeAntigravityHooks(readAntigravityHooks(file), command), null, 2)}\n`,
+    );
+    return 0;
+  }
+  installAntigravityHooks(file, command);
+  process.stdout.write(
+    `Stroq hooks installed in ${file}\n  ${ANTIGRAVITY_HOOK_EVENTS.join('\n  ')}\n${ANTIGRAVITY_NOTE}Run "stroq doctor" to verify.\n`,
+  );
+  return 0;
+}
+
 export async function runInit(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
@@ -370,6 +409,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
     // argv; the quoted line the other four use means nothing to `child_process.spawn`.
     openclaw: (scope, _command, dryRun) => initOpenClaw(scope, hookArgv(node, entry), dryRun),
     windsurf: initWindsurf,
+    antigravity: initAntigravity,
   };
   const code = install[agent](scope, command, dryRun);
   // Recorded only on a real install that succeeded, so `--dry-run` leaves no trace

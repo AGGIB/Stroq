@@ -61,6 +61,15 @@ import { commandWord } from './shell-segments.js';
  * (`Application\ Support`), as a shell command line would need. `.windsurf/rules/` and
  * `.windsurf/workflows/` stay editable: the match is on `hooks.json`, not on the
  * directory, for exactly the reason the bare `.claude` match was narrowed.
+ * Antigravity is protected at the three files that can switch the firewall off: the
+ * workspace hooks file (`.agents/hooks.json`), the global one
+ * (`~/.gemini/config/hooks.json`) and `~/.gemini/antigravity-cli/settings.json`,
+ * which can carry the same hook definitions inline and so can delete Stroq's by
+ * rewriting them. The match is the FILE in each case, not the directory: `.agents`
+ * holds agent definitions and `~/.gemini` is the Gemini CLI's whole home, and denying
+ * an edit to either would be the bare `.claude` false positive again. The plugin-level
+ * `hooks.json` Antigravity also loads has no fixed path and is not matched; that is a
+ * stated limit.
  * The two USER-level MCP client configs — `claude_desktop_config.json` (Claude
  * Desktop, at three OS-specific paths) and `mcp_config.json` (Windsurf, at either
  * of its two locations) — are protected as bare filenames, since their directories
@@ -76,7 +85,7 @@ import { commandWord } from './shell-segments.js';
  * not an oversight.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq(\/|\b))/;
+  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|\.agents\/hooks\.json|\.gemini\/(config\/hooks\.json|antigravity-cli\/settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq(\/|\b))/;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -89,7 +98,7 @@ export const SELF_CONFIG_FILE =
  * substring `.claude/settings.json` anywhere in the command text.
  */
 export const PROTECTED_DIRS =
-  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|github\/(hooks|copilot))(\/|$|\s)/;
+  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github\/(hooks|copilot))(\/|$|\s)/;
 
 /**
  * A protected directory named as a whole, rather than a path into one.
@@ -109,7 +118,7 @@ export const PROTECTED_DIRS =
  * deleting a CI workflow is not a claim this project makes about self-tamper.
  */
 export const PROTECTED_DIR_BARE =
-  /(^|[\s"'=(])(?:[\w.~/-]*\/)?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium)|\.github\/(hooks|copilot))(?:\/\*?|\*)?(?=$|[\s"';|&)])/i;
+  /(^|[\s"'=(])(?:[\w.~/-]*\/)?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini)|\.github\/(hooks|copilot))(?:\/\*?|\*)?(?=$|[\s"';|&)])/i;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',

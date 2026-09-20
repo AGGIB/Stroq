@@ -37,11 +37,12 @@ describe('runHook agent routing', () => {
       'copilot',
       'openclaw',
       'windsurf',
+      'antigravity',
     ]);
     const out = await runHook('bogus', '{}');
     expect(out).toEqual({
       stdout:
-        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
+        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity)\n',
       exitCode: 1,
     });
   });
@@ -50,7 +51,7 @@ describe('runHook agent routing', () => {
     for (const agent of ['constructor', '__proto__']) {
       const out = await runHook(agent, '{}');
       expect(out).toEqual({
-        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n`,
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity)\n`,
         exitCode: 1,
       });
     }
@@ -122,15 +123,16 @@ describe('runHook codex routing', () => {
       'copilot',
       'openclaw',
       'windsurf',
+      'antigravity',
     ]);
     expect(await runHook('bogus', '{}')).toEqual({
       stdout:
-        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n',
+        'unknown agent "bogus" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity)\n',
       exitCode: 1,
     });
     for (const agent of ['constructor', '__proto__'])
       expect(await runHook(agent, '{}')).toEqual({
-        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf)\n`,
+        stdout: `unknown agent "${agent}" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity)\n`,
         exitCode: 1,
       });
   });
@@ -388,5 +390,83 @@ describe('runHook windsurf routing', () => {
       exitCode: 2,
     });
     expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook windsurf');
+  });
+});
+
+describe('runHook antigravity routing', () => {
+  const event = (fields: Record<string, unknown>) =>
+    JSON.stringify({ conversationId: 'ag-1', workspacePaths: ['/w'], ...fields });
+
+  /**
+   * Antigravity documents its stdout contract and says nothing about what a non-zero
+   * exit means, so every verdict this adapter can produce — including its own
+   * failures — has to ride stdout with exit 0. These assertions exist to stop a
+   * future change from signalling through an exit code that may never be read.
+   */
+  const decisionOf = (stdout: string) => JSON.parse(stdout) as Record<string, unknown>;
+
+  it('routes each of the three phases, and refuses to guess a missing one', async () => {
+    // An allow on `pre`, the contract's `{}` on `post`, silence on an untainted
+    // `preinvocation`.
+    expect(
+      await runHook(
+        'antigravity',
+        event({ toolCall: { name: 'run_command', args: { CommandLine: 'ls -la' } } }),
+        'pre',
+      ),
+    ).toEqual({ stdout: '', exitCode: 0 });
+    expect(
+      await runHook(
+        'antigravity',
+        event({ toolCall: { name: 'run_command', args: { CommandLine: 'ls -la' } } }),
+        'post',
+      ),
+    ).toEqual({ stdout: '{}', exitCode: 0 });
+    expect(await runHook('antigravity', event({ invocationNum: 1 }), 'preinvocation')).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+
+    for (const arg of ['', 'PreToolUse', 'preinvoke']) {
+      const out = await runHook('antigravity', event({}), arg);
+      expect(decisionOf(out.stdout)['decision'], arg).toBe('deny');
+      expect(String(decisionOf(out.stdout)['reason']), arg).toContain('needs a phase argument');
+      expect(out.exitCode, arg).toBe(0);
+    }
+  });
+
+  it('fails closed on stdin that is not JSON, on pre only', async () => {
+    const denied = await runHook('antigravity', 'not json {{{', 'pre');
+    expect(denied.exitCode).toBe(0);
+    expect(decisionOf(denied.stdout)['decision']).toBe('deny');
+    expect(String(decisionOf(denied.stdout)['reason'])).toContain('not valid JSON');
+    expect(String(denied.stderr)).toContain('fail-closed');
+    expect(readFileSync(join(home, 'stroq.log'), 'utf8')).toContain('hook antigravity');
+    // Nothing left to block on the other two, and nothing they could usefully say.
+    expect(await runHook('antigravity', 'not json {{{', 'post')).toEqual({
+      stdout: '{}',
+      exitCode: 0,
+    });
+    expect(await runHook('antigravity', 'not json {{{', 'preinvocation')).toEqual({
+      stdout: '',
+      exitCode: 0,
+    });
+  });
+
+  it('denies a pre whose payload carries no readable toolCall', async () => {
+    const out = await runHook('antigravity', event({}), 'pre');
+    expect(out.exitCode).toBe(0);
+    expect(decisionOf(out.stdout)['decision']).toBe('deny');
+    expect(String(decisionOf(out.stdout)['reason'])).toContain('toolCall');
+  });
+
+  it('answers a stdin read that rejects with the documented deny, never exit 1', async () => {
+    // Exit 1 means nothing documented on this agent, so it could as easily be read
+    // as an allow as as a block.
+    const exploding = () => Promise.reject(new Error('stdin exploded'));
+    const out = await runHookCommand('antigravity', 'pre', exploding);
+    expect(out.exitCode).toBe(0);
+    expect(decisionOf(out.stdout)['decision']).toBe('deny');
+    expect(String(decisionOf(out.stdout)['reason'])).toContain('stdin exploded');
   });
 });

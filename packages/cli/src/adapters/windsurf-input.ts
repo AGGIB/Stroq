@@ -1,6 +1,5 @@
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
 import { toolResultToText } from './claude-code.js';
+import { MAX_SCAN_READ_BYTES, readScanText } from './file-scan.js';
 import { mcpToolName } from './cursor-mcp-name.js';
 import { kindToolInput, type ToolKind } from './kind-input.js';
 import { toolInputRecord } from './tool-input.js';
@@ -150,47 +149,22 @@ export const windsurfToolInput = (event: WindsurfEvent, args: unknown): Record<s
   kindToolInput(windsurfToolKind(event), args, DROPPED_FILE_FIELDS);
 
 /**
- * The most of a file Stroq reads for a `post_read_code` scan. Windsurf's payload
- * carries the path and not the content, so Stroq opens the file itself — and a hook
+ * The most of a file Stroq reads for a `post_read_code` scan — the shared bound,
+ * named here because the Windsurf README and tests quote it. Windsurf's payload
+ * carries the path and not the content, so Stroq opens the file itself, and a hook
  * with no documented timeout must not be the thing that reads a planted gigabyte.
- * One MiB is far more than any prompt-injection payload needs and is bounded work.
  */
-export const WINDSURF_MAX_READ_BYTES = 1_048_576;
-
-/** At most `WINDSURF_MAX_READ_BYTES` of an already-stat'ed regular file. */
-function readCapped(path: string, size: number): string {
-  const fd = openSync(path, 'r');
-  try {
-    const buffer = Buffer.alloc(Math.min(size, WINDSURF_MAX_READ_BYTES));
-    const read = readSync(fd, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, read).toString('utf8');
-  } finally {
-    closeSync(fd);
-  }
-}
+export const WINDSURF_MAX_READ_BYTES = MAX_SCAN_READ_BYTES;
 
 /**
  * What Cascade just read, read again by Stroq. `post_read_code` carries only a path,
- * so this is the whole content scan for a Windsurf file read. A relative path is
- * resolved against the policy cwd (the workspace root). A directory — Cascade reads
- * recursively — a missing or unreadable file, an empty path and an empty file all
- * return `''`, which the adapter turns into exit 0 and silence: a read that gave
- * Cascade nothing gave the model nothing either, so there is nothing to scan and
- * nothing to report. Every failure is swallowed for the same reason: this function
- * cannot be the thing that fails a hook.
+ * so this is the whole content scan for a Windsurf file read. The reading itself is
+ * `file-scan.ts`'s, shared with the Antigravity adapter, whose `PostToolUse` has the
+ * same shape of problem: a copy of a security reader is a fix that lands on one
+ * agent only.
  */
-export function windsurfReadText(filePath: string, cwd: string): string {
-  if (filePath === '') return '';
-  try {
-    const path = isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
-    const stats = statSync(path);
-    if (!stats.isFile() || stats.size === 0) return '';
-    return readCapped(path, stats.size);
-  } catch {
-    // Missing, unreadable, a broken symlink, a permissions error: nothing to scan.
-    return '';
-  }
-}
+export const windsurfReadText = (filePath: string, cwd: string): string =>
+  readScanText(filePath, cwd);
 
 /**
  * The text of a completed MCP call. Windsurf documents `mcp_result` as a string; the

@@ -1,13 +1,12 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
 import { z } from 'zod';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
+import { scanReadCandidates } from './file-scan.js';
 import { preCandidatesFor, unreadableGuard } from './kind-input.js';
 import {
   MAX_PATCH_PATHS,
-  asPaths,
   decideWithGuards,
   handlePostResult,
-  scanPostResult,
   type EngineEvent,
   type PreGuards,
 } from './pre-decision.js';
@@ -182,53 +181,17 @@ const handlePost = (engine: StroqEngine, event: EngineEvent, text: string) =>
   handlePostResult(engine, event, text, windsurfBlockOutput);
 
 /**
- * Every distinct path `post_read_code` named: `file_path` (the fan-out's canonical
- * candidate, from the shared `pathsOf`) plus every entry of `file_paths`, which
- * `kindToolInput`/`withCandidates` populates whenever the path fields disagreed.
- * Reading `file_path` alone used to scan only ONE of several disagreeing candidates —
- * `{ path: 'clean.md', file_path: 'poisoned.md' }` scanned `clean.md`, because
- * `file_path` there is `pathsOf`'s `candidates[0]` (`path` sorts first), not
- * necessarily the file Cascade actually read. Deduplicated so a payload whose fields
- * agreed is not scanned twice.
- */
-function postReadCandidates(toolInput: Readonly<Record<string, unknown>>): readonly string[] {
-  const first = toolInput['file_path'];
-  const rest = asPaths(toolInput['file_paths']);
-  const all = typeof first === 'string' && first !== '' ? [first, ...rest] : rest;
-  return [...new Set(all)];
-}
-
-/**
  * `post_read_code` carries the path and not the content, so Stroq reads the file(s)
- * itself, capped, and scans each candidate in turn — sequentially, never
- * concurrently, because the session store is file-locked. A read that gave Cascade
- * nothing — a directory, a missing or unreadable file, an empty path, an empty file —
- * contributes no engine call, no audit entry and no output for that candidate. If ANY
- * candidate scans suspect the call answers exit 2 with that warning (the worst wins,
- * the same rule every other fan-out in this adapter uses); only when every candidate
- * came back clean or unscanned does it answer `NO_OUTPUT`.
- *
- * Each candidate is scanned under its OWN `file_path`, mirroring how `preInputs`
- * rewrites `file_path` per candidate on the `pre` side — never the shared `event` as
- * it stands, whose `toolInput.file_path` is fixed at whichever candidate happened to
- * be `postReadCandidates`'s first. Core's `summarizeInput` reads that field for both
- * the audit `summary` and the provenance `source`, so scanning every candidate
- * against the unmodified `event` would enforce correctly but ATTRIBUTE every scan —
- * suspect or clean — to that one candidate's path, regardless of which file was
- * actually read for it.
+ * itself, capped, and scans each candidate in turn — the shared `scanReadCandidates`,
+ * which the Antigravity adapter's `PostToolUse` uses for the same reason. A read that
+ * gave Cascade nothing — a directory, a missing or unreadable file, an empty path, an
+ * empty file — contributes no engine call, no audit entry and no output for that
+ * candidate. If ANY candidate scans suspect the call answers exit 2 with that warning
+ * (the worst wins, the same rule every other fan-out in this adapter uses); only when
+ * every candidate came back clean or unscanned does it answer `NO_OUTPUT`.
  */
 async function handlePostRead(engine: StroqEngine, event: EngineEvent): Promise<HookOutput> {
-  let warning: string | null = null;
-  for (const path of postReadCandidates(event.toolInput)) {
-    const text = windsurfReadText(path, event.cwd);
-    if (text === '') continue;
-    const candidateEvent: EngineEvent = {
-      ...event,
-      toolInput: { ...event.toolInput, file_path: path },
-    };
-    const outcome = await scanPostResult(engine, candidateEvent, text);
-    if (outcome.warning !== null && warning === null) warning = outcome.warning;
-  }
+  const warning = await scanReadCandidates(engine, event);
   return warning === null ? NO_OUTPUT : windsurfBlockOutput(warning);
 }
 

@@ -24,6 +24,10 @@ import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { isStroqWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+import {
+  antigravityHooksPath,
+  isStroqAntigravityHooks,
+} from '../../src/commands/antigravity-hooks.js';
 
 // Pinned before every test, like `doctor.test.ts` does: several `--client` targets
 // (claude-desktop, windsurf, cursor --user) resolve under the real home directory
@@ -229,7 +233,7 @@ describe('runInit --agent', () => {
     out.restore();
     expect(code).toBe(1);
     expect(out.lines.join('')).toBe(
-      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, mcp)\n',
+      'unknown agent "gemini" (supported: claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity, mcp)\n',
     );
   });
 });
@@ -475,6 +479,88 @@ describe('runInit --agent windsurf', () => {
     expect(existsSync(settingsPath('project', dir))).toBe(false);
     expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
     expect(existsSync(copilotHooksPath('project', dir))).toBe(false);
+  });
+});
+
+describe('runInit --agent antigravity', () => {
+  interface AntigravityFile {
+    readonly stroq: {
+      readonly enabled: boolean;
+      readonly PreToolUse: { matcher: string; hooks: { command: string; timeout: number }[] }[];
+      readonly PostToolUse: { matcher: string; hooks: { command: string }[] }[];
+      readonly PreInvocation: { command: string }[];
+    };
+  }
+
+  it('writes .agents/hooks.json under its own hook name, and is idempotent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-antigravity-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'antigravity']));
+    out.restore();
+    expect(code).toBe(0);
+    const file = antigravityHooksPath('project', dir);
+    const printed = out.lines.join('');
+    expect(printed).toContain(file);
+    // The four things an Antigravity user has to know that no other agent needs.
+    expect(printed).toContain('"stroq" key');
+    expect(printed).toContain('~/.gemini/config/hooks.json');
+    expect(printed).toContain('PreInvocation');
+    expect(printed).toContain('terminal sandbox');
+
+    const first = readFileSync(file, 'utf8');
+    const parsed = JSON.parse(first) as AntigravityFile;
+    expect(parsed.stroq.enabled).toBe(true);
+    // An empty matcher means every tool: an MCP server is invisible to these hooks,
+    // so any list Stroq could write would miss exactly the call it has not heard of.
+    expect(parsed.stroq.PreToolUse[0]?.matcher).toBe('');
+    expect(parsed.stroq.PreToolUse[0]?.hooks[0]?.command).toMatch(/ hook antigravity pre$/);
+    expect(parsed.stroq.PreToolUse[0]?.hooks[0]?.timeout).toBe(30);
+    expect(parsed.stroq.PostToolUse[0]?.hooks[0]?.command).toMatch(/ hook antigravity post$/);
+    // PreInvocation's handlers sit directly under the key — a matcher group there is
+    // a hook that never runs.
+    expect(parsed.stroq.PreInvocation[0]?.command).toMatch(/ hook antigravity preinvocation$/);
+    expect(isStroqAntigravityHooks(parsed)).toBe(true);
+
+    const again = capture();
+    await inDir(dir, () => runInit(['--agent', 'antigravity']));
+    again.restore();
+    expect(readFileSync(file, 'utf8')).toBe(first);
+  });
+
+  it('prints the merged file and writes nothing with --dry-run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-antigravity-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', 'antigravity', '--dry-run']));
+    out.restore();
+    expect(code).toBe(0);
+    expect((JSON.parse(out.lines.join('')) as AntigravityFile).stroq.PreInvocation).toHaveLength(1);
+    expect(existsSync(antigravityHooksPath('project', dir))).toBe(false);
+  });
+
+  it("keeps a hook of the user's own, which lives under its own name", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-antigravity-'));
+    const file = antigravityHooksPath('project', dir);
+    mkdirSync(join(dir, '.agents'), { recursive: true });
+    writeFileSync(
+      file,
+      '{ "my-linter-hook": { "PostToolUse": [{ "matcher": "run_command", "hooks": [] }] } }',
+    );
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'antigravity']));
+    out.restore();
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    expect(parsed['my-linter-hook']).toBeDefined();
+    expect(isStroqAntigravityHooks(parsed)).toBe(true);
+  });
+
+  it('does not touch the other agents', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-antigravity-'));
+    const out = capture();
+    await inDir(dir, () => runInit(['--agent', 'antigravity']));
+    out.restore();
+    expect(existsSync(settingsPath('project', dir))).toBe(false);
+    expect(existsSync(cursorHooksPath('project', dir))).toBe(false);
+    expect(existsSync(windsurfHooksPath('project', dir))).toBe(false);
   });
 });
 
