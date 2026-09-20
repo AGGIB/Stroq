@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-09-21
+
+### Fixed
+
+- **`stroq sent --help` threw a stack trace instead of printing usage.** `sent` is the command the front page tells a first-time visitor to run, which makes `--help` the next thing they type — and in 0.14.0 it answered with a raw `ERR_PARSE_ARGS_UNKNOWN_OPTION` TypeError, because the option was never declared and `parseArgs` was called unguarded. It now prints the usage text and exits 0, before opening any credential file: a visitor asking what the command does must not have their `~/.aws/credentials` read to find out.
+
+  An unrecognised flag is answered the same way — usage on stderr and exit 2, the conventional code for a bad invocation — rather than by letting the parser's exception escape. Both paths are covered by tests, including that `--help` produces no credential-file read.
+
 ## [0.14.0] - 2026-09-21
 
 ### Added
