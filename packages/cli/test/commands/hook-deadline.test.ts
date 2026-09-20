@@ -1,6 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runHook, withDeadline } from '../../src/commands/hook.js';
-import { HOOK_DEADLINE_FRACTION, hookDeadlineMs } from '../../src/commands/config-file.js';
+import {
+  HOOK_DEADLINE_FRACTION,
+  HOOK_TIMEOUT_SECONDS,
+  hookDeadlineMs,
+} from '../../src/commands/config-file.js';
 
 const PRE_TOOL_USE = JSON.stringify({
   session_id: 'deadline-test',
@@ -15,6 +21,47 @@ describe('hookDeadlineMs', () => {
     expect(HOOK_DEADLINE_FRACTION).toBeLessThan(1);
     expect(hookDeadlineMs(15)).toBe(9_000);
     expect(hookDeadlineMs(30)).toBe(18_000);
+  });
+});
+
+// The whole watchdog rests on one assumption: that the timeout the host agent
+// enforces is the one Stroq wrote. Claude Code's own default for a command hook
+// is far longer than ours, so the 9 s deadline is only correct while every entry
+// we install still carries `timeout: 15`. The plugin is where that can drift
+// unnoticed — its hooks.json is committed JSON with the number written out as a
+// literal, so a change to HOOK_TIMEOUT_SECONDS moves the deadline for a
+// settings.json install and silently leaves the plugin behind.
+describe('the timeout Stroq installs matches the deadline it gives itself', () => {
+  interface PluginHooks {
+    readonly hooks: Readonly<Record<string, readonly { hooks: readonly { timeout?: number }[] }[]>>;
+  }
+
+  const pluginConfig = (): PluginHooks =>
+    JSON.parse(
+      readFileSync(join(import.meta.dirname, '../../../../plugins/stroq/hooks/hooks.json'), 'utf8'),
+    ) as PluginHooks;
+
+  it('writes the same timeout in the plugin as in a settings.json install', () => {
+    const timeouts = Object.values(pluginConfig().hooks)
+      .flat()
+      .flatMap((entry) => entry.hooks.map((h) => h.timeout));
+    expect(timeouts.length).toBeGreaterThan(0);
+    for (const timeout of timeouts) {
+      expect(timeout, 'plugin hooks.json drifted from HOOK_TIMEOUT_SECONDS').toBe(
+        HOOK_TIMEOUT_SECONDS,
+      );
+    }
+  });
+
+  it('gives every plugin hook an explicit timeout, never the host default', () => {
+    const entries = Object.values(pluginConfig().hooks).flat();
+    for (const entry of entries) {
+      for (const hook of entry.hooks) {
+        expect(hook.timeout, 'a hook with no timeout inherits the host default').toBeTypeOf(
+          'number',
+        );
+      }
+    }
   });
 });
 

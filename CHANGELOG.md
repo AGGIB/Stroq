@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Google Antigravity is the seventh supported agent.** `stroq init --agent antigravity` writes `.agents/hooks.json` (or `~/.gemini/config/hooks.json` with `--user`) and gives Antigravity the same protection the other six have — content scan and session taint, provenance, the secret egress guard, the ordered policy and the hash-chained audit — through its native hooks, offline.
+
+  Two things are genuinely new rather than another spelling of what the other adapters do. **Antigravity has `force_ask`, and Stroq uses it** rather than the plain `ask`: every Stroq `ask` exists because the context makes a normally-allowed action dangerous, and a standing `command(git *)` grant is exactly what would swallow that prompt. `deny_unless_prior_grant` is never used and `permissionOverrides` is never written, since both would make the outcome depend on grant state Stroq can neither see nor audit.
+
+  And **`PreInvocation` is installed on** — the only place in any supported agent where Stroq can put text into the model's context, and here the only channel a taint has at all, because `PostToolUse`'s stdout must be `{}`. Once a session is tainted, each turn is preceded by one ephemeral statement of what was read, which rules it matched, and what Stroq will now do. It is never an instruction: text arriving unattributed ahead of the model's own reasoning and telling it what to do is structurally the thing Stroq exists to detect. The file name or URL it names is the one attacker-influenced value in it, so it is reduced to a path-shaped token with both ends kept.
+
+  The rest is the shape the other adapters already have, with two limits worth stating up front. Antigravity's `PostToolUse` carries **no result at all** — same envelope as `PreToolUse` plus an optional `error` — so a poisoned command output, a fetched page and an MCP result cannot taint a session here; a file the agent read does, because Stroq opens it by path, and so does a failed call's error text. And its arguments are **PascalCase** (`CommandLine`, `AbsolutePath`, `TargetFile`, `Url`), which the shared field lists now read alongside the lowercase spellings every other agent sends — appended last so no existing agent's first candidate moves. Only `CommandLine` and `Cwd` are documented; the rest are read off the Windsurf/Cascade lineage, so a spelling guessed wrong surfaces as an `antigravity-unreadable-input` deny naming the keys rather than as a silent allow.
+
+  What a failed or timed-out Antigravity hook does is undocumented, so the adapter never signals through an exit code: every verdict, its own errors included, is the documented deny object on stdout with exit 0. `.agents/hooks.json`, `~/.gemini/config/hooks.json` and `~/.gemini/antigravity-cli/settings.json` join the protected files for every agent. [docs/AGENTS.md](docs/AGENTS.md#google-antigravity) has the event table and every limit.
+
 ## [0.13.0] - 2026-09-16
 
 ### Added

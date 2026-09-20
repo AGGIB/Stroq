@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { StroqEngine } from '@stroq/core';
 import { logError } from '../log.js';
+import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
 import { OrderedQueue, createPump } from './proxy-pump.js';
@@ -25,6 +26,15 @@ export interface McpProxyOptions {
   readonly cwd: string;
   readonly command: string;
   readonly args: readonly string[];
+  /**
+   * The environment variable names this server may have on top of `childEnv`'s
+   * infrastructure list: `--pass-env`, which `init` records from the config entry's
+   * own `env` block. `null` is a wrapper written before that flag existed, which
+   * carries no such record — the server then inherits the whole environment, as it
+   * always did. That is the migration path, not the intended state, and `runMcp`
+   * says so on stderr.
+   */
+  readonly passEnv: readonly string[] | null;
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   /** The proxy's OWN diagnostics. The server's stderr is inherited at the fd, never piped. */
@@ -35,10 +45,16 @@ export interface McpProxyOptions {
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
   const graceMs = options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
-  // No `env` and no `cwd`: the server inherits the proxy's, which is what the client
-  // gave it. `inherit` on fd 2 hands the server the proxy's own stderr, so its
-  // logging reaches the client untouched and is never parsed as a message.
-  const child = spawn(options.command, [...options.args], { stdio: ['pipe', 'pipe', 'inherit'] });
+  // No `cwd`: the server keeps the one the client gave the proxy. `inherit` on fd 2
+  // hands the server the proxy's own stderr, so its logging reaches the client
+  // untouched and is never parsed as a message. The environment is NOT inherited
+  // whole — the proxy holds the user's entire shell, and a wrapped server gets only
+  // what `childEnv` allows; a legacy wrapper (`passEnv === null`) is the one case
+  // where it still does, because nothing recorded what that server actually needs.
+  const child = spawn(options.command, [...options.args], {
+    ...(options.passEnv === null ? {} : { env: childEnv(options.passEnv) }),
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
   const serverIn = child.stdin;
   const serverOut = child.stdout;
   if (serverIn === null || serverOut === null) {

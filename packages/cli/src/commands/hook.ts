@@ -6,6 +6,14 @@ import {
   handleClaudeHook,
   type HookOutput,
 } from '../adapters/claude-code.js';
+import {
+  antigravityBadJsonOutput,
+  antigravityBadPhaseOutput,
+  antigravityFailClosedOutput,
+  handleAntigravityHook,
+  isAntigravityPhase,
+  toAntigravityPhase,
+} from '../adapters/antigravity.js';
 import { codexBlockOutput, codexFailClosedOutput, handleCodexHook } from '../adapters/codex.js';
 import {
   copilotBadPhaseOutput,
@@ -29,6 +37,7 @@ import {
   windsurfFailClosedOutput,
 } from '../adapters/windsurf.js';
 import { createEngine } from '../engine-factory.js';
+import { ANTIGRAVITY_HOOK_TIMEOUT_SECONDS } from './antigravity-hooks.js';
 import { COPILOT_HOOK_TIMEOUT_SECONDS } from './copilot-hooks.js';
 import { HOOK_TIMEOUT_SECONDS, hookDeadlineMs } from './config-file.js';
 import { logError } from '../log.js';
@@ -150,6 +159,23 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
     badJson: windsurfBlockOutput,
     stdinFailClosed: true,
     deadlineMs: hookDeadlineMs(WINDSURF_NOTIONAL_TIMEOUT_SECONDS),
+  },
+  // Antigravity has three phases rather than two — `PreInvocation` is the only place
+  // in any supported agent where Stroq can put a taint note into the model's context
+  // — and none of the three payloads names its own event, so the phase rides on the
+  // command line as it does for Copilot and OpenClaw. What is different here is the
+  // ANSWER: Antigravity documents its stdout contract and says nothing about what a
+  // non-zero exit means, so every verdict this adapter produces — a deny, an internal
+  // error, stdin that was not JSON — is the documented deny object on stdout with
+  // exit 0, never an exit code. `stdinFailClosed` therefore routes a stdin rejection
+  // here rather than to `main`'s exit 1, whose meaning is equally undocumented.
+  antigravity: {
+    handle: (engine, raw, arg) => handleAntigravityHook(engine, toAntigravityPhase(arg), raw),
+    failClosed: (raw, err, arg) => antigravityFailClosedOutput(toAntigravityPhase(arg), raw, err),
+    badJson: (reason, arg) => antigravityBadJsonOutput(toAntigravityPhase(arg), reason),
+    checkArg: (arg) => (isAntigravityPhase(arg) ? null : antigravityBadPhaseOutput(arg)),
+    stdinFailClosed: true,
+    deadlineMs: hookDeadlineMs(ANTIGRAVITY_HOOK_TIMEOUT_SECONDS),
   },
 };
 

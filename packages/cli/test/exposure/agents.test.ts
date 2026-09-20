@@ -34,6 +34,7 @@ describe('agentSurface', () => {
       'copilot',
       'openclaw',
       'windsurf',
+      'antigravity',
     ]);
   });
 

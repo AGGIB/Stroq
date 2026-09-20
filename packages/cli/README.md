@@ -11,7 +11,7 @@
 
 **Local action firewall for AI coding agents.** Stroq scans what your agent reads (files, web pages, MCP tool results, command output) for indirect prompt injection, taints the session when it finds instruction-like text, and deterministically blocks the dangerous follow-up actions an injected agent would take — outbound network commands, secret access, external git pushes, encoded execution, self-tampering. Everything runs locally; nothing is sent to a cloud.
 
-Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy).
+Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf**, **Google Antigravity** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy).
 
 ## Install
 

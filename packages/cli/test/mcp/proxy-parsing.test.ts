@@ -64,6 +64,7 @@ function startPump(): {
     sessionId: 'mcp:test',
     server: 'demo',
     cwd,
+    passEnv: ['FAKE_SERVER_LOG'],
     command: process.execPath,
     args: [fakeServer],
     stdin,

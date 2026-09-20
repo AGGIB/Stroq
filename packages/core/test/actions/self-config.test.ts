@@ -47,6 +47,15 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     "sed -i 's/a/b/' .windsurf/hooks.md",
     // The capitalised system-directory alternative must not fire on a lowercase path.
     'rm ~/.codeium/windsurf/memories/notes.md',
+    // Antigravity is protected at its three config FILES. `.agents` holds agent
+    // definitions and `~/.gemini` is the Gemini CLI's whole home, so an edit to
+    // anything else under either is ordinary work.
+    'cat .agents/reviewer.md',
+    'rm .agents/hooks.md',
+    "sed -i 's/a/b/' .agents/hooks-README.md",
+    'rm ~/.gemini/settings.json',
+    'rm ~/.gemini/tmp/session.json',
+    'rm ~/.gemini/antigravity-cli/logs/run.log',
     // A project MCP config is NOT protected: adding an MCP server to `.mcp.json` or
     // `.cursor/mcp.json` is routine agent work, and denying it would be the bare
     // `.claude` false positive again. The user-level client configs below are.
@@ -92,6 +101,10 @@ describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () =
     '/etc/windsurf/hooks.json',
     '/Library/Application Support/Windsurf/hooks.json',
     'rm -f .windsurf/hooks.json',
+    '.agents/hooks.json',
+    'rm -f .agents/hooks.json',
+    '~/.gemini/config/hooks.json',
+    '~/.gemini/antigravity-cli/settings.json',
     '~/Library/Application Support/Claude/claude_desktop_config.json',
     '~/.config/Claude/claude_desktop_config.json',
     'rm -f claude_desktop_config.json',
@@ -147,6 +160,42 @@ describe('PROTECTED_DIRS (F5-2: bare directories, find-only usage)', () => {
     'matches a bare Windsurf dir: %s',
     (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
   );
+  it.each(['.agents -name', '.agents/', '~/.gemini -delete', '.gemini/config/'])(
+    'matches a bare Antigravity dir: %s',
+    (text) => expect(PROTECTED_DIRS.test(text)).toBe(true),
+  );
+});
+
+describe('the Antigravity config files', () => {
+  it('denies a write to each of the three, and to the bare directories', () => {
+    for (const segment of [
+      'rm -f .agents/hooks.json',
+      "sed -i 's/stroq//' ~/.gemini/config/hooks.json",
+      'tee ~/.gemini/antigravity-cli/settings.json',
+      'rm -rf .agents',
+      'rm -rf ~/.gemini',
+      "find .agents -name 'hooks.json' -delete",
+    ])
+      expect(classifySelfConfigSegment(segment), segment).toBe('deny');
+  });
+
+  it('leaves the rest of .agents and ~/.gemini editable', () => {
+    for (const segment of [
+      'rm .agents/reviewer.md',
+      "sed -i 's/a/b/' ~/.gemini/settings.json",
+      'rm -rf ~/.gemini/tmp/cache',
+    ])
+      expect(classifySelfConfigSegment(segment), segment).toBe(null);
+  });
+
+  it('does not reach the directory between the bare one and the file', () => {
+    // A documented limit rather than a gap: `SELF_CONFIG_FILE` names the three
+    // files and `PROTECTED_DIR_BARE` the two bare directories, so a delete of
+    // `~/.gemini/antigravity-cli` — which takes the global settings file with it —
+    // carries no `config.self`. Pre-existing for every agent's own directory except
+    // `.stroq`, and pinned here so the claim and the behaviour cannot drift apart.
+    expect(classifySelfConfigSegment('rm -rf ~/.gemini/antigravity-cli')).toBe(null);
+  });
 });
 
 describe('classifySelfConfigSegment', () => {

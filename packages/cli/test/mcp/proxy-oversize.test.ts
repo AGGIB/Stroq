@@ -43,6 +43,7 @@ describe('an oversize server line', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: [],
       command: process.execPath,
       args: [fakeServer],
       stdin,

@@ -85,12 +85,23 @@ export function joinArgv(values: readonly unknown[]): string {
 
 /**
  * Where an agent might put the shell command, most official first. `command_line` is
- * Windsurf's documented key for `pre_run_command`; it is in this shared list rather
- * than in the Windsurf adapter because one list is what keeps every agent's reader
- * identical, and a spelling can only ADD a candidate — `commandCandidates` returns
- * all of them and the caller judges each — so no other agent's decision gets weaker.
+ * Windsurf's documented key for `pre_run_command` and `CommandLine` is Antigravity's
+ * for `run_command`; both are in this shared list rather than in their own adapters
+ * because one list is what keeps every agent's reader identical, and a spelling can
+ * only ADD a candidate — `commandCandidates` returns all of them and the caller
+ * judges each — so no other agent's decision gets weaker. The PascalCase spellings
+ * come LAST so that no existing agent's `commandOf` (the first candidate, which is
+ * what the audit records) changes.
  */
-const COMMAND_FIELDS = ['command', 'command_line', 'cmd', 'input', 'script', 'raw'] as const;
+const COMMAND_FIELDS = [
+  'command',
+  'command_line',
+  'cmd',
+  'input',
+  'script',
+  'raw',
+  'CommandLine',
+] as const;
 /** The string fields of a nested object that may hold it — one level down only. */
 const NESTED_TEXT_FIELDS = ['text', 'command', 'cmd'] as const;
 

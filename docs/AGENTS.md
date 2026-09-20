@@ -224,6 +224,55 @@ Stroq blocked this action (deny-self-tamper): Modifying agent security configura
 
 Run the Windsurf demo yourself: `pnpm install && pnpm build && ./examples/demo/run-windsurf-demo.sh`.
 
+### Google Antigravity
+
+```bash
+npx @stroq/cli init --agent antigravity   # in your project: merges into .agents/hooks.json
+```
+
+`--user` writes `~/.gemini/config/hooks.json` instead, `--dry-run` prints the merged file without writing it. Antigravity's docs do not say when `hooks.json` is read, so restart it if the hooks do not fire; `stroq doctor` then shows an `antigravity hooks` line next to the other six.
+
+Antigravity's hooks file is keyed by a hook **name** at the top level, which no other supported format is — so Stroq owns one key, `stroq`, and rewrites it whole. Re-running `init` is idempotent by construction, and every other hook name in the file, and every other key of it, is left untouched. Put hooks of your own under a name of your own, not inside this one. `init` writes `"enabled": true` explicitly even though `true` is the default, because that one field switches Stroq off while the handlers still look installed: writing it means re-running `init` repairs an `enabled: false`, and `stroq doctor` reports an entry carrying `false` as not installed.
+
+Stroq installs on three of Antigravity's events, with no matcher on the two that take one:
+
+| Antigravity event | What Stroq does                                                                                                                                                                               | Can it stop the action?                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `PreToolUse`      | Classifies the shell command, every path a file tool declares, every URL a fetch carries, or the call and its arguments as an MCP call (secret egress included), and applies your policy       | Yes — `deny`, and a real prompt through `force_ask`         |
+| `PostToolUse`     | Opens the file a read named (up to 1 MiB), scans it, taints the session, records provenance; scans a failed call's `error` text                                                                | No — and it cannot even warn: stdout must be `{}`           |
+| `PreInvocation`   | Before the model is called: if the session is tainted, injects one **ephemeral** statement of what was read and why it is untrusted                                                            | No — it is the only channel a taint has on this agent       |
+
+**`PreInvocation` is the only place in any supported agent where Stroq can put text into the model's context**, and here it is the only channel there is: `PostToolUse` has no field that could carry a warning back. The note is a statement of fact — what was read, which rules it matched, what Stroq will now do — and never an instruction, because text arriving unattributed ahead of the model's own reasoning and telling it what to do is structurally the thing Stroq exists to detect. It is an `ephemeralMessage`, so it does not persist into the transcript, and never a `userMessage`, which would forge a turn by you. The file name or URL inside it is the one attacker-influenced value, so it is reduced to a path-shaped token: everything outside a narrow path alphabet becomes `_`, both ends of an over-long value are kept, and at most three sources and three rule ids are named.
+
+**A Stroq `ask` becomes Antigravity's `force_ask`, not its `ask`.** Antigravity is only the second agent with a real prompt, so nothing is lost on the wire — but its permission model lets a standing `allow` rule satisfy a plain `ask`, and every Stroq `ask` exists because the _context_ makes a normally-allowed action dangerous: a destructive command, an external push, an `npx` for a package that came out of tool output. A standing `command(git *)` grant is exactly what would swallow that prompt. `deny_unless_prior_grant` is deliberately never used, and Stroq never writes `permissionOverrides`: both would make the outcome depend on grant state Stroq cannot see or audit.
+
+**Antigravity's arguments are PascalCase**, which is the single most likely way to ship an adapter that looks installed and classifies nothing: every reader Stroq already had looks for `command`/`cmd`/`input`/`script`/`raw` and `path`/`file_path`/`url`, and an Antigravity payload carries none of them. `CommandLine`, `AbsolutePath`, `TargetFile` and `Url` are read as additional spellings in the shared lists every agent uses. Only `CommandLine` and `Cwd` are documented; the others are read off the Windsurf/Cascade lineage this agent is built on, so a spelling guessed wrong surfaces as an `antigravity-unreadable-input` deny naming the keys it saw, never as a silent allow.
+
+The decision is Stroq's own object on stdout, with exit code 0:
+
+```json
+{
+  "decision": "deny",
+  "reason": "Stroq blocked this action (deny-self-tamper): …"
+}
+```
+
+`.agents/hooks.json`, `~/.gemini/config/hooks.json` and `~/.gemini/antigravity-cli/settings.json` are protected the same way `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, `.github/hooks/` and the Windsurf hook files already were, for every agent. The match is the FILE in each case: `.agents` holds agent definitions and `~/.gemini` is the Gemini CLI's whole home, so an edit to anything else under either stays the ordinary work it is.
+
+**Limits.**
+
+- **Nothing a tool returns reaches `PostToolUse`.** Antigravity's post payload is the same envelope as `PreToolUse` plus an optional `error` — there is no result field at all. So a poisoned command output, a fetched page and an MCP result cannot taint an Antigravity session the way they taint Claude Code, Cursor, Codex or Copilot. What does taint: a **file the agent read**, because the path is in the arguments and Stroq opens the file itself (up to 1 MiB, the same as Windsurf), and a **failed call's error text**, which the model does see. This is the largest limit of this adapter.
+- **`PostToolUse` cannot warn.** Its stdout must be `{}`. The taint is set and enforced on the next action, and the warning reaches the model through `PreInvocation` instead — which is why `stroq doctor` treats an install missing `PreInvocation` as no install at all.
+- **What a failed or timed-out hook does is undocumented.** Antigravity documents its stdout contract and says nothing about exit codes, crashes or timeouts. Stroq therefore never signals through an exit code: a deny, an internal error and stdin that was not JSON are all the documented deny object on stdout with exit 0 (the reason is also written to stderr, so a broken install is visible in Antigravity's logs). `init` writes `timeout: 30`, Antigravity's own default — if a timeout fails open a longer budget is strictly safer, and if it fails closed a longer budget only delays an answer Stroq produces in well under a second. Keep `npm install -g @stroq/cli` so no `npx` download runs inside it.
+- **MCP server names are invisible to hooks.** Every MCP call is classified as `mcp__antigravity__<tool>`, so a policy rule keyed on a _server_ cannot be written the way it can for Claude Code, Cursor and Windsurf. Rules keyed on the tool name, on `mcp.call`/`mcp.side_effect`, and the secret-egress guard all work normally. A tool name Stroq does not recognise is treated as an MCP call, which is the safe direction: `start_subagent`, `generate_image` and the `browser_*` family are classified this way on purpose, since each brings content into the session from outside it. So is `find_by_name` — Cascade's spelling of `find_file`, the tool in Pillar Security's prompt-injection-to-RCE chain (disclosed 2026-01-07, fixed 2026-02-28) — because for a search tool the fallback is strictly _more_ scrutiny than naming it would be.
+- **A call Stroq cannot read is denied, not allowed.** A `run_command`, file tool or fetch whose non-empty arguments yield no command, path or URL is denied with `antigravity-unreadable-input`, and the reason names the top-level keys it saw (never their values, which is where a secret would be). Empty arguments have nothing to act on and are unaffected, and neither a read, a search nor an MCP call can hit this rule. A call naming more than 64 files or URLs is denied outright (`antigravity-too-many-targets`) rather than classified one target at a time — that bound matters _more_ here than elsewhere, because one of the two things a timed-out hook might do is allow, and Stroq cannot tell which it is facing.
+- **The project is `workspacePaths[0]`, and never `args.Cwd`.** `Cwd` is model-chosen, and honouring it would let a tool call point the project's `.env*` secret index and the path rules at an empty directory. A multi-root workspace is indexed through its first root only, the same limit Cursor has.
+- **A bare delete of the directory between the protected file and the protected root is not caught.** `rm -rf .agents` and `rm -rf ~/.gemini` are denied, and so is a write to any of the three files; `rm -rf ~/.gemini/antigravity-cli` — which takes the global settings file with it — is only `ask-destructive`. Pre-existing for every agent's own directory except `.stroq` and `.github/hooks`, and a core follow-up rather than something this adapter fixes.
+- **Antigravity's terminal sandbox is separate from Stroq**, and on by default on macOS and Linux. A command Stroq allows may still be refused by the sandbox, and a command the sandbox would refuse is not thereby allowed by Stroq. The one case worth watching is an agent asking to leave it: an `unsandboxed(...)` allow rule, `enableTerminalSandbox: false`, or a prompted escape request all widen what the agent can reach, and a tainted session asking for any of them is a request to read closely rather than click through. Stroq does not classify those requests specially in v1.
+- **The wire format is taken from Antigravity's documentation, not recorded from a session**, and the fixtures in this repository are hand-written from that reading. That is why the adapter accepts arguments as an object and as a JSON string, reads several field spellings, and denies what it cannot read.
+- **Not used in v1:** `PostInvocation` and `Stop` (neither carries a tool call or untrusted content, and whether a run continues is not a firewall's decision), `injectSteps` beyond the one ephemeral note, `permissionOverrides`, `deny_unless_prior_grant`, plugin-level `hooks.json` (it has no fixed path and is not protected either), and the inline `hooks` block inside `~/.gemini/antigravity-cli/settings.json`, which `init` does not write though it is protected.
+- **Untested:** Windows, and Antigravity itself — nothing here has been run against a real install. There is no demo script for this adapter yet; the unit, shape, decision and end-to-end suites cover the wire mapping in its place.
+
 ### MCP proxy (any MCP client)
 
 ```bash
@@ -235,17 +284,24 @@ For clients with no hook API at all — Claude Desktop above all — Stroq goes 
 
 ```jsonc
 // before
-"github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+"github": {
+  "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…" }
+}
 // after
 "github": {
   "command": "/usr/local/bin/node",
   "args": ["/usr/local/lib/node_modules/@stroq/cli/dist/index.js", "mcp",
            "--server", "github", "--client", "claude-desktop", "--cwd", "/Users/me/project",
-           "--", "npx", "-y", "@modelcontextprotocol/server-github"]
+           "--pass-env", "GITHUB_PERSONAL_ACCESS_TOKEN",
+           "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…" }
 }
 ```
 
 `--user` picks Cursor's `~/.cursor/mcp.json` over the project file, `--dry-run` prints the rewritten config to stdout (with the per-entry outcome lines on stderr, so `--dry-run | jq` still sees only JSON) and writes nothing, and `--unwrap` puts every entry back the way it was. Re-running `init` replaces Stroq's own wrapper rather than nesting a second one — recognised by a Stroq-shaped entry path immediately followed by `mcp --server <name> --client <client>` — which is how an upgrade updates the recorded entry path; `stroq doctor` then shows an `mcp proxy` line counting the wrapped stdio servers of every client config it finds, and names any wrapper whose recorded entry path no longer exists as stale (an upgrade or uninstall that moved or removed it without `init` being re-run) rather than counting it as protected — re-running `stroq init --agent mcp` replaces it. A config whose `mcpServers` is present but not an object (a hand-edited array, say) is refused — `cannot rewrite <file>: mcpServers is not an object`, exit 1 — rather than guessed at.
+
+**The environment a wrapped server gets.** The client launches `stroq mcp`, so the proxy's own environment is the client's: every credential in your shell, plus whatever the entry's `env` block declared. A wrapped server is started with neither — only the variables its own entry declares (their NAMES are what `--pass-env` records; the values stay in the config and never enter argv) plus the ones any process needs to run: `PATH`, `HOME` and the Windows equivalents, the temp and locale variables, the platform variables Windows itself requires, and the proxy/CA settings a corporate network needs. If a server needs a variable it does not declare, add it to that entry's `env` block and re-run `init`. Wrappers written before this existed record no `--pass-env` and keep inheriting everything, rather than losing a credential on upgrade: they say so on stderr at startup and are counted separately by `stroq doctor` (`1 inherits the full environment: re-run init`). Re-running `stroq init --agent mcp` is the fix.
 
 | Message                                    | What Stroq does                                                                                                                                                         | Can it stop the action?                                                                     |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |

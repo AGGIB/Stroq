@@ -164,6 +164,11 @@ describe('wrapMcpConfig', () => {
         'claude-desktop',
         '--cwd',
         '/home/me/project',
+        // The NAME the entry declares, recorded so the proxy can pass that one
+        // variable through; the value stays where it was and never enters argv,
+        // which any other process on the machine can read.
+        '--pass-env',
+        'TOKEN',
         '--',
         'npx',
         '-y',
@@ -192,9 +197,70 @@ describe('wrapMcpConfig', () => {
       'claude-desktop',
       '--cwd',
       '/home/me/project',
+      '--pass-env',
+      '',
       '--',
       'srv',
     ]);
+  });
+
+  it('records every name the entry declares, in order, and never a value', () => {
+    const { config: out } = wrapMcpConfig(
+      config({
+        a: { command: 'srv', env: { FIRST_TOKEN: 'v1', SECOND_TOKEN: 'v2' } },
+      }),
+      opts,
+    );
+    const args = serversOf(out)['a']?.['args'] as readonly string[];
+    expect(args[args.indexOf('--pass-env') + 1]).toBe('FIRST_TOKEN,SECOND_TOKEN');
+    // The values are the point of all this; argv is world-readable on most systems.
+    expect(args.join(' ')).not.toContain('v1');
+  });
+
+  it('drops a declared name the recorded list could not survive', () => {
+    // A config file is external data. A comma in a name would arrive as a pass for
+    // two variables nobody declared — including, if the config were hostile, one
+    // the user's shell happens to hold — and a name starting with `--` would read
+    // as the next flag, or, for a lone `--`, as the separator itself, which would
+    // hand `unwrapArgs` the wrong command and leave the server unstartable.
+    const { config: out } = wrapMcpConfig(
+      config({
+        a: {
+          command: 'srv',
+          env: { 'X,AWS_SECRET_ACCESS_KEY': 'v', '--': 'v', '--client': 'v', REAL: 'v' },
+        },
+      }),
+      opts,
+    );
+    const args = serversOf(out)['a']?.['args'] as readonly string[];
+    expect(args[args.indexOf('--pass-env') + 1]).toBe('REAL');
+    // And the wrapper still round-trips: the separator is still the real one.
+    expect(unwrapArgs(args)).toEqual({ command: 'srv', args: [] });
+  });
+
+  it('keeps a lone dropped name from making the separator ambiguous', () => {
+    // The dangerous shape is a SINGLE name that joins to exactly `--`, which would
+    // become the first `--` after the wrapper's own flags.
+    const { config: out } = wrapMcpConfig(
+      config({ a: { command: 'srv', args: ['--port', '1'], env: { '--': 'v' } } }),
+      opts,
+    );
+    const args = serversOf(out)['a']?.['args'] as readonly string[];
+    expect(args[args.indexOf('--pass-env') + 1]).toBe('');
+    expect(unwrapArgs(args)).toEqual({ command: 'srv', args: ['--port', '1'] });
+  });
+
+  it('re-reads the declared names on a re-wrap, so an edited env block takes effect', () => {
+    const once = wrapMcpConfig(config({ a: { command: 'srv', env: { OLD: 'v' } } }), opts);
+    // The wrapper preserves the entry's `env`, so the SECOND wrap reads the block as
+    // the user last edited it rather than the list the first wrap happened to record.
+    const edited = config({
+      a: { ...serversOf(once.config)['a'], env: { NEW_A: 'v', NEW_B: 'v' } },
+    });
+    const twice = wrapMcpConfig(edited, opts);
+    const args = serversOf(twice.config)['a']?.['args'] as readonly string[];
+    expect(args[args.indexOf('--pass-env') + 1]).toBe('NEW_A,NEW_B');
+    expect(args.filter((arg) => arg === '--pass-env')).toHaveLength(1);
   });
 
   it('replaces its own wrapper instead of nesting one, so an upgrade updates the path', () => {
@@ -212,6 +278,8 @@ describe('wrapMcpConfig', () => {
         'claude-desktop',
         '--cwd',
         '/home/me/project',
+        '--pass-env',
+        '',
         '--',
         'srv',
         '--port',
@@ -239,6 +307,8 @@ describe('wrapMcpConfig', () => {
       'claude-desktop',
       '--cwd',
       '/home/me/project',
+      '--pass-env',
+      '',
       '--',
       './dist/index.js',
       'mcp',
@@ -317,6 +387,8 @@ describe('wrapMcpConfig', () => {
       'claude-desktop',
       '--cwd',
       '/home/me/project',
+      '--pass-env',
+      '',
       '--',
       'node',
       's.js',
@@ -417,14 +489,25 @@ describe('countWrapped, which is what doctor reports', () => {
       config({ a: { command: 'x' }, b: { command: 'y' }, remote: { url: 'https://x.example' } }),
       realOpts,
     );
-    expect(countWrapped(wrapped.config)).toEqual({ wrapped: 2, stdio: 2, stale: 0 });
+    expect(countWrapped(wrapped.config)).toEqual({
+      wrapped: 2,
+      stdio: 2,
+      stale: 0,
+      unfiltered: 0,
+    });
     // Unwrapping puts both stdio entries back, so none is behind the proxy any more.
     expect(countWrapped(unwrapMcpConfig(wrapped.config).config)).toEqual({
       wrapped: 0,
       stdio: 2,
       stale: 0,
+      unfiltered: 0,
     });
-    expect(countWrapped({ mcpServers: {} })).toEqual({ wrapped: 0, stdio: 0, stale: 0 });
+    expect(countWrapped({ mcpServers: {} })).toEqual({
+      wrapped: 0,
+      stdio: 0,
+      stale: 0,
+      unfiltered: 0,
+    });
   });
 
   it('does not count a wrapper whose recorded entry file no longer exists', () => {
@@ -434,7 +517,44 @@ describe('countWrapped, which is what doctor reports', () => {
       ...opts,
       entryArgv: ['/does/not/exist/index.js'],
     });
-    expect(countWrapped(wrapped.config)).toEqual({ wrapped: 0, stdio: 2, stale: 2 });
+    expect(countWrapped(wrapped.config)).toEqual({
+      wrapped: 0,
+      stdio: 2,
+      stale: 2,
+      unfiltered: 0,
+    });
+  });
+
+  it('counts a wrapper written before --pass-env as proxied but unfiltered', () => {
+    // Exactly what an install from an older version left behind: wrapped, working,
+    // and handing the server every variable in the client's environment. It still
+    // counts as wrapped — it IS proxied — but `doctor` has to be able to say which
+    // installs re-running `init` would actually improve.
+    const legacy = config({
+      old: {
+        command: '/usr/bin/node',
+        args: [
+          realEntry,
+          'mcp',
+          '--server',
+          'old',
+          '--client',
+          'cursor',
+          '--cwd',
+          '/w',
+          '--',
+          'srv',
+        ],
+      },
+    });
+    expect(countWrapped(legacy)).toEqual({ wrapped: 1, stdio: 1, stale: 0, unfiltered: 1 });
+    // Re-running `init` over it is the fix, and is counted as such.
+    expect(countWrapped(wrapMcpConfig(legacy, realOpts).config)).toEqual({
+      wrapped: 1,
+      stdio: 1,
+      stale: 0,
+      unfiltered: 0,
+    });
   });
 });
 

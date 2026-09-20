@@ -30,12 +30,21 @@ import { toolInputRecord } from './tool-input.js';
 /** What a native tool does, which decides both its Stroq name and its input shape. */
 export type ToolKind = 'shell' | 'patch' | 'write' | 'read' | 'fetch' | 'plain' | 'mcp';
 
-/** Where a file tool might put the path, the documented spelling first. */
-const PATH_FIELDS = ['path', 'file_path', 'raw'] as const;
+/**
+ * Where a file tool might put the path, the documented spelling first.
+ *
+ * `AbsolutePath` and `TargetFile` are Antigravity's, whose tool arguments are
+ * PascalCase throughout; they live in this shared list for the same reason
+ * `command_line` and `CommandLine` live in `codex-input.ts`'s — one list is what
+ * keeps every agent's reader identical, and a spelling can only ADD a candidate. They
+ * come LAST so that no existing agent's `candidates[0]` — the value that becomes
+ * `file_path`, and so the audit summary and the provenance source — changes.
+ */
+const PATH_FIELDS = ['path', 'file_path', 'raw', 'AbsolutePath', 'TargetFile'] as const;
 
 /**
- * Every distinct non-empty path candidate among `path`, `file_path` and `raw`, in
- * that order — not just the first: `{ path: 'safe.txt', file_path: '<protected>' }`
+ * Every distinct non-empty path candidate among the spellings above, in that order —
+ * not just the first: `{ path: 'safe.txt', file_path: '<protected>' }`
  * would otherwise let the protected value disappear behind whichever field a
  * first-match reader happened to check first. More than one candidate is judged the
  * way an `apply_patch`'s paths already are: `kindToolInput` exposes the whole list
@@ -51,8 +60,11 @@ export const pathsOf = (record: Readonly<Record<string, unknown>>): readonly str
   return [...found];
 };
 
-/** Where a `web_fetch` call might put the URL, the documented spelling first. */
-const URL_FIELDS = ['url', 'uri', 'href', 'raw'] as const;
+/**
+ * Where a fetch call might put the URL, the documented spelling first; `Url` is
+ * Antigravity's `read_url_content` key, appended last for the reason above.
+ */
+const URL_FIELDS = ['url', 'uri', 'href', 'raw', 'Url'] as const;
 
 /**
  * Every distinct non-empty URL candidate, read exactly the way `pathsOf` reads a

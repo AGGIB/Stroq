@@ -7,6 +7,11 @@ import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-ho
 import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqWindsurfHooks, readWindsurfHooks, windsurfHooksPath } from './windsurf-hooks.js';
+import {
+  antigravityHooksPath,
+  isStroqAntigravityHooks,
+  readAntigravityHooks,
+} from './antigravity-hooks.js';
 import { isStroqHandler, readSettings, settingsPath } from './init.js';
 import { countWrapped, mcpConfigPath, readMcpConfig, type McpClient } from './mcp-config.js';
 import {
@@ -35,6 +40,10 @@ export interface DoctorReport {
  * `.github` is deliberately absent for Copilot — almost every repository has one
  * whether or not Copilot CLI is in use — so Copilot is detected from its user
  * directory alone. OpenClaw's plugin is user-level only, so it has no project entry.
+ * Antigravity's user entry is `.gemini/antigravity-cli` rather than a bare `.gemini`,
+ * which the Gemini CLI also creates: detection only decides how the uninstalled state
+ * is rendered, but suggesting an Antigravity install to someone who has never run it
+ * is still noise.
  */
 const AGENT_DIRS: Readonly<
   Record<string, { readonly project: readonly string[]; readonly user: readonly string[] }>
@@ -45,6 +54,7 @@ const AGENT_DIRS: Readonly<
   copilot: { project: [], user: ['.copilot'] },
   openclaw: { project: [], user: ['.openclaw'] },
   windsurf: { project: ['.windsurf'], user: [join('.codeium', 'windsurf')] },
+  antigravity: { project: ['.agents'], user: [join('.gemini', 'antigravity-cli')] },
 };
 
 /** Agent ids whose config directory exists in `cwd` or the user's home. */
@@ -113,6 +123,17 @@ function checkWindsurfHooks(file: string): {
 } {
   try {
     return { installed: isStroqWindsurfHooks(readWindsurfHooks(file)), error: null };
+  } catch (err) {
+    return { installed: false, error: (err as Error).message };
+  }
+}
+
+function checkAntigravityHooks(file: string): {
+  readonly installed: boolean;
+  readonly error: string | null;
+} {
+  try {
+    return { installed: isStroqAntigravityHooks(readAntigravityHooks(file)), error: null };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
   }
@@ -213,12 +234,19 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
         counted.stale > 0
           ? ` (${counted.stale} stale wrapper${counted.stale === 1 ? '' : 's'}: entry missing)`
           : '';
+      // A wrapper written before `--pass-env` keeps working, so nothing else would
+      // ever mention it; this line is where a user learns that re-running `init`
+      // would stop handing that server the whole environment.
+      const unfiltered =
+        counted.unfiltered > 0
+          ? ` (${counted.unfiltered} inherits the full environment: re-run init)`
+          : '';
       found.push({
         scope,
         file,
         installed: counted.wrapped > 0,
         error: null,
-        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${stale} (${file})`,
+        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${stale}${unfiltered} (${file})`,
       });
     } catch (err) {
       found.push({ scope, file, installed: false, error: (err as Error).message });
@@ -335,6 +363,10 @@ export async function doctorReport(
     {
       name: 'windsurf hooks',
       scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf'),
+    },
+    {
+      name: 'antigravity hooks',
+      scopes: agentScopes(cwd, antigravityHooksPath, checkAntigravityHooks, 'antigravity'),
     },
     { name: 'mcp proxy', scopes: mcpProxyScopes(cwd) },
   ];
