@@ -44,6 +44,42 @@ export function hardeningExports(): string {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * The same two settings as variables to overlay on a child's environment, which is
+ * how `stroq run` applies what `--env` asks the user to apply themselves.
+ *
+ * Returns only the variables to ADD, so a caller can merge them without having to
+ * know which ones they are. The indices continue an existing `GIT_CONFIG_*` block
+ * rather than starting at zero: `eval "$(stroq inspect --env)"` is the documented
+ * way to do this by hand, so the user who read the README already has a block, and
+ * anyone with a `GIT_CONFIG_*` pair of their own would otherwise lose it silently. A
+ * pair already present with the same value is left alone — nesting one launch inside
+ * another must not grow the block without bound.
+ *
+ * A `GIT_CONFIG_COUNT` that is not a count starts the block over from zero. Git
+ * itself refuses such a value, so nothing usable is being discarded, and the
+ * alternative — refusing to harden because the environment is already broken — would
+ * turn a broken shell into an unprotected launch.
+ */
+export function hardeningEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const declared = Number(env['GIT_CONFIG_COUNT']);
+  const start = Number.isInteger(declared) && declared >= 0 ? declared : 0;
+  const present = new Set(
+    Array.from(
+      { length: start },
+      (_, i) => `${env[`GIT_CONFIG_KEY_${i}`]}=${env[`GIT_CONFIG_VALUE_${i}`]}`,
+    ),
+  );
+  const missing = GIT_HARDENING.filter(({ key, value }) => !present.has(`${key}=${value}`));
+  if (missing.length === 0) return {};
+  const overlay: NodeJS.ProcessEnv = { GIT_CONFIG_COUNT: String(start + missing.length) };
+  missing.forEach(({ key, value }, i) => {
+    overlay[`GIT_CONFIG_KEY_${start + i}`] = key;
+    overlay[`GIT_CONFIG_VALUE_${start + i}`] = value;
+  });
+  return overlay;
+}
+
 export function formatInspect(dir: string, surface: RepoSurface): string {
   if (!surface.isRepo)
     return `${dir} is not a git repository — nothing for stroq inspect to read\n`;

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   GIT_HARDENING,
   formatInspect,
+  hardeningEnv,
   hardeningExports,
   runInspect,
 } from '../../src/commands/inspect.js';
@@ -150,5 +151,41 @@ describe('the git settings stroq inspect --env prints', () => {
     });
     execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', env });
     expect(existsSync(marker), 'the protected run must not fire it').toBe(false);
+  });
+});
+
+describe('the same settings as an environment overlay', () => {
+  it('declares the pairs from index 0 when nothing else is set', () => {
+    const overlay = hardeningEnv({});
+    expect(overlay['GIT_CONFIG_COUNT']).toBe(String(GIT_HARDENING.length));
+    GIT_HARDENING.forEach(({ key, value }, i) => {
+      expect(overlay[`GIT_CONFIG_KEY_${i}`]).toBe(key);
+      expect(overlay[`GIT_CONFIG_VALUE_${i}`]).toBe(value);
+    });
+  });
+
+  // `eval "$(stroq inspect --env)"` is the documented way to do this by hand, so
+  // the user who followed the README already has a block in their environment.
+  // Overwriting it from index 0 would drop their settings on the floor.
+  it('appends to a block that is already there instead of overwriting it', () => {
+    const overlay = hardeningEnv({
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'user.name',
+      GIT_CONFIG_VALUE_0: 'someone',
+    });
+    expect(overlay['GIT_CONFIG_KEY_0']).toBeUndefined();
+    expect(overlay['GIT_CONFIG_COUNT']).toBe(String(1 + GIT_HARDENING.length));
+    expect(overlay['GIT_CONFIG_KEY_1']).toBe(GIT_HARDENING[0]?.key);
+  });
+
+  it('adds nothing twice, so nesting one launch inside another cannot grow the block', () => {
+    const first = hardeningEnv({});
+    expect(hardeningEnv(first)).toEqual({});
+  });
+
+  it('starts from zero when the count that is there is not a number git could use', () => {
+    const overlay = hardeningEnv({ GIT_CONFIG_COUNT: 'lots' });
+    expect(overlay['GIT_CONFIG_COUNT']).toBe(String(GIT_HARDENING.length));
+    expect(overlay['GIT_CONFIG_KEY_0']).toBe(GIT_HARDENING[0]?.key);
   });
 });

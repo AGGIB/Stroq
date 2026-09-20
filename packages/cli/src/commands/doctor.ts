@@ -264,6 +264,85 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
   ];
 }
 
+/**
+ * One row of `stroq doctor`'s hook section: the agent it is about, the label the
+ * report prints, and how to read its scopes. Split out of `doctorReport` so that a
+ * caller who needs ONE agent's answer — `stroq run`, deciding whether the agent it
+ * is about to start is actually guarded — asks the same code the report does, rather
+ * than a second implementation that can drift from it.
+ *
+ * `mcp` is a row here and not an agent anyone launches; `agentHookStatus` reaches it
+ * all the same, because a caller asking about it deserves the real answer.
+ */
+const HOOK_ROWS: readonly {
+  readonly id: string;
+  readonly name: string;
+  readonly scopes: (cwd: string) => readonly ScopeStatus[];
+}[] = [
+  {
+    id: 'claude-code',
+    name: 'hooks',
+    scopes: (cwd) => agentScopes(cwd, settingsPath, checkClaudeHooks, 'claude-code'),
+  },
+  {
+    id: 'cursor',
+    name: 'cursor hooks',
+    scopes: (cwd) => agentScopes(cwd, cursorHooksPath, checkCursorHooks, 'cursor'),
+  },
+  {
+    id: 'codex',
+    name: 'codex hooks',
+    scopes: (cwd) => agentScopes(cwd, codexHooksPath, checkCodexHooks, 'codex'),
+  },
+  {
+    id: 'copilot',
+    name: 'copilot hooks',
+    scopes: (cwd) => agentScopes(cwd, copilotHooksPath, checkCopilotHooks, 'copilot'),
+  },
+  { id: 'openclaw', name: 'openclaw plugin', scopes: () => openclawScopes() },
+  {
+    id: 'windsurf',
+    name: 'windsurf hooks',
+    scopes: (cwd) => agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf'),
+  },
+  {
+    id: 'antigravity',
+    name: 'antigravity hooks',
+    scopes: (cwd) => agentScopes(cwd, antigravityHooksPath, checkAntigravityHooks, 'antigravity'),
+  },
+  { id: 'mcp', name: 'mcp proxy', scopes: (cwd) => mcpProxyScopes(cwd) },
+];
+
+/** What one agent's hook install looks like, for a caller that is not the report. */
+export interface AgentHookStatus {
+  readonly id: string;
+  /** The label `stroq doctor` prints for this row. */
+  readonly name: string;
+  /** Stroq has a hook in at least one scope. */
+  readonly installed: boolean;
+  /** An installed entry is no longer the command `stroq init` recorded. */
+  readonly changed: boolean;
+  /** The same per-scope text the report shows, so a caller need not rebuild it. */
+  readonly detail: string;
+}
+
+/**
+ * One agent's hook install, or `null` when `id` is not an agent Stroq supports.
+ * Reads the same files `stroq doctor` reads, through the same checks.
+ */
+export function agentHookStatus(id: string, cwd: string = process.cwd()): AgentHookStatus | null {
+  const row = HOOK_ROWS.find((r) => r.id === id);
+  if (row === undefined) return null;
+  const scopes = row.scopes(cwd);
+  return {
+    id,
+    name: row.name,
+    installed: scopes.some((s) => s.installed),
+    changed: scopes.some((s) => s.drift === 'changed'),
+    detail: scopeDetail(scopes),
+  };
+}
+
 interface AgentStatus {
   readonly name: string;
   readonly installed: boolean;
@@ -277,19 +356,9 @@ interface AgentStatus {
  * case the detail names every agent that IS carrying the line, rather than putting a
  * green tick next to the word "missing".
  */
-function hooksCheck(
-  name: string,
-  scopes: readonly ScopeStatus[],
-  others: readonly AgentStatus[],
-): DoctorCheck {
-  const broken = scopes.some((s) => s.error !== null);
-  const installed = scopes.some((s) => s.installed);
-  // A rewritten entry is worse than a missing one: the agent reports a hook, the user
-  // believes they are covered, and whatever is on the other end runs on every tool
-  // call. It fails the line on its own, whatever the other scopes say.
-  const changed = scopes.some((s) => s.drift === 'changed');
-  const carrying = others.filter((o) => o.installed).map((o) => o.name);
-  const perScope = scopes
+/** The per-scope text a hook row prints, shared with `agentHookStatus`. */
+function scopeDetail(scopes: readonly ScopeStatus[]): string {
+  return scopes
     .map(
       (s) =>
         s.error ??
@@ -303,6 +372,21 @@ function hooksCheck(
         } (${s.file})`,
     )
     .join('; ');
+}
+
+function hooksCheck(
+  name: string,
+  scopes: readonly ScopeStatus[],
+  others: readonly AgentStatus[],
+): DoctorCheck {
+  const broken = scopes.some((s) => s.error !== null);
+  const installed = scopes.some((s) => s.installed);
+  // A rewritten entry is worse than a missing one: the agent reports a hook, the user
+  // believes they are covered, and whatever is on the other end runs on every tool
+  // call. It fails the line on its own, whatever the other scopes say.
+  const changed = scopes.some((s) => s.drift === 'changed');
+  const carrying = others.filter((o) => o.installed).map((o) => o.name);
+  const perScope = scopeDetail(scopes);
   return {
     name,
     ok: !broken && !changed && (installed || carrying.length > 0),
@@ -351,25 +435,7 @@ export async function doctorReport(
   // all" self-test, and SAMPLE is a synthetic payload that belongs to no surface in
   // particular. Scoping it would turn an unrelated scoping change into a doctor failure.
   const injectionDetected = scanContent(rules, SAMPLE).verdict === 'suspect';
-  const agents = [
-    { name: 'hooks', scopes: agentScopes(cwd, settingsPath, checkClaudeHooks, 'claude-code') },
-    { name: 'cursor hooks', scopes: agentScopes(cwd, cursorHooksPath, checkCursorHooks, 'cursor') },
-    { name: 'codex hooks', scopes: agentScopes(cwd, codexHooksPath, checkCodexHooks, 'codex') },
-    {
-      name: 'copilot hooks',
-      scopes: agentScopes(cwd, copilotHooksPath, checkCopilotHooks, 'copilot'),
-    },
-    { name: 'openclaw plugin', scopes: openclawScopes() },
-    {
-      name: 'windsurf hooks',
-      scopes: agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf'),
-    },
-    {
-      name: 'antigravity hooks',
-      scopes: agentScopes(cwd, antigravityHooksPath, checkAntigravityHooks, 'antigravity'),
-    },
-    { name: 'mcp proxy', scopes: mcpProxyScopes(cwd) },
-  ];
+  const agents = HOOK_ROWS.map((row) => ({ name: row.name, scopes: row.scopes(cwd) }));
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,
     installed: a.scopes.some((s) => s.installed),
