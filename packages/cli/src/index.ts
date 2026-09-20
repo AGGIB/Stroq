@@ -11,6 +11,7 @@ import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
 import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
+import { runSent } from './commands/sent.js';
 import { runTrust } from './commands/trust.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
@@ -47,6 +48,17 @@ Commands:
                                      rebuild a session's causal history: which content the agent read,
                                      and which actions came out of it. --last reads the agent's own
                                      transcript, so it works on sessions that ran before you installed
+  sent [<session>] [--last] [--transcript <path>] [--json] [--fail-on-finding]
+                                     which of your credentials already reached a model provider, in
+                                     which past session, put there by which tool call. --last reads
+                                     the agent's own transcript, so it covers sessions from before
+                                     you installed and can see what tools RETURNED, not just what
+                                     they sent. To match values it reads this machine's credential
+                                     files (~/.aws/credentials, ~/.npmrc, ~/.netrc,
+                                     ~/.docker/config.json, ./.env*); it reports names and sources
+                                     only, never a value. Exits 0 even when it finds something —
+                                     the past cannot be fixed by this build; use --fail-on-finding
+                                     to gate on it anyway
   canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
   attack [--json] [--only <id>] [--fuzz]
                                      replay recorded incidents against your policy; exit 1 if any gets
@@ -116,6 +128,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runReplay(rest);
     case 'why':
       return runWhy(rest);
+    case 'sent':
+      return runSent(rest);
     case 'canary':
       return runCanary(rest);
     case 'attack':
