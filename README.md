@@ -5,9 +5,9 @@
   <img src="docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### Know what told your agent to do that
+### See what your agent already sent to the model
 
-Every guard judges the command in front of it. Stroq is the only one that can name the page, file or tool result that put the command there, and stop the action because of it.
+Your coding agent reads files, issues and command output all day, and every byte of it goes to the model provider. `stroq sent` reads the sessions you already ran and names which of your own credentials went with them — one command, nothing installed. Then Stroq guards what happens next: it names the page, file or tool result that put a command there, and stops the action because of it.
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: all stopped](https://img.shields.io/badge/stroq%20attack-all%20stopped-1f9d55)](#replay-twenty-real-and-synthetic-attacks)
@@ -17,8 +17,8 @@ Every guard judges the command in front of it. Stroq is the only one that can na
 [![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](package.json)
 
 ```bash
-npx @stroq/cli replay --last   # what already happened, no install
-npx @stroq/cli init            # guard what happens next
+npx @stroq/cli sent --last   # which of your credentials already reached a model — no install
+npx @stroq/cli init          # then guard what happens next
 ```
 
 Supported today: **Claude Code**, **Cursor**, **Codex**, **Copilot CLI**, **Windsurf**, **Google Antigravity** (native hooks) · **OpenClaw** (in-process plugin) · **any MCP client** (stdio proxy)
