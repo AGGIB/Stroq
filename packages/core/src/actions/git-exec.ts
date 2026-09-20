@@ -45,9 +45,14 @@ const GIT_DASH_C = /\bgit\s+(?:\S+\s+)*?-c\s*[\w.-]+=/i;
  * against a whole command segment as well as a bare path: `echo … >> .git/config`
  * has the path in the middle of a line, while `docs/.gitattributes.md` is a document
  * about one and must not match.
+ *
+ * `.git` is joined to `config`/`hooks` by `[/\\]+`, so the Windows spelling counts.
+ * The five entries beside it carry no separator and so always worked; `.git\hooks`
+ * was the one alternative that silently matched nothing on the platform, which is
+ * precisely the alternative that names an executable file.
  */
 export const GIT_EXEC_FILE =
-  /(?<![\w.-])(\.git\/(config|hooks)|\.gitattributes|\.gitmodules|\.husky|\.devcontainer|\.envrc)(?![\w.-])/;
+  /(?<![\w.-])(\.git[/\\]+(config|hooks)|\.gitattributes|\.gitmodules|\.husky|\.devcontainer|\.envrc)(?![\w.-])/;
 
 /**
  * True for a dotted git configuration key whose value git executes.

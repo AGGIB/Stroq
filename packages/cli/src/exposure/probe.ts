@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { loadBundledRules, scanContent } from '@stroq/core';
 import { readMcpConfig, unwrapArgs } from '../commands/mcp-config.js';
+import { killChildTree } from '../mcp/kill-child.js';
 import type { Finding } from './findings.js';
 import type { McpSurface } from './mcp-surface.js';
 
@@ -97,7 +98,8 @@ function flaggedTools(
  * Runs the real MCP handshake — `initialize`, `notifications/initialized`, then exactly
  * one `tools/list` — and reads the descriptions that come back. A tool is never called:
  * the probe reads descriptions, which is where tool poisoning lives, and nothing else.
- * The child is always killed, including on timeout.
+ * The child is always killed, including on timeout — and on Windows so is everything
+ * it started, which `child.kill` alone would not reach; see `killChildTree`.
  *
  * A response carrying `result.tools` is accepted whatever its id, so a server that
  * answers without the handshake is still read rather than reported as a timeout.
@@ -123,7 +125,7 @@ async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResul
       if (done) return;
       done = true;
       clearTimeout(timer);
-      child.kill('SIGTERM');
+      killChildTree(child, 'SIGTERM');
       resolve(result);
     };
     const timer = setTimeout(

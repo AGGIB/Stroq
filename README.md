@@ -439,10 +439,13 @@ Generated from [`policies/default.yaml`](policies/default.yaml); rules are evalu
 | `ask-mcp-side-effect-when-tainted` | ask       | `mcp.side_effect`, taint = suspect   |
 | `ask-self-touch`                   | ask       | `config.self_touch`, any taint       |
 | `ask-destructive`                  | ask       | `shell.destructive`, any taint       |
+| `ask-shell-unparsed`               | ask       | `shell.unparsed`, any taint          |
 | `ask-push-external`                | ask       | `git.push_external`, any taint       |
 | _(no rule matched)_                | **allow** | default                              |
 
 Commands that only read the security config — `cat`, `grep`, `git status`/`diff`/`add`, and the like — are classified as ordinary reads, not `config.self`, so they stay allowed; opening it in an editor or otherwise writing to it is what triggers `config.self` (deny) or `config.self_touch` (ask).
+
+`shell.unparsed` is the one class that is not a claim about danger. It fires when a command runs something Stroq could not read — `iex $payload`, `& $cmd`, a pipeline fed into `Invoke-Expression` from something that is not a fetch — and the verdict it produces is "I could not tell", not "this is safe". It is triggered by that construct alone and never by an unrecognised command, so ordinary work does not collect confirmation prompts.
 
 ### Provenance
 

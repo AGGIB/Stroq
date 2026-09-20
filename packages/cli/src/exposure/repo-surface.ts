@@ -142,20 +142,36 @@ function gitAttributesHits(root: string): RepoExecHit[] {
     .map((what) => ({ kind: 'gitattributes-driver' as const, file: '.gitattributes', what }));
 }
 
-function gitHookHits(root: string): RepoExecHit[] {
+/**
+ * Whether git will run this hook file.
+ *
+ * On POSIX the executable bit answers it: git skips a hook it cannot execute, so a
+ * leftover `pre-commit` with mode 0644 is a file nobody runs and reporting it would
+ * be noise. Windows has no such bit — every file there stats as 0o666, or 0o444 when
+ * read-only — and Git for Windows runs hooks anyway, through the `sh` it ships with.
+ * Applying the POSIX test there does not mis-rank the hooks, it hides all of them:
+ * the mask is zero for every file on the platform, so the check silently reports a
+ * repository with no hooks at all. Existence is the honest test there, and it is
+ * strictly narrower than the platform's own behaviour rather than a relaxation of
+ * the POSIX one, which is untouched.
+ */
+function runsAsGitHook(file: string, plat: NodeJS.Platform): boolean {
+  try {
+    const stat = statSync(file);
+    if (!stat.isFile()) return false;
+    return plat === 'win32' || (stat.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
   const dir = join(root, '.git', 'hooks');
   if (!existsSync(dir)) return [];
   try {
     return readdirSync(dir)
       .filter((name) => !name.endsWith('.sample'))
-      .filter((name) => {
-        try {
-          const stat = statSync(join(dir, name));
-          return stat.isFile() && (stat.mode & 0o111) !== 0;
-        } catch {
-          return false;
-        }
-      })
+      .filter((name) => runsAsGitHook(join(dir, name), plat))
       .map((what) => ({ kind: 'git-hook' as const, file: `.git/hooks/${what}`, what }));
   } catch {
     return [];
@@ -280,7 +296,11 @@ function nestedBareRepos(root: string): { hits: RepoExecHit[]; capped: boolean }
   return { hits, capped: false };
 }
 
-export function repoSurface(cwd: string): RepoSurface {
+/**
+ * `plat` defaults to the real platform, so every caller keeps working unchanged; a
+ * test overrides it to exercise the Windows rules on a machine that cannot run them.
+ */
+export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platform): RepoSurface {
   if (!existsSync(join(cwd, '.git'))) {
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
   }
@@ -289,7 +309,7 @@ export function repoSurface(cwd: string): RepoSurface {
     ...gitConfigHits(cwd),
     ...gitAttributesHits(cwd),
     ...bare.hits,
-    ...gitHookHits(cwd),
+    ...gitHookHits(cwd, plat),
     ...huskyHits(cwd),
     ...devcontainerHits(cwd),
     ...envrcHits(cwd),

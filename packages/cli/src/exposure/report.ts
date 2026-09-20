@@ -6,10 +6,25 @@ import type { Reach } from './reach.js';
 import type { RepoSurface } from './repo-surface.js';
 import type { AgentSurface } from './surface.js';
 
+/** A server `--probe` tried to start and could not, with the reason it gave. */
+export interface ProbeFailure {
+  readonly server: string;
+  readonly error: string;
+}
+
 export interface ExposureReport {
   readonly version: 1;
   /** True when `--probe` ran and MCP tool descriptions were read from live servers. */
   readonly probed: boolean;
+  /**
+   * The servers `--probe` could not read. Carried separately from `findings`
+   * because a server that would not start is a gap in this run's coverage, not
+   * evidence of an attack: making it a finding would exit 1 on every machine with
+   * one broken config entry. Reporting it is not optional either — a probe result
+   * used to be dropped when it carried an error, so the footer went on claiming the
+   * tool descriptions had been scanned when nothing had been read at all.
+   */
+  readonly probeFailures: readonly ProbeFailure[];
   readonly agents: readonly AgentSurface[];
   readonly mcp: readonly McpSurface[];
   readonly context: ContextSurface;
@@ -24,6 +39,23 @@ const row = (label: string, value: number | string, note = ''): string =>
 
 const sum = <T>(items: readonly T[], pick: (t: T) => number): number =>
   items.reduce((n, t) => n + pick(t), 0);
+
+/**
+ * The one line that says what this run actually covered. It has to distinguish
+ * three states, not two: no probe, a probe that read every server, and a probe that
+ * read some and could not start the rest. The third used to read exactly like the
+ * second, which is how a Windows run — where an `npx`-launched server does not
+ * start at all — could report a scan it never performed.
+ */
+function probeFooter(report: ExposureReport): string {
+  if (!report.probed)
+    return 'Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.';
+  const failures = report.probeFailures;
+  if (failures.length === 0)
+    return 'MCP servers were started and their tool descriptions scanned (--probe).';
+  const named = failures.map((f) => `${f.server} (${f.error})`).join(', ');
+  return `MCP servers were started and their tool descriptions scanned (--probe) — but ${failures.length} of them could not be started, so tool-description poisoning is NOT covered for: ${named}`;
+}
 
 export function formatExposure(
   report: ExposureReport,
@@ -103,11 +135,6 @@ export function formatExposure(
     }
   }
 
-  lines.push(
-    '',
-    report.probed
-      ? 'MCP servers were started and their tool descriptions scanned (--probe).'
-      : 'Files only: no MCP server was started. Tool-description poisoning is NOT covered by this run — add --probe to check it.',
-  );
+  lines.push('', probeFooter(report));
   return `${lines.join('\n')}\n`;
 }

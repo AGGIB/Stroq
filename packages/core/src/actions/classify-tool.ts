@@ -14,9 +14,14 @@ export interface ToolClassification extends CommandClassification {
  * `~/.ssh` itself — which returns the key files' names, and for `Grep` their
  * contents — carried no class at all and stayed allowed in a tainted session. The
  * bare form ends at the token so `/.sshconfig` and `myaws/` do not match.
+ *
+ * A backslash counts as a separator here as well, even though `normalizePathForMatch`
+ * has already folded them: this constant is matched against a raw path in tests and
+ * could be reused elsewhere, and a credential pattern that only works when someone
+ * remembered to normalise first is the kind that quietly stops checking.
  */
 const SECRET_PATH =
-  /(\/\.ssh(\/|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|\/\.aws(\/|$)|(^|\/)\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|\/\.(npmrc|netrc|pgpass|git-credentials)$|\/\.kube(\/config$|$)|\/\.config\/gcloud(\/|$)|\/etc\/(shadow|passwd)$)/;
+  /([/\\]\.ssh([/\\]|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|[/\\]\.aws([/\\]|$)|(^|[/\\])\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|[/\\]\.(npmrc|netrc|pgpass|git-credentials)$|[/\\]\.kube([/\\]config$|$)|[/\\]\.config[/\\]gcloud([/\\]|$)|\/etc\/(shadow|passwd)$)/;
 const SIDE_EFFECT_TOOL =
   /(send|post|publish|upload|email|mail|message|notify|pay|transfer|purchase|delete|remove|drop|deploy|execute|exec|run|shell|write|update|create|comment|merge|push)/i;
 // `config.self` on an MCP call requires BOTH a write-shaped tool name and the
@@ -53,6 +58,13 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
  * case-sensitive filesystem folding can only over-match, which is the direction this
  * gate is supposed to err in.
  *
+ * A backslash is read as a separator first, because on Windows it is the only one the
+ * agent ever sends: `.claude\settings.json` arrived here as a single segment with
+ * nothing to collapse and nothing to resolve, so every evasion this function exists
+ * to close — the extra slash, the `.`, the `..` — worked there untouched. On POSIX a
+ * backslash is a legal filename character, so folding it can only over-match a file
+ * somebody named with one, which costs a confirmation rather than opening a hole.
+ *
  * Lexical, not `realpath`: resolving on disk would follow symlinks and stat files the
  * agent named, which is both slow on a hot path and a way to be pointed at something.
  * A symlink into a protected directory is therefore still uncovered, and is recorded
@@ -60,7 +72,10 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
  */
 export function normalizePathForMatch(path: string): string {
   // `/./` first, then the `//` it leaves behind — the other order leaves a double slash.
-  const collapsed = path.replace(/(^|\/)\.(?=\/)/g, '$1').replace(/\/{2,}/g, '/');
+  const collapsed = path
+    .replace(/\\/g, '/')
+    .replace(/(^|\/)\.(?=\/)/g, '$1')
+    .replace(/\/{2,}/g, '/');
   const segments: string[] = [];
   for (const segment of collapsed.split('/')) {
     if (segment === '..' && segments.length > 0 && segments[segments.length - 1] !== '..') {

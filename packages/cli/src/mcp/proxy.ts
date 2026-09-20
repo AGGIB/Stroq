@@ -4,6 +4,7 @@ import { logError } from '../log.js';
 import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
+import { killChildTree } from './kill-child.js';
 import { OrderedQueue, createPump } from './proxy-pump.js';
 
 /**
@@ -59,7 +60,7 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
   const serverOut = child.stdout;
   if (serverIn === null || serverOut === null) {
     options.stderr.write('stroq mcp: the MCP server was spawned without stdio pipes\n');
-    child.kill('SIGKILL');
+    killChildTree(child, 'SIGKILL');
     return 1;
   }
   const ctx: McpContext = {
@@ -117,9 +118,12 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
       if (shuttingDown) return;
       // The client is gone. The server gets a grace period to notice its stdin
       // closed, then SIGTERM, then SIGKILL: one that ignores both would otherwise
-      // outlive the client it was launched for.
-      termTimer = setTimeout(() => child.kill('SIGTERM'), graceMs);
-      killTimer = setTimeout(() => child.kill('SIGKILL'), graceMs * 2);
+      // outlive the client it was launched for. On Windows the two rungs collapse
+      // into one — every signal there is a TerminateProcess — so what the ladder
+      // actually buys on that platform is the grace period, and the reach comes
+      // from `killChildTree` walking the tree rather than from the escalation.
+      termTimer = setTimeout(() => killChildTree(child, 'SIGTERM'), graceMs);
+      killTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), graceMs * 2);
     });
   });
 
@@ -129,9 +133,9 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
   // second, redundant timer.
   let signalKillTimer: NodeJS.Timeout | null = null;
   const relay = (signal: NodeJS.Signals) => (): void => {
-    child.kill(signal);
+    killChildTree(child, signal);
     if (signalKillTimer === null)
-      signalKillTimer = setTimeout(() => child.kill('SIGKILL'), graceMs);
+      signalKillTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), graceMs);
   };
   const onSigint = relay('SIGINT');
   const onSigterm = relay('SIGTERM');

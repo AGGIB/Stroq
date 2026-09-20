@@ -2,6 +2,12 @@ export type ActionClass =
   | 'shell.exec_encoded'
   | 'shell.network'
   | 'shell.destructive'
+  /**
+   * The command runs something Stroq could not read — a dynamic-execution form
+   * whose operand is not a literal. Distinct from the four above because it is not
+   * a claim that the command is dangerous, it is a refusal to claim it is safe.
+   */
+  | 'shell.unparsed'
   | 'fs.secrets'
   | 'git.push_external'
   | 'config.self'
@@ -19,6 +25,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
   'shell.network',
   'shell.destructive',
+  'shell.unparsed',
   'fs.secrets',
   'git.push_external',
   'config.self',
