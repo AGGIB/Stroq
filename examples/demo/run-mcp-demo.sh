@@ -136,7 +136,11 @@ init_config="$work/mcp-config.json"
 cat > "$init_config" <<'JSON'
 {
   "mcpServers": {
-    "widgets": { "command": "npx", "args": ["-y", "widgets-mcp-server"] },
+    "widgets": {
+      "command": "npx",
+      "args": ["-y", "widgets-mcp-server"],
+      "env": { "WIDGETS_TOKEN": "tok-live-must-never-reach-argv" }
+    },
     "remote-widgets": { "url": "https://widgets.example/mcp" }
   }
 }
@@ -160,6 +164,10 @@ fi
 # Structural check, not a grep: --dry-run's stdout is the whole rewritten config as
 # JSON, and the wrapped entry's exact command/args is the one thing worth getting
 # precisely right (a wrong --cwd or --client silently misroutes the secret index).
+# `--pass-env` carries the NAMES the entry declared, and only the names: the wrapped
+# server is spawned with an infrastructure allowlist plus those, so a credential the
+# user's shell happens to hold never reaches it. Argv is world-readable, which is why
+# the check below also insists the declared VALUE appears nowhere in it.
 cat > "$work/verify-dry-run.mjs" <<'MJS'
 import { readFileSync } from 'node:fs';
 const preview = JSON.parse(readFileSync(process.env.PREVIEW_FILE, 'utf8'));
@@ -169,6 +177,7 @@ const expectedArgs = [
   '--server', 'widgets',
   '--client', process.env.CONFIG_BASENAME,
   '--cwd', process.env.PROJECT_DIR,
+  '--pass-env', 'WIDGETS_TOKEN',
   '--', 'npx', '-y', 'widgets-mcp-server',
 ];
 if (!widgets || widgets.command !== process.execPath) {
@@ -179,6 +188,14 @@ if (JSON.stringify(widgets.args) !== JSON.stringify(expectedArgs)) {
   console.error('args mismatch:');
   console.error('  got:     ', JSON.stringify(widgets.args));
   console.error('  expected:', JSON.stringify(expectedArgs));
+  process.exit(1);
+}
+if (JSON.stringify(widgets.args).includes('tok-live-must-never-reach-argv')) {
+  console.error('the declared env VALUE reached argv, which is world-readable');
+  process.exit(1);
+}
+if (JSON.stringify(widgets.env) !== JSON.stringify({ WIDGETS_TOKEN: 'tok-live-must-never-reach-argv' })) {
+  console.error('the entry lost its own env block:', JSON.stringify(widgets.env));
   process.exit(1);
 }
 const remote = preview.mcpServers && preview.mcpServers['remote-widgets'];
