@@ -338,6 +338,28 @@ Stroq blocked this action (deny-secret-egress): Arguments contain the value of a
 
 Run the MCP demo yourself: `pnpm install && pnpm build && ./examples/demo/run-mcp-demo.sh`.
 
+### `stroq run --sandbox`, per agent
+
+`stroq run -- <agent>` works for all seven agents, and the git hardening and the two refusals it applies are the same for each of them. `--sandbox` is the part whose value is not evenly distributed, and this is the honest table for it.
+
+| Agent          | Launch command | Ships its own sandbox              | What `--sandbox` adds                                       |
+| -------------- | -------------- | ---------------------------------- | ------------------------------------------------------------- |
+| Claude Code    | `claude`       | Yes — `srt`, configured by the agent | A second, OUTER boundary around one that is already there    |
+| Google Antigravity | `antigravity` | Yes                             | Same: an outer boundary, not the first one                   |
+| Cursor         | `cursor-agent` | No                                 | The only OS-level boundary on the run                        |
+| Codex          | `codex`        | No                                 | Same                                                          |
+| Copilot CLI    | `copilot`      | No                                 | Same                                                          |
+| Windsurf       | `windsurf`     | No                                 | Same                                                          |
+| OpenClaw       | `openclaw`     | No                                 | Same                                                          |
+
+The launcher prints the "ships its own sandbox" note itself when it applies, so nobody has to remember this table. A program it does not recognise is launched with the git hardening applied and a line saying, in those words, that it checked no hooks — name it with `--agent <id>` if it is an agent under another name.
+
+Each agent's own state directory is left writable (`~/.claude`, `~/.cursor`, `~/.codex`, `~/.copilot`, `~/.openclaw`, `~/.codeium`, `~/.gemini`), because an agent that cannot write its history or its configuration does not start. That list is deliberately **not** `stroq doctor`'s detection table, which it resembles: detection is narrowed to stay quiet (Antigravity's entry there is `~/.gemini/antigravity-cli`, since a bare `~/.gemini` is also the Gemini CLI's), and narrowing a write grant the same way would break the agent rather than quieten a report.
+
+**On macOS, `--sandbox` is for the headless invocation, not the TUI.** Measured against srt 0.0.77: a child inside its Seatbelt profile cannot enter raw mode — `tcsetattr` fails with `EPERM`, so `process.stdin.setRawMode` throws and `stty` cannot read the line discipline — while a permissive `sandbox-exec` profile allows both. That is srt's profile, not Seatbelt in general, and not something Stroq can widen from outside. `isatty` and the window size do work, so the terminal is inherited; it is raw mode specifically that is denied, and every full-screen agent UI needs it. `stroq run --sandbox` therefore says so on stderr whenever a terminal is attached, rather than letting it surface as an unexplained crash a second after launch. Use the agent's non-interactive mode (`claude -p`, `codex exec`, a CI run) under `--sandbox`, or drop `--sandbox` for an interactive session and keep the git hardening and the refusals.
+
+**Untested:** Windows, where srt's own support is alpha and needs a one-time `srt windows-install`; Linux, where the sandbox is bubblewrap rather than Seatbelt and the raw-mode limit above may not apply; and every agent's real UI under the sandbox — the launch path and the boundary were exercised end to end on macOS against a real `srt`, but with shell and Node probes rather than an agent.
+
 ### The PowerShell subset
 
 Copilot and Antigravity both list `powershell` as a shell tool, and the command text used to go straight to the POSIX classifier, which looks for `curl … | sh`, for `rm -rf` and for `base64 -d`. PowerShell writes all three differently, so the measured result for every one of the flagship dangerous shapes was an empty class list and an `allow`.

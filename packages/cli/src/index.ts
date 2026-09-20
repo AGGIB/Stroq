@@ -10,6 +10,7 @@ import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
 import { runReplay } from './commands/replay.js';
+import { runRun } from './commands/run.js';
 import { runTrust } from './commands/trust.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
@@ -29,6 +30,13 @@ Commands:
   hook antigravity <pre|post|preinvocation>
                                      Antigravity entrypoint: same, plus PreInvocation, where a tainted
                                      session's status is stated to the model before it is called
+  run [--sandbox] -- <agent> …       start an agent already confined: exports the git settings that
+                                     stop a repository running a command during the startup
+                                     "git status", refuses to launch into a repository that runs
+                                     something before you could approve it, and checks that Stroq's
+                                     hooks are installed for that agent. --sandbox additionally wraps
+                                     the launch in Anthropic's srt, when srt is installed, with a
+                                     read-deny list built from this machine's real credential files
   mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
   doctor [--all]                     check the installation (--all lists every agent and scope)
   log [--count 20]                   show recent audit entries
@@ -90,6 +98,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return runInspect(rest);
     case 'init':
       return runInit(rest);
+    case 'run':
+      return runRun(rest);
     case 'mcp':
       return runMcp(rest);
     case 'doctor':

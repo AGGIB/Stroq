@@ -63,6 +63,28 @@ interface BuiltEntries {
   readonly truncated: boolean;
 }
 
+/**
+ * Set to `1` in a child's environment to stop the index rebuilding itself when its
+ * sources cannot be reached.
+ *
+ * The index is normally self-healing: it restats its sources on every lookup and
+ * rebuilds whenever one of them changed, which is right when a source changing means
+ * the user edited it. Inside a sandbox it is wrong. `stroq run --sandbox` puts the
+ * very files this index is built from into the sandbox's `denyRead`, and a denied
+ * path does not read as "protected" to a caller — measured against srt 0.0.77 on
+ * macOS Seatbelt, `stat` on one fails with `EPERM`, exactly as it would for a file
+ * that had been deleted. Unsealed, the first lookup inside such a run would see every
+ * source gone, rebuild from nothing, and write that empty index over the real one —
+ * disarming the secret-egress guard for every session afterwards, not just the
+ * sandboxed one.
+ *
+ * So the launcher seals the index for the duration of the run: what is on disk is
+ * used as it stands. It is deliberately a positive, exact opt-in rather than
+ * something inferred, because guessing wrong in the other direction — sealing a live
+ * index — would quietly stop tracking a credential file the user just added.
+ */
+export const SEALED_SOURCES_ENV = 'STROQ_SECRET_SOURCES_SEALED';
+
 /** Bumped whenever the file shape changes; an older file is rebuilt from its sources. */
 const INDEX_VERSION = 2;
 /** Sources larger than this contribute nothing (credential files are tiny). */
@@ -234,9 +256,34 @@ export class FileSecretIndex implements SecretIndex {
     };
   }
 
+  /**
+   * The credential files this index would read for `cwd`, in the order it reads
+   * them: the home sources that exist, then the project's own `.env*`.
+   *
+   * Public because a caller outside the index has a use for the PATHS alone —
+   * `stroq run --sandbox` turns them into the sandbox's read-deny list, so the list
+   * is this machine's real credential files rather than a guess at well-known ones.
+   * Nothing here opens a file or hashes a value; the paths were already the one part
+   * of a source the index stores in the clear.
+   */
+  sourcePaths(cwd: string): readonly string[] {
+    return this.sources(cwd).list.map((s) => s.path);
+  }
+
+  /** Builds or refreshes the index without needing a candidate to look up. */
+  async refresh(cwd: string): Promise<SecretIndexStats> {
+    await this.ensure(cwd);
+    return this.stats();
+  }
+
   /** Returns a current index, rebuilding (under the lock) when any source changed. */
   private async ensure(cwd: string): Promise<IndexFile> {
     const previous = await this.readOrNull();
+    // Sealed: the sources are unreachable by design, so a restat proves nothing and
+    // a rebuild would only destroy what is here. An absent index still builds —
+    // returning nothing would be its own silent downgrade, and a run that starts
+    // with no index at all has none of the state the seal is protecting.
+    if (previous && this.env[SEALED_SOURCES_ENV] === '1') return previous;
     if (previous && sameSources(previous.sources, this.sources(cwd).list)) return previous;
     await mkdir(join(this.file, '..'), { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file}.lock`, async () => {
