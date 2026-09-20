@@ -74,6 +74,26 @@ function handle(line) {
     });
     return;
   }
+  if (name === 'get_customer') {
+    // For the cloak scenario: an ordinary CRM record. Nothing about it is an attack —
+    // it is the everyday case where a third-party server hands the model personal
+    // data that the model provider then sees too.
+    send({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: 'Customer 8812: Peter Parker, peter.parker@dailybugle.example, +1 (415) 555-0132, card 4242 4242 4242 4242.',
+          },
+        ],
+        structuredContent: { email: 'peter.parker@dailybugle.example', ssn: '123-45-6789' },
+        isError: false,
+      },
+    });
+    return;
+  }
   if (name === 'send_message') {
     send({
       jsonrpc: '2.0',

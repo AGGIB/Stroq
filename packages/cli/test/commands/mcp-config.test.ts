@@ -565,3 +565,43 @@ describe('reading a real file', () => {
     );
   });
 });
+
+describe('wrapMcpConfig with the cloak enabled', () => {
+  it('writes --cloak after --pass-env and before the separator', () => {
+    const { config: out } = wrapMcpConfig(config({ a: { command: 'srv' } }), {
+      ...opts,
+      cloak: true,
+    });
+    expect(serversOf(out)['a']?.['args']).toEqual([
+      '/x/dist/index.js',
+      'mcp',
+      '--server',
+      'a',
+      '--client',
+      'claude-desktop',
+      '--cwd',
+      '/home/me/project',
+      '--pass-env',
+      '',
+      '--cloak',
+      '--',
+      'srv',
+    ]);
+  });
+
+  it('is still recognised as a Stroq wrapper, so re-running init replaces rather than nests', () => {
+    const once = wrapMcpConfig(config({ a: { command: 'srv', args: ['--port', '1'] } }), {
+      ...opts,
+      cloak: true,
+    });
+    const twice = wrapMcpConfig(once.config, opts);
+    expect(twice.outcomes).toEqual([{ name: 'a', action: 'already wrapped' }]);
+    // And re-running WITHOUT --cloak takes the flag back off, rather than leaving a
+    // reversible dictionary running because it was once switched on.
+    expect(serversOf(twice.config)['a']?.['args']).not.toContain('--cloak');
+    expect(unwrapArgs(serversOf(twice.config)['a']?.['args'] as unknown[])).toEqual({
+      command: 'srv',
+      args: ['--port', '1'],
+    });
+  });
+});

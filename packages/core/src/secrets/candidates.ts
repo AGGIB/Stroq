@@ -142,7 +142,23 @@ export function candidateTokens(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
 ): SecretCandidate[] {
-  const text = textOf(toolName, toolInput);
+  return candidatesFromText(textOf(toolName, toolInput));
+}
+
+/**
+ * The windowed tokeniser itself, over text that is already text.
+ *
+ * Split out of `candidateTokens` for the MCP cloak, which needs to ask the index
+ * "which known secret values appear in THIS string" for a server's result — a
+ * question with no tool input behind it. Reaching for `candidateTokens` with a
+ * synthetic `{ text }` record would tokenise the JSON ENCODING of the string, so a
+ * value containing a quote or a backslash would have a `raw` spelling that does not
+ * occur in the string at all, and its span could never be placed.
+ *
+ * `candidateTokens` is this function plus the per-tool text extractor, so the two
+ * entry points cannot drift apart in what counts as a candidate.
+ */
+export function candidatesFromText(text: string): SecretCandidate[] {
   const limit = Math.min(text.length, MAX_SCAN_CHARS);
   const seen = new Set<string>();
   const out: SecretCandidate[] = [];

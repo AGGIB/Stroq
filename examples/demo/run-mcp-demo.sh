@@ -215,6 +215,65 @@ project_dir="$(cd "$demo_cwd" && pwd -P)"
 PREVIEW_FILE="$work/init-out" ENTRY="$cli" CONFIG_BASENAME="$(basename "$init_config")" PROJECT_DIR="$project_dir" \
   node "$work/verify-dry-run.mjs" || fail '6 (dry-run preview did not match the expected wrapped shape)'
 
+# cloak_call <label> <one JSON-RPC request line>
+#
+# The same runner as `call`, with `--cloak` on and its own session. A separate
+# session on purpose: the taint scenario 3 planted turns any side-effecting MCP call
+# in `mcp:demo` into an ask (rendered as a deny), which would stop the round trip
+# below before the cloak got a chance to do anything. The cloak dictionary lives in
+# the shared STROQ_HOME, so it survives between these two one-shot runs exactly as it
+# survives a client restarting its server.
+cloak_call() {
+  local label="$1" request="$2"
+  echo
+  echo "== $label"
+  printf '%s\n' "$request" > "$work/req"
+  set +e
+  (cd "$demo_cwd" && exec node "$cli" mcp \
+      --server widgets --client demo --cwd "$demo_cwd" --session mcp:demo-cloak --cloak \
+      -- node "$server") < "$work/req" > "$work/out" 2> "$work/err" &
+  local pid=$!
+  (sleep 30; kill -TERM "$pid" 2>/dev/null; sleep 5; kill -KILL "$pid" 2>/dev/null) &
+  local watchdog=$!
+  wait "$pid"
+  local code=$?
+  kill "$watchdog" 2>/dev/null
+  wait "$watchdog" 2>/dev/null
+  set -e
+  cat "$work/err" >> "$all_err"
+  if [ "$code" -ne 0 ]; then
+    cat "$work/err" >&2
+    fail "$label (the proxy exited $code)"
+  fi
+  cat "$work/out"
+}
+
+# 7. --cloak, inbound. A perfectly ordinary CRM record: the customer's email, phone,
+# card and SSN are replaced with stable placeholders before the model — and therefore
+# the model provider — ever sees them.
+cloak_call '7. get_customer with --cloak: PII replaced before the model sees it' \
+  '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_customer","arguments":{"id":8812}}}'
+expect '7' "$work/out" '[STROQ_EMAIL_1]'
+expect '7' "$work/out" '[STROQ_CARD_'
+expect '7' "$work/out" '[STROQ_SSN_'
+expect '7' "$work/out" 'Stroq cloak'
+absent '7' "$work/out" 'peter.parker@dailybugle.example'
+absent '7' "$work/out" '4242 4242 4242 4242'
+absent '7' "$work/out" '123-45-6789'
+
+# 8. --cloak, outbound. The model acts on the placeholder; the server receives the
+# real address. The placeholder never had to become a value anywhere in between.
+cloak_call '8. send_message quoting the placeholder: the server gets the real value' \
+  '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"send_message","arguments":{"channel":"crm","body":"following up with [STROQ_EMAIL_1]"}}}'
+expect '8' "$FAKE_SERVER_LOG" 'peter.parker@dailybugle.example'
+absent '8' "$FAKE_SERVER_LOG" '[STROQ_EMAIL_1]'
+
+# The audit records both halves of the round trip by PLACEHOLDER and never by value.
+expect 'cloak audit' "$STROQ_HOME/audit.jsonl" '"direction":"cloak"'
+expect 'cloak audit' "$STROQ_HOME/audit.jsonl" '"direction":"uncloak"'
+absent 'cloak audit' "$STROQ_HOME/audit.jsonl" 'peter.parker@dailybugle.example'
+absent 'cloak audit' "$STROQ_HOME/audit.jsonl" '123-45-6789'
+
 echo
 echo "== stroq why"
 node "$cli" why

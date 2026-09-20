@@ -29,6 +29,7 @@ describe('parseMcpArgv', () => {
         session: null,
         cwd: null,
         passEnv: null,
+        cloak: false,
         command: 'node',
         args: ['x'],
       },
@@ -89,5 +90,31 @@ describe('resolveMcpCwd', () => {
 
   it('falls back to process.cwd() when --cwd was omitted', () => {
     expect(resolveMcpCwd(null)).toBe(process.cwd());
+  });
+});
+
+describe('parseMcpArgv --cloak', () => {
+  const cloakOf = (argv: readonly string[]) => {
+    const result = parseMcpArgv(argv);
+    return result.ok ? result.invocation.cloak : result.error;
+  };
+
+  it('is off unless the flag is present', () => {
+    expect(cloakOf(['--server', 'a', '--', 'srv'])).toBe(false);
+  });
+
+  it('is on when the flag is present, and takes no value of its own', () => {
+    expect(cloakOf(['--server', 'a', '--cloak', '--', 'srv'])).toBe(true);
+    // The flag sits between two value-taking options without swallowing either.
+    expect(cloakOf(['--cloak', '--server', 'a', '--pass-env', 'T', '--', 'srv'])).toBe(true);
+    const parsed = parseMcpArgv(['--server', 'a', '--cloak', '--pass-env', 'T', '--', 'srv']);
+    expect(parsed.ok && parsed.invocation.passEnv).toEqual(['T']);
+    expect(parsed.ok && parsed.invocation.command).toBe('srv');
+  });
+
+  it('is not read from after the separator: it belongs to the server there', () => {
+    const parsed = parseMcpArgv(['--server', 'a', '--', 'srv', '--cloak']);
+    expect(parsed.ok && parsed.invocation.cloak).toBe(false);
+    expect(parsed.ok && parsed.invocation.args).toEqual(['--cloak']);
   });
 });

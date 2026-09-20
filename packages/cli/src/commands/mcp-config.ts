@@ -164,6 +164,14 @@ export interface WrapOptions {
   readonly client: string;
   /** The project directory, recorded because Claude Desktop launches servers from `/`. */
   readonly cwd: string;
+  /**
+   * `--cloak`: written into the wrapper when `init --agent mcp --cloak` asked for it,
+   * absent otherwise. Absent is the meaningful default — the cloak keeps a reversible
+   * dictionary on disk and changes what this server receives, so re-running `init`
+   * without the flag switches it back off rather than leaving it on because it was
+   * once turned on.
+   */
+  readonly cloak?: boolean;
 }
 
 const serversOf = (config: McpConfigJson): Record<string, unknown> =>
@@ -232,6 +240,10 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
         // everything rather than break it on an upgrade.
         '--pass-env',
         declaredEnvNames(entry).join(','),
+        // A bare flag, so it is written only when asked for: `wrapperIndex` keys on
+        // `mcp --server <name> --client`, which is untouched, and `unwrapArgs` reads
+        // from the separator, so an extra token between them changes neither.
+        ...(opts.cloak === true ? ['--cloak'] : []),
         '--',
         command,
         ...args,

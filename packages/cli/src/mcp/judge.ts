@@ -348,6 +348,11 @@ export async function scanMcpResult(
  * warning already opens with the warning sign, because core's `warningFor` writes it.
  * A non-array `content` (a malformed or legacy result) is not noise to discard: it is
  * kept as the first item, so the warning is appended rather than replacing data.
+ *
+ * This is also the precedent the `--cloak` notice reuses: response-side rewriting was
+ * already proven to be accepted by real clients here, so the cloak appends its own
+ * text item the same way rather than inventing a second channel. Both give up
+ * byte-exact forwarding for the line they touch; see the note in `framing.ts`.
  */
 export function withWarningBlock(
   result: Record<string, unknown>,
