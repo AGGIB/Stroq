@@ -75,6 +75,7 @@ describe('signal escalation', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: ['STROQ_MCP_STUB_KEEPALIVE'],
       command: process.execPath,
       args: [ignoreSigtermServer],
       stdin,
@@ -117,6 +118,7 @@ describe('signal escalation', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: [],
       // fake-server.mjs registers no signal handler of its own, so Node's default
       // disposition for SIGTERM — terminate — applies the moment it is relayed.
       command: process.execPath,
@@ -155,6 +157,7 @@ describe('the EOF shutdown escalation', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: ['STROQ_MCP_STUB_KEEPALIVE'],
       command: process.execPath,
       args: [ignoreSigtermServer],
       stdin,
@@ -195,6 +198,7 @@ describe('the EOF shutdown timers', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: ['EXIT_AFTER_REPLY_EXIT_CODE'],
       // Answers one request and exits, so the run is over before the client is.
       command: process.execPath,
       args: [exitAfterReplyServer],

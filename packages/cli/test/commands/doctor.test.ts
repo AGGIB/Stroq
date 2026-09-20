@@ -554,4 +554,35 @@ describe('doctorReport mcp proxy', () => {
     expect(check?.detail).toContain('wrapped 0/2 stdio servers');
     expect(check?.detail).toContain('2 stale wrappers: entry missing');
   });
+
+  it('names a wrapper that predates env filtering, so the decision is visible', async () => {
+    const file = mcpConfigPath('claude-code', 'project', cwd);
+    // An install from an older version: still wrapped and still working, but with no
+    // recorded pass-list, so its server keeps inheriting the client's whole
+    // environment. Nothing breaks it silently; `doctor` is where the user finds out.
+    writeJsonObject(file, {
+      mcpServers: {
+        old: {
+          command: '/usr/bin/node',
+          args: [
+            realEntry,
+            'mcp',
+            '--server',
+            'old',
+            '--client',
+            'claude-code',
+            '--cwd',
+            '/w',
+            '--',
+            'srv',
+          ],
+        },
+      },
+    });
+    const check = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'mcp proxy',
+    );
+    expect(check?.detail).toContain('wrapped 1/1 stdio servers');
+    expect(check?.detail).toContain('1 inherits the full environment');
+  });
 });

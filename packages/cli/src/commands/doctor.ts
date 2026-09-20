@@ -213,12 +213,19 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
         counted.stale > 0
           ? ` (${counted.stale} stale wrapper${counted.stale === 1 ? '' : 's'}: entry missing)`
           : '';
+      // A wrapper written before `--pass-env` keeps working, so nothing else would
+      // ever mention it; this line is where a user learns that re-running `init`
+      // would stop handing that server the whole environment.
+      const unfiltered =
+        counted.unfiltered > 0
+          ? ` (${counted.unfiltered} inherits the full environment: re-run init)`
+          : '';
       found.push({
         scope,
         file,
         installed: counted.wrapped > 0,
         error: null,
-        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${stale} (${file})`,
+        detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${stale}${unfiltered} (${file})`,
       });
     } catch (err) {
       found.push({ scope, file, installed: false, error: (err as Error).message });

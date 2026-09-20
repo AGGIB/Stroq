@@ -235,17 +235,24 @@ For clients with no hook API at all — Claude Desktop above all — Stroq goes 
 
 ```jsonc
 // before
-"github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+"github": {
+  "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…" }
+}
 // after
 "github": {
   "command": "/usr/local/bin/node",
   "args": ["/usr/local/lib/node_modules/@stroq/cli/dist/index.js", "mcp",
            "--server", "github", "--client", "claude-desktop", "--cwd", "/Users/me/project",
-           "--", "npx", "-y", "@modelcontextprotocol/server-github"]
+           "--pass-env", "GITHUB_PERSONAL_ACCESS_TOKEN",
+           "--", "npx", "-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…" }
 }
 ```
 
 `--user` picks Cursor's `~/.cursor/mcp.json` over the project file, `--dry-run` prints the rewritten config to stdout (with the per-entry outcome lines on stderr, so `--dry-run | jq` still sees only JSON) and writes nothing, and `--unwrap` puts every entry back the way it was. Re-running `init` replaces Stroq's own wrapper rather than nesting a second one — recognised by a Stroq-shaped entry path immediately followed by `mcp --server <name> --client <client>` — which is how an upgrade updates the recorded entry path; `stroq doctor` then shows an `mcp proxy` line counting the wrapped stdio servers of every client config it finds, and names any wrapper whose recorded entry path no longer exists as stale (an upgrade or uninstall that moved or removed it without `init` being re-run) rather than counting it as protected — re-running `stroq init --agent mcp` replaces it. A config whose `mcpServers` is present but not an object (a hand-edited array, say) is refused — `cannot rewrite <file>: mcpServers is not an object`, exit 1 — rather than guessed at.
+
+**The environment a wrapped server gets.** The client launches `stroq mcp`, so the proxy's own environment is the client's: every credential in your shell, plus whatever the entry's `env` block declared. A wrapped server is started with neither — only the variables its own entry declares (their NAMES are what `--pass-env` records; the values stay in the config and never enter argv) plus the ones any process needs to run: `PATH`, `HOME` and the Windows equivalents, the temp and locale variables, the platform variables Windows itself requires, and the proxy/CA settings a corporate network needs. If a server needs a variable it does not declare, add it to that entry's `env` block and re-run `init`. Wrappers written before this existed record no `--pass-env` and keep inheriting everything, rather than losing a credential on upgrade: they say so on stderr at startup and are counted separately by `stroq doctor` (`1 inherits the full environment: re-run init`). Re-running `stroq init --agent mcp` is the fix.
 
 | Message                                    | What Stroq does                                                                                                                                                         | Can it stop the action?                                                                     |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |

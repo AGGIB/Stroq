@@ -179,6 +179,26 @@ const hasInvalidArgs = (entry: Record<string, unknown>): boolean =>
 const argsOf = (entry: Record<string, unknown>): readonly unknown[] =>
   Array.isArray(entry['args']) ? entry['args'] : [];
 
+/**
+ * The NAMES — never the values — of the variables an entry's own `env` block
+ * declares. Recording them is the whole reason the installer is involved at all:
+ * the client merges that block into the proxy's own environment before the proxy
+ * starts, so from inside `stroq mcp` those variables are indistinguishable from
+ * whatever the user's shell exported, and only this file knows which ones the
+ * server was actually configured with.
+ *
+ * The list has to survive both `join(',')` and argv, and a config file is external
+ * data: a name containing a comma would split in two on the way back out — a pass
+ * for two variables nobody declared, one of which a hostile config could pick from
+ * the user's shell — and a name starting with `--` would read as the next flag (or,
+ * for a lone `--`, as the separator itself) and leave the server unstartable. Both
+ * are dropped; neither is a name any real server has.
+ */
+const declaredEnvNames = (entry: Record<string, unknown>): readonly string[] =>
+  isPlainObject(entry['env'])
+    ? Object.keys(entry['env']).filter((name) => !name.includes(',') && !name.startsWith('--'))
+    : [];
+
 interface EntryRewrite {
   readonly entry: unknown;
   readonly action: McpEntryAction;
@@ -206,6 +226,12 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
         opts.client,
         '--cwd',
         opts.cwd,
+        // Always written, empty list and all: its PRESENCE is what tells the proxy
+        // this wrapper knows about environment filtering. A wrapper without it
+        // predates the flag, and the proxy has to assume the server needs
+        // everything rather than break it on an upgrade.
+        '--pass-env',
+        declaredEnvNames(entry).join(','),
         '--',
         command,
         ...args,
@@ -266,6 +292,14 @@ export interface McpProxyCount {
    * `wrapped`: the client would fail to start this server.
    */
   readonly stale: number;
+  /**
+   * Wrapped, the entry file is there, but the wrapper records no `--pass-env`: it
+   * was written before environment filtering existed, so that server still inherits
+   * every variable the client holds. Counted in `wrapped` as well — it IS proxied,
+   * and judging and scanning work exactly as before — but reported separately,
+   * because re-running `init` is what closes it.
+   */
+  readonly unfiltered: number;
 }
 
 /** The Stroq entry path a wrapped entry's `args` records — the token right before `mcp`. */
@@ -286,11 +320,19 @@ export function countHttp(config: McpConfigJson): number {
   return Object.values(serversOf(config)).filter(isPlainObject).filter(isHttpEntry).length;
 }
 
+/** True when a wrapped entry's own arguments — those before its `--` — record a `--pass-env` list. */
+function recordsPassEnv(args: readonly unknown[]): boolean {
+  const at = wrapperIndex(args);
+  if (at === null) return false;
+  return args.slice(at, args.indexOf('--', at)).includes('--pass-env');
+}
+
 /**
  * How many of a config's stdio servers go through the proxy; HTTP entries are not
  * counted. A wrapper counts as `wrapped` only when its recorded entry file still
  * exists — one pointing at a path that is gone would fail at startup, so it is
- * reported as `stale` instead of as protected.
+ * reported as `stale` instead of as protected — and as `unfiltered` as well when it
+ * predates `--pass-env`.
  */
 export function countWrapped(config: McpConfigJson): McpProxyCount {
   const stdio = Object.values(serversOf(config))
@@ -298,11 +340,17 @@ export function countWrapped(config: McpConfigJson): McpProxyCount {
     .filter((entry) => !isHttpEntry(entry) && typeof entry['command'] === 'string');
   let wrapped = 0;
   let stale = 0;
+  let unfiltered = 0;
   for (const entry of stdio) {
-    const entryPath = wrappedEntryPath(argsOf(entry));
+    const args = argsOf(entry);
+    const entryPath = wrappedEntryPath(args);
     if (entryPath === null) continue;
-    if (existsSync(entryPath)) wrapped += 1;
-    else stale += 1;
+    if (!existsSync(entryPath)) {
+      stale += 1;
+      continue;
+    }
+    wrapped += 1;
+    if (!recordsPassEnv(args)) unfiltered += 1;
   }
-  return { wrapped, stdio: stdio.length, stale };
+  return { wrapped, stdio: stdio.length, stale, unfiltered };
 }

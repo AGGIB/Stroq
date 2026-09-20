@@ -89,7 +89,20 @@ interface Proxy {
   exit(): Promise<number | null>;
 }
 
-function startProxy(project: string, home: string, extra: Record<string, string> = {}): Proxy {
+/**
+ * What `init` writes from the config entry's own `env` block. The stub reads both
+ * of these, so here they stand in for exactly what a real server's credential is:
+ * the only variables it is allowed to keep. `null` writes no `--pass-env` at all,
+ * which is what a wrapper installed before the flag existed looks like.
+ */
+const E2E_PASS_ENV = 'FAKE_SERVER_LOG,FAKE_SERVER_EXIT';
+
+function startProxy(
+  project: string,
+  home: string,
+  extra: Record<string, string> = {},
+  passEnv: string | null = E2E_PASS_ENV,
+): Proxy {
   const serverLog = join(project, 'server-received.log');
   const child = tracked(
     spawn(
@@ -105,6 +118,7 @@ function startProxy(project: string, home: string, extra: Record<string, string>
         'e2e',
         '--cwd',
         project,
+        ...(passEnv === null ? [] : ['--pass-env', passEnv]),
         '--',
         process.execPath,
         fakeServer,
@@ -245,6 +259,23 @@ describe('stroq mcp (end to end)', () => {
     // The fake server exits on its own stdin ending, well inside the grace period, so
     // no signal is needed and its own code is the proxy's.
     expect(await proxy.exit()).toBe(3);
+  }, 60_000);
+
+  it('keeps a wrapper written before --pass-env working, and says on stderr that it is', async () => {
+    // The migration case, through the real CLI. An install from an older version
+    // has no recorded pass-list, so the server keeps inheriting everything — it
+    // still answers, its log file (named by an inherited variable) is still
+    // written — and the warning is what tells the user to re-run `init` instead of
+    // leaving them to notice nothing at all.
+    const proxy = startProxy(project(), stroqHome(), {}, null);
+    proxy.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+    await proxy.out.waitFor(1);
+    expect(readFileSync(proxy.serverLog, 'utf8')).toContain('"method":"initialize"');
+    const stderr = (await proxy.err.waitFor(1)).join('\n');
+    expect(stderr).toContain('predates environment filtering');
+    expect(stderr).toContain('stroq init --agent mcp');
+    proxy.child.stdin.end();
+    await proxy.exit();
   }, 60_000);
 
   it('exits 2 with a usage error before anything is spawned', async () => {

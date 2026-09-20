@@ -86,6 +86,7 @@ describe('a client that keeps writing after the MCP server has died', () => {
         sessionId: 'mcp:test',
         server: 'demo',
         cwd,
+        passEnv: ['EXIT_AFTER_REPLY_EXIT_CODE'],
         command: process.execPath,
         args: [exitAfterReplyServer],
         stdin,

@@ -13,18 +13,21 @@ import {
 } from './mcp-config.js';
 
 /**
- * Five things an MCP proxy user has to know that no hook agent needs: the client
+ * Six things an MCP proxy user has to know that no hook agent needs: the client
  * launches its servers once, at startup; the directory `init` ran in is what the
  * proxy records as the project, because Claude Desktop launches servers from `/`;
  * there is no way to prompt from inside a proxy, so an `ask` arrives as a block; HTTP
- * servers have no subprocess to wrap; and removing Stroq needs `--unwrap`, since the
- * wrapper records an absolute entry path that changes on upgrade.
+ * servers have no subprocess to wrap; each server now starts with only the variables
+ * its own entry declares, which is a behaviour change worth stating rather than
+ * discovering; and removing Stroq needs `--unwrap`, since the wrapper records an
+ * absolute entry path that changes on upgrade.
  */
 const MCP_NOTE =
   'Restart the MCP client before this takes effect: it launches its servers once, when it starts.\n' +
   'This directory is recorded as the project for every wrapped server: it is what feeds the secret index and the path rules.\n' +
   'An MCP proxy cannot prompt, so a policy "ask" arrives as a blocked tool result naming the rule to relax.\n' +
   'HTTP servers (url/serverUrl) have no subprocess to wrap and are listed as skipped.\n' +
+  'Each wrapped server starts with the variables its own "env" block declares plus the ones any process needs; nothing else in your environment reaches it. Add a variable to that block and re-run this command if a server needs one.\n' +
   '"stroq init --agent mcp --unwrap" restores every wrapped entry to its original command.\n';
 
 interface McpTarget {

@@ -78,6 +78,10 @@ function startPump(extraEnv: Record<string, string> = {}): {
     sessionId: 'mcp:test',
     server: 'demo',
     cwd,
+    // The server is started with a filtered environment, exactly as an install from
+    // this version starts one, so the stub has to be passed what it reads the same
+    // way a real server's credential is: by name, recorded at install time.
+    passEnv: ['FAKE_SERVER_LOG', ...Object.keys(extraEnv)],
     command: process.execPath,
     args: [fakeServer],
     stdin,
@@ -211,6 +215,7 @@ describe('an engine that cannot answer', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: ['FAKE_SERVER_LOG'],
       command: process.execPath,
       args: [fakeServer],
       stdin,
@@ -256,6 +261,7 @@ describe('a server command that cannot be spawned at all', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: [],
       command: join(cwd, 'stroq-does-not-exist-binary'),
       args: [],
       stdin,

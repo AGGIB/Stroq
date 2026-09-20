@@ -100,6 +100,7 @@ describe('backpressure through the real proxy pipeline', () => {
       sessionId: 'mcp:test',
       server: 'demo',
       cwd,
+      passEnv: [],
       command: process.execPath,
       args: [fakeServer],
       stdin,

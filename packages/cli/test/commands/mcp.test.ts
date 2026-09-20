@@ -28,10 +28,40 @@ describe('parseMcpArgv', () => {
         client: 'unknown',
         session: null,
         cwd: null,
+        passEnv: null,
         command: 'node',
         args: ['x'],
       },
     });
+  });
+});
+
+describe('parseMcpArgv --pass-env', () => {
+  const passEnvOf = (argv: readonly string[]) => {
+    const result = parseMcpArgv(argv);
+    return result.ok ? result.invocation.passEnv : result.error;
+  };
+
+  it('reads the recorded names as a list', () => {
+    expect(
+      passEnvOf(['--server', 'a', '--pass-env', 'GITHUB_TOKEN,SLACK_TOKEN', '--', 'srv']),
+    ).toEqual(['GITHUB_TOKEN', 'SLACK_TOKEN']);
+  });
+
+  it('tells an EMPTY recorded list apart from a wrapper that recorded none at all', () => {
+    // The distinction the whole migration rests on. An empty value means "this
+    // wrapper was written by a version that filters, and this server declared
+    // nothing" — filter it down to infrastructure. The flag being absent means the
+    // wrapper predates filtering and nothing is known about what the server needs.
+    expect(passEnvOf(['--server', 'a', '--pass-env', '', '--', 'srv'])).toEqual([]);
+    expect(passEnvOf(['--server', 'a', '--', 'srv'])).toBeNull();
+  });
+
+  it('ignores the blanks a hand-edited list leaves behind', () => {
+    expect(passEnvOf(['--server', 'a', '--pass-env', ' A , ,B, ', '--', 'srv'])).toEqual([
+      'A',
+      'B',
+    ]);
   });
 });
 
