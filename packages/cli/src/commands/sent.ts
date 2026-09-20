@@ -58,17 +58,49 @@ function emit(report: SentReport, out: Output): number {
   return out.failOnFinding && found ? 1 : 0;
 }
 
+const USAGE = `stroq sent — which of your credentials already reached a model provider
+
+  stroq sent --last                 read the newest session in this directory
+  stroq sent --transcript <path>    read a specific transcript file
+  stroq sent [<session-id>]         read a session Stroq itself recorded
+
+Flags:
+  --json               emit the report as JSON
+  --fail-on-finding    exit 1 when a credential is found (for a scheduled job)
+  -h, --help           show this
+
+It reads this machine's credential files to know what to look for, and prints
+names and sources only, never a value. A finding exits 0 by default: a session
+that already happened cannot be un-sent by today's commit.
+`;
+
 export async function runSent(args: readonly string[]): Promise<number> {
-  const { values, positionals } = parseArgs({
-    args: [...args],
-    options: {
-      json: { type: 'boolean' },
-      last: { type: 'boolean' },
-      transcript: { type: 'string' },
-      'fail-on-finding': { type: 'boolean' },
-    },
-    allowPositionals: true,
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...args],
+      options: {
+        json: { type: 'boolean' },
+        last: { type: 'boolean' },
+        transcript: { type: 'string' },
+        'fail-on-finding': { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' },
+      },
+      allowPositionals: true,
+    });
+  } catch (err) {
+    // An unknown flag is the visitor invoking the command wrong, not a Stroq
+    // fault: answer with the usage line and exit 2, never the raw parser throw.
+    process.stderr.write(`${(err as Error).message}\n\n${USAGE}`);
+    return 2;
+  }
+  const { values, positionals } = parsed;
+  // `--help` is the first thing typed after a command the front page says to run,
+  // so it must print usage before any credential file is opened.
+  if (values.help === true) {
+    process.stdout.write(USAGE);
+    return 0;
+  }
   const out: Output = {
     json: values.json === true,
     failOnFinding: values['fail-on-finding'] === true,

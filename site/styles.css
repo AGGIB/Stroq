@@ -178,6 +178,22 @@ button { font: inherit; color: inherit; }
 html:not(.js) .copy-btn { display: none; }
 .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.5rem; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
+/* The hero command is `sent --last`, seven characters longer than the `init` this
+   row was sized for, and the column is 572px: the pill and the button missed
+   sharing a line by about a dozen pixels. Taken out of the pill's own padding and
+   type rather than out of the button, which is the part a visitor clicks. Scoped to
+   the hero so the nav pill, which has its own tighter sizing, is untouched. */
+.hero .install-pill { gap: .6rem; padding-left: .95rem; }
+.hero .install-cmd { font-size: .95rem; }
+.hero .btn-gh { padding: 0 1.1rem; }
+/* The hero is two columns from 981px up, but that left column is not wide enough
+   for both until about 1250px. In the band between, the row has to wrap — so both
+   go full width, because a stacked pair reads as deliberate where a 174px button
+   orphaned under a 375px pill reads as a mistake. */
+@media (min-width: 981px) and (max-width: 1250px) {
+  .hero .install-pill { width: 100%; }
+  .hero-actions .btn-gh { width: 100%; justify-content: center; }
+}
 
 /* The install count sits in the same quiet line as the licence, so the number
    reads as one more fact about the tool rather than a badge asking to be
@@ -217,7 +233,7 @@ html:not(.js) .copy-btn { display: none; }
 /* Each line is its own block with its own preserved spacing, so the source can
    break between lines without a <pre> rendering those breaks as blank rows. */
 .tt-l { display: block; min-height: 1.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
-.tt-cmd, .tt-cur { --n: 28; }
+.tt-cmd, .tt-cur { --n: 26; }
 
 /* The prompt, and the command that types itself into it. The typed text is
    revealed with a clip, not a width, and the cursor steps alongside it. */

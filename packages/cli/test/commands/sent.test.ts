@@ -175,4 +175,35 @@ describe('stroq sent', () => {
     out.restore();
     expect(out.text()).toContain('~/.aws/credentials');
   });
+
+  // This command is the one the site puts on its front page as "run this", so the
+  // first thing a curious visitor types after it is `--help`. That must print usage,
+  // not the raw `ERR_PARSE_ARGS_UNKNOWN_OPTION` TypeError that an unhandled flag threw.
+  it('prints usage on --help without reading any credential file', async () => {
+    const out = capture();
+    const code = await runSent(['--help']);
+    out.restore();
+    expect(code).toBe(0);
+    const text = out.text();
+    expect(text).toContain('stroq sent');
+    expect(text).toContain('--last');
+    // It must not have gone on to open credential files just to answer --help.
+    expect(text).not.toContain('~/.aws/credentials');
+  });
+
+  // An unknown flag is a usage mistake, answered with the usage line and exit 2 — the
+  // conventional code for "you invoked me wrong" — never an uncaught parser throw.
+  it('reports an unknown option as a usage error, not a stack trace', async () => {
+    const out = capture();
+    const errs: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
+      errs.push(String(c));
+      return true;
+    });
+    const code = await runSent(['--nope']);
+    spy.mockRestore();
+    out.restore();
+    expect(code).toBe(2);
+    expect(errs.join('')).toContain('stroq sent');
+  });
 });
