@@ -80,12 +80,33 @@ import { commandWord } from './shell-segments.js';
  * `.mcp.json` or `.cursor/mcp.json` is routine agent work, and denying it would be
  * the bare `.claude` false positive again. That gap is stated in the README and
  * SECURITY.md; a content-aware check that protects only the wrapped entries is the
- * follow-up. The Windows
- * system path uses backslashes throughout and is not matched; that is a stated limit,
- * not an oversight.
+ * follow-up.
+ *
+ * Every separator below is `[/\\]+` rather than `\/`, which is the convention this
+ * whole file now follows. On Windows each of these paths arrives spelled with
+ * backslashes — from an agent's `file_path`, from `%USERPROFILE%`, from a PowerShell
+ * command line — so a `/`-only pattern matched none of them, and self-tamper
+ * protection there was not degraded but absent, for every agent at once, while the
+ * hook went on answering `allow`. Accepting either spelling can only ADD matches, and
+ * nothing in this file allows an action BECAUSE a path matched, so the entire cost is
+ * a POSIX over-match on a file somebody genuinely named with a backslash in it: a
+ * confirmation, not a bypass. Accepting a RUN of separators rather than exactly one
+ * closes a POSIX hole that was there all along — `\/` is a legal way to write `/` in
+ * a shell word, so `rm .claude\/settings.json` deleted the protected file while a
+ * pattern demanding the two names sit adjacent across a single slash saw nothing.
+ *
+ * Matched case-insensitively, which fixes a live macOS miss rather than only a
+ * Windows one. `classifyPath` lowercases through `normalizePathForMatch` before
+ * testing this, and the macOS alternative spells `Application Support/Windsurf`
+ * with capitals — so a `Write` to the real macOS Windsurf hooks file was compared
+ * against a lowercased copy of itself and never matched, on the platform where that
+ * file actually lives. The flag is right on its own terms too: both Windows and macOS
+ * resolve `.CLAUDE\Settings.json` to the protected file, and on a case-sensitive
+ * filesystem folding can only over-match, which is the direction this gate errs in
+ * everywhere else.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude\/settings(\.local)?\.json|\.cursor\/hooks\.json|\.codex\/(hooks\.json|config\.toml)|\.github\/(hooks(?![\w.-])|copilot\/settings(\.local)?\.json)|\.copilot\/(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw\/(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium(\/windsurf)?)\/hooks\.json|(?<![\w.-])\/etc\/windsurf\/hooks\.json|Application(?:\\ | )Support\/Windsurf\/hooks\.json|\.agents\/hooks\.json|\.gemini\/(config\/hooks\.json|antigravity-cli\/settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq(\/|\b))/;
+  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]+etc[/\\]+windsurf[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+Windsurf[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq([/\\]+|\b))/i;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -98,7 +119,7 @@ export const SELF_CONFIG_FILE =
  * substring `.claude/settings.json` anywhere in the command text.
  */
 export const PROTECTED_DIRS =
-  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github\/(hooks|copilot))(\/|$|\s)/;
+  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
 
 /**
  * A protected directory named as a whole, rather than a path into one.
@@ -116,9 +137,15 @@ export const PROTECTED_DIRS =
  * `.github` is the exception that proves the rule: `.github/hooks` and
  * `.github/copilot` are Stroq's, so they are here, while a bare `.github` is not —
  * deleting a CI workflow is not a claim this project makes about self-tamper.
+ *
+ * The leading `(?:[A-Za-z]:)?` is what lets a drive-qualified Windows path through.
+ * Without it the directory prefix had to be made entirely of `[\w.~/-]`, and the
+ * colon in `C:\Users\me\.claude` stopped the match dead — so the one command that
+ * destroys every protected file at once, written the way Windows writes it, carried
+ * no class at all.
  */
 export const PROTECTED_DIR_BARE =
-  /(^|[\s"'=(])(?:[\w.~/-]*\/)?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini)|\.github\/(hooks|copilot))(?:\/\*?|\*)?(?=$|[\s"';|&)])/i;
+  /(^|[\s"'=(])(?:[A-Za-z]:)?(?:[\w.~\\/-]*[/\\])?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini)|\.github[/\\](hooks|copilot))(?:[/\\]\*?|\*)?(?=$|[\s"';|&)])/i;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',
@@ -162,6 +189,49 @@ export const SELF_CONFIG_WRITE_COMMANDS = new Set([
   'touch',
   'shred',
 ]);
+
+/**
+ * The same verbs in PowerShell and cmd, which the set above does not contain a
+ * single one of. Until these were listed, `Remove-Item -Force .claude\settings.json`
+ * — the plainest possible way to switch the firewall off on Windows — reached the
+ * gate with an unrecognised command word and came back `ask` rather than `deny`.
+ *
+ * Compared case-folded, because PowerShell is: `Remove-Item`, `remove-item` and
+ * `REMOVE-ITEM` are one cmdlet, and a gate that only knew the documented casing
+ * would be bypassed by the shift key. Folding is confined to this set so the POSIX
+ * set keeps its own case sensitivity, where `RM` really is not `rm`.
+ *
+ * The one- and two-letter aliases PowerShell also accepts (`ri`, `mi`, `ni`, `sc`,
+ * `ac`, `sp`) are deliberately absent: several are real programs on POSIX, and the
+ * gain — catching a form nobody writes by hand — does not pay for a deny on a
+ * command that merely mentions a protected path. `del`, `rd` and `rmdir` are in,
+ * since none of the three is a POSIX command at all.
+ */
+const WINDOWS_WRITE_COMMANDS: ReadonlySet<string> = new Set([
+  'remove-item',
+  'remove-itemproperty',
+  'set-content',
+  'add-content',
+  'clear-content',
+  'set-itemproperty',
+  'out-file',
+  'move-item',
+  'copy-item',
+  'rename-item',
+  'new-item',
+  'del',
+  'erase',
+  'rd',
+  'rmdir',
+  'move',
+]);
+
+/** Directory and Windows extension removed, then folded — `C:\…\del.exe` is `del`. */
+const windowsVerb = (word: string): string =>
+  word
+    .replace(/^.*[/\\]/, '')
+    .replace(/\.(?:exe|cmd|bat|ps1)$/i, '')
+    .toLowerCase();
 
 // Interpreters are write intent only when invoked with inline code
 // (`-c`/`-e`, including combined short flags like `perl -pi -e` or
@@ -243,11 +313,14 @@ function touchesSelfConfig(segment: string, word: string): boolean {
   // every protected file at once: `rm -rf .claude` and `mv .claude /tmp` take the
   // hook entry with them. Restricted to the write commands and to a bare directory,
   // so editing `.claude/CLAUDE.md` stays the ordinary work it is.
-  return SELF_CONFIG_WRITE_COMMANDS.has(word) && PROTECTED_DIR_BARE.test(segment);
+  const writes =
+    SELF_CONFIG_WRITE_COMMANDS.has(word) || WINDOWS_WRITE_COMMANDS.has(windowsVerb(word));
+  return writes && PROTECTED_DIR_BARE.test(segment);
 }
 
 function isSelfConfigWriteIntent(segment: string, word: string): boolean {
   if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
+  if (WINDOWS_WRITE_COMMANDS.has(windowsVerb(word))) return true;
   if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
   if (segment.includes('>')) return true;
   if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;

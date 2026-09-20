@@ -38,6 +38,13 @@ export async function buildExposureReport(
   return {
     version: 1,
     probed: opts.probe === true,
+    // Every probe that came back with an error rather than a tool list. These are
+    // not findings — a server that will not start is a broken config entry, not an
+    // attack — but they are the difference between "scanned and clean" and "never
+    // read", and the report has to be able to tell them apart.
+    probeFailures: probes
+      .filter((p) => p.error !== null)
+      .map((p) => ({ server: p.server, error: p.error as string })),
     agents,
     mcp,
     context,

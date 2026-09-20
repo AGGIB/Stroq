@@ -13,6 +13,12 @@ import type { ExposureReport } from './report.js';
 export interface ShareableExposure {
   readonly version: 1;
   readonly probed: boolean;
+  /**
+   * How many probed servers could not be started, as a COUNT. A server name is the
+   * user's disk by the rule above, but the number is what stops a shared summary
+   * saying "MCP servers were probed" about a check that read nothing.
+   */
+  readonly probeFailures: number;
   readonly agentsDetected: number;
   readonly agentsProtected: number;
   readonly mcpStdio: number;
@@ -36,6 +42,7 @@ export function toShareable(report: ExposureReport): ShareableExposure {
   return {
     version: 1,
     probed: report.probed,
+    probeFailures: report.probeFailures.length,
     agentsDetected: detected.length,
     agentsProtected: detected.filter((a) => a.protected).length,
     mcpStdio: report.mcp.reduce((n, m) => n + m.stdio, 0),
@@ -51,6 +58,13 @@ export function toShareable(report: ExposureReport): ShareableExposure {
     reachPassed: report.reach.passedPolicy,
     findings: report.findings.map((f) => ({ class: f.class, severity: f.severity })),
   };
+}
+
+/** The same three states the full report distinguishes, without naming a server. */
+function probeLine(share: ShareableExposure): string {
+  if (!share.probed) return '  Files only — MCP servers were not started.';
+  if (share.probeFailures === 0) return '  MCP servers were probed.';
+  return `  MCP servers were probed — ${share.probeFailures} could not be started and were not checked.`;
 }
 
 export function formatShareable(share: ShareableExposure): string {
@@ -69,7 +83,7 @@ export function formatShareable(share: ShareableExposure): string {
       ? '  no findings'
       : `  findings: ${share.findings.map((f) => `${f.class} (${f.severity})`).join(', ')}`,
     '',
-    share.probed ? '  MCP servers were probed.' : '  Files only — MCP servers were not started.',
+    probeLine(share),
     '',
     '  Generated locally by stroq exposure --share. Nothing was transmitted.',
   ];

@@ -4,6 +4,7 @@ import { formatExposure, type ExposureReport } from '../../src/exposure/report.j
 const base: ExposureReport = {
   version: 1,
   probed: false,
+  probeFailures: [],
   agents: [
     { agent: 'claude-code', detected: true, protected: true },
     { agent: 'cursor', detected: true, protected: false },
@@ -79,8 +80,43 @@ describe('formatExposure', () => {
   });
 
   it('says servers were started when probed is true', () => {
-    const out = formatExposure({ ...base, probed: true });
+    const out = formatExposure({ ...base, probed: true, probeFailures: [] });
     expect(out).toMatch(/tool descriptions scanned/i);
+  });
+
+  /**
+   * A probe that could not start a server produced no finding and no line, while the
+   * footer went on saying the servers "were started and their tool descriptions
+   * scanned". On Windows that is the ordinary case rather than an edge one — an MCP
+   * entry is nearly always `npx`, which resolves to an `npx.cmd` shim Node refuses
+   * to spawn without a shell — so the whole tool-poisoning check reported clean
+   * without ever having run. A check that stops checking has to say so.
+   */
+  it('does not claim a server was scanned when it could not be started', () => {
+    const out = formatExposure({
+      ...base,
+      probed: true,
+      probeFailures: [{ server: 'github', error: 'spawn npx ENOENT' }],
+    });
+    expect(out).toMatch(/1 of them could not be started/i);
+    expect(out).toContain('github');
+    expect(out).toMatch(/not covered/i);
+  });
+
+  it('names the failure so it can be fixed, without inventing a finding', () => {
+    const report: ExposureReport = {
+      ...base,
+      probed: true,
+      findings: [],
+      privilege: [],
+      context: { ...base.context, flagged: [] },
+      probeFailures: [{ server: 'github', error: 'spawn npx ENOENT' }],
+    };
+    const out = formatExposure(report);
+    expect(out).toContain('spawn npx ENOENT');
+    // Still "no findings": a server that would not start is not evidence of an
+    // attack, and making it one would exit 1 on every machine with a broken entry.
+    expect(out).toMatch(/no findings/i);
   });
 
   it('hides flagged file paths unless verbose', () => {

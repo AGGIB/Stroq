@@ -98,6 +98,19 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['shell.destructive'], taint: 'any' },
     },
     {
+      // `ask`, not `deny`: the command may be perfectly ordinary, and Stroq is
+      // saying so — it read a dynamic-execution form (`iex $payload`, `& $cmd`)
+      // whose operand it cannot resolve, so it has no basis for either verdict.
+      // Asking is the honest answer; allowing would report a clean result for a
+      // command nobody classified, which on Windows was the default for every
+      // PowerShell command until this class existed.
+      id: 'ask-shell-unparsed',
+      effect: 'ask',
+      reason:
+        'Stroq could not read what this command executes (a dynamic-execution form with a non-literal operand); confirm',
+      when: { classes: ['shell.unparsed'], taint: 'any' },
+    },
+    {
       id: 'ask-push-external',
       effect: 'ask',
       reason: 'Push to an external remote requires confirmation',

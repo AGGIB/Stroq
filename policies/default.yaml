@@ -107,6 +107,12 @@ rules:
     when:
       classes: [shell.destructive]
       taint: any
+  - id: ask-shell-unparsed
+    effect: ask
+    reason: Stroq could not read what this command executes (a dynamic-execution form with a non-literal operand); confirm
+    when:
+      classes: [shell.unparsed]
+      taint: any
   - id: ask-push-external
     effect: ask
     reason: Push to an external remote requires confirmation

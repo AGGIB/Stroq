@@ -1,4 +1,6 @@
 import type { ActionClass } from '../types.js';
+import { powershellSignals } from './classify-powershell.js';
+import { isDangerousRmTarget } from './dangerous-target.js';
 import { commandWord, firstArgAfter, splitSegments, tokenize } from './shell-segments.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
@@ -131,17 +133,24 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bsupabase\s+db\s+reset\b[^\n]*--(linked|db-url)\b/, 'db-force-migrate'],
   [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
 ];
+// Every separator here is `[/\\]`, for the reason spelled out over `SELF_CONFIG_FILE`
+// in self-config.ts: on Windows these paths arrive with backslashes, and the ones
+// anchored on a slash — `.ssh`, `.aws/credentials`, `.env`, `.kube/config`,
+// `.config/gcloud` — matched nothing there at all, while the `\b`-delimited bare
+// filenames beside them kept working. Half a credential list checking out is the
+// shape this whole pass exists to remove. The two `/proc` and `/etc` entries keep
+// their slashes: those name POSIX files that have no Windows counterpart.
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /(^|[\s"'/=])~?\/?\.ssh(\/|\b)/,
+  /(^|[\s"'/\\=])~?[/\\]?\.ssh([/\\]|\b)/,
   /\bid_(rsa|ed25519|ecdsa|dsa)\b/,
-  /\.aws\/(credentials|config)\b/,
+  /\.aws[/\\](credentials|config)\b/,
   // `@` is included so `-f body=@.env` / `-d @.env` (a file-upload argument,
   // not a literal path segment) is also recognised.
-  /(^|[\s"'/=@])\.env(\.[\w-]+)?\b/,
+  /(^|[\s"'/\\=@])\.env(\.[\w-]+)?\b/,
   /\.(pem|p12|pfx|key)\b/,
   /\.(npmrc|netrc|pgpass|git-credentials)\b/,
-  /\.kube\/config\b/,
-  /\.config\/gcloud\b/,
+  /\.kube[/\\]config\b/,
+  /\.config[/\\]gcloud\b/,
   /\/etc\/(shadow|passwd)\b/,
   /\bsecurity\s+find-(generic|internet)-password\b/,
   /\/proc\/[^\s]*\/environ\b/,
@@ -153,18 +162,9 @@ const PUSH_EXTERNAL =
 // directory to it in one step — the s1ngularity exfiltration shape.
 const GH_REPO_CREATE_PUSH = /\bgh\s+repo\s+create\b[^\n]*--push\b/;
 
-export function isDangerousRmTarget(target: string, cwd: string): boolean {
-  const t = target.replace(/["']/g, '');
-  if (t === '') return false;
-  if (['/', '/*', '.', './', '*', './*'].includes(t)) return true;
-  // `~`, `~/…` and `~user/…` expand to a home directory, which is never inside a
-  // project checkout; `$VAR` is unknown and `..` points upward — all treated as
-  // outside the working tree.
-  if (t.startsWith('~') || t.startsWith('$') || t.startsWith('..')) return true;
-  if (!t.startsWith('/')) return false;
-  const normalized = t.replace(/\/+$/, '');
-  return !normalized.startsWith(`${cwd}/`);
-}
+// Re-exported from its own module so the PowerShell reader can share the judgement
+// without importing this one; `dangerous-target.ts` explains why it moved.
+export { isDangerousRmTarget } from './dangerous-target.js';
 
 function rmIsDangerous(segment: string, cwd: string): boolean {
   const tokens = tokenize(segment);
@@ -321,15 +321,22 @@ function hostsOf(command: string): string[] {
 export function classifyCommand(command: string, cwd: string): CommandClassification {
   const segments = splitSegments(command);
   const selfConfig = selfTamperSignals(segments);
+  // The PowerShell and cmd forms of the same four dangers, merged into the same
+  // classes rather than given their own. A dangerous command is dangerous whichever
+  // shell wrote it, and a policy rule naming `shell.exec_encoded` must not have to
+  // name a Windows twin of it as well. `shell.unparsed` is the one class that IS
+  // new, because "I could not read what this runs" is not any of the four.
+  const ps = powershellSignals(segments, cwd);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
-    ['shell.exec_encoded', encodedExecSignals(segments)],
-    ['shell.network', segments.filter(isNetwork).map(() => 'network-command')],
-    ['shell.destructive', destructiveSignals(segments, cwd)],
-    ['fs.secrets', secretSignals(segments)],
+    ['shell.exec_encoded', [...encodedExecSignals(segments), ...ps.encoded]],
+    ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
+    ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
+    ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
     ['git.push_external', pushExternalSignals(segments)],
     ['config.self', selfConfig.deny],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
+    ['shell.unparsed', ps.unparsed],
   ];
   const active = groups.filter(([, signals]) => signals.length > 0);
   return {

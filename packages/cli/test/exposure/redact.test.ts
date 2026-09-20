@@ -5,6 +5,7 @@ import type { ExposureReport } from '../../src/exposure/report.js';
 const report: ExposureReport = {
   version: 1,
   probed: false,
+  probeFailures: [],
   agents: [
     { agent: 'claude-code', detected: true, protected: true },
     { agent: 'cursor', detected: true, protected: false },
@@ -98,6 +99,7 @@ describe('toShareable', () => {
         'mcpWrapped',
         'privilegeKeys',
         'probed',
+        'probeFailures',
         'repoOnOpen',
         'repoPreTrust',
         'reachPassed',
@@ -123,5 +125,24 @@ describe('formatShareable', () => {
     const text = formatShareable(toShareable(report));
     expect(text).toContain('stroq exposure');
     expect(text).toMatch(/4\s*\/\s*13|4 of 13/);
+  });
+
+  /**
+   * A shared summary is the version someone else reads, so it must not be the one
+   * that overclaims. The COUNT travels and the server name does not: a name is the
+   * user's disk by the whitelist's own rule, and the count is enough to say the
+   * check did not cover everything.
+   */
+  it('does not claim the servers were probed when some could not start', () => {
+    const share = toShareable({
+      ...report,
+      probed: true,
+      probeFailures: [{ server: 'github', error: 'spawn npx ENOENT' }],
+    });
+    expect(share.probeFailures).toBe(1);
+    const text = formatShareable(share);
+    expect(text).toMatch(/1 could not be started/i);
+    expect(text).not.toContain('github');
+    expect(text).not.toContain('ENOENT');
   });
 });
