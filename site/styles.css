@@ -251,7 +251,7 @@ html:not(.js) .copy-btn { display: none; }
    chrome stays the brightest thing in the frame. */
 .stage-wall {
   position: absolute; inset: 0; z-index: 0;
-  width: 100%; height: 100%; object-fit: cover; object-position: 18% 42%;
+  width: 100%; height: 100%; object-fit: cover; object-position: center;
   /* No CSS filter: the grade lives in the asset (see site/img/README.md), so
      the browser never repaints the painting to draw it. */
 }
@@ -265,7 +265,7 @@ html:not(.js) .copy-btn { display: none; }
 /* 5b-i. The editor ----------------------------------------------------- */
 .ed {
   position: relative; z-index: 1;
-  width: 88%; margin-left: auto; overflow: hidden;
+  width: 90%; margin-inline: auto; overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px;
   background: var(--ed-bg); color: var(--term-fg);
   font: 500 var(--ed-fs)/1.55 var(--font-mono);
@@ -594,7 +594,7 @@ html:not(.js) .copy-btn { display: none; }
 .notes li + li { margin-top: .3rem; }
 
 /* 11. Policy / code figures -------------------------------------------- */
-.policy-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 2.5rem 3.5rem; align-items: start; }
+.policy-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 2.5rem 3.5rem; align-items: start; }
 .code-fig { margin: 0; overflow: hidden; border: 1px solid var(--term-line); border-radius: var(--radius-lg); background: var(--term); color: var(--term-fg); box-shadow: var(--shadow-term); }
 .code-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 44px; padding: .4rem .5rem .4rem 1.15rem; border-bottom: 1px solid var(--term-line); background: var(--term-2); color: var(--term-dim); font: 500 .8rem/1 var(--font-mono); }
 .code { margin: 0; padding: 1.1rem 1.25rem 1.2rem; overflow-x: auto; font: 500 .84rem/1.65 var(--font-mono); tab-size: 2; scrollbar-width: thin; scrollbar-color: var(--term-line) transparent; }
@@ -623,7 +623,7 @@ html:not(.js) .copy-btn { display: none; }
 .plan .btn { align-self: flex-start; margin-top: auto; }
 
 /* 14. Install ---------------------------------------------------------- */
-.install-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 2.5rem 4rem; align-items: start; }
+.install-grid { display: grid; grid-template-columns: minmax(0, 5.5fr) minmax(0, 6.5fr); gap: 2.5rem 4rem; align-items: start; }
 .install-blocks { display: grid; gap: 1.25rem; }
 .install-note { padding: 1rem 1.15rem; border: 1px solid var(--deny); border-radius: var(--radius-sm); background: var(--deny-tint); color: var(--ink); font-size: .95rem; line-height: 1.5; }
 .install-note strong { color: var(--deny-text); }
@@ -631,7 +631,7 @@ html:not(.js) .copy-btn { display: none; }
 
 /* 14b. Colophon --------------------------------------------------------- */
 .colophon { padding-block: var(--space-section); border-top: 1px solid var(--line); }
-.colophon-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 1.5rem clamp(2rem, 1.5rem + 3vw, 4rem); align-items: start; }
+.colophon-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1.5rem clamp(2rem, 1.5rem + 3vw, 4rem); align-items: start; }
 .colophon h2 { font-size: clamp(1.5rem, 1.2rem + 1.1vw, 2.1rem); }
 .colophon-body { display: grid; gap: 1rem; max-width: 68ch; color: var(--ink-2); font-size: 1rem; line-height: 1.6; }
 .colophon-body em { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
