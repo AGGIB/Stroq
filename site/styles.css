@@ -172,7 +172,7 @@ button { font: inherit; color: inherit; }
    top margin is the only thing keeping it off the descenders above it. */
 .hero-row {
   display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
-  gap: clamp(1.5rem, 1rem + 2vw, 3.5rem); align-items: end;
+  gap: clamp(1.5rem, 1rem + 2vw, 3.5rem); align-items: start;
   margin-top: clamp(.9rem, .7rem + .7vw, 1.3rem);
 }
 .hero-cta { display: flex; flex-direction: column; }
