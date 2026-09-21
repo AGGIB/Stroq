@@ -156,7 +156,7 @@ button { font: inherit; color: inherit; }
 .cta-pair-end { justify-content: flex-start; }
 
 /* 5. Hero -------------------------------------------------------------- */
-.hero { position: relative; padding: clamp(2.25rem, 1.5rem + 2vw, 2.9rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
+.hero { position: relative; padding: clamp(1.75rem, 1.2rem + 1.6vw, 2.25rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
 .hero::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: linear-gradient(to right, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--line) 1px, transparent 1px);
@@ -166,11 +166,17 @@ button { font: inherit; color: inherit; }
 }
 .hero-top { position: relative; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: clamp(2rem, 1.25rem + 3vw, 4rem); align-items: center; }
 .hero-head { min-width: 0; }
-.hero-logo { display: block; width: clamp(150px, 17vw, 230px); height: auto; margin-bottom: clamp(1rem, .75rem + 1vw, 1.5rem); color: var(--ink); }
-.hero h1 { max-width: 14ch; }
-/* The lead sits under a display line with a .98 line-height, so its own top
-   margin is the only thing keeping it off the descenders above it. */
-.hero .lead { margin-top: clamp(1.1rem, .8rem + 1vw, 1.75rem); margin-bottom: 0; max-width: 46ch; }
+.hero-logo { display: block; width: clamp(120px, 11vw, 168px); height: auto; margin-bottom: clamp(.7rem, .5rem + .8vw, 1.1rem); color: var(--ink); }
+.hero h1 { max-width: 21ch; }
+/* The lead sits under a display line with a .98 line-height, so the row's own
+   top margin is the only thing keeping it off the descenders above it. */
+.hero-row {
+  display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 1rem + 2vw, 3.5rem); align-items: end;
+  margin-top: clamp(.9rem, .7rem + .7vw, 1.3rem);
+}
+.hero-cta { display: flex; flex-direction: column; }
+.hero .lead { margin-top: 0; margin-bottom: 0; max-width: 58ch; }
 .hero .lead em { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .lead { max-width: 40ch; margin-bottom: 2.25rem; color: var(--ink-2); font-size: var(--text-lead); line-height: 1.5; }
 .install-pill { display: inline-flex; align-items: center; gap: .75rem; max-width: 100%; padding: .25rem .25rem .25rem 1.1rem; border: 1px solid var(--line-2); border-radius: 999px; background: var(--paper-2); }
@@ -192,7 +198,7 @@ button { font: inherit; color: inherit; }
 .copy-btn-dark.is-copied { background: transparent; border-color: var(--t-allow); color: var(--t-allow); }
 .copy-btn-dark.is-failed { background: transparent; border-color: var(--t-deny); color: var(--t-deny); }
 html:not(.js) .copy-btn { display: none; }
-.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.5rem; }
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 0; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
 /* The hero command is `sent --last`, seven characters longer than the `init` this
    row was sized for, and the column is 572px: the pill and the button missed
@@ -206,16 +212,28 @@ html:not(.js) .copy-btn { display: none; }
    for both until about 1250px. In the band between, the row has to wrap — so both
    go full width, because a stacked pair reads as deliberate where a 174px button
    orphaned under a 375px pill reads as a mistake. */
-@media (min-width: 981px) and (max-width: 1250px) {
+@media (max-width: 1000px) {
+  .hero-row { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+  .hero .lead { max-width: 52ch; }
+}
+/* Side by side the command and the button need 579px, and the row's right-hand
+   column is never that wide — they wrapped, leaving a 174px button orphaned
+   under a 375px pill. Stacked and full width they read as one call to action,
+   and the row comes out shorter than the wrap did, which is the point. The
+   copy button goes to the far edge so the pill reads as a field with an action
+   rather than as a short pill in a long box. */
+@media (min-width: 1001px) {
+  .hero-actions { flex-direction: column; align-items: stretch; gap: .7rem; }
   .hero .install-pill { width: 100%; }
-  .hero-actions .btn-gh { width: 100%; justify-content: center; }
+  .hero .install-pill .copy-btn { margin-left: auto; }
+  .hero-actions .btn-gh { justify-content: center; }
 }
 
 /* The install count sits in the same quiet line as the licence, so the number
    reads as one more fact about the tool rather than a badge asking to be
    believed. It is hidden until /api/stats answers; the line keeps its height
    either way, so nothing below it moves. */
-.hero-meta { margin-top: 1.1rem; font-size: .9rem; color: var(--ink-2); letter-spacing: .01em; }
+.hero-meta { margin-top: .95rem; font-size: .9rem; color: var(--ink-2); letter-spacing: .01em; }
 .hero-installs { display: inline; }
 .hero-installs[hidden] { display: none; }
 .hero-installs::after { content: " · "; }
@@ -235,12 +253,15 @@ html:not(.js) .copy-btn { display: none; }
    provenance and the exact crop. A painting rather than a gradient because a
    gradient has no texture to find on a second look. */
 .hero-top { display: block; }
-.hero-head { min-width: 0; max-width: 40rem; }
+/* The head used to be capped at 40rem because it shared the row with a second
+   column. It owns the full container now, and the cap was what left half the
+   fold empty and pushed the scene off it. */
+.hero-head { min-width: 0; }
 
-.scene { margin: clamp(2rem, 1.2rem + 2.5vw, 3.5rem) 0 0; min-width: 0; }
+.scene { margin: clamp(1.5rem, 1rem + 1.6vw, 2.25rem) 0 0; min-width: 0; }
 .stage {
   position: relative; isolation: isolate;
-  padding: clamp(1.1rem, .5rem + 2.2vw, 2.75rem) clamp(1rem, .5rem + 1.4vw, 1.9rem);
+  padding: clamp(.9rem, .5rem + 1.5vw, 2rem) clamp(1rem, .5rem + 1.4vw, 1.9rem);
   border: 1px solid var(--term-line);
   border-radius: calc(var(--radius-lg) + 8px);
   overflow: hidden;
@@ -853,6 +874,11 @@ html:not(.js) .copy-btn { display: none; }
 @media (max-width: 700px) {
   .plans, .foot-grid { grid-template-columns: 1fr; }
 }
+/* Two lines inside a 999px pill read as a squashed capsule, so at the width
+   where the command actually wraps the pill becomes the rounded box it is. */
+@media (max-width: 340px) {
+  .hero .install-pill { border-radius: var(--radius-lg); }
+}
 @media (max-width: 600px) {
   .bento { grid-template-columns: 1fr; }
   /* Wrapping breaks the tree: a wrapped `└─►` line loses the indent that says
@@ -874,6 +900,12 @@ html:not(.js) .copy-btn { display: none; }
   .tile-wide, .tile:last-child { grid-column: auto; }
   .tile { min-height: 0; }
   .install-pill { width: 100%; }
+  /* At .95rem the command needed 31px more than a 375px phone has, so the one
+     thing the hero asks you to run was printed with its tail ellipsised. Smaller
+     fixes it from 375 up; at 320 nothing small enough is still readable, so it
+     wraps instead. A command with a line break in it is still a command you can
+     read; one ending in an ellipsis is not. */
+  .hero .install-cmd { font-size: .8rem; white-space: normal; overflow-wrap: anywhere; }
   .hero-actions .btn { flex: 1 1 auto; justify-content: center; }
 }
 
