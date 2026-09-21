@@ -26,6 +26,9 @@
 
   --term: #0f1117;
   --term-2: #171a22;
+  /* The desktop the hero windows sit on: lighter and warmer than the windows
+     themselves, so the panels read as objects resting on a lit surface. */
+  --wall: #241d2e;
   --term-fg: #e6e8ef;
   --term-dim: #9aa3b5;
   --term-line: rgba(230, 232, 239, .12);
@@ -210,34 +213,90 @@ html:not(.js) .copy-btn { display: none; }
 .hero-installs-n { font-family: var(--font-display); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ic-gh { flex: none; }
 
-/* 5b. The hero terminal: one command, its real output, typed in front of you.
-   The headline promises "know what told your agent to do that"; the terminal
-   shows it being answered. Every line below the prompt is verbatim output from
-   `stroq replay` on a recorded session — the colours are the only thing added. */
+/* 5b. The hero stage: a desktop, and two windows telling one story.
+   The report window answers "what already went out"; the guard window, layered
+   in front of it, answers the second half of the same sentence — "then guards
+   what happens next". Every line in both is verbatim output: the report from
+   `stroq sent`, the guard from `stroq why` on the run in examples/demo. The
+   wallpaper is built from the product's own deny/ask/allow hues rather than a
+   stock desktop picture, so the stage costs no image request and still reads as
+   a machine rather than a marketing panel. */
 .hero-scene { min-width: 0; }
-.tt {
-  margin: 0; min-width: 0; overflow: hidden;
-  border: 1px solid var(--term-line); border-radius: var(--radius-lg);
-  background: var(--term); color: var(--term-fg); box-shadow: var(--shadow-term);
+.scene { margin: 0; min-width: 0; }
+
+.stage {
+  position: relative; isolation: isolate;
+  display: flex; flex-direction: column;
+  padding: clamp(.9rem, .5rem + 1.2vw, 1.75rem);
+  border: 1px solid var(--term-line);
+  border-radius: calc(var(--radius-lg) + 8px);
+  overflow: hidden;
+  background: var(--wall);
+  box-shadow: var(--shadow-term);
 }
+/* The light field. Oversized and blurred so no gradient edge lands inside the
+   frame, and moved with a transform rather than background-position so the
+   drift stays on the compositor. */
+.stage-wall {
+  position: absolute; inset: -30%; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(38% 44% at 18% 14%, color-mix(in oklab, var(--ask) 44%, transparent), transparent 70%),
+    radial-gradient(44% 50% at 86% 84%, color-mix(in oklab, var(--deny) 38%, transparent), transparent 72%),
+    radial-gradient(34% 40% at 84% 16%, color-mix(in oklab, var(--allow) 22%, transparent), transparent 70%),
+    radial-gradient(48% 44% at 40% 98%, color-mix(in oklab, var(--info) 20%, transparent), transparent 74%);
+  filter: blur(22px) saturate(.85);
+}
+/* Grain, so the field reads as a surface and not as a gradient. */
+.stage::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  opacity: .3; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.tt {
+  position: relative; z-index: 1;
+  margin: 0; min-width: 0; overflow: hidden;
+  border: 1px solid var(--term-line); border-radius: var(--radius);
+  background: var(--term); color: var(--term-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 20px 44px -18px rgba(0, 0, 0, .7);
+}
+/* The report sits back from the right edge so the desktop stays visible behind
+   the pair, and the guard hangs off its bottom-right the way a second terminal
+   sits in front of an editor — the overlap itself says which came first. The
+   pull-up is small on purpose: the report's honesty block has to stay readable,
+   so only its closing lines go behind the guard. */
+.tt-report { width: 100%; }
+.tt-guard {
+  z-index: 2; align-self: flex-end;
+  width: min(84%, 25.5rem); margin-right: clamp(0px, .6vw, .7rem);
+  margin-top: clamp(-3.25rem, -2vw - 1.2rem, -2rem);
+  background: color-mix(in oklab, var(--term) 94%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .45), 0 34px 68px -22px rgba(0, 0, 0, .85);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .tt-guard { backdrop-filter: blur(16px) saturate(1.2); }
+}
+
 .tt-bar {
   position: relative; display: flex; align-items: center; justify-content: center;
-  height: 38px; border-bottom: 1px solid var(--term-line); background: var(--term-2);
-  color: var(--term-dim); font: 500 .76rem/1 var(--font-mono);
+  height: 34px; border-bottom: 1px solid var(--term-line); background: var(--term-2);
+  color: var(--term-dim); font: 500 .73rem/1 var(--font-mono);
 }
-.tt-dots { position: absolute; left: .85rem; top: 50%; display: flex; gap: .45rem; translate: 0 -50%; }
-.tt-dots span { width: 12px; height: 12px; border-radius: 50%; background: var(--term-line); }
+.tt-dots { position: absolute; left: .8rem; top: 50%; display: flex; gap: .4rem; translate: 0 -50%; }
+.tt-dots span { width: 11px; height: 11px; border-radius: 50%; background: var(--term-line); }
 .tt-dots span:nth-child(1) { background: #ff5f57; }
 .tt-dots span:nth-child(2) { background: #febc2e; }
 .tt-dots span:nth-child(3) { background: #28c840; }
 .tt-screen {
-  margin: 0; padding: 1rem 1.15rem 1.1rem; min-width: 0;
-  font: 500 .735rem/1.5 var(--font-mono); white-space: normal;
+  margin: 0; padding: .85rem .95rem .95rem; min-width: 0;
+  font: 500 .69rem/1.5 var(--font-mono); white-space: normal;
 }
+.tt-guard .tt-screen { padding: .8rem .95rem .85rem; font-size: .665rem; }
 /* Each line is its own block with its own preserved spacing, so the source can
    break between lines without a <pre> rendering those breaks as blank rows. */
 .tt-l { display: block; min-height: 1.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tt-cmd, .tt-cur { --n: 26; }
+.tt-cmd2, .tt-cur2 { --n: 9; }
 
 /* The prompt, and the command that types itself into it. The typed text is
    revealed with a clip, not a width, and the cursor steps alongside it. */
@@ -249,7 +308,7 @@ html:not(.js) .copy-btn { display: none; }
 
 /* Output arrives in bursts, the way a process prints. */
 .tt-l { opacity: 0; }
-.tt-l.tt-l0 { opacity: 1; }
+.tt-l.tt-l0, .tt-l.tt-g0 { opacity: 1; }
 .tt-dim { color: var(--term-dim); }
 .tt-h { color: var(--term-fg); font-weight: 700; letter-spacing: .02em; }
 .tt-src { color: var(--term-fg); font-weight: 700; }
@@ -260,11 +319,14 @@ html:not(.js) .copy-btn { display: none; }
 .tt-allow { color: var(--t-allow); }
 .tt-q { color: var(--term-fg); }
 .tt-sum { color: var(--term-fg); font-weight: 700; }
-.tt figcaption {
-  padding: .8rem 1.15rem .9rem; border-top: 1px solid var(--term-line);
-  color: var(--term-dim); font-size: .84rem; line-height: 1.5;
+
+/* The caption left the window when the window became a scene: it is the page
+   speaking about the stage, not chrome belonging to a terminal. */
+.scene figcaption {
+  margin-top: 1rem; max-width: 52ch;
+  color: var(--ink-2); font-size: .92rem; line-height: 1.55;
 }
-.tt figcaption code { background: rgba(255, 255, 255, .08); color: var(--term-fg); }
+.scene figcaption code { background: var(--code-bg); color: var(--ink); }
 
 /* 5bb. The case study: a framed player, not a bare <video> ---------------
    The poster carries the question the film answers, so nothing autoplays and
@@ -566,6 +628,13 @@ html:not(.js) .copy-btn { display: none; }
   .hero-top { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
 }
 
+/* On a phone the stage has no room for an offset pair, so the guard takes the
+   full desktop width and only clips the overlap it needs to still read as the
+   window in front. */
+@media (max-width: 700px) {
+  .tt-guard { width: 100%; margin-right: 0; margin-top: -1.75rem; }
+}
+
 /* 16. Responsive ------------------------------------------------------- */
 @media (min-width: 880px) {
   .stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -653,6 +722,17 @@ html:not(.js) .copy-btn { display: none; }
   .tt-b7 { animation: tt-b7 16s linear infinite; }
   .tt-b8 { animation: tt-b8 16s linear infinite; }
   .tt-b9 { animation: tt-b9 16s linear infinite; }
+  /* The authored moment: the report finishes, then the guard window arrives in
+     front of it. One hand-off per loop — the two halves of the same sentence. */
+  .tt-guard { animation: tt-guard 16s linear infinite; }
+  .tt-cmd2 { animation-name: tt-type2; }
+  .tt-cur2 { animation-name: tt-cur2; }
+  .tt-g1 { animation: tt-g1 16s linear infinite; }
+  .tt-g2 { animation: tt-g2 16s linear infinite; }
+  .tt-g3 { animation: tt-g3 16s linear infinite; }
+  /* The light behind the windows breathes. Slow enough to notice only on a
+     second look, and on the compositor because it moves by transform. */
+  .stage-wall { animation: wall-drift 46s ease-in-out infinite alternate; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
@@ -666,6 +746,9 @@ html:not(.js) .copy-btn { display: none; }
   .tt-cmd { clip-path: none; }
   .tt-l { opacity: 1; }
   .tt-cur-end { opacity: 1; }
+  /* The stage holds its finished frame: both windows present, light still. */
+  .tt-guard { opacity: 1; transform: none; }
+  .stage-wall { animation: none; }
   /* Nothing travels, but the finished state is the one that carries the meaning:
      the token is in memory and lit, both links are drawn, the gate is holding the
      action, and the verdict is tied to it. */
@@ -694,6 +777,7 @@ html:not(.js) .copy-btn { display: none; }
     --allow-tint: rgba(78, 203, 127, .14);
     --term: #191d27;
     --term-2: #222736;
+    --wall: #1b1624;
     --term-line: rgba(230, 232, 239, .14);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 14px 32px -14px rgba(0, 0, 0, .6);
     --shadow-term: 0 2px 4px rgba(0, 0, 0, .5), 0 28px 56px -20px rgba(0, 0, 0, .7);
@@ -716,3 +800,21 @@ html:not(.js) .copy-btn { display: none; }
 @keyframes tt-b7 { 0%, 36.9% { opacity: 0; } 37%, 100% { opacity: 1; } }
 @keyframes tt-b8 { 0%, 41.2% { opacity: 0; } 41.3%, 100% { opacity: 1; } }
 @keyframes tt-b9 { 0%, 43.7% { opacity: 0; } 43.8%, 100% { opacity: 1; } }
+
+/* The guard window's own track inside the same 16 s loop: it arrives at 7.5 s,
+   once the report has finished printing, types its command, and prints the
+   denial. It leaves with the rest of the screen at 14.4 s. */
+@keyframes tt-guard {
+  0%, 46.9% { opacity: 0; transform: translate3d(22px, 30px, 0) scale(.965); animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+  51%, 89% { opacity: 1; transform: none; }
+  95%, 100% { opacity: 0; transform: none; }
+}
+@keyframes tt-type2 { 0%, 52% { clip-path: inset(0 100% 0 0); } 56%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes tt-cur2 { 0%, 51.9% { opacity: 0; transform: translateX(0); } 52% { opacity: 1; transform: translateX(0); } 56% { opacity: 1; transform: translateX(calc(var(--n) * 1ch)); } 56.5%, 100% { opacity: 0; transform: translateX(calc(var(--n) * 1ch)); } }
+@keyframes tt-g1 { 0%, 57.9% { opacity: 0; } 58%, 100% { opacity: 1; } }
+@keyframes tt-g2 { 0%, 60.4% { opacity: 0; } 60.5%, 100% { opacity: 1; } }
+@keyframes tt-g3 { 0%, 63.4% { opacity: 0; } 63.5%, 100% { opacity: 1; } }
+@keyframes wall-drift {
+  from { transform: translate3d(-1.6%, -1.1%, 0) scale(1.05); }
+  to { transform: translate3d(1.6%, 1.3%, 0) scale(1.09); }
+}
