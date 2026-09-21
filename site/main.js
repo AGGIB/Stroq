@@ -189,4 +189,54 @@ window.va =
       .catch(function () { /* the line stands on its own */ });
   }
 
+  /* The hero scene ----------------------------------------------------- */
+  /* The terminal under the editor replays one run of examples/demo on a 16 s
+     loop. The lines carry their own `data-at` in seconds, so retiming the
+     sequence is editing a number in the markup rather than a percentage in a
+     keyframe. Everything is visible by default: only a script that actually
+     runs hides the lines, so a failed or blocked main.js leaves the finished
+     frame on screen rather than an empty panel. The loop stops whenever the
+     scene is off screen or the tab is hidden. */
+  var term = doc.querySelector('.ed-term');
+  var termLines = term ? term.querySelectorAll('[data-at]') : [];
+  if (term && termLines.length && !reduceMotion.matches && window.requestAnimationFrame) {
+    var LOOP = 16000;
+    var HOLD = 14400;
+    var cmd = term.querySelector('.tt-cmd');
+    var origin = 0;
+    var running = false;
+    var visible = true;
+
+    term.classList.add('is-scripted');
+
+    function paint(now) {
+      if (!running) { return; }
+      if (!origin) { origin = now; }
+      var t = (now - origin) % LOOP;
+      each(termLines, function (line) {
+        var on = t >= parseFloat(line.getAttribute('data-at')) * 1000 && t < HOLD;
+        line.classList.toggle('is-on', on);
+      });
+      if (cmd) { cmd.classList.toggle('is-typing', t >= 600 && t < HOLD); }
+      window.requestAnimationFrame(paint);
+    }
+
+    function setRunning(next) {
+      if (next === running) { return; }
+      running = next;
+      if (running) { origin = 0; window.requestAnimationFrame(paint); }
+    }
+
+    function sync() { setRunning(visible && !doc.hidden); }
+
+    if (window.IntersectionObserver) {
+      new window.IntersectionObserver(function (entries) {
+        visible = entries[0].isIntersecting;
+        sync();
+      }, { threshold: 0 }).observe(term);
+    }
+    doc.addEventListener('visibilitychange', sync);
+    sync();
+  }
+
 })();
