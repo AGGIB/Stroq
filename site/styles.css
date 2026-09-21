@@ -216,6 +216,13 @@ html:not(.js) .copy-btn { display: none; }
   .hero-row { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; align-items: start; }
   .hero .lead { max-width: 52ch; }
 }
+/* The count arrives from /api/stats a beat after paint. Above this width the
+   line holds it and the licence together and nothing moves; below it the line
+   wraps and the whole scene used to step down 22px. The second line is
+   reserved from first paint instead — and only when a script is running to
+   fill it, so a visitor without JS pays nothing for a number they will never
+   be shown. A browser without `lh` simply gets the old behaviour. */
+@media (max-width: 1100px) { .js .hero-meta { min-height: 2lh; } }
 /* Side by side the command and the button need 579px, and the row's right-hand
    column is never that wide — they wrapped, leaving a 174px button orphaned
    under a 375px pill. Stacked and full width they read as one call to action,
