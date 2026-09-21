@@ -39,7 +39,11 @@
   --font-body: -apple-system, "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --text-h1: clamp(2.6rem, 1.4rem + 4.5vw, 5.2rem);
+  /* The cap is set by the hero headline, which runs to four lines at the widest
+     display sizes. At 5.2rem those four lines plus the lead, the command and the
+     meta line reached the bottom of a 1470x875 window with 5px to spare, so the
+     hero read as pinned to the fold rather than placed above it. */
+  --text-h1: clamp(2.6rem, 1.4rem + 4.5vw, 4.6rem);
   --text-h2: clamp(1.85rem, 1.2rem + 2.1vw, 3rem);
   --text-num: clamp(3.4rem, 2rem + 4.6vw, 5.6rem);
   --text-lead: clamp(1.1rem, 1rem + .4vw, 1.3rem);
@@ -140,7 +144,7 @@ button { font: inherit; color: inherit; }
 .cta-pair-end { justify-content: flex-start; }
 
 /* 5. Hero -------------------------------------------------------------- */
-.hero { position: relative; padding: clamp(2.25rem, 1.5rem + 2.5vw, 3.75rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
+.hero { position: relative; padding: clamp(2.25rem, 1.5rem + 2vw, 2.9rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
 .hero::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: linear-gradient(to right, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--line) 1px, transparent 1px);
