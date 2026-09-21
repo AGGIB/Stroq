@@ -2,38 +2,59 @@
 
 ## desk.avif, desk.webp — the hero desktop wallpaper
 
-**Painting:** James McNeill Whistler (American, 1834–1903), *Nocturne: Blue and
-Gold—Southampton Water*, 1872. Art Institute of Chicago, Stickney Fund,
-accession 1900.52.
+**Authored here.** A Sequoia-style desktop: a deep diagonal gradient with four
+blurred light ribbons drifting across it.
 
-**Licence: public domain.** The Art Institute of Chicago reports
-`is_public_domain: true` for artwork 56905
-(`https://api.artic.edu/api/v1/artworks/56905`), and the artist died in 1903, so
-the work is out of copyright worldwide under life + 70 years. The file used here
-is the Google Art Project scan on Wikimedia Commons, also tagged public domain:
+**Why not an actual macOS wallpaper.** Apple's desktop pictures are copyrighted
+files. Shipping one from this site would be redistributing Apple's artwork
+without a licence, so this is an original image built to read the same way.
+Nothing here is derived from an Apple asset.
 
-  https://commons.wikimedia.org/wiki/File:James_McNeill_Whistler_-_Nocturne-_Blue_and_Gold--Southampton_Water_-_Google_Art_Project.jpg
-
-**How these files were made.** From the 3840×2540 Commons scan, with `sharp`:
+**How to rebuild it.** The image is a single SVG, rasterised. No dependency is
+needed to read it; `sharp` (or any SVG rasteriser) turns it into the AVIF and
+WebP that ship:
 
 ```js
-sharp(src)
-  .extract({ left: 1007, top: 150, width: 2600, height: 1625 })
-  .resize(1400, 875, { fit: 'cover' })
-  .modulate({ brightness: 1.34, saturation: 1.34 })
-  .linear(1.14, -2)
+const W = 1400, H = 875;
+const D = {
+  a: 'M-150,760 C250,560 520,880 900,600 C1180,395 1330,470 1560,300',
+  b: 'M-150,620 C220,430 560,720 930,450 C1210,245 1340,330 1560,170',
+  c: 'M-150,880 C300,700 600,980 980,720 C1250,535 1380,600 1560,450',
+  d: 'M-150,470 C260,300 600,560 960,300 C1220,115 1360,190 1560,40',
+};
+const base = ['#081029', '#131746', '#2a1550', '#4b163c'];
+const bands = [
+  { d: D.a, c: '#3f74ff', w: 130, o: 0.62 },
+  { d: D.b, c: '#2fd3ff', w: 92,  o: 0.46 },
+  { d: D.c, c: '#cc46e8', w: 150, o: 0.54 },
+  { d: D.d, c: '#ff7ab0', w: 78,  o: 0.30 },
+];
+const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.8" y2="1">
+      ${base.map((c, i) => `<stop offset="${(i / (base.length - 1)).toFixed(2)}" stop-color="${c}"/>`).join('')}
+    </linearGradient>
+    <filter id="b" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <g filter="url(#b)" style="mix-blend-mode:screen">
+    ${bands.map(b => `<path d="${b.d}" fill="none" stroke="${b.c}" stroke-width="${b.w}" stroke-linecap="round" opacity="${b.o}"/>`).join('')}
+  </g>
+</svg>`;
+// sharp(Buffer.from(svg)).avif({ quality: 58, effort: 7 }).toFile('desk.avif')
+// sharp(Buffer.from(svg)).webp({ quality: 82, effort: 6 }).toFile('desk.webp')
 ```
 
-then `.avif({ quality: 44, effort: 7 })` and `.webp({ quality: 58, effort: 6 })`.
+The ribbons are **stroked curves, not filled slabs**: a stroke keeps a readable
+edge through the blur, which is what makes the shapes read as ribbons instead of
+as a smear. An earlier attempt with filled paths and a 72–120px blur dissolved
+into flat horizontal bands.
 
-The crop puts the gold sail about a tenth of the way in from the left, which is
-the band of the painting the editor window leaves uncovered. The brightening is
-not a stylistic whim: the window on top of it is dark, and the desktop has to be
-the lighter surface or the composition reads as a dark panel on a dark panel.
+A synthetic gradient compresses far better than a photograph: 5.8 KB of AVIF
+against the 39 KB the previous painted wallpaper cost.
 
-Quality was chosen by looking, not by habit — at 1:1 on the visible band, q38,
-q44 and q50 are near indistinguishable, and q50 costs 88 KB against q44's 39 KB.
-
-`sharp` is deliberately **not** a dependency of this repo: the asset is built
-once, out of tree, and committed. Rebuilding needs only a scratch
-`npm install sharp` and the snippet above.
+The stage adds a grain overlay in CSS, which also keeps a smooth gradient of
+this size from banding in 8-bit.
