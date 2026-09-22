@@ -33,6 +33,42 @@ export function collectStrings(value: unknown, depth = 0): string[] {
   return [];
 }
 
+/**
+ * The same walk, but keeping the key each leaf sat under.
+ *
+ * An array element inherits the array's own key, because `{"attendees":["Peter"]}`
+ * labels the element just as plainly as `{"attendee":"Peter"}` does. A top-level
+ * string has no key and gets an empty set rather than being dropped.
+ *
+ * The result is text -> keys rather than a list, because the cloak rewrites by value:
+ * the same string under `first_name` and under `note` must be replaced in both, so
+ * detection has to see every key it appeared under at once.
+ */
+export function collectKeyedStrings(
+  value: unknown,
+  key: string | null = null,
+  into: Map<string, Set<string>> = new Map(),
+  depth = 0,
+): Map<string, Set<string>> {
+  if (depth > MAX_JSON_DEPTH) return into;
+  if (typeof value === 'string') {
+    const keys = into.get(value) ?? new Set<string>();
+    if (key !== null) keys.add(key);
+    into.set(value, keys);
+    return into;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectKeyedStrings(item, key, into, depth + 1);
+    return into;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [childKey, item] of Object.entries(value as Record<string, unknown>)) {
+      collectKeyedStrings(item, childKey, into, depth + 1);
+    }
+  }
+  return into;
+}
+
 /** The same walk, returning a new value with every string leaf passed through `fn`. */
 export function mapStrings(value: unknown, fn: (text: string) => string, depth = 0): unknown {
   if (depth > MAX_JSON_DEPTH) return value;

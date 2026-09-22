@@ -1,5 +1,6 @@
 import { candidatesFromText, MAX_SCAN_CHARS } from '../secrets/candidates.js';
 import type { SecretIndex } from '../secrets/index.js';
+import { detectKeyedFields } from './keyed.js';
 import { detectPatterns } from './patterns.js';
 import { secretSpans } from './secret-spans.js';
 import { mergeSpans } from './substitute.js';
@@ -15,10 +16,15 @@ import type { CloakDetector, CloakSpan } from './types.js';
  * happens to resemble, which is the right way round: the index is a fact about this
  * machine, a pattern is a guess about a string.
  *
- * A later NER pass for names and addresses — the one thing AgentCloak does that this
- * does not — is a third `CloakDetector` merged in here. It is deliberately absent from
- * v1 because the credible offline option would add the project's first native runtime
- * dependency; `docs/CLOAK-COMPARISON.md` says so in the row where they are ahead.
+ * A third detector reads the KEY a leaf arrived under (`keyed.ts`), which is how
+ * names and street addresses are claimed. That is schema rather than a guess about
+ * characters, so it needs no model and no dependency, and it is laid down last so a
+ * known credential or a settled shape inside a labelled field still wins.
+ *
+ * A name in PROSE is still not detected. That is what an NER pass would be for, and
+ * it stays absent because the credible offline option would add the project's first
+ * native runtime dependency; `docs/CLOAK-COMPARISON.md` says so in the row where
+ * AgentCloak is ahead.
  */
 
 export interface CloakDetectorOptions {
@@ -38,12 +44,12 @@ export const MAX_CLOAK_CHARS = MAX_SCAN_CHARS;
 
 export function createCloakDetector(options: CloakDetectorOptions): CloakDetector {
   return {
-    async detect(text: string): Promise<readonly CloakSpan[]> {
+    async detect(text: string, keys?: ReadonlySet<string>): Promise<readonly CloakSpan[]> {
       if (text === '' || text.length > MAX_CLOAK_CHARS) return [];
-      const patterns = detectPatterns(text);
-      if (!options.secrets) return patterns;
+      const shapes = [...detectPatterns(text), ...detectKeyedFields(text, keys ?? new Set())];
+      if (!options.secrets) return mergeSpans(shapes);
       const matches = await options.secrets.lookup(candidatesFromText(text), options.cwd);
-      return mergeSpans([...secretSpans(text, matches), ...patterns]);
+      return mergeSpans([...secretSpans(text, matches), ...shapes]);
     },
   };
 }

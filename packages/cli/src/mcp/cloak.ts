@@ -1,7 +1,7 @@
 import {
   MAX_CLOAK_CHARS,
   applySpans,
-  collectStrings,
+  collectKeyedStrings,
   findPlaceholders,
   mapStrings,
   mergeSpans,
@@ -122,9 +122,15 @@ export class McpCloak {
       };
     // One detection per DISTINCT string, cached: a result that repeats the same cell
     // in a hundred rows costs one pass, and `mapStrings` below reads the same cache.
+    //
+    // Keyed by text and not by (text, key) on purpose. `collectKeyedStrings` hands
+    // over every key one value was seen under, so a name that arrives as
+    // `first_name` in one row and inside a `note` in another is detected once and
+    // replaced in BOTH — a value cloaked in one leaf and left in the next is a value
+    // the model still reads.
     const spansByText = new Map<string, readonly CloakSpan[]>();
-    for (const text of new Set(collectStrings(result))) {
-      const spans = mergeSpans(await this.opts.detector.detect(text));
+    for (const [text, keys] of collectKeyedStrings(result)) {
+      const spans = mergeSpans(await this.opts.detector.detect(text, keys));
       if (spans.length > 0) spansByText.set(text, spans);
     }
     if (spansByText.size === 0) return { kind: 'unchanged' };

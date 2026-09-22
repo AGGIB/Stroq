@@ -16,11 +16,13 @@
  * `SecretIndex` already knows, which is a stronger claim than any pattern can make;
  * the rest are structured shapes matched by regex against the original text.
  *
- * Names and street addresses are deliberately absent: they need NER, and the credible
- * offline option would add a native runtime dependency to a project that has none. The
- * `CloakDetector` seam below is where such a pass would be added later.
+ * `name` and `address` are claimed from the FIELD a value arrived in rather than from
+ * the characters in it — see `keyed.ts`. A key is schema, which is a stronger claim
+ * than a model reading the same string could make, and it costs no dependency. A name
+ * in prose still needs NER and is still absent; the `CloakDetector` seam below is
+ * where such a pass would be added.
  */
-export type CloakKind = 'secret' | 'email' | 'phone' | 'iban' | 'card' | 'ssn';
+export type CloakKind = 'secret' | 'email' | 'phone' | 'iban' | 'card' | 'ssn' | 'name' | 'address';
 
 export const CLOAK_KINDS: readonly CloakKind[] = [
   'secret',
@@ -29,6 +31,8 @@ export const CLOAK_KINDS: readonly CloakKind[] = [
   'iban',
   'card',
   'ssn',
+  'name',
+  'address',
 ];
 
 /** One value found at one place in one string. `value === text.slice(start, end)`. */
@@ -59,7 +63,16 @@ export interface CloakSpan {
  * asynchronous secret-index lookup both satisfy it, and so would an NER pass.
  */
 export interface CloakDetector {
-  detect(text: string): Promise<readonly CloakSpan[]> | readonly CloakSpan[];
+  /**
+   * `keys` is every JSON object key this exact string was seen under in the result.
+   * A set, not one key, because the same value can arrive in more than one field and
+   * the cloak rewrites by value: a name cloaked under `first_name` and left in place
+   * under `note` is a name the model still reads.
+   */
+  detect(
+    text: string,
+    keys?: ReadonlySet<string>,
+  ): Promise<readonly CloakSpan[]> | readonly CloakSpan[];
 }
 
 /** One remembered substitution. This is the only place Stroq stores a value it can restore. */

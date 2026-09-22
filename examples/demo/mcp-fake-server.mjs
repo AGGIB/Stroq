@@ -88,7 +88,18 @@ function handle(line) {
             text: 'Customer 8812: Peter Parker, peter.parker@dailybugle.example, +1 (415) 555-0132, card 4242 4242 4242 4242.',
           },
         ],
-        structuredContent: { email: 'peter.parker@dailybugle.example', ssn: '123-45-6789' },
+        // The same person twice, on purpose. In `structuredContent` the server has
+        // LABELLED the fields, so the cloak can claim the name and the street from
+        // the schema without guessing. In the prose line above nothing is labelled,
+        // and `Peter Parker` travels to the model untouched — that is the gap an NER
+        // pass would close, left visible rather than demonstrated away.
+        structuredContent: {
+          first_name: 'Peter',
+          last_name: 'Parker',
+          street_address: '20 Ingram Street, Forest Hills',
+          email: 'peter.parker@dailybugle.example',
+          ssn: '123-45-6789',
+        },
         isError: false,
       },
     });

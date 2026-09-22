@@ -18,7 +18,7 @@ If your problem is "I paste customer records into ChatGPT", AgentCloak is the an
 | **Channel** | Person ↔ ChatGPT Desktop, the whole conversation | Agent's MCP client ↔ one stdio MCP server |
 | **What it protects from** | The model provider seeing what you typed or what it echoes back | The model provider seeing what a third-party server returned, and — for credentials — the third-party server receiving what it should not |
 | **Who has to cooperate** | Nobody. It wraps the app you already use | The MCP client must launch stdio servers, which it already does |
-| **Names (`Peter Parker`)** | **Yes** | **No** — see "Where AgentCloak is ahead" |
+| **Names (`Peter Parker`)** | **Yes**, anywhere | **In a labelled field only** — `{"first_name":"Peter"}` yes, the same name in prose no. See "Where AgentCloak is ahead" |
 | **Street addresses** | **Yes** | **No** |
 | **Email** | Yes | Yes |
 | **Phone** | Yes | Yes, with an E.164 7–15 digit check; a bare unformatted digit run is deliberately not treated as a phone number |
@@ -40,7 +40,11 @@ If your problem is "I paste customer records into ChatGPT", AgentCloak is the an
 
 ## Where AgentCloak is ahead
 
-**Names and addresses.** This is the big one and it is not close. AgentCloak detects the two categories most people actually mean by "PII", and `stroq mcp --cloak` does not detect either. Run the MCP demo in this repository and you will watch `Peter Parker` travel to the model untouched while his email, phone, card and SSN are all replaced — we left that in the demo rather than picking a record without a name in it.
+**Names and addresses in prose.** AgentCloak detects the two categories most people actually mean by "PII" wherever they appear. Stroq detects them only where the server has **labelled** them: an MCP result is JSON, so `{"first_name":"Peter","street_address":"20 Ingram Street"}` is claimed from the key rather than guessed from the characters — schema is a stronger claim than a model reading the same string, it costs no dependency, and it holds for names an English-trained model has never seen.
+
+A name in a sentence is the part we do not have. Run the MCP demo in this repository and the customer record shows both halves at once: the labelled fields come back as `[STROQ_NAME_1]` and `[STROQ_ADDRESS_1]`, while `Peter Parker` in the prose line travels to the model untouched. We left that in the demo rather than picking a record without a name in it.
+
+There is a second, narrower gap in the same place. A `secret` is chased through every string leaf of the result, because a credential is a high-entropy exact value that cannot collide with ordinary text. A name is a word, so it is claimed only in the field that labelled it — propagating `Parker` into every leaf containing it would blank "mark" for a customer called Mark, which is the false positive the key-driven approach exists to avoid.
 
 Why: names and addresses need NER, and the credible offline option (GLiNER-PII through ONNX Runtime) would add this project's **first native runtime dependency**. That is the same call that made `stroq run --sandbox` shell out to `srt` rather than link it. The detector interface (`CloakDetector`) exists so a later NER pass slots in without touching anything else, but the dependency is not being added on spec.
 

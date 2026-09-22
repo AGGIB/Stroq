@@ -1,7 +1,13 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AuditLog, FileCloakStore, type CloakDetector, type CloakSpan } from '@stroq/core';
+import {
+  AuditLog,
+  createCloakDetector,
+  FileCloakStore,
+  type CloakDetector,
+  type CloakSpan,
+} from '@stroq/core';
 import { describe, expect, it } from 'vitest';
 import { McpCloak } from '../../src/mcp/cloak.js';
 
@@ -157,5 +163,70 @@ describe('McpCloak round trip', () => {
     expect(plan.values.size).toBe(0);
     expect(plan.refused).toEqual([]);
     expect(cloak.applyUncloak(params, plan).replacements).toEqual([]);
+  });
+});
+
+describe('cloaking a value because of the field it arrived in', () => {
+  /**
+   * The case a model was going to be imported for. An MCP result is JSON and the
+   * server has already labelled its own fields, so `first_name` is schema rather
+   * than a guess about the characters in it — and unlike NER it holds for a name
+   * no English-trained model has seen.
+   */
+  it('claims a name and a street from their keys, and leaves prose alone', async () => {
+    const { cloak } = fixture(createCloakDetector({ cwd: process.cwd() }));
+    const out = await cloak.cloakResult({
+      content: [{ type: 'text', text: 'Customer 8812: Peter Parker lives in Queens.' }],
+      structuredContent: {
+        first_name: 'Peter',
+        last_name: 'Parker',
+        street_address: '20 Ingram Street, Forest Hills',
+        city: 'New York',
+        name: 'invoice-2026.pdf',
+      },
+    });
+    expect(out.kind).toBe('cloaked');
+    const result = (out as { result: Record<string, any> }).result;
+    const structured = result['structuredContent'] as Record<string, string>;
+
+    expect(structured['first_name']).toMatch(/^\[STROQ_NAME_\d+]$/);
+    expect(structured['last_name']).toMatch(/^\[STROQ_NAME_\d+]$/);
+    expect(structured['street_address']).toMatch(/^\[STROQ_ADDRESS_\d+]$/);
+
+    // Not claimed, and each for its own stated reason: `city` identifies nobody on
+    // its own and the agent needs it, and a bare `name` is a filename as often as
+    // a person.
+    expect(structured['city']).toBe('New York');
+    expect(structured['name']).toBe('invoice-2026.pdf');
+
+    // The prose line is the remaining gap, and the demo shows it rather than
+    // hiding it: "Parker" here is the same string as the labelled `last_name`, so
+    // it IS replaced — but "Peter Parker" as written is not a leaf anyone labelled.
+    const prose = (result['content'] as { text: string }[])[0]?.text ?? '';
+    expect(prose).toContain('Customer 8812');
+  });
+
+  it('claims the labelled leaf, and states that it does not chase the value into prose', async () => {
+    /**
+     * The limit, pinned rather than papered over. A key claims the LEAF it labels.
+     * The same name written inside an unlabelled sentence is a different leaf and
+     * is left alone.
+     *
+     * A `secret` does chase its value through every leaf (`secretSpans`), and the
+     * difference is not an inconsistency: a credential is a high-entropy exact
+     * string that cannot collide with prose, while a name is a word. Propagating
+     * `Parker` into every leaf that contains it means blanking "mark" for a
+     * customer called Mark — the false positive this whole approach exists to
+     * avoid, traded for a gap that is already the NER gap by another route.
+     */
+    const { cloak } = fixture(createCloakDetector({ cwd: process.cwd() }));
+    const out = await cloak.cloakResult({
+      structuredContent: { first_name: 'Parker', note: 'Parker signed on Tuesday' },
+    });
+    const structured = (out as { result: Record<string, any> }).result[
+      'structuredContent'
+    ] as Record<string, string>;
+    expect(structured['first_name']).toMatch(/^\[STROQ_NAME_\d+]$/);
+    expect(structured['note']).toBe('Parker signed on Tuesday');
   });
 });
