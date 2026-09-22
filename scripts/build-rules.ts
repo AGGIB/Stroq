@@ -22,8 +22,9 @@ import {
   compileRules,
   loadRuleOverrides,
   DEFAULT_SLOW_MS,
+  DEFAULT_BLOBS,
+  PRODUCTION_CAP_MS,
   PRODUCTION_CHARS,
-  productionGate,
   SLOW_FACTOR,
   loadBenignFixtures,
   loadRuleSources,
@@ -95,12 +96,14 @@ function runDefault(): void {
   printSlowest(timing.measurements);
 
   const survivors = compiled.filter((r) => !timing.disabled.has(r.id));
-  /* The relative gate above measures up to 32,768 characters; `scanContent` is
-     handed up to 200,000. Backtracking is superlinear, so the two are different
-     questions and the second one is the one production asks. */
-  let slowAtSize;
+  /* The gate above escalates to 32,768 characters; `scanContent` is handed up to
+     200,000. Backtracking is superlinear, so those are different questions and the
+     second is the one production asks. Same machinery, same policy — warmed and
+     taken as a minimum, relative to this machine's own p95 so the verdict does not
+     depend on how fast the runner is — measured at the size that matters. */
+  let production;
   try {
-    slowAtSize = productionGate(survivors);
+    production = runTimingGate(survivors, PRODUCTION_CAP_MS, DEFAULT_BLOBS, [PRODUCTION_CHARS]);
   } catch (err) {
     if (err instanceof RulesBuildError) fail(`production-size gate failed: ${err.message}`);
     throw err;
@@ -116,7 +119,7 @@ function runDefault(): void {
 
   const disabled = new Map<string, string>([
     ...timing.disabled,
-    ...slowAtSize,
+    ...production.disabled,
     ...benignGate.disabled,
   ]);
   for (const e of errors) disabled.set(e.id, `uncompilable: ${e.error}`);
@@ -136,8 +139,8 @@ function runDefault(): void {
       `(> ${timing.thresholdMs.toFixed(2)} ms — this machine's p95 x ${SLOW_FACTOR}, capped at ${DEFAULT_SLOW_MS} ms)`,
   );
   console.log(
-    `production-size gate: ${slowAtSize.size} rule(s) disabled ` +
-      `(> ${DEFAULT_SLOW_MS} ms on ${PRODUCTION_CHARS} chars, the scanner's own cap)`,
+    `production-size gate: ${production.disabled.size} rule(s) disabled ` +
+      `(> ${production.thresholdMs.toFixed(2)} ms on ${PRODUCTION_CHARS} chars, the scanner's own cap)`,
   );
   console.log(`bundle: ${bundle.rules.length} rules, ${disabled.size} disabled → ${outFile}`);
 }

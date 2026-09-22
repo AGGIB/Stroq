@@ -264,17 +264,24 @@ export const TIMING_PASSES = 3;
 /**
  * Derives this machine's disable threshold from its own measurements.
  *
- * Capped by `DEFAULT_SLOW_MS` so a slow machine can only ever be *stricter*
- * than the historical absolute gate, never more permissive: the scan budget a
- * rule eventually competes with (`DEFAULT_BUDGET_MS`) is wall-clock on the
- * *user's* machine, so a fast builder must not be able to bless a rule that is
+ * Capped by `capMs` so a slow machine can only ever be *stricter* than the
+ * historical absolute gate, never more permissive: the scan budget a rule
+ * eventually competes with (`DEFAULT_BUDGET_MS`) is wall-clock on the *user's*
+ * machine, so a fast builder must not be able to bless a rule that is
  * catastrophic for everyone else.
+ *
+ * The cap is a parameter because it is a budget for one input size. Reused
+ * unchanged at a larger size it stops being a floor on strictness and becomes the
+ * binding term — see `PRODUCTION_CAP_MS`, which scales it.
  */
-export function deriveThresholdMs(measurements: readonly RuleTiming[]): number {
-  if (measurements.length === 0) return DEFAULT_SLOW_MS;
+export function deriveThresholdMs(
+  measurements: readonly RuleTiming[],
+  capMs: number = DEFAULT_SLOW_MS,
+): number {
+  if (measurements.length === 0) return capMs;
   const sorted = [...measurements].map((m) => m.ms).sort((a, b) => a - b);
   const anchor = sorted[Math.floor(sorted.length * ANCHOR_PERCENTILE)] ?? 0;
-  return Math.min(DEFAULT_SLOW_MS, SLOW_FACTOR * anchor);
+  return Math.min(capMs, SLOW_FACTOR * anchor);
 }
 
 export interface RuleTiming {
@@ -346,73 +353,34 @@ export function measureRuleTimingsStable(
 }
 
 /**
- * The largest input `scanContent` will ever hand a rule.
+ * The size the second gate measures at: the largest input `scanContent` will ever
+ * hand a rule.
  *
- * Kept equal to the engine's own `DEFAULT_MAX_CHARS` rather than imported, so
- * that the number the gate tests at is visible in the gate — and so the two can
- * only diverge through an edit that reads this sentence. `productionGate`'s
- * shipped-set assertion in the test suite fails if they do.
+ * Kept equal to the engine's own `DEFAULT_MAX_CHARS` rather than imported, so that
+ * the number the gate tests at is visible in the gate — and so the two can only
+ * diverge through an edit that reads this sentence. The shipped-bundle assertion in
+ * the test suite fails if they do.
  */
 export const PRODUCTION_CHARS = 200_000;
 
-/** Times every rule against every blob at one fixed size, worst blob wins. */
-export function measureAtSize(
-  rules: readonly CompiledRule[],
-  size: number,
-  blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
-): readonly RuleTiming[] {
-  return rules.map((rule) => {
-    let worst: RuleTiming = { ruleId: rule.id, ms: -1, blob: '', size };
-    for (const blob of blobs) {
-      const text = blob.build(size);
-      const started = performance.now();
-      matchRules([rule], text);
-      const ms = performance.now() - started;
-      if (ms > worst.ms) worst = { ruleId: rule.id, ms, blob: blob.name, size };
-    }
-    return worst;
-  });
-}
-
 /**
- * The second gate: no rule may be slow at the size production actually allows.
+ * The ceiling for the production-size gate, and why it is not `DEFAULT_SLOW_MS`.
  *
- * The escalation gate above measures up to 32,768 characters and decides
- * RELATIVELY, against this machine's own p95. Both choices are right for what it
- * does — it has to terminate on a catastrophic rule, and it has to give the same
- * verdict on a fast laptop and a slow runner. Neither answers this question:
- * backtracking is superlinear, so being comfortable on the gate's largest blob
- * is not the same as being comfortable on 200,000 characters, which is 6.1x more
- * and is what `scanContent` will hand it.
+ * `DEFAULT_SLOW_MS` is a wall-clock number calibrated against `BLOB_CHARS`. Reused
+ * unchanged at 6.1x the input it stops being a floor on strictness and becomes the
+ * binding term: `deriveThresholdMs` takes the MINIMUM of the cap and p95 x 30, and
+ * at this size p95 x 30 is about 42 ms here, so the 25 ms cap would always win —
+ * turning a deliberately relative gate into an absolute one. That was not a theory:
+ * it passed on this machine and convicted a rule on a slower CI runner, which is
+ * precisely what `SLOW_FACTOR`'s comment above says relative anchoring exists to
+ * prevent.
  *
- * Measured on the shipped set at that size: every rule is linear (the ratio from
- * 32 KB to 200 KB tracks the size ratio), the slowest single rule is 3.4 ms, and
- * the whole set with every variant costs 117 ms against a 500 ms scan budget. So
- * this gate convicts nothing today. It is here because the scanner checks its
- * budget BETWEEN rules and cannot interrupt one that has already entered V8:
- * the only place a pathological regex can be stopped is before it ships, and
- * until now the place it shipped through did not test it at full size.
- *
- * Absolute, not relative: this is a question about a fixed budget, so a faster
- * machine must not be allowed to admit a slower rule. Returns the rules over
- * `ceilingMs`, with the same value-free reason the escalation gate uses, because
- * it is committed to `rules/atr-disabled.json`.
+ * A cap is a budget for an input size, so it scales with the input size. At 152 ms
+ * the relative term binds on ordinary hardware and the cap binds only on a machine
+ * slow enough that it should be stricter — which is the role the cap was written
+ * for.
  */
-export function productionGate(
-  rules: readonly CompiledRule[],
-  ceilingMs: number = DEFAULT_SLOW_MS,
-  blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
-): ReadonlyMap<string, string> {
-  const over = new Map<string, string>();
-  for (const timing of measureAtSize(rules, PRODUCTION_CHARS, blobs)) {
-    if (timing.ms <= ceilingMs) continue;
-    const reason = `slow on ${timing.blob}@${PRODUCTION_CHARS} (production-size perf gate)`;
-    if (timing.ruleId.startsWith(STROQ_PREFIX))
-      throw new RulesBuildError(`${timing.ruleId} — ${reason}`);
-    over.set(timing.ruleId, reason);
-  }
-  return over;
-}
+export const PRODUCTION_CAP_MS = (DEFAULT_SLOW_MS * PRODUCTION_CHARS) / BLOB_CHARS;
 
 export interface TimingGateResult {
   readonly disabled: ReadonlyMap<string, string>;
@@ -435,7 +403,7 @@ export function runTimingGate(
   stages: readonly number[] = DEFAULT_STAGES,
 ): TimingGateResult {
   const measurements = measureRuleTimingsStable(rules, capMs, blobs, stages);
-  const thresholdMs = deriveThresholdMs(measurements);
+  const thresholdMs = deriveThresholdMs(measurements, capMs);
   const disabled = new Map<string, string>();
   for (const m of measurements) {
     if (m.ms <= thresholdMs) continue;

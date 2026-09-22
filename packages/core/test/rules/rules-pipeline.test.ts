@@ -12,9 +12,11 @@ import {
   loadRuleOverrides,
   loadRuleSources,
   RulesBuildError,
-  measureAtSize,
+  BLOB_CHARS,
+  DEFAULT_BLOBS,
+  PRODUCTION_CAP_MS,
   PRODUCTION_CHARS,
-  productionGate,
+  runTimingGate,
   runBenignGate,
   SLOW_FACTOR,
   type AtrRule,
@@ -22,6 +24,7 @@ import {
   type RuleTiming,
 } from '../../../../scripts/lib/rules-pipeline.js';
 import { loadBundledRules } from '../../src/rules/bundle.js';
+import { DEFAULT_MAX_CHARS } from '../../src/scan/scanner.js';
 
 // Minimal ATR-format rule bodies. `id` must match /^[A-Z]+-\d{4}-\d{5}$/
 // (see atr-types.ts) — these ids are made up and don't collide with any
@@ -399,63 +402,72 @@ detection:
 describe('the production-size gate', () => {
   /**
    * The gap this closes, measured on the shipped set: the escalation gate times
-   * every rule on blobs up to 32,768 characters, and `scanContent` runs in
-   * production against up to 200,000 — 6.1x more. Backtracking is superlinear,
-   * so a rule that is comfortable at the gate's largest blob is not thereby
-   * comfortable at the size it will actually be handed.
+   * every rule on blobs up to 32,768 characters, while `scanContent` runs in
+   * production against up to 200,000 — 6.1x more. Backtracking is superlinear, so
+   * comfortable at the gate's largest blob is not comfortable at the size a rule
+   * will actually be handed.
    *
-   * Nothing shipped today crosses it (the whole set at the production cap is
-   * 79 ms single-pass, the slowest single rule 3.4 ms, against a 500 ms scan
-   * budget). The gate exists so the next vendored rule drop cannot.
+   * It is the SAME gate at a different size, deliberately: warmed, taken as a
+   * minimum, and decided relative to the population's own p95. An absolute
+   * ceiling was tried first and was wrong — it passed here and convicted a rule
+   * on a slower CI runner, which is the exact failure `measureRuleTimingsStable`
+   * and `SLOW_FACTOR` are documented against a few hundred lines above.
+   *
+   * What is NOT asserted here is that a superlinear rule clears the small blob
+   * and fails the large one. Proving that needs a fixture whose cost is a
+   * specific multiple on unknown hardware, which is the flakiness this file
+   * exists to avoid — and a catastrophic fixture at 200,000 characters does not
+   * terminate at all. The disable-and-throw policy is covered by the escalation
+   * gate's own tests; what is new here is only the size, so the size is what is
+   * pinned.
    */
-  const quadratic = (id: string): AtrRule => ({
-    id,
-    title: 'catastrophic on a long run of a',
-    severity: 'high',
-    status: 'experimental',
-    tags: { category: 'test' },
-    // Classic nested quantifier: linear-ish on a short blob, quadratic on a long one.
-    detection: {
-      condition: 'any',
-      conditions: [{ field: 'content', operator: 'regex', value: '(a+)+$' }],
-    },
-    test_cases: { true_positives: [], true_negatives: [] },
-    author: 'test',
-    date: '2026/09/22',
-    schema_version: '1.0',
+  it('measures at the size production actually allows, not the gate\u2019s largest blob', () => {
+    const result = runTimingGate(loadBundledRules().slice(0, 1), DEFAULT_SLOW_MS, DEFAULT_BLOBS, [
+      PRODUCTION_CHARS,
+    ]);
+    expect(result.measurements.map((m) => m.size)).toEqual([PRODUCTION_CHARS]);
+    expect(PRODUCTION_CHARS).toBeGreaterThan(BLOB_CHARS);
   });
 
-  it('times rules at the size production actually allows', () => {
-    const { compiled } = compileRules([quadratic('ATR-2026-99001')]);
-    const short = measureAtSize(compiled, 8_192);
-    const full = measureAtSize(compiled, PRODUCTION_CHARS);
-    expect(full[0]?.size).toBe(PRODUCTION_CHARS);
-    // The point of the gate: the cost is not the same number at both sizes.
-    expect(full[0]?.ms).toBeGreaterThan(short[0]?.ms ?? 0);
-  });
-
-  it('convicts a rule that only misbehaves at production size', () => {
-    const { compiled } = compileRules([quadratic('ATR-2026-99002')]);
-    const over = productionGate(compiled, 0.000_1);
-    expect(over.has('ATR-2026-99002')).toBe(true);
-    expect(over.get('ATR-2026-99002')).toMatch(/production/i);
-  });
-
-  it('leaves a linear rule alone', () => {
-    const linear: AtrRule = {
-      ...quadratic('ATR-2026-99003'),
-      detection: {
-        condition: 'any',
-        conditions: [{ field: 'content', operator: 'regex', value: 'zzz-not-present' }],
-      },
-    };
-    const { compiled } = compileRules([linear]);
-    expect(productionGate(compiled, DEFAULT_SLOW_MS).size).toBe(0);
+  it('measures the number the engine will actually hand it', () => {
+    // The drift guard. If these separate, the gate is testing a size production
+    // never uses and every comment about it is false.
+    expect(PRODUCTION_CHARS).toBe(DEFAULT_MAX_CHARS);
   });
 
   it('holds for every rule that ships', () => {
-    // The assertion a slow rule would have to answer before it could land, run
-    // against the bundle the package actually ships rather than the sources.
-    expect(productionGate(loadBundledRules(), DEFAULT_SLOW_MS).size).toBe(0);
+    const result = runTimingGate(loadBundledRules(), DEFAULT_SLOW_MS, DEFAULT_BLOBS, [
+      PRODUCTION_CHARS,
+    ]);
+    expect([...result.disabled.keys()]).toEqual([]);
+  });
+});
+
+describe('the cap scales with the input size', () => {
+  /**
+   * The bug this pins, found by CI rather than by reading: `deriveThresholdMs`
+   * takes the MINIMUM of the cap and p95 x SLOW_FACTOR. At 32,768 characters
+   * p95 x 30 is about 7 ms, so the relative term binds and the 25 ms cap is a
+   * floor on strictness. At 200,000 it is about 42 ms, so an unchanged cap
+   * becomes the binding term and the gate turns absolute — it passed here and
+   * convicted a rule on a slower runner.
+   */
+  const measurements = (ms: number): RuleTiming[] =>
+    Array.from({ length: 100 }, (_, n) => ({ ruleId: `R-${n}`, ms, blob: 'b', size: 0 }));
+
+  it('lets the relative term bind at production size', () => {
+    // p95 x 30 = 42 ms here, under the scaled cap and over the unscaled one.
+    const at = measurements(1.4);
+    expect(deriveThresholdMs(at, DEFAULT_SLOW_MS)).toBe(DEFAULT_SLOW_MS);
+    expect(deriveThresholdMs(at, PRODUCTION_CAP_MS)).toBeCloseTo(1.4 * SLOW_FACTOR, 5);
+  });
+
+  it('still lets the cap bind on a machine slow enough to deserve it', () => {
+    expect(deriveThresholdMs(measurements(200), PRODUCTION_CAP_MS)).toBe(PRODUCTION_CAP_MS);
+  });
+
+  it('scales the cap by exactly the size ratio it is used at', () => {
+    expect(PRODUCTION_CAP_MS).toBeCloseTo((DEFAULT_SLOW_MS * PRODUCTION_CHARS) / BLOB_CHARS, 5);
+    expect(PRODUCTION_CAP_MS).toBeGreaterThan(DEFAULT_SLOW_MS);
   });
 });
