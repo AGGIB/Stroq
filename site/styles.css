@@ -156,7 +156,7 @@ button { font: inherit; color: inherit; }
 .cta-pair-end { justify-content: flex-start; }
 
 /* 5. Hero -------------------------------------------------------------- */
-.hero { position: relative; padding: clamp(2.25rem, 1.5rem + 2vw, 2.9rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
+.hero { position: relative; padding: clamp(1.75rem, 1.2rem + 1.6vw, 2.25rem) 0 clamp(2.5rem, 2rem + 2vw, 4rem); border-bottom: 1px solid var(--line); }
 .hero::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: linear-gradient(to right, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--line) 1px, transparent 1px);
@@ -166,11 +166,17 @@ button { font: inherit; color: inherit; }
 }
 .hero-top { position: relative; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: clamp(2rem, 1.25rem + 3vw, 4rem); align-items: center; }
 .hero-head { min-width: 0; }
-.hero-logo { display: block; width: clamp(150px, 17vw, 230px); height: auto; margin-bottom: clamp(1rem, .75rem + 1vw, 1.5rem); color: var(--ink); }
-.hero h1 { max-width: 14ch; }
-/* The lead sits under a display line with a .98 line-height, so its own top
-   margin is the only thing keeping it off the descenders above it. */
-.hero .lead { margin-top: clamp(1.1rem, .8rem + 1vw, 1.75rem); margin-bottom: 0; max-width: 46ch; }
+.hero-logo { display: block; width: clamp(120px, 11vw, 168px); height: auto; margin-bottom: clamp(.7rem, .5rem + .8vw, 1.1rem); color: var(--ink); }
+.hero h1 { max-width: 21ch; }
+/* The lead sits under a display line with a .98 line-height, so the row's own
+   top margin is the only thing keeping it off the descenders above it. */
+.hero-row {
+  display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 1rem + 2vw, 3.5rem); align-items: start;
+  margin-top: clamp(.9rem, .7rem + .7vw, 1.3rem);
+}
+.hero-cta { display: flex; flex-direction: column; }
+.hero .lead { margin-top: 0; margin-bottom: 0; max-width: 58ch; }
 .hero .lead em { font-style: normal; color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .lead { max-width: 40ch; margin-bottom: 2.25rem; color: var(--ink-2); font-size: var(--text-lead); line-height: 1.5; }
 .install-pill { display: inline-flex; align-items: center; gap: .75rem; max-width: 100%; padding: .25rem .25rem .25rem 1.1rem; border: 1px solid var(--line-2); border-radius: 999px; background: var(--paper-2); }
@@ -192,7 +198,7 @@ button { font: inherit; color: inherit; }
 .copy-btn-dark.is-copied { background: transparent; border-color: var(--t-allow); color: var(--t-allow); }
 .copy-btn-dark.is-failed { background: transparent; border-color: var(--t-deny); color: var(--t-deny); }
 html:not(.js) .copy-btn { display: none; }
-.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.5rem; }
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 0; }
 .btn-gh { min-height: 46px; padding: 0 1.25rem; gap: .6rem; }
 /* The hero command is `sent --last`, seven characters longer than the `init` this
    row was sized for, and the column is 572px: the pill and the button missed
@@ -206,16 +212,35 @@ html:not(.js) .copy-btn { display: none; }
    for both until about 1250px. In the band between, the row has to wrap — so both
    go full width, because a stacked pair reads as deliberate where a 174px button
    orphaned under a 375px pill reads as a mistake. */
-@media (min-width: 981px) and (max-width: 1250px) {
+@media (max-width: 1000px) {
+  .hero-row { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+  .hero .lead { max-width: 52ch; }
+}
+/* The count arrives from /api/stats a beat after paint. Above this width the
+   line holds it and the licence together and nothing moves; below it the line
+   wraps and the whole scene used to step down 22px. The second line is
+   reserved from first paint instead — and only when a script is running to
+   fill it, so a visitor without JS pays nothing for a number they will never
+   be shown. A browser without `lh` simply gets the old behaviour. */
+@media (max-width: 1100px) { .js .hero-meta { min-height: 2lh; } }
+/* Side by side the command and the button need 579px, and the row's right-hand
+   column is never that wide — they wrapped, leaving a 174px button orphaned
+   under a 375px pill. Stacked and full width they read as one call to action,
+   and the row comes out shorter than the wrap did, which is the point. The
+   copy button goes to the far edge so the pill reads as a field with an action
+   rather than as a short pill in a long box. */
+@media (min-width: 1001px) {
+  .hero-actions { flex-direction: column; align-items: stretch; gap: .7rem; }
   .hero .install-pill { width: 100%; }
-  .hero-actions .btn-gh { width: 100%; justify-content: center; }
+  .hero .install-pill .copy-btn { margin-left: auto; }
+  .hero-actions .btn-gh { justify-content: center; }
 }
 
 /* The install count sits in the same quiet line as the licence, so the number
    reads as one more fact about the tool rather than a badge asking to be
    believed. It is hidden until /api/stats answers; the line keeps its height
    either way, so nothing below it moves. */
-.hero-meta { margin-top: 1.1rem; font-size: .9rem; color: var(--ink-2); letter-spacing: .01em; }
+.hero-meta { margin-top: .95rem; font-size: .9rem; color: var(--ink-2); letter-spacing: .01em; }
 .hero-installs { display: inline; }
 .hero-installs[hidden] { display: none; }
 .hero-installs::after { content: " · "; }
@@ -235,12 +260,15 @@ html:not(.js) .copy-btn { display: none; }
    provenance and the exact crop. A painting rather than a gradient because a
    gradient has no texture to find on a second look. */
 .hero-top { display: block; }
-.hero-head { min-width: 0; max-width: 40rem; }
+/* The head used to be capped at 40rem because it shared the row with a second
+   column. It owns the full container now, and the cap was what left half the
+   fold empty and pushed the scene off it. */
+.hero-head { min-width: 0; }
 
-.scene { margin: clamp(2rem, 1.2rem + 2.5vw, 3.5rem) 0 0; min-width: 0; }
+.scene { margin: clamp(1.5rem, 1rem + 1.6vw, 2.25rem) 0 0; min-width: 0; }
 .stage {
   position: relative; isolation: isolate;
-  padding: clamp(1.1rem, .5rem + 2.2vw, 2.75rem) clamp(1rem, .5rem + 1.4vw, 1.9rem);
+  padding: clamp(.9rem, .5rem + 1.5vw, 2rem) clamp(1rem, .5rem + 1.4vw, 1.9rem);
   border: 1px solid var(--term-line);
   border-radius: calc(var(--radius-lg) + 8px);
   overflow: hidden;
@@ -458,6 +486,137 @@ html:not(.js) .copy-btn { display: none; }
 .section-lead { max-width: 46ch; color: var(--ink-2); font-size: 1.1rem; line-height: 1.55; }
 .section-head-stack { grid-template-columns: 1fr; gap: 1.25rem; align-content: start; margin-bottom: 0; }
 
+/* 6b. The desk band: lower sections that stand on the same desktop ------
+   The hero puts a project on a machine. Two sections below make the same
+   claim and nothing else does: the comparison is one moment seen twice on one
+   machine, and the install command is something you type on your own desktop.
+   Both stand on the hero's wallpaper; everything between them stays on paper,
+   so the desk keeps meaning something.
+
+   Everything inside a band switches palette by redefining the page's own
+   tokens rather than by restyling components, so no card, code figure or
+   button below needs a band-specific rule — and neither will the next one. */
+.band {
+  --paper: #171a22;
+  --paper-2: #10131a;
+  --ink: var(--term-fg);
+  --ink-2: #bcc4d4;
+  --line: var(--term-line);
+  --line-2: rgba(230, 232, 239, .26);
+  --code-bg: rgba(230, 232, 239, .1);
+  --info: var(--t-info);
+  --deny-text: var(--t-deny);
+  --ask-text: var(--t-ask);
+  --allow-text: var(--t-allow);
+  --info-text: var(--t-info);
+  --deny-tint: rgba(255, 107, 122, .16);
+  --ask-tint: rgba(255, 201, 77, .16);
+  --allow-tint: rgba(92, 214, 138, .16);
+  --term: #0b0e14;
+  --term-2: #141822;
+  --shadow-card: 0 2px 6px rgba(0, 0, 0, .4), 0 30px 60px -24px rgba(0, 0, 0, .8);
+
+  position: relative; isolation: isolate; overflow: hidden;
+  padding-block: clamp(3.75rem, 2.75rem + 4vw, 6.5rem);
+  border-top: 0;
+  background: var(--wall);
+  color: var(--ink);
+}
+.band > .container { position: relative; z-index: 1; }
+.band-wall { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: var(--wall); }
+.band-wall img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* A band is far wider and shallower than the hero stage, so it crops into the
+   brightest part of the wallpaper. Without the scrim the section lead sits
+   directly on a light ribbon. */
+.band-wall::before {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg, rgba(8, 9, 18, .5), rgba(8, 9, 18, .68));
+}
+.band-wall::after {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  opacity: .16; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Two crops of one wallpaper, not one picture used twice. */
+.diff .band-wall img { object-position: 24% 30%; scale: 1.14; }
+.install .band-wall img { object-position: 76% 76%; scale: 1.22; }
+
+/* 6c. Window chrome ----------------------------------------------------
+   The same bar the hero editor wears, so a screen on the desk reads as a
+   window rather than as a dark card that happens to hold code. */
+.win {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: 10px;
+  background: var(--term);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45), 0 34px 68px -26px rgba(0, 0, 0, .9);
+}
+.win-bar {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  min-height: 30px; padding: 0 .7rem;
+  border-bottom: 1px solid var(--term-line); background: var(--ed-chrome);
+  color: var(--term-dim); font: 500 .74rem/1 var(--font-mono);
+}
+.win-bar .tt-dots span { width: 9px; height: 9px; }
+.win-title { max-width: calc(100% - 5.5rem); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.win .vs-screen { border-radius: 0; }
+/* The answer sits forward of the question. Depth only: the pane's own border
+   already carries the allow colour, and saying it twice made a halo. */
+.win-on { box-shadow: 0 2px 6px rgba(0, 0, 0, .45), 0 42px 84px -26px rgba(0, 0, 0, .95); }
+
+/* Cards on a desk are glass, so the wallpaper stays legible through them and
+   the section reads as depth rather than as a black rectangle. */
+.band .vs, .band .install-note { background-color: rgba(14, 17, 24, .72); }
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .band .vs, .band .install-note { -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .band .vs, .band .install-note { background-color: #12151d; }
+}
+.band .install-note { border-color: color-mix(in oklab, var(--deny) 72%, transparent); }
+/* Full strength, this border rang like an alert on the dark band. */
+.band .vs-on { border-color: color-mix(in oklab, var(--allow) 62%, transparent); }
+.band .install-note strong { color: var(--t-deny); }
+
+/* The install figures get the traffic lights too. Three radial gradients
+   because one pseudo-element has to draw all three and the markup has no
+   element to spare. */
+.band .code-fig { border-color: rgba(255, 255, 255, .1); box-shadow: 0 2px 6px rgba(0, 0, 0, .45), 0 34px 68px -26px rgba(0, 0, 0, .9); }
+.band .code-head { justify-content: flex-start; gap: .85rem; padding-left: .8rem; background: var(--ed-chrome); }
+.band .code-head::before {
+  content: ""; flex: none; width: 38px; height: 10px;
+  background:
+    radial-gradient(circle 4.5px at 5px 5px, #ff5f57 98%, transparent) 0 0 / 14px 10px no-repeat,
+    radial-gradient(circle 4.5px at 5px 5px, #febc2e 98%, transparent) 14px 0 / 14px 10px no-repeat,
+    radial-gradient(circle 4.5px at 5px 5px, #28c840 98%, transparent) 28px 0 / 14px 10px no-repeat;
+}
+.band .code-head .copy-btn { margin-left: auto; }
+
+/* 6d. The ornament -----------------------------------------------------
+   Ambient, never informative. The six curves are the ones the hero wallpaper
+   is built from (site/img/README.md), drawn in ink instead of light, so the
+   paper sections and the desk sections are the same drawing twice. They bleed
+   out of three sections that are otherwise a wall of text. */
+.why, .open, .colophon { position: relative; overflow: hidden; }
+.why > .container, .open > .container, .colophon > .container { position: relative; z-index: 1; }
+.orn { position: absolute; z-index: 0; pointer-events: none; color: var(--ink); opacity: .15; }
+/* An ornament may pass behind a card, never behind prose: an unmasked curve
+   crossing a line of body text reads as an underline someone forgot to remove.
+   The mask holds each drawing to the bleed edge it comes in from and takes it
+   to nothing before it reaches the column the text is set in, which is also
+   what makes it look like it is coming from somewhere. */
+.orn-why, .orn-open { -webkit-mask-image: linear-gradient(to left, #000 30%, transparent 78%); mask-image: linear-gradient(to left, #000 30%, transparent 78%); }
+.orn-colophon { -webkit-mask-image: linear-gradient(to right, #000 34%, transparent 82%); mask-image: linear-gradient(to right, #000 34%, transparent 82%); }
+/* Each offset is set so the mask's opaque end lands in the section's own bleed
+   and its transparent end lands before that section's text column starts —
+   .why-close on the left, the plans lead above the cards, the colophon prose
+   on the right. */
+.orn-why { top: -24%; right: -4%; width: min(70rem, 92%); height: 152%; }
+.orn-open { top: -18%; right: -6%; width: min(76rem, 100%); height: 176%; }
+.orn-colophon { bottom: -44%; left: -8%; width: min(60rem, 76%); height: 186%; }
+/* Below this the container fills the viewport: there is no bleed left for an
+   ornament to come in from, only text for it to sit on. */
+@media (max-width: 1200px) { .orn { display: none; } }
+
 /* 7. Why now ----------------------------------------------------------- */
 .why-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border-block: 1px solid var(--line); background: var(--line); }
 .why-card { display: flex; flex-direction: column; gap: .9rem; padding: 2.25rem 2rem 2.25rem 0; background: var(--paper); }
@@ -506,6 +665,8 @@ html:not(.js) .copy-btn { display: none; }
 /* 9. What you get (bento) ---------------------------------------------- */
 .bento { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
 .tile { display: flex; flex-direction: column; justify-content: flex-start; gap: .8rem; min-height: 200px; padding: 1.4rem 1.4rem 1.3rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); }
+.tile, .plan { transition: translate var(--dur) var(--ease-out), border-color var(--dur), box-shadow var(--dur) var(--ease-out); }
+.tile:hover, .plan:hover { translate: 0 -2px; border-color: var(--line-2); box-shadow: var(--shadow-card); }
 .tile-wide { grid-column: span 2; }
 .tile-prov { border-color: var(--line-2); }
 .tile h3 { font-size: 1.22rem; }
@@ -677,9 +838,15 @@ html:not(.js) .copy-btn { display: none; }
 }
 @media (max-width: 960px) {
   .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .versus { grid-template-columns: 1fr; }
   .tile:last-child { grid-column: span 2; }
 }
+/* The right-hand screen prints 62 columns, and side by side there is not room
+   for them until about 1100px: below that the two panes stack and each one gets
+   the full container, which is wider than the output needs. Above it, the type
+   is sized off the viewport so the longest line lands inside the window at every
+   width rather than only at the one this was designed on. */
+@media (max-width: 1100px) { .versus { grid-template-columns: 1fr; } }
+@media (min-width: 1101px) { .band .vs-screen { font-size: clamp(.68rem, .3rem + .55vw, .8rem); } }
 @media (max-width: 900px) {
   .sc-row { grid-template-columns: 2rem minmax(0, 1fr) 7rem 5.25rem; }
   .sc-src { display: none; }
@@ -714,6 +881,11 @@ html:not(.js) .copy-btn { display: none; }
 @media (max-width: 700px) {
   .plans, .foot-grid { grid-template-columns: 1fr; }
 }
+/* Two lines inside a 999px pill read as a squashed capsule, so at the width
+   where the command actually wraps the pill becomes the rounded box it is. */
+@media (max-width: 340px) {
+  .hero .install-pill { border-radius: var(--radius-lg); }
+}
 @media (max-width: 600px) {
   .bento { grid-template-columns: 1fr; }
   /* Wrapping breaks the tree: a wrapped `└─►` line loses the indent that says
@@ -735,6 +907,12 @@ html:not(.js) .copy-btn { display: none; }
   .tile-wide, .tile:last-child { grid-column: auto; }
   .tile { min-height: 0; }
   .install-pill { width: 100%; }
+  /* At .95rem the command needed 31px more than a 375px phone has, so the one
+     thing the hero asks you to run was printed with its tail ellipsised. Smaller
+     fixes it from 375 up; at 320 nothing small enough is still readable, so it
+     wraps instead. A command with a line break in it is still a command you can
+     read; one ending in an ellipsis is not. */
+  .hero .install-cmd { font-size: .8rem; white-space: normal; overflow-wrap: anywhere; }
   .hero-actions .btn { flex: 1 1 auto; justify-content: center; }
 }
 
@@ -754,6 +932,18 @@ html:not(.js) .copy-btn { display: none; }
   from { transform: scale(1.06) translate3d(-.8%, -.5%, 0); }
   to { transform: scale(1.1) translate3d(.8%, .6%, 0); }
 }
+/* The ornament moves the way the light on the desktop does, at a third of the
+   speed: a transform on line art, so nothing repaints. */
+@keyframes orn-drift {
+  from { transform: translate3d(-1.6%, 1%, 0) scale(1.02); }
+  to { transform: translate3d(1.6%, -1%, 0) scale(1.07); }
+}
+/* The tally counts itself out rather than appearing finished. clip-path, so the
+   numbers inside never scale or reflow. */
+@keyframes sc-fill {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
 @media (prefers-reduced-motion: no-preference) {
   /* `is-scripted` is set by main.js, so these rules only ever hide a line when
      something is actually there to bring it back. */
@@ -765,8 +955,15 @@ html:not(.js) .copy-btn { display: none; }
   .ed-term.is-scripted .tt-cur-end { opacity: 0; }
   .ed-term.is-scripted .tt-l.is-on .tt-cur-end { animation: caret 1.1s steps(1) infinite; opacity: 1; }
   .stage-wall { animation: desk-drift 54s ease-in-out infinite alternate; }
+  .orn { animation: orn-drift 48s ease-in-out infinite alternate; }
   .js .reveal { opacity: 0; transform: translateY(14px); transition: opacity .7s var(--ease-out), transform .8s var(--ease-out); }
   .js .reveal.is-visible { opacity: 1; transform: none; }
+  /* The scoreboard only fills once it is looked at; `.sc-board` already carries
+     the reveal observer, so no second observer is needed. */
+  .js .sc-board .sc-bar { clip-path: inset(0 100% 0 0); }
+  .js .sc-board.is-visible .sc-bar { animation: sc-fill 1.15s var(--ease-out) .1s forwards; }
+  /* The question, then the answer. */
+  .versus .vs:nth-child(2) { transition-delay: 140ms; }
   .why-card:nth-child(2), .tile:nth-child(2), .step:nth-child(2) { transition-delay: 80ms; }
   .why-card:nth-child(3), .tile:nth-child(3), .step:nth-child(3) { transition-delay: 160ms; }
   .tile:nth-child(n+4) { transition-delay: 220ms; }
@@ -779,6 +976,7 @@ html:not(.js) .copy-btn { display: none; }
   .tt-cur { opacity: 0; }
   .tl.is-typing::after { animation: none; }
   .btn:hover, .copy-btn:hover { transform: none; }
+  .tile:hover, .plan:hover { translate: none; }
 }
 
 /* 18. Dark theme ------------------------------------------------------- */

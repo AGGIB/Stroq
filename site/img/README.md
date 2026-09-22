@@ -58,3 +58,12 @@ against the 39 KB the previous painted wallpaper cost.
 
 The stage adds a grain overlay in CSS, which also keeps a smooth gradient of
 this size from banding in 8-bit.
+
+## The ornament uses this same geometry
+
+The six curves behind the `why`, `open` and colophon sections
+(`#orn-ribbons` in the sprite, `.orn` in the stylesheet) are the four paths
+above plus two interpolated between them, drawn as strokes in ink instead of
+light. It is the desktop and the paper sections sharing one drawing, which is
+why the wallpaper's `d` attributes should not be edited without editing the
+sprite too.
