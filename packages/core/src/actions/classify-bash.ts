@@ -1,7 +1,13 @@
 import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
-import { commandWord, firstArgAfter, splitSegments, tokenize } from './shell-segments.js';
+import {
+  commandWord,
+  firstArgAfter,
+  splitPipelines,
+  splitSegments,
+  tokenize,
+} from './shell-segments.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
@@ -273,19 +279,57 @@ function isNetwork(seg: string): boolean {
   return isUnknownWrapperNetworkCall(seg, word);
 }
 
-function encodedExecSignals(segments: readonly string[]): string[] {
-  return segments.flatMap((seg, i) => {
-    const later = segments.slice(i + 1);
-    const signals: string[] = [];
-    if (DECODE.test(seg) && later.some(isShell)) signals.push('decode-pipe-shell');
-    if (isNetwork(seg) && later.some(isShell)) signals.push('remote-pipe-shell');
-    if (EVAL_DYNAMIC.test(seg)) signals.push('eval-dynamic');
-    if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
-      signals.push('inline-interpreter-payload');
-    if (SHELL_C_REMOTE.test(seg)) signals.push('shell-c-remote');
-    if (SHELL_PROC_SUB_REMOTE.test(seg)) signals.push('shell-proc-sub-remote');
-    return signals;
-  });
+/**
+ * `decode-pipe-shell` and `remote-pipe-shell` are named for a pipe, and they have to
+ * mean one.
+ *
+ * They used to read the flat segment list, which `splitSegments` produces by cutting
+ * on `|`, `;`, `&&`, `||` and newline with a single regex that keeps no record of
+ * which separator it was. `curl x.sh | sh` and `curl x.sh; sh` therefore arrived as
+ * the same two segments, and only the first is a fetch being executed.
+ *
+ * Measured on 4,902 distinct commands from this machine's own Codex and Claude
+ * transcripts, the sequence reading denied 12 of them — every one an ordinary
+ * `ssh host '…; python3 -c "…"'` diagnostic, since `python3` is in `SHELLS` and the
+ * remote script's `;` put it in a later segment. The reason printed on those denials
+ * was "executing decoded or remotely fetched code", which is false about that
+ * command; on a tool whose product is the reason, that is the expensive kind of
+ * defect. Nothing in the attack corpus depended on the loose reading: every
+ * fetch-and-execute scenario there uses a real `|` or `bash <(curl …)`.
+ *
+ * What is given up is the accidental coverage of `curl -o f url; sh f`, where the
+ * link between the two is a file rather than a pipe. That needs data flow, not
+ * separator awareness, and the old reading caught it only by also catching
+ * `curl url; ls`.
+ *
+ * Every other signal here is a property of one segment however it was reached, so
+ * those keep reading the flat list.
+ */
+function encodedExecSignals(
+  segments: readonly string[],
+  pipelines: readonly (readonly string[])[],
+): string[] {
+  const piped = pipelines.flatMap((stages) =>
+    stages.flatMap((stage, i) => {
+      const downstream = stages.slice(i + 1);
+      const signals: string[] = [];
+      if (DECODE.test(stage) && downstream.some(isShell)) signals.push('decode-pipe-shell');
+      if (isNetwork(stage) && downstream.some(isShell)) signals.push('remote-pipe-shell');
+      return signals;
+    }),
+  );
+  return [
+    ...piped,
+    ...segments.flatMap((seg) => {
+      const signals: string[] = [];
+      if (EVAL_DYNAMIC.test(seg)) signals.push('eval-dynamic');
+      if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
+        signals.push('inline-interpreter-payload');
+      if (SHELL_C_REMOTE.test(seg)) signals.push('shell-c-remote');
+      if (SHELL_PROC_SUB_REMOTE.test(seg)) signals.push('shell-proc-sub-remote');
+      return signals;
+    }),
+  ];
 }
 
 function destructiveSignals(segments: readonly string[], cwd: string): string[] {
@@ -328,7 +372,10 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
   // new, because "I could not read what this runs" is not any of the four.
   const ps = powershellSignals(segments, cwd);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
-    ['shell.exec_encoded', [...encodedExecSignals(segments), ...ps.encoded]],
+    [
+      'shell.exec_encoded',
+      [...encodedExecSignals(segments, splitPipelines(command)), ...ps.encoded],
+    ],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
     ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
