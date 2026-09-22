@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-22
+
 ### Fixed
 
 - **The scan budget was smaller than a scan.** `DEFAULT_BUDGET_MS` was 500 ms, and exceeding it fails closed — `timedOut` becomes `suspect`, which taints the session and denies later actions. Measured over the 25 files of the vendored benign corpus with no budget at all: **p50 46 ms, p95 497 ms, max 828 ms on an idle machine**, and p95 1,559 ms with 14 jobs running across 10 cores. So ordinary third-party documentation was being marked suspicious **4% of the time on an idle machine**, and 12% under load, with the session tainted afterwards.
@@ -65,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **Two gaps remain, both stated rather than papered over.** A name in **prose** — `{"text":"call Peter about the invoice"}` — is not claimed, and that is still what an NER pass would be for. And a value labelled in one field is not chased into unlabelled leaves the way a `secret` is: a credential is a high-entropy exact string that cannot collide with ordinary text, while a name is a word, and propagating `Parker` into every leaf containing it would blank "mark" for a customer called Mark. The demo shows both halves of the first gap in one record — the labelled fields come back as placeholders while `Peter Parker` in the prose line travels untouched.
 
-- **The rule performance gate now measures at the size the scanner actually allows.** `scanContent` hands a rule up to 200,000 characters; the build-time gate escalated to 32,768 and stopped — 6.1x short. That gap matters only because backtracking is superlinear, and it matters at all because the scanner checks its 500 ms budget _between_ rules and cannot interrupt one V8 has already entered. Before it ships is the only place a pathological regex can be stopped, and the place it shipped through was not testing it at full size.
+- **The rule performance gate now measures at the size the scanner actually allows.** `scanContent` hands a rule up to 200,000 characters; the build-time gate escalated to 32,768 and stopped — 6.1x short. That gap matters only because backtracking is superlinear, and it matters at all because the scanner checks its wall-clock budget _between_ rules and cannot interrupt one V8 has already entered. Before it ships is the only place a pathological regex can be stopped, and the place it shipped through was not testing it at full size.
 
   The existing gate is unchanged and still does its own job: it decides relatively, against this machine's own p95, on blobs small enough to terminate on a catastrophic rule. A second, absolute gate now runs on its survivors at the scanner's own cap — absolute because this is a question about a fixed budget, and a faster machine must not be allowed to admit a slower rule.
 
@@ -73,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **The gate runs in `pnpm build:rules`, and deliberately not in the test suite.** An assertion that every shipped rule passes was written and CI removed it: a 639-rule sweep at 200,000 characters is six times the work of the gate's own sweep, so the window for a shared runner to deschedule one measurement is six times wider, and it convicted `ATR-2026-02304` — a rule that costs 0.04 ms locally and ranks 283rd of 639 against a 37.79 ms threshold. That is noise, and a test that fails on noise teaches people to rerun CI rather than read it. `check:rules` verifies the committed bundle byte for byte, so CI still proves the gate ran; it just does not re-run a stopwatch.
 
-  **It convicts nothing today, and the measurement is why it is worth having anyway.** Every one of the 639 shipped rules is linear across that range (the cost ratio from 32 KB to 200 KB tracks the size ratio), the slowest single rule at the cap is 3.4 ms, and a full scan with every variant of 200 KB of adversarial input costs 37–117 ms against the 500 ms budget — four times the headroom. The gate is for the next vendored rule drop, not for this one. It costs 0.2 s of build time.
+  **It convicts nothing today, and the measurement is why it is worth having anyway.** Every one of the 639 shipped rules is linear across that range (the cost ratio from 32 KB to 200 KB tracks the size ratio), the slowest single rule at the cap is 3.4 ms, and a full scan with every variant of 200 KB of adversarial input costs 37–117 ms against the budget of the time — 500 ms, since raised to 4,000 ms (see Fixed) — four times the headroom even then. The gate is for the next vendored rule drop, not for this one. It costs 0.2 s of build time.
 
 - **`stroq sent` reads Codex CLI sessions.** The command the front page tells a first-time visitor to run could answer for Claude Code and nothing else, which is roughly two in five of the agents in use. It now reads `~/.codex/sessions/**/rollout-*.jsonl` as well; `--last` takes the newest session either agent recorded for the directory, and a path given to `--transcript` is matched to a reader **by what is inside the file**, not by where it sits — a Codex rollout parsed as a Claude transcript yields no events at all, which prints as a clean session rather than as the mistake it is.
 
