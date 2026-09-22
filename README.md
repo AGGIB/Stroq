@@ -186,8 +186,16 @@ Every guard in this space, Stroq's included, points forwards: it judges a call b
 ```bash
 npx @stroq/cli sent --last       # the most recent session in this directory
 npx @stroq/cli sent --transcript ~/.claude/projects/<slug>/<id>.jsonl
+npx @stroq/cli sent --transcript ~/.codex/sessions/<y>/<m>/<d>/rollout-<id>.jsonl
 npx @stroq/cli sent              # a session from Stroq's own audit log
 ```
+
+**Claude Code and Codex CLI.** `--last` takes the newest session either of them
+recorded for this directory, and a file named with `--transcript` is matched to a
+reader by what is inside it rather than by where it sits. Cursor keeps its history
+in an undocumented SQLite blob and Windsurf leaves no local transcript at all, so
+neither is claimed: a reader written against a format nobody can test is coverage
+nobody has verified.
 
 ```text
 CREDENTIALS THAT WERE IN THIS SESSION'S TRAFFIC (1)

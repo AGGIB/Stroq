@@ -26,7 +26,7 @@ import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
 import { formatSent } from '../sent/format.js';
-import { claudeCodeReader, newestTranscript } from '../sent/readers.js';
+import { newestTranscript, readerForFile, READER_ROOTS } from '../sent/readers.js';
 import type { SentReport } from '../sent/report.js';
 import { scanAuditLog, scanTranscript, type SentIndexScope } from '../sent/scan.js';
 import { sessionsIn } from './replay.js';
@@ -61,7 +61,7 @@ function emit(report: SentReport, out: Output): number {
 const USAGE = `stroq sent — which of your credentials already reached a model provider
 
   stroq sent --last                 read the newest session in this directory
-  stroq sent --transcript <path>    read a specific transcript file
+  stroq sent --transcript <path>    read a specific transcript or rollout
   stroq sent [<session-id>]         read a session Stroq itself recorded
 
 Flags:
@@ -69,9 +69,10 @@ Flags:
   --fail-on-finding    exit 1 when a credential is found (for a scheduled job)
   -h, --help           show this
 
-It reads this machine's credential files to know what to look for, and prints
-names and sources only, never a value. A finding exits 0 by default: a session
-that already happened cannot be un-sent by today's commit.
+Reads Claude Code transcripts and Codex CLI rollouts; --transcript works out
+which from the file itself. It reads this machine's credential files to know what
+to look for, and prints names and sources only, never a value. A finding exits 0
+by default: a session that already happened cannot be un-sent by today's commit.
 `;
 
 export async function runSent(args: readonly string[]): Promise<number> {
@@ -127,13 +128,12 @@ export async function runSent(args: readonly string[]): Promise<number> {
     const found =
       values.transcript === undefined
         ? await newestTranscript(cwd)
-        : // One reader is registered, so a transcript named on the command line is
-          // parsed by it. A second agent's format would need a way to tell them
-          // apart; writing that dispatch now would be guessing at a format nobody
-          // here can test against.
-          { reader: claudeCodeReader, path: values.transcript };
+        : // Chosen by what is in the file, not by where it is: a Codex rollout
+          // parsed as a Claude transcript yields no events at all, which prints
+          // as a clean session rather than as the mistake it is.
+          { reader: await readerForFile(values.transcript), path: values.transcript };
     if (found === null) {
-      process.stdout.write('no agent transcript found — looked under ~/.claude/projects\n');
+      process.stdout.write(`no agent transcript found — looked under ${READER_ROOTS()}\n`);
       return 1;
     }
     const transcript = await found.reader.read(found.path);

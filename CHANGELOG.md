@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`stroq sent` reads Codex CLI sessions.** The command the front page tells a first-time visitor to run could answer for Claude Code and nothing else, which is roughly two in five of the agents in use. It now reads `~/.codex/sessions/**/rollout-*.jsonl` as well; `--last` takes the newest session either agent recorded for the directory, and a path given to `--transcript` is matched to a reader **by what is inside the file**, not by where it sits — a Codex rollout parsed as a Claude transcript yields no events at all, which prints as a clean session rather than as the mistake it is.
+
+  **Codex does not record tool arguments as JSON, and that is the whole difficulty.** Measured on 73 real rollouts (24,638 records, 290 MB): 2,650 calls are `custom_tool_call`, whose `input` is a fragment of JavaScript — `const r = await tools.exec_command({cmd:"git status",workdir:"/w"})` — against 438 `function_call` records with a JSON `arguments` string. Of the 2,449 object literals in those scripts, **430 parse as JSON and 2,019 do not**: unquoted keys, single quotes, template literals, trailing commas, shorthand properties, spreads. A reader built on `JSON.parse` would answer for 18% of the corpus and silently report the other 82% as calls with no command in them. So the literal reader is written for the JS subset instead, and it reads **98.6%** of the corpus; where it cannot, the script's source text is kept verbatim, because a scan of the arguments still sees every character of it. A shell command is recovered from **1,650 of 1,652** Bash calls (99.9%). The whole corpus parses in 821 ms with zero unreadable lines.
+
+  Two more traps, both real: a call and its output carry **different** `id`s and are paired only by `call_id`, so a reader written from the Claude one finds no results at all; and 78 scripts call more than one tool, where the single output stream cannot be divided between them and is attached to the call the script ends with. Tool names go through `codexToolName`, the same mapper the live Codex hook uses, so a session read back off disk classifies the way it would have classified live.
+
+### Fixed
+
+- **`stroq sent --last` crashed on a long session.** Both readers loaded the whole file with `readFile(path, 'utf8')`, and V8 caps a string at 536,870,888 characters. On the machine this was found on, four Claude transcripts are over 200 MB and the largest is 1.3 GB, so in that project the command answered with a bare `RangeError: Invalid string length` thrown from inside `node:fs` — no report, no explanation, and the failure got worse the longer someone had been using the agent. Both parsers are now fed one line at a time from a stream and never hold the file as a string: the same 1.3 GB transcript reports 16,531 tool calls in 10 seconds. Lines are split with `crlfDelay`, so a transcript written on Windows no longer leaves a `\r` on the end of every recorded value.
+
 ## [0.14.1] - 2026-09-21
 
 ### Fixed

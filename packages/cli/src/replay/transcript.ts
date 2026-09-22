@@ -9,7 +9,9 @@
 //
 // Nothing here writes to the user's real `~/.stroq`: the caller runs these events
 // against a throwaway home, exactly as `stroq attack` does.
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,24 +84,44 @@ function blocksOf(record: Record<string, unknown>): Block[] {
  * the read before the later action can be matched against it.
  */
 export function parseTranscript(text: string): Transcript {
+  const parser = createTranscriptParser();
+  for (const line of text.split('\n')) parser.push(line);
+  return parser.finish();
+}
+
+/**
+ * A parser fed one line at a time.
+ *
+ * It exists because `readFile(path, 'utf8')` cannot read every transcript: V8 caps
+ * a string at 536,870,888 characters, and a long session goes past that. On the
+ * machine this was written on, four transcripts are over 200 MB and the largest is
+ * 1.3 GB — `stroq sent --last` in that project answered with a bare
+ * `RangeError: Invalid string length` from inside `node:fs`.
+ */
+export interface LineParser {
+  push(line: string): void;
+  finish(): Transcript;
+}
+
+export function createTranscriptParser(): LineParser {
   const events: TranscriptEvent[] = [];
   const pending = new Map<string, { tool: string; input: Record<string, unknown> }>();
   let sessionId = 'transcript';
   let cwd: string | null = null;
   let skipped = 0;
 
-  for (const line of text.split('\n')) {
-    if (line.trim().length === 0) continue;
+  function push(line: string): void {
+    if (line.trim().length === 0) return;
     let record: unknown;
     try {
       record = JSON.parse(line);
     } catch {
       skipped += 1;
-      continue;
+      return;
     }
     if (!isRecord(record)) {
       skipped += 1;
-      continue;
+      return;
     }
     if (typeof record['sessionId'] === 'string') sessionId = record['sessionId'];
     if (cwd === null && typeof record['cwd'] === 'string') cwd = record['cwd'];
@@ -128,7 +150,27 @@ export function parseTranscript(text: string): Transcript {
     }
   }
 
-  return { sessionId, cwd, events, skipped };
+  return { push, finish: () => ({ sessionId, cwd, events, skipped }) };
+}
+
+/**
+ * Feeds a JSONL file to a line parser without ever holding it as one string.
+ *
+ * `crlfDelay: Infinity` so a transcript written on Windows is split on `\r\n`
+ * rather than leaving a `\r` on the end of every line, which would not break
+ * `JSON.parse` but would survive into a recorded value.
+ */
+export async function feedLines(path: string, parser: LineParser): Promise<Transcript> {
+  const lines = createInterface({
+    input: createReadStream(path, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  });
+  try {
+    for await (const line of lines) parser.push(line);
+  } finally {
+    lines.close();
+  }
+  return parser.finish();
 }
 
 /** Claude Code's transcript directory for a working directory, by its own slug rule. */
@@ -187,5 +229,5 @@ async function listJsonl(dir: string): Promise<TranscriptFile[] | null> {
 }
 
 export async function readTranscript(path: string): Promise<Transcript> {
-  return parseTranscript(await readFile(path, 'utf8'));
+  return feedLines(path, createTranscriptParser());
 }
