@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pipe is not a semicolon.** `remote-pipe-shell` and `decode-pipe-shell` are named for a pipe and were matching a **sequence**. `splitSegments` cuts on `|`, `;`, `&&`, `||` and newline with one regex and keeps no record of which it was, so `curl x.sh | sh` and `curl x.sh; sh` reached the classifier as the same two segments — and only the first is a fetch being executed.
+
+  Measured on **4,902 distinct shell commands** taken from this machine's own Codex rollouts and Claude transcripts: the sequence reading denied **12** of them, every one an ordinary `ssh host '…; python3 -c "…"'` diagnostic. `python3` is in `SHELLS`, and the remote script's own `;` put it in a later segment of the same command line. The reason printed on those denials was "executing decoded or remotely fetched code", which is false about that command — and on a tool whose product is the reason, a wrong reason on a deny is the expensive kind of defect.
+
+  Both signals now walk actual pipelines. Over the same corpus, denials on a clean session fall from **23 to 5**, and the five that remain are the shape the rule is for — `python -c "exec(…)"` and a real `curl … | python3 -c`. On a **tainted** session the count is unchanged at 233, so nothing was given up where it matters. `stroq attack` still reports 20 scenarios, 15 blocked, 5 asked, 0 through, and `--fuzz` 0 escapes of 350: every fetch-and-execute in that corpus uses a real `|` or `bash <(curl …)`, so none of it depended on the loose reading.
+
+  What is knowingly given up is the accidental coverage of `curl -o f url; sh f`, where the link between fetch and execution is a file rather than a pipe. That needs data flow, not separator awareness, and the old reading only caught it by also catching `curl url; ls`.
+
+  **This was not the fix the roadmap asked for.** The site listed "a quote-aware shell lexer" next, and the measurement says that is the wrong change: `shell-segments.ts` over-splits inside quotes on purpose, and that is the only reason the classifier sees inside `python3 -c '…;os.remove(…)'` at all. A quote-aware lexer would lose that to fix 0.24% of commands. The defect the corpus actually pointed at was the pipe, and it is smaller.
+
 ### Added
 
 - **The MCP cloak claims names and street addresses from the field they arrive in.** The one category `stroq mcp --cloak` did not detect, and the plan for it was an NER model — the project's first native runtime dependency, the call it has already refused twice. It turned out not to be needed for the case that matters: an MCP result is JSON, the cloak already walks its parsed string leaves, and the enclosing **key** was in hand the whole time and thrown away before the detector saw it. `{"first_name":"Peter Parker"}` needed a model to guess at what the server had already labelled.
