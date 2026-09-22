@@ -226,6 +226,8 @@ const report = (over: Partial<BenchReport> = {}): BenchReport => ({
   flagged: 3,
   rate: 0.125,
   timedOut: 0,
+  slowestMs: 120,
+  slowestFile: '/repo/vendor/bench-corpus/files/apache-kafka/README.md',
   byRule: [{ ruleId: 'ATR-2026-00161', title: 'MCP Tool Description — IMPORTANT Tag', files: 2 }],
   flaggedFiles: ['/repo/vendor/bench-corpus/files/apache-airflow/README.md'],
   ...over,

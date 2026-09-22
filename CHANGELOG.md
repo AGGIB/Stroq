@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The scan budget was smaller than a scan.** `DEFAULT_BUDGET_MS` was 500 ms, and exceeding it fails closed — `timedOut` becomes `suspect`, which taints the session and denies later actions. Measured over the 25 files of the vendored benign corpus with no budget at all: **p50 46 ms, p95 497 ms, max 828 ms on an idle machine**, and p95 1,559 ms with 14 jobs running across 10 cores. So ordinary third-party documentation was being marked suspicious **4% of the time on an idle machine**, and 12% under load, with the session tainted afterwards.
+
+  The evidence was already in the repository, in two files that were never read together. `bench/run.ts` recorded that its slowest corpus file "measures well under 1 s". `HOOK_DEADLINE_FRACTION` recorded that "the only wall-clock budget in the decision path is the scanner's 500 ms". Both true; together they say the budget is smaller than the work.
+
+  It is now **4,000 ms** — 2.1x the worst measured under heavy contention, 4.8x the worst measured idle, and still answering with 5 s to spare against the hook's own 9,000 ms deadline, so the watchdog remains the backstop it was. This does not move the primary defence against a pathological regex, which is the build-time gate, now measured at the scanner's own 200,000-character cap. `STROQ_SCAN_BUDGET_MS` overrides it for a machine where even that is wrong; it cannot weaken the guard in either direction, since a smaller budget fails closed sooner and a larger one only lets the scan finish.
+
+  `stroq bench` now prints the comparison nobody was making — `slowest: 623 ms against production's 4000 ms budget — 6.4x headroom` — and flags a headroom below 2x. The figure is deliberately kept out of the generated `docs/BENCH.md`, because a millisecond in a committed file makes `check:reports` fail on every machine but the one that last ran it.
+
+- **The test suite reported how busy the machine was.** Under 14 jobs on 10 cores, eleven tests failed across eight files, a different set each run. Three causes, none of them a bug in the code under test:
+
+  Every failure of the first kind was `clean` becoming `suspect` — the budget above, firing on benign fixtures. The suite now sets `STROQ_SCAN_BUDGET_MS` high in `test/setup-env.ts`, so an assertion about behaviour is never decided by a stopwatch; the tests that exercise the timeout pass an explicit `budgetMs`, which still wins.
+
+  The second kind was assertions that _are_ stopwatches: `expect(elapsed).toBeLessThan(1000)` against a real cost of 110 ms, and `toBeLessThan(2000)` against 400 ms. A ratio was tried first and was not enough — a ratio cancels constant load, and the two measurements happen at different moments. At these input sizes linear-under-load and quadratic-idle overlap, so no stopwatch here can separate them; what actually bounds these functions is the input cap. The assertions now state a ceiling only a blowup of a different order can cross, and say so.
+
+  The third kind was `await setTimeout(150)` standing in for a condition. The signal-escalation tests slept, hoping the child had installed its SIGTERM trap; on a loaded machine it had not, the signal killed it outright, and the proxy was reported as escalating after 59 ms against a 200 ms grace period. Both stub servers now write a readiness marker and the tests wait for it. `testTimeout` is raised from vitest's 5 s default, because a large part of this suite spawns a real CLI through `node --import tsx` and compiles TypeScript on every start.
+
 ### Added
 
 - **The MCP cloak claims names and street addresses from the field they arrive in.** The one category `stroq mcp --cloak` did not detect, and the plan for it was an NER model — the project's first native runtime dependency, the call it has already refused twice. It turned out not to be needed for the case that matters: an MCP result is JSON, the cloak already walks its parsed string leaves, and the enclosing **key** was in hand the whole time and thrown away before the detector saw it. `{"first_name":"Peter Parker"}` needed a model to guess at what the server had already labelled.

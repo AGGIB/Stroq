@@ -1,13 +1,14 @@
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET_MATCH, loadBundledRules, scanContent } from '@stroq/core';
+import { BUDGET_MATCH, DEFAULT_BUDGET_MS, loadBundledRules, scanContent } from '@stroq/core';
 
 /** Text extensions only: the corpus is documentation, and a binary would measure nothing. */
 const TEXT = /\.(?:md|rst|txt|adoc)$/i;
 /**
  * Wall-clock scan budget the bench passes to `scanContent`, deliberately far above
- * production's `DEFAULT_BUDGET_MS` (500 ms, `packages/core/src/scan/scanner.ts`).
+ * production's `DEFAULT_BUDGET_MS` (`packages/core/src/scan/scanner.ts`), which this
+ * run reports its headroom against rather than merely mentioning.
  * Production fails a scan closed — verdict: 'suspect' plus a synthetic
  * STROQ-SCAN-BUDGET match — the moment it runs long, because a slow scan must never
  * hang a tool call; that is a latency trade-off, not a judgement about the text. The
@@ -17,8 +18,10 @@ const TEXT = /\.(?:md|rst|txt|adoc)$/i;
  * false-positive — it would both overstate the reported rate and make the published
  * number depend on the CI runner's clock speed rather than on the rules, which is
  * exactly what made `docs/BENCH.md` drift between machines. 60 s is comfortably above
- * anything in the vendored corpus takes to scan (its slowest file measures well under
- * 1 s locally), so it should never be hit in practice — see `timedOut` on
+ * anything in the vendored corpus takes to scan (its slowest file measures under 1 s
+ * locally — and that figure, sitting here unread next to a 500 ms production budget,
+ * is why benign READMEs were being marked suspect), so it should never be hit in
+ * practice — see `timedOut` on
  * `BenchReport` for what happens if it somehow is.
  */
 export const BENCH_BUDGET_MS = 60_000;
@@ -60,6 +63,9 @@ export interface BenchReport {
    * shipped.
    */
   readonly timedOut: number;
+  /** The slowest single scan in this run, against which `DEFAULT_BUDGET_MS` is judged. */
+  readonly slowestMs: number;
+  readonly slowestFile: string;
   /** Most files first, so the worst offender is the headline. */
   readonly byRule: readonly RuleHit[];
   readonly flaggedFiles: readonly string[];
@@ -132,6 +138,8 @@ export function runBench(dir: string): BenchReport {
   const flaggedFiles: string[] = [];
   let bytes = 0;
   let timedOut = 0;
+  let slowestMs = 0;
+  let slowestFile = '';
 
   for (const file of files) {
     const size = statSync(file).size;
@@ -140,12 +148,25 @@ export function runBench(dir: string): BenchReport {
     // is what makes the reported rate a rate *for documentation* rather than for every
     // rule the bundle ships regardless of where it was written to read. It also changes
     // what the number means — see docs/BENCH.md's Method section.
+    const startedAt = performance.now();
     const result = scanContent(
       rules,
       readPrefix(file, MAX_READ_BYTES),
       { budgetMs: BENCH_BUDGET_MS },
       { target: 'repo_content' },
     );
+    /* Timed against the PRODUCTION budget, which this run deliberately does not use.
+       The two numbers were recorded in different files and never compared: this
+       module said its slowest file "measures well under 1 s" while the shipped
+       budget was 500 ms, so ordinary documentation was failing closed to `suspect`
+       on an idle machine 4% of the time. A measurement belongs in the command that
+       measures, not in a unit test on shared hardware — that is the same call made
+       for the rule performance gate. */
+    const elapsed = performance.now() - startedAt;
+    if (elapsed > slowestMs) {
+      slowestMs = elapsed;
+      slowestFile = file;
+    }
     if (result.timedOut) timedOut += 1;
     if (result.verdict !== 'suspect') continue;
     flaggedFiles.push(file);
@@ -175,6 +196,8 @@ export function runBench(dir: string): BenchReport {
     flagged: flaggedFiles.length,
     rate: files.length === 0 ? 0 : flaggedFiles.length / files.length,
     timedOut,
+    slowestMs,
+    slowestFile,
     byRule: [...perRule.values()].sort((a, b) => b.files - a.files),
     flaggedFiles,
   };
@@ -184,7 +207,7 @@ const percent = (rate: number): string => `${(rate * 100).toFixed(1)}%`;
 
 export function formatBench(
   report: BenchReport,
-  opts: { readonly verbose?: boolean } = {},
+  opts: { readonly verbose?: boolean; readonly timings?: boolean } = {},
 ): string {
   const lines = [
     `stroq bench: ${report.files} files, ${Math.round(report.bytes / 1024)} KB, ${report.rules} rules`,
@@ -195,6 +218,28 @@ export function formatBench(
     lines.push(
       `timedOut:  ${report.timedOut} ${noun} hit the bench's scan budget and were forced ` +
         `suspect by that alone, not by a rule match — see docs/BENCH.md's Method section.`,
+    );
+  }
+  /* The comparison nobody was making. `DEFAULT_BUDGET_MS` is what production gives a
+     scan; this is what a scan of ordinary documentation actually costs. When the
+     second approaches the first, benign reads start failing closed to `suspect` and
+     tainting the session — which is what 500 ms was doing.
+
+     Opt-in, and NOT in the generated report: a millisecond figure in docs/BENCH.md
+     would make the committed file depend on the runner's clock speed, which is the
+     drift this module's own header says it was built to avoid. `check:reports` would
+     then fail on every machine but the one that last ran it. So this prints for a
+     person at a terminal and nowhere else. */
+  if (opts.timings === true) {
+    const headroom = DEFAULT_BUDGET_MS / Math.max(report.slowestMs, 0.001);
+    const verdict = headroom < 2 ? '  ** raise DEFAULT_BUDGET_MS **' : '';
+    /* The file is named only under --verbose: the default output deliberately reports
+       no corpus filenames, and one leaking in through a timing line would be as much
+       a change to what this command discloses as listing the flagged ones. */
+    const which = opts.verbose === true ? ` (${basename(report.slowestFile)})` : '';
+    lines.push(
+      `slowest:   ${report.slowestMs.toFixed(0)} ms${which} against production's ` +
+        `${DEFAULT_BUDGET_MS} ms budget — ${headroom.toFixed(1)}x headroom${verdict}`,
     );
   }
   if (report.byRule.length === 0) {

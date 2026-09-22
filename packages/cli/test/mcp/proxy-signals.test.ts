@@ -1,5 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -52,6 +52,26 @@ afterEach(() => {
 
 const fakeServer = join(import.meta.dirname, 'fake-server.mjs');
 const ignoreSigtermServer = join(import.meta.dirname, 'ignore-sigterm-server.mjs');
+
+/**
+ * Waits for the stub to have installed its signal traps, rather than assuming it has.
+ *
+ * These tests used `await setTimeout(150)`. On a loaded machine the child had not
+ * finished starting, the relayed SIGTERM killed it outright, and the proxy — which
+ * had done nothing wrong — was reported as escalating after 59 ms against a 200 ms
+ * grace period. A fixed sleep in place of a condition is a measurement of how busy
+ * the machine is.
+ */
+async function awaitStubReady(marker: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(marker)) {
+    if (Date.now() > deadline) throw new Error(`stub never signalled ready at ${marker}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+const readyMarker = (): string => join(mkdtempSync(join(tmpdir(), 'stroq-stub-')), 'ready');
+
 const exitAfterReplyServer = join(import.meta.dirname, 'exit-after-reply-server.mjs');
 
 let cwd: string;
@@ -69,6 +89,7 @@ describe('signal escalation', () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const GRACE_MS = 200;
+    const marker = readyMarker();
 
     const done = runMcpProxy({
       engine: createEngine(),
@@ -77,7 +98,7 @@ describe('signal escalation', () => {
       cwd,
       passEnv: ['STROQ_MCP_STUB_KEEPALIVE'],
       command: process.execPath,
-      args: [ignoreSigtermServer],
+      args: [ignoreSigtermServer, marker],
       stdin,
       stdout,
       stderr,
@@ -85,7 +106,7 @@ describe('signal escalation', () => {
     });
 
     // Let the child actually spawn and register its own signal traps.
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await awaitStubReady(marker);
 
     const start = Date.now();
     process.kill(process.pid, 'SIGTERM');
@@ -112,6 +133,7 @@ describe('signal escalation', () => {
     // well-behaved server would make this test obviously slow rather than subtly
     // wrong.
     const GRACE_MS = 3000;
+    const marker = readyMarker();
 
     const done = runMcpProxy({
       engine: createEngine(),
@@ -122,14 +144,14 @@ describe('signal escalation', () => {
       // fake-server.mjs registers no signal handler of its own, so Node's default
       // disposition for SIGTERM — terminate — applies the moment it is relayed.
       command: process.execPath,
-      args: [fakeServer],
+      args: [fakeServer, marker],
       stdin,
       stdout,
       stderr,
       shutdownGraceMs: GRACE_MS,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await awaitStubReady(marker);
     const start = Date.now();
     process.kill(process.pid, 'SIGTERM');
     const code = await done;
@@ -146,6 +168,7 @@ describe('the EOF shutdown escalation', () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const GRACE_MS = 200;
+    const marker = readyMarker();
     // The stub ignores both signals AND keeps its event loop alive past stdin EOF,
     // so it is exactly the server this path exists for: one that notices neither
     // its stdin closing nor the SIGTERM that follows. Without the keep-alive it
@@ -159,14 +182,14 @@ describe('the EOF shutdown escalation', () => {
       cwd,
       passEnv: ['STROQ_MCP_STUB_KEEPALIVE'],
       command: process.execPath,
-      args: [ignoreSigtermServer],
+      args: [ignoreSigtermServer, marker],
       stdin,
       stdout,
       stderr,
       shutdownGraceMs: GRACE_MS,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await awaitStubReady(marker);
     const start = Date.now();
     // The client is gone: no signal is sent to the proxy at all, so everything that
     // follows is the EOF path's own escalation.

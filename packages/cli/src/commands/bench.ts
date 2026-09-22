@@ -23,7 +23,7 @@ export async function runBenchCommand(args: readonly string[]): Promise<number> 
   process.stdout.write(
     values.json
       ? `${JSON.stringify(report, null, 2)}\n`
-      : formatBench(report, { verbose: values.verbose }),
+      : formatBench(report, { verbose: values.verbose, timings: true }),
   );
   return 0;
 }
