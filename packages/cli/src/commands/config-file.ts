@@ -17,9 +17,16 @@ export const HOOK_TIMEOUT_SECONDS = 15;
  * flow, Codex reports a hook failure and proceeds, Copilot discards the late deny —
  * so a hook that runs long does not merely lose its explanation, it loses its
  * verdict. Stroq answers first: 60% leaves room for process teardown and for a
- * machine slower than the one that measured this, and the margin over real work is
- * large, since the only wall-clock budget in the decision path is the scanner's 500
- * ms and a cold Node start is around 100 ms.
+ * machine slower than the one that measured this.
+ *
+ * The margin over real work: the only wall-clock budget in the decision path is the
+ * scanner's `DEFAULT_BUDGET_MS`, and a cold Node start is around 100 ms. That budget
+ * is 4,000 ms, so the worst case answers at about 4.1 s against this deadline's
+ * 9,000 ms. It was 500 ms when this paragraph was first written, and the number is
+ * repeated here rather than imported because the two are a RELATIONSHIP — if the
+ * scanner's budget ever approaches this deadline, a slow scan stops being answered
+ * by Stroq and starts being answered by the agent's timeout, which every agent
+ * treats as an allow.
  */
 export const HOOK_DEADLINE_FRACTION = 0.6;
 

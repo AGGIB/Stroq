@@ -184,7 +184,12 @@ describe('scanContent budget', () => {
     expect(scanContent(compiled, 'plain text').timedOut).toBeUndefined();
   });
 
-  it('defaults to a 500 ms budget (raised from 200 ms to avoid fail-closed on slow machines)', () => {
-    expect(DEFAULT_BUDGET_MS).toBe(500);
+  it('defaults to a budget larger than the work it has to do', () => {
+    // 500 ms was smaller than a scan of ordinary documentation: measured over the
+    // vendored benign corpus, the worst file took 828 ms on an idle machine, so 4%
+    // of benign scans failed closed to `suspect` and tainted the session. The
+    // relationship, rather than this number, is asserted in
+    // `scan/budget-fits-the-work.test.ts`.
+    expect(DEFAULT_BUDGET_MS).toBe(4_000);
   });
 });
