@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog } from '@stroq/core';
 import { runSent } from '../../src/commands/sent.js';
+import { READERS } from '../../src/sent/readers.js';
 import { auditFile } from '../../src/paths.js';
 
 const KEY = 'wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY';
@@ -189,6 +190,17 @@ describe('stroq sent', () => {
     expect(text).toContain('--last');
     // It must not have gone on to open credential files just to answer --help.
     expect(text).not.toContain('~/.aws/credentials');
+  });
+
+  // 0.15.0 shipped a `--help` that named two agents after a third reader had been
+  // registered, because the sentence was typed by hand. It is now built from the
+  // registry, and this holds it there: a reader added later cannot be missing from
+  // the first thing a visitor reads about the command.
+  it('names every agent it can read in --help', async () => {
+    const out = capture();
+    await runSent(['--help']);
+    out.restore();
+    for (const reader of READERS) expect(out.text()).toContain(reader.label);
   });
 
   // An unknown flag is a usage mistake, answered with the usage line and exit 2 — the

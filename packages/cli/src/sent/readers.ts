@@ -37,6 +37,8 @@ const HEAD_BYTES = 64 * 1024;
 export interface TranscriptReader {
   /** The agent's name as the report prints it. */
   readonly agent: string;
+  /** The agent's name as a person writes it, for `--help` and other prose. */
+  readonly label: string;
   /** Recorded sessions for `cwd`, newest first; empty when this agent leaves none. */
   find(cwd: string): Promise<readonly TranscriptFile[]>;
   read(path: string): Promise<Transcript>;
@@ -55,6 +57,7 @@ export interface TranscriptReader {
 
 export const claudeCodeReader: TranscriptReader = {
   agent: 'claude-code',
+  label: 'Claude Code',
   find: findTranscripts,
   read: readTranscript,
   root: '~/.claude/projects',
@@ -75,6 +78,7 @@ export const claudeCodeReader: TranscriptReader = {
  */
 export const codexReader: TranscriptReader = {
   agent: 'codex',
+  label: 'Codex CLI',
   find: (cwd) => findCodexRollouts(cwd),
   read: readCodexRollout,
   root: '~/.codex/sessions',
@@ -93,6 +97,7 @@ export const codexReader: TranscriptReader = {
  */
 export const cursorReader: TranscriptReader = {
   agent: 'cursor',
+  label: 'Cursor',
   find: (cwd) => findCursorSessions(cwd),
   read: readCursorSession,
   root: tilde(cursorStateDb()),
@@ -133,6 +138,14 @@ function tryParse(line: string): unknown {
   } catch {
     return null;
   }
+}
+
+/** The registered agents as one English list: `A, B and C`. */
+export function readerLabels(): string {
+  const labels = READERS.map((r) => r.label);
+  return labels.length <= 1
+    ? (labels[0] ?? '')
+    : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
 /** Every place a registered reader looks, for a message that has found nothing. */

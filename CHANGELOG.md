@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-09-23
+
+### Fixed
+
+- **`stroq sent --help` did not mention Cursor.** 0.15.0 added the Cursor reader and kept a help paragraph that said the command reads "Claude Code transcripts and Codex CLI rollouts", because that sentence was typed by hand. `--help` is the first thing a visitor types after the command the front page tells them to run, so a Cursor user was told, wrongly, that their sessions were out of reach. The list is now built from the reader registry itself, each reader carrying the name a person writes, and a test holds every registered reader to appearing in `--help`. The help also says how a Cursor session is addressed (`<store>#<session>`), since it has no file of its own.
+
 ## [0.15.0] - 2026-09-22
 
 ### Fixed
