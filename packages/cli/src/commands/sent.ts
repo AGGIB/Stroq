@@ -26,7 +26,13 @@ import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
 import { formatSent } from '../sent/format.js';
-import { newestTranscript, readerForFile, readerNotices, READER_ROOTS } from '../sent/readers.js';
+import {
+  newestTranscript,
+  readerForFile,
+  readerLabels,
+  readerNotices,
+  READER_ROOTS,
+} from '../sent/readers.js';
 import type { SentReport } from '../sent/report.js';
 import { scanAuditLog, scanTranscript, type SentIndexScope } from '../sent/scan.js';
 import { sessionsIn } from './replay.js';
@@ -69,10 +75,12 @@ Flags:
   --fail-on-finding    exit 1 when a credential is found (for a scheduled job)
   -h, --help           show this
 
-Reads Claude Code transcripts and Codex CLI rollouts; --transcript works out
-which from the file itself. It reads this machine's credential files to know what
-to look for, and prints names and sources only, never a value. A finding exits 0
-by default: a session that already happened cannot be un-sent by today's commit.
+Reads sessions recorded by ${readerLabels()}.
+--transcript works out which from the file itself; a Cursor session is
+addressed as <store>#<session>. It reads this machine's credential files to
+know what to look for, and prints names and sources only, never a value. A
+finding exits 0 by default: a session that already happened cannot be
+un-sent by today's commit.
 `;
 
 export async function runSent(args: readonly string[]): Promise<number> {
