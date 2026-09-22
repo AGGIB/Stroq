@@ -1,6 +1,6 @@
 {
   "name": "@stroq/core",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Stroq core: normalizer, ATR-compatible rule matcher, action classifier, taint-aware policy, audit chain",
   "license": "Apache-2.0",
   "private": true,

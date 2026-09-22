@@ -165,6 +165,33 @@ describe('scanTranscript', () => {
     ]);
   });
 
+  // The first launch-post finding on the author's own machine was this: a site edit
+  // written through `cat > page.mjs <<'EOF'` whose HTML listed `~/.npmrc` as an
+  // example. Nothing opened the file; the path was text going into another file.
+  it('does not call a path inside a heredoc written to a file a credential file', async () => {
+    const m = machine();
+    const path = join(m.home, '.aws', 'credentials');
+    const input = { command: `cat > notes.md <<'EOF'\nkeys live in ${path}\nEOF` };
+    const t = transcriptOf(m.cwd, [
+      { kind: 'pre', id: 'h', tool: 'Bash', input, at: AT_RUN },
+      { kind: 'post', id: 'h', tool: 'Bash', input, resultText: '', at: AT_RUN },
+    ]);
+    const report = await scanTranscript(t, source, m.index, m.scope);
+    expect(report.files).toHaveLength(0);
+  });
+
+  it('still reports a credential file inside a heredoc a shell executes', async () => {
+    const m = machine();
+    const path = join(m.home, '.aws', 'credentials');
+    const input = { command: `bash <<'EOF'\ncat ${path}\nEOF` };
+    const t = transcriptOf(m.cwd, [
+      { kind: 'pre', id: 'x', tool: 'Bash', input, at: AT_RUN },
+      { kind: 'post', id: 'x', tool: 'Bash', input, resultText: '[default]', at: AT_RUN },
+    ]);
+    const report = await scanTranscript(t, source, m.index, m.scope);
+    expect(report.files.map((f) => [f.tool, f.evidence])).toEqual([['Bash', 'named']]);
+  });
+
   // `summarizeInput` prefers a `Grep`'s pattern over its path, so matching against
   // that one string would miss the file the grep actually opened. Every string leaf
   // of the input is checked instead.
