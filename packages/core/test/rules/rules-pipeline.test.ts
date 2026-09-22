@@ -435,12 +435,22 @@ describe('the production-size gate', () => {
     expect(PRODUCTION_CHARS).toBe(DEFAULT_MAX_CHARS);
   });
 
-  it('holds for every rule that ships', () => {
-    const result = runTimingGate(loadBundledRules(), DEFAULT_SLOW_MS, DEFAULT_BLOBS, [
-      PRODUCTION_CHARS,
-    ]);
-    expect([...result.disabled.keys()]).toEqual([]);
-  });
+  /**
+   * There is deliberately no "every shipped rule passes" assertion here.
+   *
+   * It was written, and CI taught the lesson: a 639-rule timing sweep at 200,000
+   * characters is six times the work of the gate's own sweep, so the window for a
+   * shared runner to deschedule one measurement is six times wider, and something
+   * eventually catches a hiccup. It convicted `ATR-2026-02304`, which costs
+   * 0.04 ms here and ranks 283rd of 639 against a 37.79 ms threshold — noise, not
+   * a slow rule. A test that fails on noise teaches people to rerun CI rather
+   * than to read it.
+   *
+   * The gate belongs where timing decisions already live: `pnpm build:rules`,
+   * which runs on one machine and produces the bundle. `check:rules` then
+   * verifies that bundle byte for byte, so CI still proves the gate ran — it just
+   * does not re-run a stopwatch. What is deterministic is asserted above.
+   */
 });
 
 describe('the cap scales with the input size', () => {
