@@ -8,9 +8,11 @@
  *
  * A key is schema. It is a stronger claim than NER can make about the same
  * characters, it costs no dependency, and it holds for names a model trained on
- * English prose has never seen, which is most of them. What it does not do is a name
- * in prose — `{"text":"call Peter about the invoice"}` — and that remains the gap an
- * NER pass would be for.
+ * English prose has never seen, which is most of them. A name in prose is reached
+ * from here too, but not by this function: `detectAcrossLeaves` takes the names
+ * these keys claim and looks for them again in the leaves nobody labelled, so
+ * `{"text":"call Peter about the invoice"}` beside a `first_name` is claimed as
+ * well. What neither reaches is a person no field in the result names at all.
  *
  * The whole design rests on the key list being UNAMBIGUOUS, so the lists below are
  * short on purpose. A false positive here is not a privacy failure but it is a real

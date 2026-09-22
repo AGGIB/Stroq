@@ -32,4 +32,5 @@ export * from './cloak/substitute.js';
 export * from './cloak/secret-spans.js';
 export * from './cloak/json-strings.js';
 export * from './cloak/detector.js';
+export * from './cloak/prose-names.js';
 export * from './cloak/store.js';

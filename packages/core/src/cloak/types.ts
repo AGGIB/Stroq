@@ -19,8 +19,9 @@
  * `name` and `address` are claimed from the FIELD a value arrived in rather than from
  * the characters in it — see `keyed.ts`. A key is schema, which is a stronger claim
  * than a model reading the same string could make, and it costs no dependency. A name
- * in prose still needs NER and is still absent; the `CloakDetector` seam below is
- * where such a pass would be added.
+ * the result labelled in one field is then found in its prose too
+ * (`detectAcrossLeaves`); a person no field names at all still needs NER and is still
+ * absent, and the `CloakDetector` seam below is where such a pass would be added.
  */
 export type CloakKind = 'secret' | 'email' | 'phone' | 'iban' | 'card' | 'ssn' | 'name' | 'address';
 

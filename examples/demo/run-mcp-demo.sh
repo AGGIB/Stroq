@@ -250,23 +250,34 @@ cloak_call() {
 
 # 7. --cloak, inbound. A perfectly ordinary CRM record: the customer's email, phone,
 # card and SSN are replaced with stable placeholders before the model — and therefore
-# the model provider — ever sees them.
+# the model provider — ever sees them. So is the customer themself: the record names
+# them in `first_name`/`last_name`, so the prose line that repeats the name is claimed
+# too rather than handing the model the person the fields just hid.
 cloak_call '7. get_customer with --cloak: PII replaced before the model sees it' \
   '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_customer","arguments":{"id":8812}}}'
-expect '7' "$work/out" '[STROQ_EMAIL_1]'
+expect '7' "$work/out" '[STROQ_EMAIL_'
 expect '7' "$work/out" '[STROQ_CARD_'
 expect '7' "$work/out" '[STROQ_SSN_'
+expect '7' "$work/out" '[STROQ_NAME_'
 expect '7' "$work/out" 'Stroq cloak'
 absent '7' "$work/out" 'peter.parker@dailybugle.example'
 absent '7' "$work/out" '4242 4242 4242 4242'
 absent '7' "$work/out" '123-45-6789'
+# The person is gone from the sentence as well as from the fields.
+absent '7' "$work/out" 'Peter Parker'
+
+# Read the placeholder back out rather than hard-coding its number: which value gets
+# which sequence depends on what else the record contained, and a demo that asserts
+# `_1` breaks the day the cloak legitimately claims one more field.
+email_ph=$(grep -o '\[STROQ_EMAIL_[0-9]\{1,9\}\]' "$work/out" | head -1)
+[ -n "$email_ph" ] || fail '7 (no email placeholder in the cloaked result)'
 
 # 8. --cloak, outbound. The model acts on the placeholder; the server receives the
 # real address. The placeholder never had to become a value anywhere in between.
 cloak_call '8. send_message quoting the placeholder: the server gets the real value' \
-  '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"send_message","arguments":{"channel":"crm","body":"following up with [STROQ_EMAIL_1]"}}}'
+  "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"send_message\",\"arguments\":{\"channel\":\"crm\",\"body\":\"following up with ${email_ph}\"}}}"
 expect '8' "$FAKE_SERVER_LOG" 'peter.parker@dailybugle.example'
-absent '8' "$FAKE_SERVER_LOG" '[STROQ_EMAIL_1]'
+absent '8' "$FAKE_SERVER_LOG" "$email_ph"
 
 # The audit records both halves of the round trip by PLACEHOLDER and never by value.
 expect 'cloak audit' "$STROQ_HOME/audit.jsonl" '"direction":"cloak"'

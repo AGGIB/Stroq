@@ -2,6 +2,7 @@ import { candidatesFromText, MAX_SCAN_CHARS } from '../secrets/candidates.js';
 import type { SecretIndex } from '../secrets/index.js';
 import { detectKeyedFields } from './keyed.js';
 import { detectPatterns } from './patterns.js';
+import { compileNameMatcher, nameNeedles } from './prose-names.js';
 import { secretSpans } from './secret-spans.js';
 import { mergeSpans } from './substitute.js';
 import type { CloakDetector, CloakSpan } from './types.js';
@@ -21,8 +22,11 @@ import type { CloakDetector, CloakSpan } from './types.js';
  * characters, so it needs no model and no dependency, and it is laid down last so a
  * known credential or a settled shape inside a labelled field still wins.
  *
- * A name in PROSE is still not detected. That is what an NER pass would be for, and
- * it stays absent because the credible offline option would add the project's first
+ * A name in prose is reached by `detectAcrossLeaves` below, which runs this detector
+ * over every leaf and then looks again for the names the result labelled itself. What
+ * is still not detected is a name that appears ONLY in free text, with no field
+ * anywhere in the result to name it — that is what an NER pass would be for, and it
+ * stays absent because the credible offline option would add the project's first
  * native runtime dependency; `docs/CLOAK-COMPARISON.md` says so in the row where
  * AgentCloak is ahead.
  */
@@ -52,4 +56,41 @@ export function createCloakDetector(options: CloakDetectorOptions): CloakDetecto
       return mergeSpans([...secretSpans(text, matches), ...shapes]);
     },
   };
+}
+
+/**
+ * Detection over a whole result rather than one leaf at a time.
+ *
+ * Two passes, because the second needs the first's answer. The first asks the
+ * detector about each distinct leaf with every key it was seen under, exactly as
+ * before. The second takes the names that pass produced — names the SERVER labelled,
+ * never a guess — and looks for them again in the leaves that carry prose. Without
+ * it, `{"first_name":"Peter Parker","note":"call Peter about the invoice"}` cloaks
+ * the field and hands the model the note intact, which protects nothing.
+ *
+ * `mergeSpans` settles any overlap, so a leaf already claimed whole by its key keeps
+ * that claim and a secret inside a sentence still outranks a name beside it.
+ */
+export async function detectAcrossLeaves(
+  leaves: ReadonlyMap<string, ReadonlySet<string>>,
+  detector: CloakDetector,
+): Promise<Map<string, readonly CloakSpan[]>> {
+  const found = new Map<string, readonly CloakSpan[]>();
+  const names = new Set<string>();
+  for (const [text, keys] of leaves) {
+    const spans = mergeSpans(await detector.detect(text, keys));
+    if (spans.length > 0) found.set(text, spans);
+    for (const span of spans) if (span.kind === 'name') names.add(span.value);
+  }
+  if (names.size === 0) return found;
+
+  const matcher = compileNameMatcher(nameNeedles(names));
+  if (matcher === null) return found;
+  for (const text of leaves.keys()) {
+    const prose = matcher(text);
+    if (prose.length === 0) continue;
+    const merged = mergeSpans([...(found.get(text) ?? []), ...prose]);
+    found.set(text, merged);
+  }
+  return found;
 }

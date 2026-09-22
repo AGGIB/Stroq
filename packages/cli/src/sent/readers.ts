@@ -6,12 +6,14 @@
 // Cursor later means one object here plus its parser, with nothing in the scanner or
 // the formatter to change.
 //
-// Two readers are registered. Each was written against real sessions on a machine
-// that runs that agent — Claude Code's 92 transcripts and Codex's 73 rollouts — and
-// no reader is registered for a format nobody here has a session in, because a reader
-// written blind is a claim of coverage nobody has tested. Cursor keeps its history in
-// an undocumented SQLite blob and Windsurf leaves no local transcript at all, so
-// neither can be verified from here yet.
+// Three readers are registered. Each was written against real sessions on a machine
+// that runs that agent — Claude Code's 92 transcripts, Codex's 73 rollouts, Cursor's
+// 9 sessions and 1,126 tool calls — and no reader is registered for a format nobody
+// here has a session in, because a reader written blind is a claim of coverage nobody
+// has tested. That still rules out two: Copilot CLI leaves only logs (no
+// `session-state`, nothing of the conversation), and Antigravity keeps its
+// trajectories as base64-wrapped protobuf in a VS Code state database, with no
+// transcript on disk to read.
 import {
   findTranscripts,
   readTranscript,
@@ -19,7 +21,15 @@ import {
   type TranscriptFile,
 } from '../replay/transcript.js';
 import { open } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { findCodexRollouts, readCodexRollout } from './codex.js';
+import {
+  cursorStateDb,
+  cursorUnavailable,
+  findCursorSessions,
+  readCursorSession,
+  splitCursorSessionPath,
+} from './cursor.js';
 
 /** Enough of a transcript to hold its first record, whichever agent wrote it. */
 const HEAD_BYTES = 64 * 1024;
@@ -34,6 +44,13 @@ export interface TranscriptReader {
   claims(head: string): boolean;
   /** Where this reader looks, for the message printed when it finds nothing. */
   readonly root: string;
+  /**
+   * Why this reader could not look at all, or null when it could. A reader that is
+   * skipped must never be mistaken for one that looked and found nothing — that is
+   * the same confusion `readerForFile` exists to prevent on the other side of the
+   * command.
+   */
+  unavailable?(): Promise<string | null>;
 }
 
 export const claudeCodeReader: TranscriptReader = {
@@ -69,7 +86,43 @@ export const codexReader: TranscriptReader = {
   },
 };
 
-export const READERS: readonly TranscriptReader[] = [claudeCodeReader, codexReader];
+/**
+ * Cursor keeps no transcript files: its sessions are rows in one SQLite store, so a
+ * path here is `<store>#<session>` rather than a filename. See `cursor.ts` for what
+ * the store does and does not record.
+ */
+export const cursorReader: TranscriptReader = {
+  agent: 'cursor',
+  find: (cwd) => findCursorSessions(cwd),
+  read: readCursorSession,
+  root: tilde(cursorStateDb()),
+  unavailable: cursorUnavailable,
+  /* A SQLite file announces itself in its first 16 bytes, and that is all the
+     dispatch needs: no other agent here writes one. */
+  claims: (head) => head.startsWith('SQLite format 3'),
+};
+
+export const READERS: readonly TranscriptReader[] = [claudeCodeReader, codexReader, cursorReader];
+
+/** Every reason a registered reader could not look, in registration order. */
+export async function readerNotices(): Promise<readonly string[]> {
+  const notices: string[] = [];
+  for (const reader of READERS) {
+    const why = await reader.unavailable?.();
+    if (why !== undefined && why !== null) notices.push(why);
+  }
+  return notices;
+}
+
+/**
+ * A path with the home directory written as `~`, the way the other two readers
+ * spell theirs. Cursor's store is found per platform rather than named as a
+ * constant, and the message that prints it should not carry the user's username.
+ */
+function tilde(path: string): string {
+  const home = homedir();
+  return home !== '' && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -97,7 +150,10 @@ export const READER_ROOTS = (): string => READERS.map((r) => r.root).join(' or '
 export async function readerForFile(path: string): Promise<TranscriptReader> {
   let head = '';
   try {
-    const handle = await open(path, 'r');
+    // A Cursor session is addressed as `<store>#<session>`, and only the store half
+    // is a file. Sniffing the literal string would fail to open and fall back to the
+    // Claude reader, which then reports the store as an empty session.
+    const handle = await open(splitCursorSessionPath(path).db, 'r');
     try {
       const buffer = Buffer.alloc(HEAD_BYTES);
       const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
@@ -119,10 +175,12 @@ export interface FoundTranscript {
 /**
  * The most recently modified transcript any registered reader can find for `cwd`.
  *
- * Readers are asked in order and the newest across all of them wins. Both formats
- * are plain files whose mtime is the last time the agent wrote to the session, so the
- * comparison means the same thing on either side; a reader whose mtime meant
- * something else would have to be ranked some other way before it could join this.
+ * Readers are asked in order and the newest across all of them wins. For the two
+ * file formats that is the file's mtime; Cursor has no file, so its reader reports
+ * the newest moment recorded inside the session. Both are the last time the agent
+ * wrote to that session, which is what makes them comparable — a reader whose number
+ * meant something else would have to be ranked some other way before it could join
+ * this.
  */
 export async function newestTranscript(cwd: string): Promise<FoundTranscript | null> {
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;

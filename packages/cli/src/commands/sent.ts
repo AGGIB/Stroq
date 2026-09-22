@@ -26,7 +26,7 @@ import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
 import { formatSent } from '../sent/format.js';
-import { newestTranscript, readerForFile, READER_ROOTS } from '../sent/readers.js';
+import { newestTranscript, readerForFile, readerNotices, READER_ROOTS } from '../sent/readers.js';
 import type { SentReport } from '../sent/report.js';
 import { scanAuditLog, scanTranscript, type SentIndexScope } from '../sent/scan.js';
 import { sessionsIn } from './replay.js';
@@ -133,7 +133,14 @@ export async function runSent(args: readonly string[]): Promise<number> {
           // as a clean session rather than as the mistake it is.
           { reader: await readerForFile(values.transcript), path: values.transcript };
     if (found === null) {
-      process.stdout.write(`no agent transcript found — looked under ${READER_ROOTS()}\n`);
+      // Any reader that could not look at all says so here. Without it, an agent
+      // Stroq cannot read on this machine is indistinguishable from an agent that
+      // was never used in this directory.
+      const notices = await readerNotices();
+      process.stdout.write(
+        `no agent transcript found — looked under ${READER_ROOTS()}\n` +
+          notices.map((why) => `  note: ${why}\n`).join(''),
+      );
       return 1;
     }
     const transcript = await found.reader.read(found.path);

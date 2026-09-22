@@ -190,12 +190,20 @@ npx @stroq/cli sent --transcript ~/.codex/sessions/<y>/<m>/<d>/rollout-<id>.json
 npx @stroq/cli sent              # a session from Stroq's own audit log
 ```
 
-**Claude Code and Codex CLI.** `--last` takes the newest session either of them
+**Claude Code, Codex CLI and Cursor.** `--last` takes the newest session any of them
 recorded for this directory, and a file named with `--transcript` is matched to a
-reader by what is inside it rather than by where it sits. Cursor keeps its history
-in an undocumented SQLite blob and Windsurf leaves no local transcript at all, so
-neither is claimed: a reader written against a format nobody can test is coverage
-nobody has verified.
+reader by what is inside it rather than by where it sits.
+
+Cursor keeps no transcript files: every session is a set of rows in one SQLite store,
+`…/User/globalStorage/state.vscdb`, so a session is addressed as `<store>#<session>`
+and the store is opened read-only. It is also the one reader that can be missing at
+run time — it needs `node:sqlite`, which Node 22.11 does not have — and `sent` says so
+by name rather than reporting an empty session.
+
+Windsurf leaves no local transcript at all; Copilot CLI leaves logs but nothing of the
+conversation; Antigravity keeps its trajectories as base64-wrapped protobuf inside a
+VS Code state database. None of the three is claimed: a reader written against a
+format nobody can test is coverage nobody has verified.
 
 ```text
 CREDENTIALS THAT WERE IN THIS SESSION'S TRAFFIC (1)

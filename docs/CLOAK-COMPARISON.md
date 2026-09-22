@@ -18,7 +18,7 @@ If your problem is "I paste customer records into ChatGPT", AgentCloak is the an
 | **Channel** | Person ↔ ChatGPT Desktop, the whole conversation | Agent's MCP client ↔ one stdio MCP server |
 | **What it protects from** | The model provider seeing what you typed or what it echoes back | The model provider seeing what a third-party server returned, and — for credentials — the third-party server receiving what it should not |
 | **Who has to cooperate** | Nobody. It wraps the app you already use | The MCP client must launch stdio servers, which it already does |
-| **Names (`Peter Parker`)** | **Yes**, anywhere | **In a labelled field only** — `{"first_name":"Peter"}` yes, the same name in prose no. See "Where AgentCloak is ahead" |
+| **Names (`Peter Parker`)** | **Yes**, anywhere | **In a labelled field, and anywhere in the same result once a field has named that person** — `{"first_name":"Peter","note":"call Peter"}` claims both. A name that NO field in the result names is not detected. See "Where AgentCloak is ahead" |
 | **Street addresses** | **Yes** | **No** |
 | **Email** | Yes | Yes |
 | **Phone** | Yes | Yes, with an E.164 7–15 digit check; a bare unformatted digit run is deliberately not treated as a phone number |
@@ -28,7 +28,7 @@ If your problem is "I paste customer records into ChatGPT", AgentCloak is the an
 | **Payment cards** | Yes (as bank data) | Yes, Luhn-validated |
 | **Exact credential values on this machine** | **No** — it has no index of your `.env`, `~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json` or credential-shaped environment variables | **Yes** — `FileSecretIndex` already knows them, which is a stronger claim than any pattern can make. An `AKIA…` with no vendor prefix, a random 40-character password, a `.env` value with no recognisable shape: all detected because Stroq read the file |
 | **Detection method** | Local model (NER) + deterministic rules | Deterministic only: exact-value lookup + regex with real validators (Luhn, mod-97, SSA rules, E.164) |
-| **Languages** | EN + 6 others | Language-independent, because nothing it detects is prose. That is not a feature, it is what "no NER" means |
+| **Languages** | EN + 6 others | Language-independent: what it detects in prose is a name the server itself spelled out in a field, matched literally, so a Kazakh or Japanese name works exactly as an English one does. That is not a feature, it is what "no NER" means |
 | **Reversibility** | Local dictionary; originals substituted back into the reply | Local dictionary per (session, server), `0600`, **12 idle hours** then forgotten, 2000-entry LRU cap. `rm -rf ~/.stroq/cloak` removes every one |
 | **Placeholder style** | Synthetic "digital twins" — `Peter Parker → Julio Schmidt` | Bracketed tokens — `[STROQ_EMAIL_1]`. See "Twins vs tokens" |
 | **Audit trail** | Not documented | Every substitution appended to the hash-chained audit log (`stroq log`, `stroq verify`), **kind and placeholder only, never the value** |
@@ -40,19 +40,19 @@ If your problem is "I paste customer records into ChatGPT", AgentCloak is the an
 
 ## Where AgentCloak is ahead
 
-**Names and addresses in prose.** AgentCloak detects the two categories most people actually mean by "PII" wherever they appear. Stroq detects them only where the server has **labelled** them: an MCP result is JSON, so `{"first_name":"Peter","street_address":"20 Ingram Street"}` is claimed from the key rather than guessed from the characters — schema is a stronger claim than a model reading the same string, it costs no dependency, and it holds for names an English-trained model has never seen.
+**An unlabelled name.** AgentCloak detects the two categories most people actually mean by "PII" wherever they appear, from the characters alone. Stroq needs the server to have **named the person somewhere in the same result**: an MCP result is JSON, so `{"first_name":"Peter"}` is claimed from the key rather than guessed — schema is a stronger claim than a model reading the same string, it costs no dependency, and it holds for names an English-trained model has never seen. A second pass then looks for that same person in the leaves nobody labelled, so `{"note":"call Peter about the invoice"}` in that result is claimed too.
 
-A name in a sentence is the part we do not have. Run the MCP demo in this repository and the customer record shows both halves at once: the labelled fields come back as `[STROQ_NAME_1]` and `[STROQ_ADDRESS_1]`, while `Peter Parker` in the prose line travels to the model untouched. We left that in the demo rather than picking a record without a name in it.
+What is left is the record that names a person only in free text — a support ticket whose body says "spoke to Peter Parker" with no `first_name` anywhere. AgentCloak gets that one; Stroq does not.
 
-There is a second, narrower gap in the same place. A `secret` is chased through every string leaf of the result, because a credential is a high-entropy exact value that cannot collide with ordinary text. A name is a word, so it is claimed only in the field that labelled it — propagating `Parker` into every leaf containing it would blank "mark" for a customer called Mark, which is the false positive the key-driven approach exists to avoid.
+The second pass pays for itself with one narrow miss, and it is stated rather than hidden. A name that is also an ordinary English word — `Mark`, `Will`, `June` — is left alone **where a sentence begins**, because capitalisation cannot separate a person from a verb in the one position where every word is capitalised. `Mark the invoice as paid.` stays readable; `ask Mark about it` is cloaked. The field that named Mark is cloaked either way, so what is lost is a mention, not the record.
 
-Why: names and addresses need NER, and the credible offline option (GLiNER-PII through ONNX Runtime) would add this project's **first native runtime dependency**. That is the same call that made `stroq run --sandbox` shell out to `srt` rather than link it. The detector interface (`CloakDetector`) exists so a later NER pass slots in without touching anything else, but the dependency is not being added on spec.
+Why no NER: the credible offline option (GLiNER-PII through ONNX Runtime) would add this project's **first native runtime dependency** and break `npx @stroq/cli`, which is how most people meet this tool. That is the same call that made `stroq run --sandbox` shell out to `srt` rather than link it. It is also a call nobody here can currently make on evidence: two independent corpora on the machine this was built on — Cursor's 65 recorded MCP results and 299 more across 631 Claude Code transcripts — contain **zero** fields naming a person, so there is nothing local to measure a model's accuracy against, and a model evaluated only on fixtures its own author wrote is not evaluated. The detector interface (`CloakDetector`) exists so an NER pass slots in without touching anything else, but the dependency is not being added on spec.
 
 **A consumer-grade desktop UI.** AgentCloak is an application a non-technical person installs and uses. This is a flag on a proxy in a JSON config that an installer edits, and the only way to see what it did is `stroq log`. If the person who needs protecting is not a developer, this is not for them.
 
 **Breadth of channel.** AgentCloak covers an entire conversation, including everything the human types. Stroq's cloak covers exactly one MCP server's `tools/call` traffic. Anything the agent reads from a file, fetches from the web, or gets out of a shell command reaches the model in the clear — Stroq *scans* all of those and taints the session on what it finds, but it does not, and structurally cannot, redact them (see below).
 
-**More languages.** Seven against effectively none, since nothing in v1 reads prose.
+**More languages.** Seven against a different thing entirely: Stroq reads prose only for names a field already spelled out, so it is language-independent where it works and blind where no field named anyone, in every language equally.
 
 ## Where the Stroq cloak is ahead
 
