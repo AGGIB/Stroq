@@ -27,6 +27,7 @@ import {
   type SecretMatch,
 } from '@stroq/core';
 import type { Transcript } from '../replay/transcript.js';
+import { withoutHeredocData } from './heredoc.js';
 import {
   collectCredentials,
   type SentFileEvidence,
@@ -132,11 +133,17 @@ function fileEvidenceFor(tool: string): SentFileEvidence | null {
  * across every string leaf of the input so a path in any field is seen.
  */
 function credentialFilesIn(
+  tool: string,
   input: Readonly<Record<string, unknown>>,
   scope: SentIndexScope,
   sessionCwd: string | null,
 ): string[] {
-  const leaves = collectStrings(input);
+  // For a shell command, a heredoc body that nothing executes is text being written
+  // somewhere, not a file being opened — see `heredoc.ts` for the 12 of 20 findings on
+  // this machine that were exactly that.
+  const leaves = SHELL_TOOLS.has(tool)
+    ? collectStrings(input).map(withoutHeredocData)
+    : collectStrings(input);
   return scope.sourcePaths
     .filter((path) =>
       spellingsOf(path, scope, sessionCwd).some((spelling) =>
@@ -269,7 +276,7 @@ export async function scanTranscript(
     // one that was denied or errored never put anything in front of the model.
     const evidence = fileEvidenceFor(event.tool);
     if (evidence !== null) {
-      for (const path of credentialFilesIn(event.input, scope, transcript.cwd)) {
+      for (const path of credentialFilesIn(event.tool, event.input, scope, transcript.cwd)) {
         files.push({ path, tool: event.tool, evidence, call, at: event.at });
       }
     }
@@ -344,7 +351,7 @@ export function scanAuditLog(
       if (evidence === null) return [];
       // `null`: an audit entry carries no working directory, so a bare relative path
       // in one cannot be resolved to a file and is deliberately not guessed at.
-      return credentialFilesIn({ summary: entry.summary }, scope, null).map((path) => ({
+      return credentialFilesIn(entry.tool, { summary: entry.summary }, scope, null).map((path) => ({
         path,
         tool: entry.tool,
         evidence,

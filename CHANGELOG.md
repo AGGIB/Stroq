@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-09-23
+
+### Fixed
+
+- **`stroq sent` reported a path inside a heredoc as a credential file the command named.** For a shell call it searched the whole command string, so `cat > page.mjs <<'EOF'` whose body listed `~/.npmrc` as an example was reported as the session touching `~/.npmrc`. That was the first finding on the author's own machine before a launch post, and it was a site edit, not a read.
+
+  Measured over 626 Claude Code transcripts: 20 Bash calls named a credential file. 8 named it as an argument of the command (`cat ~/.npmrc | sed …`, `ls -la ~/.aws/credentials`, a node script reading the token) and all 8 are still reported. 12 named it only inside a heredoc body that was written to a file or read as text (HTML, a test file, a spec, a PR body, a commit message) and none of them is reported any more. Each of the 20 was checked by hand.
+
+  A body is still read when something executes it: `bash <<EOF`, `cat <<EOF | sh`, `python3 - <<EOF`, `ssh host <<EOF`. None of the 626 transcripts holds one that names a credential file, which is what makes keeping them free, and a real `bash <<EOF cat ~/.npmrc EOF` is still reported. The cost of that rule is stated rather than hidden: an interpreter script that only writes the path into a file is still reported, because from outside a script that reads a file and one that writes its name look the same. A heredoc whose delimiter never closes is left alone, since an unclosed `<<n` is as likely to be a shift inside `$(( ))`.
+
 ## [0.15.1] - 2026-09-23
 
 ### Fixed
