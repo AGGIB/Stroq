@@ -173,7 +173,7 @@ describe('cloaking a value because of the field it arrived in', () => {
    * than a guess about the characters in it — and unlike NER it holds for a name
    * no English-trained model has seen.
    */
-  it('claims a name and a street from their keys, and leaves prose alone', async () => {
+  it('claims a name and a street from their keys, then finds the person in the prose', async () => {
     const { cloak } = fixture(createCloakDetector({ cwd: process.cwd() }));
     const out = await cloak.cloakResult({
       content: [{ type: 'text', text: 'Customer 8812: Peter Parker lives in Queens.' }],
@@ -199,25 +199,27 @@ describe('cloaking a value because of the field it arrived in', () => {
     expect(structured['city']).toBe('New York');
     expect(structured['name']).toBe('invoice-2026.pdf');
 
-    // The prose line is the remaining gap, and the demo shows it rather than
-    // hiding it: "Parker" here is the same string as the labelled `last_name`, so
-    // it IS replaced — but "Peter Parker" as written is not a leaf anyone labelled.
+    // The prose line carries the same person the fields named, and the second pass
+    // reaches it: two labelled values, so two placeholders, which keeps the record
+    // readable as a first and a last name rather than one opaque blob. Everything
+    // that is not a name is untouched — the model still knows which customer, where
+    // they live and that the sentence is about living somewhere.
     const prose = (result['content'] as { text: string }[])[0]?.text ?? '';
-    expect(prose).toContain('Customer 8812');
+    expect(prose).toMatch(/^Customer 8812: \[STROQ_NAME_\d+] \[STROQ_NAME_\d+] lives in Queens\.$/);
+    // The same stand-in in the field and in the sentence, so the two halves of the
+    // record still refer to one person.
+    expect(prose).toContain(structured['first_name'] ?? '');
   });
 
-  it('claims the labelled leaf, and states that it does not chase the value into prose', async () => {
+  it('chases a labelled name into the prose of the same result', async () => {
     /**
-     * The limit, pinned rather than papered over. A key claims the LEAF it labels.
-     * The same name written inside an unlabelled sentence is a different leaf and
-     * is left alone.
+     * What used to be the pinned limit. A key claims the leaf it labels, and a
+     * second pass then looks for that same person in the leaves nobody labelled —
+     * because cloaking the field and handing the model the sentence beside it
+     * protects nothing.
      *
-     * A `secret` does chase its value through every leaf (`secretSpans`), and the
-     * difference is not an inconsistency: a credential is a high-entropy exact
-     * string that cannot collide with prose, while a name is a word. Propagating
-     * `Parker` into every leaf that contains it means blanking "mark" for a
-     * customer called Mark — the false positive this whole approach exists to
-     * avoid, traded for a gap that is already the NER gap by another route.
+     * The claim is still schema-backed: the server named Parker one field over.
+     * Nothing here decides that a capitalised word is a person.
      */
     const { cloak } = fixture(createCloakDetector({ cwd: process.cwd() }));
     const out = await cloak.cloakResult({
@@ -227,6 +229,25 @@ describe('cloaking a value because of the field it arrived in', () => {
       'structuredContent'
     ] as Record<string, string>;
     expect(structured['first_name']).toMatch(/^\[STROQ_NAME_\d+]$/);
-    expect(structured['note']).toBe('Parker signed on Tuesday');
+    // The SAME placeholder in both: one person, one stand-in, so the model can still
+    // reason that the note is about the customer in the record.
+    expect(structured['note']).toBe(`${structured['first_name']} signed on Tuesday`);
+  });
+
+  it('leaves an ordinary word alone where a sentence begins with it', async () => {
+    /**
+     * The cost the second pass has to keep paying. `Mark` is a customer and also a
+     * verb, and at the start of a sentence capitalisation cannot tell them apart —
+     * so there, and only there, the word is left for the model to read.
+     */
+    const { cloak } = fixture(createCloakDetector({ cwd: process.cwd() }));
+    const out = await cloak.cloakResult({
+      structuredContent: { first_name: 'Mark', note: 'Mark the invoice as paid.' },
+    });
+    const structured = (out as { result: Record<string, any> }).result[
+      'structuredContent'
+    ] as Record<string, string>;
+    expect(structured['first_name']).toMatch(/^\[STROQ_NAME_\d+]$/);
+    expect(structured['note']).toBe('Mark the invoice as paid.');
   });
 });

@@ -12,8 +12,9 @@ import { detectKeyedFields, PERSON_KEYS, PLACE_KEYS } from '../src/cloak/keyed.j
  * than any NER pass can make about the same characters, it costs no dependency,
  * and it holds for names a model trained on English has never seen.
  *
- * What it does not do is a name in prose — `{"text":"call Peter about the invoice"}`
- * — which is the remainder NER would still be for.
+ * What it does not do on its own is a name in prose — `{"text":"call Peter"}`.
+ * `detectAcrossLeaves` reaches that by carrying these claims to the other leaves of
+ * the same result; a person no field names anywhere is the remainder NER is for.
  */
 describe('detectKeyedFields', () => {
   const span = (text: string, keys: string[]) => detectKeyedFields(text, new Set(keys));

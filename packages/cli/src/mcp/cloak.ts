@@ -2,6 +2,7 @@ import {
   MAX_CLOAK_CHARS,
   applySpans,
   collectKeyedStrings,
+  detectAcrossLeaves,
   findPlaceholders,
   mapStrings,
   mergeSpans,
@@ -128,11 +129,11 @@ export class McpCloak {
     // `first_name` in one row and inside a `note` in another is detected once and
     // replaced in BOTH — a value cloaked in one leaf and left in the next is a value
     // the model still reads.
-    const spansByText = new Map<string, readonly CloakSpan[]>();
-    for (const [text, keys] of collectKeyedStrings(result)) {
-      const spans = mergeSpans(await this.opts.detector.detect(text, keys));
-      if (spans.length > 0) spansByText.set(text, spans);
-    }
+    //
+    // `detectAcrossLeaves` then makes a second pass with the names this result
+    // labelled itself, so a person named in a field is also claimed where the same
+    // result mentions them in prose.
+    const spansByText = await detectAcrossLeaves(collectKeyedStrings(result), this.opts.detector);
     if (spansByText.size === 0) return { kind: 'unchanged' };
 
     const requests: CloakRequest[] = [];
