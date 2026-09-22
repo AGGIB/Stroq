@@ -12,12 +12,19 @@ import {
   loadRuleOverrides,
   loadRuleSources,
   RulesBuildError,
+  BLOB_CHARS,
+  DEFAULT_BLOBS,
+  PRODUCTION_CAP_MS,
+  PRODUCTION_CHARS,
+  runTimingGate,
   runBenignGate,
   SLOW_FACTOR,
   type AtrRule,
   type Bundle,
   type RuleTiming,
 } from '../../../../scripts/lib/rules-pipeline.js';
+import { loadBundledRules } from '../../src/rules/bundle.js';
+import { DEFAULT_MAX_CHARS } from '../../src/scan/scanner.js';
 
 // Minimal ATR-format rule bodies. `id` must match /^[A-Z]+-\d{4}-\d{5}$/
 // (see atr-types.ts) — these ids are made up and don't collide with any
@@ -389,5 +396,88 @@ detection:
       );
       expect(() => loadRuleOverrides(file)).toThrow(/"from" must be a non-empty string/);
     });
+  });
+});
+
+describe('the production-size gate', () => {
+  /**
+   * The gap this closes, measured on the shipped set: the escalation gate times
+   * every rule on blobs up to 32,768 characters, while `scanContent` runs in
+   * production against up to 200,000 — 6.1x more. Backtracking is superlinear, so
+   * comfortable at the gate's largest blob is not comfortable at the size a rule
+   * will actually be handed.
+   *
+   * It is the SAME gate at a different size, deliberately: warmed, taken as a
+   * minimum, and decided relative to the population's own p95. An absolute
+   * ceiling was tried first and was wrong — it passed here and convicted a rule
+   * on a slower CI runner, which is the exact failure `measureRuleTimingsStable`
+   * and `SLOW_FACTOR` are documented against a few hundred lines above.
+   *
+   * What is NOT asserted here is that a superlinear rule clears the small blob
+   * and fails the large one. Proving that needs a fixture whose cost is a
+   * specific multiple on unknown hardware, which is the flakiness this file
+   * exists to avoid — and a catastrophic fixture at 200,000 characters does not
+   * terminate at all. The disable-and-throw policy is covered by the escalation
+   * gate's own tests; what is new here is only the size, so the size is what is
+   * pinned.
+   */
+  it('measures at the size production actually allows, not the gate\u2019s largest blob', () => {
+    const result = runTimingGate(loadBundledRules().slice(0, 1), DEFAULT_SLOW_MS, DEFAULT_BLOBS, [
+      PRODUCTION_CHARS,
+    ]);
+    expect(result.measurements.map((m) => m.size)).toEqual([PRODUCTION_CHARS]);
+    expect(PRODUCTION_CHARS).toBeGreaterThan(BLOB_CHARS);
+  });
+
+  it('measures the number the engine will actually hand it', () => {
+    // The drift guard. If these separate, the gate is testing a size production
+    // never uses and every comment about it is false.
+    expect(PRODUCTION_CHARS).toBe(DEFAULT_MAX_CHARS);
+  });
+
+  /**
+   * There is deliberately no "every shipped rule passes" assertion here.
+   *
+   * It was written, and CI taught the lesson: a 639-rule timing sweep at 200,000
+   * characters is six times the work of the gate's own sweep, so the window for a
+   * shared runner to deschedule one measurement is six times wider, and something
+   * eventually catches a hiccup. It convicted `ATR-2026-02304`, which costs
+   * 0.04 ms here and ranks 283rd of 639 against a 37.79 ms threshold — noise, not
+   * a slow rule. A test that fails on noise teaches people to rerun CI rather
+   * than to read it.
+   *
+   * The gate belongs where timing decisions already live: `pnpm build:rules`,
+   * which runs on one machine and produces the bundle. `check:rules` then
+   * verifies that bundle byte for byte, so CI still proves the gate ran — it just
+   * does not re-run a stopwatch. What is deterministic is asserted above.
+   */
+});
+
+describe('the cap scales with the input size', () => {
+  /**
+   * The bug this pins, found by CI rather than by reading: `deriveThresholdMs`
+   * takes the MINIMUM of the cap and p95 x SLOW_FACTOR. At 32,768 characters
+   * p95 x 30 is about 7 ms, so the relative term binds and the 25 ms cap is a
+   * floor on strictness. At 200,000 it is about 42 ms, so an unchanged cap
+   * becomes the binding term and the gate turns absolute — it passed here and
+   * convicted a rule on a slower runner.
+   */
+  const measurements = (ms: number): RuleTiming[] =>
+    Array.from({ length: 100 }, (_, n) => ({ ruleId: `R-${n}`, ms, blob: 'b', size: 0 }));
+
+  it('lets the relative term bind at production size', () => {
+    // p95 x 30 = 42 ms here, under the scaled cap and over the unscaled one.
+    const at = measurements(1.4);
+    expect(deriveThresholdMs(at, DEFAULT_SLOW_MS)).toBe(DEFAULT_SLOW_MS);
+    expect(deriveThresholdMs(at, PRODUCTION_CAP_MS)).toBeCloseTo(1.4 * SLOW_FACTOR, 5);
+  });
+
+  it('still lets the cap bind on a machine slow enough to deserve it', () => {
+    expect(deriveThresholdMs(measurements(200), PRODUCTION_CAP_MS)).toBe(PRODUCTION_CAP_MS);
+  });
+
+  it('scales the cap by exactly the size ratio it is used at', () => {
+    expect(PRODUCTION_CAP_MS).toBeCloseTo((DEFAULT_SLOW_MS * PRODUCTION_CHARS) / BLOB_CHARS, 5);
+    expect(PRODUCTION_CAP_MS).toBeGreaterThan(DEFAULT_SLOW_MS);
   });
 });

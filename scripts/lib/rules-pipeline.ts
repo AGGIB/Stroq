@@ -264,17 +264,24 @@ export const TIMING_PASSES = 3;
 /**
  * Derives this machine's disable threshold from its own measurements.
  *
- * Capped by `DEFAULT_SLOW_MS` so a slow machine can only ever be *stricter*
- * than the historical absolute gate, never more permissive: the scan budget a
- * rule eventually competes with (`DEFAULT_BUDGET_MS`) is wall-clock on the
- * *user's* machine, so a fast builder must not be able to bless a rule that is
+ * Capped by `capMs` so a slow machine can only ever be *stricter* than the
+ * historical absolute gate, never more permissive: the scan budget a rule
+ * eventually competes with (`DEFAULT_BUDGET_MS`) is wall-clock on the *user's*
+ * machine, so a fast builder must not be able to bless a rule that is
  * catastrophic for everyone else.
+ *
+ * The cap is a parameter because it is a budget for one input size. Reused
+ * unchanged at a larger size it stops being a floor on strictness and becomes the
+ * binding term — see `PRODUCTION_CAP_MS`, which scales it.
  */
-export function deriveThresholdMs(measurements: readonly RuleTiming[]): number {
-  if (measurements.length === 0) return DEFAULT_SLOW_MS;
+export function deriveThresholdMs(
+  measurements: readonly RuleTiming[],
+  capMs: number = DEFAULT_SLOW_MS,
+): number {
+  if (measurements.length === 0) return capMs;
   const sorted = [...measurements].map((m) => m.ms).sort((a, b) => a - b);
   const anchor = sorted[Math.floor(sorted.length * ANCHOR_PERCENTILE)] ?? 0;
-  return Math.min(DEFAULT_SLOW_MS, SLOW_FACTOR * anchor);
+  return Math.min(capMs, SLOW_FACTOR * anchor);
 }
 
 export interface RuleTiming {
@@ -345,6 +352,36 @@ export function measureRuleTimingsStable(
   return rules.map((r) => best.get(r.id) ?? { ruleId: r.id, ms: -1, blob: '', size: 0 });
 }
 
+/**
+ * The size the second gate measures at: the largest input `scanContent` will ever
+ * hand a rule.
+ *
+ * Kept equal to the engine's own `DEFAULT_MAX_CHARS` rather than imported, so that
+ * the number the gate tests at is visible in the gate — and so the two can only
+ * diverge through an edit that reads this sentence. The shipped-bundle assertion in
+ * the test suite fails if they do.
+ */
+export const PRODUCTION_CHARS = 200_000;
+
+/**
+ * The ceiling for the production-size gate, and why it is not `DEFAULT_SLOW_MS`.
+ *
+ * `DEFAULT_SLOW_MS` is a wall-clock number calibrated against `BLOB_CHARS`. Reused
+ * unchanged at 6.1x the input it stops being a floor on strictness and becomes the
+ * binding term: `deriveThresholdMs` takes the MINIMUM of the cap and p95 x 30, and
+ * at this size p95 x 30 is about 42 ms here, so the 25 ms cap would always win —
+ * turning a deliberately relative gate into an absolute one. That was not a theory:
+ * it passed on this machine and convicted a rule on a slower CI runner, which is
+ * precisely what `SLOW_FACTOR`'s comment above says relative anchoring exists to
+ * prevent.
+ *
+ * A cap is a budget for an input size, so it scales with the input size. At 152 ms
+ * the relative term binds on ordinary hardware and the cap binds only on a machine
+ * slow enough that it should be stricter — which is the role the cap was written
+ * for.
+ */
+export const PRODUCTION_CAP_MS = (DEFAULT_SLOW_MS * PRODUCTION_CHARS) / BLOB_CHARS;
+
 export interface TimingGateResult {
   readonly disabled: ReadonlyMap<string, string>;
   readonly measurements: readonly RuleTiming[];
@@ -366,7 +403,7 @@ export function runTimingGate(
   stages: readonly number[] = DEFAULT_STAGES,
 ): TimingGateResult {
   const measurements = measureRuleTimingsStable(rules, capMs, blobs, stages);
-  const thresholdMs = deriveThresholdMs(measurements);
+  const thresholdMs = deriveThresholdMs(measurements, capMs);
   const disabled = new Map<string, string>();
   for (const m of measurements) {
     if (m.ms <= thresholdMs) continue;
