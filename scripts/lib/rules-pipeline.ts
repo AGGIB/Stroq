@@ -345,6 +345,75 @@ export function measureRuleTimingsStable(
   return rules.map((r) => best.get(r.id) ?? { ruleId: r.id, ms: -1, blob: '', size: 0 });
 }
 
+/**
+ * The largest input `scanContent` will ever hand a rule.
+ *
+ * Kept equal to the engine's own `DEFAULT_MAX_CHARS` rather than imported, so
+ * that the number the gate tests at is visible in the gate — and so the two can
+ * only diverge through an edit that reads this sentence. `productionGate`'s
+ * shipped-set assertion in the test suite fails if they do.
+ */
+export const PRODUCTION_CHARS = 200_000;
+
+/** Times every rule against every blob at one fixed size, worst blob wins. */
+export function measureAtSize(
+  rules: readonly CompiledRule[],
+  size: number,
+  blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
+): readonly RuleTiming[] {
+  return rules.map((rule) => {
+    let worst: RuleTiming = { ruleId: rule.id, ms: -1, blob: '', size };
+    for (const blob of blobs) {
+      const text = blob.build(size);
+      const started = performance.now();
+      matchRules([rule], text);
+      const ms = performance.now() - started;
+      if (ms > worst.ms) worst = { ruleId: rule.id, ms, blob: blob.name, size };
+    }
+    return worst;
+  });
+}
+
+/**
+ * The second gate: no rule may be slow at the size production actually allows.
+ *
+ * The escalation gate above measures up to 32,768 characters and decides
+ * RELATIVELY, against this machine's own p95. Both choices are right for what it
+ * does — it has to terminate on a catastrophic rule, and it has to give the same
+ * verdict on a fast laptop and a slow runner. Neither answers this question:
+ * backtracking is superlinear, so being comfortable on the gate's largest blob
+ * is not the same as being comfortable on 200,000 characters, which is 6.1x more
+ * and is what `scanContent` will hand it.
+ *
+ * Measured on the shipped set at that size: every rule is linear (the ratio from
+ * 32 KB to 200 KB tracks the size ratio), the slowest single rule is 3.4 ms, and
+ * the whole set with every variant costs 117 ms against a 500 ms scan budget. So
+ * this gate convicts nothing today. It is here because the scanner checks its
+ * budget BETWEEN rules and cannot interrupt one that has already entered V8:
+ * the only place a pathological regex can be stopped is before it ships, and
+ * until now the place it shipped through did not test it at full size.
+ *
+ * Absolute, not relative: this is a question about a fixed budget, so a faster
+ * machine must not be allowed to admit a slower rule. Returns the rules over
+ * `ceilingMs`, with the same value-free reason the escalation gate uses, because
+ * it is committed to `rules/atr-disabled.json`.
+ */
+export function productionGate(
+  rules: readonly CompiledRule[],
+  ceilingMs: number = DEFAULT_SLOW_MS,
+  blobs: readonly BlobSpec[] = DEFAULT_BLOBS,
+): ReadonlyMap<string, string> {
+  const over = new Map<string, string>();
+  for (const timing of measureAtSize(rules, PRODUCTION_CHARS, blobs)) {
+    if (timing.ms <= ceilingMs) continue;
+    const reason = `slow on ${timing.blob}@${PRODUCTION_CHARS} (production-size perf gate)`;
+    if (timing.ruleId.startsWith(STROQ_PREFIX))
+      throw new RulesBuildError(`${timing.ruleId} — ${reason}`);
+    over.set(timing.ruleId, reason);
+  }
+  return over;
+}
+
 export interface TimingGateResult {
   readonly disabled: ReadonlyMap<string, string>;
   readonly measurements: readonly RuleTiming[];

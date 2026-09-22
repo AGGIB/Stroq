@@ -12,12 +12,16 @@ import {
   loadRuleOverrides,
   loadRuleSources,
   RulesBuildError,
+  measureAtSize,
+  PRODUCTION_CHARS,
+  productionGate,
   runBenignGate,
   SLOW_FACTOR,
   type AtrRule,
   type Bundle,
   type RuleTiming,
 } from '../../../../scripts/lib/rules-pipeline.js';
+import { loadBundledRules } from '../../src/rules/bundle.js';
 
 // Minimal ATR-format rule bodies. `id` must match /^[A-Z]+-\d{4}-\d{5}$/
 // (see atr-types.ts) — these ids are made up and don't collide with any
@@ -389,5 +393,69 @@ detection:
       );
       expect(() => loadRuleOverrides(file)).toThrow(/"from" must be a non-empty string/);
     });
+  });
+});
+
+describe('the production-size gate', () => {
+  /**
+   * The gap this closes, measured on the shipped set: the escalation gate times
+   * every rule on blobs up to 32,768 characters, and `scanContent` runs in
+   * production against up to 200,000 — 6.1x more. Backtracking is superlinear,
+   * so a rule that is comfortable at the gate's largest blob is not thereby
+   * comfortable at the size it will actually be handed.
+   *
+   * Nothing shipped today crosses it (the whole set at the production cap is
+   * 79 ms single-pass, the slowest single rule 3.4 ms, against a 500 ms scan
+   * budget). The gate exists so the next vendored rule drop cannot.
+   */
+  const quadratic = (id: string): AtrRule => ({
+    id,
+    title: 'catastrophic on a long run of a',
+    severity: 'high',
+    status: 'experimental',
+    tags: { category: 'test' },
+    // Classic nested quantifier: linear-ish on a short blob, quadratic on a long one.
+    detection: {
+      condition: 'any',
+      conditions: [{ field: 'content', operator: 'regex', value: '(a+)+$' }],
+    },
+    test_cases: { true_positives: [], true_negatives: [] },
+    author: 'test',
+    date: '2026/09/22',
+    schema_version: '1.0',
+  });
+
+  it('times rules at the size production actually allows', () => {
+    const { compiled } = compileRules([quadratic('ATR-2026-99001')]);
+    const short = measureAtSize(compiled, 8_192);
+    const full = measureAtSize(compiled, PRODUCTION_CHARS);
+    expect(full[0]?.size).toBe(PRODUCTION_CHARS);
+    // The point of the gate: the cost is not the same number at both sizes.
+    expect(full[0]?.ms).toBeGreaterThan(short[0]?.ms ?? 0);
+  });
+
+  it('convicts a rule that only misbehaves at production size', () => {
+    const { compiled } = compileRules([quadratic('ATR-2026-99002')]);
+    const over = productionGate(compiled, 0.000_1);
+    expect(over.has('ATR-2026-99002')).toBe(true);
+    expect(over.get('ATR-2026-99002')).toMatch(/production/i);
+  });
+
+  it('leaves a linear rule alone', () => {
+    const linear: AtrRule = {
+      ...quadratic('ATR-2026-99003'),
+      detection: {
+        condition: 'any',
+        conditions: [{ field: 'content', operator: 'regex', value: 'zzz-not-present' }],
+      },
+    };
+    const { compiled } = compileRules([linear]);
+    expect(productionGate(compiled, DEFAULT_SLOW_MS).size).toBe(0);
+  });
+
+  it('holds for every rule that ships', () => {
+    // The assertion a slow rule would have to answer before it could land, run
+    // against the bundle the package actually ships rather than the sources.
+    expect(productionGate(loadBundledRules(), DEFAULT_SLOW_MS).size).toBe(0);
   });
 });
