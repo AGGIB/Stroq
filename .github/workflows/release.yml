@@ -53,15 +53,18 @@ jobs:
       - name: Test with coverage
         run: pnpm test:coverage
 
+      # Before the checks below: `check:reports` runs the bench, which imports
+      # `@stroq/core` from its built `dist`. ci.yml builds first for the same reason;
+      # on a fresh runner there is no `dist` until this step.
+      - name: Build
+        run: pnpm build
+
       - name: Verify rules, corpus, ATLAS and reports
         run: |
           pnpm build:rules --check --advisory-perf
           pnpm check:atlas
           pnpm check:bench-corpus
           pnpm check:reports
-
-      - name: Build
-        run: pnpm build
 
       - name: Run attack and fuzz gates
         run: |
