@@ -98,8 +98,15 @@ async function acquire(
           await fs.mkdir(reaper);
         } catch (reaperError) {
           if ((reaperError as NodeJS.ErrnoException).code !== 'EEXIST') throw reaperError;
-          if (await isStale(fs, reaper, Math.max(staleMs, 60_000)))
+          if (await isStale(fs, reaper, Math.max(staleMs, 60_000))) {
             await fs.rm(reaper, { recursive: true, force: true });
+            continue;
+          }
+          // Another contender is reaping, or died while it was. Wait like any other
+          // contended lock: going straight back to the top of the loop spun without a
+          // deadline until the reaper aged out, 60 s, far past the hook's own timeout.
+          if (Date.now() >= deadline) throw new Error(`lock timeout: ${lockDir}`);
+          await sleep(5 + Math.random() * 10);
           continue;
         }
         try {

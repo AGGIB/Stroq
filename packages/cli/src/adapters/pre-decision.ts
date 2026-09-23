@@ -17,6 +17,8 @@ export interface EngineEvent {
   readonly toolName: string;
   readonly toolInput: Record<string, unknown>;
   readonly cwd: string;
+  /** What the audit records instead of `toolInput`; see core's `PreToolEvent`. */
+  readonly auditInput?: Record<string, unknown>;
 }
 
 /**

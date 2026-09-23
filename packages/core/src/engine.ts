@@ -354,7 +354,7 @@ export class StroqEngine {
     const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
     const provenance = origin.counted.map(toEvidence);
     const summary = await this.safeSummary(
-      summarizeInput(event.toolName, event.toolInput),
+      summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
       event.cwd,
       matches,
     );

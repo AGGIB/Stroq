@@ -50,6 +50,18 @@ describe('doctorReport', () => {
     expect(check?.detail).toContain('PreToolUse');
   });
 
+  // A `.claude/settings.json` holding only the user's own permissions is in most
+  // projects. "Incomplete" means a Stroq install with events missing; a file with no
+  // Stroq entry at all is simply not an install, and must not fail the line for a
+  // user who installed Stroq for another agent.
+  it('does not call a settings file with no Stroq hook an incomplete install', async () => {
+    const file = settingsPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ permissions: { allow: ['Bash(ls)'] } }));
+    const check = (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'hooks');
+    expect(check?.detail).not.toContain('incomplete');
+  });
+
   it('reports missing hooks, then installed hooks', async () => {
     const before = await doctorReport(cwd);
     const byName = (name: string) => before.checks.find((c) => c.name === name)!;

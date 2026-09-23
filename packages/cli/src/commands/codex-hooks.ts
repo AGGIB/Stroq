@@ -192,6 +192,22 @@ export function missingStroqCodexHooks(settings: CodexHooksJson): readonly strin
   ];
 }
 
+/** Whether any event carries a Stroq handler — the file is a Stroq install at all. */
+export function hasAnyStroqCodexHook(settings: CodexHooksJson): boolean {
+  const events = nestedEvents(settings);
+  return Object.keys(events).some((event) =>
+    groupsOf(events, event).some(
+      (group) =>
+        isPlainObject(group) &&
+        Array.isArray(group.hooks) &&
+        group.hooks.some(
+          (handler: unknown) =>
+            isPlainObject(handler) && isStroqCodexHook(handler as unknown as CodexHookHandler),
+        ),
+    ),
+  );
+}
+
 export const hasStroqCodexHook = (settings: CodexHooksJson): boolean =>
   missingStroqCodexHooks(settings).length === 0;
 

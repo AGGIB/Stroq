@@ -104,6 +104,13 @@ export interface PreToolEvent {
   readonly toolName: string;
   readonly toolInput: Readonly<Record<string, unknown>>;
   readonly cwd: string;
+  /**
+   * What the audit log records for this call, when that must differ from what is
+   * judged. The MCP cloak judges the RESTORED arguments, because a restored value can
+   * change a path or command classification, but the log must keep the placeholders
+   * the model sent: the cloak promises that `audit.jsonl` never holds the value.
+   */
+  readonly auditInput?: Readonly<Record<string, unknown>>;
 }
 
 export interface PostToolEvent extends PreToolEvent {

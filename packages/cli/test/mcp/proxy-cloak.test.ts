@@ -181,6 +181,11 @@ describe('the MCP proxy with --cloak on', () => {
     expect(received).toContain('peter@bugle.example');
     expect(received).not.toContain(placeholder);
     expect(auditText()).toContain('"direction":"uncloak"');
+    // The call is JUDGED on the restored value, but the audit records what the model
+    // sent. Judging restored arguments (A-03) must not become a way for the real value
+    // to land in audit.jsonl, which the cloak promises never holds one.
+    expect(auditText()).not.toContain('peter@bugle.example');
+    expect(auditText()).toContain(`hello ${placeholder}`);
   });
 
   it('forwards a placeholder it cannot resolve as literal text rather than guessing', async () => {

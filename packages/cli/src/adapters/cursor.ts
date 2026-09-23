@@ -228,45 +228,101 @@ async function handleBlockingPre(engine: StroqEngine, event: EngineEvent): Promi
   return rendered === null ? NO_OUTPUT : json({ ...rendered });
 }
 
-/** Cursor's generic hook does not enforce `ask`, so render it as a deny. */
+/**
+ * Fields a Cursor Write or Delete may name its target in, compared with case and
+ * separators removed so `file_path`, `filePath` and `relativeWorkspacePath` are all
+ * read. Cursor documents the preToolUse envelope but not these fields, and no live
+ * payload has been recorded, so the list covers the spellings Cursor uses elsewhere:
+ * its hook events say `file_path`, its own edit records say `relativeWorkspacePath`
+ * and `targetFile`.
+ */
+const CURSOR_PATH_KEYS: ReadonlySet<string> = new Set([
+  'filepath',
+  'path',
+  'paths',
+  'file',
+  'files',
+  'target',
+  'targetfile',
+  'targetfiles',
+  'relativeworkspacepath',
+  'notebookpath',
+  'uri',
+]);
+
+const normalizeKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Every string under a path field, through arrays, stopping once past the cap. */
+function cursorWritePaths(toolInput: Readonly<Record<string, unknown>>): string[] | 'too-many' {
+  const paths: string[] = [];
+  const visit = (value: unknown, depth: number): boolean => {
+    if (typeof value === 'string') {
+      if (value.length > 0) paths.push(value);
+      return paths.length <= MAX_PATCH_PATHS;
+    }
+    if (Array.isArray(value) && depth < 4) return value.every((item) => visit(item, depth + 1));
+    return true;
+  };
+  for (const [key, value] of Object.entries(toolInput)) {
+    if (!CURSOR_PATH_KEYS.has(normalizeKey(key))) continue;
+    if (!visit(value, 0)) return 'too-many';
+  }
+  return paths;
+}
+
+/**
+ * What the audit records for a Cursor Write or Delete whose target Stroq could not
+ * find. An `allow` with its own rule id, so `stroq log` shows the gap by name.
+ */
+export const CURSOR_WRITE_PATH_UNREAD: Decision = {
+  effect: 'allow',
+  ruleId: 'cursor-write-path-unread',
+  reason:
+    'Cursor sent a Write or Delete whose tool_input names no path Stroq recognises; it was not classified',
+};
+
+/**
+ * `preToolUse` on Cursor's `Write` and `Delete` tools: classify every path the call
+ * names, as core's `Write` would be. Cursor accepts `ask` from this hook but does not
+ * enforce it, so an ask is rendered as a deny.
+ *
+ * A call whose path cannot be found is ALLOWED and recorded, unlike Codex's and
+ * Copilot's unreadable-input denies. There the model shapes the arguments, so an
+ * unrecognised shape can be a way around the classifier. Here Cursor itself chooses
+ * the keys and the model only fills in values, so an unrecognised shape is a gap in
+ * what Stroq knows about Cursor, and answering it with a deny would block every file
+ * the agent writes. A path list above the cap is still denied: its length is the
+ * model's to choose.
+ */
 async function handleGenericPre(
   engine: StroqEngine,
   event: EngineEvent,
   input: CursorHookInput,
 ): Promise<HookOutput> {
-  if (input.tool_name !== 'Write' && input.tool_name !== 'Delete')
-    return cursorDenyOutput('Stroq could not identify the Cursor write/delete tool');
-  const paths: string[] = [];
-  let unreadable = false;
-  let tooMany = false;
-  for (const key of ['file_path', 'filepath', 'path', 'target', 'target_file', 'notebook_path']) {
-    if (!Object.hasOwn(event.toolInput, key)) continue;
-    const value = event.toolInput[key];
-    const items = Array.isArray(value) ? value : [value];
-    if (items.length > MAX_PATCH_PATHS) {
-      tooMany = true;
-      break;
-    }
-    for (const item of items) {
-      if (typeof item !== 'string' || item.length === 0) unreadable = true;
-      else paths.push(item);
-    }
-    if (paths.length > MAX_PATCH_PATHS) {
-      tooMany = true;
-      break;
-    }
-  }
-  if (unreadable || paths.length === 0 || tooMany) {
+  // The installed matcher is `Write|Delete`; anything else reaching here came from a
+  // hand-edited matcher and is not a call this handler knows how to classify.
+  if (input.tool_name !== 'Write' && input.tool_name !== 'Delete') return NO_OUTPUT;
+  const paths = cursorWritePaths(event.toolInput);
+  if (paths === 'too-many') {
     const decision: Decision = {
       effect: 'deny',
-      ruleId: tooMany ? 'cursor-too-many-paths' : 'cursor-unreadable-write',
-      reason: tooMany
-        ? `Cursor supplied more than ${MAX_PATCH_PATHS} write/delete paths`
-        : 'Cursor supplied a write/delete without a readable path',
+      ruleId: 'cursor-too-many-paths',
+      reason: `Cursor supplied more than ${MAX_PATCH_PATHS} write/delete paths`,
     };
-    return denyDirectly(event, decision, 'cursor: unreadable write/delete paths', (recorded) =>
+    return denyDirectly(event, decision, 'cursor: too many write/delete paths', (recorded) =>
       cursorDenyOutput(`Stroq blocked this action (${recorded.ruleId}): ${recorded.reason}`),
     );
+  }
+  if (paths.length === 0) {
+    await new AuditLog(auditFile()).append({
+      sessionId: event.sessionId,
+      phase: 'pre',
+      tool: 'Write',
+      summary: `cursor ${input.tool_name}: keys ${Object.keys(event.toolInput).join(', ') || '(none)'}`,
+      classes: [],
+      decision: CURSOR_WRITE_PATH_UNREAD,
+    });
+    return NO_OUTPUT;
   }
   const result = await decidePre(
     engine,

@@ -217,6 +217,8 @@ export async function judgeToolCall(
   message: Record<string, unknown>,
   id: JsonRpcId,
   params: Record<string, unknown>,
+  /** What the model sent, when `params` has had cloak placeholders restored. */
+  sentParams: Record<string, unknown> = params,
 ): Promise<JudgeVerdict> {
   const rawName = params['name'];
   const toolInput = mcpCallInput(params);
@@ -256,7 +258,13 @@ export async function judgeToolCall(
         id,
       ),
     };
-  const event: EngineEvent = { sessionId: ctx.sessionId, toolName, toolInput, cwd: ctx.cwd };
+  const event: EngineEvent = {
+    sessionId: ctx.sessionId,
+    toolName,
+    toolInput,
+    cwd: ctx.cwd,
+    ...(sentParams === params ? {} : { auditInput: mcpCallInput(sentParams) }),
+  };
   const { decision, provenance, secrets } = await decidePre(ctx.engine, event, [toolInput]);
   if (decision.effect === 'allow')
     return { forward: true, reply: null, pending: { method: 'tools/call', toolName } };

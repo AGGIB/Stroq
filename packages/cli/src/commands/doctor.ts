@@ -5,7 +5,12 @@ import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats }
 import { secretsFile, stroqHome } from '../paths.js';
 import { CURSOR_BLOCKING_EVENTS, CURSOR_EVENTS } from '../adapters/cursor.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
-import { codexHooksPath, missingStroqCodexHooks, readCodexHooks } from './codex-hooks.js';
+import {
+  codexHooksPath,
+  hasAnyStroqCodexHook,
+  missingStroqCodexHooks,
+  readCodexHooks,
+} from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
 import { isStroqWindsurfHooks, readWindsurfHooks, windsurfHooksPath } from './windsurf-hooks.js';
 import {
@@ -106,6 +111,23 @@ function checkClaudeHooks(file: string): {
         )
       );
     };
+    // "Incomplete" is a Stroq install with events missing. A settings file with no
+    // Stroq handler anywhere is not an install at all, and most projects have one.
+    const anyStroq = Object.values(hooks)
+      .flat()
+      .some(
+        (group) =>
+          group !== null &&
+          typeof group === 'object' &&
+          Array.isArray(group.hooks) &&
+          group.hooks.some(
+            (handler: unknown) =>
+              handler !== null &&
+              typeof handler === 'object' &&
+              isStroqHandler(handler as HookHandler),
+          ),
+      );
+    if (!anyStroq) return { installed: false, error: null };
     const missing = [
       ...(!hasEvent('PreToolUse', PRE_MATCHER) ? ['PreToolUse (matcher)'] : []),
       ...(!hasEvent('PostToolUse', POST_MATCHER) ? ['PostToolUse (matcher)'] : []),
@@ -123,6 +145,8 @@ function checkCursorHooks(file: string): {
 } {
   try {
     const hooks = readCursorHooks(file).hooks ?? {};
+    if (!Object.values(hooks).flat().some(isStroqCursorHook))
+      return { installed: false, error: null };
     const missing = CURSOR_EVENTS.flatMap((event) => {
       const entries = hooks[event];
       const complete =
@@ -149,7 +173,9 @@ function checkCodexHooks(file: string): {
   readonly missing?: readonly string[];
 } {
   try {
-    const missing = missingStroqCodexHooks(readCodexHooks(file));
+    const settings = readCodexHooks(file);
+    if (!hasAnyStroqCodexHook(settings)) return { installed: false, error: null };
+    const missing = missingStroqCodexHooks(settings);
     return { installed: missing.length === 0, error: null, missing };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
@@ -246,11 +272,17 @@ function agentScopes(
   return (['project', 'user'] as const).map((scope) => {
     const file = pathFor(scope, cwd);
     const status = { scope, file, ...check(file) };
-    if (!status.installed && status.missing?.length && existsSync(file))
+    // An install made by an older Stroq lacks events added since, and after an
+    // upgrade that is the likeliest reason for this line: say how to fix it, not only
+    // that it is wrong. `init` merges into the file it finds, so re-running it adds
+    // what is missing without touching the user's own hooks.
+    if (!status.installed && status.missing?.length && existsSync(file)) {
+      const init = `stroq init${agent === undefined || agent === 'claude-code' ? '' : ` --agent ${agent}`}${scope === 'user' ? ' --user' : ''}`;
       return {
         ...status,
-        detail: `${scope}: incomplete (${status.missing.join(', ')}) (${file})`,
+        detail: `${scope}: incomplete (${status.missing.join(', ')}) (${file}) — run \`${init}\` to add ${status.missing.length === 1 ? 'it' : 'them'}`,
       };
+    }
     if (!status.installed || agent === undefined) return status;
     let text: string;
     try {
@@ -525,7 +557,14 @@ export async function doctorReport(
             .map((a) => `"stroq init --agent ${a}"`)
             .join(' or ')}`,
   };
-  const hookChecks = opts.all || anyInstalled || anyBroken ? perAgentChecks : [collapsed];
+  // A partial install is not "nothing attempted" either: its own line names the
+  // missing events and the init command that adds them, which is what someone who
+  // has just upgraded Stroq needs to see.
+  const anyIncomplete = agents.some((agent) =>
+    agent.scopes.some((s) => (s.missing?.length ?? 0) > 0 && existsSync(s.file)),
+  );
+  const hookChecks =
+    opts.all || anyInstalled || anyBroken || anyIncomplete ? perAgentChecks : [collapsed];
   const home = stroqHome();
   const secrets = await checkSecrets();
   return {

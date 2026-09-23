@@ -107,6 +107,25 @@ describe('withLock', () => {
       'recovered',
     );
   });
+  // A reaper that dies between creating `.reaper` and removing it leaves a fresh
+  // directory with no owner in it. Contenders used to `continue` straight back to the
+  // top of the loop from that branch, with no pause and no deadline check, so every
+  // hook spun until the reaper aged out at 60 s — far past its own 3 s timeout and
+  // the agent's hook deadline. It has to time out like any other contended lock.
+  it('times out rather than spinning while another reaper holds the orphan', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-lock-reaper-'));
+    const lock = join(dir, 'x.lock');
+    await mkdir(lock);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    await mkdir(`${lock}.reaper`);
+    const started = Date.now();
+    await expect(
+      withLock(lock, async () => 'entered', { staleMs: 10, timeoutMs: 200 }),
+    ).rejects.toThrow(/lock timeout/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 10_000);
+
   it('releases the lock when the function throws', async () => {
     const lock = join(mkdtempSync(join(tmpdir(), 'stroq-lock-')), 'y.lock');
     await expect(
