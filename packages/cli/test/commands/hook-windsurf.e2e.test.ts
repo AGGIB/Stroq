@@ -2,37 +2,17 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 const cliDir = join(import.meta.dirname, '../..');
-const entry = join(cliDir, 'src/index.ts');
-/**
- * Two things make module resolution work with `cwd` OUTSIDE the repository (see the
- * comment on `runCli` below for why `cwd` has to be the temp project at all):
- *
- * 1. An absolute `file://` URL, not the bare specifier `tsx` the other e2e files
- *    pass: Node resolves a relative `--import` against the CHILD's working
- *    directory, and that is about to be a temp project rather than the repository,
- *    where `node_modules/tsx` would be found.
- * 2. `TSX_TSCONFIG_PATH` in the spawn's `env` below. tsx normally discovers a
- *    tsconfig by walking up from `cwd`, and walking up from a temp directory never
- *    reaches `packages/cli/tsconfig.json` — so its `paths` mapping (`@stroq/core` ->
- *    `../core/src/index.ts`) would never apply. Without it, `@stroq/core` resolves
- *    the ordinary Node way instead: through `packages/cli/node_modules/@stroq/core`
- *    to `packages/core/package.json`'s `exports.import`, i.e. the gitignored
- *    `dist/index.js` — which does not exist on a clean checkout, since CI runs tests
- *    before `pnpm build`. Pointing tsx at the CLI's own tsconfig explicitly, no
- *    matter what `cwd` is, keeps `@stroq/core` resolving to source everywhere.
- */
-const tsxLoader = pathToFileURL(join(cliDir, '../../node_modules/tsx/dist/loader.mjs')).href;
+const entry = CLI_ENTRY;
 
 /**
  * `cwd` is the PROJECT, not the CLI directory: the Windsurf adapter reads
  * `process.cwd()` for policy and never `tool_info.cwd`, exactly as Windsurf runs the
- * hook in the workspace root. `entry` stays absolute so the spawn still resolves, and
- * `TSX_TSCONFIG_PATH` below keeps `@stroq/core` resolving to source despite `cwd`
- * being nowhere near the repository — see the comment above `tsxLoader`.
+ * hook in the workspace root. `entry` is the self-contained built bundle, so it runs
+ * the same from any directory.
  */
 function runCli(
   args: string[],
@@ -41,12 +21,11 @@ function runCli(
   cwd: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--import', tsxLoader, entry, ...args], {
+    const child = spawn(process.execPath, [entry, ...args], {
       cwd,
       env: {
         ...process.env,
         STROQ_HOME: home,
-        TSX_TSCONFIG_PATH: join(cliDir, 'tsconfig.json'),
       },
     });
     let stdout = '';

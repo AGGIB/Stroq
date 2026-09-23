@@ -3,9 +3,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 const cliDir = join(import.meta.dirname, '../..');
-const entry = join(cliDir, 'src/index.ts');
+const entry = CLI_ENTRY;
 
 function runCli(
   args: string[],
@@ -13,7 +14,7 @@ function runCli(
   home: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', entry, ...args], {
+    const child = spawn(process.execPath, [entry, ...args], {
       cwd: cliDir,
       env: { ...process.env, STROQ_HOME: home },
     });

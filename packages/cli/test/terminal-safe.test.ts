@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { neutralizeControls, withSafeOutput } from '../src/terminal-safe.js';
+import { CLI_ENTRY } from './helpers/cli-entry.js';
 
 const ESC = '\u001b';
 const BEL = '\u0007';
@@ -86,11 +87,10 @@ describe('stroq replay (end to end)', () => {
     writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
     const cliDir = join(import.meta.dirname, '..');
     const out = await new Promise<string>((resolve, reject) => {
-      const child = spawn(
-        process.execPath,
-        ['--import', 'tsx', join(cliDir, 'src/index.ts'), 'replay', '--transcript', file],
-        { cwd: cliDir, env: { ...process.env, STROQ_HOME: join(dir, 'home') } },
-      );
+      const child = spawn(process.execPath, [CLI_ENTRY, 'replay', '--transcript', file], {
+        cwd: cliDir,
+        env: { ...process.env, STROQ_HOME: join(dir, 'home') },
+      });
       let text = '';
       child.stdout.on('data', (d: Buffer) => (text += d.toString()));
       child.stderr.on('data', (d: Buffer) => (text += d.toString()));
