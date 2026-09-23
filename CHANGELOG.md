@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-23
+
 ### Security
 
 A security audit of 0.15.2 ([docs/audits/2026-09-23-stroq.md](docs/audits/2026-09-23-stroq.md)) found eight P1 defects the test suite and the attack corpus did not cover. Each is fixed with a regression test built from the audit's own synthetic case, and each case was re-run independently of those tests before merging.
