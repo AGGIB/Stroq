@@ -207,7 +207,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
       <p class="agent-limit"><strong>Limit:</strong> stdio only; entries with <code>url</code>/<code>serverUrl</code> (HTTP servers) are skipped, unprotected.</p>
     </div>
   </div>
-  <p>Also available: <a href="https://github.com/AGGIB/Stroq#as-a-claude-code-plugin">as a Claude Code plugin</a> (<code>/plugin marketplace add AGGIB/Stroq</code>), or <a href="https://github.com/AGGIB/Stroq#from-source">from source</a>.</p>
+  <p>Also available: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#as-a-claude-code-plugin">as a Claude Code plugin</a> (<code>/plugin marketplace add AGGIB/Stroq</code>), or <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#from-source">from source</a>.</p>
 </section>
 
 <hr class="docs-divider">
@@ -266,7 +266,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <p><code>secret.egress</code> fires when an egress-shaped action (<code>shell.network</code>, <code>network.fetch</code>, <code>mcp.call</code>, <code>mcp.side_effect</code>, <code>git.push_external</code>, <code>shell.exec_encoded</code>) carries the exact value of a known secret. Known secrets are the credential-named or vendor-shaped values found in the working directory's <code>.env*</code> files, <code>~/.aws/credentials</code>, <code>~/.npmrc</code>, <code>~/.netrc</code>, <code>~/.docker/config.json</code>, and credential-named environment variables.</p>
   <p>The index at <code>~/.stroq/secrets.json</code> holds only <code>sha256(salt + value)</code>, the key name and the file path — never the value itself. The whole argument is scanned in overlapping 256&nbsp;KiB windows, up to 2&nbsp;MiB total, so padding buys an attacker nothing up to that size; past it, the action is denied as unscannable rather than let through half-checked. The matched value is redacted from the audit summary as <code>[REDACTED:&lt;name&gt;]</code>.</p>
   <div class="docs-note">
-    <p><strong>What it doesn't catch:</strong> the guard matches secret <em>values in the arguments</em> of an outbound call, so it doesn't know what a command will go on to read — <code>curl -d @~/.aws/credentials …</code> is covered by <code>fs.secrets</code>, not this. Matching is exact: a value split across arguments, base64-encoded, or DNS-encoded is not matched. <code>$VAR</code> shell expansion happens after Stroq sees the command, so <code>curl -H "Authorization: Bearer $TOKEN"</code> is never flagged — the recommended way to pass a credential. Full limits: <a href="https://github.com/AGGIB/Stroq#secret-egress-guard">README on GitHub</a>.</p>
+    <p><strong>What it doesn't catch:</strong> the guard matches secret <em>values in the arguments</em> of an outbound call, so it doesn't know what a command will go on to read — <code>curl -d @~/.aws/credentials …</code> is covered by <code>fs.secrets</code>, not this. Matching is exact: a value split across arguments, base64-encoded, or DNS-encoded is not matched. <code>$VAR</code> shell expansion happens after Stroq sees the command, so <code>curl -H "Authorization: Bearer $TOKEN"</code> is never flagged — the recommended way to pass a credential. Full limits: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#secret-egress-guard">the guide on GitHub</a>.</p>
   </div>
 </section>
 
@@ -296,7 +296,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
       </tbody>
     </table>
   </div>
-  <p>Full flags for every command: <a href="https://github.com/AGGIB/Stroq#commands">README on GitHub</a>.</p>
+  <p>Full flags for every command: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#commands">the guide on GitHub</a>.</p>
 </section>
 
 <section class="docs-section" id="replay" aria-labelledby="replay-title">
@@ -311,7 +311,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <h2 id="attack-title">Attack corpus</h2>
   <p><code>stroq attack</code> replays recorded hook events from twelve public incidents and eight synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
   <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>20 scenarios: 15 blocked, 5 asked, 0 passed through — every attack was stopped.</code></pre>
-  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq#replay-twenty-real-and-synthetic-attacks">README on GitHub</a>.</p>
+  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-twenty-real-and-synthetic-attacks">the guide on GitHub</a>.</p>
 </section>
 
 <section class="docs-section" id="exposure" aria-labelledby="exposure-title">
@@ -350,7 +350,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
     <li><strong>Regex denial-of-service is mitigated, not eliminated:</strong> a build-time performance gate keeps known-slow patterns out of the shipped rule set; a scan that still runs past budget at runtime fails closed rather than returning clean.</li>
     <li><strong>Shell quote-splicing evasions are known</strong> (for example <code>c"u"rl</code>) — see <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">SECURITY.md</a> for the current out-of-scope list.</li>
   </ul>
-  <p>Full list, unabridged: <a href="https://github.com/AGGIB/Stroq#guarantees-and-limits">README on GitHub</a>.</p>
+  <p>Full list, unabridged: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#guarantees-and-limits">the guide on GitHub</a>.</p>
 </section>
 
 </article>
