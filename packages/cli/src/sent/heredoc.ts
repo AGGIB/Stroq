@@ -23,8 +23,15 @@ const HEREDOC = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/g;
  * Deliberately generous: calling a data body code only keeps a mention the report
  * already made, while calling a code body data would hide a read.
  */
+//
+// The assignment is `NAME=value` with a name that cannot contain `=`: the earlier
+// `\S+=\S*` let the two halves trade characters, and `env a=a=a=…` backtracked for
+// 42 s at 400 KB. A stage is also read only as far as its command word can be.
 const EXECUTES_STDIN =
-  /^(?:sudo\s+)?(?:(?:\S*\/)?env\s+(?:\S+=\S*\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|fish|python\d*(?:\.\d+)?|node|deno|bun|tsx|ruby|perl|php|osascript|ssh|eval|source|\.|xargs|npx|pnpm|uv)(?:\s|$)/;
+  /^(?:sudo\s+)?(?:(?:\S*\/)?env\s+(?:[A-Za-z_]\w*=\S*\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|fish|python\d*(?:\.\d+)?|node|deno|bun|tsx|ruby|perl|php|osascript|ssh|eval|source|\.|xargs|npx|pnpm|uv)(?:\s|$)/;
+
+/** How much of a pipeline stage the interpreter check reads. */
+const STAGE_PREFIX = 512;
 
 /** Whether the stage receiving the heredoc on `line`, or one piped after it, runs it. */
 function bodyIsExecuted(line: string, operatorStart: number, operatorEnd: number): boolean {
@@ -32,7 +39,7 @@ function bodyIsExecuted(line: string, operatorStart: number, operatorEnd: number
   // the operator — including a plain `|`, so `x | bash <<EOF` is read as bash's.
   const before = line.slice(0, operatorStart).split(/&&|\|\||;|\$\(|\|/);
   const stages = [before[before.length - 1] ?? '', ...line.slice(operatorEnd).split('|').slice(1)];
-  return stages.some((stage) => EXECUTES_STDIN.test(stage.trim()));
+  return stages.some((stage) => EXECUTES_STDIN.test(stage.trim().slice(0, STAGE_PREFIX)));
 }
 
 /**

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+A second audit ([docs/audits/2026-09-24-stroq.md](docs/audits/2026-09-24-stroq.md)) looked where the first did not: what Stroq prints, and what it writes into a repository someone else wrote.
+
+- **Attacker-written text reached the terminal as raw control sequences (B-01).** `stroq replay` and `stroq log` printed the escape sequences in recorded commands and audit summaries as they were, so a transcript could write the clipboard through OSC 52 on terminals that allow it, or paint a fake `ALLOW` over the real verdict, inside the commands someone runs to find out what an injected agent did. A hook's deny reason, which the agent shows the user, carried them too. Every command except `hook` and `mcp` now writes control characters as visible `\uXXXX` escapes, and so do the evidence sentences in hook reasons; JSON output still parses to the original.
+- **`stroq init` wrote through a repository's symlink (B-02).** A cloned repository that made `.claude/settings.json` a link to a file elsewhere got Stroq's hooks merged into that file. A config write must now stay inside the project, or the home directory for a user-scope install, through every symlink in the path; a dotfile manager's link within the home directory still works.
+- **A config parse error quoted the file (B-03).** V8's message quotes the input, and a config symlinked to `~/.npmrc` made that the start of a credential file. It now names the position only.
+
+### Fixed
+
+- **A config symlinked to `/dev/zero` hung `doctor`, `init` and `exposure` (B-04).** The shared config reader now reads only a regular file of at most 4 MiB, as `inspect` and the secret index already did.
+- **`stroq sent` could spend minutes on one command (B-05).** The heredoc filter's env-prefix pattern backtracked quadratically: 41.7 s on a 400 KB `env a=a=a=…`. It is now linear, 0.4 ms on the same input.
+- **`SECURITY.md` sent researchers to limits "the README documents" (B-06)** after the README moved to `docs/GUIDE.md`. It now links the sections in `docs/AGENTS.md` and the guide, and lists Antigravity.
+
 ## [0.16.0] - 2026-09-23
 
 ### Security
