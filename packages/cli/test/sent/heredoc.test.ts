@@ -69,4 +69,20 @@ describe('withoutHeredocData', () => {
       `cat ${NPMRC} | sed 's/=.*/=***/'`,
     );
   });
+
+  // Found auditing this module: the env-assignment part of the interpreter check was
+  // `(?:\S+=\S*\s+)*`, where `\S+` and `=` overlap, and `env a=a=a=…` with no space
+  // after it took 42 s at 400 KB. `stroq sent` reads commands the model wrote.
+  it('stays linear on a long run of env-style assignments', () => {
+    const cmd = `env ${'a='.repeat(200_000)}x <<EOF\nbody\nEOF`;
+    const started = performance.now();
+    withoutHeredocData(cmd);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it('still reads a real env prefix in front of an interpreter', () => {
+    expect(withoutHeredocData(`env FOO=bar BAZ=1 bash <<'EOF'\ncat ~/.npmrc\nEOF`)).toContain(
+      '~/.npmrc',
+    );
+  });
 });

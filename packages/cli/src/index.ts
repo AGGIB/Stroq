@@ -9,6 +9,7 @@ import { runInit } from './commands/init.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
 import { runSent } from './commands/sent.js';
@@ -106,14 +107,25 @@ export async function main(argv: readonly string[]): Promise<number> {
       if (out.timedOut) await exitNow(out.exitCode);
       return out.exitCode;
     }
+    case 'mcp':
+      // A protocol stream: what the proxy does not judge it forwards byte for byte.
+      return runMcp(rest);
+    default:
+      // Everything else prints for a person, and much of what it prints — recorded
+      // commands, audit summaries, file names from a cloned repository — was written
+      // by whoever wrote what the agent read. See `terminal-safe.ts`.
+      return withSafeOutput(() => report(command, rest));
+  }
+}
+
+async function report(command: string | undefined, rest: readonly string[]): Promise<number> {
+  switch (command) {
     case 'inspect':
       return runInspect(rest);
     case 'init':
       return runInit(rest);
     case 'run':
       return runRun(rest);
-    case 'mcp':
-      return runMcp(rest);
     case 'doctor':
       return runDoctor(rest);
     case 'log':
@@ -171,7 +183,7 @@ main(process.argv.slice(2)).then(
     process.exitCode = code;
   },
   (err: unknown) => {
-    process.stderr.write(`${String(err)}\n`);
+    process.stderr.write(`${neutralizeControls(String(err))}\n`);
     process.exitCode = 1;
   },
 );
