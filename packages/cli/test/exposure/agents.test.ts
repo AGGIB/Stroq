@@ -2,20 +2,21 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { POST_MATCHER, PRE_MATCHER } from '../../src/commands/init.js';
 import { agentFindings, agentSurface } from '../../src/exposure/surface.js';
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-exposure-'));
 
-const withStroqClaudeHooks = (cwd: string): void => {
+const stroq = [{ type: 'command', command: 'stroq hook claude-code' }];
+
+/** The full install `stroq init` writes: both events, with its own matchers. */
+const withStroqClaudeHooks = (cwd: string, events = ['PreToolUse', 'PostToolUse']): void => {
   mkdirSync(join(cwd, '.claude'), { recursive: true });
+  const matcher = (event: string): string => (event === 'PreToolUse' ? PRE_MATCHER : POST_MATCHER);
   writeFileSync(
     join(cwd, '.claude', 'settings.json'),
     JSON.stringify({
-      hooks: {
-        PreToolUse: [
-          { matcher: 'Bash', hooks: [{ type: 'command', command: 'stroq hook claude-code' }] },
-        ],
-      },
+      hooks: Object.fromEntries(events.map((e) => [e, [{ matcher: matcher(e), hooks: stroq }]])),
     }),
   );
 };
@@ -52,6 +53,15 @@ describe('agentSurface', () => {
     const claude = agentSurface(cwd, fixture()).find((s) => s.agent === 'claude-code');
     expect(claude?.detected).toBe(true);
     expect(claude?.protected).toBe(true);
+  });
+
+  // The same definition `doctor` and `stroq run` use (A-06): a post-only install
+  // scans what the agent read but blocks nothing, so it is not protection.
+  it('does not report a post-only install as protected', () => {
+    const cwd = fixture();
+    withStroqClaudeHooks(cwd, ['PostToolUse']);
+    const claude = agentSurface(cwd, fixture()).find((s) => s.agent === 'claude-code');
+    expect(claude?.protected).toBe(false);
   });
 
   it('treats an unreadable config as unprotected rather than throwing', () => {

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildExposureReport, runExposure } from '../../src/commands/exposure.js';
+import { POST_MATCHER, PRE_MATCHER } from '../../src/commands/init.js';
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-exp-cmd-'));
 
@@ -66,9 +67,20 @@ describe('runExposure', () => {
     writeFileSync(
       join(cwd, '.claude', 'settings.json'),
       JSON.stringify({
+        // The full install `init` writes: a pre-only or narrowed hook is not
+        // protection, and `exposure` now says so (A-06).
         hooks: {
           PreToolUse: [
-            { matcher: 'Bash', hooks: [{ type: 'command', command: 'stroq hook claude-code' }] },
+            {
+              matcher: PRE_MATCHER,
+              hooks: [{ type: 'command', command: 'stroq hook claude-code' }],
+            },
+          ],
+          PostToolUse: [
+            {
+              matcher: POST_MATCHER,
+              hooks: [{ type: 'command', command: 'stroq hook claude-code' }],
+            },
           ],
         },
       }),
