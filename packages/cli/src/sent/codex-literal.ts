@@ -179,6 +179,21 @@ export function readObjectLiteral(src: string, start: number): LiteralRead | nul
     return fail();
   }
 
+  /**
+   * Adds a field as an own data property. Plain assignment is not the same thing:
+   * for the key `__proto__` it sets the object's prototype, so a value there vanished
+   * from what `sent` scans, and an object there answered `input.cmd` through the
+   * prototype chain. `JSON.parse` defines own properties, and so does this.
+   */
+  function setField(out: Record<string, unknown>, key: string, value: unknown): void {
+    Object.defineProperty(out, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+
   function readObject(): Record<string, unknown> {
     depth += 1;
     if (depth > MAX_DEPTH) fail();
@@ -205,13 +220,13 @@ export function readObjectLiteral(src: string, start: number): LiteralRead | nul
       skipSpace();
       if (src[i] === ':') {
         i += 1;
-        out[key] = readValue();
+        setField(out, key, readValue());
         continue;
       }
       /* `{calendar_id, time_min:"…"}` — a shorthand property. The name is still
          evidence that the call carried that field; only its value is unknown. */
       if (src[i] === '}' || src[i] === ',') {
-        out[key] = null;
+        setField(out, key, null);
         continue;
       }
       fail();

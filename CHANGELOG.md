@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Codex argument reader lost a `__proto__` key.** It built objects by assignment, and assigning to `__proto__` sets the object's prototype instead of adding a field: a value under that key vanished from the arguments `stroq sent` scans, and an object there made `input.cmd` answer through the prototype chain while the object's own fields said nothing. Fields are now defined as own properties, as `JSON.parse` does. Found by the property tests below, on the first run that generated the key.
+
+### Changed
+
+- **Property tests for everything that reads attacker-written text** (`fast-check`, a dev dependency): shell segmentation, normalization, JSON leaf walking, control-character neutralization, prose-name matching, and the Claude, Codex and Cursor session readers. Beyond not throwing and staying fast, they check correctness: any JSON object read by the Codex literal reader comes back exactly, neutralized JSON still decodes to the original, a heredoc body written to a file is dropped while one a shell runs is kept, and no reader pairs a result with a call it never saw.
+- **End-to-end tests run the built CLI** rather than the source through `tsx`, so they test the artifact users get; the suite takes 24 s instead of 57 s. Coverage thresholds sit just under the measured values instead of seventeen points below.
+- **Dependabot** proposes grouped weekly updates for npm and GitHub Actions.
+
 ## [0.16.1] - 2026-09-24
 
 ### Security
