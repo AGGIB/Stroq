@@ -3,17 +3,18 @@ import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 const cliDir = join(import.meta.dirname, '../..');
 const repoRoot = join(cliDir, '../..');
 const wrapper = join(repoRoot, 'plugins/stroq/hooks/stroq-hook.sh');
-const entry = join(cliDir, 'src/index.ts');
+const entry = CLI_ENTRY;
 
 /** A `stroq` executable on PATH that runs the TypeScript CLI in-process, like a global install. */
 function stroqShim(): string {
   const dir = mkdtempSync(join(tmpdir(), 'stroq-shim-'));
   const script = join(dir, 'stroq');
-  writeFileSync(script, `#!/bin/sh\nexec "${process.execPath}" --import tsx "${entry}" "$@"\n`);
+  writeFileSync(script, `#!/bin/sh\nexec "${process.execPath}" "${entry}" "$@"\n`);
   chmodSync(script, 0o755);
   return dir;
 }
@@ -24,8 +25,8 @@ function runWrapper(
   home: string,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    // cwd is the CLI package so that tsx resolves `@stroq/core` through
-    // packages/cli/tsconfig.json paths (the core dist is not built when tests run).
+    // The wrapper runs the built, self-contained bundle, so cwd matters to nothing
+    // but the hook's own idea of the project.
     const child = spawn('bash', [wrapper], {
       cwd: cliDir,
       env: { ...process.env, PATH: path, STROQ_HOME: home },
