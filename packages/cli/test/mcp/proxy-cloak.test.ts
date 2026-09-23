@@ -2,9 +2,12 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { FileCloakStore } from '@stroq/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
+import { cloakKey } from '../../src/mcp/cloak-factory.js';
 import { runMcpProxy } from '../../src/mcp/proxy.js';
+import { cloakDir } from '../../src/paths.js';
 
 /**
  * The cloak through the REAL proxy against the real stub server: the only place the
@@ -58,15 +61,17 @@ function lineReader(stream: NodeJS.ReadableStream): {
   };
 }
 
-function startPump(cloak: boolean, extraEnv: Record<string, string> = {}) {
+function startPump(cloak: boolean, extraEnv: Record<string, string> = {}, failPost = false) {
   const serverLog = join(cwd, 'server-received.log');
   process.env['FAKE_SERVER_LOG'] = serverLog;
   for (const [key, value] of Object.entries(extraEnv)) process.env[key] = value;
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const engine = createEngine();
+  if (failPost) vi.spyOn(engine, 'post').mockRejectedValue(new Error('synthetic post failure'));
   const done = runMcpProxy({
-    engine: createEngine(),
+    engine,
     sessionId: 'mcp:cloak-test',
     server: 'crm',
     cwd,
@@ -102,6 +107,32 @@ describe('the MCP proxy with --cloak off (the default)', () => {
 });
 
 describe('the MCP proxy with --cloak on', () => {
+  it('judges a restored path before forwarding the call', async () => {
+    const store = new FileCloakStore(join(cloakDir(), `${cloakKey('mcp:cloak-test', 'crm')}.json`));
+    const entries = await store.assign([{ kind: 'name', value: '.claude/settings.json' }], '');
+    const placeholder = entries.get('.claude/settings.json')?.placeholder ?? '';
+    expect(placeholder).not.toBe('');
+
+    const { stdin, out, serverLog, done } = startPump(true);
+    stdin.write(call(1, 'write_file', { path: placeholder, content: 'disabled' }));
+    await out.waitFor(1);
+    stdin.end();
+    expect(await done).toBe(0);
+    expect(out.lines[0]).toContain('isError');
+    expect(out.lines[0]).toContain('deny-self-tamper');
+    expect(existsSync(serverLog) ? readFileSync(serverLog, 'utf8') : '').not.toContain('"id":1');
+  });
+
+  it('still cloaks a result when the post scan fails', async () => {
+    const { stdin, out, done } = startPump(true, {}, true);
+    stdin.write(call(1, 'get_customer'));
+    await out.waitFor(1);
+    stdin.end();
+    expect(await done).toBe(0);
+    expect(out.lines[0]).toContain('[STROQ_EMAIL_');
+    expect(out.lines[0]).not.toContain('peter@bugle.example');
+  });
+
   it('replaces every detected value in the result and tells the model it did', async () => {
     const { stdin, out, done } = startPump(true);
     stdin.write(call(1, 'get_customer'));
@@ -212,6 +243,18 @@ describe('the MCP proxy with --cloak on', () => {
     expect(JSON.parse(out.lines[0] ?? '')).toMatchObject({ id: 2 });
     expect(auditText()).toContain('mcp-cloak-unscannable-result');
   }, 30_000);
+
+  it('drops a malformed primitive tools/call result under cloak', async () => {
+    const { stdin, out, done } = startPump(true);
+    stdin.write(call(1, 'primitive_result'));
+    stdin.write(call(2, 'get_time'));
+    await out.waitFor(1);
+    stdin.end();
+    expect(await done).toBe(0);
+    expect(out.lines).toHaveLength(1);
+    expect(JSON.parse(out.lines[0] ?? '')).toMatchObject({ id: 2 });
+    expect(auditText()).toContain('mcp-cloak-invalid-result');
+  });
 
   it('forwards a clean result byte for byte, cloak or no cloak', async () => {
     const { stdin, out, done } = startPump(true);

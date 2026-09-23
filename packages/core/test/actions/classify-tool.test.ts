@@ -4,7 +4,7 @@ import { classifyTool, parseMcpToolName } from '../../src/actions/classify-tool.
 const cwd = '/home/dev/project';
 
 describe('parseMcpToolName', () => {
-  it('splits server and tool at the last double underscore', () => {
+  it('keeps double underscores inside the tool name', () => {
     expect(parseMcpToolName('mcp__github__create_issue')).toEqual({
       server: 'github',
       tool: 'create_issue',
@@ -12,6 +12,10 @@ describe('parseMcpToolName', () => {
     expect(parseMcpToolName('mcp__plugin_my-plugin_db__query')).toEqual({
       server: 'plugin_my-plugin_db',
       tool: 'query',
+    });
+    expect(parseMcpToolName('mcp__fs__write__file')).toEqual({
+      server: 'fs',
+      tool: 'write__file',
     });
     expect(parseMcpToolName('Bash')).toBeNull();
   });
@@ -41,12 +45,24 @@ describe('classifyTool', () => {
     ).toEqual(['fs.secrets']);
     expect(classifyTool('Read', { file_path: `${cwd}/src/index.ts` }, cwd).classes).toEqual([]);
   });
+  it('flags secret paths searched by Grep without treating the search pattern as a path', () => {
+    expect(classifyTool('Grep', { path: '.env', pattern: 'TOKEN' }, cwd).classes).toEqual([
+      'fs.secrets',
+    ]);
+    expect(classifyTool('Grep', { paths: ['src', '.ssh'], pattern: 'key' }, cwd).classes).toEqual([
+      'fs.secrets',
+    ]);
+    expect(classifyTool('Grep', { pattern: '.env' }, cwd).classes).toEqual([]);
+  });
   it('classifies WebFetch as network.fetch with host', () => {
     const r = classifyTool('WebFetch', { url: 'https://docs.example/page' }, cwd);
     expect(r.classes).toEqual(['network.fetch']);
     expect(r.hosts).toEqual(['docs.example']);
   });
   it('classifies MCP calls and side-effecting tool names', () => {
+    expect(
+      classifyTool('mcp__fs__write__file', { path: '.claude/settings.json' }, cwd).classes,
+    ).toEqual(['mcp.call', 'config.self', 'mcp.side_effect']);
     expect(classifyTool('mcp__fs__read_file', { path: 'a' }, cwd)).toMatchObject({
       classes: ['mcp.call'],
       mcp: { server: 'fs', tool: 'read_file' },
@@ -65,6 +81,17 @@ describe('classifyTool', () => {
     expect(
       classifyTool('mcp__fs__write_file', { path: '.claude/settings.json' }, cwd).classes,
     ).toContain('config.self');
+  });
+  it('normalizes MCP file paths and applies native file protections', () => {
+    for (const path of ['.claude/./settings.json', '.claude/x/../settings.json']) {
+      expect(classifyTool('mcp__fs__write_file', { path }, cwd).classes).toContain('config.self');
+    }
+    expect(
+      classifyTool('mcp__fs__write_file', { path: '.git/hooks/pre-commit' }, cwd).classes,
+    ).toContain('config.git_exec');
+    expect(classifyTool('mcp__fs__read_file', { path: '.env' }, cwd).classes).toContain(
+      'fs.secrets',
+    );
   });
   it('does not flag an MCP tool touching an unrelated path', () => {
     expect(classifyTool('mcp__fs__read_file', { path: 'src/index.ts' }, cwd).classes).not.toContain(

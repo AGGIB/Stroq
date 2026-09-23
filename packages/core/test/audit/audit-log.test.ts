@@ -126,6 +126,27 @@ describe('AuditLog', () => {
     await Promise.all(Array.from({ length: 20 }, (_, i) => log.append(input(i))));
     expect(await log.verify()).toMatchObject({ ok: true, count: 20 });
   });
+  it('invalidates the cached head after an external writer changes the journal', async () => {
+    const file = fresh();
+    const first = new AuditLog(file);
+    await first.append(input(1));
+    const prior = JSON.parse(readFileSync(file, 'utf8')) as { seq: number; hash: string };
+    // A separate writer that does not use AuditLog's process-local hint.
+    const externallyWritten = {
+      ...input(2),
+      seq: 2,
+      ts: new Date().toISOString(),
+      prevHash: prior.hash,
+    };
+    writeFileSync(
+      file,
+      readFileSync(file, 'utf8') +
+        `${JSON.stringify({ ...externallyWritten, hash: hashEntry(externallyWritten) })}\n`,
+    );
+    const next = await new AuditLog(file).append(input(3));
+    expect(next.seq).toBe(3);
+    expect(await first.verify()).toMatchObject({ ok: true, count: 3 });
+  });
   it('reports a corrupt line via verify without throwing', async () => {
     const file = fresh();
     const log = new AuditLog(file);

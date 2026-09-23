@@ -161,11 +161,14 @@ const EMPTY_SIGNALS: PowerShellSignals = {
 };
 
 /**
- * Reads the already-split segments of one command. Splitting is shared with the
- * POSIX path and needs no dialect of its own: PowerShell and cmd use the same `|`,
- * `;`, `&&` and `||` that `splitSegments` breaks on.
+ * Reads individual commands and their pipeline grouping. A sequence (`;`) must
+ * not be mistaken for a pipe carrying downloaded bytes into `iex`.
  */
-export function powershellSignals(segments: readonly string[], cwd: string): PowerShellSignals {
+export function powershellSignals(
+  segments: readonly string[],
+  pipelines: readonly (readonly string[])[],
+  cwd: string,
+): PowerShellSignals {
   if (segments.length === 0) return EMPTY_SIGNALS;
   const encoded: string[] = [];
   const network: string[] = [];
@@ -173,7 +176,7 @@ export function powershellSignals(segments: readonly string[], cwd: string): Pow
   const secrets: string[] = [];
   const unparsed: string[] = [];
 
-  segments.forEach((segment, i) => {
+  segments.forEach((segment) => {
     if (isPsNetwork(segment)) network.push('ps-network-command');
     if (PS_ENCODED_COMMAND.test(segment) || PS_ENCODED_COMMAND_LONG.test(segment))
       encoded.push('ps-encoded-command');
@@ -189,23 +192,19 @@ export function powershellSignals(segments: readonly string[], cwd: string): Pow
       encoded.push('ps-remote-exec');
       return;
     }
-    // Split across a pipe, the source is an earlier segment: `iwr … | iex`.
-    // `i > 0` is what makes this a pipeline SINK rather than a bare word: `iex`
-    // standing alone at the head of a command executes nothing — in PowerShell it
-    // waits for an argument, and in Elixir it is the REPL — so flagging it would
-    // put a confirmation prompt in front of `iex` every time an Elixir developer
-    // opened a shell.
-    if (i > 0 && EXEC_SINK_ALONE.test(segment)) {
-      // Whatever came down the pipe is executed. If it was fetched, that is the
-      // download cradle; if it was anything else, Stroq did not read what runs and
-      // says so rather than reporting a command it never classified.
-      if (segments.slice(0, i).some(isPsNetwork)) encoded.push('ps-remote-exec');
-      else unparsed.push('ps-exec-unreadable-pipe');
-      return;
-    }
     if (EXEC_SINK_EXPRESSION.test(segment)) unparsed.push('ps-exec-expression');
     if (CALL_OPERATOR_EXPRESSION.test(segment)) unparsed.push('ps-call-operator-expression');
   });
+
+  for (const pipeline of pipelines) {
+    pipeline.forEach((segment, i) => {
+      // Only an actual pipe carries the previous command's output into this sink.
+      // A bare `iex` at the start of a sequence has no input to execute.
+      if (i === 0 || !EXEC_SINK_ALONE.test(segment)) return;
+      if (pipeline.slice(0, i).some(isPsNetwork)) encoded.push('ps-remote-exec');
+      else unparsed.push('ps-exec-unreadable-pipe');
+    });
+  }
 
   return { encoded, network, destructive, secrets, unparsed };
 }

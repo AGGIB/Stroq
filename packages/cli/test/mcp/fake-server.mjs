@@ -120,6 +120,10 @@ function handle(line) {
     });
     return;
   }
+  if (name === 'primitive_result') {
+    send({ jsonrpc: '2.0', id, result: 'peter@bugle.example' });
+    return;
+  }
   if (name === 'huge') {
     // For the oversize-line test: one line whose `text` field alone is
     // `arguments.chars` characters (default 10 MiB), well past MAX_LINE_CHARS (8

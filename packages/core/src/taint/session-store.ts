@@ -28,6 +28,31 @@ function addSource(state: SessionState, source: TaintSource, now: string): Sessi
   return { ...state, taint, updatedAt: now };
 }
 
+function isSessionState(value: unknown, sessionId: string): value is SessionState {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (state['sessionId'] !== sessionId || typeof state['updatedAt'] !== 'string') return false;
+  if (state['taint'] === null) return true;
+  if (typeof state['taint'] !== 'object' || Array.isArray(state['taint'])) return false;
+  const taint = state['taint'] as Record<string, unknown>;
+  return (
+    taint['level'] === 'suspect' &&
+    typeof taint['since'] === 'string' &&
+    Array.isArray(taint['sources']) &&
+    taint['sources'].every((item: unknown) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return false;
+      const source = item as Record<string, unknown>;
+      return (
+        typeof source['tool'] === 'string' &&
+        typeof source['at'] === 'string' &&
+        (source['source'] === undefined || typeof source['source'] === 'string') &&
+        Array.isArray(source['ruleIds']) &&
+        source['ruleIds'].every((rule: unknown) => typeof rule === 'string')
+      );
+    })
+  );
+}
+
 export class FileSessionStore implements SessionStore {
   constructor(
     private readonly dir: string,
@@ -47,15 +72,19 @@ export class FileSessionStore implements SessionStore {
         return emptyState(sessionId, this.now().toISOString());
       throw err;
     }
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(raw) as SessionState;
-      return { ...parsed, sessionId };
+      parsed = JSON.parse(raw);
     } catch (err) {
       // Fail closed: a corrupt session file must surface as an error, not as an
       // untainted or partially-tainted state, so the caller (the CLI hook layer)
       // can deny/ask on high-impact tools instead of silently trusting bad state.
       throw new Error(`corrupt session state: ${this.file(sessionId)}`, { cause: err });
     }
+    if (!isSessionState(parsed, sessionId)) {
+      throw new Error(`corrupt session state: ${this.file(sessionId)}`);
+    }
+    return parsed;
   }
 
   private async write(state: SessionState): Promise<void> {

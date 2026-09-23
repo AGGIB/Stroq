@@ -85,7 +85,6 @@ const HOMOGLYPHS: Readonly<Record<string, string>> = {
 const BASE64_TOKEN = /[A-Za-z0-9+/]{24,}={0,2}/g;
 const HEX_TOKEN = /\b(?:[0-9a-fA-F]{2}){16,}\b/g;
 const URL_ENCODED = /%[0-9A-Fa-f]{2}[\s\S]*?%[0-9A-Fa-f]{2}/;
-const MAX_TOKENS_PER_LAYER = 50;
 
 function foldToken(token: string): string {
   if (!(NON_LATIN_CONFUSABLE.test(token) && LATIN.test(token))) return token;
@@ -199,10 +198,10 @@ function decodeLayer(text: string, depth: number, maxDepth: number): Variant[] {
     found.push({ kind, depth, text: decoded });
     found.push(...decodeLayer(decoded, depth + 1, maxDepth));
   };
-  for (const token of (text.match(BASE64_TOKEN) ?? []).slice(0, MAX_TOKENS_PER_LAYER)) {
+  for (const token of text.match(BASE64_TOKEN) ?? []) {
     push('base64', decodeBase64(token));
   }
-  for (const token of (text.match(HEX_TOKEN) ?? []).slice(0, MAX_TOKENS_PER_LAYER)) {
+  for (const token of text.match(HEX_TOKEN) ?? []) {
     push('hex', decodeHex(token));
   }
   push('url', decodeUrl(text));

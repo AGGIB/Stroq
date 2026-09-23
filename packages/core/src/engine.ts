@@ -10,7 +10,7 @@ import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import { candidateTokens, exceedsSecretScan } from './secrets/candidates.js';
+import { candidateTokens, candidatesFromText, exceedsSecretScan } from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
@@ -288,6 +288,24 @@ export class StroqEngine {
     return { matches, unscannable: exceedsSecretScan(event.toolName, event.toolInput) };
   }
 
+  /** Audit summaries must be safe even when the action itself is not outbound. */
+  private async safeSummary(
+    summary: string,
+    cwd: string,
+    known: readonly SecretMatch[] = [],
+  ): Promise<string> {
+    const index = this.opts.secrets;
+    if (!index) return redactMatches(summary, known);
+    try {
+      const matches = await index.lookup(candidatesFromText(summary), cwd);
+      return redactMatches(summary, [...known, ...matches]);
+    } catch {
+      // A failed index must not turn a local command into an audit disclosure,
+      // nor suppress a post-scan and its taint by throwing before it runs.
+      return '[REDACTED:secret-index-unavailable]';
+    }
+  }
+
   /**
    * Persists provenance for `atoms`, never throwing: recording is enrichment,
    * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
@@ -335,11 +353,16 @@ export class StroqEngine {
     ];
     const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
     const provenance = origin.counted.map(toEvidence);
+    const summary = await this.safeSummary(
+      summarizeInput(event.toolName, event.toolInput),
+      event.cwd,
+      matches,
+    );
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
       tool: event.toolName,
-      summary: redactMatches(summarizeInput(event.toolName, event.toolInput), matches),
+      summary,
       classes,
       decision,
       ...(provenance.length > 0 ? { provenance } : {}),
@@ -369,7 +392,10 @@ export class StroqEngine {
       const state = await this.opts.sessions.get(event.sessionId);
       return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
-    const summary = summarizeInput(event.toolName, event.toolInput);
+    const summary = await this.safeSummary(
+      summarizeInput(event.toolName, event.toolInput),
+      event.cwd,
+    );
     const scan = scanContent(
       this.opts.rules,
       event.toolResultText,
@@ -417,7 +443,7 @@ export class StroqEngine {
       event,
       summary,
       atoms,
-      scan.verdict === 'suspect',
+      scan.verdict === 'suspect' && !trusted,
     );
     return { scan, taint: state.taint, scanned: true, atoms, provenanceError, trusted };
   }

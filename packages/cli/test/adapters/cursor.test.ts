@@ -162,6 +162,58 @@ describe('event field mapping', () => {
 });
 
 describe('handleCursorHook', () => {
+  it('blocks a direct Cursor Write or Delete of protected configuration before execution', async () => {
+    for (const tool_name of ['Write', 'Delete']) {
+      const out = await run({
+        hook_event_name: 'preToolUse',
+        tool_name,
+        tool_input: { file_path: `${cwd}/.cursor/hooks.json`, content: '{}' },
+      });
+      expect(body(out.stdout)['permission']).toBe('deny');
+      expect(String(body(out.stdout)['user_message'])).toContain('deny-self-tamper');
+    }
+  });
+
+  it('checks every conflicting path field in a Cursor write', async () => {
+    const out = await run({
+      hook_event_name: 'preToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: 'src/okay.ts', path: '.claude/settings.json' },
+    });
+    expect(body(out.stdout)['permission']).toBe('deny');
+    expect(String(body(out.stdout)['user_message'])).toContain('deny-self-tamper');
+  });
+
+  it('denies a Cursor write without a readable path', async () => {
+    const out = await run({ hook_event_name: 'preToolUse', tool_name: 'Write', tool_input: {} });
+    expect(body(out.stdout)['permission']).toBe('deny');
+    expect(String(body(out.stdout)['user_message'])).toContain('cursor-unreadable-write');
+  });
+
+  it('denies malformed and oversized Cursor path lists even with a safe path', async () => {
+    for (const path of [null, Array.from({ length: 65 }, () => 'src/okay.ts')]) {
+      const out = await run({
+        hook_event_name: 'preToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/okay.ts', path },
+      });
+      expect(body(out.stdout)['permission']).toBe('deny');
+      expect(String(body(out.stdout)['user_message'])).toContain(
+        path === null ? 'cursor-unreadable-write' : 'cursor-too-many-paths',
+      );
+    }
+  });
+
+  it('allows an ordinary Cursor write', async () => {
+    expect(
+      await run({
+        hook_event_name: 'preToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/app.ts', content: 'ok' },
+      }),
+    ).toEqual({ stdout: '', exitCode: 0 });
+  });
+
   it('prints nothing for an allowed shell command', async () => {
     expect(await run({ hook_event_name: 'beforeShellExecution', command: 'ls -la' })).toEqual({
       stdout: '',

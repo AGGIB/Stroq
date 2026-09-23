@@ -136,7 +136,7 @@
   <p>Every guard in this field answers the same question: is the command in front of me dangerous? That question cannot be answered from the command alone. An <code>npx</code> that installs an attacker's package looks exactly like an <code>npx</code> that installs a dependency; what separates them is that one of them was dictated by something the agent had just read.</p>
   <p>Stroq is built around that difference. It sits on the agent's own tool-call hooks, remembers what the session took in, and when an action matches something that arrived in untrusted output it says so by name: which file, which tool result, how long ago. <a href="#replay"><code>stroq replay</code></a> then reconstructs the whole chain for a session after the fact — including sessions that ran before Stroq was installed. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.</p>
   <div class="docs-note">
-    <p><strong>Six agents and any MCP client, one engine.</strong> Native hooks for Claude Code, Cursor, Codex, Copilot CLI and Windsurf, an in-process plugin for OpenClaw, and a stdio proxy for any other MCP client (Claude Desktop included) — the same classifier, policy, taint and audit everywhere.</p>
+    <p><strong>Seven agents and any MCP client, one engine.</strong> Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Google Antigravity, an in-process plugin for OpenClaw, and a stdio proxy for any other MCP client (Claude Desktop included) — the same classifier, policy, taint and audit everywhere.</p>
   </div>
 </section>
 
@@ -155,7 +155,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
       </thead>
       <tbody>
         <tr><td>Claude Code</td><td><code>.claude/settings.json</code> hooks, or the plugin</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Deny on high-impact calls</td></tr>
-        <tr><td>Cursor</td><td><code>.cursor/hooks.json</code></td><td>Yes</td><td>Audited only</td><td>Yes</td><td>Deny on shell/MCP; allow elsewhere</td></tr>
+        <tr><td>Cursor</td><td><code>.cursor/hooks.json</code></td><td>Yes</td><td>Yes (Write/Delete)</td><td>Yes for shell/MCP; deny for writes</td><td>Deny on shell/MCP/Write/Delete; allow elsewhere</td></tr>
         <tr><td>Codex</td><td><code>.codex/hooks.json</code></td><td>Yes</td><td>Yes</td><td>Rendered as deny</td><td>Exit 2 on high-impact calls</td></tr>
         <tr><td>Copilot CLI</td><td><code>.github/hooks/stroq.json</code></td><td>Yes</td><td>Yes</td><td>Yes (deny in cloud agent)</td><td>Exit 2 on <code>preToolUse</code></td></tr>
         <tr><td>OpenClaw</td><td>In-process plugin</td><td>Yes</td><td>Yes</td><td>Yes, real <code>/approve</code></td><td>Block on every path except reads</td></tr>
@@ -173,8 +173,8 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
     <div class="agent-card">
       <h3>Cursor</h3>
       <code class="install-cmd-block">npx @stroq/cli init --agent cursor</code>
-      <p>Six of Cursor's hook events, <code>failClosed</code> on the two that block.</p>
-      <p class="agent-limit"><strong>Limit:</strong> no Cursor event can block an editor-made file edit — it's audited, not stopped.</p>
+      <p>Seven of Cursor's hook events, <code>failClosed</code> on the three that block.</p>
+      <p class="agent-limit"><strong>Limit:</strong> Cursor Write/Delete tool calls are gated by <code>preToolUse</code>; Tab edits use separate hooks that Stroq does not install.</p>
     </div>
     <div class="agent-card">
       <h3>Codex</h3>

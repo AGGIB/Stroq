@@ -259,6 +259,21 @@ describe('mergeCodexHooks on a file that keeps its events at the root', () => {
     expect(hasStroqCodexHook(merged)).toBe(true);
     expect(nested(merged, 'PreToolUse')).toEqual([{ matcher: CODEX_PRE_MATCHER, commands: [cmd] }]);
   });
+
+  it('rejects a post-only hook and a narrowed pre matcher', () => {
+    const installed = mergeCodexHooks({}, cmd);
+    expect(
+      hasStroqCodexHook({ hooks: { PostToolUse: installed.hooks?.['PostToolUse'] ?? [] } }),
+    ).toBe(false);
+    const narrowed = {
+      ...installed,
+      hooks: {
+        ...installed.hooks,
+        PreToolUse: [{ matcher: 'Bash', hooks: [codexHandler(cmd)] }],
+      },
+    };
+    expect(hasStroqCodexHook(narrowed)).toBe(false);
+  });
 });
 
 describe('mergeCodexHooks on a file whose hooks key is not an event map', () => {

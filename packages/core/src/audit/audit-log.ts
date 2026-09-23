@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { ActionClass, Decision, ProvenanceEvidence, SecretHit } from '../types.js';
 import { withLock } from '../util/lock.js';
@@ -60,6 +60,58 @@ export const GENESIS_HASH = '0'.repeat(64);
 const MAX_SUMMARY = 300;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
+const MAX_HEAD_CACHE = 64;
+
+/**
+ * A process-local hint for repeated appends. A hook process may create more than
+ * one AuditLog for the same file, while an MCP proxy may append thousands of times.
+ * The file's identity and high-resolution metadata are checked UNDER the journal
+ * lock before reuse. Another process's append, replacement, or edit invalidates the
+ * hint and forces the old full parse (including its corrupt-line check).
+ */
+const auditHeads = new Map<string, { fingerprint: string; last: AuditEntry }>();
+
+interface FileState {
+  readonly fingerprint: string;
+  readonly size: bigint;
+}
+
+async function fileState(file: string): Promise<FileState | null> {
+  try {
+    const info = await stat(file, { bigint: true });
+    return {
+      fingerprint: `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`,
+      size: info.size,
+    };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/** Confirm that no non-cooperating writer followed our append before caching it. */
+async function hasExpectedTail(file: string, state: FileState, line: Buffer): Promise<boolean> {
+  if (state.size < BigInt(line.length) || state.size > BigInt(Number.MAX_SAFE_INTEGER))
+    return false;
+  const handle = await open(file, 'r');
+  try {
+    const tail = Buffer.alloc(line.length);
+    const { bytesRead } = await handle.read(tail, 0, tail.length, Number(state.size) - tail.length);
+    return (
+      bytesRead === line.length &&
+      tail.equals(line) &&
+      (await fileState(file))?.fingerprint === state.fingerprint
+    );
+  } finally {
+    await handle.close();
+  }
+}
+
+function rememberHead(file: string, stamp: string, last: AuditEntry): void {
+  auditHeads.delete(file);
+  auditHeads.set(file, { fingerprint: stamp, last });
+  if (auditHeads.size > MAX_HEAD_CACHE) auditHeads.delete(auditHeads.keys().next().value!);
+}
 
 interface RedactionRule {
   readonly re: RegExp;
@@ -178,8 +230,12 @@ export class AuditLog {
   async append(input: AuditEntryInput): Promise<AuditEntry> {
     await mkdir(dirname(this.file), { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file}.lock`, async () => {
-      const entries = await this.readAll();
-      const last = entries[entries.length - 1];
+      const before = await fileState(this.file);
+      const cached = auditHeads.get(this.file);
+      const last =
+        before !== null && cached?.fingerprint === before.fingerprint
+          ? cached.last
+          : (await this.readAll()).at(-1);
       const summary = redact(input.summary).slice(0, MAX_SUMMARY);
       const unhashed: Omit<AuditEntry, 'hash'> = {
         ...input,
@@ -189,10 +245,25 @@ export class AuditLog {
         prevHash: last?.hash ?? GENESIS_HASH,
       };
       const entry: AuditEntry = { ...unhashed, hash: hashEntry(unhashed) };
-      await appendFile(this.file, `${JSON.stringify(entry)}\n`, {
+      const line = Buffer.from(`${JSON.stringify(entry)}\n`, 'utf8');
+      await appendFile(this.file, line, {
         encoding: 'utf8',
         mode: PRIVATE_FILE_MODE,
       });
+      // The append itself is complete. Failure to refresh a performance hint must
+      // never turn a successful audit write into a reported hook failure.
+      try {
+        const after = await fileState(this.file);
+        if (
+          after !== null &&
+          after.size === (before?.size ?? 0n) + BigInt(line.length) &&
+          (await hasExpectedTail(this.file, after, line))
+        )
+          rememberHead(this.file, after.fingerprint, entry);
+        else auditHeads.delete(this.file);
+      } catch {
+        auditHeads.delete(this.file);
+      }
       return entry;
     });
   }

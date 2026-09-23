@@ -29,6 +29,27 @@ beforeEach(() => {
 });
 
 describe('doctorReport', () => {
+  it('does not count post-only Claude hooks as installed protection', async () => {
+    const file = settingsPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [
+            {
+              matcher: 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*',
+              hooks: [{ type: 'command', command: '"/n" "/e.js" hook claude-code', timeout: 15 }],
+            },
+          ],
+        },
+      }),
+    );
+    const check = (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'hooks');
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('PreToolUse');
+  });
+
   it('reports missing hooks, then installed hooks', async () => {
     const before = await doctorReport(cwd);
     const byName = (name: string) => before.checks.find((c) => c.name === name)!;
@@ -108,6 +129,50 @@ describe('doctorReport', () => {
 });
 
 describe('doctorReport cursor hooks', () => {
+  it('does not count a post-only or fail-open Cursor configuration as installed', async () => {
+    const file = cursorHooksPath('project', cwd);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        hooks: {
+          afterShellExecution: [{ command: '"/n" "/e.js" hook cursor' }],
+        },
+      }),
+    );
+    const postOnly = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'cursor hooks',
+    );
+    expect(postOnly?.ok).toBe(false);
+    expect(postOnly?.detail).toContain('beforeShellExecution');
+    installCursorHooks(file, '"/n" "/e.js" hook cursor');
+    const installed = JSON.parse(readFileSync(file, 'utf8')) as {
+      hooks: Record<string, { command: string; failClosed?: boolean }[]>;
+    };
+    installed.hooks['beforeShellExecution']![0]!.failClosed = false;
+    writeFileSync(file, JSON.stringify(installed));
+    const failOpen = (await doctorReport(cwd, { all: true })).checks.find(
+      (c) => c.name === 'cursor hooks',
+    );
+    expect(failOpen?.ok).toBe(false);
+    expect(failOpen?.detail).toContain('beforeShellExecution (failClosed)');
+  });
+
+  it('requires the Cursor write/delete preToolUse gate and its exact matcher', async () => {
+    const file = cursorHooksPath('project', cwd);
+    installCursorHooks(file, '"/n" "/e.js" hook cursor');
+    const installed = JSON.parse(readFileSync(file, 'utf8')) as {
+      hooks: Record<string, { command: string; matcher?: string; failClosed?: boolean }[]>;
+    };
+    installed.hooks['preToolUse']![0]!.matcher = 'Shell';
+    writeFileSync(file, JSON.stringify(installed));
+    const report = (await doctorReport(cwd, { all: true })).checks.find(
+      (check) => check.name === 'cursor hooks',
+    );
+    expect(report?.ok).toBe(false);
+    expect(report?.detail).toContain('preToolUse');
+  });
+
   const detailOf = (
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,

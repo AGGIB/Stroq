@@ -14,10 +14,12 @@ import { logError } from '../log.js';
 import { auditFile } from '../paths.js';
 import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './claude-code.js';
 import { mcpToolName } from './cursor-mcp-name.js';
+import { decidePre, denyDirectly, MAX_PATCH_PATHS } from './pre-decision.js';
 import { toolInputRecord } from './tool-input.js';
 
-/** The six Cursor events Stroq installs on; any other event is not ours to answer. */
+/** The Cursor events Stroq installs on; any other event is not ours to answer. */
 export const CURSOR_EVENTS = [
+  'preToolUse',
   'beforeShellExecution',
   'afterShellExecution',
   'beforeMCPExecution',
@@ -29,12 +31,13 @@ export const CURSOR_EVENTS = [
 export type CursorEvent = (typeof CURSOR_EVENTS)[number];
 
 /**
- * The two events where a `deny` actually stops a high-impact action. They are the
+ * The events where a `deny` actually stops a high-impact action. They are the
  * ones `init` writes `failClosed: true` on and the ones an internal error answers
  * with an explicit deny; on the others there is nothing to block, so stalling the
  * agent would buy no safety.
  */
 export const CURSOR_BLOCKING_EVENTS: readonly CursorEvent[] = [
+  'preToolUse',
   'beforeShellExecution',
   'beforeMCPExecution',
 ];
@@ -82,6 +85,10 @@ export type CursorHookInput = z.infer<typeof CursorHookInputSchema>;
 
 export function cursorToolName(input: CursorHookInput): string {
   switch (input.hook_event_name) {
+    case 'preToolUse':
+      // The installed matcher is Write|Delete. Both change a filesystem path and
+      // need the same self-tamper classification as core's Write tool.
+      return 'Write';
     case 'beforeShellExecution':
     case 'afterShellExecution':
       return 'Bash';
@@ -97,6 +104,8 @@ export function cursorToolName(input: CursorHookInput): string {
 
 export function cursorToolInput(input: CursorHookInput): Record<string, unknown> {
   switch (input.hook_event_name) {
+    case 'preToolUse':
+      return toolInputRecord(input.tool_input);
     case 'beforeShellExecution':
     case 'afterShellExecution':
       return { command: input.command ?? '' };
@@ -219,6 +228,60 @@ async function handleBlockingPre(engine: StroqEngine, event: EngineEvent): Promi
   return rendered === null ? NO_OUTPUT : json({ ...rendered });
 }
 
+/** Cursor's generic hook does not enforce `ask`, so render it as a deny. */
+async function handleGenericPre(
+  engine: StroqEngine,
+  event: EngineEvent,
+  input: CursorHookInput,
+): Promise<HookOutput> {
+  if (input.tool_name !== 'Write' && input.tool_name !== 'Delete')
+    return cursorDenyOutput('Stroq could not identify the Cursor write/delete tool');
+  const paths: string[] = [];
+  let unreadable = false;
+  let tooMany = false;
+  for (const key of ['file_path', 'filepath', 'path', 'target', 'target_file', 'notebook_path']) {
+    if (!Object.hasOwn(event.toolInput, key)) continue;
+    const value = event.toolInput[key];
+    const items = Array.isArray(value) ? value : [value];
+    if (items.length > MAX_PATCH_PATHS) {
+      tooMany = true;
+      break;
+    }
+    for (const item of items) {
+      if (typeof item !== 'string' || item.length === 0) unreadable = true;
+      else paths.push(item);
+    }
+    if (paths.length > MAX_PATCH_PATHS) {
+      tooMany = true;
+      break;
+    }
+  }
+  if (unreadable || paths.length === 0 || tooMany) {
+    const decision: Decision = {
+      effect: 'deny',
+      ruleId: tooMany ? 'cursor-too-many-paths' : 'cursor-unreadable-write',
+      reason: tooMany
+        ? `Cursor supplied more than ${MAX_PATCH_PATHS} write/delete paths`
+        : 'Cursor supplied a write/delete without a readable path',
+    };
+    return denyDirectly(event, decision, 'cursor: unreadable write/delete paths', (recorded) =>
+      cursorDenyOutput(`Stroq blocked this action (${recorded.ruleId}): ${recorded.reason}`),
+    );
+  }
+  const result = await decidePre(
+    engine,
+    event,
+    paths.map((file_path) => ({ ...event.toolInput, file_path })),
+  );
+  const rendered = renderDecision(result.decision, result.provenance, result.secrets);
+  if (rendered === null) return NO_OUTPUT;
+  if (rendered.permission === 'ask') {
+    const reason = `${rendered.user_message}; Cursor preToolUse cannot prompt, so Stroq denied it`;
+    return json({ permission: 'deny', user_message: reason, agent_message: reason });
+  }
+  return json({ ...rendered });
+}
+
 /**
  * `beforeReadFile`: classify the path first, so a credential file under an
  * already-tainted session is denied before its body is even scanned; then scan
@@ -250,32 +313,28 @@ async function handleReadFile(
 }
 
 /**
- * What the audit records for an edit Stroq was not installed to stop: an explicit
- * `allow`, so it can never be read as a block that happened, and so `stroq why`
- * (which reports the most recent non-allow entry) keeps explaining the real denial.
+ * A completed edit is an observation. The separate `preToolUse` entry records the
+ * decision made before Cursor ran its Write or Delete tool.
  */
-export const CURSOR_EDIT_UNENFORCED: Decision = {
+export const CURSOR_EDIT_OBSERVED: Decision = {
   effect: 'allow',
-  ruleId: 'cursor-edit-unenforced',
-  reason:
-    'Stroq installs no pre-edit hook on Cursor; the edit already happened and is recorded, not blocked',
+  ruleId: 'cursor-edit-observed',
+  reason: 'Cursor reported a completed edit; its preToolUse decision is recorded separately',
 };
 
 /**
- * `afterFileEdit`: the edit has already happened, and Stroq v1 installs on no Cursor
- * event that could have stopped it. `engine.pre` would write a `deny(deny-self-tamper)`
- * the firewall never enforced, so the path is classified and recorded directly. Every
- * edit is appended, as the Claude Code adapter audits every `PreToolUse` it is handed.
+ * `afterFileEdit`: the edit has already happened. Record it as a post observation,
+ * never as a decision that stopped or allowed the earlier tool call.
  */
 async function handleFileEdit(event: EngineEvent, filePath: string): Promise<HookOutput> {
   const { classes } = classifyTool('Write', event.toolInput, event.cwd);
   await new AuditLog(auditFile()).append({
     sessionId: event.sessionId,
-    phase: 'pre',
+    phase: 'post',
     tool: 'Write',
     summary: filePath,
     classes,
-    decision: CURSOR_EDIT_UNENFORCED,
+    decision: CURSOR_EDIT_OBSERVED,
   });
   return NO_OUTPUT;
 }
@@ -307,6 +366,8 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
     cwd: projectRoot(input),
   };
   switch (input.hook_event_name) {
+    case 'preToolUse':
+      return handleGenericPre(engine, event, input);
     case 'beforeShellExecution':
     case 'beforeMCPExecution':
       return handleBlockingPre(engine, event);
@@ -319,10 +380,8 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
       await scanOutput(engine, event, cursorResultText(input));
       return NO_OUTPUT;
     case 'afterFileEdit':
-      // The classification (`config.self` for `.cursor/hooks.json`,
-      // `.claude/settings.json`, `~/.stroq/…`) is recorded, not enforced. The
-      // equivalent shell command still goes through `beforeShellExecution` and is
-      // denied there.
+      // Keep a distinct observation of a completed edit. The `preToolUse` record
+      // carries any decision made before Cursor's Write/Delete tool executed.
       return handleFileEdit(event, input.file_path ?? '');
   }
 }

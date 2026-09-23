@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { doctorReport } from '../src/commands/doctor.js';
+import { installHooks, settingsPath } from '../src/commands/init.js';
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-doctor-'));
 
@@ -42,16 +43,7 @@ describe('doctorReport when no agent carries Stroq', () => {
   it('leaves the installed path alone', async () => {
     const cwd = fixture();
     mkdirSync(join(cwd, '.claude'), { recursive: true });
-    writeFileSync(
-      join(cwd, '.claude', 'settings.json'),
-      JSON.stringify({
-        hooks: {
-          PreToolUse: [
-            { matcher: 'Bash', hooks: [{ type: 'command', command: 'stroq hook claude-code' }] },
-          ],
-        },
-      }),
-    );
+    installHooks(settingsPath('project', cwd), 'stroq hook claude-code');
     const report = await doctorReport(cwd);
     const names = report.checks.map((c) => c.name);
     expect(names).toContain('cursor hooks');

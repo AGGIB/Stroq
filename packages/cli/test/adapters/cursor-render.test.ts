@@ -67,8 +67,12 @@ describe('renderDecision', () => {
 });
 
 describe('cursorFailClosedOutput', () => {
-  it('denies for the two blocking events', () => {
-    expect(CURSOR_BLOCKING_EVENTS).toEqual(['beforeShellExecution', 'beforeMCPExecution']);
+  it('denies for the blocking events', () => {
+    expect(CURSOR_BLOCKING_EVENTS).toEqual([
+      'preToolUse',
+      'beforeShellExecution',
+      'beforeMCPExecution',
+    ]);
     for (const name of CURSOR_BLOCKING_EVENTS) {
       const out = cursorFailClosedOutput({ hook_event_name: name }, new Error('boom'));
       expect(out.exitCode).toBe(0);
