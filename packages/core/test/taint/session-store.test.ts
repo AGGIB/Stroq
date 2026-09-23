@@ -64,6 +64,20 @@ describe('FileSessionStore', () => {
     const store = new FileSessionStore(dir);
     await expect(store.get('s1')).rejects.toThrow(/corrupt session state/);
   });
+  it('rejects valid JSON with an unknown taint level instead of treating it as clean', async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `${sessionKey('s1')}.json`),
+      JSON.stringify({
+        sessionId: 's1',
+        taint: { level: 'BROKEN', since: '2026-09-23T00:00:00Z', sources: [] },
+        updatedAt: '2026-09-23T00:00:00Z',
+      }),
+      'utf8',
+    );
+    await expect(new FileSessionStore(dir).get('s1')).rejects.toThrow(/corrupt session state/);
+  });
   it('never uses the raw session id as a file name', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
     await new FileSessionStore(dir).markSuspect('../../etc/passwd', src('Read'));

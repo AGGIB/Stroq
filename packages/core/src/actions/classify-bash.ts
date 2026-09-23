@@ -364,18 +364,16 @@ function hostsOf(command: string): string[] {
 
 export function classifyCommand(command: string, cwd: string): CommandClassification {
   const segments = splitSegments(command);
+  const pipelines = splitPipelines(command);
   const selfConfig = selfTamperSignals(segments);
   // The PowerShell and cmd forms of the same four dangers, merged into the same
   // classes rather than given their own. A dangerous command is dangerous whichever
   // shell wrote it, and a policy rule naming `shell.exec_encoded` must not have to
   // name a Windows twin of it as well. `shell.unparsed` is the one class that IS
   // new, because "I could not read what this runs" is not any of the four.
-  const ps = powershellSignals(segments, cwd);
+  const ps = powershellSignals(segments, pipelines, cwd);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
-    [
-      'shell.exec_encoded',
-      [...encodedExecSignals(segments, splitPipelines(command)), ...ps.encoded],
-    ],
+    ['shell.exec_encoded', [...encodedExecSignals(segments, pipelines), ...ps.encoded]],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
     ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],

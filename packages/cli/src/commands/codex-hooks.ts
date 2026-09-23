@@ -167,22 +167,49 @@ export function mergeCodexHooks(settings: CodexHooksJson, command: string): Code
 }
 
 /**
- * True when Stroq's handler is registered under the official `hooks` wrapper —
- * the only place `init` writes it, and so the only place `doctor` may call it
- * installed. An entry the file still keeps at the root reports as not installed:
- * re-running `init` migrates it, and reporting it as installed would leave a user
- * whose Codex build only reads `hooks` believing they were protected.
+ * True when both required events have Stroq's handler under the official `hooks`
+ * wrapper with the matchers init installs. A post-only hook or a narrowed pre
+ * matcher cannot protect the actions Stroq claims to cover.
  */
-export function hasStroqCodexHook(settings: CodexHooksJson): boolean {
-  return Object.values(nestedEvents(settings))
-    .flatMap((groups): readonly unknown[] => (Array.isArray(groups) ? groups : []))
-    .some(
+export function missingStroqCodexHooks(settings: CodexHooksJson): readonly string[] {
+  const events = nestedEvents(settings);
+  const hasEvent = (event: string, matcher: string): boolean =>
+    groupsOf(events, event).some(
       (group) =>
         isPlainObject(group) &&
-        Array.isArray(group['hooks']) &&
-        group['hooks'].some((handler: unknown) => isStroqCodexHook(handler as CodexHookHandler)),
+        group.matcher === matcher &&
+        Array.isArray(group.hooks) &&
+        group.hooks.some(
+          (handler: unknown) =>
+            isPlainObject(handler) &&
+            handler['type'] === 'command' &&
+            isStroqCodexHook(handler as unknown as CodexHookHandler),
+        ),
     );
+  return [
+    ...(!hasEvent('PreToolUse', CODEX_PRE_MATCHER) ? ['PreToolUse (matcher)'] : []),
+    ...(!hasEvent('PostToolUse', CODEX_POST_MATCHER) ? ['PostToolUse (matcher)'] : []),
+  ];
 }
+
+/** Whether any event carries a Stroq handler — the file is a Stroq install at all. */
+export function hasAnyStroqCodexHook(settings: CodexHooksJson): boolean {
+  const events = nestedEvents(settings);
+  return Object.keys(events).some((event) =>
+    groupsOf(events, event).some(
+      (group) =>
+        isPlainObject(group) &&
+        Array.isArray(group.hooks) &&
+        group.hooks.some(
+          (handler: unknown) =>
+            isPlainObject(handler) && isStroqCodexHook(handler as unknown as CodexHookHandler),
+        ),
+    ),
+  );
+}
+
+export const hasStroqCodexHook = (settings: CodexHooksJson): boolean =>
+  missingStroqCodexHooks(settings).length === 0;
 
 export function codexHooksPath(scope: 'project' | 'user', cwd: string = process.cwd()): string {
   return scope === 'user'

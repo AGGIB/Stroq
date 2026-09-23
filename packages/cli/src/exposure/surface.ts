@@ -4,15 +4,13 @@ import {
   isStroqAntigravityHooks,
   readAntigravityHooks,
 } from '../commands/antigravity-hooks.js';
-import { codexHooksPath, hasStroqCodexHook, readCodexHooks } from '../commands/codex-hooks.js';
 import {
   copilotHooksPath,
   isStroqCopilotHooks,
   readCopilotHooks,
 } from '../commands/copilot-hooks.js';
-import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from '../commands/cursor-hooks.js';
-import { detectedAgents } from '../commands/doctor.js';
-import { HOOK_AGENTS, isStroqHandler, readSettings, settingsPath } from '../commands/init.js';
+import { agentHookStatus, detectedAgents } from '../commands/doctor.js';
+import { HOOK_AGENTS } from '../commands/init.js';
 import { isStroqOpenClawPlugin, openclawPluginDir } from '../commands/openclaw-plugin.js';
 import {
   isStroqWindsurfHooks,
@@ -42,26 +40,13 @@ const SCOPES = ['project', 'user'] as const;
 
 function isProtected(agent: string, cwd: string): boolean {
   switch (agent) {
+    // The same definition `doctor` and `stroq run` apply: every required event with
+    // its matcher and fail-closed flag. A post-only install scans but blocks nothing,
+    // and counting it as protection is what A-06 of the 2026-09-23 audit found.
     case 'claude-code':
-      return SCOPES.some((s) =>
-        safe(() =>
-          Object.values(readSettings(settingsPath(s, cwd)).hooks ?? {})
-            .flat()
-            .some((g) => Array.isArray(g.hooks) && g.hooks.some(isStroqHandler)),
-        ),
-      );
     case 'cursor':
-      return SCOPES.some((s) =>
-        safe(() =>
-          Object.values(readCursorHooks(cursorHooksPath(s, cwd)).hooks ?? {})
-            .flat()
-            .some(isStroqCursorHook),
-        ),
-      );
     case 'codex':
-      return SCOPES.some((s) =>
-        safe(() => hasStroqCodexHook(readCodexHooks(codexHooksPath(s, cwd)))),
-      );
+      return safe(() => agentHookStatus(agent, cwd)?.installed === true);
     case 'copilot':
       return SCOPES.some((s) =>
         safe(() => isStroqCopilotHooks(readCopilotHooks(copilotHooksPath(s, cwd)))),

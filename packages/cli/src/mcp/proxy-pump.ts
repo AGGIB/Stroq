@@ -90,6 +90,13 @@ const CLOAK_UNSCANNABLE_RESULT: Decision = {
     'The server result is larger than the cloak can read whole, so its values could not be replaced before the model saw them; the result is dropped rather than delivered uncloaked. Without --cloak this result would be forwarded unscanned.',
 };
 
+const CLOAK_INVALID_RESULT: Decision = {
+  effect: 'deny',
+  ruleId: 'mcp-cloak-invalid-result',
+  reason:
+    'The tools/call result is not an MCP result object, so Stroq cannot safely cloak it; the result is dropped rather than delivered in the clear.',
+};
+
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 // Re-exported unchanged: `proxy.ts` imports `OrderedQueue` from here and
@@ -190,14 +197,14 @@ export function createPump(deps: PumpDeps): Pump {
     message: Record<string, unknown>,
     params: Record<string, unknown>,
     plan: UncloakPlan,
+    restored: ReturnType<McpCloak['applyUncloak']>,
   ): Promise<void> {
     if (cloak === null || plan.values.size === 0) {
       if (cloak !== null) await cloak.auditUncloak(callAuditFields(params).toolName, plan, []);
       return forwardToServer(line);
     }
-    const applied = cloak.applyUncloak(params, plan);
-    await cloak.auditUncloak(callAuditFields(params).toolName, plan, applied.replacements);
-    return fromClient(serverIn, `${JSON.stringify({ ...message, params: applied.value })}\n`);
+    await cloak.auditUncloak(callAuditFields(params).toolName, plan, restored.replacements);
+    return fromClient(serverIn, `${JSON.stringify({ ...message, params: restored.value })}\n`);
   }
 
   async function handleClientLine(line: SplitLine): Promise<void> {
@@ -256,11 +263,8 @@ export function createPump(deps: PumpDeps): Pump {
     if (isToolsCall(message.method)) {
       const params = paramsOf(message.value);
       try {
-        // Resolved BEFORE the engine runs, but applied only after it allows. A
-        // placeholder standing for a credential refuses the call outright; the rest
-        // are restored on the forwarded line, which is safe in this order because the
-        // kinds v1 restores carry no action class and no provenance atom — see the
-        // ordering note at the top of `cloak.ts`.
+        // Resolve credentials first, then judge the exact arguments that will be
+        // forwarded. Restored values can affect path and command classification.
         const plan = cloak === null ? EMPTY_PLAN : await cloak.planUncloak(params);
         if (plan.refused.length > 0) {
           const { toolName, toolInput } = callAuditFields(params);
@@ -278,9 +282,13 @@ export function createPump(deps: PumpDeps): Pump {
             errorResponse(message.value, message.id, decisionText(decision, [], [])),
           );
         }
-        const verdict = await judgeToolCall(ctx, message.value, message.id, params);
+        const restored =
+          cloak === null ? { value: params, replacements: [] } : cloak.applyUncloak(params, plan);
+        if (!isRecord(restored.value)) throw new Error('restored MCP parameters are invalid');
+        const verdict = await judgeToolCall(ctx, message.value, message.id, restored.value, params);
         if (verdict.pending !== null) pending.set(message.id, verdict.pending);
-        if (verdict.forward) return forwardWithRestores(line, message.value, params, plan);
+        if (verdict.forward)
+          return forwardWithRestores(line, message.value, params, plan, restored);
         return verdict.reply === null ? undefined : replyToClient(verdict.reply);
       } catch (err) {
         // An engine that cannot answer must not become an allow: the call is
@@ -359,10 +367,10 @@ export function createPump(deps: PumpDeps): Pump {
     try {
       warning = await scanMcpResult(ctx, entry, result);
     } catch (err) {
-      // Observe-only, exactly as every adapter's `post` already is: the result the
-      // model asked for still reaches it, and the failure is recorded.
+      // The post scan is observe-only, but a cloak still needs to process the
+      // result before the model sees it.
       logError('mcp proxy post', err);
-      return forwardToClient(line);
+      if (cloak === null) return forwardToClient(line);
     }
     // The cloak runs AFTER the scan, and on a `tools/call` result only. After,
     // because the scan and the provenance atoms are a record of what the server
@@ -372,7 +380,16 @@ export function createPump(deps: PumpDeps): Pump {
     // would break the client rather than protect anyone.
     let cloaked: unknown = result;
     let notice: string | null = null;
-    if (cloak !== null && entry.method === 'tools/call' && isRecord(result)) {
+    if (cloak !== null && entry.method === 'tools/call') {
+      if (!isRecord(result)) {
+        await auditDrop(
+          entry.toolName,
+          { method: entry.method },
+          CLOAK_INVALID_RESULT,
+          'mcp cloak: a tools/call result with an invalid shape was dropped unread',
+        );
+        return;
+      }
       const outcome = await cloak.cloakResult(result);
       if (outcome.kind === 'refused') {
         await auditDrop(

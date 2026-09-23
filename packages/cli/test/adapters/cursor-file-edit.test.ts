@@ -43,7 +43,7 @@ const capturedWhy = async (): Promise<string> => {
 };
 
 describe('afterFileEdit (I2)', () => {
-  it("records an edit of Stroq's own config as an unenforced allow, without blocking it", async () => {
+  it("records a completed edit of Stroq's own config as an observation", async () => {
     expect(
       await run({
         hook_event_name: 'afterFileEdit',
@@ -56,7 +56,7 @@ describe('afterFileEdit (I2)', () => {
     expect(audit).toContain('"tool":"Write"');
     expect(audit).toContain(`${cwd}/.cursor/hooks.json`);
     // The edit already happened, so the audit must not claim a block that never was.
-    expect(audit).toContain('cursor-edit-unenforced');
+    expect(audit).toContain('cursor-edit-observed');
     expect(audit).not.toContain('deny-self-tamper');
     expect(audit).not.toContain('"effect":"deny"');
   });
@@ -67,9 +67,9 @@ describe('afterFileEdit (I2)', () => {
     expect(entries).toHaveLength(1);
     expect(JSON.parse(entries[0] ?? '')).toMatchObject({
       tool: 'Write',
-      phase: 'pre',
+      phase: 'post',
       classes: [],
-      decision: { effect: 'allow', ruleId: 'cursor-edit-unenforced' },
+      decision: { effect: 'allow', ruleId: 'cursor-edit-observed' },
     });
   });
 
@@ -91,7 +91,7 @@ describe('afterFileEdit (I2)', () => {
     const why = await capturedWhy();
     expect(why).toContain('deny-encoded-exec');
     expect(why).toContain(CURL_PIPE_SH);
-    expect(why).not.toContain('cursor-edit-unenforced');
+    expect(why).not.toContain('cursor-edit-observed');
     expect(why).not.toContain('hooks.json');
   });
 });

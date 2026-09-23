@@ -68,11 +68,51 @@ describe('StroqEngine secret egress guard', () => {
   });
 
   it('ignores the value in a purely local command', async () => {
-    const { pre } = fixture();
+    const { pre, engine, audit, cwd } = fixture();
     const r = await pre('Bash', { command: `echo ${AWS_SECRET} > /tmp/x` });
     expect(r.decision.effect).toBe('allow');
     expect(r.secrets).toEqual([]);
     expect(r.classes).not.toContain('secret.egress');
+    await engine.post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: `echo ${AWS_SECRET} > /tmp/x` },
+      toolResultText: '',
+      cwd,
+    });
+    const summaries = (await audit.readAll()).map((entry) => entry.summary);
+    expect(summaries.every((summary) => !summary.includes(AWS_SECRET))).toBe(true);
+  });
+
+  it('redacts a short indexed secret from local pre and post summaries', async () => {
+    const { cwd, pre, engine, audit } = fixture();
+    const secret = 'A1b2c3d4e5f6g7h8';
+    writeFileSync(join(cwd, '.env'), `AUDIT_FAKE_KEY=${secret}\n`);
+    const toolInput = { command: `printf '%s' '${secret}'` };
+    expect((await pre('Bash', toolInput)).decision.effect).toBe('allow');
+    await engine.post({ sessionId: 's1', toolName: 'Bash', toolInput, toolResultText: '', cwd });
+    const summaries = (await audit.readAll()).map((entry) => entry.summary);
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((summary) => summary.includes('[REDACTED:AUDIT_FAKE_KEY]'))).toBe(true);
+    expect(summaries.every((summary) => !summary.includes(secret))).toBe(true);
+  });
+
+  it('redacts indexed values in file, web and MCP summaries too', async () => {
+    const { cwd, pre, engine, audit } = fixture();
+    const secret = 'A1b2c3d4e5f6g7h8';
+    writeFileSync(join(cwd, '.env'), `AUDIT_FAKE_KEY=${secret}\n`);
+    const calls: readonly [string, Record<string, unknown>][] = [
+      ['Read', { file_path: secret }],
+      ['WebFetch', { url: `https://example.test/?key=${secret}`, prompt: 'inspect' }],
+      ['mcp__demo__send_message', { body: secret }],
+    ];
+    for (const [toolName, toolInput] of calls) {
+      await pre(toolName, toolInput);
+      await engine.post({ sessionId: 's1', toolName, toolInput, toolResultText: '', cwd });
+    }
+    const summaries = (await audit.readAll()).map((entry) => entry.summary);
+    expect(summaries).toHaveLength(6);
+    expect(summaries.every((summary) => !summary.includes(secret))).toBe(true);
   });
 
   it('treats a canary as a certain positive and taints the session', async () => {

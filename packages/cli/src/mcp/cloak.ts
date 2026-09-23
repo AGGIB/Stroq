@@ -28,14 +28,10 @@ import {
  *    put a credential on the wire that `deny-secret-egress` exists to keep off it.
  *    Such a call is refused; `plan.refused` carries the labels a refusal may print.
  *
- * 2. **Judge what the model actually sent, then restore.** The proxy judges the call
- *    as it arrived — with placeholders in it — and only substitutes afterwards, on the
- *    line it forwards. That ordering is safe precisely because of rule 1 plus the
- *    kinds v1 detects: an email, a phone number, an IBAN, a card number and an SSN
- *    contribute no action class and no provenance atom, so restoring one cannot turn
- *    an allow into something the policy would have denied. A kind that DID carry
- *    classification weight would have to be judged after restoring instead, and that
- *    is the constraint any future detector has to satisfy before it is added.
+ * 2. **Judge restored arguments.** Credential placeholders are refused first; all
+ *    other placeholders are restored before policy checks. A restored value may
+ *    change path, command, provenance or egress classification, so the engine must
+ *    inspect exactly what the server will receive.
  */
 
 /** What happened to one result. `refused` means it must not be delivered as it stands. */

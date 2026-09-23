@@ -8,6 +8,7 @@ export const CURSOR_HOOKS_VERSION = 1;
 
 export interface CursorHookEntry {
   readonly command: string;
+  readonly matcher?: string;
   readonly timeout?: number;
   /** Cursor treats a non-zero exit as "allow" unless this is set. */
   readonly failClosed?: boolean;
@@ -23,10 +24,17 @@ export const isStroqCursorHook = (entry: CursorHookEntry): boolean =>
   typeof entry?.command === 'string' && / hook cursor$/.test(entry.command);
 
 /**
- * `failClosed` only on the two events where a deny stops something: on the other
+ * `failClosed` only on the events where a deny stops something: on the other
  * four a hook crash must not stall the agent, since there is nothing to block.
  */
 export function cursorEntry(event: CursorEvent, command: string): CursorHookEntry {
+  if (event === 'preToolUse')
+    return {
+      command,
+      matcher: '^(Write|Delete)$',
+      failClosed: true,
+      timeout: HOOK_TIMEOUT_SECONDS,
+    };
   return CURSOR_BLOCKING_EVENTS.includes(event)
     ? { command, failClosed: true, timeout: HOOK_TIMEOUT_SECONDS }
     : { command, timeout: HOOK_TIMEOUT_SECONDS };
@@ -41,7 +49,7 @@ function existingEntries(
 }
 
 /**
- * Adds Stroq's entry to each of the six events, dropping any older Stroq entry
+ * Adds Stroq's entry to each of the seven events, dropping any older Stroq entry
  * first, so re-running `init` is idempotent and an upgrade replaces the command
  * rather than stacking a second one. Foreign entries and foreign events (and any
  * other key of the file) are preserved untouched.

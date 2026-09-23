@@ -133,7 +133,7 @@ function deriveBench(): string {
       'it flags. The difference between those two is the surface the text arrived on, ' +
       'which is a scan_target question rather than a regex one, and it is open.',
     '',
-    'Production scans under a 500 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
+    'Production scans under a 4,000 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
       "fails closed the moment it runs out — verdict: 'suspect' plus a synthetic " +
       'STROQ-SCAN-BUDGET match — because a slow scan must never hang a tool call. This ' +

@@ -19,6 +19,12 @@ const commandsOf = (settings: CursorHooksJson, event: string) =>
 
 describe('cursorEntry', () => {
   it('fails closed only where a deny stops something', () => {
+    expect(cursorEntry('preToolUse', cmd)).toEqual({
+      command: cmd,
+      matcher: '^(Write|Delete)$',
+      failClosed: true,
+      timeout: 15,
+    });
     expect(cursorEntry('beforeShellExecution', cmd)).toEqual({
       command: cmd,
       failClosed: true,
@@ -41,6 +47,7 @@ describe('mergeCursorHooks', () => {
     const merged = mergeCursorHooks({}, cmd);
     expect(merged.version).toBe(CURSOR_HOOKS_VERSION);
     expect(Object.keys(merged.hooks ?? {})).toEqual([
+      'preToolUse',
       'beforeShellExecution',
       'afterShellExecution',
       'beforeMCPExecution',

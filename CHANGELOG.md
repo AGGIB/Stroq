@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+A security audit of 0.15.2 ([docs/audits/2026-09-23-stroq.md](docs/audits/2026-09-23-stroq.md)) found eight P1 defects the test suite and the attack corpus did not cover. Each is fixed with a regression test built from the audit's own synthetic case, and each case was re-run independently of those tests before merging.
+
+- **An encoded instruction after fifty harmless encoded tokens scanned clean (A-01).** The normalizer decoded only the first 50 base64 and hex tokens of each layer, so an instruction placed after ~2 KB of benign base64 produced `clean` and no provenance. Every token is now decoded; the work stays bounded by the 200,000-character scan window and the scan budget. Real lockfiles with 200–400 integrity hashes scan in 64–206 ms, and the worst synthetic case, 6,898 tokens filling the window, in 3.7 s, under the 4,000 ms budget, and fails closed past it.
+- **File-shaped MCP tools went around the path classes (A-02).** `write_file(path: '.claude/./settings.json')`, a `..` detour, or a write into `.git/hooks/` through an MCP server was allowed while the same native write was denied, and an MCP `read_file` of `.env` under taint was not a secret read. Path-like arguments of read- and write-shaped MCP tools are now normalized and classified exactly as native file tools are. Prose that merely mentions a protected path is still not self-tamper.
+- **The cloak judged a call before restoring it (A-03).** A placeholder was judged, then replaced with its value on the way to the server, so a server could plant `.claude/settings.json` in a cloaked field and have the model write to it through the placeholder. Restored arguments are now judged; the audit still records the placeholders the model sent.
+- **A known secret could be written to the audit log (A-04).** Only outbound actions were checked against the secret index, so a local `printf` of a `.env` value put that value in both audit records. Every `pre` and `post` summary is now matched against the index before it is written.
+- **A failed result scan delivered the result uncloaked (A-05).** With `--cloak` on, an exception in the post-scan forwarded the server's result as it was. The cloak now runs regardless, and a result that cannot be cloaked is dropped.
+- **A partial install counted as protection (A-06).** `doctor`, `exposure` and `stroq run` accepted any Stroq command anywhere in a hook file, so a post-only Claude or Codex config, or a Cursor config without its blocking events, passed. Each agent's required events, matchers and fail-closed flags are now checked and the missing ones named.
+- **`Grep` over a secret file was unclassified (A-07).** A tainted `Grep` of `.env` through Copilot or Antigravity was allowed; it is now `fs.secrets`.
+- **Well-formed but wrong session state could lift a taint (A-08).** A session file with `"level": "BROKEN"` loaded and the next `curl` was allowed. Session state is now validated on load and anything else fails closed.
+
+### Fixed
+
+- **A stale lock could be taken from a living owner (A-09).** Locks now carry an owner token and are never reclaimed from a live process by age alone; release checks ownership. A multi-process test holds a critical section past the stale interval and checks the audit chain.
+- **`stroq trust` removed the taint but not the suspect provenance (A-10).** A command from a trusted file was still denied as `origin.suspect`. Trusting exact content now waives both; a changed byte restores the protection.
+- **PowerShell read `;` as `|` (A-11).** `iwr … ; iex $x` was classified as fetch-and-execute. Only a real pipe is.
+- **Release staging was not pinned to what CI verified (A-12, A-13).** The release workflow now refuses a tag that does not match the package version, repeats the format, type, test, rules, reports, attack and fuzz gates before staging, and pins npm 11.15.0, checking that `npm stage` exists first.
+- **Five defects in the audit fixes themselves, found reviewing them.** Judging restored arguments had put the restored value in the audit summary — the MCP demo's real email reached `audit.jsonl`. A lock contender that found another contender's `.reaper` directory spun with no pause and no deadline, so a reaper killed mid-reap kept every hook busy for up to 60 s. The new Cursor write gate denied every Write/Delete whose path it could not find; the payload's field names are Cursor's and undocumented, so an unrecognised shape is now allowed and recorded as `cursor-write-path-unread` instead of blocking every edit, and camelCase fields such as `relativeWorkspacePath` are read. `doctor` called any hook file without Stroq's events an incomplete install, failing the Claude line for a Cursor-only user with their own `.claude/settings.json`. And A-06 had reached `doctor` and `stroq run` but not `stroq exposure`, which kept its own any-Stroq-command check; it now uses the same definition.
+
+### Added
+
+- **Cursor editor writes can be blocked.** `init --agent cursor` installs a `preToolUse` gate on `Write|Delete` with `failClosed`, so an edit to Stroq's config, another agent's hooks or `.git/hooks` is denied before it happens rather than audited after. `ask` is rendered as a deny because Cursor does not enforce it on this hook. It is checked against synthetic payloads, not a recorded Cursor session; Tab edits have their own hooks and are not covered. An existing install gains the gate by re-running `stroq init --agent cursor`, and `doctor` says so.
+
+### Changed
+
+- **The README is 39 lines.** Everything it held moved to [docs/GUIDE.md](docs/GUIDE.md) with the same headings, so old anchors still resolve.
+- **Docs, site and the BENCH template state the 4,000 ms scan budget, seven agents, and what the cloak detects in labelled fields.** The site's static test count is gone, since it was always out of date.
+
 ## [0.15.2] - 2026-09-23
 
 ### Fixed

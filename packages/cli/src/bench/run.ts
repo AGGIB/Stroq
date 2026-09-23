@@ -14,13 +14,13 @@ const TEXT = /\.(?:md|rst|txt|adoc)$/i;
  * hang a tool call; that is a latency trade-off, not a judgement about the text. The
  * bench is measuring a different thing: which rules match real documentation, not how
  * fast the machine producing this report happens to be. Passing no budget here would
- * inherit the 500 ms production one, and a timeout-induced 'suspect' is not a rule
+ * inherit the 4,000 ms production one, and a timeout-induced 'suspect' is not a rule
  * false-positive — it would both overstate the reported rate and make the published
  * number depend on the CI runner's clock speed rather than on the rules, which is
  * exactly what made `docs/BENCH.md` drift between machines. 60 s is comfortably above
  * anything in the vendored corpus takes to scan (its slowest file measures under 1 s
- * locally — and that figure, sitting here unread next to a 500 ms production budget,
- * is why benign READMEs were being marked suspect), so it should never be hit in
+ * locally — the former 500 ms production budget is why benign READMEs were being
+ * marked suspect), so it should never be hit in
  * practice — see `timedOut` on
  * `BenchReport` for what happens if it somehow is.
  */

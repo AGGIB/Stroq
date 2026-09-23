@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -162,6 +162,84 @@ describe('event field mapping', () => {
 });
 
 describe('handleCursorHook', () => {
+  it('blocks a direct Cursor Write or Delete of protected configuration before execution', async () => {
+    for (const tool_name of ['Write', 'Delete']) {
+      const out = await run({
+        hook_event_name: 'preToolUse',
+        tool_name,
+        tool_input: { file_path: `${cwd}/.cursor/hooks.json`, content: '{}' },
+      });
+      expect(body(out.stdout)['permission']).toBe('deny');
+      expect(String(body(out.stdout)['user_message'])).toContain('deny-self-tamper');
+    }
+  });
+
+  it('checks every conflicting path field in a Cursor write', async () => {
+    const out = await run({
+      hook_event_name: 'preToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: 'src/okay.ts', path: '.claude/settings.json' },
+    });
+    expect(body(out.stdout)['permission']).toBe('deny');
+    expect(String(body(out.stdout)['user_message'])).toContain('deny-self-tamper');
+  });
+
+  // Cursor documents the preToolUse envelope but not the fields its Write and
+  // Delete tools put in `tool_input`, and no recorded payload exists yet. The keys
+  // are chosen by Cursor, not by the model, so a shape Stroq does not recognise is
+  // a coverage gap rather than something an attacker can steer — while denying on
+  // it would block every file write the agent makes. It is allowed and recorded, so
+  // `stroq log` shows the gap instead of the agent silently losing its edits.
+  it('allows and records a Cursor write whose path it cannot find', async () => {
+    const out = await run({ hook_event_name: 'preToolUse', tool_name: 'Write', tool_input: {} });
+    expect(out).toEqual({ stdout: '', exitCode: 0 });
+    expect(readFileSync(join(home, 'audit.jsonl'), 'utf8')).toContain('cursor-write-path-unread');
+  });
+
+  it('reads the path from the camelCase fields Cursor uses internally', async () => {
+    for (const tool_input of [
+      { relativeWorkspacePath: '.cursor/hooks.json' },
+      { targetFile: `${cwd}/.cursor/hooks.json` },
+      { filePath: '.claude/settings.json' },
+    ]) {
+      const out = await run({ hook_event_name: 'preToolUse', tool_name: 'Write', tool_input });
+      expect(body(out.stdout)['permission']).toBe('deny');
+      expect(String(body(out.stdout)['user_message'])).toContain('deny-self-tamper');
+    }
+  });
+
+  it('ignores a path field that carries no string beside one that does', async () => {
+    const out = await run({
+      hook_event_name: 'preToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: 'src/okay.ts', path: null },
+    });
+    expect(out).toEqual({ stdout: '', exitCode: 0 });
+  });
+
+  it('denies an oversized Cursor path list even with a safe path', async () => {
+    const out = await run({
+      hook_event_name: 'preToolUse',
+      tool_name: 'Write',
+      tool_input: {
+        file_path: 'src/okay.ts',
+        path: Array.from({ length: 65 }, () => 'src/okay.ts'),
+      },
+    });
+    expect(body(out.stdout)['permission']).toBe('deny');
+    expect(String(body(out.stdout)['user_message'])).toContain('cursor-too-many-paths');
+  });
+
+  it('allows an ordinary Cursor write', async () => {
+    expect(
+      await run({
+        hook_event_name: 'preToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/app.ts', content: 'ok' },
+      }),
+    ).toEqual({ stdout: '', exitCode: 0 });
+  });
+
   it('prints nothing for an allowed shell command', async () => {
     expect(await run({ hook_event_name: 'beforeShellExecution', command: 'ls -la' })).toEqual({
       stdout: '',
