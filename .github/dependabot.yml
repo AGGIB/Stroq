@@ -1,0 +1,21 @@
+# Weekly, grouped, and small on purpose: every update PR runs the full CI (tests,
+# attack suite, fuzz, demos), and a flood of single-package PRs would be ignored.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Dev tooling moves together and is safe to batch; the two runtime
+      # dependencies are what ships to users, so each gets its own PR.
+      dev-dependencies:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
