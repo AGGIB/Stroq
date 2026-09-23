@@ -285,13 +285,7 @@ export function createPump(deps: PumpDeps): Pump {
         const restored =
           cloak === null ? { value: params, replacements: [] } : cloak.applyUncloak(params, plan);
         if (!isRecord(restored.value)) throw new Error('restored MCP parameters are invalid');
-        const verdict = await judgeToolCall(
-          ctx,
-          message.value,
-          message.id,
-          restored.value,
-          params,
-        );
+        const verdict = await judgeToolCall(ctx, message.value, message.id, restored.value, params);
         if (verdict.pending !== null) pending.set(message.id, verdict.pending);
         if (verdict.forward)
           return forwardWithRestores(line, message.value, params, plan, restored);
