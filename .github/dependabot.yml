@@ -8,10 +8,19 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # Dev tooling moves together and is safe to batch; the two runtime
-      # dependencies are what ships to users, so each gets its own PR.
+      # Minor and patch dev tooling is safe to batch. A MAJOR is not: the first
+      # grouped PR carried TypeScript 5.9 -> 7.0, vitest 4 -> 5 and @types/node
+      # 24 -> 26 alongside two patches, and TypeScript 7 fails the typecheck, so
+      # the patches were stuck behind it. Majors now arrive one per PR. The two
+      # runtime dependencies ship to users, so each gets its own PR as well.
       dev-dependencies:
         dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # Node's types must describe the oldest Node `engines` allows (22), or code
+      # can compile against an API that 22 does not have and fail for its users.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
