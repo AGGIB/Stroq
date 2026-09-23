@@ -9,9 +9,12 @@ import { fileURLToPath } from 'node:url';
 export default function setup(): void {
   const root = fileURLToPath(new URL('..', import.meta.url));
   try {
-    execFileSync('pnpm', ['-r', '--filter', './packages/*', 'build'], {
+    // On Windows `pnpm` is `pnpm.cmd`, which Node only runs through a shell.
+    const windows = process.platform === 'win32';
+    execFileSync(windows ? 'pnpm.cmd' : 'pnpm', ['-r', '--filter', './packages/*', 'build'], {
       cwd: root,
       stdio: 'pipe',
+      shell: windows,
     });
   } catch (err) {
     const out = err as { stdout?: Buffer; stderr?: Buffer };
