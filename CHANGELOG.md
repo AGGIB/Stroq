@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-24
+
 ### Security
 
 A second audit ([docs/audits/2026-09-24-stroq.md](docs/audits/2026-09-24-stroq.md)) looked where the first did not: what Stroq prints, and what it writes into a repository someone else wrote.
