@@ -72,6 +72,17 @@ describe('contextSurface', () => {
     expect(s.flagged).toHaveLength(1);
   });
 
+  it('records the sha256 of every file it read, for the next run to compare', () => {
+    const home = fixture();
+    const cwd = fixture();
+    writeFileSync(join(cwd, 'CLAUDE.md'), 'x');
+    const s = contextSurface(cwd, home);
+    // sha256("x")
+    expect(s.digests[join(cwd, 'CLAUDE.md')]).toBe(
+      '2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881',
+    );
+  });
+
   it('flags a file that trips a rule', () => {
     const home = fixture();
     const cwd = fixture();
@@ -190,6 +201,7 @@ describe('contextFindings', () => {
       commands: 1,
       bytes: 1024,
       flagged: ['/h/.claude/skills/a/SKILL.md'],
+      digests: {},
       foreignHooks: 0,
       capped: false,
     });
@@ -206,6 +218,7 @@ describe('contextFindings', () => {
       commands: 0,
       bytes: 0,
       flagged: [],
+      digests: {},
       foreignHooks: 3,
       capped: false,
     });

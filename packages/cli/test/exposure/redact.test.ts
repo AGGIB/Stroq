@@ -27,6 +27,7 @@ const report: ExposureReport = {
     commands: 79,
     bytes: 4096,
     flagged: ['/Users/secretname/.claude/skills/private-thing/SKILL.md'],
+    digests: {},
     foreignHooks: 1,
     capped: false,
   },

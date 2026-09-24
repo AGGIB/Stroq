@@ -39,6 +39,9 @@ describe('runExposure', () => {
   beforeEach(() => {
     captured.length = 0;
     cwd = fixture();
+    // Each test its own record of instruction files, so one test's run is not the
+    // previous run another test compares against.
+    process.env['STROQ_HOME'] = fixture();
     vi.spyOn(process, 'cwd').mockReturnValue(cwd);
     vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
       captured.push(String(chunk));
@@ -51,6 +54,19 @@ describe('runExposure', () => {
   });
 
   const output = (): string => captured.join('');
+
+  it('records the instruction files on the first run and names what changed on the next', async () => {
+    writeFileSync(join(cwd, 'CLAUDE.md'), '# rules');
+    await runExposure([]);
+    expect(output()).toContain('Recorded 1 instruction and skill file');
+    captured.length = 0;
+    writeFileSync(join(cwd, 'CLAUDE.md'), '# rules, edited');
+    writeFileSync(join(cwd, 'AGENTS.md'), '# agents');
+    await runExposure([]);
+    expect(output()).toContain('Changed since the last run');
+    expect(output()).toContain(`changed  ${join(cwd, 'CLAUDE.md')}`);
+    expect(output()).toContain(`new      ${join(cwd, 'AGENTS.md')}`);
+  }, 60_000);
 
   it('exits 1 when there is a finding, naming it in the report', async () => {
     mkdirSync(join(cwd, '.cursor'), { recursive: true });

@@ -1,4 +1,5 @@
 import type { ContextSurface } from './context-surface.js';
+import type { Drift } from './inventory.js';
 import { sortFindings, type Finding } from './findings.js';
 import type { McpSurface } from './mcp-surface.js';
 import type { PrivilegeHit } from './privilege-surface.js';
@@ -57,9 +58,35 @@ function probeFooter(report: ExposureReport): string {
   return `MCP servers were started and their tool descriptions scanned (--probe) — but ${failures.length} of them could not be started, so tool-description poisoning is NOT covered for: ${named}`;
 }
 
+/**
+ * What appeared or changed among the instruction and skill files since the last run;
+ * see `Drift`. Printed with the flag from this run's scan beside each, since a changed
+ * file is worth reading either way and a flagged one first.
+ */
+const DRIFT_LINES = 10;
+
+function driftLines(drift: Drift, flagged: ReadonlySet<string>, verbose: boolean): string[] {
+  const total = drift.added.length + drift.changed.length;
+  if (drift.baseline || total === 0) return [];
+  const mark = (path: string): string => (flagged.has(path) ? '  (flagged)' : '');
+  const all = [
+    ...drift.changed.map((path) => `  changed  ${path}${mark(path)}`),
+    ...drift.added.map((path) => `  new      ${path}${mark(path)}`),
+  ];
+  // A plugin update can touch dozens of files; the rest are one flag away.
+  const shown = verbose ? all : all.slice(0, DRIFT_LINES);
+  const hidden = all.length - shown.length;
+  return [
+    `Changed since the last run (${total}): read these if you did not change them yourself.`,
+    ...shown,
+    ...(hidden > 0 ? [`  …and ${hidden} more (--verbose lists them all)`] : []),
+    '',
+  ];
+}
+
 export function formatExposure(
   report: ExposureReport,
-  opts: { readonly verbose?: boolean } = {},
+  opts: { readonly verbose?: boolean; readonly drift?: Drift } = {},
 ): string {
   const detected = report.agents.filter((a) => a.detected);
   const unprotected = detected.filter((a) => !a.protected);
@@ -110,6 +137,16 @@ export function formatExposure(
 
   if (opts.verbose && ctx.flagged.length > 0) {
     lines.push('Flagged files:', ...ctx.flagged.map((f) => `  ${f}`), '');
+  }
+
+  if (opts.drift?.baseline === true) {
+    const recorded = Object.keys(ctx.digests).length;
+    lines.push(
+      `Recorded ${recorded} instruction and skill file${recorded === 1 ? '' : 's'}; the next run names any that appear or change.`,
+      '',
+    );
+  } else if (opts.drift) {
+    lines.push(...driftLines(opts.drift, new Set(ctx.flagged), opts.verbose === true));
   }
 
   // The on-open list is surface, not a finding: a husky hook or a `prepare` script is

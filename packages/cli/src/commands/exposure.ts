@@ -10,7 +10,14 @@ import { probeFindings, probeServers } from '../exposure/probe.js';
 import { reachFindings, reachFrom } from '../exposure/reach.js';
 import { repoFindings, repoSurface } from '../exposure/repo-surface.js';
 import { formatShareable, toShareable } from '../exposure/redact.js';
+import {
+  compareInventory,
+  readInventory,
+  writeInventory,
+  type Drift,
+} from '../exposure/inventory.js';
 import { formatExposure, type ExposureReport } from '../exposure/report.js';
+import { inventoryFile } from '../paths.js';
 import { agentFindings, agentSurface } from '../exposure/surface.js';
 
 export async function buildExposureReport(
@@ -55,17 +62,35 @@ export async function buildExposureReport(
   };
 }
 
+/**
+ * Compares this run's instruction and skill files with the last run's, then records
+ * this run's. A record that cannot be written costs only the next comparison, so it
+ * is reported on stderr and never fails the command.
+ */
+function recordInventory(digests: Readonly<Record<string, string>>): Drift {
+  const file = inventoryFile();
+  const drift = compareInventory(readInventory(file), digests);
+  try {
+    writeInventory(file, digests);
+  } catch (err) {
+    process.stderr.write(`stroq exposure: could not record ${file}: ${(err as Error).message}\n`);
+  }
+  return drift;
+}
+
 export async function runExposure(argv: readonly string[]): Promise<number> {
   const report = await buildExposureReport(process.cwd(), { probe: argv.includes('--probe') });
   const share = argv.includes('--share');
+  const drift = recordInventory(report.context.digests);
   if (argv.includes('--json')) {
-    const payload = share ? toShareable(report) : report;
+    // `--share` stays field-by-field typed data: file paths never reach it.
+    const payload = share ? toShareable(report) : { ...report, drift };
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   } else {
     process.stdout.write(
       share
         ? formatShareable(toShareable(report))
-        : formatExposure(report, { verbose: argv.includes('--verbose') }),
+        : formatExposure(report, { verbose: argv.includes('--verbose'), drift }),
     );
   }
   // Exit 1 on any finding, so `stroq exposure` works in CI and in a pre-commit hook

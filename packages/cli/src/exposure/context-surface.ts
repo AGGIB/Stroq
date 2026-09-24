@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +23,11 @@ export interface ContextSurface {
   readonly bytes: number;
   /** Paths of files that tripped at least one rule. See `contextFindings` for the caveat. */
   readonly flagged: readonly string[];
+  /**
+   * The sha256 of every file read, by absolute path, so the next run can name what
+   * appeared or changed since: a swapped skill is the same file name with new text.
+   */
+  readonly digests: Readonly<Record<string, string>>;
   /** Non-Stroq hook handlers configured for Claude Code: arbitrary code on every tool call. */
   readonly foreignHooks: number;
   /** True when discovery stopped at `MAX_CONTEXT_FILES`, so every count is a lower bound. */
@@ -144,6 +150,7 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
 
   const rules = loadBundledRules();
   const flagged: string[] = [];
+  const digests: Record<string, string> = {};
   let bytes = 0;
   for (const file of [
     ...skills.paths,
@@ -163,6 +170,7 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
     } catch {
       continue;
     }
+    digests[file] = createHash('sha256').update(text).digest('hex');
     // Every file walked above is an instruction file, a skill, a subagent or a slash
     // command: text the agent is meant to obey, not repository material.
     if (scanContent(rules, text, {}, { target: 'instruction_file' }).verdict === 'suspect')
@@ -176,6 +184,7 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
     commands: commands.size,
     bytes,
     flagged,
+    digests,
     foreignHooks: countForeignHooks(cwd),
     capped: skills.full || subagents.full || commands.full,
   };
