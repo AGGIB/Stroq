@@ -304,8 +304,8 @@ describe('mergeCodexHooks on a file whose hooks key is not an event map', () => 
 
 describe('codex hooks files', () => {
   it('computes project and user paths', () => {
-    expect(codexHooksPath('project', '/w')).toBe('/w/.codex/hooks.json');
-    expect(codexHooksPath('user')).toMatch(/\.codex\/hooks\.json$/);
+    expect(codexHooksPath('project', '/w')).toBe(join('/w', '.codex', 'hooks.json'));
+    expect(codexHooksPath('user')).toMatch(/\.codex[\\/]hooks\.json$/);
   });
 
   it('reads missing or empty files as {} and installs hooks creating directories', () => {

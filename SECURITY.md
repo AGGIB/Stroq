@@ -56,6 +56,15 @@ A placeholder standing for the value of a **known secret** — anything in the s
 
 Making the cloak restore a value it should not, leak a value into the audit log or the proxy's own stderr, resolve a placeholder across servers, or forward an uncloaked result while claiming to have cloaked it, is **in scope** and wanted. So is any way to make a dictionary outlive its TTL or be written with wider permissions.
 
+## Windows
+
+Stroq's CI runs its suite on Windows, but with less behind the promises above than on macOS and Linux.
+
+- **File permissions.** `0600` and `0700` are POSIX modes, and Windows does not apply them. The index, the audit log, the cloak dictionary and the rest of `~/.stroq` are protected by the ACL of the user profile they live in, which by default admits the user, SYSTEM and Administrators. A `STROQ_HOME` outside the profile gets whatever that directory grants.
+- **The Claude Code plugin's hook** is a POSIX shell script, so on Windows it needs a shell that can run one, such as Git Bash; whether Claude Code runs it that way has not been verified. `stroq init`, which writes the hook into `.claude/settings.json` directly, does not depend on it.
+- **`stroq run --sandbox`** relies on srt, whose Windows support is an alpha; the generated config is checked on macOS and Linux only.
+- **OpenClaw:** `stroq init --agent openclaw` finds `openclaw.cmd` on `PATH` but prints the two install commands instead of running them, because a `.cmd` shim only runs through a shell that would re-split the plugin path.
+
 ## Scope
 
 **In scope:** any way to defeat a protection this project documents as working today for the Claude Code, Cursor, Codex, Copilot CLI, OpenClaw, Windsurf or Antigravity adapter, or for the MCP stdio proxy. For example: a `shell.network`, `shell.exec_encoded`, `git.push_external`, `fs.secrets`, or `config.self` action that the README or `policies/default.yaml` says should be denied or asked, but is instead silently allowed; or content that should trip a rule in `rules/stroq/` (or a non-disabled rule in `rules/atr/`) but is normalized and scanned as clean.

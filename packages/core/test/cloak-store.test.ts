@@ -30,7 +30,9 @@ describe('FileCloakStore', () => {
 
     // The dictionary holds the value in the clear — that is the point of it — so the
     // file permissions are part of the contract, not an incidental detail.
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: `chmod 0600` is not applied there, and the file is
+    // protected by the user profile's ACL instead (see SECURITY.md).
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readFileSync(file, 'utf8')).toContain('a@b.example');
   });
 

@@ -103,17 +103,17 @@ describe('buildCopilotHooks', () => {
 
 describe('copilotHooksPath', () => {
   it('is the repository hooks directory for a project', () => {
-    expect(copilotHooksPath('project', '/w')).toBe('/w/.github/hooks/stroq.json');
+    expect(copilotHooksPath('project', '/w')).toBe(join('/w', '.github', 'hooks', 'stroq.json'));
   });
 
   it('honours COPILOT_HOME for the user scope, and falls back to ~/.copilot', () => {
     expect(copilotHooksPath('user', '/w', { COPILOT_HOME: '/opt/copilot' })).toBe(
-      '/opt/copilot/hooks/stroq.json',
+      join('/opt/copilot', 'hooks', 'stroq.json'),
     );
-    expect(copilotHooksPath('user', '/w', {})).toMatch(/\.copilot\/hooks\/stroq\.json$/);
+    expect(copilotHooksPath('user', '/w', {})).toMatch(/\.copilot[\\/]hooks[\\/]stroq\.json$/);
     // An empty variable is not a home directory.
     expect(copilotHooksPath('user', '/w', { COPILOT_HOME: '' })).toMatch(
-      /\.copilot\/hooks\/stroq\.json$/,
+      /\.copilot[\\/]hooks[\\/]stroq\.json$/,
     );
   });
 });

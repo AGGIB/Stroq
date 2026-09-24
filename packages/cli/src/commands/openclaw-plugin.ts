@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  accessSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -156,15 +164,32 @@ export const openclawInstallCommands = (dir: string): readonly string[] =>
  */
 export function openclawOnPath(
   env: Readonly<Record<string, string | undefined>> = process.env,
+  plat: NodeJS.Platform = process.platform,
 ): string | null {
+  // On Windows a file runs by its extension, not a mode bit: `accessSync(X_OK)` only
+  // checks that it exists there, so a bare `openclaw` (npm also writes one, for Git
+  // Bash) would count while the runnable shim is `openclaw.cmd`.
+  const names =
+    plat === 'win32'
+      ? (env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .filter((ext) => ext !== '')
+          .map((ext) => `${OPENCLAW_BIN}${ext.toLowerCase()}`)
+      : [OPENCLAW_BIN];
   for (const entry of (env['PATH'] ?? '').split(delimiter)) {
     if (entry === '') continue;
-    const candidate = join(entry, OPENCLAW_BIN);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // not here, or not executable
+    for (const name of names) {
+      const candidate = join(entry, name);
+      try {
+        if (plat === 'win32') {
+          if (statSync(candidate).isFile()) return candidate;
+        } else {
+          accessSync(candidate, constants.X_OK);
+          return candidate;
+        }
+      } catch {
+        // not here, or not executable
+      }
     }
   }
   return null;

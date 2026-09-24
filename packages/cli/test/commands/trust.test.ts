@@ -56,7 +56,9 @@ describe('stroq trust', () => {
     expect(code).toBe(0);
     expect(text).toContain('trusted');
     expect(text).toMatch(/rules waived: \S+/);
-    expect(statSync(trustFile()).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: `chmod 0600` is not applied there, and the file is
+    // protected by the user profile's ACL instead (see SECURITY.md).
+    if (process.platform !== 'win32') expect(statSync(trustFile()).mode & 0o777).toBe(0o600);
     const list = JSON.parse(readFileSync(trustFile(), 'utf8')) as {
       entries: { source: string; sha256: string }[];
     };

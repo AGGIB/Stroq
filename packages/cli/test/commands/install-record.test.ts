@@ -33,7 +33,9 @@ describe('install record', () => {
     const record = readInstallRecord(file);
     expect(record.entries['claude-code:project']?.command).toBe(CLAUDE_COMMAND);
     expect(record.entries['codex:user']?.command).toBe('stroq hook codex');
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: `chmod 0600` is not applied there, and the file is
+    // protected by the user profile's ACL instead (see SECURITY.md).
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(file, 'utf8')).version).toBe(1);
   });
 

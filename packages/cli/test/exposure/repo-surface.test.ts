@@ -184,9 +184,14 @@ describe('git hooks, where the executable bit does not exist', () => {
     expect(repoSurface(repoWithPlainHook(), 'linux').onOpen).toEqual([]);
   });
 
-  it('reports an executable hook on POSIX exactly as before', () => {
-    const root = repoWithPlainHook();
-    chmodSync(join(root, '.git', 'hooks', 'pre-commit'), 0o755);
-    expect(repoSurface(root, 'linux').onOpen.map((h) => h.what)).toEqual(['pre-commit']);
-  });
+  // Windows cannot set the mode bit this test depends on; the Windows semantics have
+  // their own cases above.
+  it.skipIf(process.platform === 'win32')(
+    'reports an executable hook on POSIX exactly as before',
+    () => {
+      const root = repoWithPlainHook();
+      chmodSync(join(root, '.git', 'hooks', 'pre-commit'), 0o755);
+      expect(repoSurface(root, 'linux').onOpen.map((h) => h.what)).toEqual(['pre-commit']);
+    },
+  );
 });

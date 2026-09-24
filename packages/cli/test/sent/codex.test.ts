@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findCodexRollouts, parseCodexRollout, readCodexRollout } from '../../src/sent/codex.js';
 import { readerForFile } from '../../src/sent/readers.js';
@@ -255,10 +255,7 @@ describe('findCodexRollouts', () => {
       { day: '2026/09/20', name: 'rollout-c.jsonl', cwd: '/w/two', mtime: 5000 },
     ]);
     const found = await findCodexRollouts('/w/one', home);
-    expect(found.map((f) => f.path.split('/').pop())).toEqual([
-      'rollout-b.jsonl',
-      'rollout-a.jsonl',
-    ]);
+    expect(found.map((f) => basename(f.path))).toEqual(['rollout-b.jsonl', 'rollout-a.jsonl']);
   });
 
   it('falls back to every session when this directory has none', async () => {

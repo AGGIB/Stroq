@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
-import { mkdir, stat, utimes } from 'node:fs/promises';
+import { mkdir, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -186,5 +186,35 @@ describe('withLock', () => {
         fs: { mkdir, rm: rm as typeof import('node:fs/promises').rm, stat },
       }),
     ).rejects.toThrow('release failed');
+  });
+
+  // Windows answers EPERM, not EEXIST, when mkdir races the removal of the directory
+  // a holder has just released. It failed the concurrent-append audit test there.
+  const eperm = (path: string): NodeJS.ErrnoException =>
+    Object.assign(new Error(`EPERM: operation not permitted, mkdir '${path}'`), {
+      code: 'EPERM',
+    });
+
+  it('waits out an EPERM from mkdir, which is Windows reporting a lock being released', async () => {
+    const lock = join(mkdtempSync(join(tmpdir(), 'stroq-lock-')), 'eperm.lock');
+    let refusals = 2;
+    const flaky = (async (path: string) => {
+      if (path === lock && refusals-- > 0) throw eperm(path);
+      return mkdir(path);
+    }) as typeof mkdir;
+    await expect(
+      withLock(lock, async () => 'entered', { fs: { mkdir: flaky, rm, stat } }),
+    ).resolves.toBe('entered');
+    expect(refusals).toBeLessThan(0);
+  });
+
+  it('reports the EPERM itself, not a timeout, when it never clears', async () => {
+    const lock = join(mkdtempSync(join(tmpdir(), 'stroq-lock-')), 'denied.lock');
+    const denied = (async (path: string) => {
+      throw eperm(path);
+    }) as typeof mkdir;
+    await expect(
+      withLock(lock, async () => 'entered', { timeoutMs: 50, fs: { mkdir: denied, rm, stat } }),
+    ).rejects.toMatchObject({ code: 'EPERM' });
   });
 });

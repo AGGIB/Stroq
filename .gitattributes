@@ -1,0 +1,14 @@
+# LF in the working tree on every platform.
+#
+# Git for Windows checks text files out with CRLF by default. The bench corpus is
+# verified by SHA-256 against its manifest, rule fixtures and scanner tests compare
+# exact bytes, and shell scripts must not carry `\r` — so on Windows the corpus hash
+# check failed before any code ran. Text is normalized to LF instead.
+* text=auto eol=lf
+
+# Binary assets are never normalized.
+*.png binary
+*.jpg binary
+*.gif binary
+*.mp4 binary
+*.pdf binary

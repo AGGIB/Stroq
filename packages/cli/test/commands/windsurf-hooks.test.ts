@@ -128,10 +128,10 @@ describe('isStroqWindsurfHooks', () => {
 
 describe('windsurfHooksPath', () => {
   it('is the workspace file for a project and the Windsurf IDE file for a user', () => {
-    expect(windsurfHooksPath('project', '/w')).toBe('/w/.windsurf/hooks.json');
+    expect(windsurfHooksPath('project', '/w')).toBe(join('/w', '.windsurf', 'hooks.json'));
     // `~/.codeium/windsurf/hooks.json` is the Windsurf IDE's user file. The JetBrains
     // plugin reads `~/.codeium/hooks.json`, which `init` deliberately does not write.
-    expect(windsurfHooksPath('user', '/w')).toMatch(/\.codeium\/windsurf\/hooks\.json$/);
+    expect(windsurfHooksPath('user', '/w')).toMatch(/\.codeium[\\/]windsurf[\\/]hooks\.json$/);
   });
 });
 

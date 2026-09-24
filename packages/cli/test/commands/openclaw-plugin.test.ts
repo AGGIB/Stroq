@@ -99,11 +99,11 @@ describe('the packaged plugin', () => {
 describe('openclawPluginDir', () => {
   it('lives under the Stroq home, and honours STROQ_HOME', () => {
     expect(openclawPluginDir({ STROQ_HOME: '/opt/stroq-home' })).toBe(
-      '/opt/stroq-home/openclaw-plugin',
+      join('/opt/stroq-home', 'openclaw-plugin'),
     );
-    expect(openclawPluginDir({})).toMatch(/\.stroq\/openclaw-plugin$/);
+    expect(openclawPluginDir({})).toMatch(/\.stroq[\\/]openclaw-plugin$/);
     // An empty variable is not a home directory.
-    expect(openclawPluginDir({ STROQ_HOME: '' })).toMatch(/\.stroq\/openclaw-plugin$/);
+    expect(openclawPluginDir({ STROQ_HOME: '' })).toMatch(/\.stroq[\\/]openclaw-plugin$/);
   });
 });
 
@@ -215,19 +215,36 @@ describe('the two openclaw commands', () => {
 });
 
 describe('openclawOnPath', () => {
-  it('finds an executable openclaw on PATH and nothing else', () => {
-    const dir = tmp('stroq-openclaw-path-');
-    const other = tmp('stroq-openclaw-path-');
-    expect(openclawOnPath({ PATH: [other, dir].join(delimiter) })).toBeNull();
-    expect(openclawOnPath({})).toBeNull();
+  // The mode bit is a POSIX idea; on Windows `chmod` does not make a file
+  // unrunnable, which is what the Windows case below is for.
+  it.skipIf(process.platform === 'win32')(
+    'finds an executable openclaw on PATH and nothing else',
+    () => {
+      const dir = tmp('stroq-openclaw-path-');
+      const other = tmp('stroq-openclaw-path-');
+      expect(openclawOnPath({ PATH: [other, dir].join(delimiter) })).toBeNull();
+      expect(openclawOnPath({})).toBeNull();
 
-    // A file that is not executable is not a binary anyone can run.
-    const bin = join(dir, 'openclaw');
-    writeFileSync(bin, '#!/bin/sh\nexit 0\n');
-    chmodSync(bin, 0o644);
-    expect(openclawOnPath({ PATH: dir })).toBeNull();
-    chmodSync(bin, 0o755);
-    expect(openclawOnPath({ PATH: [other, dir].join(delimiter) })).toBe(bin);
+      // A file that is not executable is not a binary anyone can run.
+      const bin = join(dir, 'openclaw');
+      writeFileSync(bin, '#!/bin/sh\nexit 0\n');
+      chmodSync(bin, 0o644);
+      expect(openclawOnPath({ PATH: dir })).toBeNull();
+      chmodSync(bin, 0o755);
+      expect(openclawOnPath({ PATH: [other, dir].join(delimiter) })).toBe(bin);
+    },
+  );
+
+  // On Windows a file runs by extension. The npm shim is `openclaw.cmd`, and the
+  // extensionless `openclaw` beside it (written for Git Bash) is not runnable there.
+  it('finds the openclaw shim by PATHEXT on Windows, and not a bare file', () => {
+    const dir = tmp('stroq-openclaw-win-');
+    writeFileSync(join(dir, 'openclaw'), '#!/bin/sh\n');
+    expect(openclawOnPath({ PATH: dir, PATHEXT: '.EXE;.CMD' }, 'win32')).toBeNull();
+    writeFileSync(join(dir, 'openclaw.cmd'), '@echo off\n');
+    expect(openclawOnPath({ PATH: dir, PATHEXT: '.EXE;.CMD' }, 'win32')).toBe(
+      join(dir, 'openclaw.cmd'),
+    );
   });
 
   it('skips empty PATH entries rather than probing the working directory', () => {
