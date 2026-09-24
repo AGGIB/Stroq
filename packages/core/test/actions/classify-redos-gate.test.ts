@@ -8,68 +8,91 @@ import { classifyCommand } from '../../src/actions/classify-bash.js';
  * that runs past the agent's timeout is answered by the agent — for Codex and Copilot,
  * as an allow. So every input below is one that used to take seconds (16 KiB of
  * `eval ` took 28 s; `find . -exec` and 4 KiB of spaces, 23.7 s), or the repeated
- * trigger of a pattern that could, and each has to classify in well under a second.
+ * trigger of a pattern that could.
+ *
+ * What is held is the growth, not a number of milliseconds: each input is timed at a
+ * quarter of its size and at its full size. Linear work takes about four times as
+ * long; the patterns this guards against took sixteen times as long or more. Only an
+ * input that is both slow and growing faster than it should fails. A time alone does
+ * not work on a shared runner — linear work on 37,000 lines of `eval x` took 1.3 s
+ * there under coverage, against 0.2 s on a laptop — and a ratio alone does not work
+ * on timings of a millisecond, which are noise.
  */
 const SIZE = 256 * 1024;
 const BOUND_MS = 1_000;
+const MAX_GROWTH = 8;
 
-const repeat = (unit: string): string => unit.repeat(Math.ceil(SIZE / unit.length)).slice(0, SIZE);
+type Build = (repeat: (unit: string) => string) => string;
 
-const ADVERSARIAL: ReadonlyArray<readonly [string, string]> = [
-  ['eval chain', repeat('eval ')],
-  ['eval with arguments', repeat('eval x ')],
-  ['eval chain, lines', repeat('eval x\n')],
-  ['find -exec and spaces', `find . -exec${repeat(' ')}x`],
-  ['-exec heads', `find . ${repeat('-exec ')}`],
-  ['slashes', `cat ${repeat('/')}x`],
-  ['backslashes', `cat ${repeat('\\')}x`],
-  ['rm -rf C: and slashes', `rm -rf C:${repeat('/')}x`],
-  ['Remove-Item and backslashes', `Remove-Item C:${repeat('\\')}x`],
-  ['word dots', repeat('a.')],
-  ['ssh target shape', `ssh ${repeat('a.')}`],
-  ['source dots', repeat('a.b ')],
-  ['shells', repeat('bash ')],
-  ['sh -c', repeat('sh -c ')],
-  ['open quotes after sh -c', repeat('bash -c "')],
-  ['process substitution, then dots', `<( ${repeat('. ')}`],
-  ['git push', repeat('git push ')],
-  ['git clean -', repeat('git clean -')],
-  ['git -c', repeat('git x ')],
-  ['git config', repeat('git config ')],
-  ['config reads', repeat('config ')],
-  ['git submodule foreach', repeat('git submodule foreach x ')],
-  ['dd', repeat('dd ')],
-  ['terraform apply', repeat('terraform apply ')],
-  ['drizzle-kit push', repeat('drizzle-kit push ')],
-  ['prisma db push', repeat('prisma db push ')],
-  ['supabase db reset', repeat('supabase db reset ')],
-  ['gh repo create', repeat('gh repo create ')],
-  ['/proc/', `cat ${repeat('/proc/')}`],
-  ['certutil', repeat('certutil ')],
-  ['bitsadmin', repeat('bitsadmin ')],
-  ['powershell', repeat('powershell ')],
-  ['Buffer.from(', `node -e ${repeat('Buffer.from(')}`],
-  ['spaces', `echo${repeat(' ')}x`],
-  ['tabs', `echo${repeat('\t')}x`],
-  ['dots', `echo ${repeat('.')}`],
-  ['quotes', `echo ${repeat("'")}`],
-  ['double quotes', `echo ${repeat('"')}`],
-  ['$(', `echo ${repeat('$(')}`],
-  ['backticks', `echo ${repeat('`')}`],
-  ['rm -rf', repeat('rm -rf ')],
-  ['http://', `curl ${repeat('http://')}`],
-  ['x@', `ssh ${repeat('x@')}`],
-  ['semicolons', repeat(';')],
-  ['pipes', repeat('|')],
+const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
+  ['eval chain', (r) => r('eval ')],
+  ['eval with arguments', (r) => r('eval x ')],
+  ['eval chain, lines', (r) => r('eval x\n')],
+  ['find -exec and spaces', (r) => `find . -exec${r(' ')}x`],
+  ['-exec heads', (r) => `find . ${r('-exec ')}`],
+  ['slashes', (r) => `cat ${r('/')}x`],
+  ['backslashes', (r) => `cat ${r('\\')}x`],
+  ['rm -rf C: and slashes', (r) => `rm -rf C:${r('/')}x`],
+  ['Remove-Item and backslashes', (r) => `Remove-Item C:${r('\\')}x`],
+  ['word dots', (r) => r('a.')],
+  ['ssh target shape', (r) => `ssh ${r('a.')}`],
+  ['source dots', (r) => r('a.b ')],
+  ['shells', (r) => r('bash ')],
+  ['sh -c', (r) => r('sh -c ')],
+  ['open quotes after sh -c', (r) => r('bash -c "')],
+  ['process substitution, then dots', (r) => `<( ${r('. ')}`],
+  ['git push', (r) => r('git push ')],
+  ['git clean -', (r) => r('git clean -')],
+  ['git -c', (r) => r('git x ')],
+  ['git config', (r) => r('git config ')],
+  ['config reads', (r) => r('config ')],
+  ['git submodule foreach', (r) => r('git submodule foreach x ')],
+  ['dd', (r) => r('dd ')],
+  ['terraform apply', (r) => r('terraform apply ')],
+  ['drizzle-kit push', (r) => r('drizzle-kit push ')],
+  ['prisma db push', (r) => r('prisma db push ')],
+  ['supabase db reset', (r) => r('supabase db reset ')],
+  ['gh repo create', (r) => r('gh repo create ')],
+  ['/proc/', (r) => `cat ${r('/proc/')}`],
+  ['certutil', (r) => r('certutil ')],
+  ['bitsadmin', (r) => r('bitsadmin ')],
+  ['powershell', (r) => r('powershell ')],
+  ['Buffer.from(', (r) => `node -e ${r('Buffer.from(')}`],
+  ['spaces', (r) => `echo${r(' ')}x`],
+  ['tabs', (r) => `echo${r('\t')}x`],
+  ['dots', (r) => `echo ${r('.')}`],
+  ['quotes', (r) => `echo ${r("'")}`],
+  ['double quotes', (r) => `echo ${r('"')}`],
+  ['$(', (r) => `echo ${r('$(')}`],
+  ['backticks', (r) => `echo ${r('`')}`],
+  ['rm -rf', (r) => r('rm -rf ')],
+  ['http://', (r) => `curl ${r('http://')}`],
+  ['x@', (r) => `ssh ${r('x@')}`],
+  ['semicolons', (r) => r(';')],
+  ['pipes', (r) => r('|')],
 ];
 
-describe('classifyCommand stays fast on commands built to be slow', () => {
-  it.each(ADVERSARIAL)(`%s (256 KiB) classifies in under ${BOUND_MS} ms`, (_name, command) => {
-    const started = performance.now();
-    classifyCommand(command, '/tmp');
-    expect(performance.now() - started).toBeLessThan(BOUND_MS);
+/** `build` at `size`: every repeated unit fills `size` characters. */
+const at = (build: Build, size: number): string =>
+  build((unit) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size));
+
+const timed = (command: string): number => {
+  const started = performance.now();
+  classifyCommand(command, '/tmp');
+  return performance.now() - started;
+};
+
+describe('classifyCommand stays linear on commands built to be slow', () => {
+  it.each(ADVERSARIAL)('%s', (_name, build) => {
+    const quarter = timed(at(build, SIZE / 4));
+    const full = timed(at(build, SIZE));
+    const growth = `${quarter.toFixed(0)} ms at ${SIZE / 4096} KiB, ${full.toFixed(0)} ms at ${SIZE / 1024} KiB`;
+    expect(full < BOUND_MS || full < MAX_GROWTH * quarter, growth).toBe(true);
   });
 });
+
+/** The unit repeated to 256 KiB, for the budget tests below. */
+const repeat = (unit: string): string => at((r) => r(unit), SIZE);
 
 describe('the nesting budget', () => {
   it('reports a command whose nested arguments outgrow it as unread, and asks', () => {
