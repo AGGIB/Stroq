@@ -68,8 +68,10 @@ Commands:
   exposure [--probe] [--share] [--json] [--verbose]
                                      map this machine's agent surface and report what reaches you;
                                      --probe starts your MCP servers to read their tool descriptions
-  inspect [<dir>] [--json] [--env]   read what a repository runs before you open it with an agent;
-                                     --env prints the git settings that neutralise it
+  inspect [<dir>] [--json|--sarif] [--env]
+                                     read what a repository runs before you open it with an agent;
+                                     --sarif for code scanning, --env prints the git settings that
+                                     neutralise it
   trust [<file>] [--list] [--remove <file>] [--json]
                                      waive a false positive on a file's exact content; without
                                      arguments, list what is trusted

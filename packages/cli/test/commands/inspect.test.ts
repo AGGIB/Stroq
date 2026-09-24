@@ -113,6 +113,29 @@ describe('stroq inspect', () => {
     expect(record.isRepo).toBe(true);
     expect(record.findings).toHaveLength(1);
   });
+
+  it('emits SARIF with --sarif, keeping the exit code, for code scanning', () => {
+    const dir = repo();
+    git(dir, 'config', 'core.fsmonitor', '/tmp/pwn.sh');
+    const out = capture();
+    const code = runInspect([dir, '--sarif']);
+    out.restore();
+    expect(code).toBe(1);
+    const log = JSON.parse(out.lines.join('')) as {
+      version: string;
+      runs: Array<{ results: Array<{ ruleId: string }> }>;
+    };
+    expect(log.version).toBe('2.1.0');
+    expect(log.runs[0]?.results.map((r) => r.ruleId)).toEqual(['stroq/git-config-exec']);
+  });
+
+  it('refuses --json and --sarif together rather than picking one', () => {
+    const out = capture();
+    const code = runInspect([repo(), '--json', '--sarif']);
+    out.restore();
+    expect(code).toBe(2);
+    expect(out.lines.join('')).toContain('--json or --sarif');
+  });
 });
 
 describe('the git settings stroq inspect --env prints', () => {

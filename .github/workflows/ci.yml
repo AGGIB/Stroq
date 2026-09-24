@@ -150,3 +150,41 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # Stroq's own repository through `stroq inspect --sarif`, uploaded to code scanning:
+  # it proves GitHub accepts the log the command writes, and a pull request that adds
+  # execution this repository would run before anyone approves it shows up as an
+  # alert. Exit 1 means findings, which is the upload's job to report, not this step's.
+  inspect:
+    name: stroq inspect (SARIF)
+    runs-on: ubuntu-latest
+    # A fork's and Dependabot's pull requests get a read-only token, which cannot upload.
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Inspect this repository
+        run: node packages/cli/dist/index.js inspect --sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
+
+      - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: stroq-inspect.sarif
+          category: stroq-inspect
