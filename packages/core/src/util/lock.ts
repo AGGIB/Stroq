@@ -89,7 +89,16 @@ async function acquire(
       }
       return owner;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EPERM') {
+        // Windows' answer, in place of EEXIST, while the holder that just released the
+        // lock is still deleting its directory: contention, not a permission problem.
+        // Wait like any contended lock, and report the real error if it never clears.
+        if (Date.now() >= deadline) throw err;
+        await sleep(5 + Math.random() * 10);
+        continue;
+      }
+      if (code !== 'EEXIST') throw err;
       if (await isStale(fs, lockDir, staleMs)) {
         // Only one contender may reclaim an orphan. Without this gate another
         // contender could remove a newly acquired lock after the first reaper.
@@ -97,8 +106,10 @@ async function acquire(
         try {
           await fs.mkdir(reaper);
         } catch (reaperError) {
-          if ((reaperError as NodeJS.ErrnoException).code !== 'EEXIST') throw reaperError;
-          if (await isStale(fs, reaper, Math.max(staleMs, 60_000))) {
+          const reaperCode = (reaperError as NodeJS.ErrnoException).code;
+          // EPERM: the same Windows race, on a reaper directory being removed.
+          if (reaperCode !== 'EEXIST' && reaperCode !== 'EPERM') throw reaperError;
+          if (reaperCode === 'EEXIST' && (await isStale(fs, reaper, Math.max(staleMs, 60_000)))) {
             await fs.rm(reaper, { recursive: true, force: true });
             continue;
           }
