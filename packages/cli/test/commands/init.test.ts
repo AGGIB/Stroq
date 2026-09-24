@@ -108,8 +108,8 @@ describe('mergeHooks', () => {
 
 describe('settings files', () => {
   it('computes project and user paths', () => {
-    expect(settingsPath('project', '/w')).toBe('/w/.claude/settings.json');
-    expect(settingsPath('user')).toMatch(/\.claude\/settings\.json$/);
+    expect(settingsPath('project', '/w')).toBe(join('/w', '.claude', 'settings.json'));
+    expect(settingsPath('user')).toMatch(/\.claude[\\/]settings\.json$/);
   });
   it('reads missing or empty files as {} and installs hooks creating directories', () => {
     const dir = mkdtempSync(join(tmpdir(), 'stroq-init-'));

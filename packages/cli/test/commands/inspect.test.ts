@@ -128,30 +128,35 @@ describe('the git settings stroq inspect --env prints', () => {
   // The claim the command makes, run against real git rather than asserted in a
   // comment. Without the override the repository's own script runs during a plain
   // `git status`; with it, it does not run at all.
-  it('stops a repository fsmonitor from running during git status', () => {
-    const dir = repo();
-    const marker = join(dir, 'marker.txt');
-    const script = join(dir, 'fsmonitor.sh');
-    writeFileSync(script, `#!/bin/sh\necho fired >> ${marker}\nexit 1\n`);
-    chmodSync(script, 0o755);
-    git(dir, 'config', 'core.fsmonitor', script);
-    writeFileSync(join(dir, 'a.txt'), 'x\n');
+  // Runs a POSIX shell script as git's fsmonitor, which Git for Windows does not execute
+  // the same way; the settings `--env` prints are tested on their own above.
+  it.skipIf(process.platform === 'win32')(
+    'stops a repository fsmonitor from running during git status',
+    () => {
+      const dir = repo();
+      const marker = join(dir, 'marker.txt');
+      const script = join(dir, 'fsmonitor.sh');
+      writeFileSync(script, `#!/bin/sh\necho fired >> ${marker}\nexit 1\n`);
+      chmodSync(script, 0o755);
+      git(dir, 'config', 'core.fsmonitor', script);
+      writeFileSync(join(dir, 'a.txt'), 'x\n');
 
-    git(dir, 'status', '--porcelain');
-    expect(existsSync(marker), 'the unprotected run should have fired it').toBe(true);
-    const firedWithout = readFileSync(marker, 'utf8').trim().split('\n').length;
-    expect(firedWithout).toBeGreaterThan(0);
-    rmSync(marker);
+      git(dir, 'status', '--porcelain');
+      expect(existsSync(marker), 'the unprotected run should have fired it').toBe(true);
+      const firedWithout = readFileSync(marker, 'utf8').trim().split('\n').length;
+      expect(firedWithout).toBeGreaterThan(0);
+      rmSync(marker);
 
-    const env: Record<string, string> = { ...process.env, HOME: dir } as Record<string, string>;
-    env['GIT_CONFIG_COUNT'] = String(GIT_HARDENING.length);
-    GIT_HARDENING.forEach(({ key, value }, i) => {
-      env[`GIT_CONFIG_KEY_${i}`] = key;
-      env[`GIT_CONFIG_VALUE_${i}`] = value;
-    });
-    execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', env });
-    expect(existsSync(marker), 'the protected run must not fire it').toBe(false);
-  });
+      const env: Record<string, string> = { ...process.env, HOME: dir } as Record<string, string>;
+      env['GIT_CONFIG_COUNT'] = String(GIT_HARDENING.length);
+      GIT_HARDENING.forEach(({ key, value }, i) => {
+        env[`GIT_CONFIG_KEY_${i}`] = key;
+        env[`GIT_CONFIG_VALUE_${i}`] = value;
+      });
+      execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', env });
+      expect(existsSync(marker), 'the protected run must not fire it').toBe(false);
+    },
+  );
 });
 
 describe('the same settings as an environment overlay', () => {

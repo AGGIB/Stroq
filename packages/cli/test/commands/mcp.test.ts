@@ -1,6 +1,6 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseMcpArgv, resolveMcpCwd } from '../../src/commands/mcp.js';
 
@@ -85,7 +85,9 @@ describe('resolveMcpCwd', () => {
   });
 
   it('leaves an already-absolute value unchanged', () => {
-    expect(resolveMcpCwd('/already/absolute')).toBe('/already/absolute');
+    // Absolute on this platform: `/already/absolute` is drive-relative on Windows.
+    const absolute = resolve('/already/absolute');
+    expect(resolveMcpCwd(absolute)).toBe(absolute);
   });
 
   it('falls back to process.cwd() when --cwd was omitted', () => {

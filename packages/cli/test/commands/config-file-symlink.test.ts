@@ -86,11 +86,15 @@ describe('readJsonObject', () => {
 
   // A repository can commit `.claude/settings.json` as a symlink to `/dev/zero`, and
   // `doctor`, `init` and `exposure` then read an endless stream until memory ran out.
-  it('refuses a config that is not a regular file instead of reading it forever', () => {
-    const file = join(project, 'zero.json');
-    symlinkSync('/dev/zero', file);
-    expect(() => readJsonObject(file)).toThrow(/not a regular file/);
-  });
+  // `/dev/zero` is a POSIX device; Windows has no equivalent path to link to.
+  it.skipIf(process.platform === 'win32')(
+    'refuses a config that is not a regular file instead of reading it forever',
+    () => {
+      const file = join(project, 'zero.json');
+      symlinkSync('/dev/zero', file);
+      expect(() => readJsonObject(file)).toThrow(/not a regular file/);
+    },
+  );
 
   it('refuses a config too large to be a real one', () => {
     const file = join(project, 'huge.json');

@@ -103,8 +103,22 @@ export function hashSecret(salt: string, value: string): string {
   return createHash('sha256').update(`${salt}\n${value}`).digest('hex').slice(0, 32);
 }
 
+/**
+ * A path as a report shows it: `~/…` for one inside the home directory.
+ *
+ * On a directory boundary, not a string prefix — `/home/alice/.env` for the user
+ * `/home/al` used to come out `~ice/.env`. The part under home is written with forward
+ * slashes on every platform, because that is how the docs, the site and every report
+ * spell `~/.aws/credentials`; on Windows it used to read `~\.aws\credentials`. A path
+ * outside home is left exactly as it was.
+ */
 export function displayPath(path: string, home: string): string {
-  return home !== '' && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+  const base = home.replace(/[\\/]+$/, '');
+  if (base === '') return path;
+  if (path === base || path === home) return '~';
+  const next = path.charAt(base.length);
+  if (!path.startsWith(base) || (next !== '/' && next !== '\\')) return path;
+  return `~${path.slice(base.length).replace(/\\/g, '/')}`;
 }
 
 function extractFor(path: string, text: string): ExtractedSecret[] {

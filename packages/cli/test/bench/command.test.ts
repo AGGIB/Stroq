@@ -61,7 +61,7 @@ describe('runBenchCommand', () => {
       // stdout, nothing on stderr.
       expect(await runBenchCommand([])).toBe(0);
       expect(out.join('')).toContain('stroq bench:');
-      expect(out.join('')).toContain('vendor/bench-corpus/files');
+      expect(out.join('')).toContain(join('vendor', 'bench-corpus', 'files'));
       expect(err.join('')).toBe('');
     },
     // Scans the whole vendored corpus, like the run.test.ts case above: ~4.5 s on a

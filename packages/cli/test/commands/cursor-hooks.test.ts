@@ -107,8 +107,8 @@ describe('mergeCursorHooks', () => {
 
 describe('cursor hooks files', () => {
   it('computes project and user paths', () => {
-    expect(cursorHooksPath('project', '/w')).toBe('/w/.cursor/hooks.json');
-    expect(cursorHooksPath('user')).toMatch(/\.cursor\/hooks\.json$/);
+    expect(cursorHooksPath('project', '/w')).toBe(join('/w', '.cursor', 'hooks.json'));
+    expect(cursorHooksPath('user')).toMatch(/\.cursor[\\/]hooks\.json$/);
   });
 
   it('reads missing or empty files as {} and installs hooks creating directories', () => {

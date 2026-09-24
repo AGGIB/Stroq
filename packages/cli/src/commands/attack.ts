@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { sep } from 'node:path';
+import { displayPath as displayHomePath } from '@stroq/core';
 import { parseArgs } from 'node:util';
 import { formatFuzz, runFuzz } from '../attack/fuzz.js';
 import { MUTATIONS } from '../attack/mutate.js';
@@ -21,10 +21,7 @@ function select(only: string | undefined): readonly Scenario[] {
  * policy is actually loaded from. Leaves `default` and paths outside home untouched.
  */
 export function displayPath(path: string): string {
-  const home = homedir();
-  if (home === '') return path;
-  if (path === home) return '~';
-  return path.startsWith(`${home}${sep}`) ? `~${path.slice(home.length)}` : path;
+  return displayHomePath(path, homedir());
 }
 
 /** Replays the recorded incident scenarios against the active policy; exit 1 if any misbehaves. */

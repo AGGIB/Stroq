@@ -1,3 +1,4 @@
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { displayPath, runAttackCommand } from '../../src/commands/attack.js';
 import type { FuzzReport } from '../../src/attack/fuzz.js';
@@ -140,14 +141,20 @@ describe('stroq attack', () => {
 
 describe('displayPath', () => {
   it('shortens a path under a fake HOME to ~/..., for the JSON report to avoid leaking it', () => {
-    const previousHome = process.env['HOME'];
-    process.env['HOME'] = '/Users/fakeuser';
+    // `homedir()` reads HOME on POSIX and USERPROFILE on Windows, so both are set,
+    // to a path that is absolute on this platform.
+    const previous = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'] };
+    const fake = resolve('/Users/fakeuser');
+    process.env['HOME'] = fake;
+    process.env['USERPROFILE'] = fake;
     try {
-      expect(displayPath('/Users/fakeuser/.stroq/policy.yaml')).toBe('~/.stroq/policy.yaml');
-      expect(displayPath('/Users/fakeuser')).toBe('~');
+      expect(displayPath(join(fake, '.stroq', 'policy.yaml'))).toBe('~/.stroq/policy.yaml');
+      expect(displayPath(fake)).toBe('~');
     } finally {
-      if (previousHome === undefined) delete process.env['HOME'];
-      else process.env['HOME'] = previousHome;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 

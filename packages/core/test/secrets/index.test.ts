@@ -46,6 +46,29 @@ function fixture() {
   return { home, cwd, file, index };
 }
 
+describe('displayPath across platforms', () => {
+  // `startsWith(home)` without a boundary shortened `/home/alice/.env` for the user
+  // `/home/al` to `~ice/.env` — a path that names nobody's file.
+  it('only shortens a path inside the home directory, not one that shares its prefix', () => {
+    expect(displayPath('/home/alice/.env', '/home/al')).toBe('/home/alice/.env');
+    expect(displayPath('/home/al/.env', '/home/al')).toBe('~/.env');
+    expect(displayPath('/home/al', '/home/al')).toBe('~');
+  });
+
+  // The label is what docs, site and reports all spell `~/.aws/credentials`; on
+  // Windows it came out `~\.aws\credentials`.
+  it('writes the part under home with forward slashes on Windows', () => {
+    expect(displayPath('C:\\Users\\me\\.aws\\credentials', 'C:\\Users\\me')).toBe(
+      '~/.aws/credentials',
+    );
+    expect(displayPath('C:\\Users\\me', 'C:\\Users\\me\\')).toBe('~');
+  });
+
+  it('leaves a path outside home exactly as it was', () => {
+    expect(displayPath('D:\\work\\.env', 'C:\\Users\\me')).toBe('D:\\work\\.env');
+  });
+});
+
 describe('hashSecret / displayPath', () => {
   it('hashes with the salt and shortens home paths', () => {
     expect(hashSecret('s', 'v')).toMatch(/^[0-9a-f]{32}$/);

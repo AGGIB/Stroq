@@ -54,7 +54,8 @@ describe('afterFileEdit (I2)', () => {
     const audit = auditText();
     expect(audit).toContain('config.self');
     expect(audit).toContain('"tool":"Write"');
-    expect(audit).toContain(`${cwd}/.cursor/hooks.json`);
+    // As JSON spells it: on Windows the path's backslashes are escaped in the log.
+    expect(audit).toContain(JSON.stringify(`${cwd}/.cursor/hooks.json`).slice(1, -1));
     // The edit already happened, so the audit must not claim a block that never was.
     expect(audit).toContain('cursor-edit-observed');
     expect(audit).not.toContain('deny-self-tamper');

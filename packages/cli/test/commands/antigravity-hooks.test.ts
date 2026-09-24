@@ -138,8 +138,8 @@ describe('isStroqAntigravityHooks', () => {
 
 describe('antigravityHooksPath', () => {
   it('is the workspace .agents file for a project and the Gemini config file for a user', () => {
-    expect(antigravityHooksPath('project', '/w')).toBe('/w/.agents/hooks.json');
-    expect(antigravityHooksPath('user', '/w')).toMatch(/\.gemini\/config\/hooks\.json$/);
+    expect(antigravityHooksPath('project', '/w')).toBe(join('/w', '.agents', 'hooks.json'));
+    expect(antigravityHooksPath('user', '/w')).toMatch(/\.gemini[\\/]config[\\/]hooks\.json$/);
   });
 });
 

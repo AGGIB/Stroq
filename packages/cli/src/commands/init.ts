@@ -298,6 +298,13 @@ function initOpenClaw(
     process.stdout.write(
       `OpenClaw is not on PATH; run these two commands where it is:\n  ${commands.join('\n  ')}\n`,
     );
+  } else if (process.platform === 'win32') {
+    // What npm installs on Windows is `openclaw.cmd`, which Node only runs through a
+    // shell, and the plugin path is an argument a shell would re-split. Printing the
+    // two commands is the safe half of that trade.
+    process.stdout.write(
+      `OpenClaw is at ${bin}; on Windows Stroq does not run it for you. Run these two commands:\n  ${commands.join('\n  ')}\n`,
+    );
   } else {
     for (const outcome of runOpenClawInstall(bin, dir)) {
       process.stdout.write(`$ ${outcome.line}\n${outcome.output}`);
