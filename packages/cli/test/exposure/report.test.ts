@@ -20,6 +20,7 @@ const base: ExposureReport = {
     commands: 79,
     bytes: 4096,
     flagged: ['/h/a.md'],
+    digests: {},
     foreignHooks: 0,
     capped: false,
   },
@@ -54,6 +55,21 @@ const base: ExposureReport = {
 };
 
 describe('formatExposure', () => {
+  it('lists ten changed instruction files by default, and all of them with --verbose', () => {
+    const added = Array.from({ length: 12 }, (_, i) => `/home/u/.claude/skills/s${i}/SKILL.md`);
+    const drift = { baseline: false, added, changed: [] };
+    const short = formatExposure(base, { drift });
+    expect(short).toContain('Changed since the last run (12)');
+    expect(short).toContain('…and 2 more (--verbose lists them all)');
+    expect(short).not.toContain('s11/SKILL.md');
+    expect(formatExposure(base, { drift, verbose: true })).toContain('s11/SKILL.md');
+  });
+
+  it('says nothing about drift when nothing changed', () => {
+    const out = formatExposure(base, { drift: { baseline: false, added: [], changed: [] } });
+    expect(out).not.toContain('Changed since the last run');
+  });
+
   it('counts detected and protected agents in the summary', () => {
     const out = formatExposure(base);
     expect(out).toMatch(/Agents detected\s+2/);
