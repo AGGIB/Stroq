@@ -144,6 +144,15 @@ export function scanTargetForTool(
  * `old_str`, Antigravity's `TargetContent`. Scanning it would ask about removing an
  * injection, the opposite of saving one.
  */
+/**
+ * The score at which text written into an instruction file counts as a payload: a
+ * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
+ * because a README install line should not taint the session that reads it; saved into
+ * `CLAUDE.md`, the same line is an order every later session is given, and a question
+ * costs little on a write that rare.
+ */
+const INSTRUCTION_WRITE_THRESHOLD = 0.4;
+
 const REPLACED_TEXT_KEYS: ReadonlySet<string> = new Set(['old_string', 'old_str', 'TargetContent']);
 const MAX_WRITTEN_DEPTH = 4;
 
@@ -386,7 +395,7 @@ export class StroqEngine {
     const scan = scanContent(
       this.opts.rules,
       text,
-      { threshold: this.opts.policy.threshold },
+      { threshold: Math.min(this.opts.policy.threshold, INSTRUCTION_WRITE_THRESHOLD) },
       { target: 'instruction_file' },
     );
     return scan.verdict === 'suspect';

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The false-positive bench reads 121 files, and reports 24.0% rather than 16.0%.** The first 25 were chosen by hand and weighted toward the documents most likely to trip a rule; the 96 added are chosen by a rule instead — the root README of each of the 100 most-starred Apache-2.0 repositories on GitHub — so they are what an agent most often reads. The rate rose, and most of the difference is one rule, `STROQ-2026-00005` (`curl … | sh`), firing on install lines. The two numbers are two corpora and are not comparable. The corpus files are stored byte for byte (`-text` in `.gitattributes`), since one README has CRLF line endings.
+- **Reading a `curl … | sh` install line no longer taints the session.** On a corpus of 121 benign files — the 25 it had, plus the root README of each of the 100 most-starred Apache-2.0 repositories, chosen by that rule rather than by hand — the false-positive rate was 24.0%, and 19 of the 29 flagged files were one rule, `STROQ-2026-00005`, on README install lines. It is medium now, below the taint threshold: 14.9% on the same corpus. Running `curl … | sh` is still denied in any session, running the line that was read is still asked about or denied through provenance, and writing one into a file an agent loads as instructions is still asked about (writes there are scanned at a lower threshold). Text that carries only this pattern — an issue title, a PDF's text — no longer taints on its own; `stroq attack` scenarios 15 and 20 are still blocked, at the command. The bench corpus files are stored byte for byte (`-text`), since one README has CRLF.
 
 ### Added
 

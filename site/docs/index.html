@@ -335,7 +335,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <h2 id="coverage-title">Coverage &amp; bench</h2>
   <p>Two commands report what the attack corpus actually demonstrates, both regenerated in CI from their own live output so the published numbers can never drift from the code that produces them.</p>
   <h3>stroq bench — false-positive rate</h3>
-  <div class="report-stat"><span class="n">24%</span><span class="label">flagged on 121 files of real, benign developer documentation</span></div>
+  <div class="report-stat"><span class="n">15%</span><span class="label">flagged on 121 files of real, benign developer documentation</span></div>
   <p>Measured by a method we publish, on a corpus we vendor — not a third-party audit. <code>stroq bench --corpus &lt;dir&gt;</code> reproduces the same measurement on your own files. Full method and the files it flags: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md">docs/BENCH.md</a>.</p>
   <h3>stroq coverage — technique mapping</h3>
   <p>Maps the 20 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
