@@ -83,7 +83,14 @@ beforeEach(() => {
   process.env['STROQ_MCP_STUB_KEEPALIVE'] = '0';
 });
 
-describe('signal escalation', () => {
+/**
+ * POSIX only. Windows has no signals to relay or ignore: `process.kill(pid, 'SIGTERM')`
+ * ends the target outright, so the first test would end this test worker, and a stub
+ * cannot ignore the proxy's SIGTERM, so there is no escalation left to measure.
+ */
+const posixSignals = process.platform !== 'win32';
+
+describe.runIf(posixSignals)('signal escalation', () => {
   it('escalates to SIGKILL, within the injected grace period, when the server ignores a relayed SIGTERM', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
@@ -162,7 +169,7 @@ describe('signal escalation', () => {
   }, 15_000);
 });
 
-describe('the EOF shutdown escalation', () => {
+describe.runIf(posixSignals)('the EOF shutdown escalation', () => {
   it('ends the server stdin, then SIGTERMs, then SIGKILLs a server that outlives its client', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -122,35 +122,60 @@ describe('runInit --agent openclaw', () => {
     expect(existsSync(join(plan.directory, 'index.js'))).toBe(false);
   });
 
-  it('runs the two commands when openclaw is on PATH', async () => {
-    // A stand-in for the Gateway CLI. `initOpenClaw` has no seam to inject a fake
-    // `RunCommand`, so whatever `openclaw` resolves to on PATH really is spawned via
-    // `spawnSync` — and this sandbox hangs when it executes a shebang script that
-    // way, so the stand-in has to be a real, shebang-free executable rather than a
-    // hand-written `#!/bin/sh` stub. `/bin/echo` is exactly that: it is symlinked to
-    // a file named `openclaw`, and its own stdout (the argv it was given back) is
-    // what `initOpenClaw` relays to the user, so both commands are still verified
-    // end to end.
-    const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
-    symlinkSync('/bin/echo', join(bin, 'openclaw'));
+  // Windows never runs them: see the next test.
+  it.skipIf(process.platform === 'win32')(
+    'runs the two commands when openclaw is on PATH',
+    async () => {
+      // A stand-in for the Gateway CLI. `initOpenClaw` has no seam to inject a fake
+      // `RunCommand`, so whatever `openclaw` resolves to on PATH really is spawned via
+      // `spawnSync` — and this sandbox hangs when it executes a shebang script that
+      // way, so the stand-in has to be a real, shebang-free executable rather than a
+      // hand-written `#!/bin/sh` stub. `/bin/echo` is exactly that: it is symlinked to
+      // a file named `openclaw`, and its own stdout (the argv it was given back) is
+      // what `initOpenClaw` relays to the user, so both commands are still verified
+      // end to end.
+      const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
+      symlinkSync('/bin/echo', join(bin, 'openclaw'));
 
-    const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
-    const out = capture();
-    await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
-    out.restore();
-    const printed = out.lines.join('');
-    // Task 3 review, Important: both substrings below also appear in the "not on
-    // PATH" branch's printed instructions, so on their own they cannot tell a
-    // regression that stops running the commands from the case that actually ran
-    // them. The "$ openclaw ..." echo line only appears when a command is actually
-    // run (see `initOpenClaw`), so it — plus the absence of the other branch's own
-    // wording — is what proves this one really executed.
-    expect(printed).not.toContain('not on PATH');
-    expect(printed).toContain('$ openclaw plugins install --link');
-    expect(printed).toContain('$ openclaw plugins enable stroq');
-    expect(printed).toContain('plugins install --link');
-    expect(printed).toContain('plugins enable stroq');
-  });
+      const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+      const out = capture();
+      await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
+      out.restore();
+      const printed = out.lines.join('');
+      // Task 3 review, Important: both substrings below also appear in the "not on
+      // PATH" branch's printed instructions, so on their own they cannot tell a
+      // regression that stops running the commands from the case that actually ran
+      // them. The "$ openclaw ..." echo line only appears when a command is actually
+      // run (see `initOpenClaw`), so it — plus the absence of the other branch's own
+      // wording — is what proves this one really executed.
+      expect(printed).not.toContain('not on PATH');
+      expect(printed).toContain('$ openclaw plugins install --link');
+      expect(printed).toContain('$ openclaw plugins enable stroq');
+      expect(printed).toContain('plugins install --link');
+      expect(printed).toContain('plugins enable stroq');
+    },
+  );
+
+  it.runIf(process.platform === 'win32')(
+    'finds openclaw.cmd on Windows and prints the two commands instead of running them',
+    async () => {
+      // What npm installs on Windows. It only runs through a shell, which would
+      // re-split the plugin path, so `init` names it and leaves the running to the user.
+      const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
+      writeFileSync(join(bin, 'openclaw.cmd'), '@exit /b 1\r\n');
+
+      const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+      const out = capture();
+      await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
+      out.restore();
+      const printed = out.lines.join('');
+      expect(printed).toContain(`OpenClaw is at ${join(bin, 'openclaw.cmd')}`);
+      expect(printed).toContain('on Windows Stroq does not run it for you');
+      expect(printed).not.toContain('$ openclaw');
+      expect(printed).toContain('openclaw plugins install --link');
+      expect(printed).toContain('openclaw plugins enable stroq');
+    },
+  );
 
   it('warns when the entry it recorded lives in the npx cache', async () => {
     // `npx @stroq/cli init --agent openclaw` records a path under `_npx/`, which
