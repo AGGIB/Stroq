@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-24
+
 ### Security
 
 The first CodeQL run over the repository, and a profile of the command classifier that followed it, found ways to hold a hook until the agent's own timeout answers it — which Codex and Copilot treat as an allow. A regex that runs for seconds blocks the event loop, so Stroq's own fail-closed deadline cannot fire.
