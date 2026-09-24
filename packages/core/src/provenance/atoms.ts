@@ -15,7 +15,15 @@ const MAX_LINE_SCAN = 512;
 // `|` ends a URL too: in `curl https://x.example/i.sh|sh` the pipe is shell syntax,
 // not part of the URL the command fetches.
 const URL_RE = /https?:\/\/[^\s"'<>()[\]`|]+/gi;
-const TRAILING_PUNCT = /[.,;:!?'"]+$/;
+// Sentence punctuation after a URL, stripped with `trimEndOf`. All but the quotes are
+// legal inside a URL, so a long run of them is part of the match, and the pattern
+// `/[.,;:!?'"]+$/` restarted at every one of them when one more character followed:
+// 199,000 `!` in tool output took 48 s, and a Bash command has no length cap at all.
+const TRAILING_PUNCT = '.,;:!?\'"';
+const QUOTES = '"\'';
+const LEADING_QUOTES = /^["']+/;
+const VERSION_MARKER = /[[<>=!~;]/;
+const LINE_BREAKS = '\n\r\u2028\u2029';
 const URL_HOST = /^https?:\/\/(?:[^@/\s]+@)?([^/:?#\s]+)/;
 // `user@host.tld` — ssh/scp targets and git ssh remotes.
 const SSH_TARGET = /(?<![\w.-])[\w.-]+@((?:[\w-]+\.)+[a-z]{2,})(?![\w.-])/gi;
@@ -63,11 +71,42 @@ interface Positioned {
   readonly atom: Atom;
 }
 
+/**
+ * `text` without the run of `chars` at its end. A loop, not a `[…]+$` pattern: that
+ * restarts at every character of a run it cannot finish, so a long run followed by
+ * one character outside it costs time quadratic in the run.
+ */
+function trimEndOf(text: string, chars: string): string {
+  let end = text.length;
+  while (end > 0 && chars.includes(text.charAt(end - 1))) end -= 1;
+  return text.slice(0, end);
+}
+
+/**
+ * `name` cut at its first version, extra or marker character (`>=2.0`, `[socks]`,
+ * `; python_version…`), on its last line only: it used to be `/[[<>=!~;].*$/`, whose
+ * `.` stops at a line break, so a marker before one was never cut. The same pattern
+ * restarted at every marker character of a run it could not finish.
+ */
+function withoutVersion(name: string): string {
+  let lastLine = name.length;
+  while (lastLine > 0 && !LINE_BREAKS.includes(name.charAt(lastLine - 1))) lastLine -= 1;
+  const cut = name.slice(lastLine).search(VERSION_MARKER);
+  return cut === -1 ? name : name.slice(0, lastLine + cut);
+}
+
+/**
+ * A package name as a lookup key. `knownPackages` runs every dependency name in the
+ * project's `package.json` through here on every Bash call — up to 256 KiB of it,
+ * written by whoever wrote the repository — so nothing here may be super-linear: with
+ * the edges stripped by `/^["']+|["']+$/g` and `/[[<>=!~;].*$/`, one planted name of
+ * 262,000 quotes, or of `[`s and a line break, took 30 s.
+ */
 export function normalizePackageName(raw: string): string {
-  const name = raw.replace(/^["']+|["']+$/g, '');
+  const name = trimEndOf(raw.replace(LEADING_QUOTES, ''), QUOTES);
   const at = name.startsWith('@') ? name.indexOf('@', 1) : name.indexOf('@');
   const base = at > 0 ? name.slice(0, at) : name;
-  return base.replace(/[[<>=!~;].*$/, '').toLowerCase();
+  return withoutVersion(base).toLowerCase();
 }
 
 function restOfLine(text: string, from: number): string {
@@ -159,7 +198,7 @@ function installedPackages(text: string): Positioned[] {
 function urlAtoms(text: string): Positioned[] {
   const fromUrls = [...text.matchAll(URL_RE)].flatMap((m): Positioned[] => {
     const index = m.index ?? 0;
-    const url = m[0].replace(TRAILING_PUNCT, '').toLowerCase();
+    const url = trimEndOf(m[0], TRAILING_PUNCT).toLowerCase();
     const host = URL_HOST.exec(url)?.[1];
     return host
       ? [
