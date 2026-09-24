@@ -1,7 +1,18 @@
 id: STROQ-2026-00005
 title: 'Remote script piped into a shell'
 status: experimental
-severity: critical
+# Medium, below the 0.6 taint threshold: a match is recorded and scored, but on its
+# own it no longer marks the session suspect. Measured on 2026-09-25 against 121
+# benign files, this rule alone flagged 19 of them — README install lines — and a
+# session that reads an ordinary README should not lose its network for the rest of
+# the conversation. The protection the taint bought is kept elsewhere: running
+# `curl … | sh` is `shell.exec_encoded` and denied in any session, and the line is
+# recorded as a provenance atom, so an agent that runs the command it read is asked
+# about (origin.untrusted) or denied (origin.suspect) by name. What is given up: text
+# that carries only this pattern — an issue title, a PDF's extracted text — no longer
+# taints by itself, so later actions of other kinds after such a read are judged
+# as in a clean session. At `critical` the rate was 24.0%; at `medium`, 14.9%.
+severity: medium
 author: 'Stroq'
 date: '2026/09/03'
 schema_version: '1.0'

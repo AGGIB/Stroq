@@ -124,7 +124,8 @@ function deriveBench(): string {
       'rules/atr, which is imported verbatim from upstream.',
     '',
     'The corpus grew on 2026-09-25, and the rate rose with it: 16.0% on the first 25 ' +
-      'files, 24.0% on the 121 that replaced them. The first 25 were chosen by hand and ' +
+      'files, 24.0% on the 121 that replaced them (before the change below). The first ' +
+      '25 were chosen by hand and ' +
       'weighted toward the documents most likely to trip a credential- or token-shaped ' +
       'rule. The 96 added are chosen by a rule instead of by us — the root README of ' +
       'each of the 100 most-starred Apache-2.0 repositories on GitHub that are not ' +
@@ -132,17 +133,23 @@ function deriveBench(): string {
       'often actually reads rather than the ones we expected to be hard. Compare this ' +
       "figure with one published before that date and you are comparing two corpora, so don't.",
     '',
-    'The largest single source of false positives on the wider corpus is ' +
-      '`STROQ-2026-00005`, `curl … | sh`: an install line in a README is byte-identical to ' +
-      'the same line in an injected instruction, so no pattern separates them, and ' +
-      'scoping the rule to command output cost two recorded attack scenarios. What can ' +
-      'change is what a match does — whether reading an install line should taint the ' +
-      'session at all, when running `curl … | sh` is denied on its own — and that is a ' +
-      'decision about the rule, not about this measurement. `ATR-2026-00150` matches a ' +
-      'bare `-----BEGIN PRIVATE KEY-----` header, and its own documented true positives ' +
-      'are bare headers too, with no key body — exactly like the TLS configuration ' +
-      'example it flags. The difference between those two is the surface the text ' +
-      'arrived on, which is a scan_target question rather than a regex one, and it is open.',
+    'On the wider corpus the largest single source of false positives was ' +
+      '`STROQ-2026-00005`, `curl … | sh`, on 19 README install lines: such a line is ' +
+      'byte-identical to the same line in an injected instruction, so no pattern ' +
+      'separates them, and scoping the rule to command output had cost two recorded ' +
+      'attack scenarios. So what a match does changed instead of what matches. Since ' +
+      '2026-09-25 the rule is medium, below the taint threshold: reading an install ' +
+      'line is recorded but no longer taints the session, which took the rate from ' +
+      '24.0% to 14.9%. Running `curl … | sh` is still denied in any session, the line ' +
+      'is still a provenance atom, so running the command that was read is still asked ' +
+      'about or denied by name, and a pipe-to-shell line written into a file an agent ' +
+      'loads as instructions is still asked about. What is given up is that text ' +
+      'carrying only this pattern no longer taints on its own. `ATR-2026-00150` matches ' +
+      'a bare `-----BEGIN PRIVATE KEY-----` header, and its own documented true ' +
+      'positives are bare headers too, with no key body — exactly like the TLS ' +
+      'configuration example it flags. The difference between those two is the surface ' +
+      'the text arrived on, which is a scan_target question rather than a regex one, and ' +
+      'it is open.',
     '',
     'Production scans under a 4,000 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +

@@ -557,7 +557,7 @@
             ]
           }
         },
-        "expect": "suspect"
+        "expect": "clean"
       },
       {
         "event": {
@@ -760,7 +760,7 @@
             }
           }
         },
-        "expect": "suspect"
+        "expect": "clean"
       },
       {
         "event": {
