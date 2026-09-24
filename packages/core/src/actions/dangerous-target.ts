@@ -15,6 +15,17 @@ const UNC_PATH = /^\\\\/;
 /** Both separators, one casing, no trailing slash — so two spellings compare equal. */
 const foldPath = (path: string): string => path.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
 
+/**
+ * `path` without its trailing slashes. A loop rather than `/\/+$/`, which restarts at
+ * every slash of a run it cannot finish: a target of 65,536 slashes and one more
+ * character took 1.7 s, and a delete target is a word of a command the agent wrote.
+ */
+function withoutTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charAt(end - 1) === '/') end -= 1;
+  return path.slice(0, end);
+}
+
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
   if (t === '') return false;
@@ -39,6 +50,6 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
     return normalized === '' || !normalized.startsWith(`${root}/`);
   }
   if (!t.startsWith('/')) return false;
-  const normalized = t.replace(/\/+$/, '');
+  const normalized = withoutTrailingSlashes(t);
   return !normalized.startsWith(`${cwd}/`);
 }

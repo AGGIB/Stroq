@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   classifyCommand,
@@ -57,6 +58,32 @@ describe('isDangerousRmTarget', () => {
   it.each(['node_modules', 'dist/', `${cwd}/build`, 'tmp.txt'])('allows %s', (t) =>
     expect(isDangerousRmTarget(t, cwd)).toBe(false),
   );
+
+  it('drops trailing slashes from an absolute target exactly as `/\\/+$/` did', () => {
+    expect(isDangerousRmTarget(`${cwd}/build///`, cwd)).toBe(false);
+    expect(isDangerousRmTarget(`${cwd}//`, cwd)).toBe(true);
+    fc.assert(
+      fc.property(
+        fc.constantFrom('/', cwd, `${cwd}ile`, '/home/dev'),
+        fc.array(fc.constantFrom('/', '//', 'build', '.', 'x'), { maxLength: 12 }),
+        (head, rest) => {
+          const t = head + rest.join('');
+          const expected = t === '/' || !t.replace(/\/+$/, '').startsWith(`${cwd}/`);
+          expect(isDangerousRmTarget(t, cwd)).toBe(expected);
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  it('stays linear on a long run of slashes', () => {
+    // An `rm -rf` target is a word of a command the agent wrote, with no length cap.
+    // Stripped with `/\/+$/`, a run of slashes and then one more character restarted
+    // the pattern at every slash: 65,536 of them took 1.7 s.
+    const started = performance.now();
+    expect(isDangerousRmTarget(`${'/'.repeat(131_072)}x`, cwd)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 describe('classifyCommand', () => {
@@ -160,5 +187,47 @@ describe('classifyCommand', () => {
 
   it('reading settings is not tampering', () => {
     expect(classesOf('cat .claude/settings.json')).not.toContain('config.self');
+  });
+});
+
+describe('inline interpreter payload', () => {
+  const flagged = (cmd: string): boolean =>
+    classifyCommand(cmd, cwd).signals.includes('inline-interpreter-payload');
+
+  it('still flags a Buffer.from base64 decode', () => {
+    expect(flagged("node -e \"eval(Buffer.from('bHM=','base64').toString())\"")).toBe(true);
+    expect(flagged('node -e "console.log(Buffer.from(\'hi\').length)"')).toBe(false);
+  });
+
+  it('flags exactly what the pattern with its own Buffer.from alternative flagged', () => {
+    const interp = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
+    const payloadByPattern =
+      /(exec\(|base64|__import__|atob\(|Buffer\.from\([^)]*base64|child_process|subprocess|os\.system)/;
+    const pieces = ['Buffer.from(', 'base64', 'base', '64', ')', "'", ',', 'x', ' ', 'exec('];
+    fc.assert(
+      fc.property(
+        fc.constantFrom('node -e ', 'python3 -c ', 'ruby -x '),
+        fc.array(fc.constantFrom(...pieces, 'atob(', 'os.system', ';', '|'), { maxLength: 30 }),
+        (head, body) => {
+          const cmd = head + body.join('');
+          const expected = splitSegments(cmd).some(
+            (seg) => interp.test(seg) && payloadByPattern.test(seg),
+          );
+          expect(flagged(cmd)).toBe(expected);
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  it('stays linear on a run of unclosed Buffer.from calls', () => {
+    // `Buffer\.from\([^)]*base64` rescanned the rest of the segment from every
+    // `Buffer.from(` that had no `)` or `base64` after it: 262,144 characters of them
+    // took 2.1 s, in a command the agent wrote. The trailing `<(curl` is there only
+    // so `SHELL_PROC_SUB_REMOTE` matches at once instead of failing from every `.`,
+    // which is super-linear on this shape in its own right and a separate issue.
+    const started = performance.now();
+    expect(flagged(`python -c ${'Buffer.from('.repeat(21_845)} <(curl`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
