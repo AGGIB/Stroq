@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runCanary } from '../../src/commands/canary.js';
+import { canaryValue, runCanary } from '../../src/commands/canary.js';
 import { secretsFile } from '../../src/paths.js';
 
 beforeEach(() => {
@@ -44,5 +44,21 @@ describe('stroq canary', () => {
     expect(await runCanary(['--name', ''])).toBe(0);
     out.restore();
     expect(out.lines.join('')).toMatch(/^STROQ_CANARY_KEY=stroq_canary_/);
+  });
+
+  // Each character used to be `byte % 62`. 256 is not a multiple of 62, so A–H came up
+  // 5 times in 256 and every other character 4 times. 2,000 canaries are 64,000
+  // characters: a uniform draw puts about 8,258 of them in A–H, with a standard
+  // deviation of about 85, and the modulo draw put about 10,000 there. The bound is six
+  // standard deviations, which a uniform generator exceeds about twice in a billion runs.
+  it('draws every character of the value uniformly from its alphabet', () => {
+    const chars = Array.from({ length: 2000 }, () =>
+      canaryValue().slice('stroq_canary_'.length),
+    ).join('');
+    const inFirstEight = [...chars].filter((c) => 'ABCDEFGH'.includes(c)).length;
+    const p = 8 / 62;
+    const expected = chars.length * p;
+    const sd = Math.sqrt(chars.length * p * (1 - p));
+    expect(Math.abs(inFirstEight - expected)).toBeLessThan(6 * sd);
   });
 });
