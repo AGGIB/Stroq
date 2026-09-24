@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-25
+
 ### Security
 
 - **A download straight into a protected file was not self-tamper.** `curl -o`/`-O`/`--output`, `wget -O` and PowerShell's `-OutFile` are neither a writer verb nor a `>`, so `curl -s https://… -o .claude/settings.json` replaced the hook config with no class at all in an untainted session. They are write intent now, for self-tamper and for the new instruction-file guard; so are `rsync` and `patch`.
