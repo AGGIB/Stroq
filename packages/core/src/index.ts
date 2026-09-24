@@ -15,6 +15,7 @@ export * from './policy/default-policy.js';
 export * from './policy/evaluate.js';
 export * from './policy/load-policy.js';
 export * from './util/lock.js';
+export * from './util/read-regular-file.js';
 export * from './taint/session-store.js';
 export * from './audit/audit-log.js';
 export * from './engine.js';

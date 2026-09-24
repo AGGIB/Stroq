@@ -1,3 +1,4 @@
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,6 +108,27 @@ describe('knownPackages', () => {
     const oversized = knownPackages(oversizedCwd);
     expect(performance.now() - start2).toBeLessThan(1000);
     expect(oversized.has('dependencies')).toBe(false);
+  });
+
+  // `mkfifo package.json` is one ordinary-looking command, and this runs on every Bash
+  // PreToolUse. Opening a FIFO for reading waits for a writer, synchronously, so every
+  // later command in that directory held the hook until the agent's own timeout —
+  // which every agent treats as an allow — and Stroq's deadline could not fire on a
+  // blocked event loop. The writer below is what lets the old code finish instead of
+  // hanging this test: it waited, read the pipe, and trusted what came through it.
+  it.skipIf(process.platform === 'win32')('never opens a FIFO planted as a manifest', () => {
+    const cwd = project();
+    const fifo = join(cwd, 'package.json');
+    execFileSync('mkfifo', [fifo]);
+    const manifest = JSON.stringify({ dependencies: { 'from-the-pipe': '1' } });
+    const writer = spawn('sh', ['-c', 'printf %s "$1" > "$0"', fifo, manifest], {
+      stdio: 'ignore',
+    });
+    try {
+      expect(knownPackages(cwd).has('from-the-pipe')).toBe(false);
+    } finally {
+      writer.kill('SIGKILL');
+    }
   });
 });
 

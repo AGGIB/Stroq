@@ -1,7 +1,8 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeText } from '../normalize/normalizer.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
+import { readRegularFile } from '../util/read-regular-file.js';
 import { extractAtoms, normalizePackageName } from './atoms.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
@@ -37,10 +38,16 @@ const OPTIONAL_DEPS_HEADER = '[project.optional-dependencies]';
 // since it runs on every Bash PreToolUse.
 const MAX_MANIFEST_BYTES = 262_144;
 
+/**
+ * A manifest's text, or `null` when there is none worth reading. Only a regular file
+ * counts: `mkfifo package.json` once made every later Bash PreToolUse in that
+ * directory wait on the pipe until the agent's own timeout, which every agent treats
+ * as an allow.
+ */
 function readText(path: string): string | null {
   try {
-    if (statSync(path).size > MAX_MANIFEST_BYTES) return null;
-    return readFileSync(path, 'utf8');
+    const read = readRegularFile(path, MAX_MANIFEST_BYTES);
+    return read.kind === 'text' ? read.text : null;
   } catch {
     return null;
   }
