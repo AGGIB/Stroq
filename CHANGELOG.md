@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+The first CodeQL run over the repository, and a profile of the command classifier that followed it, found ways to hold a hook until the agent's own timeout answers it — which Codex and Copilot treat as an allow. A regex that runs for seconds blocks the event loop, so Stroq's own fail-closed deadline cannot fire.
+
+- **`mkfifo package.json` held every later Bash hook in that directory.** The provenance reader stat'ed a manifest and then read it by name, never checking its type, so opening the pipe waited for a writer that never came: `stroq hook` on a plain `ls` was still running at 25 s. Manifests, agent configs, `stroq exposure`'s reads and the Windsurf and Antigravity post-read scan now open the file once (without blocking on a pipe), check that handle, and read only a regular file.
+- **Crafted commands took seconds to classify.** `find . -exec` followed by 4 KiB of spaces took 23.7 s, 16 KiB of `eval ` 28 s, a dependency name of 262,000 quotes in `package.json` 30 s on every Bash call, and 199,000 `!` in tool output 48 s. Every regex on the classification path now runs in linear time: each of 45 adversarial 256 KiB commands classifies in a fraction of a second, and a test holds their growth. Each rewritten pattern is checked against the old one on generated input, so what is detected is unchanged.
+- **A command nested too deeply to read in time is asked about.** An unquoted `eval` argument runs to the next delimiter, so on one line they nest; past a budget of nested text (twice the command plus 64 KiB, which no ordinary command reaches) extraction stops and the command gets `nested-commands-too-large` in `shell.unparsed`, which the default policy asks about. What was extracted before the budget ran out is still classified.
+
 ### Fixed
 
+- **On Windows, a hook's audit append could fail under parallel tool calls.** Windows answers `EPERM` instead of `EEXIST` when a lock directory is created while the previous holder is still removing it; the file lock now waits on it like any contended lock. The same lock guards the taint, provenance and cloak stores and the secret index.
+- **`/home/alice/.env` was shown as `~ice/.env` for a user whose home is `/home/al`,** on every platform, and Windows paths under home were shown with backslashes. Paths under home are now cut on a directory boundary and written with forward slashes.
+- **`stroq init --agent openclaw` looked for a bare `openclaw` on Windows,** where the runnable shim is `openclaw.cmd`. It now follows `PATHEXT`, and on Windows prints the two install commands instead of running a `.cmd` through a shell.
+- **Canary values drew their first eight letters a quarter more often** than the rest (a byte modulo 62); they are uniform now.
+- **The bench corpus failed its hash check on a Windows checkout,** where Git converts text to CRLF. `.gitattributes` keeps LF.
 - **The Codex argument reader lost a `__proto__` key.** It built objects by assignment, and assigning to `__proto__` sets the object's prototype instead of adding a field: a value under that key vanished from the arguments `stroq sent` scans, and an object there made `input.cmd` answer through the prototype chain while the object's own fields said nothing. Fields are now defined as own properties, as `JSON.parse` does. Found by the property tests below, on the first run that generated the key.
 
 ### Changed
@@ -16,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Property tests for everything that reads attacker-written text** (`fast-check`, a dev dependency): shell segmentation, normalization, JSON leaf walking, control-character neutralization, prose-name matching, and the Claude, Codex and Cursor session readers. Beyond not throwing and staying fast, they check correctness: any JSON object read by the Codex literal reader comes back exactly, neutralized JSON still decodes to the original, a heredoc body written to a file is dropped while one a shell runs is kept, and no reader pairs a result with a call it never saw.
 - **End-to-end tests run the built CLI** rather than the source through `tsx`, so they test the artifact users get; the suite takes 24 s instead of 57 s. Coverage thresholds sit just under the measured values instead of seventeen points below.
 - **Dependabot** proposes grouped weekly updates for npm and GitHub Actions.
+- **Windows is a required CI job**, alongside Linux and macOS. The tests of POSIX-only behaviour (mode bits, signals, the bash plugin wrapper, srt) skip there and say why, and `SECURITY.md` has a Windows section on what that leaves unverified.
+- **CodeQL and OpenSSF Scorecard run on every push to `main`.** CI's token is read-only; the release workflow grants `id-token: write` to the publish job only.
+- **`SECURITY.md` names the supported release as "the latest on npm"** instead of a version that had gone stale.
 
 ## [0.16.1] - 2026-09-24
 
