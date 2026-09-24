@@ -70,6 +70,9 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['x@', (r) => `ssh ${r('x@')}`],
   ['semicolons', (r) => r(';')],
   ['pipes', (r) => r('|')],
+  ['instruction file names', (r) => `echo x > ${r('CLAUDE.md ')}`],
+  ['memory paths', (r) => `cat notes >> ${r('.claude/projects/')}`],
+  ['memory path separators', (r) => `cat notes >> .claude/projects/x${r('/')}m`],
 ];
 
 /** `build` at `size`: every repeated unit fills `size` characters. */

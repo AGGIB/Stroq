@@ -103,6 +103,17 @@ function countForeignHooks(cwd: string): number {
 
 const isMarkdown = (name: string): boolean => name.endsWith('.md');
 
+/** The directories directly inside `dir`, or none when it cannot be read. */
+function subdirectories(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(dir, entry.name));
+  } catch {
+    return [];
+  }
+}
+
 export function contextSurface(cwd: string, home: string = homedir()): ContextSurface {
   const skills = new FileSet();
   walk(join(home, '.claude', 'skills'), isMarkdown, skills);
@@ -123,6 +134,13 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
       const full = join(base, name);
       if (existsSync(full)) instruction.add(full);
     }
+  // The user-level CLAUDE.md, and the memory Claude Code keeps per project: both are
+  // loaded into every session like the files above, and both are where a poisoned
+  // session would save an instruction for the next one.
+  const userClaude = join(home, '.claude', 'CLAUDE.md');
+  if (existsSync(userClaude)) instruction.add(userClaude);
+  for (const project of subdirectories(join(home, '.claude', 'projects')))
+    walk(join(project, 'memory'), isMarkdown, instruction);
 
   const rules = loadBundledRules();
   const flagged: string[] = [];

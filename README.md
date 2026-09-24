@@ -8,7 +8,7 @@
 ### See what your agent already sent to the model
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
-[![stroq attack: all stopped](https://img.shields.io/badge/stroq%20attack-all%20stopped-1f9d55)](docs/GUIDE.md#replay-twenty-real-and-synthetic-attacks)
+[![stroq attack: all stopped](https://img.shields.io/badge/stroq%20attack-all%20stopped-1f9d55)](docs/GUIDE.md#replay-twenty-one-real-and-synthetic-attacks)
 [![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli?logo=npm&logoColor=white&label=npm&color=cb3837)](https://www.npmjs.com/package/@stroq/cli)
 [![npm downloads](https://img.shields.io/npm/d18m/%40stroq%2Fcli?label=downloads&color=0b7285)](https://www.npmjs.com/package/@stroq/cli)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)

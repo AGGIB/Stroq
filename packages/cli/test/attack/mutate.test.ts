@@ -177,13 +177,13 @@ describe('mutateScenario', () => {
 
   it('mutates every scenario that has untrusted text', () => {
     const mutable = SCENARIOS.filter((s) => mutateScenario(s, MUTATIONS[1]!) !== null);
-    // 20 scenarios, 6 of which carry no injected content (origin: direct-user; see the
+    // 21 scenarios, 6 of which carry no injected content (origin: direct-user; see the
     // two tests below): 08, 09, 12 have no files and no PostToolUse text at all, and 03,
     // 05, 13 carry only a planted secret in `files`, which is fixture state, not untrusted
-    // text. All seven of Task 5's synthetic cells (14 through 20) carry a real PostToolUse
-    // payload, so the direct-user set is unchanged and the mutable count grows by exactly
-    // seven — the assertion right below this one pins that count precisely.
-    expect(mutable.length).toBe(14);
+    // text. All seven of Task 5's synthetic cells (14 through 20) and 21 carry a real
+    // PostToolUse payload, so the direct-user set is unchanged and the mutable count grows
+    // by exactly one per such cell — the assertion right below this one pins that count.
+    expect(mutable.length).toBe(15);
   });
 
   it('returns a scenario, not null, for the identity control on a PostToolUse step', () => {

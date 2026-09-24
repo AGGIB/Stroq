@@ -28,11 +28,20 @@ export function formatEntry(entry: AuditEntry): string {
 export async function runLog(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
-    options: { count: { type: 'string', default: '20' } },
+    options: {
+      count: { type: 'string', default: '20' },
+      json: { type: 'boolean', default: false },
+    },
   });
   const parsedCount = Number.parseInt(values.count ?? '20', 10);
   const count = Number.isNaN(parsedCount) ? 20 : Math.max(1, parsedCount);
   const entries = await new AuditLog(auditFile()).readAll();
+  // One entry per line, as the chain stores it, for a SIEM forwarder or `jq`. An empty
+  // log prints nothing rather than a sentence a parser would choke on.
+  if (values.json) {
+    for (const entry of entries.slice(-count)) process.stdout.write(`${JSON.stringify(entry)}\n`);
+    return 0;
+  }
   if (entries.length === 0) {
     process.stdout.write('no audit entries yet\n');
     return 0;

@@ -125,6 +125,29 @@ export const SELF_CONFIG_FILE =
  * `find .claude -name 'settings.json' -delete` never has the literal
  * substring `.claude/settings.json` anywhere in the command text.
  */
+/**
+ * Files an agent loads as instructions in every later session: the project and user
+ * `CLAUDE.md`, `AGENTS.md` and `GEMINI.md`, Cursor's and Windsurf's rules, Copilot's
+ * `copilot-instructions.md`, Claude Code's skills, subagents and slash commands, and
+ * its per-project memory directory.
+ *
+ * Not self-tamper, and not in `SELF_CONFIG_FILE`: editing these is ordinary work, and
+ * denying it was the bare `.claude` false positive above. What makes a write to one
+ * worth a question is the session doing it. One that has read something hostile and
+ * then saves an instruction here has outlived itself — every future session loads it
+ * (OWASP ASI06, memory and context poisoning). So this names the file, and the policy
+ * decides with the taint: `config.instructions` is asked about in a tainted session,
+ * and a write whose own text trips a rule in any session.
+ *
+ * Each name is a whole path segment — `CLAUDE.md.bak` and `my-AGENTS.md` are
+ * somebody's own files — and each directory ends at a segment boundary, so
+ * `.claude/skills-notes.md` and `.cursor/rules.md` are not the directories they
+ * resemble. Case-insensitive, as the filesystems that resolve `claude.md` to the
+ * same file are.
+ */
+export const INSTRUCTION_FILE =
+  /(?<![\w.-])(?:(?:CLAUDE|AGENTS|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w.-])|\.claude[/\\]+(?:skills|agents|commands)(?![\w.-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w.-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w.-])/i;
+
 export const PROTECTED_DIRS =
   /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
 
@@ -406,6 +429,23 @@ function anySegmentIsInterpreterInlineCode(segments: readonly string[]): boolean
     const word = commandWord(seg);
     return SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(seg);
   });
+}
+
+/**
+ * `instruction-file-write` for each segment that writes an `INSTRUCTION_FILE`, read
+ * with the same write-intent test the self-tamper gate uses: a writer verb, a
+ * redirect, inline interpreter code, a destructive `git` subcommand or a writing
+ * `find`. Like that gate it errs towards a write when a segment both mentions the
+ * file and redirects, which here costs a question in a tainted session and nothing
+ * otherwise.
+ */
+export function instructionWriteSignals(segments: readonly string[]): string[] {
+  return segments.some(
+    (segment) =>
+      INSTRUCTION_FILE.test(segment) && isSelfConfigWriteIntent(segment, commandWord(segment)),
+  )
+    ? ['instruction-file-write']
+    : [];
 }
 
 export function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {

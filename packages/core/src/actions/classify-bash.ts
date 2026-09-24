@@ -6,6 +6,7 @@ import { commandWord, firstArgAfter, splitCommand, tokenize } from './shell-segm
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
+  instructionWriteSignals,
   selfTamperSignals,
 } from './self-config.js';
 
@@ -393,6 +394,7 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
     ['config.self', selfConfig.deny],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
+    ['config.instructions', instructionWriteSignals(segments)],
     // Too much nesting to read is not reading it: see `nestedBudget`.
     ['shell.unparsed', truncated ? [...ps.unparsed, 'nested-commands-too-large'] : ps.unparsed],
   ];

@@ -1,7 +1,7 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
 import { isGitExecPath } from './git-exec.js';
-import { SELF_CONFIG_FILE } from './self-config.js';
+import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
 
 export interface ToolClassification extends CommandClassification {
   readonly mcp?: { readonly server: string; readonly tool: string };
@@ -106,6 +106,10 @@ function classifyPath(rawPath: string, write: boolean): ToolClassification {
   if (write && isGitExecPath(path)) {
     classes.push('config.git_exec');
     signals.push('git-exec-file');
+  }
+  if (write && INSTRUCTION_FILE.test(path)) {
+    classes.push('config.instructions');
+    signals.push('instruction-file-write');
   }
   if (SECRET_PATH.test(path)) {
     classes.push('fs.secrets');

@@ -44,6 +44,32 @@ describe('log and verify', () => {
     expect(out.lines.join('')).not.toContain('cmd 1');
   });
 
+  it('prints each entry as one line of JSON with --json, for a SIEM or jq', async () => {
+    const log = new AuditLog(auditFile());
+    for (let i = 1; i <= 3; i += 1) {
+      await log.append({
+        sessionId: 's',
+        phase: 'pre',
+        tool: 'Bash',
+        summary: `cmd ${i}`,
+        classes: ['shell.network'],
+        decision: { effect: 'deny', ruleId: 'r', reason: 'x' },
+      });
+    }
+    const out = capture();
+    expect(await runLog(['--json', '--count', '2'])).toBe(0);
+    out.restore();
+    const lines = out.lines.join('').trimEnd().split('\n');
+    expect(lines.map((line) => JSON.parse(line))).toEqual((await log.readAll()).slice(-2));
+  });
+
+  it('prints nothing with --json when the log is empty, so a parser gets no prose', async () => {
+    const out = capture();
+    expect(await runLog(['--json'])).toBe(0);
+    out.restore();
+    expect(out.lines.join('')).toBe('');
+  });
+
   it('clamps --count 0 to 1, and falls back to 20 for a non-numeric value', async () => {
     const log = new AuditLog(auditFile());
     for (let i = 1; i <= 3; i += 1) {

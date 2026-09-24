@@ -292,7 +292,7 @@
         <div class="stat">
           <dt class="stat-label">Checks</dt>
           <dd class="stat-num">CI</dd>
-          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, twenty replayed incidents.</dd>
+          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, twenty-one replayed incidents.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -483,16 +483,16 @@
   <section class="score" id="attacks" aria-labelledby="score-title">
     <div class="container">
       <div class="section-head reveal">
-        <h2 id="score-title">20 real incidents. <span class="hi-deny">15 blocked</span>, <span class="hi-ask">5 asked</span>, none through.</h2>
+        <h2 id="score-title">21 attacks replayed. <span class="hi-deny">15 blocked</span>, <span class="hi-ask">6 asked</span>, none through.</h2>
         <p class="section-lead">Each a published write-up, rebuilt as a hook transcript and replayed through <em>your</em> policy on every commit. <code>stroq attack</code> exits 1 if one gets through.</p>
       </div>
 
       <div class="sc-board reveal">
-        <div class="sc-bar" role="img" aria-label="Of 20 replayed incidents, 15 were blocked outright, 5 were turned into a prompt, and none passed through.">
+        <div class="sc-bar" role="img" aria-label="Of 21 replayed incidents, 15 were blocked outright, 6 were turned into a prompt, and none passed through.">
           <span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>
-          <span class="sc-seg sc-seg-ask"><b>5</b> asked</span>
+          <span class="sc-seg sc-seg-ask"><b>6</b> asked</span>
         </div>
-        <p class="sc-zero">Each one is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 350 mutated variants escaped.</p>
+        <p class="sc-zero">Each one is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 375 mutated variants escaped.</p>
       </div>
 
       <ol class="sc-list reveal">
@@ -643,6 +643,13 @@
           <span class="sc-src sc-src-own">Stroq-authored</span>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">21</span>
+          <span class="sc-what">A contributing guide asks the agent to save a pipe-to-shell step into CLAUDE.md</span>
+          <span class="sc-effect">memory poisoning</span>
+          <span class="sc-src sc-src-own">Stroq-authored</span>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
       </ol>
 
       <div class="cta-pair reveal">
@@ -766,7 +773,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
     <div class="container policy-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="policy-title">One YAML file. First match wins.</h2>
-        <p class="section-lead">Fifteen action classes, one ordered file, first match wins.</p>
+        <p class="section-lead">Seventeen action classes, one ordered file, first match wins.</p>
         <p class="list-title">Action classes named in the default policy</p>
         <ul class="class-list" aria-label="Action classes named in the default policy">
           <li><code>secret.egress</code></li>
@@ -782,7 +789,10 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
           <li><code>git.push_external</code></li>
           <li><code>mcp.side_effect</code></li>
           <li><code>config.self_touch</code></li>
+          <li><code>config.instructions_payload</code></li>
+          <li><code>config.instructions</code></li>
           <li><code>shell.destructive</code></li>
+          <li><code>shell.unparsed</code></li>
         </ul>
       </div>
       <figure class="code-fig reveal">

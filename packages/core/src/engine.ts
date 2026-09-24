@@ -89,7 +89,7 @@ export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
  * does not recognise is read as `repo_content`, which is the wider surface for the
  * rules that matter there and therefore the safe way to be wrong.
  */
-const INSTRUCTION_FILE =
+const INSTRUCTION_READ_PATH =
   /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]/i;
 
 /**
@@ -112,7 +112,7 @@ const INSTRUCTION_FILE =
  *   away from `any`, these two need their own branch here rather than continuing to
  *   share `tool_result` with `tools/call`.
  * - `Bash` returns a command's output.
- * - `Read` returns a file, classified by path (see `INSTRUCTION_FILE`); `Grep` returns
+ * - `Read` returns a file, classified by path (see `INSTRUCTION_READ_PATH`); `Grep` returns
  *   repository lines.
  * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
  *   the surface the published false-positive rate is measured on.
@@ -127,7 +127,7 @@ export function scanTargetForTool(
   if (toolName === 'Bash') return 'command_output';
   if (toolName === 'Read') {
     const path = toolInput.file_path ?? toolInput.notebook_path;
-    return typeof path === 'string' && INSTRUCTION_FILE.test(path)
+    return typeof path === 'string' && INSTRUCTION_READ_PATH.test(path)
       ? 'instruction_file'
       : 'repo_content';
   }
@@ -136,6 +136,36 @@ export function scanTargetForTool(
   }
   return 'any';
 }
+/** Where a write tool, an edit tool or a shell command carries the text it writes. */
+const WRITTEN_TEXT_KEYS = [
+  'content',
+  'new_string',
+  'new_str',
+  'file_text',
+  'new_source',
+  'command',
+];
+
+/**
+ * The new text a write carries, from the keys the write and edit tools of the
+ * supported agents use, including each edit of a `MultiEdit`'s `edits`. A Bash
+ * command is its own text: the payload of `echo … >> CLAUDE.md` is in it.
+ */
+function writtenText(toolInput: Readonly<Record<string, unknown>>): string {
+  const texts = (record: Readonly<Record<string, unknown>>): string[] =>
+    WRITTEN_TEXT_KEYS.flatMap((key) => {
+      const value = record[key];
+      return typeof value === 'string' ? [value] : [];
+    });
+  const edits = Array.isArray(toolInput['edits']) ? toolInput['edits'] : [];
+  return [
+    ...texts(toolInput),
+    ...edits.flatMap((edit: unknown) =>
+      edit !== null && typeof edit === 'object' ? texts(edit as Record<string, unknown>) : [],
+    ),
+  ].join('\n');
+}
+
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 const MAX_STORED_CHARS = 120;
 
@@ -339,14 +369,36 @@ export class StroqEngine {
     }
   }
 
+  /**
+   * Whether the text a write to an instruction file puts there trips a rule, scanned
+   * as an instruction file would be when it is read back. Only the new text counts:
+   * an Edit's `old_string` is what is being removed, and removing an injection is the
+   * opposite of saving one. Patches reach the engine as paths only, so for them the
+   * taint alone decides.
+   */
+  private writesInjection(event: PreToolEvent): boolean {
+    const text = writtenText(event.toolInput);
+    if (text === '') return false;
+    const scan = scanContent(
+      this.opts.rules,
+      text,
+      { threshold: this.opts.policy.threshold },
+      { target: 'instruction_file' },
+    );
+    return scan.verdict === 'suspect';
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
     const { matches, unscannable } = await this.checkSecrets(event, classification.classes);
     const secrets = dedupeHits(matches.map(toHit));
+    const savesInjection =
+      classification.classes.includes('config.instructions') && this.writesInjection(event);
     const classes: ActionClass[] = [
       ...classification.classes,
+      ...(savesInjection ? (['config.instructions_payload'] as const) : []),
       ...origin.classes,
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),

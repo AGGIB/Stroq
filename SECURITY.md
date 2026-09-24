@@ -69,6 +69,8 @@ Stroq's CI runs its suite on Windows, but with less behind the promises above th
 
 **In scope:** any way to defeat a protection this project documents as working today for the Claude Code, Cursor, Codex, Copilot CLI, OpenClaw, Windsurf or Antigravity adapter, or for the MCP stdio proxy. For example: a `shell.network`, `shell.exec_encoded`, `git.push_external`, `fs.secrets`, or `config.self` action that the README or `policies/default.yaml` says should be denied or asked, but is instead silently allowed; or content that should trip a rule in `rules/stroq/` (or a non-disabled rule in `rules/atr/`) but is normalized and scanned as clean.
 
+**Writes to instruction and memory files** (`config.instructions`) are in scope on their own terms: a write to one of the files `docs/GUIDE.md` lists that a tainted session makes without being asked, or a write whose own text trips a rule and is not asked about, is a bypass. Known limits: a patch (Codex's and Copilot's `apply_patch`) reaches Stroq as file paths only, so its text is never scanned and only the taint decides; a file an agent loads as instructions that is not on that list is not covered; and the agent's own, built-in memory feature — one that saves outside the files — is invisible to hooks.
+
 **Out of scope (known gaps, already on the roadmap — please still report if unsure, but expect these to be closed as duplicates of tracked work rather than triaged as new):**
 
 - Evasions of the shell classifier that rely on shell quote-splicing or quoting the classifier does not fully parse yet (for example `c"u"rl`, `$'curl'`, heredoc/`<<<` and pipe-to-shell forms) — a quote-aware lexer for the Bash classifier is on the roadmap.

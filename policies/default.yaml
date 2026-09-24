@@ -101,6 +101,18 @@ rules:
     when:
       classes: [config.self_touch]
       taint: any
+  - id: ask-instructions-payload
+    effect: ask
+    reason: The text being written to an instruction file itself matches an injection rule; every later session would load it; confirm
+    when:
+      classes: [config.instructions_payload]
+      taint: any
+  - id: ask-instructions-when-tainted
+    effect: ask
+    reason: Session is tainted by suspicious content; a write to a file every later session loads as instructions needs confirmation
+    when:
+      classes: [config.instructions]
+      taint: suspect
   - id: ask-destructive
     effect: ask
     reason: Destructive command requires confirmation
