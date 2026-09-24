@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import {
   AuditLog,
   DEFAULT_POLICY,
+  FileCanaryFiles,
   FileProvenanceStore,
   FileSecretIndex,
   FileSessionStore,
@@ -14,6 +15,7 @@ import {
 } from '@stroq/core';
 import {
   auditFileIn,
+  canaryFilesFileIn,
   policyFile,
   secretsFileIn,
   sessionsDirIn,
@@ -72,6 +74,7 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
     // `stroq attack` builds its engine at a throwaway home, so a scenario can never
     // be waived by an entry the operator added to their own list.
     trust: new FileTrustStore(trustFileIn(location.home)),
+    canaryFiles: new FileCanaryFiles(canaryFilesFileIn(location.home), location.userHome),
   });
 }
 

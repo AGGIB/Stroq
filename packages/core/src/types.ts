@@ -9,6 +9,11 @@ export type ActionClass =
    */
   | 'shell.unparsed'
   | 'fs.secrets'
+  /**
+   * A decoy file planted with `stroq canary --file` was named by the call. No task the
+   * user asked for needs it, so something the session read steered the agent there.
+   */
+  | 'fs.canary'
   | 'git.push_external'
   | 'config.self'
   | 'config.self_touch'
@@ -35,6 +40,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'shell.destructive',
   'shell.unparsed',
   'fs.secrets',
+  'fs.canary',
   'git.push_external',
   'config.self',
   'config.self_touch',

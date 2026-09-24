@@ -60,7 +60,9 @@ Commands:
                                      only, never a value. Exits 0 even when it finds something —
                                      the past cannot be fixed by this build; use --fail-on-finding
                                      to gate on it anyway
-  canary [--name <NAME>]             print a canary secret to plant; its outbound use is denied and taints the session
+  canary [--name <NAME>] [--file <path>]
+                                     print a canary secret to plant, or plant it as a decoy file; its
+                                     outbound use, or any call naming the file, is denied and taints
   attack [--json] [--only <id>] [--fuzz]
                                      replay recorded incidents against your policy; exit 1 if any gets
                                      through. --fuzz crosses every scenario with every mutation and

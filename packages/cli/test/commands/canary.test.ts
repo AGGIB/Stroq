@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { canaryValue, runCanary } from '../../src/commands/canary.js';
-import { secretsFile } from '../../src/paths.js';
+import { canaryFilesFile, secretsFile } from '../../src/paths.js';
 
 beforeEach(() => {
   process.env['STROQ_HOME'] = mkdtempSync(join(tmpdir(), 'stroq-canary-'));
@@ -17,6 +17,41 @@ function capture(): { lines: string[]; restore: () => void } {
   });
   return { lines, restore: () => spy.mockRestore() };
 }
+
+describe('stroq canary --file', () => {
+  it('plants a decoy file, registers its path, and keeps only the value hash', async () => {
+    const target = join(mkdtempSync(join(tmpdir(), 'stroq-decoy-')), '.aws', 'credentials.bak');
+    const out = capture();
+    expect(await runCanary(['--file', target])).toBe(0);
+    out.restore();
+    const body = readFileSync(target, 'utf8');
+    const m = /^STROQ_CANARY_KEY=(stroq_canary_[A-Za-z0-9]{32})\n$/.exec(body);
+    expect(m).not.toBeNull();
+    if (process.platform !== 'win32') expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(canaryFilesFile(), 'utf8')).files).toEqual([target]);
+    const index = readFileSync(secretsFile(), 'utf8');
+    expect(index).not.toContain(m![1]);
+    expect(index).toContain('"canary":true');
+    // The value is never printed: the file is the canary, not something to paste.
+    expect(out.lines.join('')).not.toContain(m![1]);
+    expect(out.lines.join('')).toContain(target);
+  });
+
+  it('refuses to overwrite a file that already exists', async () => {
+    const target = join(mkdtempSync(join(tmpdir(), 'stroq-decoy-')), 'credentials');
+    writeFileSync(target, 'real=1\n');
+    const errors: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      errors.push(String(chunk));
+      return true;
+    });
+    expect(await runCanary(['--file', target])).toBe(1);
+    spy.mockRestore();
+    expect(readFileSync(target, 'utf8')).toBe('real=1\n');
+    expect(errors.join('')).toContain('already exists');
+    expect(existsSync(canaryFilesFile())).toBe(false);
+  });
+});
 
 describe('stroq canary', () => {
   it('prints a fresh canary line and records only its hash', async () => {

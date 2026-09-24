@@ -27,6 +27,7 @@ export * from './secrets/extract.js';
 export * from './secrets/candidates.js';
 export * from './secrets/index.js';
 export * from './secrets/describe.js';
+export * from './secrets/canary-files.js';
 export * from './cloak/types.js';
 export * from './cloak/patterns.js';
 export * from './cloak/substitute.js';
