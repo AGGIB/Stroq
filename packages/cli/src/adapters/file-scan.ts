@@ -1,4 +1,4 @@
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { StroqEngine } from '@stroq/core';
 import { asPaths, scanPostResult, type EngineEvent } from './pre-decision.js';
@@ -24,11 +24,22 @@ import { asPaths, scanPostResult, type EngineEvent } from './pre-decision.js';
  */
 export const MAX_SCAN_READ_BYTES = 1_048_576;
 
-/** At most `maxBytes` of an already-stat'ed regular file. */
-function readCapped(path: string, size: number, maxBytes: number): string {
-  const fd = openSync(path, 'r');
+/** `O_NONBLOCK` so a FIFO opens at once and is refused below; Windows has no such flag. */
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
+
+/**
+ * At most `maxBytes` of a regular file, checked on the handle that is then read — the
+ * same rule as core's `readRegularFile`, except that a larger file is read up to the
+ * cap rather than refused, since its first MiB is still what the model saw. A `stat`
+ * of the path followed by an open of the path read whatever was there by then: a FIFO
+ * swapped in between blocked the open, and the hook with it.
+ */
+function readCapped(path: string, maxBytes: number): string {
+  const fd = openSync(path, OPEN_FLAGS);
   try {
-    const buffer = Buffer.alloc(Math.min(size, maxBytes));
+    const stats = fstatSync(fd);
+    if (!stats.isFile() || stats.size === 0) return '';
+    const buffer = Buffer.alloc(Math.min(stats.size, maxBytes));
     const read = readSync(fd, buffer, 0, buffer.length, 0);
     return buffer.subarray(0, read).toString('utf8');
   } finally {
@@ -51,10 +62,7 @@ export function readScanText(
 ): string {
   if (filePath === '') return '';
   try {
-    const path = isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
-    const stats = statSync(path);
-    if (!stats.isFile() || stats.size === 0) return '';
-    return readCapped(path, stats.size, maxBytes);
+    return readCapped(isAbsolute(filePath) ? filePath : resolve(cwd, filePath), maxBytes);
   } catch {
     // Missing, unreadable, a broken symlink, a permissions error: nothing to scan.
     return '';

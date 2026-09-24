@@ -1,14 +1,19 @@
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { FileSecretIndex } from '@stroq/core';
 import { secretsFile } from '../paths.js';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const CANARY_LENGTH = 32;
 
+/**
+ * `randomInt` rather than a random byte modulo 62: 256 is not a multiple of 62, so
+ * the modulo made the first eight letters a quarter more likely than the rest.
+ */
 export function canaryValue(): string {
-  const bytes = randomBytes(32);
-  return `stroq_canary_${[...bytes].map((b) => ALPHABET[b % ALPHABET.length]).join('')}`;
+  const chars = Array.from({ length: CANARY_LENGTH }, () => ALPHABET[randomInt(ALPHABET.length)]);
+  return `stroq_canary_${chars.join('')}`;
 }
 
 /**

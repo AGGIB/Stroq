@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { isGitExecKey } from '@stroq/core';
+import { isGitExecKey, readRegularFile } from '@stroq/core';
 import type { Finding } from './findings.js';
 
 /**
@@ -62,9 +62,8 @@ const SKIP_DIRS = new Set(['node_modules', '.venv', 'venv', 'vendor', 'target', 
 
 const readTextOr = (file: string, fallback = ''): string => {
   try {
-    const stat = statSync(file);
-    if (!stat.isFile() || stat.size > MAX_CONFIG_BYTES) return fallback;
-    return readFileSync(file, 'utf8');
+    const read = readRegularFile(file, MAX_CONFIG_BYTES);
+    return read.kind === 'text' ? read.text : fallback;
   } catch {
     return fallback;
   }

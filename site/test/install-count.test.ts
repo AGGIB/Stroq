@@ -43,11 +43,12 @@ describe('the hero install count', () => {
   // grows an npm origin, that decision was made — and this test says so.
   it('never requires the browser to reach a third-party origin', () => {
     expect(csp()).toMatch(/connect-src 'self'(;|$)/);
-    expect(main).not.toMatch(/api\.npmjs\.org|api\.github\.com/);
+    expect(main).not.toContain('api.npmjs.org');
+    expect(main).not.toContain('api.github.com');
   });
 
   it('reads npm from the server side instead', () => {
-    expect(api).toMatch(/api\.npmjs\.org/);
+    expect(api).toContain('api.npmjs.org');
   });
 
   // npm's `point` endpoints served a week-old number for days in September 2026

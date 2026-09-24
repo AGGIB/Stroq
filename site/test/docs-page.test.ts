@@ -20,8 +20,10 @@ describe('the docs page survives its own CSP', () => {
 
   it('has no inline <style> or <script> block', () => {
     expect(html).not.toMatch(/<style[\s>]/i);
-    // Every <script> tag must carry a src — no inline body.
-    for (const tag of html.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) ?? []) {
+    // Every <script> tag must carry a src — no inline body. Only the opening tag is
+    // matched: a browser ignores the body of a script that has a src, and matching
+    // through to a closing tag would miss `</script >`, which ends the element too.
+    for (const tag of html.match(/<script\b[^>]*>/gi) ?? []) {
       expect(tag, `inline script body: ${tag.slice(0, 80)}`).toMatch(/\bsrc=/);
     }
   });
