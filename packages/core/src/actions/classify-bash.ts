@@ -98,8 +98,12 @@ const SSH_TARGET = /\b[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g;
 const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-r)\b/;
 const EVAL_DYNAMIC = /\beval\b[^\n]*(\$\(|`|\$\{?\w)/;
 const INLINE_INTERP = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
-const INLINE_PAYLOAD =
-  /(exec\(|base64|__import__|atob\(|Buffer\.from\([^)]*base64|child_process|subprocess|os\.system)/;
+// `Buffer.from(x, 'base64')` needs no alternative of its own: it contains `base64`,
+// which is matched anywhere in the segment already. A `Buffer\.from\([^)]*base64`
+// alternative used to sit here, adding no match and only cost: from every
+// `Buffer.from(` with no `)` or `base64` after it, `[^)]*` rescanned the rest of the
+// segment, so 262,144 characters of them took 2.1 s in this pattern alone.
+const INLINE_PAYLOAD = /(exec\(|base64|__import__|atob\(|child_process|subprocess|os\.system)/;
 const INLINE_NETWORK = /(urllib|requests|socket|http\.client|fetch\(|http\.request|net\.connect)/;
 const SHELL_C_REMOTE = /\b(ba|z|da)?sh\s+-c\s+["']?\$\((curl|wget)\b/;
 // `bash|sh|zsh|source|.` piping a process substitution straight into the
