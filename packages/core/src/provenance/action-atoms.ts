@@ -41,8 +41,8 @@ const MAX_MANIFEST_BYTES = 262_144;
 /**
  * A manifest's text, or `null` when there is none worth reading. Only a regular file
  * counts: `mkfifo package.json` once made every later Bash PreToolUse in that
- * directory wait on the pipe until the agent's own timeout, which every agent treats
- * as an allow.
+ * directory wait on the pipe until the agent's own timeout, which Codex and Copilot
+ * treat as an allow (docs/AGENTS.md).
  */
 function readText(path: string): string | null {
   try {

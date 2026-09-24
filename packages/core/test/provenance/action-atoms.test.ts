@@ -113,7 +113,7 @@ describe('knownPackages', () => {
   // `mkfifo package.json` is one ordinary-looking command, and this runs on every Bash
   // PreToolUse. Opening a FIFO for reading waits for a writer, synchronously, so every
   // later command in that directory held the hook until the agent's own timeout —
-  // which every agent treats as an allow — and Stroq's deadline could not fire on a
+  // which Codex and Copilot treat as an allow — and Stroq's deadline could not fire on a
   // blocked event loop. The writer below is what lets the old code finish instead of
   // hanging this test: it waited, read the pipe, and trusted what came through it.
   it.skipIf(process.platform === 'win32')('never opens a FIFO planted as a manifest', () => {
