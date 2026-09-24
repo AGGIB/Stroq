@@ -41,7 +41,7 @@ Commands:
                                      read-deny list built from this machine's real credential files
   mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
   doctor [--all]                     check the installation (--all lists every agent and scope)
-  log [--count 20]                   show recent audit entries
+  log [--count 20] [--json]          show recent audit entries (--json: one JSON line each)
   verify                             verify the audit hash chain
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint

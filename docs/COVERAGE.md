@@ -16,7 +16,7 @@ Which techniques are in scope for a local, hook-based action firewall at all, an
 Reproduce this table with `stroq coverage`, or load the same mapping into MITRE ATT&CK Navigator with `stroq coverage --format=navigator`.
 
 ```text
-stroq coverage — 20 scenarios (12 documented, 8 synthetic) · ATLAS 2026.08 · OWASP ASI 2026
+stroq coverage — 21 scenarios (12 documented, 9 synthetic) · ATLAS 2026.08 · OWASP ASI 2026
 
 AML.T0010        not covered AI Supply Chain Compromise (-)
     limitation: Stroq sees the agent’s own install or load of a supply-chain artifact (a package, model, container image, or tool); compromise introduced before the agent ever touches the artifact (e.g. at the origin registry) is addressed under supply-chain staging, not here.
@@ -42,7 +42,7 @@ AML.T0051        not covered LLM Prompt Injection (-)
     limitation: Covers injected instructions in content the agent reads back through a tool call; instructions injected purely in a user’s own conversational turn, never touching a tool, are not this surface.
 AML.T0051.000    not covered Direct (-)
     limitation: Direct injection happens in the user’s own prompt to the model, a channel Stroq’s hooks do not see; Stroq can only act once the injected instruction drives a subsequent tool call.
-AML.T0051.001    covered     Indirect (01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 10-skill-base64-installer, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 19-dependency-postinstall-persistence, 20-pdf-text-exec)
+AML.T0051.001    covered     Indirect (01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 10-skill-base64-installer, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 19-dependency-postinstall-persistence, 20-pdf-text-exec, 21-memory-persistence)
 AML.T0051.002    not covered Triggered (-)
     limitation: Covers the triggering event when it arrives as tool-call content (a file change, an incoming message ingested via a tool); an event source entirely outside any tool call is invisible.
 AML.T0068        partial     LLM Prompt Obfuscation (10-skill-base64-installer, 14-agents-md-invisible-hook-disable)
@@ -62,7 +62,7 @@ AML.T0108        not covered AI Agent (-)
     limitation: Stroq evaluates each tool call the compromised agent makes on its own merits (a fetch, then a destructive or exfiltrating action); it does not itself recognize a fetch-and-execute loop as a C2 beacon pattern across a session.
 AML.T0080        not covered AI Agent Context Poisoning (-)
     limitation: Covers poisoning delivered through content the agent reads via a tool call; poisoning injected purely through direct conversation with no tool-call boundary is not this surface.
-AML.T0080.000    not covered Memory (-)
+AML.T0080.000    partial     Memory (21-memory-persistence)
     limitation: Covers a memory write that flows through a tool call Stroq can inspect; a memory feature implemented as an opaque internal model state with no corresponding tool call is invisible.
 AML.T0080.001    not covered Thread (-)
     limitation: Covers thread content the agent reads back through a tool call; instructions injected purely as user conversation turns are not visible to a hook that only sees tool calls.
@@ -131,15 +131,15 @@ AML.T0069.002    not covered System Prompt (-)
 AML.T0074        not covered Masquerading (-)
     limitation: Covers file-metadata and type-masquerading content a tool call returns, the same surface as prompt obfuscation; reclaiming a stale, previously-trusted package or model namespace after it is deleted or renamed is adversary-side registry activity outside the developer’s machine and is not covered.
 
-in scope: 59 techniques — 3 covered, 7 partial, 49 not covered
+in scope: 59 techniques — 3 covered, 8 partial, 48 not covered
 
 OWASP ASI 2026:
-ASI01  Agent Goal Hijack — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec
+ASI01  Agent Goal Hijack — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec, 21-memory-persistence
 ASI02  Tool Misuse — scenarios: 03-token-in-mcp-comment, 05-roguepilot-schema-url, 08-rm-rf-home, 09-drizzle-force-push, 12-parent-dir-wipe, 13-padded-secret-exfil
 ASI03  Identity & Privilege Abuse — scenarios: 03-token-in-mcp-comment, 04-s1ngularity-public-repo, 05-roguepilot-schema-url, 06-env-dump-exfil, 11-fetched-page-ssh-key-upload, 13-padded-secret-exfil, 16-issue-body-html-comment-exfil
 ASI04  Agentic Supply Chain Compromise — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 10-skill-base64-installer, 19-dependency-postinstall-persistence
 ASI05  Unexpected Code Execution — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 10-skill-base64-installer, 15-issue-title-pipe-to-shell, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec
-ASI06  Memory & Context Poisoning — scenarios: 19-dependency-postinstall-persistence
+ASI06  Memory & Context Poisoning — scenarios: 19-dependency-postinstall-persistence, 21-memory-persistence
 ASI07  Insecure Inter-Agent Communication — not claimed by any scenario (structurally out of reach: needs a multi-agent system, and Stroq sits on one agent's tool calls)
 ASI08  Cascading Agent Failures — not claimed by any scenario (structurally out of reach: needs a multi-agent system, and Stroq sits on one agent's tool calls)
 ASI09  Human-Agent Trust Exploitation — not claimed by any scenario (out of observation: the attack suite replays hook events and never models a human approval step, so no scenario can honestly exercise it)

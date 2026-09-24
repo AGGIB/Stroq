@@ -13,6 +13,14 @@ export type ActionClass =
   | 'config.self'
   | 'config.self_touch'
   | 'config.git_exec'
+  /**
+   * A write to a file the agent loads as instructions in every later session —
+   * `CLAUDE.md`, `AGENTS.md`, rules, skills, memory. Ordinary work until the session
+   * has read something hostile, and then the way that session outlives itself.
+   */
+  | 'config.instructions'
+  /** Such a write whose own text trips a rule: the injection is what is being saved. */
+  | 'config.instructions_payload'
   | 'network.fetch'
   | 'mcp.call'
   | 'mcp.side_effect'
@@ -31,6 +39,8 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'config.self',
   'config.self_touch',
   'config.git_exec',
+  'config.instructions',
+  'config.instructions_payload',
   'network.fetch',
   'mcp.call',
   'mcp.side_effect',

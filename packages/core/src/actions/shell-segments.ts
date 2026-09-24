@@ -12,7 +12,11 @@
  * lets the self-tamper gate see the protected path at all.
  */
 
-const SEGMENT_SPLIT = /\|\||&&|\||;|\n/;
+// `>|` is a redirect that overwrites a file even under `noclobber`, not a pipe: split
+// there, `echo x >| CLAUDE.md` came apart into `echo x >` and `CLAUDE.md`, and no
+// segment held both the write and the file it wrote.
+const PIPE = /(?<!>)\|/;
+const SEGMENT_SPLIT = /\|\||&&|(?<!>)\||;|\n/;
 
 /** Shell keywords that are never a command word by themselves. */
 export const SHELL_KEYWORDS = new Set([
@@ -142,7 +146,7 @@ function pipelinesOf(command: string): string[][] {
     .split(SEQUENCE_SPLIT)
     .map((run) =>
       run
-        .split('|')
+        .split(PIPE)
         .map((stage) => stage.trim())
         .filter((stage) => stage.length > 0),
     )

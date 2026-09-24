@@ -89,7 +89,7 @@ export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
  * does not recognise is read as `repo_content`, which is the wider surface for the
  * rules that matter there and therefore the safe way to be wrong.
  */
-const INSTRUCTION_FILE =
+const INSTRUCTION_READ_PATH =
   /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]/i;
 
 /**
@@ -112,7 +112,7 @@ const INSTRUCTION_FILE =
  *   away from `any`, these two need their own branch here rather than continuing to
  *   share `tool_result` with `tools/call`.
  * - `Bash` returns a command's output.
- * - `Read` returns a file, classified by path (see `INSTRUCTION_FILE`); `Grep` returns
+ * - `Read` returns a file, classified by path (see `INSTRUCTION_READ_PATH`); `Grep` returns
  *   repository lines.
  * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
  *   the surface the published false-positive rate is measured on.
@@ -127,7 +127,7 @@ export function scanTargetForTool(
   if (toolName === 'Bash') return 'command_output';
   if (toolName === 'Read') {
     const path = toolInput.file_path ?? toolInput.notebook_path;
-    return typeof path === 'string' && INSTRUCTION_FILE.test(path)
+    return typeof path === 'string' && INSTRUCTION_READ_PATH.test(path)
       ? 'instruction_file'
       : 'repo_content';
   }
@@ -136,6 +136,36 @@ export function scanTargetForTool(
   }
   return 'any';
 }
+/**
+ * The text a write replaces rather than writes: an `Edit`'s `old_string`, Copilot's
+ * `old_str`, Antigravity's `TargetContent`. Scanning it would ask about removing an
+ * injection, the opposite of saving one.
+ */
+const REPLACED_TEXT_KEYS: ReadonlySet<string> = new Set(['old_string', 'old_str', 'TargetContent']);
+const MAX_WRITTEN_DEPTH = 4;
+
+/**
+ * Every string a write carries, at any key, except the text it replaces. A list of the
+ * keys agents are known to use was the first version, and a security review found
+ * Antigravity's `create_file` sending its text as `CodeContent`, outside it — so the
+ * payload was never scanned for a whole agent, and Cursor's field is undocumented.
+ * Missing a key is a bypass; scanning a path or a flag is at worst a question. A Bash
+ * command is its own text: the payload of `echo … >> CLAUDE.md` is in it.
+ */
+function writtenText(toolInput: Readonly<Record<string, unknown>>): string {
+  const texts: string[] = [];
+  const walk = (value: unknown, depth: number): void => {
+    if (typeof value === 'string') texts.push(value);
+    else if (depth >= MAX_WRITTEN_DEPTH || value === null || typeof value !== 'object') return;
+    else if (Array.isArray(value)) for (const item of value) walk(item, depth + 1);
+    else
+      for (const [key, item] of Object.entries(value))
+        if (!REPLACED_TEXT_KEYS.has(key)) walk(item, depth + 1);
+  };
+  walk(toolInput, 0);
+  return texts.join('\n');
+}
+
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 const MAX_STORED_CHARS = 120;
 
@@ -339,14 +369,36 @@ export class StroqEngine {
     }
   }
 
+  /**
+   * Whether the text a write to an instruction file puts there trips a rule, scanned
+   * as an instruction file would be when it is read back. Only the new text counts:
+   * an Edit's `old_string` is what is being removed, and removing an injection is the
+   * opposite of saving one. Patches reach the engine as paths only, so for them the
+   * taint alone decides.
+   */
+  private writesInjection(event: PreToolEvent): boolean {
+    const text = writtenText(event.toolInput);
+    if (text === '') return false;
+    const scan = scanContent(
+      this.opts.rules,
+      text,
+      { threshold: this.opts.policy.threshold },
+      { target: 'instruction_file' },
+    );
+    return scan.verdict === 'suspect';
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
     const { matches, unscannable } = await this.checkSecrets(event, classification.classes);
     const secrets = dedupeHits(matches.map(toHit));
+    const savesInjection =
+      classification.classes.includes('config.instructions') && this.writesInjection(event);
     const classes: ActionClass[] = [
       ...classification.classes,
+      ...(savesInjection ? (['config.instructions_payload'] as const) : []),
       ...origin.classes,
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),

@@ -245,6 +245,8 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>ask-origin-untrusted</td><td class="tag-ask">ask</td><td><code>origin.untrusted</code>, any taint</td></tr>
         <tr><td>ask-mcp-side-effect-when-tainted</td><td class="tag-ask">ask</td><td><code>mcp.side_effect</code>, taint = suspect</td></tr>
         <tr><td>ask-self-touch</td><td class="tag-ask">ask</td><td><code>config.self_touch</code>, any taint</td></tr>
+        <tr><td>ask-instructions-payload</td><td class="tag-ask">ask</td><td><code>config.instructions_payload</code>, any taint</td></tr>
+        <tr><td>ask-instructions-when-tainted</td><td class="tag-ask">ask</td><td><code>config.instructions</code>, taint = suspect</td></tr>
         <tr><td>ask-destructive</td><td class="tag-ask">ask</td><td><code>shell.destructive</code>, any taint</td></tr>
         <tr><td>ask-push-external</td><td class="tag-ask">ask</td><td><code>git.push_external</code>, any taint</td></tr>
         <tr><td><em>(no rule matched)</em></td><td class="tag-allow">allow</td><td>default</td></tr>
@@ -290,7 +292,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>stroq replay</td><td>Rebuild a session's causal history — which content produced which action</td></tr>
         <tr><td>stroq sent</td><td>Which of your credentials already reached a model provider, in which past session, put there by which tool call — it reads this machine's credential files to match values, and reports names and sources only</td></tr>
         <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
-        <tr><td>stroq attack</td><td>Replay 20 recorded incidents against your policy; exit 1 if any gets through</td></tr>
+        <tr><td>stroq attack</td><td>Replay 21 recorded incidents against your policy; exit 1 if any gets through</td></tr>
         <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>
         <tr><td>stroq inspect</td><td>Read what a repository runs when you open it, before you point an agent at it</td></tr>
       </tbody>
@@ -309,9 +311,9 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 
 <section class="docs-section" id="attack" aria-labelledby="attack-title">
   <h2 id="attack-title">Attack corpus</h2>
-  <p><code>stroq attack</code> replays recorded hook events from twelve public incidents and eight synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
-  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>20 scenarios: 15 blocked, 5 asked, 0 passed through — every attack was stopped.</code></pre>
-  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-twenty-real-and-synthetic-attacks">the guide on GitHub</a>.</p>
+  <p><code>stroq attack</code> replays recorded hook events from twelve public incidents and nine synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>21 scenarios: 15 blocked, 6 asked, 0 passed through — every attack was stopped.</code></pre>
+  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-twenty-one-real-and-synthetic-attacks">the guide on GitHub</a>.</p>
 </section>
 
 <section class="docs-section" id="exposure" aria-labelledby="exposure-title">

@@ -691,7 +691,7 @@ html:not(.js) .copy-btn { display: none; }
    numbers equal to the ones in the markup, which the scoreboard generator writes
    from the attack corpus. */
 .sc-seg-deny { background: var(--deny-tint); color: var(--deny-text); box-shadow: inset 0 0 0 1px var(--deny); flex-grow: 15; }
-.sc-seg-ask { background: var(--ask-tint); color: var(--ask-text); box-shadow: inset 0 0 0 1px var(--ask); flex-grow: 5; }
+.sc-seg-ask { background: var(--ask-tint); color: var(--ask-text); box-shadow: inset 0 0 0 1px var(--ask); flex-grow: 6; }
 .sc-zero { max-width: 68ch; margin-top: 1.1rem; color: var(--ink-2); font-size: .97rem; }
 .sc-zero-n { color: var(--ink); font-family: var(--font-display); font-weight: 700; }
 
