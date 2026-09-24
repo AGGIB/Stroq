@@ -95,6 +95,13 @@ import { commandWord } from './shell-segments.js';
  * a shell word, so `rm .claude\/settings.json` deleted the protected file while a
  * pattern demanding the two names sit adjacent across a single slash saw nothing.
  *
+ * `/etc/windsurf` is matched from the separator just before `etc`, with the same
+ * lookbehind, rather than from the start of a run of them: inside a run the character
+ * before that last separator is another separator, which the lookbehind admits, so
+ * the same paths match. Matching `[/\\]+etc` from every separator of a long run
+ * instead re-read the run from each one, and `rm -rf C:` followed by 16 KiB of `/`
+ * took 139 ms, growing with the square of the run.
+ *
  * Matched case-insensitively, which fixes a live macOS miss rather than only a
  * Windows one. `classifyPath` lowercases through `normalizePathForMatch` before
  * testing this, and the macOS alternative spells `Application Support/Windsurf`
@@ -106,7 +113,7 @@ import { commandWord } from './shell-segments.js';
  * everywhere else.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]+etc[/\\]+windsurf[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+Windsurf[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq([/\\]+|\b))/i;
+  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]etc[/\\]+windsurf[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+Windsurf[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq([/\\]+|\b))/i;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own

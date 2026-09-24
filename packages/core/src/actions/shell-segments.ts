@@ -150,14 +150,7 @@ function pipelinesOf(command: string): string[][] {
 }
 
 export function splitPipelines(command: string): string[][] {
-  return [
-    ...pipelinesOf(command),
-    ...extractSubstitutions(command).flatMap(pipelinesOf),
-    ...extractShCStrings(command).flatMap(pipelinesOf),
-    ...extractFindExecCommands(command).flatMap(pipelinesOf),
-    ...extractEvalArguments(command).flatMap(pipelinesOf),
-    ...extractGitForeachOrBisectRunCommands(command).flatMap(pipelinesOf),
-  ];
+  return splitCommand(command).pipelines;
 }
 
 // `sh|bash|zsh|dash|ksh -c '<quoted string>'`: the quoted string is a nested
@@ -175,14 +168,48 @@ const SH_C_QUOTE = /\b(?:sh|bash|zsh|dash|ksh)\s+-c\s+(["'])/g;
  */
 const IEX_QUOTE = /\b(?:iex|Invoke-Expression)\s+(["'])/gi;
 
+/**
+ * `text.indexOf(char, position)` for positions that only move forward, remembering
+ * the answer until a position passes it. The extractors below ask where the closing
+ * quote or the next delimiter is from every match; asked afresh, a command with many
+ * matches and no answer re-read the rest of itself from each one.
+ */
+function forwardIndexOf(text: string, char: string): (position: number) => number {
+  let from = Infinity;
+  let at = -1;
+  return (position) => {
+    if (position < from || (at !== -1 && at < position)) {
+      from = position;
+      at = text.indexOf(char, position);
+    }
+    return at;
+  };
+}
+
+/** `forwardIndexOf` for the first of several characters. */
+function forwardSearch(text: string, chars: RegExp): (position: number) => number {
+  const pattern = new RegExp(chars.source, 'g');
+  let from = Infinity;
+  let at = -1;
+  return (position) => {
+    if (position < from || (at !== -1 && at < position)) {
+      from = position;
+      pattern.lastIndex = position;
+      at = pattern.exec(text)?.index ?? -1;
+    }
+    return at;
+  };
+}
+
 function extractQuotedBodies(command: string, pattern: RegExp): string[] {
   const results: string[] = [];
+  const closing = { '"': forwardIndexOf(command, '"'), "'": forwardIndexOf(command, "'") };
   pattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(command)) !== null) {
-    const quote = match[1] as string;
+    const quote = match[1] as '"' | "'";
     const start = match.index + match[0].length;
-    const end = command.indexOf(quote, start);
+    const end = closing[quote](start);
     if (end === -1) continue;
     results.push(command.slice(start, end));
   }
@@ -235,20 +262,57 @@ export function extractFindExecCommands(command: string): string[] {
 // coverage for the static forms that substitution extraction can't see.
 const EVAL_ARG = /\beval\s+/g;
 
-function extractEvalArguments(command: string): string[] {
+/**
+ * How much text the `eval` and `git submodule foreach` extractions may produce for
+ * one command, together.
+ *
+ * An unquoted argument runs to the next `;`, `|`, `&` or line break, so on one line
+ * of n `eval x` the arguments nest: each is most of the line again. Extracted and
+ * classified one by one, that was the square of the line in memory and the cube in
+ * time — 16 KiB of `eval ` took 28 s, inside a hook whose timeout is an allow for
+ * Codex and Copilot. Arguments that do not overlap add up to less than the command,
+ * so twice its length plus some headroom is never reached by an ordinary one. Past
+ * it, extraction stops and `classifyCommand` reports the command as one it could not
+ * read, which the default policy asks about.
+ */
+const nestedBudget = (command: string): number => 2 * command.length + 65_536;
+
+interface Budget {
+  remaining: number;
+  exceeded: boolean;
+}
+
+const ARGUMENT_END = /[;\n|&]/;
+
+/**
+ * The command text each match of `head` introduces: the contents of a quoted first
+ * argument, or else everything up to the next delimiter. Shared by `eval` and
+ * `git submodule foreach` / `git bisect run`, which read their argument the same way.
+ */
+function extractArguments(command: string, head: RegExp, budget: Budget): string[] {
   const results: string[] = [];
-  EVAL_ARG.lastIndex = 0;
+  const closing = { '"': forwardIndexOf(command, '"'), "'": forwardIndexOf(command, "'") };
+  const argumentEnd = forwardSearch(command, ARGUMENT_END);
+  head.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = EVAL_ARG.exec(command)) !== null) {
-    const rest = command.slice(match.index + match[0].length);
-    const quote = rest[0];
+  while ((match = head.exec(command)) !== null) {
+    const start = match.index + match[0].length;
+    const quote = command[start];
+    let argument: string;
     if (quote === '"' || quote === "'") {
-      const end = rest.indexOf(quote, 1);
-      if (end !== -1) results.push(rest.slice(1, end));
-      continue;
+      const end = closing[quote](start + 1);
+      if (end === -1) continue;
+      argument = command.slice(start + 1, end);
+    } else {
+      const stop = argumentEnd(start);
+      argument = command.slice(start, stop === -1 ? command.length : stop);
     }
-    const stop = rest.search(/[;\n|&]/);
-    results.push(stop === -1 ? rest : rest.slice(0, stop));
+    if (argument.length > budget.remaining) {
+      budget.exceeded = true;
+      break;
+    }
+    budget.remaining -= argument.length;
+    results.push(argument);
   }
   return results;
 }
@@ -266,24 +330,6 @@ function extractEvalArguments(command: string): string[] {
 // delimiter.
 const GIT_FOREACH_OR_BISECT_RUN = /\bgit\s+(?:submodule\s+foreach|bisect\s+run)\s+/g;
 
-function extractGitForeachOrBisectRunCommands(command: string): string[] {
-  const results: string[] = [];
-  GIT_FOREACH_OR_BISECT_RUN.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = GIT_FOREACH_OR_BISECT_RUN.exec(command)) !== null) {
-    const rest = command.slice(match.index + match[0].length);
-    const quote = rest[0];
-    if (quote === '"' || quote === "'") {
-      const end = rest.indexOf(quote, 1);
-      if (end !== -1) results.push(rest.slice(1, end));
-      continue;
-    }
-    const stop = rest.search(/[;\n|&]/);
-    results.push(stop === -1 ? rest : rest.slice(0, stop));
-  }
-  return results;
-}
-
 /**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
  * the (further-split) inner text of any process/command substitutions,
@@ -292,19 +338,36 @@ function extractGitForeachOrBisectRunCommands(command: string): string[] {
  * `git bisect run <cmd>` tails found anywhere in the command.
  */
 export function splitSegments(command: string): string[] {
-  const substitutions = extractSubstitutions(command).flatMap(splitTop);
-  const shCStrings = extractShCStrings(command).flatMap(splitTop);
-  const findExecCommands = extractFindExecCommands(command).flatMap(splitTop);
-  const evalArguments = extractEvalArguments(command).flatMap(splitTop);
-  const gitForeachOrBisectRun = extractGitForeachOrBisectRunCommands(command).flatMap(splitTop);
-  return [
-    ...splitTop(command),
-    ...substitutions,
-    ...shCStrings,
-    ...findExecCommands,
-    ...evalArguments,
-    ...gitForeachOrBisectRun,
+  return splitCommand(command).segments;
+}
+
+/** A command cut into segments and into pipelines, from one pass over what it nests. */
+export interface SplitCommand {
+  readonly segments: string[];
+  readonly pipelines: string[][];
+  /** The nested arguments outgrew `nestedBudget`, so not all of them are here. */
+  readonly truncated: boolean;
+}
+
+/**
+ * `splitSegments` and `splitPipelines` together: the nested texts are extracted
+ * once for both, and whether the budget cut them short is reported rather than
+ * hidden, so the caller can say it could not read the whole command.
+ */
+export function splitCommand(command: string): SplitCommand {
+  const budget: Budget = { remaining: nestedBudget(command), exceeded: false };
+  const nested = [
+    extractSubstitutions(command),
+    extractShCStrings(command),
+    extractFindExecCommands(command),
+    extractArguments(command, EVAL_ARG, budget),
+    extractArguments(command, GIT_FOREACH_OR_BISECT_RUN, budget),
   ];
+  return {
+    segments: [...splitTop(command), ...nested.flatMap((texts) => texts.flatMap(splitTop))],
+    pipelines: [...pipelinesOf(command), ...nested.flatMap((texts) => texts.flatMap(pipelinesOf))],
+    truncated: budget.exceeded,
+  };
 }
 
 function stripBackslashes(token: string): string {

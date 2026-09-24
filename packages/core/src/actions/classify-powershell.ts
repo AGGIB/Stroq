@@ -1,4 +1,5 @@
 import { isDangerousRmTarget } from './dangerous-target.js';
+import { anyOf, followedBy } from './followed-by.js';
 
 /**
  * The dangerous PowerShell and cmd forms, added to the classifier the POSIX shells
@@ -54,7 +55,10 @@ import { isDangerousRmTarget } from './dangerous-target.js';
 const PS_NETWORK =
   /\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm|Start-BitsTransfer|Net\.WebClient|DownloadString|DownloadFile|DownloadData)\b/i;
 /** `certutil` and `bitsadmin` are ordinary admin tools until they are given a transfer to do. */
-const PS_LOLBIN_FETCH = /\bcertutil\b[^\n]*-urlcache\b|\bbitsadmin\b[^\n]*\/transfer\b/i;
+export const PS_LOLBIN_FETCH = anyOf(
+  followedBy(/\bcertutil\b/i, /-urlcache\b/i),
+  followedBy(/\bbitsadmin\b/i, /\/transfer\b/i),
+);
 
 const isPsNetwork = (segment: string): boolean =>
   PS_NETWORK.test(segment) || PS_LOLBIN_FETCH.test(segment);
@@ -82,8 +86,12 @@ const CALL_OPERATOR_EXPRESSION = /(?:^|[\s;|({])&\s*[$(]/;
  * interpreter's own name in the same segment, so `sed -e` and `node -e` — which
  * share the short spelling — are untouched.
  */
-const PS_ENCODED_COMMAND =
-  /\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s-e(?:c|nc|ncodedcommand)?\s+\S/i;
+// The head leaves out `(?:\.exe)?`: every place that matched also matches without
+// it, ending earlier, and the flag cannot start inside `.exe` anyway.
+export const PS_ENCODED_COMMAND = followedBy(
+  /\b(?:powershell|pwsh)\b/i,
+  /\s-e(?:c|nc|ncodedcommand)?\s+\S/i,
+);
 /** The same flag reached through a wrapper that does not name the interpreter. */
 const PS_ENCODED_COMMAND_LONG = /\s-(?:enc|encodedcommand)\s+\S/i;
 /** Decoding in-process, which is how a payload avoids the flag above entirely. */

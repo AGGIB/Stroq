@@ -1,3 +1,4 @@
+import { followedBy, type TextTest } from './followed-by.js';
 import { SELF_CONFIG_WRITE_COMMANDS } from './self-config.js';
 import { commandWord } from './shell-segments.js';
 
@@ -27,9 +28,31 @@ export const GIT_EXEC_KEY =
  * override. `-c` is transient rather than persisted, and still runs the command for
  * that invocation, which is the whole of what the attack needs.
  */
-const GIT_CONFIG_WRITE = /\bgit\b[^\n]*?\bconfig\b/i;
-const GIT_CONFIG_READ = /\bconfig\b[^\n]*\s--(get|get-all|get-regexp|list|name-only)\b/i;
-const GIT_DASH_C = /\bgit\s+(?:\S+\s+)*?-c\s*[\w.-]+=/i;
+export const GIT_CONFIG_WRITE = followedBy(/\bgit\b/i, /\bconfig\b/i);
+export const GIT_CONFIG_READ = followedBy(
+  /\bconfig\b/i,
+  /\s--(get|get-all|get-regexp|list|name-only)\b/i,
+);
+
+const GIT_THEN_SPACE = /\bgit\s/i;
+const DASH_C_ASSIGNMENT = /(?<=\s)-c\s*[\w.-]+=/gi;
+
+/**
+ * `git`, whitespace, any words, then `-c key=` at the start of one — what
+ * `/\bgit\s+(?:\S+\s+)*?-c\s*[\w.-]+=/i` asked. That pattern walked the words after
+ * every `git` in the segment, so a segment of `git x ` repeated cost the square of
+ * its length. Whatever lies between the space after `git` and the space before `-c`
+ * is some run of words and spaces, so the question is only whether a `-c key=`
+ * preceded by whitespace starts after the first `git` and its space.
+ */
+export const GIT_DASH_C: TextTest = {
+  test(text: string): boolean {
+    const git = GIT_THEN_SPACE.exec(text);
+    if (git === null) return false;
+    DASH_C_ASSIGNMENT.lastIndex = git.index + git[0].length;
+    return DASH_C_ASSIGNMENT.test(text);
+  },
+};
 
 /**
  * Files a repository can ship that make git — or tooling that opens the checkout —
