@@ -319,7 +319,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 <section class="docs-section" id="exposure" aria-labelledby="exposure-title">
   <h2 id="exposure-title">Exposure &amp; inspect</h2>
   <p><code>stroq attack</code> tells you what your policy would do. <code>stroq exposure</code> tells you what actually reaches <em>you</em> on this machine — which agents run here, which of them Stroq isn't installed for, which MCP servers bypass the proxy, what config keys widen privilege, and what the repository in front of you runs when you open it. Exit code 1 on any finding, so it works in CI or a pre-commit hook.</p>
-  <p><code>stroq inspect &lt;dir&gt;</code> answers the same question for a repository you haven't opened yet, which matters because agents run <code>git status</code> at startup — before any trust prompt a hook could gate on. <code>stroq inspect --env</code> prints two <code>GIT_CONFIG_*</code> exports that neutralise a hostile <code>.git/config</code> before the agent ever touches it.</p>
+  <p><code>stroq inspect &lt;dir&gt;</code> answers the same question for a repository you haven't opened yet, which matters because agents run <code>git status</code> at startup — before any trust prompt a hook could gate on. <code>stroq inspect --env</code> prints two <code>GIT_CONFIG_*</code> exports that neutralise a hostile <code>.git/config</code> before the agent ever touches it, and <code>stroq inspect --sarif</code> writes the findings for GitHub code scanning, so a pull request that adds them shows up as an alert.</p>
   <pre class="code" tabindex="0" role="region" aria-label="Inspect a repository before opening it"><code>npx @stroq/cli inspect ./that-repo-someone-sent-me</code></pre>
 </section>
 

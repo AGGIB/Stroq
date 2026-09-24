@@ -39,7 +39,7 @@ export type RepoExecKind =
   | 'envrc'
   | 'package-install-script';
 
-const PRE_TRUST: ReadonlySet<RepoExecKind> = new Set([
+export const PRE_TRUST: ReadonlySet<RepoExecKind> = new Set([
   'git-config-exec',
   'git-config-include',
   'nested-bare-repo',
@@ -322,7 +322,8 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
   };
 }
 
-const WHY: Readonly<Record<string, string>> = {
+/** Why each kind of pre-trust execution is a finding; also the SARIF rule text. */
+export const WHY: Readonly<Record<string, string>> = {
   'git-config-exec':
     'this repository sets a git configuration key whose value git runs as a command, which happens during an ordinary index refresh — an agent typing `git status` triggers it, before any approval',
   'git-config-include':

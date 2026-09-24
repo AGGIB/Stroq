@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { repoFindings, repoSurface, type RepoSurface } from '../exposure/repo-surface.js';
+import { inspectSarif } from '../exposure/sarif.js';
+import { stroqVersion } from '../version.js';
 
 /**
  * The pre-flight: what a repository will run, read before an agent opens it.
@@ -118,12 +120,16 @@ export function formatInspect(dir: string, surface: RepoSurface): string {
 export function runInspect(argv: readonly string[]): number {
   const { values, positionals } = parseArgs({
     args: [...argv],
-    options: { json: { type: 'boolean' }, env: { type: 'boolean' } },
+    options: { json: { type: 'boolean' }, sarif: { type: 'boolean' }, env: { type: 'boolean' } },
     allowPositionals: true,
   });
   if (values.env === true) {
     process.stdout.write(hardeningExports());
     return 0;
+  }
+  if (values.json === true && values.sarif === true) {
+    process.stderr.write('stroq inspect: choose --json or --sarif, not both\n');
+    return 2;
   }
   const dir = resolve(positionals[0] ?? process.cwd());
   if (!existsSync(dir)) {
@@ -133,9 +139,11 @@ export function runInspect(argv: readonly string[]): number {
   const surface = repoSurface(dir);
   const findings = repoFindings(surface);
   process.stdout.write(
-    values.json === true
-      ? `${JSON.stringify({ version: 1, dir, ...surface, findings }, null, 2)}\n`
-      : formatInspect(dir, surface),
+    values.sarif === true
+      ? `${JSON.stringify(inspectSarif(surface, stroqVersion()), null, 2)}\n`
+      : values.json === true
+        ? `${JSON.stringify({ version: 1, dir, ...surface, findings }, null, 2)}\n`
+        : formatInspect(dir, surface),
   );
   // Only pre-trust execution fails the command. The on-open list is ordinary, and a
   // check that fails on every repository with a pre-commit hook is one people stop

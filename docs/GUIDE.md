@@ -302,6 +302,24 @@ $ eval "$(stroq inspect --env)"
 
 `core.fsmonitor=false` and `safe.bareRepository=explicit`, exported as `GIT_CONFIG_*`, which git applies at command scope — above anything a repository's own config says. Measured against git 2.53.0 and pinned in the test suite: with `core.fsmonitor` pointing at a script, a plain `git status` runs it twice, and the same command under these variables does not run it at all; a nested bare repository that `git rev-parse` otherwise treats as a repository is refused outright. Deliberately only those two — `core.hooksPath` is how husky installs itself, and `core.pager`, `core.editor` and `diff.external` are ordinary preferences, so overriding them would break real work to close a narrower hole than the report above already names.
 
+In CI, `--sarif` writes the same findings as a SARIF 2.1.0 log for GitHub code scanning, so a pull request that adds pre-approval execution — an `fsmonitor`, a filter driver, a committed bare repository, a devcontainer `initializeCommand` — shows up as an alert before anyone opens the checkout with an agent. Each finding is placed at its file in the repository; what runs on an ordinary open or build is left out, as it is from the exit code. Stroq runs this on its own repository.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+steps:
+  - uses: actions/checkout@v4
+  - name: What this repository runs before anyone approves it
+    run: npx -y @stroq/cli inspect --sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
+  - uses: github/codeql-action/upload-sarif@v4
+    with:
+      sarif_file: stroq-inspect.sarif
+      category: stroq-inspect
+```
+
+Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the step from failing on them and still fails on anything else. `stroq exposure` has no SARIF form: its findings are about this machine, not a file in the repository, and code scanning needs one.
+
 `--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
 ## Or start the agent already confined
@@ -496,7 +514,7 @@ node packages/cli/dist/index.js doctor
 | `stroq canary [--name <NAME>]`                                                                                                                                     | Print a canary secret to plant; its outbound use is denied and taints the session                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `stroq attack [--json] [--only <id>]`                                                                                                                              | Replay 20 recorded incidents against your policy; exit 1 if any gets through                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `stroq exposure [--probe] [--share] [--json] [--verbose]`                                                                                                          | Map this machine's agent surface and report what reaches you; exit 1 on any finding. `--share` prints a redacted summary, `--probe` starts your MCP servers to read their tool descriptions                                                                                                                                                                                                                                                                                                                         |
-| `stroq inspect [<dir>] [--json] [--env]`                                                                                                                           | Read what a repository runs when you open it, before you point an agent at it; exit 1 when something runs before you could approve it. `--env` prints the git settings that neutralise it                                                                                                                                                                                                                                                                                                                           |
+| `stroq inspect [<dir>] [--json\|--sarif] [--env]`                                                                                                                  | Read what a repository runs when you open it, before you point an agent at it; exit 1 when something runs before you could approve it. `--sarif` writes a SARIF 2.1.0 log for code scanning. `--env` prints the git settings that neutralise it                                                                                                                                                                                                                                                                     |
 
 ## Policy
 
