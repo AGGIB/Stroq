@@ -28,7 +28,7 @@ than by trusting that nobody copies a file across by convention.
 
 ## Selection
 
-All 25 sources are real README/CONTRIBUTING/SECURITY/configuration
+The first 25 sources are real README/CONTRIBUTING/SECURITY/configuration
 documentation from Apache-2.0 projects, deliberately weighted toward the
 text that actually causes false positives rather than away from it:
 credentials, tokens, API keys, environment variables, shell/CLI invocation,
@@ -156,3 +156,106 @@ Apache-2.0, confirm the raw URL for the file resolves at the ref you intend
 to pin, add an entry to `sources.json` with empty `commit`/`sha256`, run
 `pnpm fetch:bench-corpus`, and commit the updated manifest together with the
 new file under `files/`.
+
+## The 96 added on 2026-09-25
+
+Chosen by a rule, not by hand: the root README (whatever `/repos/{repo}/readme` returns) of each of the 100 most-starred repositories on GitHub whose detected licence is Apache-2.0 and which are not archived, from one search on 2026-09-25 (`license:apache-2.0 stars:>20000 archived:false`, sorted by stars). Four of the hundred were already in the corpus above and were not added twice: huggingface/transformers, google-gemini/gemini-cli, apache/airflow and apache/spark. Nothing in the result was dropped for being inconvenient: a README that trips a rule is exactly what this corpus is for. Star counts are as of that search.
+
+| Repo                                    | Path        | Stars   |
+| --------------------------------------- | ----------- | ------- |
+| tensorflow/tensorflow                   | README.md   | 200,289 |
+| Snailclimb/JavaGuide                    | README.md   | 158,858 |
+| Genymobile/scrcpy                       | README.md   | 150,344 |
+| Shubhamsaboo/awesome-llm-apps           | README.md   | 139,655 |
+| kubernetes/kubernetes                   | README.md   | 127,960 |
+| openai/codex                            | README.md   | 126,345 |
+| Graphify-Labs/graphify                  | README.md   | 121,200 |
+| rust-lang/rust                          | README.md   | 119,123 |
+| tauri-apps/tauri                        | README.md   | 111,377 |
+| microsoft/TypeScript                    | README.md   | 111,182 |
+| supabase/supabase                       | README.md   | 110,742 |
+| fatedier/frp                            | README.md   | 109,607 |
+| TauricResearch/TradingAgents            | README.md   | 108,462 |
+| nexu-io/open-design                     | README.md   | 97,969  |
+| microsoft/playwright                    | README.md   | 96,639  |
+| puppeteer/puppeteer                     | README.md   | 95,619  |
+| thedotmack/claude-mem                   | README.md   | 94,623  |
+| vllm-project/vllm                       | README.md   | 92,639  |
+| localsend/localsend                     | README.md   | 92,613  |
+| infiniflow/ragflow                      | README.md   | 91,275  |
+| home-assistant/core                     | README.rst  | 91,134  |
+| opencv/opencv                           | README.md   | 90,959  |
+| PaddlePaddle/PaddleOCR                  | README.md   | 90,162  |
+| astral-sh/uv                            | README.md   | 90,142  |
+| gohugoio/hugo                           | README.md   | 89,931  |
+| macrozheng/mall                         | README.md   | 84,835  |
+| unclecode/crawl4ai                      | README.md   | 84,213  |
+| mlabonne/llm-course                     | README.md   | 83,122  |
+| rtk-ai/rtk                              | README.md   | 81,654  |
+| spring-projects/spring-boot             | README.adoc | 81,489  |
+| d2l-ai/d2l-zh                           | README.md   | 81,086  |
+| NationalSecurityAgency/ghidra           | README.md   | 79,581  |
+| unslothai/unsloth                       | README.md   | 76,721  |
+| tesseract-ocr/tesseract                 | README.md   | 76,667  |
+| caddyserver/caddy                       | README.md   | 76,056  |
+| hiyouga/LlamaFactory                    | README.md   | 75,005  |
+| apache/superset                         | README.md   | 74,916  |
+| unionlabs/union                         | README.md   | 73,789  |
+| headroomlabs-ai/headroom                | README.md   | 73,720  |
+| moby/moby                               | README.md   | 72,132  |
+| pbakaus/impeccable                      | README.md   | 70,774  |
+| swiftlang/swift                         | README.md   | 70,395  |
+| cline/cline                             | README.md   | 69,237  |
+| openinterpreter/openinterpreter         | README.md   | 68,431  |
+| apache/echarts                          | README.md   | 67,393  |
+| prometheus/prometheus                   | README.md   | 66,210  |
+| mem0ai/mem0                             | README.md   | 65,949  |
+| alacritty/alacritty                     | README.md   | 65,809  |
+| kelseyhightower/nocode                  | README.md   | 65,746  |
+| usestrix/strix                          | README.md   | 64,594  |
+| keras-team/keras                        | README.md   | 64,338  |
+| jingyaogong/minimind                    | README.md   | 62,479  |
+| coollabsio/coolify                      | README.md   | 62,239  |
+| FuelLabs/sway                           | README.md   | 61,421  |
+| sharkdp/bat                             | README.md   | 60,565  |
+| spring-projects/spring-framework        | README.md   | 60,259  |
+| zylon-ai/private-gpt                    | README.md   | 57,529  |
+| typst/typst                             | README.md   | 56,228  |
+| facebookresearch/segment-anything       | README.md   | 54,939  |
+| aaif-goose/goose                        | README.md   | 54,625  |
+| psf/requests                            | README.md   | 54,342  |
+| google/material-design-icons            | README.md   | 54,027  |
+| mozilla/pdf.js                          | README.md   | 53,941  |
+| lyswhut/lx-music-desktop                | README.md   | 53,905  |
+| heygen-com/hyperframes                  | README.md   | 52,868  |
+| ChromeDevTools/chrome-devtools-mcp      | README.md   | 52,575  |
+| etcd-io/etcd                            | README.md   | 52,310  |
+| xai-org/grok-1                          | README.md   | 52,233  |
+| google/guava                            | README.md   | 51,909  |
+| dbeaver/dbeaver                         | README.md   | 51,866  |
+| bojieli/ai-agent-book                   | README.md   | 50,780  |
+| skylot/jadx                             | README.md   | 50,614  |
+| HKUDS/CLI-Anything                      | README.md   | 50,298  |
+| apple/container                         | README.md   | 50,157  |
+| ClickHouse/ClickHouse                   | README.md   | 50,057  |
+| kelseyhightower/kubernetes-the-hard-way | README.md   | 49,961  |
+| Aider-AI/aider                          | README.md   | 49,160  |
+| bevyengine/bevy                         | README.md   | 48,362  |
+| ReactiveX/RxJava                        | README.md   | 48,193  |
+| jeecgboot/JeecgBoot                     | README.md   | 47,972  |
+| prisma/orm                              | README.md   | 47,670  |
+| exo-explore/exo                         | README.md   | 47,631  |
+| lysine-dev/okhttp                       | README.md   | 47,077  |
+| milvus-io/milvus                        | README.md   | 46,248  |
+| android/architecture-samples            | README.md   | 45,846  |
+| streamlit/streamlit                     | README.md   | 45,831  |
+| google/zx                               | README.md   | 45,769  |
+| grpc/grpc                               | README.md   | 45,339  |
+| spf13/cobra                             | README.md   | 44,647  |
+| sharkdp/fd                              | README.md   | 44,530  |
+| AykutSarac/jsoncrack.com                | README.md   | 44,446  |
+| Yuan1z0825/nature-skills                | README.md   | 44,400  |
+| Kong/kong                               | README.md   | 44,189  |
+| lysine-dev/retrofit                     | README.md   | 43,944  |
+| ray-project/ray                         | README.rst  | 43,916  |
+| juspay/hyperswitch                      | README.md   | 43,911  |

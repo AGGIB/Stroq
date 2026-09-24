@@ -123,15 +123,26 @@ function deriveBench(): string {
       '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml) rather than by editing ' +
       'rules/atr, which is imported verbatim from upstream.',
     '',
-    'The two that remain are the two no pattern separates. `STROQ-2026-00005` ' +
-      '(`curl … | sh`) is byte-identical in a README install line and in an injected ' +
-      'instruction: scoping it to command output cleared two documentation false ' +
-      'positives and cost two recorded attack scenarios, and a third flagged file stays ' +
-      'flagged either way. `ATR-2026-00150` matches a bare ' +
-      '`-----BEGIN PRIVATE KEY-----` header, and its own documented true positives are ' +
-      'bare headers too, with no key body — exactly like the TLS configuration example ' +
-      'it flags. The difference between those two is the surface the text arrived on, ' +
-      'which is a scan_target question rather than a regex one, and it is open.',
+    'The corpus grew on 2026-09-25, and the rate rose with it: 16.0% on the first 25 ' +
+      'files, 24.0% on the 121 that replaced them. The first 25 were chosen by hand and ' +
+      'weighted toward the documents most likely to trip a credential- or token-shaped ' +
+      'rule. The 96 added are chosen by a rule instead of by us — the root README of ' +
+      'each of the 100 most-starred Apache-2.0 repositories on GitHub that are not ' +
+      'archived, less the four already here — so they are the documents an agent most ' +
+      'often actually reads rather than the ones we expected to be hard. Compare this ' +
+      "figure with one published before that date and you are comparing two corpora, so don't.",
+    '',
+    'The largest single source of false positives on the wider corpus is ' +
+      '`STROQ-2026-00005`, `curl … | sh`: an install line in a README is byte-identical to ' +
+      'the same line in an injected instruction, so no pattern separates them, and ' +
+      'scoping the rule to command output cost two recorded attack scenarios. What can ' +
+      'change is what a match does — whether reading an install line should taint the ' +
+      'session at all, when running `curl … | sh` is denied on its own — and that is a ' +
+      'decision about the rule, not about this measurement. `ATR-2026-00150` matches a ' +
+      'bare `-----BEGIN PRIVATE KEY-----` header, and its own documented true positives ' +
+      'are bare headers too, with no key body — exactly like the TLS configuration ' +
+      'example it flags. The difference between those two is the surface the text ' +
+      'arrived on, which is a scan_target question rather than a regex one, and it is open.',
     '',
     'Production scans under a 4,000 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
@@ -148,7 +159,8 @@ function deriveBench(): string {
     '',
     'The corpus is vendored, unmodified, third-party developer documentation — ' +
       'README, CONTRIBUTING, SECURITY and configuration files pulled from real ' +
-      'Apache-2.0-licensed projects — fetched at an exact resolved commit and pinned by ' +
+      'Apache-2.0-licensed projects, 25 chosen by hand and 96 by the rule above — ' +
+      'fetched at an exact resolved commit and pinned by ' +
       'sha256 for every file in ' +
       '[`vendor/bench-corpus/sources.json`](../vendor/bench-corpus/sources.json); ' +
       '`pnpm check:bench-corpus` fails CI if a committed file no longer matches the ' +
