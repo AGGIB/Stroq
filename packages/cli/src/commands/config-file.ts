@@ -1,13 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { readRegularFile } from '@stroq/core';
 
 /**
  * Seconds Stroq writes on every hook entry it installs for Claude Code, Cursor and
@@ -67,15 +61,16 @@ const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
  * Only a regular file within `MAX_CONFIG_BYTES` is read. A repository can commit
  * `.claude/settings.json` as a symlink to `/dev/zero`, and `doctor`, `init` and
  * `exposure` then read an endless stream until the process ran out of memory; the
- * same check already guards `inspect` and the secret index.
+ * same check already guards `inspect` and the secret index. The check is made on the
+ * handle that is then read, so re-pointing the path in between changes nothing.
  */
 export function readJsonObject<T extends object>(file: string): T {
   if (!existsSync(file)) return {} as T;
-  const info = statSync(file);
-  if (!info.isFile()) throw new Error(`cannot read ${file}: not a regular file`);
-  if (info.size > MAX_CONFIG_BYTES)
-    throw new Error(`cannot read ${file}: ${info.size} bytes is too large for an agent config`);
-  const text = readFileSync(file, 'utf8');
+  const read = readRegularFile(file, MAX_CONFIG_BYTES);
+  if (read.kind === 'not-regular') throw new Error(`cannot read ${file}: not a regular file`);
+  if (read.kind === 'too-large')
+    throw new Error(`cannot read ${file}: ${read.size} bytes is too large for an agent config`);
+  const text = read.text;
   if (text.trim().length === 0) return {} as T;
   try {
     return JSON.parse(text) as T;

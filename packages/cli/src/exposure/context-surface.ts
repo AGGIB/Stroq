@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { loadBundledRules, scanContent } from '@stroq/core';
+import { loadBundledRules, readRegularFile, scanContent } from '@stroq/core';
 import { isStroqHandler, readSettings, settingsPath } from '../commands/init.js';
 import type { Finding } from './findings.js';
 
@@ -135,10 +135,13 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
   ]) {
     let text: string;
     try {
-      const size = statSync(file).size;
-      bytes += size;
-      if (size > MAX_SCAN_BYTES) continue;
-      text = readFileSync(file, 'utf8');
+      // Found by name, so any of these can be a symlink to `/dev/zero` or a FIFO that a
+      // repository or an agent put there; only a regular file is read.
+      const read = readRegularFile(file, MAX_SCAN_BYTES);
+      if (read.kind === 'not-regular') continue;
+      bytes += read.size;
+      if (read.kind === 'too-large') continue;
+      text = read.text;
     } catch {
       continue;
     }
