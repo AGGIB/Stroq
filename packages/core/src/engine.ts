@@ -1,4 +1,5 @@
 import { classifyTool } from './actions/classify-tool.js';
+import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
@@ -41,6 +42,8 @@ export interface EngineOptions {
    * suspect verdict taints, which is the behaviour before this existed.
    */
   readonly trust?: TrustStore;
+  /** Optional: decoy files planted with `stroq canary --file`. Without it `fs.canary` never fires. */
+  readonly canaryFiles?: CanaryFiles;
   readonly now?: () => Date;
 }
 
@@ -179,6 +182,7 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
   'shell.exec_encoded',
 ];
 const CANARY_RULE_ID = 'STROQ-CANARY';
+const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
 
 /**
  * The secret guard's verdict on one action: the known values found in its arguments,
@@ -396,9 +400,19 @@ export class StroqEngine {
     const secrets = dedupeHits(matches.map(toHit));
     const savesInjection =
       classification.classes.includes('config.instructions') && this.writesInjection(event);
+    const decoy = this.opts.canaryFiles
+      ? canaryFileTouched(
+          this.opts.canaryFiles.paths(),
+          event.toolName,
+          event.toolInput,
+          event.cwd,
+          this.opts.canaryFiles.home,
+        )
+      : null;
     const classes: ActionClass[] = [
       ...classification.classes,
       ...(savesInjection ? (['config.instructions_payload'] as const) : []),
+      ...(decoy !== null ? (['fs.canary'] as const) : []),
       ...origin.classes,
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
@@ -420,15 +434,22 @@ export class StroqEngine {
       ...(provenance.length > 0 ? { provenance } : {}),
       ...(secrets.length > 0 ? { secrets } : {}),
     });
-    const taint = secrets.some((s) => s.canary)
-      ? (
-          await this.opts.sessions.markSuspect(event.sessionId, {
-            tool: event.toolName,
-            ruleIds: [CANARY_RULE_ID],
-            at: this.now(),
-          })
-        ).taint
-      : state.taint;
+    // A canary value on its way out, or a decoy file opened: either way something the
+    // session read is steering it, and every later call is judged as compromised.
+    const tripped = [
+      ...(secrets.some((s) => s.canary) ? [CANARY_RULE_ID] : []),
+      ...(decoy !== null ? [CANARY_FILE_RULE_ID] : []),
+    ];
+    const taint =
+      tripped.length > 0
+        ? (
+            await this.opts.sessions.markSuspect(event.sessionId, {
+              tool: event.toolName,
+              ruleIds: tripped,
+              at: this.now(),
+            })
+          ).taint
+        : state.taint;
     return {
       decision,
       classes,

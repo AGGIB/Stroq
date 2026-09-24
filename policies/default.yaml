@@ -35,6 +35,12 @@ rules:
     when:
       classes: [secret.unscannable]
       taint: any
+  - id: deny-canary-file
+    effect: deny
+    reason: A decoy file planted with stroq canary --file was touched; no task needs it, so the session is treated as compromised
+    when:
+      classes: [fs.canary]
+      taint: any
   - id: deny-self-tamper
     effect: deny
     reason: Modifying agent security configuration is blocked

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Decoy files: `stroq canary --file <path>`.** Plants a credentials-shaped file somewhere no task you ask for needs — `~/.aws/credentials.bak` — holding a canary value. Any agent call that names it (a `Read`, a `Grep`, a `cat`, relative or through `~` and `$HOME`) is denied as `fs.canary` and taints the session: the agent was steered there by something it read that the rules did not catch. Created only where nothing exists, mode `0600`; only the path is recorded, in `~/.stroq/canary-files.json`.
+
 ## [0.18.0] - 2026-09-25
 
 ### Security

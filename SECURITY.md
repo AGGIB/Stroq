@@ -38,7 +38,7 @@ Good-faith security research against Stroq — running the CLI against your own 
 
 Everything Stroq writes is one-way, with exactly one exception, and it is opt-in.
 
-The secret index stores `sha256(salt + value)` and never a value. `stroq exposure`'s inventory stores the paths of instruction and skill files and the sha256 of their content, never the content. Provenance stores a structurally redacted excerpt of at most 120 characters. The audit log runs every summary through `redact()` before it is appended. None of those can be turned back into a credential.
+The secret index stores `sha256(salt + value)` and never a value. `stroq exposure`'s inventory stores the paths of instruction and skill files and the sha256 of their content, never the content. The decoy registry (`stroq canary --file`) stores paths; the value inside a decoy is in the secret index as a hash, like any canary. Provenance stores a structurally redacted excerpt of at most 120 characters. The audit log runs every summary through `redact()` before it is appended. None of those can be turned back into a credential.
 
 **`stroq mcp --cloak` is different, and you should decide about it deliberately.** It replaces values in an MCP server's `tools/call` results with placeholders before the model reads them, and restores them on the way back to that server — which means it keeps a dictionary that maps a placeholder to the real value, in the clear, on disk. That dictionary is the only reversible record Stroq holds.
 
