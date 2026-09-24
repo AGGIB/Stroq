@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readScanText } from '../src/adapters/file-scan.js';
 import { readJsonObject } from '../src/commands/config-file.js';
 import { repoSurface } from '../src/exposure/repo-surface.js';
 
@@ -80,6 +81,19 @@ describe('a file re-pointed between the check and the read', () => {
       join(root, 'swapped.config'),
     );
     expect(repoSurface(root).preTrust.map((h) => h.what)).toEqual(['core.fsmonitor']);
+    expect(race.swap).toBeUndefined();
+  });
+
+  // The Windsurf and Antigravity post-read hooks. Swapped for a FIFO instead, the read
+  // by name blocked in open() and held the hook until the agent's own timeout.
+  it('readScanText scans the file the agent read, not one swapped in after the check', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-race-scan-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'checked.md'), 'checked');
+    writeFileSync(join(dir, 'swapped.md'), 'swapped');
+    const file = join(dir, 'read.md');
+    swapAfterCheck(file, join(dir, 'checked.md'), join(dir, 'swapped.md'));
+    expect(readScanText(file, dir)).toBe('checked');
     expect(race.swap).toBeUndefined();
   });
 });
