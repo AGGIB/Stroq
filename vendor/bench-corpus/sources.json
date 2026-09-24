@@ -200,6 +200,774 @@
       "license": "Apache-2.0",
       "commit": "d480d66e7fe52ef5daa46eb1af9f33f954be9b7c",
       "sha256": "8e365a76ed4c6b117cd5e4b81f78a80f43fe97ebaac8b93a7bd9cfe493ae7bd9"
+    },
+    {
+      "repo": "tensorflow/tensorflow",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f7226c5d8cdf88b9b28fe0a28b448028012802dd",
+      "sha256": "cd490686cd4ad6355aff49d75431f2cc00a101c61f60c3065b7c88cab7f557a4"
+    },
+    {
+      "repo": "Snailclimb/JavaGuide",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "31f891d3053dc2af6c2fd1a0b94af233496a718c",
+      "sha256": "b57846f9955a275ad42d5e96c1e1808c51fa01abe94d422418b887c827dd043f"
+    },
+    {
+      "repo": "Genymobile/scrcpy",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "19c1261d2e2cbf2b5e6a71a8b64cc1dd3ede06ac",
+      "sha256": "fd524a9cb97893daec2531e93b692ff427168febaa1b8a95609835636edced4c"
+    },
+    {
+      "repo": "Shubhamsaboo/awesome-llm-apps",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "c62287849378babe255ebc4d8d76862389e3af3b",
+      "sha256": "17b374b2f61323c237d3efe3e60636b69418d271a4a8506c1063e661731b463c"
+    },
+    {
+      "repo": "kubernetes/kubernetes",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f139c507930ad25a5118dc44d284d8212384fd55",
+      "sha256": "0c1159ea384aa0855eaad87f4595da8fd776553830297f3a7c43db81c7708fbd"
+    },
+    {
+      "repo": "openai/codex",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dda227891d27b6e0f3f244eda149a98d098969ad",
+      "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7"
+    },
+    {
+      "repo": "Graphify-Labs/graphify",
+      "ref": "v8",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "4c735618f3d56fd622c2049771584621c31ba9ff",
+      "sha256": "0a5f76b2c4e6cfee46fbbdcab1aa3595d3ebf5f630a13657b544b8d87f766ce4"
+    },
+    {
+      "repo": "rust-lang/rust",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f7575a9da8e4a4fca3b5668d5a2ea7476db44b3f",
+      "sha256": "b3f6ef2fef88b98cb9ec013a5c86213095e53e40eb228679574e4d06517f33c8"
+    },
+    {
+      "repo": "tauri-apps/tauri",
+      "ref": "dev",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "7dbfc1fe5c36143b6a4614cbbd9d4c14ee9dfdcf",
+      "sha256": "db8ff4de3e034289f335c1ae5527d41f3142b2ea9c2002967be5cf5f0e7d39d7"
+    },
+    {
+      "repo": "microsoft/TypeScript",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "df1a31e6d5c4aa4485f276fdfb4218a7bfcdf348",
+      "sha256": "b43867a1a978a0a3d881b91e50e9807f1f56e3f1dd54d65cad43f471c84e0036"
+    },
+    {
+      "repo": "supabase/supabase",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ad5c4bb8791b24f9ea24802f5b500e7126aeacf8",
+      "sha256": "c1a23ddcd6f67625de1bdad0be99dccf59e80c9e772e52a5c855072e783c15d4"
+    },
+    {
+      "repo": "fatedier/frp",
+      "ref": "dev",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "d20a232996007dfe6ab425abc0a39a3ae9a0889b",
+      "sha256": "2cde03ad6d6cbd40a0dfa44975d4834db13d98ece97e30e1e7077a432320e03a"
+    },
+    {
+      "repo": "TauricResearch/TradingAgents",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "35543d0248bf89fcb92b17a15858ad0c0e940687",
+      "sha256": "be740e1add018fed069f43699907ae33ffaf413384d5f64c661fc6320547bbd1"
+    },
+    {
+      "repo": "nexu-io/open-design",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "1b47e60bd46641469fcd8b69c496c4e3a548bc28",
+      "sha256": "0ba5c5493720b6904ebed05a4aa818897560f2201a976282125202af12d11612"
+    },
+    {
+      "repo": "microsoft/playwright",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "5ea3ac5c1ea4edb02ab4cf8118c3a3d07ccc362c",
+      "sha256": "97b185d18d10c3f5e0a4dbfe46249831210c85548af4d7b3de4381a290ab4ee2"
+    },
+    {
+      "repo": "puppeteer/puppeteer",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "9e5fefac4fdd7bb1476441598bca078de608fc71",
+      "sha256": "b2564c37c112336cc191da0890bdc4a8a3e5e039830b17613c69ac7914a7b4bc"
+    },
+    {
+      "repo": "thedotmack/claude-mem",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "b3fd9fdc8e7433bd91dc1b6689a649adb6aac263",
+      "sha256": "4e365c56f8eb4bdf4357f74d18708714abc46a77c73555912c7a93fdfa8c1a49"
+    },
+    {
+      "repo": "vllm-project/vllm",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "36f94d5fe8a3953f1ad340de3c5aaec909765243",
+      "sha256": "8d2e7cd8d120bcd91ddfa85ef957f7246021b4a3f46f2e1f4ccf084ec6c20026"
+    },
+    {
+      "repo": "localsend/localsend",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "e768240d1ad95f0f162b852b5ff37bec71cde1ef",
+      "sha256": "5625cab3d26d35ae61566c4fc86e70b68bf9025424e6569c14896063212bd6db"
+    },
+    {
+      "repo": "infiniflow/ragflow",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "313ca90f6abd7682fe8523e16fd67b3653a3fa84",
+      "sha256": "e321e3b65b92b34121e96d147fe9145e1e428ec1453e3cbbf4426fab09d701ad"
+    },
+    {
+      "repo": "home-assistant/core",
+      "ref": "dev",
+      "path": "README.rst",
+      "license": "Apache-2.0",
+      "commit": "4dfd74e0e42364f178f329392fb362e89359b30d",
+      "sha256": "c9955c50630b0e2582cbc56b13f077e778a8c03c8002ce8966a38444a30c4d93"
+    },
+    {
+      "repo": "opencv/opencv",
+      "ref": "5.x",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "42ef589e6495c4d30fb2914ec505d49191880ffe",
+      "sha256": "a894f3aaef865eaf82c1fddcc92da631ec5b1ca13503403964caef4f8bec0807"
+    },
+    {
+      "repo": "PaddlePaddle/PaddleOCR",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf",
+      "sha256": "63d76041f1dcb84e1dd141d45dc8dec5d86a3e357fe98bf8432ad2721c0ced90"
+    },
+    {
+      "repo": "astral-sh/uv",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "bea138450f0e620a4ce5765b0e38cff7b9f0799f",
+      "sha256": "57a84a5a635f30e3a26541ebc16ca690944a7750f05713b1af92d3170b58f704"
+    },
+    {
+      "repo": "gohugoio/hugo",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "079c76f0104de25c3e8f5b7d77878291bd8c8c2c",
+      "sha256": "4d3ca6ad462e6940caefded78385ce9ffa7c5c215293d1172701efed96e7fde2"
+    },
+    {
+      "repo": "macrozheng/mall",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dcaa93b3150352e5044708d7211b5bed0af4509f",
+      "sha256": "e387ff537c8d51b4a6a165a73198a560f92725f0d3d598d3488bdbd41d99f7d7"
+    },
+    {
+      "repo": "unclecode/crawl4ai",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "86e6464f6db215e0d608f6aa1da41e8505636ede",
+      "sha256": "2b87b0282aeba1f4eebe5fc5234d8e420041ca4bad37c67358cc0cfad099f729"
+    },
+    {
+      "repo": "mlabonne/llm-course",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "7abd96e8284bfae232048fdb77b52397a2114847",
+      "sha256": "1614a13cb3645b1feddd93dbb496b9df6c054a338a3ca5e8d4ceb4326bd7278c"
+    },
+    {
+      "repo": "rtk-ai/rtk",
+      "ref": "develop",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f5e104e117ab5b05c69d448103c28f1155e04417",
+      "sha256": "d51e56234265cc33279a0d98126d80159a74d9ac9f8e6e310ec160e32be0435f"
+    },
+    {
+      "repo": "spring-projects/spring-boot",
+      "ref": "main",
+      "path": "README.adoc",
+      "license": "Apache-2.0",
+      "commit": "8ce3f594fee1f250741773daf2bcee3bf02fe8a1",
+      "sha256": "05a1bce942de45a7ddb341f1af1dc95e77ed8d1567b7d6c8410f200d6da407ea"
+    },
+    {
+      "repo": "d2l-ai/d2l-zh",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "e6b18ccea71451a55fcd861d7b96fddf2587b09a",
+      "sha256": "5cf4c3b17e27dfcf5154759b4f6cbefcbd990d690ced3ebd93a88bfad0b64bbf"
+    },
+    {
+      "repo": "NationalSecurityAgency/ghidra",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "8e9a8e7a276d270d9855bce0599c9387f6193871",
+      "sha256": "bc211b0cd68a0a586a07b1cccea28aec99c8aa695d888405fd7ffa4533807a35"
+    },
+    {
+      "repo": "unslothai/unsloth",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "5b5b78e7b82355a699926dcd5e7e2dabe7ce5a3f",
+      "sha256": "e763fe1699169d57ba2f1516399824e807a52d51f6872d52157de6b3318f01f6"
+    },
+    {
+      "repo": "tesseract-ocr/tesseract",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "8ae68101439b3f7df123499a784e8896c805179d",
+      "sha256": "1a14c7cd54039ffb79e05aff12841f48d4d4da50f231ee98e7e9bb6138d03e7a"
+    },
+    {
+      "repo": "caddyserver/caddy",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "7ee4441f9261d649eed215f27331352c1ab5a746",
+      "sha256": "19a03ce87b6b83b284b085bb675139008f9f2b88367ed466ee0916d7a196396c"
+    },
+    {
+      "repo": "hiyouga/LlamaFactory",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "97b32d3133b501432141a82949d5c7bc4d94f23a",
+      "sha256": "7c72bce01922b0ab829b3562b1196ed9d17d77d2543e562b871ee5e0f6f29b0a"
+    },
+    {
+      "repo": "apache/superset",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "defcd639107946734c068bc33c3c32ce71ee2e5d",
+      "sha256": "92b78c078265d1ce22d12d2563d6ce5056e89fe44baa71c60e116055ad6a4a46"
+    },
+    {
+      "repo": "unionlabs/union",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "031785bb6dc6b957c624e62bc64c184409c97d7b",
+      "sha256": "b3d9bd809fb8af74a0a65c0b0a49c7816df3f97991e0bc5e0f81c879766c62c1"
+    },
+    {
+      "repo": "headroomlabs-ai/headroom",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ca54c2aba1809f9b19acfc2ef9a9dd13276f4f19",
+      "sha256": "ac72ff71580e4d280db8db057ada0ecfe25c25949809cfba8c06479ed84404e9"
+    },
+    {
+      "repo": "moby/moby",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "a9fa490ce1843945f96c578f4be025632ec19cda",
+      "sha256": "97dff8df1c816b0c115f7fcd976bbaaf9106edc0f5d8c8559c74a6bcac285b04"
+    },
+    {
+      "repo": "pbakaus/impeccable",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "edb9c7fbcba158fb6236bd043d6cba18d9cde8d3",
+      "sha256": "4dfa2740321ca339244080e37f44721ea5d9cd3e15513d13cb1ac57beff7e29f"
+    },
+    {
+      "repo": "swiftlang/swift",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "a8d4ba165e156c86f35642fc75400deb8dde1521",
+      "sha256": "cd936fc3ff009b3ea96dbc77ad4382b3bf666412f7cb60e9f0bed9869df024ad"
+    },
+    {
+      "repo": "cline/cline",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dd2e190e5c5551f666dea8fafc6f5d1b1a8e5909",
+      "sha256": "e68470af087a1f3a7abe00a725e42e5d4a9da56c204047df2211986ddd844d24"
+    },
+    {
+      "repo": "openinterpreter/openinterpreter",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "89e7a862435645cfe0209ab4e18199c832629261",
+      "sha256": "d5db2b994d859b4186348f83bf35783a86b3f79e363d0c92100dbf06707ced16"
+    },
+    {
+      "repo": "apache/echarts",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "984bf46b2f905dd0ad909a2d5e6e9d66a1b6568c",
+      "sha256": "8cc8864325843d975f082cba0fd4cf208093feffb03568f48f164725dab8ebf9"
+    },
+    {
+      "repo": "prometheus/prometheus",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "a0e6979d8d906f7cf3da331f7e962177e07a40e4",
+      "sha256": "0d2f3f6f3d19ed74c6302168f95d18f12a7e1041e89dcceadca6f2de860f828d"
+    },
+    {
+      "repo": "mem0ai/mem0",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "989c7da0fc8e4df6342dbb8c448af9816d60d24c",
+      "sha256": "7509347d34a767a2ef37ceb6cf6c714de9e8d84fe66ad5eea92bbae824a8fbeb"
+    },
+    {
+      "repo": "alacritty/alacritty",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "d692748d3f61253ebe9f5094320120d22f6a046f",
+      "sha256": "0dd7c6ea42dc74f2d1949ec0217e15ecf348d6194757bf3d97af22834aeea1ae"
+    },
+    {
+      "repo": "kelseyhightower/nocode",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "6c073b08f7987018cbb2cb9a5747c84913b3608e",
+      "sha256": "4b620aff358d19be1b91d3dd0b9c0e40769c73a9d21172145608793c2c0c67d9"
+    },
+    {
+      "repo": "usestrix/strix",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ae38fe70cd0260555a2ac745ca585e16bf3d6c74",
+      "sha256": "f6d5cf80126692cfb86589df9f1cf4fb11dc605c014247374f0e4dda1d741fa0"
+    },
+    {
+      "repo": "keras-team/keras",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "5827202bc30622d3638663fb44ebe4e828c224b9",
+      "sha256": "40b7d47ea7fa5b58b1250f330c08e351b746f3105b011edac1b2da03409715f1"
+    },
+    {
+      "repo": "jingyaogong/minimind",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f659b55761b754d306bd140573493a6543cafd7f",
+      "sha256": "1af72ca8351d90c9786b3936ce5a5faa125f4429f11e04099bd2eba2c0c4ac58"
+    },
+    {
+      "repo": "coollabsio/coolify",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "0935bf141e3befdc325201e298d19de17349dedb",
+      "sha256": "44500943587476cd6321c94a9782a47dad2e518d358ba07ae551873bd1a8afe4"
+    },
+    {
+      "repo": "FuelLabs/sway",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "71d88899a38b18e314c1e51ef94d004f7e70589d",
+      "sha256": "5649a9af7cbf89eb4558d394cfa7b2a16c80c66ae0ebf6eebc1e42bd3606fbe0"
+    },
+    {
+      "repo": "sharkdp/bat",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "4987f76709aae3a1c4db723c53874c9ddcb0c4fd",
+      "sha256": "df367a657941804edb4fe722edc389a3f597d402370c038cf3edb5a4f881a49f"
+    },
+    {
+      "repo": "spring-projects/spring-framework",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "f935b8da24174ca7a12cec7a41c1354144f410fe",
+      "sha256": "41455b5309b63c2f7742ea78ff3dc69b5b5986356d4b4810e2c1f390d1225401"
+    },
+    {
+      "repo": "zylon-ai/private-gpt",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "01ac43d72bc4c0b7565994197fe23476539059a7",
+      "sha256": "3b4ae5d4ee0793b3aa65b1a292cb1409bcaf6d12f7739d38f81937135f8dab07"
+    },
+    {
+      "repo": "typst/typst",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "9f2b6e8715237cb086899a42873660fe744622e8",
+      "sha256": "ddaf0de156f6a442c7f831202cd55583614df4cc3cfb4b16e95162c7eb11e653"
+    },
+    {
+      "repo": "facebookresearch/segment-anything",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "dca509fe793f601edb92606367a655c15ac00fdf",
+      "sha256": "cab2c4900910c9e4afd64833f57d106b8fc1a27fca963d4439ae5b8f94cdbce1"
+    },
+    {
+      "repo": "aaif-goose/goose",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "61830521ad3134fe1ffa32f62d95ede205216bfc",
+      "sha256": "0f1df85a0c457caf1f3c4e1c0370f2da3887fffa588d207862cfc298c1d39755"
+    },
+    {
+      "repo": "psf/requests",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+      "sha256": "2a9268c9be5f4dc9abe9105740be7c5234babc3dd2b25eb11ca376c538a0c67b"
+    },
+    {
+      "repo": "google/material-design-icons",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "27e9ef1dbeedc13d682fece4a58e1eda4cb0961a",
+      "sha256": "e1ab9d093fa612bd83a1043717ac150d636354c444792893dba2119f22a212c3"
+    },
+    {
+      "repo": "mozilla/pdf.js",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "31d20bc5acaf7eecd5b5d626425daeb3ff181db9",
+      "sha256": "32ff2cfd67617845299910cff29ebd0dd191e1d0ab344518c9e840d772d6084c"
+    },
+    {
+      "repo": "lyswhut/lx-music-desktop",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ad95d5091c9ed689fa72b5e5c849df65f5a679ce",
+      "sha256": "78835fe8e06c047ab081899d330d20b2120ccbb60f10905c1533fe585af76ce8"
+    },
+    {
+      "repo": "heygen-com/hyperframes",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "2fe37e3406fa079a02f6e3d1e5119bedb9ef584c",
+      "sha256": "2eaed202bfbe908a8dfcfaaf414f3625340e442e0a838191cd7dd2032a52dcf0"
+    },
+    {
+      "repo": "ChromeDevTools/chrome-devtools-mcp",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "bd4ea273006f05fe8bf6201bfa0ea33d1faf2289",
+      "sha256": "059a0349daaef6bda98eae6d9384ed349ac94b8033b18be817c317a01b472024"
+    },
+    {
+      "repo": "etcd-io/etcd",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "1edd247ff4b4d7515f674429ef5db75cceb80b4d",
+      "sha256": "d78b5f4555f76984a161a824a06722f8ed5b00e7cf9d845a75ccda1d134deae1"
+    },
+    {
+      "repo": "xai-org/grok-1",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "7050ed204b8206bb8645c7b7bbef7252f79561b0",
+      "sha256": "69b897742758aaf0b135af6dab5028e7b46402c098262bd5e244fcd575ffb1c8"
+    },
+    {
+      "repo": "google/guava",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "4d41665af1b05bad09039b82cb2a1a474a7bceaf",
+      "sha256": "e4264d57cff1cb7ccaa16a1515fc35703416af8b198530fd25ae255b639ade17"
+    },
+    {
+      "repo": "dbeaver/dbeaver",
+      "ref": "devel",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "3e3222d73a5883a946066be334ead03205537962",
+      "sha256": "ea03cc7b39acce4fcd355be439dd2b14f8b861f7b4406ca4024de9267b06deb1"
+    },
+    {
+      "repo": "bojieli/ai-agent-book",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "04c88c53df962eb4375a0fad9ec041066529b358",
+      "sha256": "21195bfba51235eeba6f272e6454ab046f0791b3b2bf260417c56b8f4abb95a2"
+    },
+    {
+      "repo": "skylot/jadx",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "2fb1b16386941660fda07e9017285aec40fcb37f",
+      "sha256": "3cea1d7e9ff4f7c041c3d802be0d237f9931fba823b9a608bd0f74c6d3ec5ae8"
+    },
+    {
+      "repo": "HKUDS/CLI-Anything",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "34f519533bc175d2fe287ab8316b0dd99bb9cc43",
+      "sha256": "24669c9549ad753b173eead4ffc465ebc0b8dc9b4d64e7be73cd5b3b03f56ac9"
+    },
+    {
+      "repo": "apple/container",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "eafe6b8b31cfc42f86a7a4c6a3a7a04867411260",
+      "sha256": "e139019fdc5c1e828bea3cb9ff477685ced6163691ac1107afdb01bf5d7e8bb7"
+    },
+    {
+      "repo": "ClickHouse/ClickHouse",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "848069a42bf62323cd8cd3c9a71a52e98fdb2600",
+      "sha256": "8f97181fa955f71e1a580f694a2e78f6c066a700b7c232cab7e6a6090ec07637"
+    },
+    {
+      "repo": "kelseyhightower/kubernetes-the-hard-way",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "52eb26dad1a3e9e8083a899bc854421eb4842a73",
+      "sha256": "2a6676b5aeb4f965b9d2bb80aeed8323d019dc5ae49f266199add002629cb298"
+    },
+    {
+      "repo": "Aider-AI/aider",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "sha256": "e40e05367ceacf7138a2605484bf7d1cb5a262d2dba03f52a5327c023b3cd0dc"
+    },
+    {
+      "repo": "bevyengine/bevy",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "8fd6a060a4ec40d88b5872806e321afc95430c99",
+      "sha256": "dd2327c348fe01e66f585fd00f8cf06b07396afaf9194c228a6291b87a314c2f"
+    },
+    {
+      "repo": "ReactiveX/RxJava",
+      "ref": "4.x",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ec9f38c33595dfd81168832c60cb960a69f8492a",
+      "sha256": "d07897a3e87e542297b18f818c66ffb9781bcf6c3a8a3113019369b00c120134"
+    },
+    {
+      "repo": "jeecgboot/JeecgBoot",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "87d7f938d47d2585618bcfc5a31d125801cbff27",
+      "sha256": "68e32813a229832c75d2f746c21f76ecde3bb50535095390db23f311dbc3346b"
+    },
+    {
+      "repo": "prisma/orm",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "7a47637acb7e711bdc73c85a53b1e2a3fb3f1383",
+      "sha256": "ef9dd46580c30ba318723fb5bdb2b2f79ebc43a99c21ee10560a4d7a234386ad"
+    },
+    {
+      "repo": "exo-explore/exo",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "21a54c5ea0230a3bec1e1a786d200126c7e34ec6",
+      "sha256": "07c117eab042d44f26bbf8322e5dff582d558db6950c22330acf3c6ec3fe09df"
+    },
+    {
+      "repo": "lysine-dev/okhttp",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "40a3b8749deaacf60a04c890aed052cb14ad36ee",
+      "sha256": "749c950d14345d5482cc72c05a5c9f971feb3a10e4fbfbcde1b074991ae71f81"
+    },
+    {
+      "repo": "milvus-io/milvus",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "15fdc95998549f6508c29b14671e2aad37db1ee4",
+      "sha256": "8fedcdc9023fcd061a54405bf0d83afb4516c7ec053b2efd22476473ce10153f"
+    },
+    {
+      "repo": "android/architecture-samples",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ee66e1526b84c026615df032c705842b7d2a521f",
+      "sha256": "682b1d5bf9b74c3d8c56f8dc3bfe7327aa05cc7191220802cc6ecb1766e9f73f"
+    },
+    {
+      "repo": "streamlit/streamlit",
+      "ref": "develop",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "d2cabf5c4d5d255b08058224e56c718a8378176c",
+      "sha256": "45b271be0490145de6b0c245e2dc0ee5518b38f07eab5bc2419dd2c3923cd87e"
+    },
+    {
+      "repo": "google/zx",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "65fc542d88baac578967e22bea28cb610976578c",
+      "sha256": "952b5b10d116096332aa4f1d6e74c3ab328030411b2f76e7c7cdedaaff0bc4b8"
+    },
+    {
+      "repo": "grpc/grpc",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "88f984bbbd15b0223c95e56d9944357e665b3818",
+      "sha256": "15823e28dd6dcadfba187ac188bf22d79f26b783d1813eaca58588dbd2781d4f"
+    },
+    {
+      "repo": "spf13/cobra",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "sha256": "50473243fcb2851020fc25bcd7ad372fc969825588b9994beec4d9e33523a0c0"
+    },
+    {
+      "repo": "sharkdp/fd",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "ce97e473ebaec49697c07daa50a7bc2b32f713d2",
+      "sha256": "9c4547aa703c8bf329c862b30053cf138024fb9265dc23541604e9b056dd5811"
+    },
+    {
+      "repo": "AykutSarac/jsoncrack.com",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "a46d0d0adb098e12e577a083e87ead7f61f90098",
+      "sha256": "879d1a0688515477d8751020d656ec76b8fe5e68170cc3bfa1f81245693ff099"
+    },
+    {
+      "repo": "Yuan1z0825/nature-skills",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "79c9f986501ff462f4b9d1294c8223bfee1a5149",
+      "sha256": "35907a922feb5fd2a87f4bb7202beef20d3f094858857487aa735d41e2cbf090"
+    },
+    {
+      "repo": "Kong/kong",
+      "ref": "master",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "94b6c29509f6ff8f4f5326a8c86bc9345cc7248b",
+      "sha256": "376442dbbec623bc2edaf4473baa768c5bd4e56c391e480719692ea3e84d2d0b"
+    },
+    {
+      "repo": "lysine-dev/retrofit",
+      "ref": "trunk",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "e27d855b7b029e7f907dfc52205fdb3e9c603c16",
+      "sha256": "e4175f8a33061ce183de1cbffe469a8d4d65835e6c6ae19955263d3ef26bc7c2"
+    },
+    {
+      "repo": "ray-project/ray",
+      "ref": "master",
+      "path": "README.rst",
+      "license": "Apache-2.0",
+      "commit": "d75809516734046e86399062043f8db3e795df7d",
+      "sha256": "94df2acbdfdc95f867ce205d63da33480db909359e6235d9bb3c912fb6a11e87"
+    },
+    {
+      "repo": "juspay/hyperswitch",
+      "ref": "main",
+      "path": "README.md",
+      "license": "Apache-2.0",
+      "commit": "6482aa5fe53e9028c6796bebd191c500bce56add",
+      "sha256": "58117e63d3e61fbaf9ded8ec7083ed9e6f0a53d28e9ba5d8c6a3223a9a8806f7"
     }
   ]
 }

@@ -12,3 +12,8 @@
 *.gif binary
 *.mp4 binary
 *.pdf binary
+
+# The bench corpus is third-party text pinned by sha256 to the exact bytes fetched,
+# and some of it has CRLF line endings (microsoft/TypeScript's README): normalising
+# it on commit, as the rule above would, changes the bytes the hash was taken of.
+vendor/bench-corpus/files/** -text

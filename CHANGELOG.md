@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The false-positive bench reads 121 files, and reports 24.0% rather than 16.0%.** The first 25 were chosen by hand and weighted toward the documents most likely to trip a rule; the 96 added are chosen by a rule instead — the root README of each of the 100 most-starred Apache-2.0 repositories on GitHub — so they are what an agent most often reads. The rate rose, and most of the difference is one rule, `STROQ-2026-00005` (`curl … | sh`), firing on install lines. The two numbers are two corpora and are not comparable. The corpus files are stored byte for byte (`-text` in `.gitattributes`), since one README has CRLF line endings.
+
 ### Added
 
 - **Decoy files: `stroq canary --file <path>`.** Plants a credentials-shaped file somewhere no task you ask for needs — `~/.aws/credentials.bak` — holding a canary value. Any agent call that names it (a `Read`, a `Grep`, a `cat`, relative or through `~` and `$HOME`) is denied as `fs.canary` and taints the session: the agent was steered there by something it read that the rules did not catch. Created only where nothing exists, mode `0600`; only the path is recorded, in `~/.stroq/canary-files.json`.
