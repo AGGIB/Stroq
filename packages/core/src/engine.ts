@@ -136,34 +136,34 @@ export function scanTargetForTool(
   }
   return 'any';
 }
-/** Where a write tool, an edit tool or a shell command carries the text it writes. */
-const WRITTEN_TEXT_KEYS = [
-  'content',
-  'new_string',
-  'new_str',
-  'file_text',
-  'new_source',
-  'command',
-];
+/**
+ * The text a write replaces rather than writes: an `Edit`'s `old_string`, Copilot's
+ * `old_str`, Antigravity's `TargetContent`. Scanning it would ask about removing an
+ * injection, the opposite of saving one.
+ */
+const REPLACED_TEXT_KEYS: ReadonlySet<string> = new Set(['old_string', 'old_str', 'TargetContent']);
+const MAX_WRITTEN_DEPTH = 4;
 
 /**
- * The new text a write carries, from the keys the write and edit tools of the
- * supported agents use, including each edit of a `MultiEdit`'s `edits`. A Bash
+ * Every string a write carries, at any key, except the text it replaces. A list of the
+ * keys agents are known to use was the first version, and a security review found
+ * Antigravity's `create_file` sending its text as `CodeContent`, outside it — so the
+ * payload was never scanned for a whole agent, and Cursor's field is undocumented.
+ * Missing a key is a bypass; scanning a path or a flag is at worst a question. A Bash
  * command is its own text: the payload of `echo … >> CLAUDE.md` is in it.
  */
 function writtenText(toolInput: Readonly<Record<string, unknown>>): string {
-  const texts = (record: Readonly<Record<string, unknown>>): string[] =>
-    WRITTEN_TEXT_KEYS.flatMap((key) => {
-      const value = record[key];
-      return typeof value === 'string' ? [value] : [];
-    });
-  const edits = Array.isArray(toolInput['edits']) ? toolInput['edits'] : [];
-  return [
-    ...texts(toolInput),
-    ...edits.flatMap((edit: unknown) =>
-      edit !== null && typeof edit === 'object' ? texts(edit as Record<string, unknown>) : [],
-    ),
-  ].join('\n');
+  const texts: string[] = [];
+  const walk = (value: unknown, depth: number): void => {
+    if (typeof value === 'string') texts.push(value);
+    else if (depth >= MAX_WRITTEN_DEPTH || value === null || typeof value !== 'object') return;
+    else if (Array.isArray(value)) for (const item of value) walk(item, depth + 1);
+    else
+      for (const [key, item] of Object.entries(value))
+        if (!REPLACED_TEXT_KEYS.has(key)) walk(item, depth + 1);
+  };
+  walk(toolInput, 0);
+  return texts.join('\n');
 }
 
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };

@@ -93,6 +93,31 @@ describe('writes to the files an agent loads as instructions', () => {
     expect(r.classes).toContain('config.instructions_payload');
   });
 
+  it('read the text under whatever key the agent sends it', async () => {
+    // Antigravity's `create_file` sends its text as `CodeContent`; Cursor's field is
+    // undocumented. Every string of a write is scanned except the text being replaced.
+    for (const input of [
+      { file_path: 'CLAUDE.md', CodeContent: POISON },
+      { file_path: 'CLAUDE.md', some_future_field: { nested: [POISON] } },
+    ]) {
+      const r = await engine().pre(pre('Write', input));
+      expect(r.classes, JSON.stringify(Object.keys(input))).toContain(
+        'config.instructions_payload',
+      );
+    }
+  });
+
+  it('do not count the text being removed', async () => {
+    for (const input of [
+      { file_path: 'CLAUDE.md', old_string: POISON, new_string: '' },
+      { file_path: 'CLAUDE.md', old_str: POISON, new_str: 'fixed' },
+      { file_path: 'CLAUDE.md', TargetContent: POISON, ReplacementContent: 'fixed' },
+    ]) {
+      const r = await engine().pre(pre('Edit', input));
+      expect(r.classes).not.toContain('config.instructions_payload');
+    }
+  });
+
   it('do not scan what is written to any other file', async () => {
     const r = await engine().pre(pre('Write', { file_path: 'notes.md', content: POISON }));
     expect(r.classes).not.toContain('config.instructions_payload');

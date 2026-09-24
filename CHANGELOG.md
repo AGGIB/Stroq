@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A download straight into a protected file was not self-tamper.** `curl -o`/`-O`/`--output`, `wget -O` and PowerShell's `-OutFile` are neither a writer verb nor a `>`, so `curl -s https://… -o .claude/settings.json` replaced the hook config with no class at all in an untainted session. They are write intent now, for self-tamper and for the new instruction-file guard; so are `rsync` and `patch`.
+- **`>|` was read as a pipe.** The segment splitter cut `echo x >| file` into `echo x >` and `file`, so no segment held both the write and its target. Found, with the two above, by a security review of the instruction-file guard below.
+
 ### Added
 
-- **Writes to the files an agent loads as instructions are guarded (OWASP ASI06).** A session that read something hostile could save an instruction into `CLAUDE.md`, `AGENTS.md`, rules, skills or Claude Code's per-project memory, and every later session would load it; editing those files was treated as ordinary work in any session. Such a write is now `config.instructions`, asked about in a tainted session, and the text being written is scanned as an instruction file would be when read back: a write whose own text trips a rule is `config.instructions_payload`, asked about in any session. In an untainted session, ordinary edits are unaffected. A patch reaches Stroq as paths only, so for Codex's and Copilot's `apply_patch` the taint alone decides. `stroq attack` gains scenario 21, a contributing guide that asks the agent to save a pipe-to-shell step into `CLAUDE.md`; it is asked about.
+- **Writes to the files an agent loads as instructions are guarded (OWASP ASI06).** A session that read something hostile could save an instruction into `CLAUDE.md`, `AGENTS.md`, rules, skills or Claude Code's per-project memory, and every later session would load it; editing those files was treated as ordinary work in any session. Such a write is now `config.instructions`, asked about in a tainted session, and the text being written is scanned as an instruction file would be when read back: a write whose own text trips a rule is `config.instructions_payload`, asked about in any session. In an untainted session, ordinary edits are unaffected. A shell write is recognised however it spells the file — quotes spliced into the name, a variable assigned earlier in the command, `./` and `..`, a trailing dot Windows strips. A patch reaches Stroq as paths only, so for Codex's and Copilot's `apply_patch` the taint alone decides, and so does `git apply` of a diff file, whose targets are inside the diff. `stroq attack` gains scenario 21, a contributing guide that asks the agent to save a pipe-to-shell step into `CLAUDE.md`; it is asked about.
 - **`stroq exposure` scans `~/.claude/CLAUDE.md` and each project's `~/.claude/projects/*/memory/*.md`,** which are loaded into every session like the instruction files it already read.
 - **`stroq log --json`** prints each audit entry as one line of JSON, as the chain stores it, for a SIEM forwarder or `jq`.
 

