@@ -1,13 +1,8 @@
 import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
-import {
-  commandWord,
-  firstArgAfter,
-  splitPipelines,
-  splitSegments,
-  tokenize,
-} from './shell-segments.js';
+import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
+import { commandWord, firstArgAfter, splitCommand, tokenize } from './shell-segments.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
@@ -94,9 +89,15 @@ const TERMINAL_DATA_COMMANDS = new Set([
   'false',
 ]);
 const URL_HOST = /https?:\/\/([^\s/'"`:]+)/g;
-const SSH_TARGET = /\b[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g;
+// Starts only where a run of `[\w.-]` starts, and only if that run holds a word
+// character before its `@` — which is where `\b[\w.-]+@` could start, and gives the
+// same host. Starting at every `\b` inside the run, as that did, re-read the run from
+// each of them: 16 KiB of `a.` took 241 ms, growing with the square.
+export const SSH_TARGET = /(?<![\w.-])(?=[.-]*\w)[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g;
 const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-r)\b/;
-const EVAL_DYNAMIC = /\beval\b[^\n]*(\$\(|`|\$\{?\w)/;
+// The `[^\n]*` patterns in this file are `followedBy`: the same question, answered
+// in linear time. 16 KiB of `eval ` took 28 s as a pattern; see `followed-by.ts`.
+export const EVAL_DYNAMIC = followedBy(/\beval\b/, /(\$\(|`|\$\{?\w)/);
 const INLINE_INTERP = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
 // `Buffer.from(x, 'base64')` needs no alternative of its own: it contains `base64`,
 // which is matched anywhere in the segment already. A `Buffer\.from\([^)]*base64`
@@ -111,17 +112,20 @@ const SHELL_C_REMOTE = /\b(ba|z|da)?sh\s+-c\s+["']?\$\((curl|wget)\b/;
 // inner text is also split out as its own segment by shell-segments.ts, so
 // this only needs to add the `shell.exec_encoded` signal; `shell.network`
 // comes from that extracted inner segment matching `isNetwork` on its own.
-const SHELL_PROC_SUB_REMOTE = /\b(bash|sh|zsh|dash|ksh|source|\.)\b[^\n]*<\(\s*(curl|wget)\b/;
-const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
+export const SHELL_PROC_SUB_REMOTE = followedBy(
+  /\b(bash|sh|zsh|dash|ksh|source|\.)\b/,
+  /<\(\s*(curl|wget)\b/,
+);
+export const DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
   [/\bgit\s+reset\s+--hard\b/, 'git-destructive'],
   [/\bgit\s+clean\s+-[a-zA-Z]*f/, 'git-destructive'],
   [/\bgit\s+checkout\s+(--\s+)?\.\s*$/, 'git-destructive'],
   [/\bgit\s+restore\s+\.\s*$/, 'git-destructive'],
-  [/\bgit\s+push\b[^\n]*(--force|\s-f\b)/, 'git-destructive'],
+  [followedBy(/\bgit\s+push\b/, /(--force|\s-f\b)/), 'git-destructive'],
   [/\bgit\s+branch\s+-D\b/, 'git-destructive'],
   [/\b(DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE)\b/i, 'sql-destructive'],
   [/\bmkfs(\.\w+)?\b/, 'disk-destructive'],
-  [/\bdd\b[^\n]*\bof=\/dev\/(?!null\b|zero\b)/, 'disk-destructive'],
+  [followedBy(/\bdd\b/, /\bof=\/dev\/(?!null\b|zero\b)/), 'disk-destructive'],
   [/\bshred\b/, 'disk-destructive'],
   [/\bwipefs\b/, 'disk-destructive'],
   [/\bchmod\s+-R\s+777\s+\//, 'chmod-root'],
@@ -132,15 +136,18 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
   // (claude-code #27063), `prisma migrate reset` / `db push --force-reset`.
   // `-destroy`, `-destroy=true|t|1` are destructive; `-destroy=false` explicitly is not.
   [
-    /\b(terraform|tofu)\s+(destroy\b|apply\b[^\n]*\s-destroy(?:=(?:1|t|true))?(?![\w=-]))/i,
+    anyOf(
+      /\b(terraform|tofu)\s+destroy\b/i,
+      followedBy(/\b(terraform|tofu)\s+apply\b/i, /\s-destroy(?:=(?:1|t|true))?(?![\w=-])/i),
+    ),
     'iac-destroy',
   ],
   [/\bpulumi\s+destroy\b/, 'iac-destroy'],
-  [/\bdrizzle-kit\s+push\b[^\n]*--force(?![\w-])/, 'db-force-migrate'],
+  [followedBy(/\bdrizzle-kit\s+push\b/, /--force(?![\w-])/), 'db-force-migrate'],
   [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
-  [/\bprisma\s+db\s+push\b[^\n]*--(force-reset|accept-data-loss)\b/, 'db-force-migrate'],
+  [followedBy(/\bprisma\s+db\s+push\b/, /--(force-reset|accept-data-loss)\b/), 'db-force-migrate'],
   // Only the remote-targeting forms: a bare `supabase db reset` resets the local dev stack.
-  [/\bsupabase\s+db\s+reset\b[^\n]*--(linked|db-url)\b/, 'db-force-migrate'],
+  [followedBy(/\bsupabase\s+db\s+reset\b/, /--(linked|db-url)\b/), 'db-force-migrate'],
   [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
 ];
 // Every separator here is `[/\\]`, for the reason spelled out over `SELF_CONFIG_FILE`
@@ -150,7 +157,7 @@ const DESTRUCTIVE: ReadonlyArray<readonly [RegExp, string]> = [
 // filenames beside them kept working. Half a credential list checking out is the
 // shape this whole pass exists to remove. The two `/proc` and `/etc` entries keep
 // their slashes: those name POSIX files that have no Windows counterpart.
-const SECRET_PATTERNS: readonly RegExp[] = [
+export const SECRET_PATTERNS: readonly PatternTest[] = [
   /(^|[\s"'/\\=])~?[/\\]?\.ssh([/\\]|\b)/,
   /\bid_(rsa|ed25519|ecdsa|dsa)\b/,
   /\.aws[/\\](credentials|config)\b/,
@@ -163,14 +170,16 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\.config[/\\]gcloud\b/,
   /\/etc\/(shadow|passwd)\b/,
   /\bsecurity\s+find-(generic|internet)-password\b/,
-  /\/proc\/[^\s]*\/environ\b/,
+  followedBy(/\/proc\//, /\/environ\b/, 'word'),
 ];
 const ENV_DUMP = /^(env|printenv|set|export)\s*$/;
-const PUSH_EXTERNAL =
-  /\bgit\s+(push\b[^\n]*\b(https?:\/\/|git@|ssh:\/\/)|remote\s+(add|set-url)\b)/;
+export const PUSH_EXTERNAL = anyOf(
+  followedBy(/\bgit\s+push\b/, /\b(https?:\/\/|git@|ssh:\/\/)/),
+  /\bgit\s+remote\s+(add|set-url)\b/,
+);
 // `gh repo create … --push` creates a remote repository and pushes the source
 // directory to it in one step — the s1ngularity exfiltration shape.
-const GH_REPO_CREATE_PUSH = /\bgh\s+repo\s+create\b[^\n]*--push\b/;
+export const GH_REPO_CREATE_PUSH = followedBy(/\bgh\s+repo\s+create\b/, /--push\b/);
 
 // Re-exported from its own module so the PowerShell reader can share the judgement
 // without importing this one; `dangerous-target.ts` explains why it moved.
@@ -367,8 +376,7 @@ function hostsOf(command: string): string[] {
 }
 
 export function classifyCommand(command: string, cwd: string): CommandClassification {
-  const segments = splitSegments(command);
-  const pipelines = splitPipelines(command);
+  const { segments, pipelines, truncated } = splitCommand(command);
   const selfConfig = selfTamperSignals(segments);
   // The PowerShell and cmd forms of the same four dangers, merged into the same
   // classes rather than given their own. A dangerous command is dangerous whichever
@@ -385,7 +393,8 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
     ['config.self', selfConfig.deny],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
-    ['shell.unparsed', ps.unparsed],
+    // Too much nesting to read is not reading it: see `nestedBudget`.
+    ['shell.unparsed', truncated ? [...ps.unparsed, 'nested-commands-too-large'] : ps.unparsed],
   ];
   const active = groups.filter(([, signals]) => signals.length > 0);
   return {
