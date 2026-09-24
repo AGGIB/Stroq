@@ -13,7 +13,7 @@ const WINDOWS_DRIVE_PATH = /^[A-Za-z]:(?:[\\/]|$)/;
 const UNC_PATH = /^\\\\/;
 
 /** Both separators, one casing, no trailing slash — so two spellings compare equal. */
-const foldPath = (path: string): string => path.replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+const foldPath = (path: string): string => withoutTrailingSlashes(path.replace(/[\\/]+/g, '/'));
 
 /**
  * `path` without its trailing slashes. A loop rather than `/\/+$/`, which restarts at
