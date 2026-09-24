@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only: CI checks code, it never writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

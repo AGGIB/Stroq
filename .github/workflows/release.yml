@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   publish:
@@ -18,6 +17,11 @@ jobs:
     # publish an unreviewed branch by dispatching the workflow against it.
     if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # The OIDC token for npm provenance and trusted publishing, granted to this job
+    # only. Job-level permissions replace the top-level ones, so `contents` is repeated.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
