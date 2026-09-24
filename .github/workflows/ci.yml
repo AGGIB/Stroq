@@ -120,15 +120,13 @@ jobs:
         working-directory: packages/cli
         run: npm pack --dry-run
 
-  # The suite on the other two operating systems Stroq claims. macOS is where it is
-  # developed and must pass. Windows has had fixes (PowerShell parsing, path
-  # handling) but had never been run at all, so it starts as a measurement: it
-  # reports failures without blocking a merge, until the number reaches zero and
-  # the `continue-on-error` below can go.
+  # The suite on the other two operating systems Stroq claims; both must pass. The
+  # tests that exercise POSIX-only behaviour (mode bits, signals, the bash plugin
+  # wrapper, srt) skip on Windows and say why; SECURITY.md lists what that leaves
+  # unverified there.
   cross-platform:
     name: suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
