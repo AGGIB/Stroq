@@ -11,6 +11,15 @@ on:
 permissions:
   contents: read
 
+# One run per tag at a time. GitHub occasionally delivers a tag push twice (it did
+# for v0.19.0): two concurrent runs both see the version as unpublished, both try to
+# stage it, and the second fails with a 409. Queued instead of cancelled, the second
+# run starts after the first and its "Decide how to publish" step skips the version
+# as already published.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     # Tag pushes always run; manual runs are only honoured from main, so nobody can
