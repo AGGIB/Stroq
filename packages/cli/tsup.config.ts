@@ -12,6 +12,10 @@ export default defineConfig({
   // unpacked package size for no benefit.
   sourcemap: false,
   noExternal: ['@stroq/core'],
+  // tsup strips `node:` from builtin imports by default. `fs` still resolves without
+  // it; `sqlite` does not exist at all, so the Cursor reader loaded nothing in the
+  // published CLI and blamed the user's Node version for it.
+  removeNodeProtocol: false,
   banner: { js: '#!/usr/bin/env node' },
   onSuccess: async () => {
     // scenarios/index.ts reads this next to dist/index.js at runtime (see its
