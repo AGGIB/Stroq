@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A deny the taint caused says how to undo a false positive.** It names what tainted the session and gives the exact commands, with the real session id — `stroq untaint --session <id>`, and `stroq trust <file>` when the source was a file read — to run outside the agent. The one reason that mentioned `untaint` before printed a literal `<id>`.
 - **Usage errors are one line and exit 2.** An unknown option or a missing value used to throw a raw `TypeError [ERR_PARSE_ARGS_…]`; `doctor`, `exposure` and `verify` ignored options they did not have. An unknown command prints the closest one (`Did you mean "sent"?`) instead of the full usage. `stroq hook` with no agent prints its usage instead of waiting on stdin, and `stroq log --json | head` no longer ends in an EPIPE stack trace.
 
 ## [0.19.2] - 2026-09-27

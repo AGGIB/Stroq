@@ -52,8 +52,7 @@ export const DEFAULT_POLICY: Policy = {
     {
       id: 'deny-origin-suspect',
       effect: 'deny',
-      reason:
-        'Action was dictated by content Stroq flagged as suspicious; blocked (a false positive can be cleared with: stroq untaint --session <id>)',
+      reason: 'Action was dictated by content Stroq flagged as suspicious; blocked',
       when: { classes: ['origin.suspect'], taint: 'any' },
     },
     {

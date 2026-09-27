@@ -4,6 +4,7 @@ import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
+import { withWayOut } from './policy/way-out.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
 import { toEvidence } from './provenance/describe.js';
@@ -426,7 +427,13 @@ export class StroqEngine {
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
-    const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
+    const decision = withWayOut(
+      evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null),
+      this.opts.policy,
+      state.taint,
+      event.sessionId,
+      new Date(this.now()),
+    );
     const provenance = origin.counted.map(toEvidence);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),

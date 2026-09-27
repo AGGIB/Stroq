@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   antigravityHooksPath,
   installAntigravityHooks,
@@ -10,7 +10,7 @@ import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hook
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { cursorHooksPath, installCursorHooks } from '../../src/commands/cursor-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
-import { uninstallAgent } from '../../src/commands/uninstall.js';
+import { runUninstall, uninstallAgent } from '../../src/commands/uninstall.js';
 import { installWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
 
 const STROQ = '"/n" "/e.js"';
@@ -112,5 +112,62 @@ describe('stroq uninstall', () => {
   it('names the OpenClaw command instead of running it', () => {
     const result = uninstallAgent('openclaw', 'user', cwd, false);
     expect(result.message).toContain('openclaw plugins disable stroq');
+  });
+});
+
+describe('runUninstall', () => {
+  function capture(): { text: () => string; restore: () => void } {
+    let text = '';
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      text += String(chunk);
+      return true;
+    });
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      text += String(chunk);
+      return true;
+    });
+    return {
+      text: () => text,
+      restore: () => {
+        out.mockRestore();
+        err.mockRestore();
+      },
+    };
+  }
+
+  it('removes the project install from the working directory', async () => {
+    const file = settingsPath('project', cwd);
+    installHooks(file, `${STROQ} hook claude-code`);
+    const where = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    const out = capture();
+    try {
+      expect(await runUninstall([])).toBe(0);
+    } finally {
+      out.restore();
+      where.mockRestore();
+    }
+    expect(out.text()).toContain("Removed Stroq's hooks");
+    expect(json(file)).toEqual({});
+  });
+
+  it('refuses an agent it does not know, with exit 2', async () => {
+    const out = capture();
+    try {
+      expect(await runUninstall(['--agent', 'emacs'])).toBe(2);
+    } finally {
+      out.restore();
+    }
+    expect(out.text()).toContain('unknown agent "emacs"');
+  });
+
+  it('unwraps MCP servers through init --agent mcp --unwrap', async () => {
+    const config = join(cwd, 'mcp.json');
+    writeFileSync(config, JSON.stringify({ mcpServers: {} }));
+    const out = capture();
+    try {
+      expect(await runUninstall(['--agent', 'mcp', '--config', config, '--dry-run'])).toBe(0);
+    } finally {
+      out.restore();
+    }
   });
 });
