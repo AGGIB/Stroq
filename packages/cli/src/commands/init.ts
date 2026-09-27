@@ -1,8 +1,11 @@
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { cpSync, existsSync, realpathSync, renameSync, rmSync } from 'node:fs';
+import { basename, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
 import { recordInstall } from './install-record.js';
+import { stroqHome } from '../paths.js';
+import { stroqVersion } from '../version.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
   HOOK_TIMEOUT_SECONDS,
@@ -113,6 +116,45 @@ export function hookCommand(node: string, entry: string, agent: HookAgent = 'cla
  * rule with `hookCommand` is what keeps a `--import tsx` from appearing in one and
  * not the other.
  */
+/** The npx cache root an entry was installed under: `…/_npx/<hash>`, both separators. */
+const NPX_CACHE_ROOT = /^(.*[/\\]_npx[/\\][^/\\]+)[/\\]node_modules[/\\]/;
+
+/**
+ * The entry hooks should run. `npx @stroq/cli init` — the README's own instruction —
+ * runs from npm's npx cache, which npm prunes; a hook pointing into it then fails to
+ * start, and the agent treats that as a non-blocking error and runs the call. So an
+ * entry in that cache is copied, with the dependencies installed beside it, to
+ * `<stroq home>/cli/<version>/`, and the copy is what the hooks run. Copied into a
+ * temporary directory and renamed, so an interrupted copy is never mistaken for one.
+ *
+ * npx starts the CLI through `node_modules/.bin/stroq`, a link, so the entry is
+ * resolved to the file it names first. When there is nothing to copy, or the copy
+ * fails, the entry is kept as given: `init` still installs, and `stroq doctor` names
+ * the path if it later disappears.
+ */
+export function stableEntry(entry: string, home: string, version: string, dryRun = false): string {
+  const root = NPX_CACHE_ROOT.exec(entry)?.[1];
+  if (root === undefined || !existsSync(entry)) return entry;
+  const target = join(home, 'cli', version);
+  const moved = join(target, relative(realpathSync(root), realpathSync(entry)));
+  if (dryRun || existsSync(moved)) return moved;
+  const partial = `${target}.${process.pid}.tmp`;
+  try {
+    rmSync(partial, { recursive: true, force: true });
+    cpSync(join(root, 'node_modules'), join(partial, 'node_modules'), {
+      recursive: true,
+      // `.bin` holds links back into the cache; nothing runs through them.
+      filter: (source) => basename(source) !== '.bin',
+    });
+    rmSync(target, { recursive: true, force: true });
+    renameSync(partial, target);
+    return moved;
+  } catch {
+    rmSync(partial, { recursive: true, force: true });
+    return entry;
+  }
+}
+
 export function hookArgv(node: string, entry: string): readonly string[] {
   return needsTsxLoader(entry) ? [node, '--import', 'tsx', entry] : [node, entry];
 }
@@ -396,7 +438,12 @@ export async function runInit(args: readonly string[]): Promise<number> {
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
   const node = process.execPath;
-  const entry = resolve(process.argv[1] ?? '');
+  const launched = resolve(process.argv[1] ?? '');
+  const entry = stableEntry(launched, stroqHome(), stroqVersion(), dryRun);
+  if (entry !== launched)
+    process.stdout.write(
+      `Stroq ran from the npx cache, which npm prunes; the hooks run a copy at ${entry}\n`,
+    );
   // Checked and delegated before `hookCommand` is ever computed: `mcp` is an
   // `InitAgent` but not a `HookAgent`, so narrowing it away here — rather than
   // casting it into `hookCommand` and never using the result — is what lets every

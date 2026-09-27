@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
   mkdirSync,
 } from 'node:fs';
@@ -19,6 +20,7 @@ import {
   readSettings,
   runInit,
   settingsPath,
+  stableEntry,
 } from '../../src/commands/init.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
@@ -722,5 +724,64 @@ describe('runInit --agent mcp', () => {
     // and the path rules for every wrapped server. `realpathSync` because macOS
     // resolves the temp directory symlink on chdir.
     expect(args[args.indexOf('--cwd') + 1]).toBe(realpathSync(dir));
+  });
+});
+
+describe('stableEntry', () => {
+  /** npm's npx cache as `npx @stroq/cli init` leaves it: the CLI and its dependencies. */
+  function npxTree(): { readonly root: string; readonly entry: string } {
+    const root = join(mkdtempSync(join(tmpdir(), 'stroq-npx-')), '_npx', 'a1b2c3');
+    const cli = join(root, 'node_modules', '@stroq', 'cli');
+    mkdirSync(join(cli, 'dist'), { recursive: true });
+    writeFileSync(join(cli, 'dist', 'index.js'), '// cli');
+    writeFileSync(join(cli, 'package.json'), '{"version":"9.9.9"}');
+    mkdirSync(join(root, 'node_modules', 'zod'), { recursive: true });
+    writeFileSync(join(root, 'node_modules', 'zod', 'index.js'), '// zod');
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    return { root, entry: join(cli, 'dist', 'index.js') };
+  }
+
+  // npm prunes the npx cache. A hook pointing into it stopped starting, and the agent
+  // ran every call it would have judged.
+  it('copies a CLI run from the npx cache, with its dependencies, somewhere npm leaves alone', () => {
+    const { entry } = npxTree();
+    const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+    const moved = stableEntry(entry, home, '9.9.9');
+    expect(moved).toBe(
+      join(home, 'cli', '9.9.9', 'node_modules', '@stroq', 'cli', 'dist', 'index.js'),
+    );
+    expect(readFileSync(moved, 'utf8')).toBe('// cli');
+    expect(existsSync(join(home, 'cli', '9.9.9', 'node_modules', 'zod', 'index.js'))).toBe(true);
+    expect(existsSync(join(home, 'cli', '9.9.9', 'node_modules', '.bin'))).toBe(false);
+    // A second init reuses the copy.
+    expect(stableEntry(entry, home, '9.9.9')).toBe(moved);
+  });
+
+  // npx starts the CLI through `node_modules/.bin/stroq`, a link into the package, and
+  // that link is the path `process.argv[1]` holds.
+  it.skipIf(process.platform === 'win32')('follows the .bin link npx starts it through', () => {
+    const { root, entry } = npxTree();
+    const bin = join(root, 'node_modules', '.bin', 'stroq');
+    symlinkSync(join('..', '@stroq', 'cli', 'dist', 'index.js'), bin);
+    const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+    const moved = stableEntry(bin, home, '9.9.9');
+    expect(moved).toBe(
+      join(home, 'cli', '9.9.9', 'node_modules', '@stroq', 'cli', 'dist', 'index.js'),
+    );
+    expect(readFileSync(moved, 'utf8')).toBe(readFileSync(entry, 'utf8'));
+  });
+
+  it('keeps the entry it was given when there is nothing there to copy', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+    const missing = join(tmpdir(), '_npx', 'gone', 'node_modules', '.bin', 'stroq');
+    expect(stableEntry(missing, home, '9.9.9')).toBe(missing);
+    expect(existsSync(join(home, 'cli'))).toBe(false);
+  });
+
+  it('leaves an entry outside the npx cache where it is', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+    const global = '/usr/local/lib/node_modules/@stroq/cli/dist/index.js';
+    expect(stableEntry(global, home, '9.9.9')).toBe(global);
+    expect(existsSync(join(home, 'cli'))).toBe(false);
   });
 });
