@@ -120,9 +120,10 @@ describe('stroq hook claude-code (end to end)', () => {
     expect(res.stdout).toContain('"permissionDecision":"deny"');
   }, 60_000);
 
-  it('prints usage and exits 1 for an unknown command', async () => {
+  it('names an unknown command and exits 1, pointing at the list', async () => {
     const res = await runCli(['bogus'], '', mkdtempSync(join(tmpdir(), 'stroq-e2e-')));
     expect(res.code).toBe(1);
-    expect(res.stdout).toContain('Commands:');
+    expect(res.stderr).toContain('unknown command "bogus"');
+    expect(res.stderr).toContain('stroq --help');
   }, 60_000);
 });
