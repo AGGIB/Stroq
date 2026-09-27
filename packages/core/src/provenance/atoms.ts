@@ -21,6 +21,10 @@ const URL_RE = /https?:\/\/[^\s"'<>()[\]`|]+/gi;
 // 199,000 `!` in tool output took 48 s, and a Bash command has no length cap at all.
 const TRAILING_PUNCT = '.,;:!?\'"';
 const QUOTES = '"\'';
+// What prose puts after a name: "run npx helper-fix." must yield `helper-fix`, or the
+// command that copies it never matches. `;` and `!` need no entry: `VERSION_MARKER`
+// cuts at both.
+const TRAILING = `${QUOTES}.,:?)`;
 const LEADING_QUOTES = /^["']+/;
 const VERSION_MARKER = /[[<>=!~;]/;
 const LINE_BREAKS = '\n\r\u2028\u2029';
@@ -103,7 +107,7 @@ function withoutVersion(name: string): string {
  * 262,000 quotes, or of `[`s and a line break, took 30 s.
  */
 export function normalizePackageName(raw: string): string {
-  const name = trimEndOf(raw.replace(LEADING_QUOTES, ''), QUOTES);
+  const name = trimEndOf(raw.replace(LEADING_QUOTES, ''), TRAILING);
   const at = name.startsWith('@') ? name.indexOf('@', 1) : name.indexOf('@');
   const base = at > 0 ? name.slice(0, at) : name;
   return withoutVersion(base).toLowerCase();
