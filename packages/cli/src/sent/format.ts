@@ -146,6 +146,21 @@ export function formatSent(report: SentReport): string {
     lines.push(...MEANING, '');
   }
 
-  lines.push(...coverageLines(report));
+  lines.push(...coverageLines(report), '', ...nextLines(report.credentials.length > 0));
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Where to go from here. A report that ended on its coverage left a newcomer with a
+ * finding and no move to make: rotating comes first when there is something to
+ * rotate, then the command that shows what the session did, then the one that guards
+ * the next session.
+ */
+function nextLines(found: boolean): string[] {
+  return [
+    'NEXT',
+    ...(found ? ['  Rotate each credential named above that is still live.'] : []),
+    '  stroq replay --last    what the session read, and which later actions matched it',
+    '  stroq init             guard the next session (--agent <name> for another agent)',
+  ];
 }

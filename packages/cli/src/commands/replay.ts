@@ -185,12 +185,27 @@ export function buildReplay(allEntries: readonly AuditEntry[], sessionId: string
 
 const RULE_PREVIEW = 3;
 
-function verdictTag(entry: AuditEntry): string {
+/**
+ * Whose verdicts these are. The audit log records what Stroq decided while the
+ * session ran: `recorded`, in the past tense. A transcript is replayed through today's
+ * policy after the fact, and in a session recorded before Stroq was installed nothing
+ * stopped anything: `replayed`, in the conditional. Printing "DENIED" there told a
+ * user the `curl` had been blocked when it had run.
+ */
+export type ReplayVoice = 'recorded' | 'replayed';
+
+function verdictTag(entry: AuditEntry, voice: ReplayVoice): string {
   const d = entry.decision;
   if (!d) return '';
-  if (d.effect === 'deny') return `DENIED  ${d.ruleId ?? 'default'}`;
-  if (d.effect === 'ask') return `ASKED   ${d.ruleId ?? 'default'}`;
-  return `allowed ${d.ruleId ?? 'default'}`;
+  const rule = d.ruleId ?? 'default';
+  if (voice === 'replayed') {
+    if (d.effect === 'deny') return `WOULD DENY  ${rule}`;
+    if (d.effect === 'ask') return `WOULD ASK   ${rule}`;
+    return `would allow ${rule}`;
+  }
+  if (d.effect === 'deny') return `DENIED  ${rule}`;
+  if (d.effect === 'ask') return `ASKED   ${rule}`;
+  return `allowed ${rule}`;
 }
 
 function readLine(src: ReplaySource): string {
@@ -212,26 +227,27 @@ function readLine(src: ReplaySource): string {
 const secretLine = (s: SecretHit): string =>
   `${s.name} from ${s.source}${s.canary ? ' (canary)' : ''}`;
 
-function consequenceBlock(c: ReplayConsequence, last: boolean): string[] {
+function consequenceBlock(c: ReplayConsequence, last: boolean, voice: ReplayVoice): string[] {
   const elbow = last ? '  └─►' : '  ├─►';
   const rail = last ? '     ' : '  │  ';
   const gap = ageLabel(c.evidence.at, new Date(c.action.ts));
+  const tag = verdictTag(c.action, voice);
   return [
     `${elbow} #${c.action.seq} ${c.action.tool}  ${c.action.summary}`,
-    `${rail}   ${verdictTag(c.action)}${' '.repeat(Math.max(1, 34 - verdictTag(c.action).length))}${gap} later`,
+    `${rail}   ${tag}${' '.repeat(Math.max(1, 34 - tag.length))}${gap} later`,
     `${rail}   carried over: "${c.evidence.excerpt}" (${c.evidence.kind})` +
       (c.alsoCarried > 0 ? ` and ${c.alsoCarried} more` : ''),
   ];
 }
 
-function sourceBlock(src: ReplaySource): string[] {
+function sourceBlock(src: ReplaySource, voice: ReplayVoice): string[] {
   const seq = src.read ? `#${src.read.seq} ` : '';
   const head = [`  ■ ${seq}${src.tool}  ${src.source}`, `      ${readLine(src)}`];
   if (src.consequences.length === 0) {
     return [...head, '      nothing traced back to it', ''];
   }
   const body = src.consequences.flatMap((c, i) =>
-    consequenceBlock(c, i === src.consequences.length - 1),
+    consequenceBlock(c, i === src.consequences.length - 1, voice),
   );
   return [...head, '  │', ...body, ''];
 }
@@ -241,7 +257,7 @@ function duration(model: ReplayModel): string {
   return ` · ${ageLabel(model.first, new Date(model.last))} long`;
 }
 
-export function formatReplay(model: ReplayModel): string {
+export function formatReplay(model: ReplayModel, voice: ReplayVoice = 'recorded'): string {
   if (model.total === 0) {
     return `no audit entries for session ${model.sessionId}\n`;
   }
@@ -253,20 +269,22 @@ export function formatReplay(model: ReplayModel): string {
     'stroq replay — what the agent did, and what told it to do it',
     '',
     `  session ${model.sessionId} · ${model.total} events${duration(model)} · ` +
-      `${model.denied} denied · ${model.asked} asked`,
+      (voice === 'replayed'
+        ? `${model.denied} would be denied · ${model.asked} would ask (today's policy)`
+        : `${model.denied} denied · ${model.asked} asked`),
     '',
   ];
 
   if (model.sources.length > 0) {
     lines.push('CONTENT THE AGENT READ, AND WHAT CAME OUT OF IT', '');
-    for (const src of model.sources) lines.push(...sourceBlock(src));
+    for (const src of model.sources) lines.push(...sourceBlock(src, voice));
   }
 
   if (model.secretActions.length > 0) {
     lines.push('ACTIONS CARRYING A KNOWN SECRET VALUE', '');
     for (const a of model.secretActions) {
       lines.push(`  ● #${a.seq} ${a.tool}  ${a.summary}`);
-      lines.push(`      ${verdictTag(a)}`);
+      lines.push(`      ${verdictTag(a, voice)}`);
       for (const s of a.secrets ?? []) lines.push(`      ${secretLine(s)}`);
       lines.push('');
     }
@@ -275,7 +293,7 @@ export function formatReplay(model: ReplayModel): string {
   if (model.unlinked.length > 0) {
     lines.push(`ACTIONS WITH NO UNTRUSTED ORIGIN (${model.unlinked.length})`, '');
     for (const a of model.unlinked) {
-      const tag = a.decision ? a.decision.effect : '-';
+      const tag = a.decision ? verdictTag(a, voice) : '-';
       lines.push(`  ○ #${a.seq} ${a.tool}  ${a.summary}`);
       lines.push(`      ${tag}`);
     }
@@ -288,6 +306,12 @@ export function formatReplay(model: ReplayModel): string {
       ? 'No action in this session traced back to content the agent read.'
       : `${traced} of ${judged} judged actions traced back to content the agent read.`,
   );
+  if (voice === 'replayed')
+    lines.push(
+      '',
+      "These are the verdicts today's policy gives the recording —",
+      'not a record of what was blocked at the time. Guard the next session: stroq init',
+    );
   return `${lines.join('\n')}\n`;
 }
 
@@ -382,7 +406,7 @@ export async function runReplay(args: readonly string[]): Promise<number> {
       process.stdout.write(`${JSON.stringify(model, null, 2)}\n`);
       return 0;
     }
-    process.stdout.write(`${formatReplay(model)}\nreplayed from ${path}\n`);
+    process.stdout.write(`${formatReplay(model, 'replayed')}\nreplayed from ${path}\n`);
     return 0;
   }
 

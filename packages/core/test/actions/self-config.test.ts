@@ -343,3 +343,48 @@ describe('the two user-level MCP client configs (spec §2d)', () => {
     expect(PROTECTED_DIRS.test('Claude -name')).toBe(false);
   });
 });
+
+// An agent that could run these could clear its own taint, waive the scan of the file
+// that tainted it, or take the hooks out, and nothing classified the call: each came
+// back with no class at all and was allowed in a tainted session.
+describe("changing Stroq's own state through its CLI", () => {
+  it.each([
+    'stroq untaint --all',
+    'stroq untaint --session s1',
+    'stroq trust README.md',
+    'stroq trust --remove README.md',
+    'stroq init --agent cursor',
+    'stroq uninstall',
+    'npx @stroq/cli untaint --all',
+    'npx -y @stroq/cli@0.19.2 trust notes.md',
+    'pnpm dlx @stroq/cli uninstall --user',
+    'node /usr/local/lib/node_modules/@stroq/cli/dist/index.js untaint --all',
+    'sudo stroq untaint --all',
+    '/usr/local/bin/stroq untaint --all',
+  ])('deny: %s', (segment) => expect(classifySelfConfigSegment(segment)).toBe('deny'));
+
+  it.each([
+    'stroq doctor',
+    'stroq log --json',
+    'stroq why',
+    'stroq sent --last',
+    'stroq replay --last',
+    'stroq trust',
+    'stroq trust --list',
+    'stroq init --dry-run',
+    'stroq uninstall --dry-run',
+    'npx @stroq/cli doctor',
+    // Only the command position counts.
+    'echo stroq untaint --all',
+    'grep "stroq untaint" notes.md',
+  ])('null (reading, or not Stroq at all): %s', (segment) =>
+    expect(classifySelfConfigSegment(segment)).toBeNull(),
+  );
+
+  it('names its own signal', () => {
+    expect(selfTamperSignals(['stroq untaint --all'])).toEqual({
+      deny: ['stroq-state-change'],
+      ask: [],
+    });
+  });
+});

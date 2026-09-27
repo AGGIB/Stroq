@@ -28,7 +28,8 @@ export const DEFAULT_POLICY: Policy = {
     {
       id: 'deny-self-tamper',
       effect: 'deny',
-      reason: 'Modifying agent security configuration is blocked',
+      reason:
+        'Modifying agent security configuration is blocked; that change is yours to make, outside the agent (to take Stroq out: stroq uninstall)',
       when: { classes: ['config.self'], taint: 'any' },
     },
     {
@@ -51,8 +52,7 @@ export const DEFAULT_POLICY: Policy = {
     {
       id: 'deny-origin-suspect',
       effect: 'deny',
-      reason:
-        'Action was dictated by content Stroq flagged as suspicious; blocked (a false positive can be cleared with: stroq untaint --session <id>)',
+      reason: 'Action was dictated by content Stroq flagged as suspicious; blocked',
       when: { classes: ['origin.suspect'], taint: 'any' },
     },
     {

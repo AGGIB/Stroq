@@ -39,43 +39,36 @@ describe('parseTrustList', () => {
 });
 
 describe('FileTrustStore', () => {
-  it('trusts the exact content it was given, from the source it was given', () => {
+  it('trusts the exact content it was given', () => {
     const file = trustFileWith({
       version: 1,
       entries: [{ source: '/repo/NOTES.md', sha256: trustDigest(TEXT), ruleIds: [], addedAt: 'x' }],
     });
     const store = new FileTrustStore(file);
-    expect(store.trusts('/repo/NOTES.md', TEXT)).toBe(true);
+    expect(store.trusts(TEXT)).toBe(true);
   });
 
   // The pin is the whole safety argument: trusting a file today must say nothing
   // about the file that arrives in tomorrow's pull request.
-  it('does not trust the same source once its content changes', () => {
+  it('does not trust the content once it changes', () => {
     const file = trustFileWith({
       version: 1,
       entries: [{ source: '/repo/NOTES.md', sha256: trustDigest(TEXT), ruleIds: [], addedAt: 'x' }],
     });
-    expect(new FileTrustStore(file).trusts('/repo/NOTES.md', `${TEXT}\nand one more line`)).toBe(
-      false,
-    );
+    expect(new FileTrustStore(file).trusts(`${TEXT}\nand one more line`)).toBe(false);
   });
 
-  it('does not trust the same content from a different source', () => {
+  // The digest is the pin: the same bytes are the same text the user judged, whether
+  // a Read, a `cat` or another path brings them in. The source is kept for the list.
+  it('trusts the same bytes from any source', () => {
     const file = trustFileWith({
       version: 1,
       entries: [{ source: '/repo/NOTES.md', sha256: trustDigest(TEXT), ruleIds: [], addedAt: 'x' }],
     });
-    expect(new FileTrustStore(file).trusts('/elsewhere/NOTES.md', TEXT)).toBe(false);
+    expect(new FileTrustStore(file).trusts(TEXT)).toBe(true);
   });
 
-  it('trusts nothing when the source is unknown, and nothing when the file is absent', () => {
-    const file = trustFileWith({
-      version: 1,
-      entries: [{ source: '/repo/NOTES.md', sha256: trustDigest(TEXT), ruleIds: [], addedAt: 'x' }],
-    });
-    expect(new FileTrustStore(file).trusts('', TEXT)).toBe(false);
-    expect(new FileTrustStore(join(tmpdir(), 'stroq-no-such-trust.json')).trusts('/a', TEXT)).toBe(
-      false,
-    );
+  it('trusts nothing when the file is absent', () => {
+    expect(new FileTrustStore(join(tmpdir(), 'stroq-no-such-trust.json')).trusts(TEXT)).toBe(false);
   });
 });

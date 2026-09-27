@@ -114,4 +114,15 @@ describe('projectSlug', () => {
     expect(projectSlug('/Users/dev/Documents/stroq')).toBe('-Users-dev-Documents-stroq');
     expect(projectSlug('/home/dev/my.app')).toBe('-home-dev-my-app');
   });
+
+  // Claude Code replaces every character that is not an ASCII letter or digit: its
+  // own directory for a project under `~/Documents/Мои проекты` is
+  // `-Users-dev-Documents-----------readme`. The old rule replaced only `/` and `.`,
+  // so a project with a space, a non-ASCII name or a Windows path was never found
+  // and `--last` fell back to every project.
+  it('replaces every character that is not an ASCII letter or digit', () => {
+    expect(projectSlug('/Users/dev/My Projects/app_1')).toBe('-Users-dev-My-Projects-app-1');
+    expect(projectSlug('/Users/dev/Мой/app')).toBe('-Users-dev-----app');
+    expect(projectSlug('C:\\Users\\dev\\app')).toBe('C--Users-dev-app');
+  });
 });

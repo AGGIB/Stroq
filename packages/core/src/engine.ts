@@ -4,6 +4,7 @@ import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
+import { withWayOut } from './policy/way-out.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
 import { toEvidence } from './provenance/describe.js';
@@ -426,7 +427,13 @@ export class StroqEngine {
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
-    const decision = evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null);
+    const decision = withWayOut(
+      evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null),
+      this.opts.policy,
+      state.taint,
+      event.sessionId,
+      new Date(this.now()),
+    );
     const provenance = origin.counted.map(toEvidence);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
@@ -490,9 +497,9 @@ export class StroqEngine {
     // into ~/.stroq than a provenance record can.
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
     // A trusted entry is pinned to the exact bytes it was added for, so this asks
-    // about the text actually scanned rather than about the path alone.
+    // about the text actually scanned, not about where it came from.
     const trusted =
-      scan.verdict === 'suspect' && this.opts.trust?.trusts(source, event.toolResultText) === true;
+      scan.verdict === 'suspect' && this.opts.trust?.trusts(event.toolResultText) === true;
     // The audit entry is the forensic record and must be durable before we
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no

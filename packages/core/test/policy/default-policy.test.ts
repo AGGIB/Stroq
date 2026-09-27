@@ -13,9 +13,11 @@ describe('policies/default.yaml', () => {
     expect(parsePolicy(yamlText)).toEqual(DEFAULT_POLICY);
   });
 
-  it('tells the user how to clear a false positive in the origin-suspect reason', () => {
+  // The engine writes the way out, with the real session id (policy/way-out.ts); a
+  // placeholder here would print a literal `<id>` next to it.
+  it('leaves the untaint command to the engine, which knows the session id', () => {
     const rule = DEFAULT_POLICY.rules.find((r) => r.id === 'deny-origin-suspect');
-    expect(rule?.reason).toContain('stroq untaint --session <id>');
+    expect(rule?.reason).not.toContain('<id>');
   });
 
   it('denies an unscannable egress immediately after the secret-egress rule', () => {

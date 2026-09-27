@@ -14,81 +14,54 @@ import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
 import { runSent } from './commands/sent.js';
 import { runTrust } from './commands/trust.js';
+import { runUninstall } from './commands/uninstall.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
+import {
+  commandHelp,
+  parseArgsProblem,
+  suggestCommand,
+  unknownOption,
+  usage,
+  usageError,
+  wantsHelp,
+} from './help.js';
 
-const USAGE = `stroq <command>
+type Runner = (args: readonly string[]) => number | Promise<number>;
 
-Commands:
-  init [--agent <name>] [--user] [--dry-run]
-                                     install hooks (--agent claude-code | cursor | codex | copilot | openclaw | windsurf | antigravity; project config by default)
-                                     or wrap a client's MCP servers (--agent mcp --client <name>)
-  hook <claude-code|cursor|codex>    hook entrypoint: reads the event JSON on stdin, prints a decision
-  hook windsurf                      Windsurf entrypoint: its events name themselves, and a block is exit 2 with the reason on stderr
-  hook copilot <pre|post>            Copilot entrypoint: its events carry no name, so the phase is an argument
-  hook openclaw <pre|post>           OpenClaw plugin entrypoint: same, answered in Stroq's own JSON
-  hook antigravity <pre|post|preinvocation>
-                                     Antigravity entrypoint: same, plus PreInvocation, where a tainted
-                                     session's status is stated to the model before it is called
-  run [--sandbox] -- <agent> …       start an agent already confined: exports the git settings that
-                                     stop a repository running a command during the startup
-                                     "git status", refuses to launch into a repository that runs
-                                     something before you could approve it, and checks that Stroq's
-                                     hooks are installed for that agent. --sandbox additionally wraps
-                                     the launch in Anthropic's srt, when srt is installed, with a
-                                     read-deny list built from this machine's real credential files
-  mcp --server <n> -- <cmd> …        stdio MCP proxy: judges every tools/call, scans every result
-  doctor [--all]                     check the installation (--all lists every agent and scope)
-  log [--count 20] [--json]          show recent audit entries (--json: one JSON line each)
-  verify                             verify the audit hash chain
-  untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
-  why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
-  replay [<session>] [--last] [--transcript <path>] [--json] [--list]
-                                     rebuild the recorded sequence: which content the agent read,
-                                     and which later actions matched it. --last reads the agent's own
-                                     transcript, so it works on sessions that ran before you installed
-  sent [<session>] [--last] [--transcript <path>] [--json] [--fail-on-finding]
-                                     which credentials appear in a recorded agent session, and in
-                                     which tool result or call. This local evidence does not confirm
-                                     a model request or provider delivery. --last reads
-                                     the agent's own transcript, so it covers sessions from before
-                                     you installed and can see what tools RETURNED, not just what
-                                     they called. To match values it reads this machine's credential
-                                     files (~/.aws/credentials, ~/.npmrc, ~/.netrc,
-                                     ~/.docker/config.json, ./.env*); it reports names and sources
-                                     only, never a value. Exits 0 even when it finds something —
-                                     the past cannot be fixed by this build; use --fail-on-finding
-                                     to gate on it anyway
-  canary [--name <NAME>] [--file <path>]
-                                     print a canary secret to plant, or plant it as a decoy file; its
-                                     outbound use, or any call naming the file, is denied and taints
-  attack [--json] [--only <id>] [--fuzz]
-                                     replay recorded incidents against your policy; exit 1 if any gets
-                                     through. --fuzz crosses every scenario with every mutation and
-                                     prints the ones that escape
-  exposure [--probe] [--share] [--json] [--verbose]
-                                     map this machine's agent surface and report what reaches you;
-                                     --probe starts your MCP servers to read their tool descriptions
-  inspect [<dir>] [--json|--sarif] [--env]
-                                     read what a repository runs before you open it with an agent;
-                                     --sarif for code scanning, --env prints the git settings that
-                                     neutralise it
-  trust [<file>] [--list] [--remove <file>] [--json]
-                                     waive a false positive on a file's exact content; without
-                                     arguments, list what is trusted
-  bench [--corpus <dir>] [--json] [--verbose]
-                                     measure how much benign developer text the rule set flags
-  coverage [--format table|navigator] [--json]
-                                     control mapping against MITRE ATLAS and OWASP ASI
-  --version                          print the CLI version
-`;
+/** Every command that prints for a person, by name. */
+const COMMANDS: Readonly<Record<string, Runner>> = {
+  inspect: runInspect,
+  init: runInit,
+  uninstall: runUninstall,
+  run: runRun,
+  doctor: runDoctor,
+  log: runLog,
+  verify: () => runVerify(),
+  trust: runTrust,
+  untaint: runUntaint,
+  replay: runReplay,
+  why: runWhy,
+  sent: runSent,
+  canary: runCanary,
+  attack: runAttackCommand,
+  exposure: runExposure,
+  bench: runBenchCommand,
+  coverage: runCoverageCommand,
+};
 
 export async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
     case 'hook': {
+      // Asked for help, or run with no agent at all: no agent invokes it that way, so
+      // it is a person, and a person should not be left waiting on stdin.
+      if (rest[0] === undefined || wantsHelp('hook', rest)) {
+        process.stdout.write(commandHelp('hook') ?? '');
+        return rest[0] === undefined ? 2 : 0;
+      }
       // Reading stdin happens inside the command so that a rejection there is
       // answered by the agent's own fail-closed path, not by the exit-1 handler at
       // the bottom of this file: Codex reads exit 1 as a hook failure and continues
@@ -113,6 +86,10 @@ export async function main(argv: readonly string[]): Promise<number> {
       return out.exitCode;
     }
     case 'mcp':
+      if (wantsHelp('mcp', rest)) {
+        process.stdout.write(commandHelp('mcp') ?? '');
+        return 0;
+      }
       // A protocol stream: what the proxy does not judge it forwards byte for byte.
       return runMcp(rest);
     default:
@@ -124,48 +101,49 @@ export async function main(argv: readonly string[]): Promise<number> {
 }
 
 async function report(command: string | undefined, rest: readonly string[]): Promise<number> {
-  switch (command) {
-    case 'inspect':
-      return runInspect(rest);
-    case 'init':
-      return runInit(rest);
-    case 'run':
-      return runRun(rest);
-    case 'doctor':
-      return runDoctor(rest);
-    case 'log':
-      return runLog(rest);
-    case 'verify':
-      return runVerify();
-    case 'trust':
-      return runTrust(rest);
-    case 'untaint':
-      return runUntaint(rest);
-    case 'replay':
-      return runReplay(rest);
-    case 'why':
-      return runWhy(rest);
-    case 'sent':
-      return runSent(rest);
-    case 'canary':
-      return runCanary(rest);
-    case 'attack':
-      return runAttackCommand(rest);
-    case 'exposure':
-      return runExposure(rest);
-    case 'bench':
-      return runBenchCommand(rest);
-    case 'coverage':
-      return runCoverageCommand(rest);
-    case '--version':
-    case '-v':
-    case 'version':
-      process.stdout.write(`${stroqVersion()}\n`);
-      return 0;
-    default:
-      process.stdout.write(USAGE);
-      return command === undefined || command === '--help' || command === '-h' ? 0 : 1;
+  if (command === undefined || command === '--help' || command === '-h') {
+    process.stdout.write(usage());
+    return 0;
   }
+  if (command === '--version' || command === '-v' || command === 'version') {
+    process.stdout.write(`${stroqVersion()}\n`);
+    return 0;
+  }
+  if (command === 'help') {
+    const help = rest[0] === undefined ? usage() : commandHelp(rest[0]);
+    if (help === null) return unknownCommand(rest[0] ?? '');
+    process.stdout.write(help);
+    return 0;
+  }
+  const runner = COMMANDS[command];
+  if (runner === undefined) return unknownCommand(command);
+  // `sent` writes its own, longer help.
+  if (command !== 'sent' && wantsHelp(command, rest)) {
+    process.stdout.write(commandHelp(command) ?? '');
+    return 0;
+  }
+  const unknown = unknownOption(command, rest);
+  if (unknown !== null) {
+    process.stderr.write(usageError(command, `unknown option ${unknown}`));
+    return 2;
+  }
+  try {
+    return await runner(rest);
+  } catch (err) {
+    const problem = parseArgsProblem(err);
+    if (problem === null) throw err;
+    process.stderr.write(usageError(command, problem));
+    return 2;
+  }
+}
+
+function unknownCommand(typed: string): number {
+  const suggestion = suggestCommand(typed);
+  process.stderr.write(
+    `stroq: unknown command "${typed}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}\n` +
+      'Run "stroq --help" for the list of commands.\n',
+  );
+  return 1;
 }
 
 /** Waits for stdout and stderr to drain, then exits. Never resolves. */
@@ -182,6 +160,13 @@ async function exitNow(code: number): Promise<never> {
   );
   process.exit(code);
 }
+
+// `stroq log --json | head -1` closes the pipe after one line. That is the reader
+// being done, not a failure, and must not end in a stack trace.
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') process.exit(process.exitCode ?? 0);
+  throw err;
+});
 
 main(process.argv.slice(2)).then(
   (code) => {

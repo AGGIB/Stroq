@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **An agent could clear its own taint with `stroq untaint`.** `stroq untaint`, `stroq trust <file>` and `stroq init` change what Stroq enforces, but they touch no protected path, so run through Bash they came back with no class and were allowed in a tainted session. They are now `config.self` (deny) in the command position however spelled — `stroq`, a path to it, `npx @stroq/cli`, `pnpm dlx`, `node …/@stroq/cli/dist/index.js` — and so is the new `stroq uninstall`. `--dry-run`, `trust` without a file and every reading command stay allowed; a mention (`grep "stroq untaint" docs/`) is not a call.
+
+### Added
+
+- **`stroq uninstall [--agent <name>] [--user] [--dry-run]`.** Takes Stroq's entries out of an agent's config and leaves everything else in it as it was; `--agent mcp` unwraps the servers. `init` now says how to undo it, and the self-tamper deny names it.
+- **`--help` on every command**, and `stroq help [<command>]`. The text comes from one table, and a test fails when a command parses a flag the table does not list.
+
+### Changed
+
+- **A deny the taint caused says how to undo a false positive.** It names what tainted the session and gives the exact commands, with the real session id — `stroq untaint --session <id>`, and `stroq trust <file>` when the source was a file read — to run outside the agent. The one reason that mentioned `untaint` before printed a literal `<id>`.
+- **`stroq trust` waives the trusted bytes however they are read.** An entry matched only the source string a taint recorded, so a Bash `cat` of the trusted file, a relative path, or a path longer than the 120 characters a source keeps tainted again. The digest is the pin; the source is kept for `--list`.
+- **`stroq sent --last` no longer reads another project's session.** With no session recorded in this directory it fell back to the newest one anywhere, matched it against this project's `.env` and reported it as this directory's. It now names the directory that session ran in and says how to read it; a session from a directory containing this one is the same project and is read. The report ends with what to do next: rotate, `stroq replay --last`, `stroq init`.
+- **`--last` finds the sessions of a project whose path has a space, a non-ASCII letter or a Windows drive.** Stroq derived Claude Code's transcript directory by replacing only `/` and `.`; Claude Code replaces every character that is not an ASCII letter or digit, so those projects were never found and `--last` fell back to every project.
+- **`stroq replay --last` speaks in the conditional.** A transcript is replayed through today's policy after the fact, and printed "DENIED … 17 s later" for a `curl` that had run. It now prints `WOULD DENY` and "would be denied (today's policy)", says it is not a record of what was blocked, and names the rule of an action with no untrusted origin instead of a bare `deny`.
+- **Usage errors are one line and exit 2.** An unknown option or a missing value used to throw a raw `TypeError [ERR_PARSE_ARGS_…]`; `doctor`, `exposure` and `verify` ignored options they did not have. An unknown command prints the closest one (`Did you mean "sent"?`) instead of the full usage. `stroq hook` with no agent prints its usage instead of waiting on stdin, and `stroq log --json | head` no longer ends in an EPIPE stack trace.
+
 ## [0.19.2] - 2026-09-27
 
 ### Security
