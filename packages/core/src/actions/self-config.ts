@@ -6,7 +6,7 @@
  * same protected-file regex.
  */
 import { normalizePathForMatch } from './normalize-path.js';
-import { commandWord } from './shell-segments.js';
+import { commandWord, tokenize } from './shell-segments.js';
 
 /**
  * Protected agent-security files: the only paths whose write/edit/delete
@@ -436,6 +436,43 @@ const OPENCLAW_PLUGIN_CONFIG_WRITE = /\bopenclaw\s+config\s+set\s+plugins\./;
 export const disablesAgentPlugin = (segment: string): boolean =>
   OPENCLAW_PLUGIN_OFF.test(segment) || OPENCLAW_PLUGIN_CONFIG_WRITE.test(segment);
 
+/**
+ * Stroq's own commands that change what it enforces: `untaint` clears a session's
+ * taint, `trust <file>` waives the scan of a file, `init` and `uninstall` rewrite the
+ * hooks. They touch no path this gate protects — the state lives under `~/.stroq` —
+ * so without this an agent could run them through Bash, in a tainted session, and
+ * undo the decision that was about to stop it. They are the user's to run, outside
+ * the agent. `--dry-run`, `trust` with no file and every reading command stay open.
+ *
+ * Only the command position counts, unlike `disablesAgentPlugin`: grepping the docs
+ * for "stroq untaint" is ordinary work in any project that uses Stroq. A wrapper
+ * (`sudo`), an absolute path, a runner (`npx @stroq/cli …`, `pnpm dlx`, `node …/
+ * @stroq/cli/dist/index.js`) and a `find -exec` (extracted as a segment of its own)
+ * all reach the command position.
+ */
+const STROQ_RUNNERS: ReadonlySet<string> = new Set(['npx', 'pnpm', 'bunx', 'yarn', 'npm', 'node']);
+const STROQ_PACKAGE = /^@stroq\/cli(?:@\S*)?$/;
+const STROQ_ENTRY = /[\\/]@stroq[\\/]cli[\\/]dist[\\/]index\.js$/;
+
+export function changesStroqState(segment: string): boolean {
+  const word = commandWord(segment);
+  if (word !== 'stroq' && !STROQ_RUNNERS.has(word)) return false;
+  const tokens = tokenize(segment).map((token) => token.replace(/["']/g, ''));
+  const at = tokens.findIndex((token) =>
+    word === 'stroq'
+      ? token.replace(/^.*[\\/]/, '') === 'stroq'
+      : STROQ_PACKAGE.test(token) || STROQ_ENTRY.test(token),
+  );
+  if (at === -1) return false;
+  const args = tokens.slice(at + 1).filter((token) => token !== '--');
+  if (args.includes('--dry-run')) return false;
+  const sub = args.find((token) => !token.startsWith('-'));
+  if (sub === 'untaint' || sub === 'init' || sub === 'uninstall') return true;
+  if (sub !== 'trust') return false;
+  const after = args.slice(args.indexOf('trust') + 1);
+  return after.includes('--remove') || after.some((token) => !token.startsWith('-'));
+}
+
 export type SelfConfigVerdict = 'deny' | 'ask' | null;
 
 /**
@@ -447,7 +484,7 @@ export type SelfConfigVerdict = 'deny' | 'ask' | null;
  *               commands, editors, interpreters without inline code)
  */
 export function classifySelfConfigSegment(segment: string): SelfConfigVerdict {
-  if (disablesAgentPlugin(segment)) return 'deny';
+  if (disablesAgentPlugin(segment) || changesStroqState(segment)) return 'deny';
   const word = commandWord(segment);
   if (!touchesSelfConfig(segment, word)) return null;
   if (isSelfConfigWriteIntent(segment, word)) return 'deny';
@@ -539,7 +576,13 @@ export function selfTamperSignals(segments: readonly string[]): SelfConfigSignal
     if (verdict === 'deny' || (verdict === 'ask' && interpreterInlineElsewhere)) {
       // Named apart from a file write so `stroq why` says which kind of tamper
       // it was: nothing on disk changed, the gate itself was switched off.
-      deny.push(disablesAgentPlugin(segment) ? 'self-config-disable' : 'self-config-write');
+      deny.push(
+        changesStroqState(segment)
+          ? 'stroq-state-change'
+          : disablesAgentPlugin(segment)
+            ? 'self-config-disable'
+            : 'self-config-write',
+      );
     } else if (verdict === 'ask') {
       ask.push('self-config-touch');
     }

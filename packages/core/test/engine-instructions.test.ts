@@ -137,3 +137,18 @@ describe('writes to the files an agent loads as instructions', () => {
     expect(r.classes).not.toContain('config.instructions_payload');
   });
 });
+
+describe("Stroq's own state, changed from inside the session", () => {
+  it('is denied: a tainted agent cannot clear its own taint', async () => {
+    const e = await tainted();
+    const r = await e.pre(pre('Bash', { command: 'npx @stroq/cli untaint --all' }));
+    expect(r.classes).toContain('config.self');
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-self-tamper' });
+  });
+
+  it('leaves the reading commands alone', async () => {
+    const e = await tainted();
+    const r = await e.pre(pre('Bash', { command: 'stroq why' }));
+    expect(r.classes).not.toContain('config.self');
+  });
+});
