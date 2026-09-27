@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **An agent could clear its own taint with `stroq untaint`.** `stroq untaint`, `stroq trust <file>` and `stroq init` change what Stroq enforces, but they touch no protected path, so run through Bash they came back with no class and were allowed in a tainted session. They are now `config.self` (deny) in the command position however spelled — `stroq`, a path to it, `npx @stroq/cli`, `pnpm dlx`, `node …/@stroq/cli/dist/index.js` — and so is the new `stroq uninstall`. `--dry-run`, `trust` without a file and every reading command stay allowed; a mention (`grep "stroq untaint" docs/`) is not a call.
+
+### Added
+
+- **`stroq uninstall [--agent <name>] [--user] [--dry-run]`.** Takes Stroq's entries out of an agent's config and leaves everything else in it as it was; `--agent mcp` unwraps the servers. `init` now says how to undo it, and the self-tamper deny names it.
+- **`--help` on every command**, and `stroq help [<command>]`. The text comes from one table, and a test fails when a command parses a flag the table does not list.
+
+### Changed
+
+- **Usage errors are one line and exit 2.** An unknown option or a missing value used to throw a raw `TypeError [ERR_PARSE_ARGS_…]`; `doctor`, `exposure` and `verify` ignored options they did not have. An unknown command prints the closest one (`Did you mean "sent"?`) instead of the full usage. `stroq hook` with no agent prints its usage instead of waiting on stdin, and `stroq log --json | head` no longer ends in an EPIPE stack trace.
+
 ## [0.19.2] - 2026-09-27
 
 ### Security
