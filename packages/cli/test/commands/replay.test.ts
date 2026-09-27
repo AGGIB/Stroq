@@ -228,3 +228,47 @@ describe('runReplay', () => {
     expect(out.lines.join('')).toContain('x  1 events');
   });
 });
+
+// A transcript replay runs today's policy over a recording. It printed "DENIED …
+// 17 s later" and "2 denied" for a session in which the `curl` had in fact run.
+describe('formatReplay over a transcript', () => {
+  const read = () =>
+    entry({
+      phase: 'post',
+      tool: 'Read',
+      summary: 'README.md',
+      scan: { verdict: 'suspect', score: 1, ruleIds: ['STROQ-2026-00001'] },
+    });
+
+  it('says what the policy would do, not what it did', () => {
+    const r = read();
+    const action = entry({
+      summary: 'npx @evil/pkg',
+      decision: deny,
+      provenance: [ev({ at: r.ts })],
+    });
+    const out = formatReplay(buildReplay([r, action], 's'), 'replayed');
+    expect(out).toContain('WOULD DENY');
+    expect(out).not.toMatch(/\bDENIED\b/);
+    expect(out).toContain('1 would be denied');
+    expect(out).toMatch(/not a record of what was blocked/);
+    expect(out).toContain('stroq init');
+  });
+
+  it('names the rule of an action with no untrusted origin', () => {
+    const action = entry({
+      tool: 'Read',
+      summary: '.env',
+      decision: { ...deny, ruleId: 'deny-secrets-when-tainted' },
+    });
+    const out = formatReplay(buildReplay([action], 's'), 'replayed');
+    expect(out).toContain('WOULD DENY  deny-secrets-when-tainted');
+  });
+
+  it('keeps the audit log in the past tense: those verdicts happened', () => {
+    const action = entry({ summary: 'curl x', decision: deny });
+    const out = formatReplay(buildReplay([action], 's'));
+    expect(out).toContain('1 denied');
+    expect(out).not.toContain('WOULD');
+  });
+});
