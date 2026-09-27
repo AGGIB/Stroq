@@ -449,6 +449,8 @@ npx @stroq/cli doctor                # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
+Run through `npx`, the CLI lives in npm's npx cache, which npm prunes; a hook pointing there would stop starting, and an agent runs the call when its hook cannot start. So `init` copies a CLI it was started from out of that cache, with its dependencies, to `~/.stroq/cli/<version>/` and points the hooks at the copy. `stroq doctor` fails a hook whose Node or CLI path no longer exists and says to run `init` again.
+
 ### Coverage by agent
 
 What each host lets Stroq do, in one table. [docs/AGENTS.md](AGENTS.md) has the full event tables and every documented limit.
