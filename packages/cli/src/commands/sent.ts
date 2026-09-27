@@ -22,6 +22,7 @@
 // good its reason. Nothing is written or printed but names and sources — matching
 // goes through the same salted-hash lookup the live guard uses.
 import { homedir } from 'node:os';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
@@ -82,6 +83,12 @@ know what to look for, and prints names and sources only, never a value. A
 finding exits 0 by default: a session that already happened cannot be
 changed by today's commit. A transcript match does not confirm provider delivery.
 `;
+
+/** Whether `dir` is `root` or somewhere inside it. */
+function isWithin(dir: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(dir));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
 
 export async function runSent(args: readonly string[]): Promise<number> {
   let parsed;
@@ -152,6 +159,22 @@ export async function runSent(args: readonly string[]): Promise<number> {
       return 1;
     }
     const transcript = await found.reader.read(found.path);
+    // `--last` falls back to the newest session anywhere when this directory has
+    // none. Scanned, that session would be matched against THIS project's `.env` and
+    // reported as this directory's, so it is named instead. A session recorded in a
+    // directory that contains this one is the same project and is read.
+    if (
+      values.transcript === undefined &&
+      transcript.cwd !== null &&
+      !isWithin(cwd, transcript.cwd)
+    ) {
+      process.stdout.write(
+        `no agent session recorded in ${cwd}.\n` +
+          `The newest one on this machine ran in ${transcript.cwd}: run \`stroq sent --last\` there,\n` +
+          'or name a session with --transcript <path>.\n',
+      );
+      return 1;
+    }
     if (transcript.events.length === 0) {
       process.stdout.write(`no tool calls recorded in ${found.path}\n`);
       return 1;

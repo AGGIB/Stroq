@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog } from '@stroq/core';
 import { runSent } from '../../src/commands/sent.js';
 import { READERS } from '../../src/sent/readers.js';
+import { projectSlug } from '../../src/replay/transcript.js';
 import { auditFile } from '../../src/paths.js';
 
 const KEY = 'wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY';
@@ -222,5 +223,71 @@ describe('stroq sent', () => {
     out.restore();
     expect(code).toBe(2);
     expect(errs.join('')).toContain('stroq sent');
+  });
+});
+
+describe('stroq sent --last, when this directory has no session', () => {
+  /** A Claude Code session recorded in `ranIn`, filed the way Claude Code files it. */
+  function sessionIn(ranIn: string): void {
+    const dir = join(home, '.claude', 'projects', projectSlug(ranIn));
+    mkdirSync(dir, { recursive: true });
+    const input = { file_path: join(home, '.aws', 'credentials') };
+    const lines = [
+      {
+        sessionId: 'x',
+        cwd: ranIn,
+        timestamp: AT,
+        message: { content: [{ type: 'tool_use', id: 'a', name: 'Read', input }] },
+      },
+      {
+        sessionId: 'x',
+        cwd: ranIn,
+        timestamp: AT,
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'a', content: `aws_secret_access_key = ${KEY}\n` },
+          ],
+        },
+      },
+    ];
+    writeFileSync(join(dir, 'x.jsonl'), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+  }
+
+  // It used to scan the newest session of any project and credit what it found to
+  // this project's `.env`, under a header that read "the newest session in this
+  // directory".
+  it("does not quietly read another project's session", async () => {
+    sessionIn('/somewhere/else');
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.text()).toContain(`no agent session recorded in ${cwd}`);
+    expect(out.text()).toContain('/somewhere/else');
+    expect(out.text()).toContain('--transcript');
+    expect(out.text()).not.toContain('aws_secret_access_key');
+  });
+
+  it('reads the session of the project this directory is inside', async () => {
+    sessionIn(cwd);
+    vi.spyOn(process, 'cwd').mockReturnValue(join(cwd, 'packages', 'app'));
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(0);
+    expect(out.text()).toContain('aws_secret_access_key');
+  });
+});
+
+describe('what stroq sent suggests next', () => {
+  it('ends with the commands to run next', async () => {
+    const out = capture();
+    await runSent(['--transcript', transcriptFile()]);
+    out.restore();
+    const text = out.text();
+    expect(text).toContain('NEXT');
+    expect(text).toContain('stroq replay --last');
+    expect(text).toContain('stroq init');
+    expect(text).toMatch(/rotate/i);
   });
 });
