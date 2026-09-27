@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-28
+
 ### Security
 
 - **An agent could clear its own taint with `stroq untaint`.** `stroq untaint`, `stroq trust <file>` and `stroq init` change what Stroq enforces, but they touch no protected path, so run through Bash they came back with no class and were allowed in a tainted session. They are now `config.self` (deny) in the command position however spelled — `stroq`, a path to it, `npx @stroq/cli`, `pnpm dlx`, `node …/@stroq/cli/dist/index.js` — and so is the new `stroq uninstall`. `--dry-run`, `trust` without a file and every reading command stay allowed; a mention (`grep "stroq untaint" docs/`) is not a call.
