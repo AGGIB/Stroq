@@ -173,9 +173,13 @@ export async function feedLines(path: string, parser: LineParser): Promise<Trans
   return parser.finish();
 }
 
-/** Claude Code's transcript directory for a working directory, by its own slug rule. */
+/**
+ * Claude Code's transcript directory for a working directory, by its own slug rule:
+ * every character that is not an ASCII letter or digit becomes `-` — a space, an
+ * underscore, a non-ASCII letter, and on Windows the drive colon and backslashes.
+ */
 export function projectSlug(cwd: string): string {
-  return cwd.replace(/[/.]/g, '-');
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 export const transcriptRoot = (): string => join(homedir(), '.claude', 'projects');
