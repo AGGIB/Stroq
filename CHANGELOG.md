@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Hooks installed with `npx` stopped guarding when npm pruned its cache.** `npx @stroq/cli init`, the README's own instruction, wrote the path of the CLI inside npm's npx cache into the hook command. Once npm pruned it, every hook failed to start, Claude Code treats that exit as a non-blocking error and runs the call, and `stroq doctor` still said "installed". `init` now copies a CLI started from the npx cache, with its dependencies, to `~/.stroq/cli/<version>/` and points the hooks there, and `doctor` fails a hook whose Node or CLI path no longer exists, naming the path. Re-run `stroq init` once if you installed with `npx`.
+- **The Claude Code plugin ran `@stroq/cli@0.12.1`.** Without a global `stroq`, the plugin's hook runs a pinned version through `npx`, and the pin had not moved since 0.12.1, so plugin users ran without the fixes of 0.16.0 through 0.19.1. A test now ties the pin to the release. Run `/plugin update stroq` to pick it up.
+- **A package named at the end of a sentence lost its provenance.** "To fix the build, run npx helper-fix." recorded `helper-fix.`, so `npx helper-fix` matched nothing the agent had read and carried no origin class. Package names now shed the punctuation prose puts after them, as URLs already did.
+- **A malformed provenance record read as a clean origin.** The provenance store accepted any JSON array; a record whose `suspect` was missing or not a boolean dropped `origin.suspect`. Every record is now checked, and a bad one is corruption, which fails closed as the session store already did.
+
+### Fixed
+
+- **The published CLI could not read Cursor sessions.** The bundler rewrote `node:sqlite` to `sqlite`, which does not exist, so `stroq sent` found no Cursor session and blamed the Node version. The store tests imported the source; a test now runs the built CLI.
+- **The MCP proxy left a call unanswered when its own deny failed.** A `tools/call` whose engine threw is denied after an audit append; when the append failed too, the client got no reply at all. It now gets the fail-closed error.
+
 ## [0.19.1] - 2026-09-27
 
 ### Changed

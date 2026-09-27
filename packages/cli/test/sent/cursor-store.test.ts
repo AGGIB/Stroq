@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   readCursorSession,
 } from '../../src/sent/cursor.js';
 import { readerForFile } from '../../src/sent/readers.js';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 /**
  * The half of the reader the pure parse tests cannot reach: opening a real store.
@@ -121,5 +123,27 @@ withStore('reading a real Cursor store', () => {
 
   it('reports itself available on a Node that has node:sqlite', async () => {
     expect(await cursorUnavailable()).toBeNull();
+  });
+
+  // Every test above imports the source. The bundler rewrote `node:sqlite` to
+  // `sqlite`, a module that does not exist, so the published CLI told every Cursor
+  // user their Node was too old while this suite passed. Only the artifact shows it.
+  it('reads the store from the built CLI too', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-cursor-home-'));
+    try {
+      const run = spawnSync(
+        process.execPath,
+        [CLI_ENTRY, 'sent', '--transcript', cursorSessionPath(db, SESSION_A)],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, HOME: home, USERPROFILE: home, STROQ_HOME: join(home, '.stroq') },
+        },
+      );
+      expect(run.stdout + run.stderr).not.toMatch(/need node:sqlite|No tool calls recorded/);
+      expect(run.stdout).toMatch(/· 1 tool call/);
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

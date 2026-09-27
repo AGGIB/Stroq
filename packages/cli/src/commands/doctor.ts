@@ -256,6 +256,8 @@ interface ScopeStatus {
    * an install from before this record existed reads as `unrecorded`, not as drift.
    */
   readonly drift?: InstallDrift;
+  /** Paths the installed hook command runs that no longer exist; see `vanishedPaths`. */
+  readonly vanished?: readonly string[];
 }
 
 function agentScopes(
@@ -272,12 +274,12 @@ function agentScopes(
   return (['project', 'user'] as const).map((scope) => {
     const file = pathFor(scope, cwd);
     const status = { scope, file, ...check(file) };
+    const init = `stroq init${agent === undefined || agent === 'claude-code' ? '' : ` --agent ${agent}`}${scope === 'user' ? ' --user' : ''}`;
     // An install made by an older Stroq lacks events added since, and after an
     // upgrade that is the likeliest reason for this line: say how to fix it, not only
     // that it is wrong. `init` merges into the file it finds, so re-running it adds
     // what is missing without touching the user's own hooks.
     if (!status.installed && status.missing?.length && existsSync(file)) {
-      const init = `stroq init${agent === undefined || agent === 'claude-code' ? '' : ` --agent ${agent}`}${scope === 'user' ? ' --user' : ''}`;
       return {
         ...status,
         detail: `${scope}: incomplete (${status.missing.join(', ')}) (${file}) — run \`${init}\` to add ${status.missing.length === 1 ? 'it' : 'them'}`,
@@ -290,8 +292,51 @@ function agentScopes(
     } catch {
       return status;
     }
+    const vanished = vanishedPaths(text);
+    if (vanished.length > 0)
+      return {
+        ...status,
+        installed: false,
+        vanished,
+        detail: `${scope}: BROKEN — the hook runs ${vanished.join(' and ')}, which no longer exists, so the agent skips it (${file}) — run \`${init}\` again`,
+      };
     return { ...status, drift: installDrift(agent, scope, text, record) };
   });
+}
+
+/** `"<node>" [--import tsx] "<entry>" hook …`: the command `hookCommand` writes. */
+const STROQ_HOOK_COMMAND = /^"([^"]+)"(?: --import tsx)? "([^"]+)" hook /;
+
+/**
+ * The Node binary and CLI entry a Stroq hook command in `text` runs, where either no
+ * longer exists. A hook that cannot start fails open on the agent's side — Claude
+ * Code treats that exit as a non-blocking error and runs the call — so a path that
+ * vanished is worse than a hook that was never installed: the user believes it is
+ * there. The usual cause is `npx @stroq/cli init`, whose entry lived in the npx
+ * cache that npm prunes.
+ */
+function vanishedPaths(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const gone = new Set<string>();
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 8) return;
+    if (typeof value === 'string') {
+      const match = STROQ_HOOK_COMMAND.exec(value);
+      for (const path of match === null ? [] : [match[1], match[2]])
+        if (path !== undefined && !existsSync(path)) gone.add(path);
+    } else if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+    } else if (typeof value === 'object' && value !== null) {
+      for (const item of Object.values(value)) walk(item, depth + 1);
+    }
+  };
+  walk(parsed, 0);
+  return [...gone];
 }
 
 /** Every known MCP client config, in the order `doctor` reports them. */
@@ -479,13 +524,15 @@ function hooksCheck(
   // believes they are covered, and whatever is on the other end runs on every tool
   // call. It fails the line on its own, whatever the other scopes say.
   const changed = scopes.some((s) => s.drift === 'changed');
+  // The same holds for an entry that no longer exists: the agent skips the hook.
+  const dead = scopes.some((s) => s.vanished?.length);
   const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopeDetail(scopes);
   return {
     name,
-    ok: !broken && !changed && !incomplete && (installed || carrying.length > 0),
+    ok: !broken && !changed && !dead && !incomplete && (installed || carrying.length > 0),
     detail:
-      !broken && !incomplete && !installed && carrying.length > 0
+      !broken && !dead && !incomplete && !installed && carrying.length > 0
         ? `not installed (ok: ${carrying.join(', ')} are)`
         : perScope,
   };
@@ -538,7 +585,11 @@ export async function doctorReport(
   // A broken config file (present but unreadable) is not the "nothing has been
   // attempted anywhere" state the collapsed line describes — the per-agent detail
   // naming the file and the parse error is strictly more useful, so it is kept.
-  const anyBroken = agents.some((agent) => agent.scopes.some((s) => s.error !== null));
+  // So is a hook whose CLI has vanished: it reads as not installed, but the user did
+  // install it, and the line that says which path is gone is the one that helps.
+  const anyBroken = agents.some((agent) =>
+    agent.scopes.some((s) => s.error !== null || (s.vanished?.length ?? 0) > 0),
+  );
   const perAgentChecks = agents.map((agent, i) =>
     hooksCheck(
       agent.name,

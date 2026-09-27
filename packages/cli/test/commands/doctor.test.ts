@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { doctorReport, runDoctor } from '../../src/commands/doctor.js';
+import { agentHookStatus, doctorReport, runDoctor } from '../../src/commands/doctor.js';
 import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
@@ -20,6 +20,10 @@ import {
 import { secretsFile } from '../../src/paths.js';
 import { mcpConfigPath, wrapMcpConfig } from '../../src/commands/mcp-config.js';
 import { writeJsonObject } from '../../src/commands/config-file.js';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
+
+/** A hook command whose Node and entry exist: `doctor` checks that they do. */
+const STROQ = `"${process.execPath}" "${CLI_ENTRY}"`;
 
 let cwd: string;
 beforeEach(() => {
@@ -39,7 +43,7 @@ describe('doctorReport', () => {
           PostToolUse: [
             {
               matcher: 'Read|WebFetch|WebSearch|Bash|Grep|mcp__.*',
-              hooks: [{ type: 'command', command: '"/n" "/e.js" hook claude-code', timeout: 15 }],
+              hooks: [{ type: 'command', command: `${STROQ} hook claude-code`, timeout: 15 }],
             },
           ],
         },
@@ -69,8 +73,22 @@ describe('doctorReport', () => {
     expect(byName('rules').ok).toBe(true);
     expect(byName('self-test').ok).toBe(true);
     expect(byName('hooks').ok).toBe(false);
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'hooks')?.ok).toBe(true);
+  });
+
+  // `npx @stroq/cli init` recorded an entry inside npm's npx cache. When npm pruned
+  // it, every hook failed to start, the agent treated that as a non-blocking error and
+  // ran the call — and this line still said "installed".
+  it('fails a hook whose command runs a CLI that no longer exists', async () => {
+    const gone = join(cwd, '_npx', 'a1b2', 'node_modules', '@stroq', 'cli', 'dist', 'index.js');
+    installHooks(settingsPath('project', cwd), `"${process.execPath}" "${gone}" hook claude-code`);
+    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'hooks');
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(gone);
+    expect(check?.detail).toMatch(/no longer exists/);
+    expect(check?.detail).toContain('stroq init');
+    expect(agentHookStatus('claude-code', cwd)?.installed).toBe(false);
   });
 
   it('reports a broken hooks check instead of throwing when settings.json is corrupt', async () => {
@@ -148,7 +166,7 @@ describe('doctorReport cursor hooks', () => {
       file,
       JSON.stringify({
         hooks: {
-          afterShellExecution: [{ command: '"/n" "/e.js" hook cursor' }],
+          afterShellExecution: [{ command: `${STROQ} hook cursor` }],
         },
       }),
     );
@@ -157,7 +175,7 @@ describe('doctorReport cursor hooks', () => {
     );
     expect(postOnly?.ok).toBe(false);
     expect(postOnly?.detail).toContain('beforeShellExecution');
-    installCursorHooks(file, '"/n" "/e.js" hook cursor');
+    installCursorHooks(file, `${STROQ} hook cursor`);
     const installed = JSON.parse(readFileSync(file, 'utf8')) as {
       hooks: Record<string, { command: string; failClosed?: boolean }[]>;
     };
@@ -172,7 +190,7 @@ describe('doctorReport cursor hooks', () => {
 
   it('requires the Cursor write/delete preToolUse gate and its exact matcher', async () => {
     const file = cursorHooksPath('project', cwd);
-    installCursorHooks(file, '"/n" "/e.js" hook cursor');
+    installCursorHooks(file, `${STROQ} hook cursor`);
     const installed = JSON.parse(readFileSync(file, 'utf8')) as {
       hooks: Record<string, { command: string; matcher?: string; failClosed?: boolean }[]>;
     };
@@ -202,7 +220,7 @@ describe('doctorReport cursor hooks', () => {
   });
 
   it('passes both lines once Cursor alone is installed', async () => {
-    installCursorHooks(cursorHooksPath('project', cwd), '"/n" "/e.js" hook cursor');
+    installCursorHooks(cursorHooksPath('project', cwd), `${STROQ} hook cursor`);
     const report = await doctorReport(cwd);
     expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
     expect(detailOf(report, 'cursor hooks')).toContain('project: installed');
@@ -213,7 +231,7 @@ describe('doctorReport cursor hooks', () => {
   });
 
   it('says which agent carries the line when Claude Code alone is installed', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const report = await doctorReport(cwd);
     expect(report.checks.find((c) => c.name === 'cursor hooks')?.ok).toBe(true);
     expect(detailOf(report, 'cursor hooks')).toBe('not installed (ok: hooks are)');
@@ -221,7 +239,7 @@ describe('doctorReport cursor hooks', () => {
   });
 
   it('reports a broken cursor hooks file without failing the Claude Code line', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const file = cursorHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
@@ -275,7 +293,7 @@ describe('doctorReport codex hooks', () => {
   });
 
   it('passes every line once Codex alone is installed', async () => {
-    installCodexHooks(codexHooksPath('project', cwd), '"/n" "/e.js" hook codex');
+    installCodexHooks(codexHooksPath('project', cwd), `${STROQ} hook codex`);
     const report = await doctorReport(cwd);
     expect(report.checks.every((c) => c.ok)).toBe(true);
     expect(detailOf(report, 'codex hooks')).toContain('project: installed');
@@ -284,15 +302,15 @@ describe('doctorReport codex hooks', () => {
   });
 
   it('names every agent that is carrying the line', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
-    installCursorHooks(cursorHooksPath('project', cwd), '"/n" "/e.js" hook cursor');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
+    installCursorHooks(cursorHooksPath('project', cwd), `${STROQ} hook cursor`);
     expect(detailOf(await doctorReport(cwd), 'codex hooks')).toBe(
       'not installed (ok: hooks, cursor hooks are)',
     );
   });
 
   it('reports a broken codex hooks file without failing the other two lines', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const file = codexHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
@@ -311,7 +329,7 @@ describe('doctorReport codex hooks', () => {
       hooks: [
         {
           type: 'command',
-          command: '"/n" "/e.js" hook codex',
+          command: `${STROQ} hook codex`,
           timeout: 15,
           statusMessage: 'Stroq',
         },
@@ -325,7 +343,7 @@ describe('doctorReport codex hooks', () => {
       (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'codex hooks')?.ok,
     ).toBe(false);
 
-    installCodexHooks(file, '"/n" "/e.js" hook codex');
+    installCodexHooks(file, `${STROQ} hook codex`);
     expect((await doctorReport(cwd)).checks.find((c) => c.name === 'codex hooks')?.ok).toBe(true);
     const migrated = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     expect(migrated['PreToolUse']).toBeUndefined();
@@ -347,7 +365,7 @@ describe('doctorReport copilot hooks', () => {
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
-  const cmd = (phase: string) => `"/n" "/e.js" hook copilot ${phase}`;
+  const cmd = (phase: string) => `${STROQ} hook copilot ${phase}`;
   const install = (dir: string) =>
     installCopilotHooks(copilotHooksPath('project', dir), cmd('pre'), cmd('post'));
 
@@ -369,7 +387,7 @@ describe('doctorReport copilot hooks', () => {
   });
 
   it('reports a broken copilot hooks file without failing the other lines', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const file = copilotHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
@@ -506,7 +524,7 @@ describe('doctorReport windsurf hooks', () => {
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
-  const cmd = '"/n" "/e.js" hook windsurf';
+  const cmd = `${STROQ} hook windsurf`;
 
   it('names the file it looked for when nothing is installed', async () => {
     const windsurf = (await doctorReport(cwd, { all: true })).checks.find(
@@ -541,7 +559,7 @@ describe('doctorReport windsurf hooks', () => {
   });
 
   it('reports a broken windsurf hooks file without failing the other lines', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const file = windsurfHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');
@@ -566,7 +584,7 @@ describe('doctorReport antigravity hooks', () => {
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
-  const cmd = '"/n" "/e.js" hook antigravity';
+  const cmd = `${STROQ} hook antigravity`;
 
   it('names the file it looked for when nothing is installed', async () => {
     const antigravity = (await doctorReport(cwd, { all: true })).checks.find(
@@ -619,7 +637,7 @@ describe('doctorReport antigravity hooks', () => {
   });
 
   it('reports a broken antigravity hooks file without failing the other lines', async () => {
-    installHooks(settingsPath('project', cwd), '"/n" "/e.js" hook claude-code');
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
     const file = antigravityHooksPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, '{ not json');

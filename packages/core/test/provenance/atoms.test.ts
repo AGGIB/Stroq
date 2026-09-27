@@ -18,7 +18,7 @@ const joined = (pieces: readonly string[]) =>
 
 /** `normalizePackageName` as it was written with patterns, kept as the reference it must equal. */
 function normalizePackageNameByPattern(raw: string): string {
-  const name = raw.replace(/^["']+|["']+$/g, '');
+  const name = raw.replace(/^["']+|["'.,:?)]+$/g, '');
   const at = name.startsWith('@') ? name.indexOf('@', 1) : name.indexOf('@');
   const base = at > 0 ? name.slice(0, at) : name;
   return base.replace(/[[<>=!~;].*$/, '').toLowerCase();
@@ -31,6 +31,17 @@ describe('normalizePackageName', () => {
     expect(normalizePackageName('"requests[socks]>=2.0"')).toBe('requests');
     expect(normalizePackageName('github.com/x/y/cmd/z@v1.0.0')).toBe('github.com/x/y/cmd/z');
     expect(normalizePackageName('Rich[jupyter]==13')).toBe('rich');
+  });
+
+  // Prose ends a sentence after the name: "To fix it, run npx helper-fix." kept the
+  // period, and `npx helper-fix` never matched what the agent had read.
+  it('drops the punctuation that ends the sentence a name sits in', () => {
+    expect(normalizePackageName('helper-fix.')).toBe('helper-fix');
+    expect(normalizePackageName('left-pad,')).toBe('left-pad');
+    expect(normalizePackageName('requests:')).toBe('requests');
+    expect(normalizePackageName('@evil/fix)')).toBe('@evil/fix');
+    expect(normalizePackageName('"helper-fix".')).toBe('helper-fix');
+    expect(normalizePackageName('prisma@5.1.0.')).toBe('prisma');
   });
 
   it('cuts a version marker only on the last line, as `.*$` did', () => {

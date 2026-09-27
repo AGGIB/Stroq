@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
-import type { ProvenanceRecord } from '../types.js';
+import type { AtomKind, ProvenanceRecord } from '../types.js';
 import { withLock } from '../util/lock.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
@@ -18,6 +18,28 @@ export interface ProvenanceStore {
 export const MAX_RECORDS = 2000;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
+const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
+  'url',
+  'host',
+  'pkg',
+  'pipe_shell',
+  'encoded',
+]);
+
+function isProvenanceRecord(value: unknown): value is ProvenanceRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record['seq'] === 'number' &&
+    typeof record['at'] === 'string' &&
+    typeof record['tool'] === 'string' &&
+    typeof record['source'] === 'string' &&
+    ATOM_KINDS.has(record['kind']) &&
+    typeof record['hash'] === 'string' &&
+    typeof record['excerpt'] === 'string' &&
+    typeof record['suspect'] === 'boolean'
+  );
+}
 
 export class FileProvenanceStore implements ProvenanceStore {
   constructor(
@@ -45,12 +67,13 @@ export class FileProvenanceStore implements ProvenanceStore {
       // on high-impact tools rather than silently forgetting what was read.
       throw new Error(`corrupt provenance state: ${this.file(sessionId)}`, { cause: err });
     }
-    if (!Array.isArray(parsed)) {
+    if (!Array.isArray(parsed) || !parsed.every(isProvenanceRecord)) {
       // Valid JSON but the wrong shape is corruption too: silently treating it
-      // as an empty list would let `record` fold it away on the next write.
+      // as an empty list would let `record` fold it away on the next write, and a
+      // record whose `suspect` is not a boolean would read as a clean origin.
       throw new Error(`corrupt provenance state: ${this.file(sessionId)}`);
     }
-    return parsed as ProvenanceRecord[];
+    return parsed;
   }
 
   private async write(sessionId: string, records: readonly ProvenanceRecord[]): Promise<void> {
