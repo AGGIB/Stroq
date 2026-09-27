@@ -419,12 +419,33 @@ export function createPump(deps: PumpDeps): Pump {
     return replyFromResult({ ...message.value, result: out });
   }
 
+  /**
+   * The answer to a request whose handling threw past every handler above — most
+   * often a fail-closed deny whose audit append failed too. Nothing was forwarded, so
+   * without a reply the client waits for one that never comes. A line that cannot be
+   * parsed, or that has no id, has nobody to answer.
+   */
+  async function answerAfterError(line: SplitLine, err: unknown): Promise<void> {
+    const unmarked = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
+    const value = parseLine(unmarked);
+    if (value === undefined) return;
+    const message = classifyMessage(value);
+    if (message.kind !== 'request') return;
+    const text = `Stroq internal error (fail-closed): ${messageOf(err)}`;
+    try {
+      await replyToClient(errorResponse(message.value, message.id, text));
+    } catch (replyErr) {
+      logError('mcp proxy client line reply', replyErr);
+    }
+  }
+
   return {
     onClientLine: async (line: SplitLine): Promise<void> => {
       try {
         await handleClientLine(line);
       } catch (err) {
         logError('mcp proxy client line', err);
+        await answerAfterError(line, err);
       }
     },
     onServerLine: async (line: SplitLine): Promise<void> => {
