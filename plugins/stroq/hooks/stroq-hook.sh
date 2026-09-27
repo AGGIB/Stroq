@@ -13,7 +13,7 @@
 # "block". PostToolUse events fail open in that case, because the tool has
 # already run and there is nothing left to block.
 set -u
-STROQ_PIN="@stroq/cli@0.19.1"
+STROQ_PIN="@stroq/cli@0.19.2"
 
 input="$(cat)"
 
