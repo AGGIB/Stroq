@@ -54,15 +54,19 @@ describe('formatSent', () => {
     expect(text).toContain('Bash');
   });
 
-  // The single most important line in the whole command. Content reaching a model
-  // provider is how these products work; the finding is "you probably did not know",
-  // never "you were breached". Copy that overstates this is the thing this project
-  // has already been punished for, so it is asserted, not left to reviewers.
-  it('states plainly what the finding does not mean', () => {
+  // A local transcript proves the recorded match, not a subsequent model request.
+  // Keep that distinction visible even for a tool result and a file-read finding.
+  it('does not claim the provider received a recorded value or file', () => {
     const text = formatSent(report()).toLowerCase();
-    expect(text).toContain('not');
+    expect(text).toContain('credential values found in this session record');
+    expect(text).toContain('in the result of');
+    expect(text).toContain('in the arguments of');
+    expect(text).toContain('read/grep call was recorded');
+    expect(text).toContain('cannot confirm a later model request, delivery to a provider');
     expect(text).toContain('breach');
-    expect(text).toMatch(/retain|kept|stored/);
+    expect(text).toContain('retention');
+    expect(text).not.toContain('already reached a model provider');
+    expect(text).not.toContain('was sent to the model whole');
     expect(text).not.toContain('leaked');
     expect(text).not.toContain('hacked');
     expect(text).not.toContain('compromised');
@@ -91,6 +95,7 @@ describe('formatSent', () => {
     );
     expect(text).toContain('--last');
     expect(text.toLowerCase()).toContain('arguments');
+    expect(text).toContain('never what came back');
   });
 
   it('is unambiguous when nothing was found', () => {
@@ -114,8 +119,9 @@ describe('formatSent', () => {
         ],
       }),
     );
-    expect(text).toContain('named in the command');
-    expect(text).not.toContain('contents came back');
+    expect(text).toContain('named in a shell command');
+    expect(text).toContain('whether it read or printed the file is unknown');
+    expect(text).not.toContain('Read/Grep call was recorded');
   });
 
   it('marks a canary as a canary', () => {

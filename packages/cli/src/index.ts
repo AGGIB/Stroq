@@ -46,15 +46,16 @@ Commands:
   untaint [--session <id>] [--all]   clear a false-positive session's taint, or every session's
   why [--seq <n>]                    explain the most recent denied/asked action: rule, provenance, taint
   replay [<session>] [--last] [--transcript <path>] [--json] [--list]
-                                     rebuild a session's causal history: which content the agent read,
-                                     and which actions came out of it. --last reads the agent's own
+                                     rebuild the recorded sequence: which content the agent read,
+                                     and which later actions matched it. --last reads the agent's own
                                      transcript, so it works on sessions that ran before you installed
   sent [<session>] [--last] [--transcript <path>] [--json] [--fail-on-finding]
-                                     which of your credentials already reached a model provider, in
-                                     which past session, put there by which tool call. --last reads
+                                     which credentials appear in a recorded agent session, and in
+                                     which tool result or call. This local evidence does not confirm
+                                     a model request or provider delivery. --last reads
                                      the agent's own transcript, so it covers sessions from before
                                      you installed and can see what tools RETURNED, not just what
-                                     they sent. To match values it reads this machine's credential
+                                     they called. To match values it reads this machine's credential
                                      files (~/.aws/credentials, ~/.npmrc, ~/.netrc,
                                      ~/.docker/config.json, ./.env*); it reports names and sources
                                      only, never a value. Exits 0 even when it finds something —

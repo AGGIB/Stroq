@@ -1,15 +1,15 @@
 // Finding this machine's own credentials in a session that already happened.
 //
 // Every other guard in Stroq looks forward: it judges a call before it runs. Once a
-// session is over, the question nobody answers is the retroactive one — which of my
-// credentials are already in a model provider's inbox, from which session, put there
-// by which tool call. This module answers it from two sources, neither of which needs
-// Stroq to have been installed at the time:
+// session is over, the retroactive question is which known credentials appeared in
+// its recorded tool calls and results. This module answers it from two sources;
+// transcript reading does not require Stroq to have been installed at the time:
 //
-//  - the agent's own transcript, which still holds the text of every tool result, so
-//    a value that entered the model's context can be found by matching it; and
+//  - the agent's own transcript, which may hold tool result text that can be matched
+//    against the local secret index; and
 //  - Stroq's audit log, for sessions where the hooks were running, which holds no
-//    result text at all and so can only speak about tool ARGUMENTS and file reads.
+//    result text at all and so can only speak about recorded argument matches and
+//    supported file-path references.
 //
 // The second is strictly weaker and the report says so; `SentCoverage.toolResultsRead`
 // exists so that "found nothing" from the audit log can never be mistaken for the
@@ -204,17 +204,17 @@ export interface TranscriptSource {
  * Scans a recorded session for values this machine's secret index recognises.
  *
  * The index has to be the REAL one. That is the whole function: it cannot tell you a
- * credential reached a model without knowing the credential, so unlike `stroq replay`
+ * credential appeared in a record without knowing the credential, so unlike `stroq replay`
  * — which deliberately runs against a throwaway home so that inspecting history never
  * touches the operator's credential files — this reads `~/.aws/credentials`, `~/.npmrc`,
  * `~/.netrc`, `~/.docker/config.json` and the project's `.env*`. It still never holds
  * a value: matching goes through the same salted-hash lookup the live guard uses, and
  * what comes back is the name and the source.
  *
- * Both halves of a call are scanned. A tool RESULT carrying the value is the finding
- * that matters, because the harness puts that text into the model's next request. A
- * tool ARGUMENT carrying it is reported too: the model could only have written it if
- * the value was already in its context.
+ * Both halves of a call are scanned. A tool RESULT carrying the value is important
+ * evidence of potential exposure, but a recorded result alone cannot prove that a
+ * later model request occurred. A tool ARGUMENT carrying it is reported separately;
+ * its presence in the call does not identify the eventual recipient either.
  */
 export async function scanTranscript(
   transcript: Transcript,
@@ -236,8 +236,8 @@ export async function scanTranscript(
       // The whole input serialised, not the egress-shaped subset `candidateTokens`
       // extracts. That function exists to decide whether a call is about to send a
       // credential somewhere; this one asks the different question of whether the
-      // model had the value at all, and a `Write` whose contents are a credential
-      // answers it just as well as a `curl` does.
+      // value was present in the recorded call, and a `Write` whose contents are a
+      // credential answers it just as well as a `curl` does.
       const matches = await lookup(index, JSON.stringify(event.input) ?? '', scope);
       argumentMatches.set(event.id, matches);
       const call = describeCall(event.tool, event.input, matches);
@@ -272,8 +272,8 @@ export async function scanTranscript(
         at: event.at,
       });
     }
-    // Reported from the `post` half only: a `pre` is a call the agent proposed, and
-    // one that was denied or errored never put anything in front of the model.
+    // Reported from the `post` half only: a `pre` is a proposed call. Even a post
+    // event does not establish what was shown to a model or sent to a provider.
     const evidence = fileEvidenceFor(event.tool);
     if (evidence !== null) {
       for (const path of credentialFilesIn(event.tool, event.input, scope, transcript.cwd)) {

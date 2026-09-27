@@ -1,22 +1,22 @@
-// `stroq sent` — which of your credentials already reached a model provider.
+// `stroq sent` — credential evidence in recorded agent sessions.
 //
 // THE NAME. The plan called this `stroq leaked`, which is the punchiest option and
 // the wrong one: "leaked" asserts a breach, and what this command observes is that a
-// value was in the traffic between an agent and its model. Those are different
-// claims, and the second one is the true one. `stroq exposure --context` was rejected
+// value was recorded in a local transcript or audit log. Those are different
+// claims. `stroq exposure --context` was rejected
 // for a different reason — `exposure` maps this machine's live surface and exits 1 on
 // findings, while this reads session history and deliberately does not, so folding
 // them together would give one command two incompatible contracts. `stroq context`
 // collides with the "context the agent reads" row `exposure` already prints, which
-// means instruction files, not credentials. `sent` states exactly the observation and
-// nothing more, and it reads as a pair with `stroq replay`: both are retrospective,
+// means instruction files, not credentials. `sent` remains the command name and
+// reads as a pair with `stroq replay`: both are retrospective,
 // both work on sessions that ran before Stroq was installed.
 //
 // THE SECRET INDEX. Unlike `stroq replay`, which runs a transcript through a
 // throwaway engine with a fake home precisely so that inspecting history never reads
 // the operator's credential files, this command uses the REAL index at
 // `~/.stroq/secrets.json`, built from this machine's real credential files. It has
-// to: it cannot tell you a value reached a model without knowing the value. That is
+// to: it cannot match a recorded value without knowing the value. That is
 // stated in the usage text, in the command's own output, and in the docs, because a
 // tool that quietly starts reading `~/.aws/credentials` is a nasty surprise however
 // good its reason. Nothing is written or printed but names and sources — matching
@@ -46,8 +46,8 @@ interface Output {
  * EXIT CODE. Zero whenever a report was produced, even one naming a credential.
  *
  * The question this command answers is about the past, and a build cannot be made
- * green by fixing the present: a credential that reached a model three weeks ago will
- * still have reached it after every commit on the branch. A gate that can never be
+ * green by fixing the present: a credential recorded three weeks ago will
+ * still be in that record after every commit on the branch. A gate that can never be
  * satisfied is a gate that gets deleted, taking the check with it. `stroq exposure`
  * exits 1 on findings for the opposite reason — everything it reports is a setting on
  * this machine that can be changed today.
@@ -64,7 +64,7 @@ function emit(report: SentReport, out: Output): number {
   return out.failOnFinding && found ? 1 : 0;
 }
 
-const USAGE = `stroq sent — which of your credentials already reached a model provider
+const USAGE = `stroq sent — credential evidence in recorded agent sessions
 
   stroq sent --last                 read the newest session in this directory
   stroq sent --transcript <path>    read a specific transcript or rollout
@@ -80,7 +80,7 @@ Reads sessions recorded by ${readerLabels()}.
 addressed as <store>#<session>. It reads this machine's credential files to
 know what to look for, and prints names and sources only, never a value. A
 finding exits 0 by default: a session that already happened cannot be
-un-sent by today's commit.
+changed by today's commit. A transcript match does not confirm provider delivery.
 `;
 
 export async function runSent(args: readonly string[]): Promise<number> {

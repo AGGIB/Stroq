@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docs — Stroq</title>
-<meta name="description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command. The reference for the tool, not the pitch.">
+<title>Stroq docs — AI coding agent security and session scans</title>
+<meta name="description" content="Install Stroq for AI coding agents, scan recorded Claude Code, Codex CLI and Cursor sessions for known secrets, and understand prompt-injection guards, policies and limits.">
 <link rel="canonical" href="https://stroq.dev/docs/">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3ee">
@@ -12,15 +12,15 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Stroq">
 <meta property="og:url" content="https://stroq.dev/docs/">
-<meta property="og:title" content="Docs — Stroq">
-<meta property="og:description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command.">
+<meta property="og:title" content="Stroq docs — AI coding agent security and session scans">
+<meta property="og:description" content="Install, scan recorded agent sessions for known secrets, and understand policies and limits.">
 <meta property="og:image" content="https://stroq.dev/assets/social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta property="og:image:alt" content="Stroq — know what told your AI agent to do that">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Docs — Stroq">
-<meta name="twitter:description" content="How Stroq works, how to install it for each agent, the default policy, provenance, the secret egress guard, and every command.">
+<meta name="twitter:title" content="Stroq docs — AI coding agent security and session scans">
+<meta name="twitter:description" content="Install, scan recorded agent sessions for known secrets, and understand policies and limits.">
 <meta name="twitter:image" content="https://stroq.dev/assets/social-preview.png">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -66,6 +66,7 @@
     <div class="nav-menu" id="nav-menu">
       <ul class="nav-links">
         <li><a href="/#how">How it works</a></li>
+        <li><a href="/session-secret-scan/">Session secret scan</a></li>
         <li><a href="/#attacks">Attacks</a></li>
         <li><a href="/docs/" aria-current="page">Docs</a></li>
         <li><a href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
@@ -90,6 +91,7 @@
     <p class="docs-nav-heading">Start</p>
     <ul class="docs-nav-list">
       <li><a href="#overview">Overview</a></li>
+      <li><a href="#session-scan">Session secret scan</a></li>
       <li><a href="#install">Install</a></li>
       <li><a href="#agents">Per-agent notes</a></li>
     </ul>
@@ -126,18 +128,26 @@
 
 <div class="docs-lead">
   <span class="docs-kicker">Documentation</span>
-  <h1>How Stroq actually works.</h1>
-  <p>Every hook event it installs on, the default policy, provenance and the secret egress guard, and every command. This is the reference; <a href="/#how">the front page</a> is the pitch.</p>
+  <h1>Stroq documentation for AI coding agent security.</h1>
+  <p>Scan recorded sessions for known secrets, install live agent hooks, and understand the default policy, provenance, commands and limits.</p>
 </div>
 
 <section class="docs-section" id="overview" aria-labelledby="overview-title">
   <h2 id="overview-title">Overview</h2>
   <p>Coding agents read untrusted content constantly: web pages, file contents, MCP tool results, the output of commands they just ran themselves. When that content hides instructions, an agent that follows what it reads turns them into real actions — outbound requests, secret reads, external pushes, arbitrary shell.</p>
-  <p>Every guard in this field answers the same question: is the command in front of me dangerous? That question cannot be answered from the command alone. An <code>npx</code> that installs an attacker's package looks exactly like an <code>npx</code> that installs a dependency; what separates them is that one of them was dictated by something the agent had just read.</p>
-  <p>Stroq is built around that difference. It sits on the agent's own tool-call hooks, remembers what the session took in, and when an action matches something that arrived in untrusted output it says so by name: which file, which tool result, how long ago. <a href="#replay"><code>stroq replay</code></a> then reconstructs the whole chain for a session after the fact — including sessions that ran before Stroq was installed. No cloud round trip, no proxy, and no relying on the model to notice the injection itself.</p>
+  <p>An <code>npx</code> that installs an attacker's package can look like an ordinary dependency install. The command alone does not reveal whether an untrusted page or tool result supplied the package name.</p>
+  <p>Stroq records supported tool output and compares later actions with fragments it saw there, naming the file or tool result and its time. A match is evidence of a connection, not proof of the model's internal reasoning. <a href="#replay"><code>stroq replay</code></a> can reconstruct the recorded sequence, including sessions from before Stroq was installed. Hook decisions run locally; the optional MCP integration uses a local stdio proxy.</p>
   <div class="docs-note">
     <p><strong>Seven agents and any MCP client, one engine.</strong> Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Google Antigravity, an in-process plugin for OpenClaw, and a stdio proxy for any other MCP client (Claude Desktop included) — the same classifier, policy, taint and audit everywhere.</p>
   </div>
+</section>
+
+<section class="docs-section" id="session-scan" aria-labelledby="session-scan-title">
+  <h2 id="session-scan-title">Find known secrets in recorded agent sessions</h2>
+  <p><code>stroq sent</code> reads local Claude Code, Codex CLI and Cursor session records, then matches tool arguments and available tool results against credentials found on this machine. It reports names, sources and the recorded call without printing credential values. It can examine sessions from before Stroq was installed.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Scan the latest agent session"><code>npx @stroq/cli sent --last
+npx @stroq/cli sent --transcript &lt;path&gt;</code></pre>
+  <p>A match proves that a known value appears in the local record. A named credential file is weaker evidence than an exact value match. The transcript alone does not prove that a model provider received the value or that it is still valid. Stroq reads local credential sources to build its comparison index; a rotated or unknown secret may be missed. See the <a href="/session-secret-scan/">session scan walkthrough</a> and <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#which-credentials-appeared-in-a-recorded-agent-session">full reference</a>.</p>
 </section>
 
 <section class="docs-section" id="install" aria-labelledby="install-title">
@@ -160,6 +170,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>Copilot CLI</td><td><code>.github/hooks/stroq.json</code></td><td>Yes</td><td>Yes</td><td>Yes (deny in cloud agent)</td><td>Exit 2 on <code>preToolUse</code></td></tr>
         <tr><td>OpenClaw</td><td>In-process plugin</td><td>Yes</td><td>Yes</td><td>Yes, real <code>/approve</code></td><td>Block on every path except reads</td></tr>
         <tr><td>Windsurf</td><td><code>.windsurf/hooks.json</code></td><td>Yes</td><td>Yes</td><td>Rendered as block</td><td>Exit 2 on high-impact <code>pre_*</code></td></tr>
+        <tr><td>Antigravity</td><td><code>.agents/hooks.json</code></td><td>Yes</td><td>Yes</td><td><code>force_ask</code></td><td>Documented deny object on high-impact calls</td></tr>
         <tr><td>Any MCP client</td><td><code>stroq mcp</code> proxy</td><td><code>tools/call</code> only</td><td>Through <code>tools/call</code></td><td>Blocked tool result</td><td>Deny while judging</td></tr>
       </tbody>
     </table>
@@ -185,7 +196,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
     <div class="agent-card">
       <h3>Copilot CLI</h3>
       <code class="install-cmd-block">npx @stroq/cli init --agent copilot</code>
-      <p>Two events, no matcher — every tool goes through Stroq.</p>
+      <p>Two hook events let Stroq check the tool calls Copilot CLI exposes to them.</p>
       <p class="agent-limit"><strong>Limit:</strong> a hook slower than the timeout is treated as an allow, and the late deny is discarded.</p>
     </div>
     <div class="agent-card">
@@ -199,6 +210,12 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
       <code class="install-cmd-block">npx @stroq/cli init --agent windsurf</code>
       <p>Six of Cascade's twelve events; every answer is an exit code.</p>
       <p class="agent-limit"><strong>Limit:</strong> command output is invisible to hooks, so it can't taint a session the way it does elsewhere.</p>
+    </div>
+    <div class="agent-card">
+      <h3>Google Antigravity</h3>
+      <code class="install-cmd-block">npx @stroq/cli init --agent antigravity</code>
+      <p>Three hook events: pre-call policy, file-read/error scan and a pre-invocation warning.</p>
+      <p class="agent-limit"><strong>Limit:</strong> tool results have no content field in the documented hook payload, so command and MCP outputs cannot taint the session. Live host behaviour has not been tested.</p>
     </div>
     <div class="agent-card">
       <h3>Any MCP client</h3>
@@ -215,11 +232,11 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 <section class="docs-section" id="how-it-works" aria-labelledby="how-it-works-title">
   <h2 id="how-it-works-title">How it works</h2>
   <ol>
-    <li><strong><code>PostToolUse</code> — scan and taint.</strong> The output of <code>Read</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Bash</code>, <code>Grep</code>, and every <code>mcp__*</code> tool is normalized (zero-width characters and variation-selector code points stripped, homoglyphs folded, base64/hex/URL-encoded content decoded up to two levels) and matched against the rule set. If the highest-severity match scores at or above <code>threshold</code> (0.6 by default), the session is marked <code>suspect</code> and the agent gets an inline warning to treat the content as untrusted.</li>
+    <li><strong><code>PostToolUse</code> — scan and taint.</strong> In Claude Code, supported <code>Read</code>, <code>WebFetch</code>, <code>WebSearch</code>, <code>Bash</code>, <code>Grep</code> and <code>mcp__*</code> results are normalized (zero-width characters and variation-selector code points stripped, homoglyphs folded, base64/hex/URL-encoded content decoded up to two levels) and matched against the rule set. If the highest-severity match scores at or above <code>threshold</code> (0.6 by default), the session is marked <code>suspect</code> and the agent gets an inline warning. Other integrations expose different result fields and warning channels.</li>
     <li><strong><code>PreToolUse</code> — classify and decide.</strong> <code>Bash</code>, file writes, <code>Read</code>, <code>WebFetch</code>, and <code>mcp__*</code> calls are classified into action classes (<code>shell.network</code>, <code>shell.destructive</code>, <code>shell.exec_encoded</code>, <code>fs.secrets</code>, <code>git.push_external</code>, <code>config.self</code>, <code>mcp.side_effect</code>, and more) and evaluated against an ordered policy — first matching rule wins, otherwise the configured default (<code>allow</code>).</li>
     <li><strong>Audit.</strong> Every decision, on both hooks, is appended to a hash-chained JSONL log (<code>~/.stroq/audit.jsonl</code>), sensitive values redacted before they're written. <code>stroq verify</code> checks the chain hasn't been tampered with.</li>
   </ol>
-  <p>The phase names are Claude Code's; every other adapter maps its host's events onto the same pair — Cursor's <code>beforeShellExecution</code>/<code>afterMCPExecution</code>, Codex's and Copilot's <code>PreToolUse</code>/<code>PostToolUse</code>, OpenClaw's <code>before_tool_call</code>/<code>after_tool_call</code>, Windsurf's <code>pre_*</code>/<code>post_*</code> events, the MCP proxy's request and its response — so one policy file, one taint store and one audit log govern all of them.</p>
+  <p>The phase names are Claude Code's. Cursor, Codex, Copilot CLI, OpenClaw, Windsurf, Antigravity and the MCP proxy map the events their hosts expose into the same engine. The available tool calls and result content differ by integration; see <a href="#agents">per-agent limits</a> before treating any channel as covered.</p>
   <p>If Stroq itself crashes while handling a high-impact tool call, it fails <strong>closed</strong> — deny — rather than silently letting the action through.</p>
 </section>
 
@@ -290,8 +307,8 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>stroq untaint</td><td>Clear a false-positive session's taint and provenance, or every session's</td></tr>
         <tr><td>stroq trust</td><td>Waive a false positive on a file's exact content, pinned to its sha256</td></tr>
         <tr><td>stroq why</td><td>Explain the most recent denied/asked action: rule, provenance, taint</td></tr>
-        <tr><td>stroq replay</td><td>Rebuild a session's causal history — which content produced which action</td></tr>
-        <tr><td>stroq sent</td><td>Which of your credentials already reached a model provider, in which past session, put there by which tool call — it reads this machine's credential files to match values, and reports names and sources only</td></tr>
+        <tr><td>stroq replay</td><td>Rebuild the recorded sequence and show earlier content matching later actions; this is evidence of a link, not proof of the model's reasoning</td></tr>
+        <tr><td>stroq sent</td><td>Find known credentials in a recorded agent session's tool arguments and available results; reads this machine's credential files to match values and reports names and sources, not values. Provider delivery is not established by the transcript alone.</td></tr>
         <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
         <tr><td>stroq attack</td><td>Replay 21 recorded incidents against your policy; exit 1 if any gets through</td></tr>
         <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>
@@ -338,7 +355,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <div class="report-stat"><span class="n">15%</span><span class="label">flagged on 121 files of real, benign developer documentation</span></div>
   <p>Measured by a method we publish, on a corpus we vendor — not a third-party audit. <code>stroq bench --corpus &lt;dir&gt;</code> reproduces the same measurement on your own files. Full method and the files it flags: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md">docs/BENCH.md</a>.</p>
   <h3>stroq coverage — technique mapping</h3>
-  <p>Maps the 20 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
+  <p>Maps the 21 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
 </section>
 
 <section class="docs-section" id="limits" aria-labelledby="limits-title">
@@ -365,9 +382,11 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
     <div class="foot-brand">
       <svg class="brand-logo" width="84" height="34" role="img" aria-labelledby="foot-logo-title" focusable="false"><title id="foot-logo-title">Stroq</title><use href="#logo-mark"/></svg>
       <p class="foot-line">Built for developers who let agents run.</p>
+      <p class="foot-contact">Contact: <a href="mailto:agybaygibatollaev@gmail.com">agybaygibatollaev@gmail.com</a></p>
     </div>
     <nav class="foot-nav" aria-label="Footer">
       <ul class="foot-links">
+        <li><a href="/session-secret-scan/">Session secret scan</a></li>
         <li><a href="https://github.com/AGGIB/Stroq">GitHub</a></li>
         <li><a href="https://www.npmjs.com/package/@stroq/cli">npm</a></li>
         <li><a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">Security policy</a></li>

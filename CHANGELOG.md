@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`stroq sent` states what a local record proves, and no more.** It used to say a matched credential "already reached a model provider"; a transcript shows the value was in a recorded tool result or argument, not that a request carrying it was sent, received or kept. The report, `--help`, the README, the guide and the site now say that, and a credential-file row separates a recorded `Read`/`Grep` from a path only named in a shell command. The JSON output is unchanged.
+- **The npm description and README lead with the session scan** (`npx @stroq/cli sent --last`), list Antigravity and `stroq sent`/`stroq replay`, and count 21 attack scenarios, 12 from public incidents and 9 synthetic.
+
 ## [0.19.0] - 2026-09-25
 
 ### Changed

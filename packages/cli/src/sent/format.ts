@@ -1,10 +1,8 @@
 // Rendering a retroactive exposure report as something a developer will believe.
 //
-// The hard part here is not the layout, it is the claim. "A credential reached the
-// model" is true and useful; "you were breached" is neither, and a command that
-// implies the second gets discounted along with everything else the project says. So
-// the disclaimer below is not boilerplate to skim past — it is the part that makes
-// the finding actionable, and it is asserted in the tests.
+// The hard part here is not the layout, it is the claim. A local transcript proves
+// where a credential appeared in that record; it does not prove a later model
+// request or delivery to a provider. The distinction is asserted in the tests.
 import { ageLabel } from '@stroq/core';
 import type { SentCredential, SentFileEvidence, SentOccurrence, SentReport } from './report.js';
 
@@ -18,8 +16,8 @@ const VIA_LABEL: Readonly<Record<SentOccurrence['via'], string>> = {
  * printing them identically is how a report loses a reader who knows the difference.
  */
 const FILE_EVIDENCE_LINE: Readonly<Record<SentFileEvidence, string>> = {
-  read: 'its contents came back to the model',
-  named: 'named in the command; whether its contents were printed depends on the command',
+  read: 'a Read/Grep call was recorded for this path; its returned content is not established here',
+  named: 'named in a shell command; whether it read or printed the file is unknown',
 };
 
 function timestamp(iso: string): string {
@@ -70,8 +68,8 @@ function coverageLines(report: SentReport): string[] {
   const lines = [
     'COVERAGE',
     `  Matched against ${c.indexedSecrets} value(s) indexed from: ${sources}`,
-    '  Reading those credential files is what this command does; it opens nothing else,',
-    '  and it stores and prints names and sources only, never a value.',
+    '  To match known values, this command reads supported local credential files',
+    '  and project .env sources. It stores and prints names and sources, never values.',
     '  Credential-shaped variables in the environment this command ran with are matched',
     '  too, and are not counted above.',
     '  A credential you have rotated or deleted since that session is not in the index,',
@@ -79,37 +77,38 @@ function coverageLines(report: SentReport): string[] {
   ];
   if (c.toolResultsRead) {
     lines.push(
-      `  Tool results were read in full from the agent's own transcript (${c.results} of ${c.calls} calls).`,
+      `  Recorded tool result text was scanned from the agent transcript (${c.results} of ${c.calls} calls).`,
     );
   } else {
     lines.push(
-      '  The audit log records what each call SENT, never what came back, so only tool',
-      '  arguments and credential-file reads are covered here. Run `stroq sent --last`',
-      "  to read the agent's own transcript instead, which still has the result text.",
+      '  The audit log records call arguments, never what came back, so only recorded',
+      '  argument matches and supported file-path references are covered here.',
+      "  Run `stroq sent --last` to read the agent's own transcript instead,",
+      '  which may still have the result text.',
     );
   }
   return lines;
 }
 
 /**
- * The claim, stated at its real strength and no higher. Content reaching a model
- * provider is not an incident — it is how a coding agent works — so the finding is
- * "this specific credential was in that traffic and you may not have known", and the
- * action it supports is rotation, not panic.
+ * The claim, stated at its real strength and no higher. A local record establishes
+ * a match or file reference, not a later model request, provider delivery, or the
+ * current validity of a credential.
  */
 const MEANING: readonly string[] = [
   'WHAT THIS SAYS, AND WHAT IT DOES NOT',
-  '  What is above was in the text of that session, so it went to the model provider',
-  '  along with everything else in it. That is how a coding agent works.',
-  '  Nothing here says the provider retained any of it, that a person ever saw it, or',
-  '  that this was a breach. It says the value was in that traffic, and that you may',
-  '  not have known it was.',
-  '  If one of them matters, rotate it. Rotating is cheap; being sure is not.',
+  '  These findings come from a local agent transcript or Stroq audit log.',
+  '  Where shown, a matching value appeared in a tool result or call argument.',
+  '  A file entry records a supported tool using or naming its path.',
+  '  This record alone cannot confirm a later model request, delivery to a provider,',
+  '  the recipient, retention, human access, or whether a credential is still valid.',
+  '  It does not prove a breach. Review the session and rotate active credentials',
+  '  when the potential exposure warrants it.',
 ];
 
 export function formatSent(report: SentReport): string {
   const lines: string[] = [
-    'stroq sent — which of your credentials already reached a model provider',
+    'stroq sent — credential evidence in recorded agent sessions',
     '',
     `  session ${report.sessionId} · ${report.coverage.calls} tool call(s)${duration(report)}`,
     origin(report),
@@ -117,10 +116,7 @@ export function formatSent(report: SentReport): string {
   ];
 
   if (report.credentials.length > 0) {
-    lines.push(
-      `CREDENTIALS THAT WERE IN THIS SESSION'S TRAFFIC (${report.credentials.length})`,
-      '',
-    );
+    lines.push(`CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (${report.credentials.length})`, '');
     for (const credential of report.credentials) lines.push(...credentialBlock(credential));
   }
 
@@ -133,8 +129,8 @@ export function formatSent(report: SentReport): string {
     if (report.files.some((f) => f.evidence === 'read')) {
       lines.push(
         '',
-        '  A file whose contents came back was sent to the model whole, including any',
-        '  value Stroq does not have indexed and therefore could not name above.',
+        "  A Read/Grep result may contain sensitive content absent from today's index.",
+        '  Inspect the agent transcript to learn what was actually returned.',
       );
     }
     lines.push('');
@@ -142,8 +138,8 @@ export function formatSent(report: SentReport): string {
 
   if (report.credentials.length === 0 && report.files.length === 0) {
     lines.push(
-      'No indexed credential appeared in this session, and no credential file was',
-      'read or named by it. Read the coverage below before treating that as clean.',
+      'No indexed credential match or credential-file finding was recorded for',
+      'this session. Read the coverage below before treating that as clean.',
       '',
     );
   } else {
