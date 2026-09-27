@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-09-27
+
 ### Security
 
 - **Hooks installed with `npx` stopped guarding when npm pruned its cache.** `npx @stroq/cli init`, the README's own instruction, wrote the path of the CLI inside npm's npx cache into the hook command. Once npm pruned it, every hook failed to start, Claude Code treats that exit as a non-blocking error and runs the call, and `stroq doctor` still said "installed". `init` now copies a CLI started from the npx cache, with its dependencies, to `~/.stroq/cli/<version>/` and points the hooks there, and `doctor` fails a hook whose Node or CLI path no longer exists, naming the path. Re-run `stroq init` once if you installed with `npx`.
