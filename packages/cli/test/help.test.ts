@@ -22,6 +22,7 @@ const run = (...args: string[]) =>
 /** Every command a person runs, with the source file that parses its arguments. */
 const COMMANDS: Readonly<Record<string, string>> = {
   init: 'init',
+  uninstall: 'uninstall',
   run: 'run',
   mcp: 'mcp',
   doctor: 'doctor',

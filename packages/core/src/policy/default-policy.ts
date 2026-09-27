@@ -28,7 +28,8 @@ export const DEFAULT_POLICY: Policy = {
     {
       id: 'deny-self-tamper',
       effect: 'deny',
-      reason: 'Modifying agent security configuration is blocked',
+      reason:
+        'Modifying agent security configuration is blocked; that change is yours to make, outside the agent (to take Stroq out: stroq uninstall)',
       when: { classes: ['config.self'], taint: 'any' },
     },
     {

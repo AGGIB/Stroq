@@ -474,6 +474,8 @@ export async function runInit(args: readonly string[]): Promise<number> {
   // ownership suffix is not the same as knowing the entry was not replaced.
   if (code === 0 && !dryRun) {
     recordInstall(agent, scope, agent === 'openclaw' ? hookArgv(node, entry).join(' ') : command);
+    const flags = `${agent === 'claude-code' ? '' : ` --agent ${agent}`}${scope === 'user' ? ' --user' : ''}`;
+    process.stdout.write(`To remove them: stroq uninstall${flags}\n`);
   }
   return code;
 }

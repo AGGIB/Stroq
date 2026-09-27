@@ -42,6 +42,21 @@ const COMMANDS: readonly CommandHelp[] = [
     ],
   },
   {
+    name: 'uninstall',
+    synopsis: 'uninstall [--agent <name>] [--user] [--dry-run]',
+    about: [
+      "take Stroq's hooks out of an agent's config, leaving everything else in it as it",
+      'was; with --agent mcp, put every wrapped MCP server back',
+    ],
+    flags: [
+      ['--agent <name>', 'the agent to remove Stroq from, as for init (default claude-code)'],
+      ['--user', "remove from the user's config instead of this project's"],
+      ['--dry-run', 'print the result and change nothing'],
+      ['--client <name>', 'with --agent mcp: the client whose servers to unwrap'],
+      ['--config <path>', 'with --agent mcp: the config file to unwrap'],
+    ],
+  },
+  {
     name: 'hook',
     synopsis: 'hook <agent> [<phase>]',
     about: [

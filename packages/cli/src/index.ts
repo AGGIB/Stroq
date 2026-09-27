@@ -14,6 +14,7 @@ import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
 import { runSent } from './commands/sent.js';
 import { runTrust } from './commands/trust.js';
+import { runUninstall } from './commands/uninstall.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runWhy } from './commands/why.js';
@@ -34,6 +35,7 @@ type Runner = (args: readonly string[]) => number | Promise<number>;
 const COMMANDS: Readonly<Record<string, Runner>> = {
   inspect: runInspect,
   init: runInit,
+  uninstall: runUninstall,
   run: runRun,
   doctor: runDoctor,
   log: runLog,

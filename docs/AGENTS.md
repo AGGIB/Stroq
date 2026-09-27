@@ -154,7 +154,7 @@ The CLI answers in Stroq's own JSON, because the only thing reading it is the pl
 {
   "decision": "deny",
   "ruleId": "deny-self-tamper",
-  "reason": "Modifying agent security configuration is blocked"
+  "reason": "Modifying agent security configuration is blocked; that change is yours to make, outside the agent (to take Stroq out: stroq uninstall)"
 }
 ```
 
@@ -203,7 +203,7 @@ The other six are deliberately not installed on, each for a stated reason: `post
 There is no stdout contract in Windsurf's hook API, so **everything meaningful is an exit code plus stderr**: `0` proceeds, `2` shows the message to Cascade and — on a `pre_*` event — blocks the action, and any other exit is an allow. `init` writes `show_output: true` on every entry so a block reason and a taint warning are visible in the Cascade UI as well; on an allow Stroq prints nothing at all, so nothing shows.
 
 ```text
-Stroq blocked this action (deny-self-tamper): Modifying agent security configuration is blocked
+Stroq blocked this action (deny-self-tamper): Modifying agent security configuration is blocked; that change is yours to make, outside the agent (to take Stroq out: stroq uninstall)
 ```
 
 `.windsurf/hooks.json`, `~/.codeium/windsurf/hooks.json`, `~/.codeium/hooks.json`, `/etc/windsurf/hooks.json` and `/Library/Application Support/Windsurf/hooks.json` are protected the same way `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` and `.github/hooks/` already were, for every agent. `.windsurf/rules/` and `.windsurf/workflows/` stay editable: the match is on the hooks file, not the directory.
