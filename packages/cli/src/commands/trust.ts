@@ -21,9 +21,9 @@ import { trustFile } from '../paths.js';
  * people escape that is by removing Stroq.
  *
  * An entry is pinned to the exact bytes: it records the sha256 of the file as it is
- * now, and the engine waives a verdict only when both the source and the digest
- * match. Trusting a README today therefore says nothing about the README in
- * tomorrow's pull request. Every waiver is written to the audit chain as well, so an
+ * now, and the engine waives a verdict only for text with that digest, however it
+ * was read — a `Read`, a `cat`, another path to the same file. Trusting a README
+ * today therefore says nothing about the README in tomorrow's pull request. Every waiver is written to the audit chain as well, so an
  * exemption is a setting one can read back, not a hole.
  */
 function read(file: string): TrustList {

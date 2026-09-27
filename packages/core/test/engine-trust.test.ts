@@ -74,6 +74,25 @@ describe('trusted content', () => {
     expect(result.taint).toBeNull();
   });
 
+  // The entry used to match only the source string the taint recorded: `cat` of the
+  // trusted file (source "cat docs/NOTES.md"), a path the engine clips at 120
+  // characters, or a relative path an agent passed each tainted again. The digest is
+  // the whole pin — these are the bytes that were judged, wherever they are read from.
+  it.each([
+    ['a Bash cat of the file', 'Bash', { command: 'cat docs/NOTES.md' }],
+    [
+      'a path past the 120 characters a source keeps',
+      'Read',
+      { file_path: `/${'d/'.repeat(80)}NOTES.md` },
+    ],
+    ['a relative path', 'Read', { file_path: 'docs/NOTES.md' }],
+  ])('waives the same bytes read through %s', async (_name, toolName, toolInput) => {
+    const { engine: e } = engine([entryFor(POISONED)]);
+    const result = await e.post({ ...post(POISONED), toolName, toolInput });
+    expect(result.trusted).toBe(true);
+    expect(result.taint).toBeNull();
+  });
+
   it('still denies a network command in a session whose taint was waived', async () => {
     const { engine: e } = engine([entryFor(POISONED)]);
     await e.post(post(POISONED));

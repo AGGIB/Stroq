@@ -38,8 +38,15 @@ export const trustDigest = (text: string): string =>
   createHash('sha256').update(text).digest('hex');
 
 export interface TrustStore {
-  /** True when this exact content, from this exact source, was judged benign. */
-  trusts(source: string, text: string): boolean;
+  /**
+   * True when this exact content was judged benign. The digest is the whole pin: the
+   * same bytes are the same text the user read and judged, whichever tool, path or
+   * spelling of the path brings them in, and any other bytes are not. The entry's
+   * `source` names what was trusted in `stroq trust --list`; it is not matched,
+   * because a Bash `cat` of the file, a relative path or a path longer than the 120
+   * characters a taint source keeps each missed an entry the user had added.
+   */
+  trusts(text: string): boolean;
   list(): readonly TrustEntry[];
 }
 
@@ -85,10 +92,9 @@ export class FileTrustStore implements TrustStore {
     return this.cache;
   }
 
-  trusts(source: string, text: string): boolean {
-    if (source === '') return false;
+  trusts(text: string): boolean {
     const digest = trustDigest(text);
-    return this.load().entries.some((e) => e.source === source && e.sha256 === digest);
+    return this.load().entries.some((e) => e.sha256 === digest);
   }
 
   list(): readonly TrustEntry[] {

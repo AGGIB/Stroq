@@ -375,8 +375,8 @@ trusted /repo/docs/SECURITY.md
 
 An exemption list is also the first thing an attacker wants to write to, so three things hold it down.
 
-- **Pinned to the bytes.** The entry records the sha256 of the file as it is now, and a verdict is waived only when the source and the digest both match. Trusting a README today says nothing about the README in tomorrow's pull request; change one character and it taints again.
-- **Protected.** The list lives in `~/.stroq/trust.json`, which `config.self` already covers, so a tainted agent asking to add itself an exemption is denied like any other attempt to edit Stroq's own configuration.
+- **Pinned to the bytes.** The entry records the sha256 of the file as it is now, and a verdict is waived only for text with that digest — however the agent read it: a `Read`, a `cat`, another path to the same file. Trusting a README today says nothing about the README in tomorrow's pull request; change one character and it taints again.
+- **Protected.** The list lives in `~/.stroq/trust.json`, which `config.self` already covers, and running `stroq trust <file>` from inside the session is `config.self` too, so an agent asking to add itself an exemption is denied like any other attempt to edit Stroq's own configuration.
 - **Visible.** A waiver is written into the audit chain next to the verdict it waived, and `stroq log` prints it as `suspect(1.00) trusted` rather than as a clean line. `stroq trust --list` shows every entry with the rules it waives. An exemption nobody can read back is a hole, not a setting.
 
 Waiving a taint is not waiving the policy. The classes that are denied at any taint — `secret.egress`, `config.self`, `config.git_exec`, `shell.exec_encoded` — are unaffected: trusting the file that mentioned `curl … | sh` does not let the agent run it.
