@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -107,3 +107,15 @@ describe.skipIf(process.platform === 'win32')(
     }, 60_000);
   },
 );
+
+describe('the Claude Code plugin wrapper', () => {
+  // Without a global `stroq`, the plugin runs this pin through npx. It sat at 0.12.1
+  // for seven releases, so plugin users ran without every fix made since.
+  it('pins the version this release ships', () => {
+    const pin = /^STROQ_PIN="@stroq\/cli@([^"]+)"$/m.exec(readFileSync(wrapper, 'utf8'))?.[1];
+    const { version } = JSON.parse(readFileSync(join(cliDir, 'package.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(pin).toBe(version);
+  });
+});
