@@ -97,6 +97,23 @@ describe('FileProvenanceStore', () => {
     expect(readFileSync(file, 'utf8')).toBe('{}');
   });
 
+  // An array alone was accepted, so a record whose `suspect` was missing or not a
+  // boolean read as a clean origin and `origin.suspect` was silently dropped — the
+  // same shape-over-parse gap the session store closed for its taint.
+  it.each([
+    ['a record without suspect', [{ ...input('h'), suspect: undefined, seq: 1, at: 'x' }]],
+    ['suspect that is not a boolean', [{ ...input('h'), suspect: 'yes', seq: 1, at: 'x' }]],
+    ['an unknown atom kind', [{ ...input('h'), kind: 'nope', seq: 1, at: 'x' }]],
+    ['a record that is not an object', [null]],
+    ['a missing hash', [{ ...input('h'), hash: 7, seq: 1, at: 'x' }]],
+  ])('fails closed on an array holding %s', async (_name, records) => {
+    const { dir, store } = fresh();
+    await mkdir(dir, { recursive: true });
+    writeFileSync(join(dir, `${sessionKey('s1')}.prov.json`), JSON.stringify(records));
+    await expect(store.lookup('s1', ['h'])).rejects.toThrow(/corrupt provenance/);
+    await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
+  });
+
   it("clear removes the session's records", async () => {
     const { store } = fresh();
     await store.record('s1', [input('h1')]);
