@@ -1,6 +1,6 @@
 {
   "name": "@stroq/cli",
-  "version": "0.19.2",
+  "version": "0.20.0",
   "description": "Find known secrets in local Claude Code, Codex and Cursor sessions; trace risky AI agent actions and guard future tool calls",
   "license": "Apache-2.0",
   "type": "module",
