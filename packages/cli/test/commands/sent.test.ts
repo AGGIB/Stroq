@@ -68,11 +68,14 @@ function transcriptFile(): string {
 }
 
 describe('stroq sent', () => {
-  it('names the credential a recorded session put into the model context', async () => {
+  it('names a credential found in a recorded tool result without claiming delivery', async () => {
     const out = capture();
     const code = await runSent(['--transcript', transcriptFile()]);
     out.restore();
     expect(out.text()).toContain('aws_secret_access_key');
+    expect(out.text()).toContain('credential evidence in recorded agent sessions');
+    expect(out.text()).toContain('cannot confirm a later model request, delivery to a provider');
+    expect(out.text()).not.toContain('already reached a model provider');
     expect(out.text()).not.toContain(KEY);
     expect(code).toBe(0);
   });
@@ -188,6 +191,8 @@ describe('stroq sent', () => {
     const text = out.text();
     expect(text).toContain('stroq sent');
     expect(text).toContain('--last');
+    expect(text).toContain('does not confirm provider delivery');
+    expect(text).not.toContain('already reached a model provider');
     // It must not have gone on to open credential files just to answer --help.
     expect(text).not.toContain('~/.aws/credentials');
   });

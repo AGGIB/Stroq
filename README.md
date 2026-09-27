@@ -5,7 +5,7 @@
   <img src="docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### See what your agent already sent to the model
+### Find known secrets in AI coding agent sessions
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: all stopped](https://img.shields.io/badge/stroq%20attack-all%20stopped-1f9d55)](docs/GUIDE.md#replay-twenty-one-real-and-synthetic-attacks)
@@ -15,10 +15,10 @@
 
 </div>
 
-Coding agents read files and run commands all day, and every tool result goes to the model provider. Stroq tells you which of your credentials went with it, then guards the next session.
+Stroq scans recorded Claude Code, Codex CLI and Cursor sessions for values matching credentials on your machine. It names the credential and the tool call without printing the value, then helps guard supported actions in future sessions. A local transcript match does not by itself prove delivery to a model provider.
 
 ```bash
-npx @stroq/cli sent --last   # which of your credentials already reached the model, no install
+npx @stroq/cli sent --last   # scan the latest recorded session; no hook setup needed
 npx @stroq/cli init          # hook into your agent and guard the next session
 ```
 
@@ -26,9 +26,11 @@ npx @stroq/cli init          # hook into your agent and guard the next session
 
 <img src="docs/assets/demo.gif" alt="stroq replay --last on a recorded session: a poisoned README scores SUSPECT and the curl | sh it dictated is denied 12 seconds later; an npx command copied from an MCP result is asked about and traced back to it; an unrelated pnpm test is allowed" width="800">
 
-- **Looks back.** `stroq sent` reads the sessions Claude Code, Codex CLI and Cursor already keep on disk, including ones from before Stroq was installed, and prints names and files, never values.
-- **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, a proxy for any MCP client. A known secret can't leave in an outbound command or MCP call, and a command copied from something the agent just read is asked about or denied, with the source named.
+- **Looks back.** `stroq sent` reads local Claude Code, Codex CLI and Cursor records, including sessions from before Stroq was installed. It matches known values in available tool arguments and results, and reports names and sources, not values. It reads local credential files to build the comparison index; old, rotated or unknown values may be missed.
+- **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties some later actions to earlier tool output. Coverage depends on the host, version and channel.
 - **Local.** No network calls from the hooks, no telemetry. Apache-2.0.
+
+Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
 
 ## Docs
 

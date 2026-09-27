@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find credentials in past AI coding agent sessions | Stroq</title>
+<meta name="description" content="Scan a saved Claude Code, Codex CLI or Cursor session for values of your locally known credentials. Stroq reports redacted evidence and coverage limits; no prior hook installation is needed.">
+<link rel="canonical" href="https://stroq.dev/session-secret-scan/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3ee">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0f12">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Stroq">
+<meta property="og:url" content="https://stroq.dev/session-secret-scan/">
+<meta property="og:title" content="Find credentials in past AI coding agent sessions | Stroq">
+<meta property="og:description" content="Match known credentials against saved Claude Code, Codex CLI and Cursor sessions. See redacted evidence, its source and what the scan could not check.">
+<meta property="og:image" content="https://stroq.dev/assets/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Stroq — local security checks for AI coding agents">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Find credentials in past AI coding agent sessions | Stroq">
+<meta name="twitter:description" content="Match known credentials against saved Claude Code, Codex CLI and Cursor sessions, with redacted evidence and explicit coverage limits.">
+<meta name="twitter:image" content="https://stroq.dev/assets/social-preview.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/docs/docs.css">
+<script src="/docs/docs.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <nav class="nav container" aria-label="Main navigation">
+    <a class="brand" href="/" aria-label="Stroq — home"><strong>Stroq</strong></a>
+    <a class="btn btn-nav" href="/docs/">Docs</a>
+    <a class="btn btn-nav" href="https://github.com/AGGIB/Stroq">GitHub</a>
+  </nav>
+</header>
+
+<main id="main">
+  <div class="container docs-shell">
+    <nav class="docs-nav" aria-label="On this page">
+      <div class="docs-nav-group">
+        <p class="docs-nav-heading">Session secret scan</p>
+        <ul class="docs-nav-list">
+          <li><a href="#what-it-checks">What it checks</a></li>
+          <li><a href="#run-the-scan">Run the scan</a></li>
+          <li><a href="#read-the-result">Read the result</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#limits">Coverage and limits</a></li>
+          <li><a href="#next-steps">Next steps</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <article class="docs-main">
+      <div class="docs-lead">
+        <span class="docs-kicker">Past-session check</span>
+        <h1>Find known credentials in past AI coding agent sessions.</h1>
+        <p>Stroq checks a saved Claude Code, Codex CLI or Cursor session for credential values known on your machine. It names the source, tool call and time without printing the value. You can inspect sessions recorded before installing Stroq hooks.</p>
+      </div>
+
+      <section class="docs-section" id="what-it-checks" aria-labelledby="what-it-checks-title">
+        <h2 id="what-it-checks-title">What does <code>stroq sent</code> check?</h2>
+        <p>For one selected session, Stroq reads recorded tool calls and results and compares their text with the current values it can index from the working directory's <code>.env*</code> files, common credential files in your home directory and credential-named environment variables. A match is reported as a credential name and source, with the call where it appeared. It also records when a tool read or named a credential file; naming a path in a shell command is weaker evidence than a file-read result.</p>
+        <p>The report includes coverage: how many values were indexed, which files supplied them, how many calls were read and whether tool results were available. This matters when a scan returns no findings.</p>
+      </section>
+
+      <section class="docs-section" id="run-the-scan" aria-labelledby="run-the-scan-title">
+        <h2 id="run-the-scan-title">How to run it</h2>
+        <p>Run the first command from the project directory you want to inspect. <code>--last</code> selects its newest available session across the three supported readers. A transcript path lets you choose a Claude Code or Codex CLI session explicitly.</p>
+        <pre class="code" tabindex="0" role="region" aria-label="Commands for scanning a past agent session"><code>npx @stroq/cli sent --last
+npx @stroq/cli sent --transcript /path/to/session.jsonl
+npx @stroq/cli sent --last --json</code></pre>
+        <p>No prior Stroq hook installation is needed for the transcript scan. For repeat use, <code>npm install -g @stroq/cli</code> avoids an <code>npx</code> package fetch at invocation time. See the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md">full guide</a> for the audit-log form, Cursor session addressing and <code>--fail-on-finding</code>.</p>
+      </section>
+
+      <section class="docs-section" id="read-the-result" aria-labelledby="read-the-result-title">
+        <h2 id="read-the-result-title">What a finding means</h2>
+        <p>A value found in a saved tool result or tool argument is evidence that the recorded session contained that known credential. The output distinguishes these two locations and identifies the relevant call. A credential-file row distinguishes a file read from a path merely named in a shell command.</p>
+        <div class="docs-note">
+          <p><strong>Provider delivery is not verified.</strong> A local transcript cannot prove which bytes a model provider received, whether a result was truncated before transmission, what the provider retained or whether anyone used the credential. Treat a finding as a reason to investigate and rotate a sensitive credential, not as proof of an external breach.</p>
+        </div>
+        <p>A finding does not change the command's default exit status: a produced report exits <code>0</code> even with findings. Use <code>--fail-on-finding</code> when a scheduled check should return <code>1</code> on a finding. A missing session or one with no recorded tool calls also returns <code>1</code>.</p>
+      </section>
+
+      <section class="docs-section" id="privacy" aria-labelledby="privacy-title">
+        <h2 id="privacy-title">What stays on your machine?</h2>
+        <p>The scan runs locally. It reads the chosen local session and credential sources to perform exact-value matching; it does not upload their contents for analysis. Stroq refreshes a local index of salted hashes and writes names and source paths, never matched values, to the human-readable or JSON report. Review that report before sharing it, because names, paths and command summaries can still be sensitive.</p>
+        <p>On a first <code>npx</code> invocation, npm may download the CLI package. Install the package ahead of time if you need the check to run without a package download.</p>
+      </section>
+
+      <section class="docs-section" id="limits" aria-labelledby="limits-title">
+        <h2 id="limits-title">Coverage and limits</h2>
+        <ul>
+          <li><strong>Known values only.</strong> A credential rotated or deleted since the session is absent from the current index and cannot match. Split, encoded or otherwise transformed values may also be missed.</li>
+          <li><strong>One saved session at a time.</strong> <code>--last</code> chooses the newest session associated with the current directory; it does not certify every prior session or every agent on the machine.</li>
+          <li><strong>Three transcript readers.</strong> Claude Code, Codex CLI and Cursor are supported. Cursor uses a SQLite store and needs a Node version with <code>node:sqlite</code>; Stroq reports when that reader is unavailable. Windsurf, Copilot CLI and Antigravity histories are not claimed here.</li>
+          <li><strong>Audit logs are narrower.</strong> When scanning Stroq's own audit log instead of an agent transcript, tool-result text is unavailable; only call arguments and credential-file evidence can be checked.</li>
+        </ul>
+        <p>No findings means no indexed value was found in the material this run could read. Check the report's coverage section before drawing a conclusion about the session.</p>
+      </section>
+
+      <section class="docs-section" id="next-steps" aria-labelledby="next-steps-title">
+        <h2 id="next-steps-title">What to do next</h2>
+        <ol>
+          <li>Review the named call and source in the local transcript. Confirm whether the credential is still active and rotate it if exposure matters.</li>
+          <li>Run <a href="/docs/#exposure"><code>stroq exposure</code></a> to inspect which agent channels and MCP servers are actually guarded on this machine.</li>
+          <li>Use <a href="/docs/#install"><code>stroq init</code></a> and <code>stroq doctor</code> to add and check forward-looking hooks. The <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">security limits</a> explain where hooks cannot enforce a boundary.</li>
+        </ol>
+        <p>For transcript formats, exact commands and report fields, see the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md">full guide</a> and <a href="https://github.com/AGGIB/Stroq">source code on GitHub</a>.</p>
+      </section>
+    </article>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="container foot-grid">
+    <div class="foot-brand">
+      <strong>Stroq</strong>
+      <p class="foot-line">Local checks and action guards for AI coding agents.</p>
+      <p class="foot-contact">Contact: <a href="mailto:agybaygibatollaev@gmail.com">agybaygibatollaev@gmail.com</a></p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/docs/">Docs</a></li>
+        <li><a href="https://www.npmjs.com/package/@stroq/cli">npm</a></li>
+        <li><a href="https://github.com/AGGIB/Stroq">GitHub</a></li>
+      </ul>
+    </nav>
+    <p class="foot-meta"><span>Open source · Apache-2.0. Check the reported evidence and coverage before acting on a result.</span></p>
+  </div>
+</footer>
+</body>
+</html>

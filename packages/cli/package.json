@@ -1,7 +1,7 @@
 {
   "name": "@stroq/cli",
   "version": "0.19.0",
-  "description": "Local action firewall for AI agents: scans what the agent reads, taints the session, blocks dangerous follow-up actions",
+  "description": "Find known secrets in local Claude Code, Codex and Cursor sessions; trace risky AI agent actions and guard future tool calls",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -32,10 +32,13 @@
     "agent-security",
     "prompt-injection",
     "claude-code",
+    "codex",
+    "openclaw",
     "mcp",
     "firewall",
-    "guardrails",
     "cursor",
+    "secret-scanning",
+    "credential-exposure",
     "llm-security"
   ],
   "publishConfig": {

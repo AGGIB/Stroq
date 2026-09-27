@@ -6,20 +6,18 @@
 // three fields `SecretHit` does — name, source, canary — plus where it was seen. That
 // is a deliberate ceiling: the report is printed to a terminal, written to `--json`
 // and pasted into issues, and the whole point of the feature would be lost if telling
-// someone a credential reached a model required showing them the credential.
+// someone where a credential appeared in a local record required showing its value.
 
-/** How a credential's value came to be in the traffic between the agent and the model. */
+/** Where a credential's value appeared in a recorded tool interaction. */
 export type SentVia =
   /**
-   * It was in the text a tool returned, so the agent's harness put it into the
-   * model's context on the next turn. This is the finding the command exists for and
-   * the one no forward-looking guard can answer after the fact.
+   * It was in the recorded text a tool returned. A later model request is possible
+   * but is not established by this record alone.
    */
   | 'tool_result'
   /**
-   * The model wrote it into the arguments of a call. That is weaker evidence of
-   * nothing and stronger evidence of something: the model could only write it if it
-   * already had it, so the value was in the context before this call as well.
+   * It was in the recorded arguments of a call. This establishes presence in that
+   * call, not how the agent obtained it or where the call's text was delivered.
    */
   | 'tool_argument';
 
@@ -66,16 +64,16 @@ export interface SentSighting extends SentOccurrence {
  * shell command that names it may never print a byte of it.
  */
 export type SentFileEvidence =
-  /** A tool whose output IS the named file — `Read`, `Grep`. The contents came back. */
+  /** A `Read` or `Grep` call was recorded for the file; its result may be partial or an error. */
   | 'read'
   /** A shell command named the file; whether it printed it depends on the command. */
   | 'named';
 
 /**
  * A credential FILE this session touched. Reported separately from a value because it
- * is a different claim: the file's contents went back to the model, but Stroq only
- * recognises the values it has indexed — a file can be read whole without a single
- * indexed value being named above it.
+ * is a different claim: a supported file tool returned or a shell command named the
+ * path, but the report does not establish the full contents or provider delivery.
+ * Stroq recognises only the values it has indexed.
  */
 export interface SentFileRead {
   /** The display path of the credential file, e.g. `~/.aws/credentials`. */
