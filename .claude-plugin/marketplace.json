@@ -3,14 +3,14 @@
   "owner": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
   "metadata": {
     "description": "Stroq — find known secrets in AI coding agent sessions, then guard the next one",
-    "version": "0.20.1"
+    "version": "0.21.0"
   },
   "plugins": [
     {
       "name": "stroq",
       "source": "./plugins/stroq",
       "description": "Guards Claude Code's tool calls: scans what the agent reads, names the file or result that dictated a command, and blocks secret egress and risky follow-ups. Local, no telemetry. Pair with `npx @stroq/cli sent --last` to find known secrets in past sessions.",
-      "version": "0.20.1",
+      "version": "0.21.0",
       "homepage": "https://stroq.dev",
       "license": "Apache-2.0",
       "keywords": ["security", "firewall", "prompt-injection", "secrets", "provenance", "audit"],

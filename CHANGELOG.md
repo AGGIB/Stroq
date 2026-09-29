@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-29
+
 ### Added
 
 - **`stroq sent` opens with its verdict.** One line says what the scan concluded before any detail — `✗ 1 known credential value(s) … aws_secret_access_key`, `✓ No known credential value in 312 tool call(s), checked against 41 indexed value(s)`, or `!` when a credential file was touched without an indexed value — and the NEXT block links each credential whose provider it can tell (AWS, GitHub, npm, OpenAI, Anthropic, Stripe) to the page where it is rotated. The README, the npm page and /session-secret-scan/ show a trimmed example from a synthetic session.
