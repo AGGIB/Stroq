@@ -4,6 +4,7 @@ import {
   PROTECTED_DIRS,
   SELF_CONFIG_FILE,
   selfTamperSignals,
+  stroqStateSignals,
 } from '../../src/actions/self-config.js';
 
 describe('SELF_CONFIG_FILE (F5-1: protected files only, not bare .claude)', () => {
@@ -361,7 +362,34 @@ describe("changing Stroq's own state through its CLI", () => {
     'node /usr/local/lib/node_modules/@stroq/cli/dist/index.js untaint --all',
     'sudo stroq untaint --all',
     '/usr/local/bin/stroq untaint --all',
-  ])('deny: %s', (segment) => expect(classifySelfConfigSegment(segment)).toBe('deny'));
+    // Found by a review of 0.20.0: each was allowed.
+    'npx stroq untaint --all',
+    'npx -y stroq untaint --all',
+    'pnpm exec stroq untaint --all',
+    'pnpm stroq untaint --all',
+    'yarn stroq untaint --all',
+    'npm exec stroq untaint --all',
+    'npm exec -- stroq untaint --all',
+    'bunx stroq untaint --all',
+    'npx -p @stroq/cli stroq init',
+    'npx --package=@stroq/cli stroq untaint',
+    'stroq.cmd untaint --all',
+    'stroq.exe untaint --all',
+    'C:\\Users\\dev\\AppData\\Roaming\\npm\\stroq.cmd untaint --all',
+    'node C:\\dev\\node_modules\\@stroq\\cli\\dist\\index.js untaint --all',
+    'node packages/cli/dist/index.js untaint --all',
+    '$(which stroq) untaint --all',
+    '`which stroq` untaint --all',
+    'S=stroq; $S untaint --all',
+    'S=stroq; ${S} trust notes.md',
+    'bash -c "stroq untaint --all"',
+    'ls && stroq untaint --all',
+    // A string a shell runs is commands, line by line: only text is joined.
+    'bash -c "ls\nstroq untaint --all"',
+    "sh -c 'echo hi\nstroq trust notes.md'",
+    "bash <<'EOF'\nstroq untaint --all\nEOF",
+    'eval "ls\nstroq init"',
+  ])('deny: %s', (command) => expect(stroqStateSignals(command)).toEqual(['stroq-state-change']));
 
   it.each([
     'stroq doctor',
@@ -374,17 +402,26 @@ describe("changing Stroq's own state through its CLI", () => {
     'stroq init --dry-run',
     'stroq uninstall --dry-run',
     'npx @stroq/cli doctor',
+    'npx stroq why',
+    // Asking how a command works is not running it.
+    'stroq init --help',
+    'stroq untaint -h',
+    'npx stroq uninstall --help',
     // Only the command position counts.
     'echo stroq untaint --all',
     'grep "stroq untaint" notes.md',
-  ])('null (reading, or not Stroq at all): %s', (segment) =>
-    expect(classifySelfConfigSegment(segment)).toBeNull(),
+    // A line of a commit message or a heredoc body is text, not a command.
+    'git commit -m "docs: quickstart\n\nstroq init --agent cursor"',
+    "git commit -m 'docs\nstroq untaint --all'",
+    "cat > NOTES.md <<'EOF'\nRun:\nstroq init\nEOF",
+    'cat > NOTES.md <<-EOF\n\tstroq untaint --all\n\tEOF\nls',
+  ])('none (reading, asking, or not Stroq at all): %s', (command) =>
+    expect(stroqStateSignals(command)).toEqual([]),
   );
 
-  it('names its own signal', () => {
-    expect(selfTamperSignals(['stroq untaint --all'])).toEqual({
-      deny: ['stroq-state-change'],
-      ask: [],
-    });
+  it('still reads the command after a heredoc ends', () => {
+    expect(stroqStateSignals("cat > N.md <<'EOF'\ntext\nEOF\nstroq untaint --all")).toEqual([
+      'stroq-state-change',
+    ]);
   });
 });

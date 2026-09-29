@@ -73,6 +73,13 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['instruction file names', (r) => `echo x > ${r('CLAUDE.md ')}`],
   ['memory paths', (r) => `cat notes >> ${r('.claude/projects/')}`],
   ['memory path separators', (r) => `cat notes >> .claude/projects/x${r('/')}m`],
+  // `joinText` (stroq-state.ts) reads every command once for quotes and heredocs.
+  ['quoted heredoc operators with no close', (r) => `cat ${r("<<'a")}`],
+  ['bare heredoc operators', (r) => `cat ${r('<<a ')}\n`],
+  ['open quotes before sh -c', (r) => `${r('bash -c "x')}`],
+  ['heredoc body lines', (r) => `cat <<EOF\n${r('stroq init\n')}`],
+  ['stroq runner flags', (r) => `npx ${r('-y ')}stroq untaint`],
+  ['many heredocs closed in turn', (r) => `cat ${r('<<a ')}\n${r('a\n')}`],
 ];
 
 /** `build` at `size`: every repeated unit fills `size` characters. */

@@ -16,7 +16,7 @@ const shellQuote = (word: string): string =>
  *
  * Only decisions the taint had a part in get it: a rule whose `taint` is `suspect`,
  * or one that fires on `origin.suspect`. The commands are the user's to run, outside
- * the agent; the agent cannot run them (`changesStroqState` in actions/self-config).
+ * the agent; the agent cannot run them (`stroqStateSignals` in actions/stroq-state).
  * `trust` is offered for a file read only, the one kind of source it waives.
  */
 export function withWayOut(
