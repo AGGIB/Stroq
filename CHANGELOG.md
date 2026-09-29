@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq sent` opens with its verdict.** One line says what the scan concluded before any detail — `✗ 1 known credential value(s) … aws_secret_access_key`, `✓ No known credential value in 312 tool call(s), checked against 41 indexed value(s)`, or `!` when a credential file was touched without an indexed value — and the NEXT block links each credential whose provider it can tell (AWS, GitHub, npm, OpenAI, Anthropic, Stripe) to the page where it is rotated. The README, the npm page and /session-secret-scan/ show a trimmed example from a synthetic session.
+- **`stroq why` ends a deny or an ask with the way out**: the `stroq untaint --session <id>` command to run outside the agent, and a link to the false-positive form pre-titled with the rule.
+
 ### Changed
 
 - **One promise on every surface.** The link preview (the image HN, X, Slack and the site show), the plugin marketplace and the Claude Code plugin now say what the README and npm say: find known secrets in AI coding agent sessions, then guard the next one — with `npx @stroq/cli sent --last` as the first command. npm's `homepage` is stroq.dev.

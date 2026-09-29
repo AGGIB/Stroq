@@ -18,6 +18,24 @@ npx @stroq/cli sent --last       # inspect the newest supported session in this 
 npx @stroq/cli replay --last     # trace recorded content to later agent actions
 ```
 
+What a finding looks like (a synthetic session, trimmed):
+
+```text
+stroq sent — credential evidence in recorded agent sessions
+
+✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+
+CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+
+  ● aws_secret_access_key — ~/.aws/credentials
+      seen once, first at 2026-09-28T10:00:01Z
+      └─ in the result of    Read       ~/.aws/credentials
+
+NEXT
+  Rotate each credential named above that is still live.
+    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials
+```
+
 Run these commands from the project directory with Node.js 22 or newer. They work on sessions from before Stroq was installed. `npx` downloads the CLI from npm; `sent` reads local credential sources to know what values to match and does not upload them. See the [guide's coverage and limits](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md).
 
 **Guard future sessions:** Stroq scans content visible to installed agent hooks, carries suspicion and source information into later decisions, and applies a local policy to the tool calls those hooks expose. It supports native hooks, an OpenClaw plugin and a stdio MCP proxy; coverage differs by agent and channel. The hooks do not send telemetry.

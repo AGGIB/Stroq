@@ -22,6 +22,24 @@ npx @stroq/cli sent --last   # scan the latest recorded session; no hook setup n
 npx @stroq/cli init          # hook into your agent and guard the next session
 ```
 
+What a finding looks like (a synthetic session, trimmed):
+
+```text
+stroq sent — credential evidence in recorded agent sessions
+
+✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+
+CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+
+  ● aws_secret_access_key — ~/.aws/credentials
+      seen once, first at 2026-09-28T10:00:01Z
+      └─ in the result of    Read       ~/.aws/credentials
+
+NEXT
+  Rotate each credential named above that is still live.
+    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials
+```
+
 <img src="docs/assets/case-study.gif" alt="An agent fixing a bug runs a helper package named in a GitHub issue, reads .env, and POSTs an AWS secret key to an unknown collector. stroq replay --last traces both commands back to that issue, and with Stroq installed the request is denied by deny-secret-egress, naming the variable, the file and the issue it came from." width="820">
 
 <img src="docs/assets/demo.gif" alt="stroq replay --last on a recorded session: a poisoned README scores SUSPECT and the curl | sh it dictated is denied 12 seconds later; an npx command copied from an MCP result is asked about and traced back to it; an unrelated pnpm test is allowed" width="800">

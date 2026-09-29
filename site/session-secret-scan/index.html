@@ -81,6 +81,20 @@ npx @stroq/cli sent --last --json</code></pre>
 
       <section class="docs-section" id="read-the-result" aria-labelledby="read-the-result-title">
         <h2 id="read-the-result-title">What a finding means</h2>
+        <p>A synthetic session, trimmed:</p>
+        <pre class="code" tabindex="0" role="region" aria-label="Example stroq sent output"><code>stroq sent — credential evidence in recorded agent sessions
+
+✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+
+CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+
+  ● aws_secret_access_key — ~/.aws/credentials
+      seen once, first at 2026-09-28T10:00:01Z
+      └─ in the result of    Read       ~/.aws/credentials
+
+NEXT
+  Rotate each credential named above that is still live.
+    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials</code></pre>
         <p>A value found in a saved tool result or tool argument is evidence that the recorded session contained that known credential. The output distinguishes these two locations and identifies the relevant call. A credential-file row distinguishes a file read from a path merely named in a shell command.</p>
         <div class="docs-note">
           <p><strong>Provider delivery is not verified.</strong> A local transcript cannot prove which bytes a model provider received, whether a result was truncated before transmission, what the provider retained or whether anyone used the credential. Treat a finding as a reason to investigate and rotate a sensitive credential, not as proof of an external breach.</p>

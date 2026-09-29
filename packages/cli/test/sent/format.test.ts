@@ -131,3 +131,34 @@ describe('formatSent', () => {
     expect(text).toContain('canary');
   });
 });
+
+// The report opened on a header and went straight into detail: no line said what the
+// scan concluded, which is the line a user would act on — or screenshot.
+describe('the verdict at the top of stroq sent', () => {
+  const verdict = (text: string): string => text.split('\n')[2] ?? '';
+
+  it('names what was found, first, in one line', () => {
+    const line = verdict(formatSent(report()));
+    expect(line).toMatch(/^✗ /);
+    expect(line).toContain('1 known credential value');
+    expect(line).toContain('aws_secret_access_key');
+  });
+
+  it('says clean with the numbers that make clean mean something', () => {
+    const line = verdict(formatSent(report({ credentials: [], files: [] })));
+    expect(line).toMatch(/^✓ /);
+    expect(line).toContain('312 tool call(s)');
+    expect(line).toContain('41 indexed value(s)');
+  });
+
+  it('keeps a file touched without a value from reading as clean', () => {
+    const line = verdict(formatSent(report({ credentials: [] })));
+    expect(line).toMatch(/^! /);
+    expect(line).toContain('1 credential file');
+  });
+
+  it('points to where each found credential is rotated', () => {
+    const text = formatSent(report());
+    expect(text).toContain('https://console.aws.amazon.com/iam/home#/security_credentials');
+  });
+});

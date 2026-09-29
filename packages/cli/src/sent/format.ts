@@ -106,9 +106,46 @@ const MEANING: readonly string[] = [
   '  when the potential exposure warrants it.',
 ];
 
+/**
+ * Where a credential of this kind is rotated, when its name or source says which
+ * provider issued it. A finding that ends in "rotate it" and no address is one more
+ * search the user has to do before acting on it.
+ */
+const ROTATE: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\baws|aws_/i, 'https://console.aws.amazon.com/iam/home#/security_credentials'],
+  [/github|\bgh_|^gh[a-z]?_/i, 'https://github.com/settings/tokens'],
+  [/npm|_authtoken/i, 'https://www.npmjs.com/settings/~/tokens'],
+  [/openai/i, 'https://platform.openai.com/api-keys'],
+  [/anthropic/i, 'https://console.anthropic.com/settings/keys'],
+  [/stripe/i, 'https://dashboard.stripe.com/apikeys'],
+];
+
+const rotationUrl = (credential: SentCredential): string | null =>
+  ROTATE.find(([pattern]) => pattern.test(`${credential.name} ${credential.source}`))?.[1] ?? null;
+
+/**
+ * The one line that says what the scan concluded, before any detail: the line a user
+ * acts on, and the one they would share. Clean carries the numbers that make it mean
+ * something, and a credential file touched without an indexed value is not clean.
+ */
+function verdictLine(report: SentReport): string {
+  const found = report.credentials.length;
+  if (found > 0) {
+    const names = report.credentials.map((c) => c.name);
+    const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3}` : '');
+    return `✗ ${found} known credential value(s) in this session's recorded tool calls: ${shown}`;
+  }
+  if (report.files.length > 0)
+    return `! No known credential value matched, but the session touched ${report.files.length} credential file(s) — see below`;
+  const { calls, indexedSecrets, toolResultsRead } = report.coverage;
+  return `✓ No known credential value in ${calls} tool call(s), checked against ${indexedSecrets} indexed value(s)${toolResultsRead ? '' : ' — arguments only, see coverage'}`;
+}
+
 export function formatSent(report: SentReport): string {
   const lines: string[] = [
     'stroq sent — credential evidence in recorded agent sessions',
+    '',
+    verdictLine(report),
     '',
     `  session ${report.sessionId} · ${report.coverage.calls} tool call(s)${duration(report)}`,
     origin(report),
@@ -146,7 +183,7 @@ export function formatSent(report: SentReport): string {
     lines.push(...MEANING, '');
   }
 
-  lines.push(...coverageLines(report), '', ...nextLines(report.credentials.length > 0));
+  lines.push(...coverageLines(report), '', ...nextLines(report.credentials));
   return `${lines.join('\n')}\n`;
 }
 
@@ -156,10 +193,16 @@ export function formatSent(report: SentReport): string {
  * rotate, then the command that shows what the session did, then the one that guards
  * the next session.
  */
-function nextLines(found: boolean): string[] {
+function nextLines(credentials: readonly SentCredential[]): string[] {
+  const rotations = credentials.flatMap((c) => {
+    const url = c.canary ? null : rotationUrl(c);
+    return url === null ? [] : [`    ${c.name}: ${url}`];
+  });
   return [
     'NEXT',
-    ...(found ? ['  Rotate each credential named above that is still live.'] : []),
+    ...(credentials.length > 0
+      ? ['  Rotate each credential named above that is still live.', ...rotations]
+      : []),
     '  stroq replay --last    what the session read, and which later actions matched it',
     '  stroq init             guard the next session (--agent <name> for another agent)',
   ];
