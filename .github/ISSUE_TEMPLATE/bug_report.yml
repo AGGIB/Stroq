@@ -35,8 +35,8 @@ body:
     id: stroq-version
     attributes:
       label: Stroq version
-      description: See package.json, or run `npm ls @stroq/cli`.
-      placeholder: '0.1.0'
+      description: Run `npx @stroq/cli --version` (or `stroq --version`).
+      placeholder: 'e.g. 0.20.1'
     validations:
       required: true
   - type: input

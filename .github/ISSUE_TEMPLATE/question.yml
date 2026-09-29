@@ -1,0 +1,19 @@
+name: Question or feedback
+description: Ask how something works, or tell us what got in your way — one field is enough
+title: '[Question]: '
+labels: ['question']
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What happened, or what do you want to know?
+      description: >
+        Anything goes: a result you did not understand, a step that took too long,
+        something you expected Stroq to do. Leave out secrets and private paths.
+    validations:
+      required: true
+  - type: input
+    id: context
+    attributes:
+      label: Agent, OS and Stroq version (optional)
+      placeholder: 'e.g. Claude Code 2.1.271, macOS 15, stroq 0.20.1'

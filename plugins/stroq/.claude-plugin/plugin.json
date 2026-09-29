@@ -1,6 +1,6 @@
 {
   "name": "stroq",
-  "description": "Local action firewall for Claude Code: scans what the agent reads, taints the session, attributes commands to the content they came from, denies outbound calls that carry your secrets, and asks before destructive or external actions. Deterministic, offline, hash-chained audit.",
+  "description": "Guards Claude Code's tool calls: scans what the agent reads, names the file or result that dictated a command, and blocks secret egress and risky follow-ups. Local, no telemetry. Pair with `npx @stroq/cli sent --last` to find known secrets in past sessions.",
   "version": "0.20.1",
   "author": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
   "homepage": "https://stroq.dev",
