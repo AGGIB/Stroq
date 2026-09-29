@@ -7,6 +7,8 @@ import {
   HOOK_TIMEOUT_SECONDS,
   hookDeadlineMs,
 } from '../../src/commands/config-file.js';
+import { POST_MATCHER, PRE_MATCHER } from '../../src/commands/init.js';
+import { HIGH_IMPACT_TOOL } from '../../src/adapters/claude-code.js';
 
 const PRE_TOOL_USE = JSON.stringify({
   session_id: 'deadline-test',
@@ -51,6 +53,24 @@ describe('the timeout Stroq installs matches the deadline it gives itself', () =
         HOOK_TIMEOUT_SECONDS,
       );
     }
+  });
+
+  it('matches the same tools in the plugin as in a settings.json install', () => {
+    const matchers = (event: string): string[] =>
+      (pluginConfig().hooks[event] ?? []).map(
+        (entry) => (entry as { matcher?: string }).matcher ?? '',
+      );
+    expect(matchers('PreToolUse')).toEqual([PRE_MATCHER]);
+    expect(matchers('PostToolUse')).toEqual([POST_MATCHER]);
+  });
+
+  // Claude Code runs shell commands through `Monitor` and `PowerShell` as well as Bash.
+  it('covers every Claude Code tool that runs a shell command', () => {
+    for (const tool of ['Bash', 'Monitor', 'PowerShell']) {
+      expect(new RegExp(`^(?:${PRE_MATCHER})$`).test(tool), tool).toBe(true);
+      expect(HIGH_IMPACT_TOOL.test(tool), tool).toBe(true);
+    }
+    expect(new RegExp(`^(?:${POST_MATCHER})$`).test('PowerShell')).toBe(true);
   });
 
   it('gives every plugin hook an explicit timeout, never the host default', () => {

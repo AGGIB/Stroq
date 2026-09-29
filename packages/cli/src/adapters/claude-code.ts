@@ -28,7 +28,8 @@ export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
 /** The shape a recorded event has before parsing (defaults still optional); used by `stroq attack` scenarios. */
 export type ClaudeHookEvent = z.input<typeof ClaudeHookInputSchema>;
 
-export const HIGH_IMPACT_TOOL = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
+export const HIGH_IMPACT_TOOL =
+  /^(Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
 const MAX_RESULT_CHARS = 200_000;
 
 export interface HookOutput {

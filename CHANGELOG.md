@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Claude Code's `Monitor` and `PowerShell` tools ran commands Stroq never saw.** Both run a shell command — `Monitor`'s script "runs in the same shell environment as Bash" — and neither was in the hook matcher, so a `curl … | sh` through either reached no hook and left no audit line. Both are now in the `PreToolUse` matcher, judged by the same command classifier as `Bash` (which reads PowerShell syntax too), and high-impact for the fail-closed path; `PowerShell` output is scanned like `Bash` output. Re-run `stroq init` (or `/plugin update stroq`): `stroq doctor` reports an install with the older matcher as incomplete.
+- **A shell tool whose command Stroq could not read was allowed.** A `Bash`, `PowerShell` or `Monitor` call without a string `command` — a host that renamed the field, say — was classified as an empty command. It is now `shell.unparsed`, which the default policy asks about.
+
 ## [0.20.0] - 2026-09-28
 
 ### Security

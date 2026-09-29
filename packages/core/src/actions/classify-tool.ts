@@ -128,13 +128,29 @@ function classifyFetch(toolInput: Readonly<Record<string, unknown>>): ToolClassi
   return { classes: ['network.fetch'], hosts: host ? [host] : [], signals: ['web-fetch'] };
 }
 
+/**
+ * Tools that run a shell command from `command`. Claude Code has three: `Bash`,
+ * `PowerShell`, and `Monitor`, whose script "runs in the same shell environment as
+ * Bash" and streams its output back as notifications. All three are judged by what
+ * the command does; `classifyCommand` reads PowerShell syntax as well as POSIX.
+ */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell', 'Monitor']);
+const UNREADABLE_COMMAND: ToolClassification = {
+  classes: ['shell.unparsed'],
+  hosts: [],
+  signals: ['shell-command-unreadable'],
+};
+
 export function classifyTool(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): ToolClassification {
-  if (toolName === 'Bash') {
-    const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
+  if (SHELL_TOOLS.has(toolName)) {
+    const command = toolInput['command'];
+    // A shell tool whose command Stroq cannot read is not an empty command: a host
+    // that renamed the field would otherwise have every call allowed without a word.
+    if (typeof command !== 'string') return UNREADABLE_COMMAND;
     return classifyCommand(command, cwd);
   }
   if (WRITE_TOOLS.has(toolName)) return classifyPath(pathOf(toolInput), true);

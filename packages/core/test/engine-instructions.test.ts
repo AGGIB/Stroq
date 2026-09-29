@@ -173,3 +173,17 @@ describe('a deny that depends on the taint', () => {
     expect(r.decision.reason).not.toContain('untaint');
   });
 });
+
+describe('PowerShell output', () => {
+  it('is scanned like Bash output and taints the session', async () => {
+    const r = await engine().post({
+      sessionId: 's1',
+      toolName: 'PowerShell',
+      toolInput: { command: 'Get-Content README.md' },
+      toolResultText: POISON,
+      cwd,
+    });
+    expect(r.scanned).toBe(true);
+    expect(r.taint?.level).toBe('suspect');
+  });
+});

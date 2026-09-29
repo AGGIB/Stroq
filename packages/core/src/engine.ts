@@ -79,7 +79,7 @@ export interface PostResult {
   readonly trusted?: boolean;
 }
 
-export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|Grep|mcp__)/;
+export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__)/;
 
 /**
  * Names of files whose *content* is instructions to the agent rather than repository
@@ -115,7 +115,7 @@ const INSTRUCTION_READ_PATH =
  *   wrongly feed — but the day a rule category such as `skill-compromise` is scoped
  *   away from `any`, these two need their own branch here rather than continuing to
  *   share `tool_result` with `tools/call`.
- * - `Bash` returns a command's output.
+ * - `Bash` and Claude Code's `PowerShell` return a command's output.
  * - `Read` returns a file, classified by path (see `INSTRUCTION_READ_PATH`); `Grep` returns
  *   repository lines.
  * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
@@ -128,7 +128,7 @@ export function scanTargetForTool(
   if (toolName.startsWith('mcp__')) {
     return toolName.endsWith('__tools_list') ? 'tool_description' : 'tool_result';
   }
-  if (toolName === 'Bash') return 'command_output';
+  if (toolName === 'Bash' || toolName === 'PowerShell') return 'command_output';
   if (toolName === 'Read') {
     const path = toolInput.file_path ?? toolInput.notebook_path;
     return typeof path === 'string' && INSTRUCTION_READ_PATH.test(path)
