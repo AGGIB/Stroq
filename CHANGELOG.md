@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The 0.20.0 rule that keeps an agent from running `stroq untaint` missed most of the ways to spell it.** `npx stroq`, `pnpm exec stroq`, `pnpm`/`yarn stroq`, `npm exec`, `npx -p @stroq/cli stroq`, `stroq.cmd`/`.exe`, a Windows path, `$(which stroq)`, a variable holding `stroq`, and `node packages/cli/dist/index.js` in a checkout were all allowed. It now resolves the program the way a shell and a package runner would. It also stopped denying text: `stroq init --help`, and a line of a commit message or a heredoc body that starts with `stroq init`, are no longer read as commands — while a string handed to `sh -c`/`eval` and a heredoc fed to a shell still are.
 - **A shell tool whose command Stroq could not read was allowed.** A `Bash`, `PowerShell` or `Monitor` call without a string `command` — a host that renamed the field, say — was classified as an empty command. It is now `shell.unparsed`, which the default policy asks about.
 
+### Changed
+
+- **A Claude Code result Stroq could not find is recorded as not scanned, not as clean.** A `PostToolUse` with neither `tool_response` nor `tool_result` — what a renamed field would look like — used to be scanned as an empty string and audited as a clean scan, so a change in Claude Code's payload would have gone unnoticed. The audit line now reads `not scanned: no result field (keys: …)`. The other adapters still need the same.
+- **`stroq uninstall --agent codex` removes Stroq from an event written as a single group object at the file's root**, a shape Codex reads and `init` lifts; it left Stroq's handler there and reported it removed.
+
 ### Fixed
 
 - **`stroq sent --last` refused every Cursor session** (since 0.20.0). The Cursor reader records the files a session touched rather than a working directory, and the check that keeps another project's session out read a file inside this project as another project. A session now belongs here when either path contains the other, compared through symlinks, so a project reached through a link (`/var` → `/private/var`) is the same project.

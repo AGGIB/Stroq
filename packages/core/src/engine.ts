@@ -485,6 +485,16 @@ export class StroqEngine {
       summarizeInput(event.toolName, event.toolInput),
       event.cwd,
     );
+    if (event.resultMissing !== undefined) {
+      await this.opts.audit.append({
+        sessionId: event.sessionId,
+        phase: 'post',
+        tool: event.toolName,
+        summary: `${summary} — not scanned: no result field (keys: ${event.resultMissing.join(', ')})`,
+      });
+      const state = await this.opts.sessions.get(event.sessionId);
+      return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
+    }
     const scan = scanContent(
       this.opts.rules,
       event.toolResultText,

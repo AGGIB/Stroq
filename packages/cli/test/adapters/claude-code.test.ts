@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -190,5 +190,24 @@ describe('failClosedOutput', () => {
     const json = parse(deny.stdout).hookSpecificOutput;
     expect(json['permissionDecision']).toBe('deny');
     expect(String(json['permissionDecisionReason'])).toMatch(/fail-closed.*boom/);
+  });
+});
+
+describe('a PostToolUse with no result field', () => {
+  it('is audited as not scanned, naming the keys Claude Code sent', async () => {
+    const home = process.env['STROQ_HOME'] ?? '';
+    await handleClaudeHook(createEngine(), {
+      session_id: 'm1',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+      tool_output: 'renamed field',
+      cwd,
+    });
+    const lines = readFileSync(join(home, 'audit.jsonl'), 'utf8').trim().split('\n');
+    const last = JSON.parse(lines.at(-1) ?? '{}') as { summary?: string; scan?: unknown };
+    expect(last.scan).toBeUndefined();
+    expect(last.summary).toContain('not scanned: no result field');
+    expect(last.summary).toContain('tool_output');
   });
 });
