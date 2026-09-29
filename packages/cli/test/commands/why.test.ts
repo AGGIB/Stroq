@@ -113,3 +113,17 @@ describe('stroq why', () => {
     );
   });
 });
+
+describe('what stroq why offers after a call the user thinks was wrong', () => {
+  it('gives the untaint command with the real session id, and where to report it', async () => {
+    await seed();
+    const out = capture();
+    await runWhy([]);
+    out.restore();
+    const text = out.lines.join('');
+    expect(text).toContain('Wrong call?');
+    expect(text).toContain('stroq untaint --session s');
+    expect(text).toContain('https://github.com/AGGIB/Stroq/issues/new?template=false_positive.yml');
+    expect(text).toContain('deny-origin-suspect');
+  });
+});
