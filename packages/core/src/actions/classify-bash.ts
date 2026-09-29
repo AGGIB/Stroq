@@ -1,5 +1,6 @@
 import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
+import { stroqStateSignals } from './stroq-state.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
 import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
 import { commandWord, firstArgAfter, splitCommand, tokenize } from './shell-segments.js';
@@ -391,7 +392,7 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
     ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
     ['git.push_external', pushExternalSignals(segments)],
-    ['config.self', selfConfig.deny],
+    ['config.self', [...selfConfig.deny, ...stroqStateSignals(command)]],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
     ['config.instructions', instructionWriteSignals(segments)],

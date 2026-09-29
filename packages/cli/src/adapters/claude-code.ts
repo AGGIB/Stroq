@@ -28,7 +28,8 @@ export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
 /** The shape a recorded event has before parsing (defaults still optional); used by `stroq attack` scenarios. */
 export type ClaudeHookEvent = z.input<typeof ClaudeHookInputSchema>;
 
-export const HIGH_IMPACT_TOOL = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
+export const HIGH_IMPACT_TOOL =
+  /^(Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
 const MAX_RESULT_CHARS = 200_000;
 
 export interface HookOutput {
@@ -180,9 +181,13 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
       );
     return NO_OUTPUT;
   }
+  const response = input.tool_response ?? input.tool_result;
   const result = await engine.post({
     ...base,
-    toolResultText: toolResultToText(input.tool_response ?? input.tool_result),
+    toolResultText: toolResultToText(response),
+    // No result field at all is not an empty result: it is a payload shape this
+    // adapter does not know, and the audit says so instead of recording a clean scan.
+    ...(response === undefined ? { resultMissing: Object.keys(input).sort() } : {}),
   });
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return NO_OUTPUT;

@@ -173,3 +173,46 @@ describe('a deny that depends on the taint', () => {
     expect(r.decision.reason).not.toContain('untaint');
   });
 });
+
+describe('PowerShell output', () => {
+  it('is scanned like Bash output and taints the session', async () => {
+    const r = await engine().post({
+      sessionId: 's1',
+      toolName: 'PowerShell',
+      toolInput: { command: 'Get-Content README.md' },
+      toolResultText: POISON,
+      cwd,
+    });
+    expect(r.scanned).toBe(true);
+    expect(r.taint?.level).toBe('suspect');
+  });
+});
+
+describe('a post event with no result field', () => {
+  // A host that renamed its result field used to send nothing to scan, and every such
+  // event went into the audit as a clean scan: drift that nothing noticed.
+  it('is recorded as not scanned, with the keys the host did send', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-engine-missing-'));
+    const audit = new AuditLog(join(home, 'audit.jsonl'));
+    const e = new StroqEngine({
+      rules: loadBundledRules(),
+      policy: DEFAULT_POLICY,
+      sessions: new FileSessionStore(join(home, 'sessions')),
+      audit,
+    });
+    const r = await e.post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      toolResultText: '',
+      resultMissing: ['session_id', 'tool_name', 'tool_output'],
+      cwd,
+    });
+    expect(r.scanned).toBe(false);
+    const last = (await audit.readAll()).at(-1)!;
+    expect(last.phase).toBe('post');
+    expect(last.scan).toBeUndefined();
+    expect(last.summary).toContain('not scanned: no result field');
+    expect(last.summary).toContain('tool_output');
+  });
+});

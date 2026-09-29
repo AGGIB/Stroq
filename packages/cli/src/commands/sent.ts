@@ -22,7 +22,8 @@
 // good its reason. Nothing is written or printed but names and sources — matching
 // goes through the same salted-hash lookup the live guard uses.
 import { homedir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
@@ -84,10 +85,36 @@ finding exits 0 by default: a session that already happened cannot be
 changed by today's commit. A transcript match does not confirm provider delivery.
 `;
 
+/**
+ * `path` with symlinks resolved as far as it exists: a project reached through a link
+ * (`/var` → `/private/var` on macOS) is the same project, and a recorded file that has
+ * since been deleted is resolved through the nearest directory that is still there.
+ */
+function real(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    const parent = dirname(absolute);
+    return parent === absolute ? absolute : join(real(parent), basename(absolute));
+  }
+}
+
 /** Whether `dir` is `root` or somewhere inside it. */
 function isWithin(dir: string, root: string): boolean {
-  const rel = relative(resolve(root), resolve(dir));
+  const rel = relative(real(root), real(dir));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * Whether a session recorded at `recorded` is this directory's. Either contains the
+ * other: a session that ran in a directory containing this one is the same project,
+ * and Cursor records the files a session touched rather than a working directory, so
+ * its `cwd` is a path inside the project — which 0.20.0 read as another project and
+ * refused, for every Cursor session.
+ */
+export function sessionBelongsHere(cwd: string, recorded: string): boolean {
+  return isWithin(cwd, recorded) || isWithin(recorded, cwd);
 }
 
 export async function runSent(args: readonly string[]): Promise<number> {
@@ -166,7 +193,7 @@ export async function runSent(args: readonly string[]): Promise<number> {
     if (
       values.transcript === undefined &&
       transcript.cwd !== null &&
-      !isWithin(cwd, transcript.cwd)
+      !sessionBelongsHere(cwd, transcript.cwd)
     ) {
       process.stdout.write(
         `no agent session recorded in ${cwd}.\n` +

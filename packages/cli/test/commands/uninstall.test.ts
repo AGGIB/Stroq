@@ -171,3 +171,39 @@ describe('runUninstall', () => {
     }
   });
 });
+
+describe('stroq uninstall --agent codex, on the shapes Codex reads', () => {
+  // Codex also reads an event kept at the file's root as a single group object; `init`
+  // lifts that shape, and `uninstall` left Stroq's handler in it while reporting it
+  // removed.
+  it('removes Stroq from a root-level group object and keeps the rest of it', () => {
+    const file = codexHooksPath('project', cwd);
+    seed(file, {
+      PreToolUse: {
+        matcher: 'Bash',
+        hooks: [
+          { type: 'command', command: `${STROQ} hook codex` },
+          { type: 'command', command: 'my-own' },
+        ],
+      },
+      hooks: {},
+    });
+    expect(uninstallAgent('codex', 'project', cwd, false).removed).toBe(true);
+    expect(json(file)).toEqual({
+      PreToolUse: { matcher: 'Bash', hooks: [{ type: 'command', command: 'my-own' }] },
+      hooks: {},
+    });
+  });
+
+  it('drops a root-level group that held only Stroq', () => {
+    const file = codexHooksPath('project', cwd);
+    seed(file, {
+      PostToolUse: {
+        matcher: 'Bash',
+        hooks: [{ type: 'command', command: `${STROQ} hook codex` }],
+      },
+    });
+    uninstallAgent('codex', 'project', cwd, false);
+    expect(json(file)).toEqual({});
+  });
+});

@@ -131,6 +131,12 @@ export interface PreToolEvent {
 
 export interface PostToolEvent extends PreToolEvent {
   readonly toolResultText: string;
+  /**
+   * Set by an adapter when the host's event carried none of the fields the result is
+   * read from: the keys it did carry. The output was not scanned, and the audit says
+   * so — a host that renamed its result field used to be recorded as a clean scan.
+   */
+  readonly resultMissing?: readonly string[];
 }
 
 /** Kinds of "actionable atoms" tracked for instruction provenance. */

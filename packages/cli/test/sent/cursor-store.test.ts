@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   cursorSessionPath,
+  cursorStateDb,
   cursorUnavailable,
   findCursorSessions,
   readCursorSession,
@@ -128,6 +129,55 @@ withStore('reading a real Cursor store', () => {
   // Every test above imports the source. The bundler rewrote `node:sqlite` to
   // `sqlite`, a module that does not exist, so the published CLI told every Cursor
   // user their Node was too old while this suite passed. Only the artifact shows it.
+  // 0.20.0 refused every Cursor session from `sent --last`: the reader records the
+  // files a session touched as its cwd, and the new "another project" check read a
+  // file inside this project as a different project.
+  it('finds this project’s Cursor session with --last, through the built CLI', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-cursor-last-'));
+    const project = mkdtempSync(join(tmpdir(), 'stroq-cursor-proj-'));
+    const env = {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      STROQ_HOME: join(home, '.stroq'),
+    };
+    const store = cursorStateDb(process.platform, env, home);
+    mkdirSync(dirname(store), { recursive: true });
+    const handle = new sqlite!.DatabaseSync(store);
+    handle.exec('create table cursorDiskKV (key text primary key, value text)');
+    handle.prepare('insert into cursorDiskKV (key, value) values (?, ?)').run(
+      'bubbleId:c1:b1',
+      JSON.stringify({
+        _v: 3,
+        type: 2,
+        bubbleId: 'b1',
+        createdAt: '2026-09-27T10:00:00.000Z',
+        toolFormerData: {
+          toolCallId: 'b1',
+          status: 'completed',
+          name: 'read_file_v2',
+          params: JSON.stringify({ targetFile: join(project, 'src', 'app.ts') }),
+          result: JSON.stringify({ contents: 'export {}\n' }),
+        },
+      }),
+    );
+    handle.close();
+    try {
+      const run = spawnSync(process.execPath, [CLI_ENTRY, 'sent', '--last'], {
+        cwd: project,
+        encoding: 'utf8',
+        env,
+      });
+      expect(run.stdout + run.stderr).not.toMatch(/no agent session recorded in/);
+      expect(run.stdout).toMatch(/· 1 tool call/);
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   it('reads the store from the built CLI too', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-cursor-home-'));
     try {
