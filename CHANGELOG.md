@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **One promise on every surface.** The link preview (the image HN, X, Slack and the site show), the plugin marketplace and the Claude Code plugin now say what the README and npm say: find known secrets in AI coding agent sessions, then guard the next one — with `npx @stroq/cli sent --last` as the first command. npm's `homepage` is stroq.dev.
+- **The issue forms ask for less.** The false-positive form no longer requires the raw flagged text, which for a secrets tool meant pasting private content in public; the smallest excerpt, with secrets removed, or a description is enough. A short "Question or feedback" form is new, and the bug form's version hint works for `npx` users. The site's "Report a bypass" link goes to the private advisory form, as SECURITY.md asks.
+
 ## [0.20.1] - 2026-09-29
 
 ### Security

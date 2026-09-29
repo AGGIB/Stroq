@@ -1,4 +1,4 @@
-# A blank issue is how to ask a question: this repository has no Discussions.
+# Questions and feedback have their own short form (question.yml); a blank issue works too.
 blank_issues_enabled: true
 contact_links:
   - name: Report a security vulnerability or bypass

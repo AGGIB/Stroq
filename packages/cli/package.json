@@ -25,7 +25,7 @@
     "url": "git+https://github.com/AGGIB/stroq.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/AGGIB/stroq#readme",
+  "homepage": "https://stroq.dev",
   "bugs": "https://github.com/AGGIB/stroq/issues",
   "keywords": [
     "ai-agents",

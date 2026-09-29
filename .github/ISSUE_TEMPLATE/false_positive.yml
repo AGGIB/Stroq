@@ -13,20 +13,21 @@ body:
     attributes:
       label: The benign command or content
       description: >
-        The exact command that was denied/asked, or the exact file/tool
-        output content that was flagged as suspicious. Paste the raw text —
-        do not paraphrase it, since the exact bytes matter for a regex fix.
+        The command that was denied or asked, or the part of the file or tool
+        output that was flagged — the smallest piece that still triggers it.
+        Remove anything private first: secrets, internal hostnames, customer
+        data. The words that matched matter more than the rest, so a trimmed
+        excerpt is fine; if you cannot share any of it, describe it instead.
       render: text
     validations:
-      required: true
+      required: false
   - type: textarea
     id: decision
     attributes:
       label: Rule id(s) and decision line
       description: >
-        The rule id(s) involved and the relevant line(s) from `stroq log`
-        (or the raw hook JSON output), including the `permissionDecision` and
-        `permissionDecisionReason` if this was a PreToolUse action.
+        The rule id(s) involved — `stroq why` prints them — and the relevant
+        line(s) from `stroq log`, or the reason the agent showed you.
       render: shell
     validations:
       required: true
