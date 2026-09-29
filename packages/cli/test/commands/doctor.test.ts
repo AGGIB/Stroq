@@ -26,10 +26,24 @@ import { CLI_ENTRY } from '../helpers/cli-entry.js';
 const STROQ = `"${process.execPath}" "${CLI_ENTRY}"`;
 
 let cwd: string;
+/** A Codex home whose config.toml records `approved` hook approvals. */
+function codexHome(approved: boolean): void {
+  const dir = join(cwd, 'codex-home');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'config.toml'),
+    approved
+      ? '[hooks.state."stroq-pre"]\ntrusted_hash = "sha256:aa"\n'
+      : '[features]\nhooks = true\n',
+  );
+  process.env['CODEX_HOME'] = dir;
+}
+
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), 'stroq-doctor-'));
   process.env['STROQ_HOME'] = join(cwd, 'home');
   process.env['HOME'] = join(cwd, 'fakehome');
+  codexHome(true);
 });
 
 describe('doctorReport', () => {
@@ -299,6 +313,17 @@ describe('doctorReport codex hooks', () => {
     expect(detailOf(report, 'codex hooks')).toContain('project: installed');
     expect(detailOf(report, 'hooks')).toBe('not installed (ok: codex hooks are)');
     expect(detailOf(report, 'cursor hooks')).toBe('not installed (ok: codex hooks are)');
+  });
+
+  // A fresh install is a hook Codex has not been told to trust, and it does not run.
+  it('fails a Codex install that Codex has not approved yet', async () => {
+    codexHome(false);
+    installCodexHooks(codexHooksPath('project', cwd), `${STROQ} hook codex`);
+    const report = await doctorReport(cwd);
+    const codex = report.checks.find((c) => c.name === 'codex hooks')!;
+    expect(codex.ok).toBe(false);
+    expect(codex.detail).toContain('NOT APPROVED');
+    expect(codex.detail).toMatch(/approve/);
   });
 
   it('names every agent that is carrying the line', async () => {

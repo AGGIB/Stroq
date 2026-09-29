@@ -225,3 +225,32 @@ export function installCodexHooks(file: string, command: string): CodexHooksJson
   writeJsonObject(file, merged);
   return merged;
 }
+
+/**
+ * How many hooks a Codex config.toml records as approved.
+ *
+ * Codex 0.158 runs a new or changed hook only after the user approves it in its
+ * interface, and writes the approval as `hooks.state."<key>".trusted_hash`. Measured
+ * on a real install (2026-09-29): a user-level Stroq hook did not run until
+ * `--dangerously-bypass-hook-trust` was passed. The key's format is Codex's own and
+ * undocumented, so this does not try to find Stroq's entry: a config with no approval
+ * at all is the one thing that certainly means Stroq's hook is not running.
+ */
+export function codexApprovedHooks(configToml: string): number {
+  let inState = false;
+  let count = 0;
+  for (const line of configToml.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) {
+      inState = /^\s*\[\s*hooks\.state(?:\s*\]|\.)/.test(line);
+      continue;
+    }
+    if (inState && /\btrusted_hash\s*=/.test(line)) count += 1;
+  }
+  return count;
+}
+
+/** Codex's own config.toml: `$CODEX_HOME/config.toml`, else `~/.codex/config.toml`. */
+export function codexConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  const home = env['CODEX_HOME'];
+  return join(home !== undefined && home !== '' ? home : join(homedir(), '.codex'), 'config.toml');
+}
