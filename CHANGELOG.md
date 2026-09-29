@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The 0.20.0 rule that keeps an agent from running `stroq untaint` missed most of the ways to spell it.** `npx stroq`, `pnpm exec stroq`, `pnpm`/`yarn stroq`, `npm exec`, `npx -p @stroq/cli stroq`, `stroq.cmd`/`.exe`, a Windows path, `$(which stroq)`, a variable holding `stroq`, and `node packages/cli/dist/index.js` in a checkout were all allowed. It now resolves the program the way a shell and a package runner would. It also stopped denying text: `stroq init --help`, and a line of a commit message or a heredoc body that starts with `stroq init`, are no longer read as commands — while a string handed to `sh -c`/`eval` and a heredoc fed to a shell still are.
 - **A shell tool whose command Stroq could not read was allowed.** A `Bash`, `PowerShell` or `Monitor` call without a string `command` — a host that renamed the field, say — was classified as an empty command. It is now `shell.unparsed`, which the default policy asks about.
 
+### Fixed
+
+- **`stroq sent --last` refused every Cursor session** (since 0.20.0). The Cursor reader records the files a session touched rather than a working directory, and the check that keeps another project's session out read a file inside this project as another project. A session now belongs here when either path contains the other, compared through symlinks, so a project reached through a link (`/var` → `/private/var`) is the same project.
+
 ## [0.20.0] - 2026-09-28
 
 ### Security

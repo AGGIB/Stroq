@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog } from '@stroq/core';
-import { runSent } from '../../src/commands/sent.js';
+import { runSent, sessionBelongsHere } from '../../src/commands/sent.js';
 import { READERS } from '../../src/sent/readers.js';
 import { projectSlug } from '../../src/replay/transcript.js';
 import { auditFile } from '../../src/paths.js';
@@ -289,5 +289,18 @@ describe('what stroq sent suggests next', () => {
     expect(text).toContain('stroq replay --last');
     expect(text).toContain('stroq init');
     expect(text).toMatch(/rotate/i);
+  });
+});
+
+describe('which recorded session belongs to this directory', () => {
+  it.each([
+    ['/w/app', '/w/app', true],
+    ['/w/app/packages/cli', '/w/app', true],
+    // Cursor records the files a session touched, not a working directory.
+    ['/w/app', '/w/app/src/index.ts', true],
+    ['/w/app', '/elsewhere', false],
+    ['/w/app', '/w/application', false],
+  ])('%s and a session recorded at %s → %s', (cwd, recorded, expected) => {
+    expect(sessionBelongsHere(cwd, recorded)).toBe(expected);
   });
 });
