@@ -47,10 +47,24 @@ function stripEvent(entries: readonly unknown[], ours: (h: unknown) => boolean):
   });
 }
 
-/** Every array-valued key of `events`, stripped; a key Stroq emptied is dropped. */
+/** A single matcher group written in place of an event's array, as Codex allows. */
+const isGroup = (value: unknown): value is Json =>
+  isPlainObject(value) && Array.isArray(value['hooks']);
+
+/**
+ * Every event of `events` stripped; a key Stroq emptied is dropped. An event written
+ * as one group object rather than an array — Codex reads that shape at the file's
+ * root, and `init` lifts it — is stripped as a one-group array and written back as
+ * the object it was.
+ */
 function stripEvents(events: Json, ours: (h: unknown) => boolean): Json {
   const out: Json = {};
   for (const [event, value] of Object.entries(events)) {
+    if (isGroup(value)) {
+      const [kept] = stripEvent([value], ours);
+      if (kept !== undefined) out[event] = kept;
+      continue;
+    }
     if (!Array.isArray(value)) {
       out[event] = value;
       continue;
@@ -64,7 +78,8 @@ function stripEvents(events: Json, ours: (h: unknown) => boolean): Json {
 /** The `hooks` object stripped, and dropped when Stroq was all it held. */
 function stripHooksKey(settings: Json, ours: (h: unknown) => boolean): Json {
   const { hooks, ...rest } = settings;
-  if (!isPlainObject(hooks)) return settings;
+  // An empty `hooks` is the user's, not something Stroq emptied: it stays.
+  if (!isPlainObject(hooks) || Object.keys(hooks).length === 0) return settings;
   const kept = stripEvents(hooks, ours);
   return Object.keys(kept).length > 0 ? { ...rest, hooks: kept } : rest;
 }
