@@ -239,9 +239,12 @@ function initCursor(scope: 'project' | 'user', command: string, dryRun: boolean)
  * is a change to their file and so has to be said out loud.
  */
 const CODEX_NOTE =
+  "Codex runs a new or changed hook only after you approve it: start codex and approve Stroq's hooks\n" +
+  'when it lists them for review. Until then Stroq does nothing in Codex, and "stroq doctor" says NOT APPROVED;\n' +
+  'upgrading Stroq changes the hook, and Codex asks again.\n' +
   'On older Codex releases hooks are opt-in: set [features] hooks = true in ~/.codex/config.toml.\n' +
-  "Project hooks load only once you trust this project's .codex/ layer (Codex asks the first time);\n" +
-  '"stroq init --agent codex --user" writes ~/.codex/hooks.json instead and skips that prompt.\n' +
+  "Project hooks also load only once you trust this project's .codex/ layer (Codex asks the first time);\n" +
+  '"stroq init --agent codex --user" writes ~/.codex/hooks.json instead, which needs no project trust.\n' +
   'Events an existing file kept at its root are migrated under the official "hooks" wrapper; nothing is dropped.\n';
 
 function initCodex(scope: 'project' | 'user', command: string, dryRun: boolean): number {

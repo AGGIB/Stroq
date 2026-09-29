@@ -6,6 +6,8 @@ import { secretsFile, stroqHome } from '../paths.js';
 import { CURSOR_BLOCKING_EVENTS, CURSOR_EVENTS } from '../adapters/cursor.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
 import {
+  codexApprovedHooks,
+  codexConfigPath,
   codexHooksPath,
   hasAnyStroqCodexHook,
   missingStroqCodexHooks,
@@ -171,12 +173,24 @@ function checkCodexHooks(file: string): {
   readonly installed: boolean;
   readonly error: string | null;
   readonly missing?: readonly string[];
+  readonly unapproved?: boolean;
 } {
   try {
     const settings = readCodexHooks(file);
     if (!hasAnyStroqCodexHook(settings)) return { installed: false, error: null };
     const missing = missingStroqCodexHooks(settings);
-    return { installed: missing.length === 0, error: null, missing };
+    if (missing.length > 0) return { installed: false, error: null, missing };
+    // Codex runs a hook only once it is approved; with no approval recorded at all,
+    // Stroq's is certainly not running, however complete the file is.
+    let config = '';
+    try {
+      config = readFileSync(codexConfigPath(), 'utf8');
+    } catch {
+      // No config.toml: nothing approved.
+    }
+    if (codexApprovedHooks(config) === 0)
+      return { installed: false, error: null, unapproved: true };
+    return { installed: true, error: null, missing };
   } catch (err) {
     return { installed: false, error: (err as Error).message };
   }
@@ -258,6 +272,8 @@ interface ScopeStatus {
   readonly drift?: InstallDrift;
   /** Paths the installed hook command runs that no longer exist; see `vanishedPaths`. */
   readonly vanished?: readonly string[];
+  /** Installed, but the agent has not approved the hook, so it does not run (Codex). */
+  readonly unapproved?: boolean;
 }
 
 function agentScopes(
@@ -267,6 +283,7 @@ function agentScopes(
     readonly installed: boolean;
     readonly error: string | null;
     readonly missing?: readonly string[];
+    readonly unapproved?: boolean;
   },
   agent?: string,
 ): ScopeStatus[] {
@@ -285,6 +302,11 @@ function agentScopes(
         detail: `${scope}: incomplete (${status.missing.join(', ')}) (${file}) — run \`${init}\` to add ${status.missing.length === 1 ? 'it' : 'them'}`,
       };
     }
+    if (status.unapproved === true)
+      return {
+        ...status,
+        detail: `${scope}: NOT APPROVED — Codex runs a new or changed hook only after you approve it, and ${codexConfigPath()} records no approval (${file}) — start codex and approve Stroq's hooks when it lists them for review`,
+      };
     if (!status.installed || agent === undefined) return status;
     let text: string;
     try {
@@ -525,7 +547,7 @@ function hooksCheck(
   // call. It fails the line on its own, whatever the other scopes say.
   const changed = scopes.some((s) => s.drift === 'changed');
   // The same holds for an entry that no longer exists: the agent skips the hook.
-  const dead = scopes.some((s) => s.vanished?.length);
+  const dead = scopes.some((s) => s.vanished?.length || s.unapproved === true);
   const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopeDetail(scopes);
   return {
@@ -588,7 +610,9 @@ export async function doctorReport(
   // So is a hook whose CLI has vanished: it reads as not installed, but the user did
   // install it, and the line that says which path is gone is the one that helps.
   const anyBroken = agents.some((agent) =>
-    agent.scopes.some((s) => s.error !== null || (s.vanished?.length ?? 0) > 0),
+    agent.scopes.some(
+      (s) => s.error !== null || (s.vanished?.length ?? 0) > 0 || s.unapproved === true,
+    ),
   );
   const perAgentChecks = agents.map((agent, i) =>
     hooksCheck(

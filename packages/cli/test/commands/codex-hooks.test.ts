@@ -6,6 +6,7 @@ import { CODEX_HIGH_IMPACT_TOOL } from '../../src/adapters/codex.js';
 import {
   CODEX_POST_MATCHER,
   CODEX_PRE_MATCHER,
+  codexApprovedHooks,
   codexHandler,
   codexHooksPath,
   hasStroqCodexHook,
@@ -329,5 +330,42 @@ describe('codex hooks files', () => {
     const file = codexHooksPath('project', dir);
     writeFileSync(file, '{ not json');
     expect(() => readCodexHooks(file)).toThrow(/cannot parse/);
+  });
+});
+
+// Codex 0.158 runs a new or changed hook only after the user approves it, and records
+// the approval as `hooks.state."<key>".trusted_hash` in its config.toml. Measured on
+// a real install: a user-level Stroq hook ran only with --dangerously-bypass-hook-trust.
+describe('codexApprovedHooks', () => {
+  it('counts approved hooks in every shape TOML can write them', () => {
+    expect(
+      codexApprovedHooks(
+        [
+          '[features]',
+          'hooks = true',
+          '',
+          '[hooks.state."/u/.codex/hooks.json:pre_tool_use:0:0"]',
+          'trusted_hash = "sha256:aa"',
+          '',
+          "[hooks.state.'other']",
+          'trusted_hash = "sha256:bb"',
+          '',
+          '[hooks.state]',
+          '"third" = { trusted_hash = "sha256:cc" }',
+          '',
+          '[projects."/w"]',
+          'trust_level = "trusted"',
+        ].join('\n'),
+      ),
+    ).toBe(3);
+  });
+
+  it('counts nothing where nothing was approved', () => {
+    expect(codexApprovedHooks('')).toBe(0);
+    expect(
+      codexApprovedHooks('[features]\nhooks = true\n[projects."/w"]\ntrust_level = "trusted"\n'),
+    ).toBe(0);
+    // A trusted_hash outside hooks.state is not a hook approval.
+    expect(codexApprovedHooks('[something]\ntrusted_hash = "x"\n')).toBe(0);
   });
 });

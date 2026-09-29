@@ -266,6 +266,9 @@ describe('runInit --agent codex', () => {
     // The two things a Codex user has to know that no other agent needs.
     expect(printed).toContain('[features] hooks = true');
     expect(printed).toContain('trust');
+    // Measured on Codex 0.158: a new hook does not run until it is approved.
+    expect(printed).toMatch(/only after you approve it/);
+    expect(printed).not.toContain('skips that prompt');
     const first = readFileSync(file, 'utf8');
     const parsed = JSON.parse(first);
     expect(parsed.hooks.PreToolUse).toHaveLength(1);

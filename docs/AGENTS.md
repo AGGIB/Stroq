@@ -47,10 +47,11 @@ npx @stroq/cli init --agent codex   # in your project: writes .codex/hooks.json
 
 `--user` writes `~/.codex/hooks.json` instead, `--dry-run` prints the merged file without writing it. `stroq doctor` then shows a `codex hooks` line next to the other two. Re-running `init` is idempotent and replaces an older Stroq entry rather than stacking a second one; foreign matchers, foreign events and any other key in the file are left untouched. Stroq always writes the official nested shape: a file that kept its events at the root instead of under the `hooks` wrapper has them migrated into it, groups and all, because a hook written in the shape Codex is not reading is a hook that never runs. Nothing is dropped — an event declared in both places keeps both, and a root value Stroq cannot read as hook groups is left exactly where it was.
 
-Two things to check after installing, both specific to Codex:
+Three things to check after installing, all specific to Codex:
 
+- **Approve the hooks.** Codex runs a new or changed hook only after you approve it: start `codex` and approve Stroq's hooks when it lists them for review. It records the approval in `~/.codex/config.toml` as `hooks.state."<key>".trusted_hash`; until then Stroq does nothing in Codex, and `stroq doctor` fails the `codex hooks` line as NOT APPROVED. Upgrading Stroq changes the hook command, and Codex asks again. `doctor` cannot tell which recorded approval is Stroq's — the key is Codex's own — so it fails the line only when none is recorded at all. Measured on Codex 0.158.0-alpha.2 (2026-09-29): a user-level Stroq hook ran under `codex exec` only with `--dangerously-bypass-hook-trust`.
 - On releases where hooks are still opt-in, add `[features]` / `hooks = true` to `~/.codex/config.toml`.
-- A project-local `.codex/` layer only loads once you trust it — Codex prompts the first time it sees one. `--user` writes the home-directory copy and skips that prompt entirely.
+- A project-local `.codex/` layer only loads once you trust the project — Codex prompts the first time it sees one. `--user` writes the home-directory copy, which needs no project trust; its hooks still need approving. In the same measurement, project hooks did not load under `codex exec` at all, even with the project trusted and the approval bypassed — if you drive Codex through `exec`, install with `--user`.
 
 Stroq installs on two of Codex's events:
 
