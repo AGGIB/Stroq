@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-09-30
+
 ### Fixed
 
 - **A fresh Codex install did nothing, and `stroq doctor` said it was installed.** Codex runs a new or changed hook only after the user approves it — measured on Codex 0.158: a user-level Stroq hook ran under `codex exec` only with `--dangerously-bypass-hook-trust` — and nothing in `init` or `doctor` said so. `init --agent codex` now says the hooks need approving (and again after each upgrade, since the command changes), `doctor` fails the `codex hooks` line as NOT APPROVED when Codex's `config.toml` records no hook approval at all, and docs/AGENTS.md describes the step. The old note that `--user` "skips that prompt" was about project trust only and is corrected: user-level hooks need approving too, and under `codex exec` project hooks did not load at all.
