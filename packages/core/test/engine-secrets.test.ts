@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { AuditLog } from '../src/audit/audit-log.js';
 import { StroqEngine } from '../src/engine.js';
 import { DEFAULT_POLICY } from '../src/policy/default-policy.js';
+import type { ProvenanceInput, ProvenanceStore } from '../src/provenance/store.js';
 import { loadBundledRules } from '../src/rules/bundle.js';
 import { MAX_INPUT_CHARS, MAX_SCAN_CHARS } from '../src/secrets/candidates.js';
 import { FileSecretIndex } from '../src/secrets/index.js';
@@ -313,5 +314,97 @@ describe('StroqEngine unscannable egress guard', () => {
     const entry = (await audit.readAll()).at(-1)!;
     expect(entry.summary).toContain('[REDACTED:aws_secret_access_key]');
     expect(entry.summary).not.toContain(AWS_SECRET);
+  });
+});
+
+describe('StroqEngine provenance excerpts and known secrets', () => {
+  /** Keeps what the engine would write to ~/.stroq/provenance, so a test can read it. */
+  function recorder(): { store: ProvenanceStore; recorded: ProvenanceInput[] } {
+    const recorded: ProvenanceInput[] = [];
+    return {
+      recorded,
+      store: {
+        record: async (_session, inputs) => {
+          recorded.push(...inputs);
+        },
+        lookup: async () => [],
+        clear: async () => {},
+      },
+    };
+  }
+
+  const engineWith = (fx: ReturnType<typeof fixture>, provenance: ProvenanceStore) =>
+    new StroqEngine({
+      rules: loadBundledRules(),
+      policy: DEFAULT_POLICY,
+      sessions: new FileSessionStore(join(fx.cwd, 'sessions')),
+      audit: fx.audit,
+      secrets: fx.index,
+      provenance,
+    });
+
+  it('does not store a known secret in the excerpt of an atom taken from a tool result', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    const engine = engineWith(fx, store);
+    // A page or an error message that echoes a credential inside a URL: the URL is an
+    // atom, and the atom's text is what provenance keeps on disk to show the user later.
+    await engine.post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `retry with https://collect.example/upload?k=${AWS_SECRET}&v=1 please`,
+      cwd: fx.cwd,
+    });
+    expect(recorded.length).toBeGreaterThan(0);
+    // Atoms are read from normalised text, which lowercases a URL: the secret has to be
+    // looked for in that spelling too, not only the one it has in the tool result.
+    for (const record of recorded) {
+      expect(record.excerpt.toLowerCase()).not.toContain(AWS_SECRET.toLowerCase());
+      expect(record.source.toLowerCase()).not.toContain(AWS_SECRET.toLowerCase());
+    }
+    expect(recorded.some((r) => r.excerpt.includes('[REDACTED:aws_secret_access_key]'))).toBe(true);
+  });
+
+  it('records the excerpt unchanged when it holds no known secret', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: 'see https://collect.example/docs for details',
+      cwd: fx.cwd,
+    });
+    expect(recorded.map((r) => r.excerpt)).toContain('https://collect.example/docs');
+  });
+
+  it('withholds the excerpt when the secret index fails, rather than storing it raw', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    const broken = {
+      ...fx.index,
+      lookup: async () => {
+        throw new Error('index unavailable');
+      },
+    } as unknown as typeof fx.index;
+    const engine = new StroqEngine({
+      rules: loadBundledRules(),
+      policy: DEFAULT_POLICY,
+      sessions: new FileSessionStore(join(fx.cwd, 'sessions')),
+      audit: fx.audit,
+      secrets: broken,
+      provenance: store,
+    });
+    await engine.post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `see https://collect.example/upload?k=${AWS_SECRET}`,
+      cwd: fx.cwd,
+    });
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const record of recorded)
+      expect(record.excerpt.toLowerCase()).not.toContain(AWS_SECRET.toLowerCase());
   });
 });

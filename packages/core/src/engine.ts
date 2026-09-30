@@ -221,12 +221,23 @@ const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
  * a second chance to get it wrong, in the one place where getting it wrong writes a
  * credential to the user's terminal.
  */
-export function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
+export function redactMatches(
+  summary: string,
+  matches: readonly SecretMatch[],
+  ignoreCase = false,
+): string {
   return matches.reduce((text, m) => {
     const encoded = encodeURIComponent(m.token);
     const lowerEncoded = encoded.replace(/%[0-9A-F]{2}/g, (hex) => hex.toLowerCase());
     const forms = new Set([m.raw, m.token, encoded, lowerEncoded]);
-    return [...forms].reduce((t, form) => t.split(form).join(`[REDACTED:${m.name}]`), text);
+    const mark = `[REDACTED:${m.name}]`;
+    return [...forms].reduce(
+      (t, form) =>
+        ignoreCase
+          ? t.replace(new RegExp(form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), () => mark)
+          : t.split(form).join(mark),
+      text,
+    );
   }, summary);
 }
 
@@ -351,6 +362,30 @@ export class StroqEngine {
   }
 
   /**
+   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted,
+   * clipped, and with every value the secret index knows taken out.
+   *
+   * An atom is a slice of a tool result, and a result can echo a credential: a URL with
+   * a token in its query, a package name a page built from one. Provenance keeps the
+   * excerpt on disk to show the user later, so it is scrubbed as an audit summary is.
+   * The values are looked up in the result as it was written, because an atom is read
+   * from normalised text (a URL comes out lowercased) and a hash of the lowercase
+   * spelling would match nothing; they are then removed from the atom without regard to
+   * case. A failing index withholds the excerpt rather than storing it unchecked.
+   */
+  private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
+    const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
+    const index = this.opts.secrets;
+    if (!index) return atoms.map((atom) => clip(atom.value));
+    try {
+      const matches = await index.lookup(candidatesFromText(event.toolResultText), event.cwd);
+      return atoms.map((atom) => clip(redactMatches(atom.value, matches, true)));
+    } catch {
+      return atoms.map(() => '[REDACTED:secret-index-unavailable]');
+    }
+  }
+
+  /**
    * Persists provenance for `atoms`, never throwing: recording is enrichment,
    * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
    * the caller the scan verdict and taint already computed in `post()`.
@@ -365,15 +400,16 @@ export class StroqEngine {
     const store = this.opts.provenance;
     if (!store || atoms.length === 0) return null;
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
+    const excerpts = await this.safeExcerpts(event, atoms);
     try {
       await store.record(
         event.sessionId,
-        atoms.map((atom) => ({
+        atoms.map((atom, i) => ({
           tool: event.toolName,
           source,
           kind: atom.kind,
           hash: atomHash(atom),
-          excerpt: redact(atom.value).slice(0, MAX_STORED_CHARS),
+          excerpt: excerpts[i] ?? '',
           suspect,
         })),
       );

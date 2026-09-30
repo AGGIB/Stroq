@@ -322,7 +322,7 @@ steps:
 
 Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the step from failing on them and still fails on anything else. `stroq exposure` has no SARIF form: its findings are about this machine, not a file in the repository, and code scanning needs one.
 
-`--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
+`--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. The server is started with the variables it needs to run (`PATH`, `HOME`, the proxy and locale settings) and the `env` its own config declares, not with your shell's environment: a `.mcp.json` that came with a repository you have just cloned names the command, and it does not get your credentials. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
 ## Or start the agent already confined
 
