@@ -1,7 +1,7 @@
 import { classifyTool } from './actions/classify-tool.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
-import { normalizeText } from './normalize/normalizer.js';
+import { expandVariants, normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withWayOut } from './policy/way-out.js';
@@ -12,7 +12,12 @@ import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import { candidateTokens, candidatesFromText, exceedsSecretScan } from './secrets/candidates.js';
+import {
+  candidateTokens,
+  candidatesFromText,
+  exceedsSecretScan,
+  type SecretCandidate,
+} from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
@@ -301,6 +306,14 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
+/** Every secret-index candidate in `text` and in each form `expandVariants` reads from it. */
+const candidatesOfVariants = (text: string): SecretCandidate[] =>
+  expandVariants(text).flatMap((variant) => candidatesFromText(variant.text));
+
+/** Whether `value`, or something it decodes to, holds one of the tokens in `known`. */
+const decodesToKnown = (value: string, known: ReadonlySet<string>): boolean =>
+  candidatesOfVariants(value).some((candidate) => known.has(candidate.token));
+
 export class StroqEngine {
   constructor(private readonly opts: EngineOptions) {}
 
@@ -368,18 +381,28 @@ export class StroqEngine {
    * An atom is a slice of a tool result, and a result can echo a credential: a URL with
    * a token in its query, a package name a page built from one. Provenance keeps the
    * excerpt on disk to show the user later, so it is scrubbed as an audit summary is.
-   * The values are looked up in the result as it was written, because an atom is read
-   * from normalised text (a URL comes out lowercased) and a hash of the lowercase
-   * spelling would match nothing; they are then removed from the atom without regard to
-   * case. A failing index withholds the excerpt rather than storing it unchecked.
+   *
+   * The values are looked up in every form the atoms were read from: the result as it
+   * was written, and its base64, hex and percent-decoded layers, because atoms are read
+   * from those too and the index hashes plain spellings. They are then removed from the
+   * atom without regard to case, since an atom is read from normalised text (a URL comes
+   * out lowercased) and the value in it is not spelled as the value in the index. An
+   * encoded blob is not text a value can be removed from: when it decodes to one, it is
+   * replaced whole. A failing index withholds the excerpt rather than storing it unchecked.
    */
   private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
     const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
     const index = this.opts.secrets;
     if (!index) return atoms.map((atom) => clip(atom.value));
     try {
-      const matches = await index.lookup(candidatesFromText(event.toolResultText), event.cwd);
-      return atoms.map((atom) => clip(redactMatches(atom.value, matches, true)));
+      const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
+      if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
+      const known = new Set(matches.map((match) => match.token));
+      return atoms.map((atom) =>
+        atom.kind === 'encoded' && decodesToKnown(atom.value, known)
+          ? '[REDACTED:encoded-secret]'
+          : clip(redactMatches(atom.value, matches, true)),
+      );
     } catch {
       return atoms.map(() => '[REDACTED:secret-index-unavailable]');
     }

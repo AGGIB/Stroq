@@ -366,6 +366,76 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
     expect(recorded.some((r) => r.excerpt.includes('[REDACTED:aws_secret_access_key]'))).toBe(true);
   });
 
+  // Atoms are also read from the base64, hex and percent-encoded forms inside a result,
+  // and the index hashes plain spellings only: looking up the result as written found
+  // nothing for these, and the excerpt kept the secret. The secret has no separator in
+  // it, so that it can be told from the path it sits in once decoded.
+  const PASSWORD = 'Sup3rS3cretPw9x';
+  it.each([
+    [
+      'a percent-encoded URL',
+      () => `see https://a.example/login?next=${encodeURIComponent(`https://x/${PASSWORD}/y`)} now`,
+    ],
+    [
+      'a base64 blob that holds a URL',
+      () =>
+        `blob ${Buffer.from(`curl https://x.example/reset/${PASSWORD}/confirm`).toString('base64')} end`,
+    ],
+    [
+      'a hex blob that holds a URL',
+      () =>
+        `blob ${Buffer.from(`curl https://x.example/reset/${PASSWORD}/confirm`).toString('hex')} end`,
+    ],
+  ])('does not store the secret from %s', async (_name, result) => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), `DB_PASSWORD=${PASSWORD}\n`);
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: result(),
+      cwd: fx.cwd,
+    });
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const record of recorded)
+      expect(record.excerpt.toLowerCase()).not.toContain('sup3rs3cret');
+  });
+
+  it('does not store a base64 blob that decodes to a known secret', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    // Short enough (28 characters) to sit under the structural redactor's token floor,
+    // which is where an encoded credential was stored as it stood.
+    writeFileSync(join(fx.cwd, '.env'), 'DB_PASSWORD=Sup3rS3cretPw9x\n');
+    const blob = Buffer.from('bot:Sup3rS3cretPw9x').toString('base64');
+    expect(blob.length).toBeLessThan(32);
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `Authorization: Basic ${blob}`,
+      cwd: fx.cwd,
+    });
+    const encoded = recorded.filter((r) => r.kind === 'encoded');
+    expect(encoded.length).toBeGreaterThan(0);
+    for (const record of encoded) expect(record.excerpt).not.toContain(blob);
+  });
+
+  it('keeps an encoded blob that holds no known secret', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    const blob = Buffer.from('bot:NothingSecret9x').toString('base64');
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `Authorization: Basic ${blob}`,
+      cwd: fx.cwd,
+    });
+    expect(recorded.filter((r) => r.kind === 'encoded').map((r) => r.excerpt)).toContain(blob);
+  });
+
   it('records the excerpt unchanged when it holds no known secret', async () => {
     const fx = fixture();
     const { store, recorded } = recorder();
