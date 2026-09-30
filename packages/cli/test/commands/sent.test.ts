@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { runSent, sessionBelongsHere } from '../../src/commands/sent.js';
-import { READERS } from '../../src/sent/readers.js';
+import { newestTranscript, READERS } from '../../src/sent/readers.js';
 import { projectSlug } from '../../src/replay/transcript.js';
 import { auditFile, secretsFile } from '../../src/paths.js';
 
@@ -433,15 +433,53 @@ describe('stroq sent --last, finding the project’s own session', () => {
     expect(parsed.coverage.sessionsInProject).toBe(2);
   });
 
-  it('reads a Codex session recorded in a folder above', async () => {
+  it('reads a Codex session recorded in a folder above, not a newer one elsewhere', async () => {
     codexRollout(cwd, 'above', new Date('2026-09-01T00:00:00Z'));
+    codexRollout('/elsewhere/one', 'foreign', new Date('2026-09-20T00:00:00Z'));
     const sub = join(cwd, 'packages', 'app');
     mkdirSync(sub, { recursive: true });
-    vi.spyOn(process, 'cwd').mockReturnValue(sub);
+    const found = await newestTranscript(sub);
+    expect(found?.reader.agent).toBe('codex');
+    expect(found?.path).toContain('rollout-above');
+    expect(found?.sessions).toBe(1);
+  });
+
+  // Both readers have sessions of the project, but one's are in this very folder and the
+  // other's are only in a folder above: the nearer wins, whatever the times say.
+  it('prefers sessions in this folder over newer ones only in a folder above it', async () => {
+    const sub = join(cwd, 'packages', 'app');
+    mkdirSync(sub, { recursive: true });
+    claudeSession(cwd, 'above', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    codexRollout(sub, 'exact', new Date('2026-09-01T00:00:00Z'));
+    const found = await newestTranscript(sub);
+    expect(found?.reader.agent).toBe('codex');
+    expect(found?.sessions).toBe(1);
+  });
+
+  // The nearest folder above is the project's; the user's home directory is not a project.
+  // A session started in ~ used to be the answer for every folder under it.
+  it('does not take a session recorded in the home directory for the project’s', async () => {
+    claudeSession(home, 'at-home', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    claudeSession('/elsewhere/one', 'other', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    const project = join(home, 'work', 'app');
+    mkdirSync(project, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(project);
     const out = capture();
-    await runSent(['--last']);
+    const code = await runSent(['--last']);
     out.restore();
-    expect(out.text()).not.toContain('no agent session recorded');
+    expect(code).toBe(1);
+    expect(out.text()).toContain('no agent session recorded');
+    expect(out.text()).not.toContain('at-home');
+  });
+
+  it('still reads a session recorded in the home directory when that is where it is run', async () => {
+    claudeSession(home, 'at-home', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    vi.spyOn(process, 'cwd').mockReturnValue(home);
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(0);
+    expect(out.text()).toContain('at-home');
   });
 });
 

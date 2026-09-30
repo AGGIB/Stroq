@@ -364,8 +364,8 @@ export async function findCursorSessionsScoped(cwd: string, db?: string): Promis
     list.map((s) => ({ path: cursorSessionPath(store, s.id), mtimeMs: s.mtimeMs }));
   const here = sessions.filter((s) => s.roots.some((root) => isUnder(root, cwd)));
   return here.length > 0
-    ? { files: files(here), scoped: true }
-    : { files: files(sessions), scoped: false };
+    ? { files: files(here), scoped: true, depth: 0 }
+    : { files: files(sessions), scoped: false, depth: 0 };
 }
 
 /** One session out of a store, or the newest one when the path names no session. */

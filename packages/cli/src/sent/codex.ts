@@ -307,11 +307,11 @@ export async function findCodexRolloutsScoped(cwd: string, home?: string): Promi
   for (const file of all) recorded.set(file, await rolloutCwd(file.path));
   // This directory's own rollouts, else those of the nearest folder above it that has any:
   // the same reading of "the project's session" as the Claude reader's.
-  for (const dir of directoryAndParents(cwd)) {
+  for (const [depth, dir] of directoryAndParents(cwd).entries()) {
     const here = all.filter((file) => sameFolder(recorded.get(file) ?? null, dir));
-    if (here.length > 0) return { files: here, scoped: true };
+    if (here.length > 0) return { files: here, scoped: true, depth };
   }
-  return { files: all, scoped: false };
+  return { files: all, scoped: false, depth: 0 };
 }
 
 export async function readCodexRollout(path: string): Promise<Transcript> {

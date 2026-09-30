@@ -212,7 +212,11 @@ export async function newestTranscript(cwd: string): Promise<FoundTranscript | n
   // A reader with sessions of this directory's own outranks one that only has the
   // fallback list of every project: the newest session on the machine is very often
   // another project's, and `--last` refused it while this one's own was there.
-  const own = lists.filter((list) => list.scoped && list.files.length > 0);
+  const withSessions = lists.filter((list) => list.scoped && list.files.length > 0);
+  // Nearest folder first: sessions in this very directory beat newer ones only in a folder
+  // above it, whichever agent recorded them.
+  const nearest = Math.min(...withSessions.map((list) => list.depth));
+  const own = withSessions.filter((list) => list.depth === nearest);
   const candidates = own.length > 0 ? own : lists;
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
   for (const { reader, files } of candidates) {
