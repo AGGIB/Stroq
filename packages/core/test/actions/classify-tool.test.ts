@@ -776,3 +776,111 @@ describe('what the path scan reads, third pass', () => {
     );
   });
 });
+
+// Round four of review: the catch-all for unnamed keys had holes of its own.
+describe('the weak reading of unnamed keys cannot displace the strong one', () => {
+  it.each([
+    [
+      'a list under an unnamed key first',
+      { attachments: ['.claude/settings.json'], path: '.claude/settings.json' },
+    ],
+    [
+      'an unnamed key after',
+      { path: '.claude/settings.json', attachments: ['.claude/settings.json'] },
+    ],
+    [
+      'an object key first',
+      { files: { '.claude/settings.json': 'x' }, path: '.claude/settings.json' },
+    ],
+  ])('keeps the write to a protected path with %s', (_name, input) => {
+    expect(classifyTool('mcp__fs__write_file', input, cwd).classes).toContain('config.self');
+  });
+
+  // Weak values are best effort: 4,096 of them once filled the budget and turned a deny
+  // into "could not read the call".
+  it('is not filled up by thousands of decoys ahead of the real path', () => {
+    const decoys = Array.from({ length: 5000 }, (_, i) => `/tmp/decoy/${i}`);
+    const r = classifyTool(
+      'mcp__fs__write_file',
+      { attachments: decoys, path: '.claude/settings.json' },
+      cwd,
+    );
+    expect(r.classes).toContain('config.self');
+    expect(r.classes).not.toContain('shell.unparsed');
+  });
+
+  // `http:/../x` is not a link: normalised it is `x`, and a server that resolves paths
+  // before it opens them opens `x`.
+  it.each([
+    ['path', 'mcp__fs__write_file', { path: 'http:/../.claude/settings.json' }, 'config.self'],
+    [
+      'file_path',
+      'mcp__fs__write_file',
+      { file_path: 'HTTPS:/../.claude/settings.json' },
+      'config.self',
+    ],
+    ['path', 'mcp__fs__read_file', { path: 'http:/../.env' }, 'fs.secrets'],
+    ['file_path', 'mcp__fs__edit_file', { file_path: 'data:/../CLAUDE.md' }, 'config.instructions'],
+  ])('reads a value under %s that only starts like a scheme', (_key, tool, input, expected) => {
+    expect(classifyTool(tool, input, cwd).classes).toContain(expected);
+  });
+
+  it('reads the same trick in the native Grep tool', () => {
+    expect(classifyTool('Grep', { pattern: 'x', path: 'http:/../.ssh' }, cwd).classes).toContain(
+      'fs.secrets',
+    );
+  });
+
+  it('still leaves a real link alone', () => {
+    const r = classifyTool('mcp__pw__browser_navigate', { url: 'https://example.com/.env' }, cwd);
+    expect(r.classes).not.toContain('fs.secrets');
+  });
+
+  // A glob, a selector and an accessor are not paths, and were read as reads of credentials.
+  it.each([
+    ['a glob', { glob: '**/*.pem' }],
+    ['a glob with a directory', { pattern: 'src/**/*.key' }],
+    ['a selector', { selector: '.ssh/.item > a' }],
+    ['a JSON accessor', { expr: '$.config/id_rsa' }],
+    ['a query', { query2: 'items[?(@.path==".env")]/x' }],
+  ])('does not read %s as a path', (_name, input) => {
+    expect(classifyTool('mcp__x__search', input, cwd).classes).not.toContain('fs.secrets');
+  });
+
+  it('does not read a bare filename or extension under an unnamed key', () => {
+    expect(classifyTool('mcp__x__set_ext', { ext: '.pem' }, cwd).classes).not.toContain(
+      'fs.secrets',
+    );
+  });
+
+  // Example files are not credentials, and the secret index skips them for the same reason.
+  it.each(['.env.example', '.env.sample', '.env.template', '.env.dist', 'app/.env.example'])(
+    'does not treat %s as a credential file',
+    (path) => {
+      expect(classifyTool('mcp__github__get_file_contents', { path }, cwd).classes).not.toContain(
+        'fs.secrets',
+      );
+      expect(classifyTool('Read', { file_path: `/proj/${path}` }, cwd).classes).not.toContain(
+        'fs.secrets',
+      );
+    },
+  );
+
+  it.each(['.env', '.env.local', '.env.production', 'app/.env.staging'])(
+    'still treats %s as a credential file',
+    (path) => {
+      expect(classifyTool('mcp__github__get_file_contents', { path }, cwd).classes).toContain(
+        'fs.secrets',
+      );
+    },
+  );
+
+  // An undecodable escape threw an error per run, and thousands of them took seconds.
+  it('does not take long over a file URI made of undecodable escapes', () => {
+    const t = performance.now();
+    const uri = `file:///p/${'%E0'.repeat(600_000)}/.claude/settings.json`;
+    const r = classifyTool('mcp__fs__write_file', { uri }, cwd);
+    expect(performance.now() - t).toBeLessThan(1500);
+    expect(r.classes).toContain('config.self');
+  });
+});

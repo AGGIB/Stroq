@@ -69,7 +69,7 @@ function emit(report: SentReport, out: Output): number {
 
 const USAGE = `stroq sent — credential evidence in recorded agent sessions
 
-  stroq sent --last                 read the newest session in this directory
+  stroq sent --last                 read the newest session of this project
   stroq sent --transcript <path>    read a specific transcript or rollout
   stroq sent [<session-id>]         read a session Stroq itself recorded
 

@@ -815,3 +815,39 @@ describe('the Claude Code failure event', () => {
     expect(merged.hooks?.['PostToolUseFailure']?.[0]).toEqual(mine);
   });
 });
+
+// A hook sees only the tools its matcher names, so a tool the classifier has a rule for and
+// the matcher does not name is judged by nothing. Claude Code anchors a matcher as a whole
+// name, so that is how it is tested here. The names are the classifier's branches
+// (`classifyTool`); a new branch belongs in this list.
+describe('the Claude Code matchers name every tool the classifier judges', () => {
+  const anchored = (matcher: string): RegExp => new RegExp(`^(?:${matcher})$`);
+  const CLASSIFIED = [
+    'Bash',
+    'PowerShell',
+    'Monitor',
+    'Write',
+    'Edit',
+    'MultiEdit',
+    'NotebookEdit',
+    'Read',
+    'Grep',
+    'WebFetch',
+    'mcp__server__tool',
+  ];
+
+  it.each(CLASSIFIED)('PRE_MATCHER names %s', (tool) => {
+    expect(anchored(PRE_MATCHER).test(tool)).toBe(true);
+  });
+
+  it.each(['Bash', 'PowerShell', 'Read', 'Grep', 'WebFetch', 'WebSearch', 'mcp__server__tool'])(
+    'POST_MATCHER names %s, whose output is scanned',
+    (tool) => {
+      expect(anchored(POST_MATCHER).test(tool)).toBe(true);
+    },
+  );
+
+  it('does not name a tool nothing judges', () => {
+    expect(anchored(PRE_MATCHER).test('TodoWrite')).toBe(false);
+  });
+});

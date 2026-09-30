@@ -1,4 +1,5 @@
 import { expandVariants, normalizeText } from '../normalize/normalizer.js';
+import { decodePercentRuns } from '../normalize/percent-runs.js';
 import { candidatesFromText, type SecretCandidate } from '../secrets/candidates.js';
 import type { Atom, SecretMatch } from '../types.js';
 
@@ -23,15 +24,7 @@ import type { Atom, SecretMatch } from '../types.js';
  * Looking for a KNOWN VALUE has no such cost, so here a stray `50%` does not hide the
  * escapes beside it.
  */
-export function percentDecodedLeniently(text: string): string {
-  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
-}
+export const percentDecodedLeniently = decodePercentRuns;
 
 /**
  * Every secret-index candidate in `text` and in each form `expandVariants` reads from it,

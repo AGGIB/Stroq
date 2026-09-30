@@ -1,6 +1,7 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
 import { isGitExecPath } from './git-exec.js';
+import { decodePercentRuns } from '../normalize/percent-runs.js';
 import { normalizePathForMatch } from './normalize-path.js';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
 
@@ -24,7 +25,7 @@ export interface ToolClassification extends CommandClassification {
  * remembered to normalise first is the kind that quietly stops checking.
  */
 const SECRET_PATH =
-  /((^|[/\\])\.ssh([/\\]|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|(^|[/\\])\.aws([/\\]|$)|(^|[/\\])\.env(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|[/\\]\.(npmrc|netrc|pgpass|git-credentials)$|[/\\]\.kube([/\\]config$|$)|[/\\]\.config[/\\]gcloud([/\\]|$)|\/etc\/(shadow|passwd)$)/;
+  /((^|[/\\])\.ssh([/\\]|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|(^|[/\\])\.aws([/\\]|$)|(^|[/\\])\.env(?!\.(?:example|sample|template|dist)$)(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|[/\\]\.(npmrc|netrc|pgpass|git-credentials)$|[/\\]\.kube([/\\]config$|$)|[/\\]\.config[/\\]gcloud([/\\]|$)|\/etc\/(shadow|passwd)$)/;
 const SIDE_EFFECT_TOOL =
   /(send|post|publish|upload|email|mail|message|notify|pay|transfer|purchase|delete|remove|drop|deploy|execute|exec|run|shell|write|update|create|comment|merge|push)/i;
 // `config.self` on an MCP call requires BOTH a write-shaped tool name and the
@@ -228,16 +229,6 @@ function trimControls(value: string): string {
   return value.slice(start, end);
 }
 
-/** Each run of valid percent-escapes decoded on its own; an invalid one is left as it was. */
-const decodeRuns = (text: string): string =>
-  text.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
-
 /**
  * The paths a value can name. Ordinarily one: itself. A `file:` URI has more than one
  * reading, and a server takes whichever it takes, so every one is classified: what a URL
@@ -252,11 +243,13 @@ function pathCandidates(raw: string): string[] {
   if (!/^file:/i.test(stripped)) return [raw];
   const candidates = [stripped];
   try {
-    candidates.push(decodeRuns(new URL(stripped).pathname));
+    candidates.push(decodePercentRuns(new URL(stripped).pathname));
   } catch {
     // Not a URL a parser accepts; the cut-off reading below is all there is.
   }
-  candidates.push(decodeRuns(stripped.replace(/^file:\/*/i, '').replace(/[?#][\s\S]*$/, '')));
+  candidates.push(
+    decodePercentRuns(stripped.replace(/^file:\/*/i, '').replace(/[?#][\s\S]*$/, '')),
+  );
   return [...new Set(candidates)];
 }
 
@@ -318,6 +311,10 @@ interface ScanState {
   readonly seen: Set<string>;
   chars: number;
   complete: boolean;
+  /** Values read only because they look like paths: their own list, budget and dedupe. */
+  readonly weakEntries: PathEntry[];
+  readonly weakSeen: Set<string>;
+  weakChars: number;
 }
 
 interface Frame {
@@ -353,7 +350,15 @@ function scanPaths(
   keyPattern: RegExp,
   weak: boolean,
 ): PathScan {
-  const state: ScanState = { entries: [], seen: new Set(), chars: 0, complete: true };
+  const state: ScanState = {
+    entries: [],
+    seen: new Set(),
+    chars: 0,
+    complete: true,
+    weakEntries: [],
+    weakSeen: new Set(),
+    weakChars: 0,
+  };
   const stack: Frame[] = [{ value: toolInput, key: '', isPathKey: false, dest: false }];
   for (let frame = stack.pop(); frame !== undefined; frame = stack.pop()) {
     const { value } = frame;
@@ -385,29 +390,46 @@ function scanPaths(
     }
     for (let i = children.length - 1; i >= 0; i -= 1) stack.push(children[i] as Frame);
   }
-  return { entries: state.entries, complete: state.complete };
+  // The named keys first, so what they hold is classified whatever else was found.
+  return { entries: [...state.entries, ...state.weakEntries], complete: state.complete };
 }
 
 /** A link is not a file the tool opens; `file:` is the one scheme that is. */
-const NOT_A_FILE = /^(?:https?|ftp|wss?|data|blob):/i;
-/** One line, no whitespace, and a separator or a leading dot or tilde: what a path looks like. */
+const LINK_SCHEME = /^(?:https?|ftp|wss?|data|blob):/i;
+/**
+ * Whether `value` is a link and not a path. Judged after `.` and `..` are resolved, because
+ * `http:/../.claude/settings.json` starts like a link and is `.claude/settings.json` to a
+ * server that resolves paths before it opens them.
+ */
+const isLink = (value: string): boolean =>
+  LINK_SCHEME.test(value) && LINK_SCHEME.test(normalizePathForMatch(value));
+
+/** What a value under an unnamed key must look like to be read as a path at all. */
 const WEAK_PATH_CHARS = 1024;
+/** Glob, selector, accessor and query characters: a pattern, not a path. */
+const NOT_PATH_CHARS = /[\s*?[\]{}<>|()$^"'`;,=]/;
 const looksLikePath = (value: string): boolean =>
   value.length > 0 &&
   value.length <= WEAK_PATH_CHARS &&
-  !/\s/.test(value) &&
-  (/[\\/]/.test(value) || /^[.~]/.test(value)) &&
-  !NOT_A_FILE.test(value);
+  /[\\/]/.test(value) &&
+  !NOT_PATH_CHARS.test(value) &&
+  !isLink(value);
+
+/** Values read only because they look like paths are best effort: never a reason to give up. */
+const MAX_WEAK_VALUES = 512;
+const MAX_WEAK_CHARS = 256 * 1024;
 
 function addWeak(value: string, state: ScanState): void {
   if (!looksLikePath(value)) return;
-  const id = `r\n${value}`;
-  if (state.seen.has(id)) return;
-  if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS)
+  if (state.weakSeen.has(value)) return;
+  if (
+    state.weakEntries.length >= MAX_WEAK_VALUES ||
+    state.weakChars + value.length > MAX_WEAK_CHARS
+  )
     return;
-  state.seen.add(id);
-  state.chars += value.length;
-  state.entries.push({ path: value, dest: false, weak: true });
+  state.weakSeen.add(value);
+  state.weakChars += value.length;
+  state.weakEntries.push({ path: value, dest: false, weak: true });
 }
 
 function addPath(value: string, key: string, dest: boolean, state: ScanState): void {
@@ -429,7 +451,7 @@ function addPath(value: string, key: string, dest: boolean, state: ScanState): v
 function addOne(value: string, dest: boolean, state: ScanState): void {
   // `url` and `uri` are path keys for the sake of `file:` URIs; an ordinary link under one
   // is not a file, and `https://github.com/o/r/blob/main/.env.example` is not a read of it.
-  if (NOT_A_FILE.test(value)) return;
+  if (isLink(value)) return;
   const id = `${dest ? 'w' : 'r'}\n${value}`;
   if (state.seen.has(id)) return;
   if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS) {

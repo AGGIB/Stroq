@@ -183,17 +183,18 @@ It runs against a throwaway home, exactly as `stroq attack` does: sessions, prov
 Live guards judge future calls. The retrospective question is different: _which of my known credentials appear in sessions I already ran, and in which recorded calls?_ `stroq sent` reads the agent's local session records, so it does not need Stroq hooks to have been installed during those sessions. Running with `npx` may download the CLI package.
 
 ```bash
-npx @stroq/cli sent --last       # the most recent session in this directory
+npx @stroq/cli sent --last       # the newest session of this project
 npx @stroq/cli sent --transcript ~/.claude/projects/<slug>/<id>.jsonl
 npx @stroq/cli sent --transcript ~/.codex/sessions/<y>/<m>/<d>/rollout-<id>.jsonl
 npx @stroq/cli sent              # a session from Stroq's own audit log
 ```
 
 **Claude Code, Codex CLI and Cursor.** `--last` takes the newest session any of them
-recorded for this directory, and a file named with `--transcript` is matched to a
-reader by what is inside it rather than by where it sits. The project's `.env` files
-are the ones in the folder that session ran in, whichever folder of the project you
-typed the command in, and the coverage section says which folder that was and how many
+recorded for this directory, or for the nearest folder above it that has any (never your
+home directory), and a file named with `--transcript` is matched to a
+reader by what is inside it rather than by where it sits. The `.env` files compared
+are those of the folder that session ran in and of the folder you typed the command in,
+and the coverage section says which folders those were and how many
 sessions the project has (`--last` reads one). A run with no credential file or `.env`
 to compare against opens with `?`, not `✓`.
 
@@ -411,7 +412,7 @@ flowchart LR
 2. **`PreToolUse` — classify and decide.** `Bash`, `PowerShell` and `Monitor` (the three tools that run a shell command), `Write`/`Edit`/`MultiEdit`/`NotebookEdit`, `Read`, `WebFetch`, and `mcp__*` calls are classified into action classes (`shell.network`, `shell.destructive`, `shell.exec_encoded`, `fs.secrets`, `git.push_external`, `config.self`, `config.self_touch`, `config.instructions`, `mcp.side_effect`, and more) and evaluated against an ordered policy — first matching rule wins, otherwise the configured default (`allow`).
 3. **Audit.** Every decision, on both hooks, is appended to a hash-chained JSONL log (`~/.stroq/audit.jsonl`), with sensitive values redacted before they're written. `stroq verify` checks that the chain hasn't been tampered with. A false positive can be cleared with `stroq untaint --session <id>` (the session id is shown in `stroq log`).
 
-The phase names are Claude Code's; every other adapter maps its host's events onto the same pair — Cursor's `beforeShellExecution`/`afterMCPExecution`, Codex's and Copilot's `PreToolUse`/`PostToolUse`, OpenClaw's `before_tool_call`/`after_tool_call`, Windsurf's `pre_*`/`post_*` events, the MCP proxy's request and its response — so one policy file, one taint store and one audit log govern all of them.
+The phase names are Claude Code's; every other adapter maps its host's events onto the same pair (Claude Code also reports a failed tool through a third event, `PostToolUseFailure`, which is scanned like a result) — Cursor's `beforeShellExecution`/`afterMCPExecution`, Codex's and Copilot's `PreToolUse`/`PostToolUse`, OpenClaw's `before_tool_call`/`after_tool_call`, Windsurf's `pre_*`/`post_*` events, the MCP proxy's request and its response — so one policy file, one taint store and one audit log govern all of them.
 
 If Stroq itself crashes while handling a high-impact tool call, it fails **closed** — deny — rather than silently letting the action through.
 
@@ -491,7 +492,7 @@ The repository is also a plugin marketplace. Inside Claude Code:
 /plugin install stroq@stroq
 ```
 
-This registers the same `PreToolUse`/`PostToolUse` hooks as `stroq init` without touching your `.claude/settings.json`, so `stroq doctor` will report the settings-file hooks as missing — that is expected. The plugin's hook wrapper runs a globally installed `stroq` when there is one (fastest), and otherwise `npx -y @stroq/cli@<pinned version>` (the first run downloads the package). If neither can start, a `PreToolUse` event exits with code 2, which Claude Code treats as _block_: a missing runtime never silently disables the firewall. For the lowest per-call latency, `npm install -g @stroq/cli` alongside the plugin.
+This registers the same `PreToolUse`, `PostToolUse` and `PostToolUseFailure` hooks as `stroq init` without touching your `.claude/settings.json`, so `stroq doctor` will report the settings-file hooks as missing — that is expected. The plugin's hook wrapper runs a globally installed `stroq` when there is one (fastest), and otherwise `npx -y @stroq/cli@<pinned version>` from a scratch directory, within an 11-second deadline for the whole path (the first run downloads the package; while a release is not on npm yet, the newest one runs). If neither can start, a `PreToolUse` event exits with code 2, which Claude Code treats as _block_: a missing runtime never silently disables the firewall. For the lowest per-call latency, `npm install -g @stroq/cli` alongside the plugin.
 
 ### From source
 

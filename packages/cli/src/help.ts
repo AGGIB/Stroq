@@ -153,7 +153,10 @@ const COMMANDS: readonly CommandHelp[] = [
       'sessions that ran before you installed',
     ],
     flags: [
-      ['--last', 'the newest session recorded for this directory'],
+      [
+        '--last',
+        'the newest session recorded for this project (this directory, or the folder above it)',
+      ],
       ['--transcript <path>', 'a specific transcript'],
       ['--json', 'machine-readable output'],
       ['--list', 'list the sessions in the audit log'],
@@ -167,7 +170,10 @@ const COMMANDS: readonly CommandHelp[] = [
       'or call. Reads names and sources only, never a value',
     ],
     flags: [
-      ['--last', 'the newest session recorded for this directory'],
+      [
+        '--last',
+        'the newest session recorded for this project (this directory, or the folder above it)',
+      ],
       ['--transcript <path>', 'a specific transcript or rollout'],
       ['--json', 'machine-readable output'],
       ['--fail-on-finding', 'exit 1 when a credential is found'],
