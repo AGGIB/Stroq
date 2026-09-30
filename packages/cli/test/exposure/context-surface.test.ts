@@ -153,6 +153,45 @@ describe('contextSurface', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 20_000);
 
+  // One budget for the three walks into the skills, so a repository's link to a directory
+  // it does not own spent it before the user's own plugin skills were reached.
+  it('does not let a repository’s symlink spend the budget the user’s own skills need', () => {
+    const home = fixture();
+    const cwd = fixture();
+    const outside = fixture();
+    for (let i = 0; i < 2_500; i += 1) mkdirSync(join(outside, `d${i}`));
+    mkdirSync(join(home, '.claude', 'plugins', 'p'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'plugins', 'p', 'SKILL.md'), '# mine');
+    mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
+    symlinkSync(outside, join(cwd, '.claude', 'skills', 'big'), 'dir');
+    const s = contextSurface(cwd, home);
+    expect(s.skills).toBe(1);
+    expect(s.capped).toBe(true);
+  }, 20_000);
+
+  it('reads a large plugin cache under the home directory in full', () => {
+    const home = fixture();
+    const cwd = fixture();
+    for (let i = 0; i < 3_000; i += 1) {
+      mkdirSync(join(home, '.claude', 'plugins', `p${i}`), { recursive: true });
+      writeFileSync(join(home, '.claude', 'plugins', `p${i}`, 'SKILL.md'), '# skill');
+    }
+    const s = contextSurface(cwd, home);
+    expect(s.skills).toBe(3_000);
+    expect(s.capped).toBe(false);
+  }, 30_000);
+
+  it('does not look inside node_modules or .git for skills', () => {
+    const home = fixture();
+    const cwd = fixture();
+    for (const dir of ['node_modules', '.git'])
+      mkdirSync(join(home, '.claude', 'plugins', 'p', dir, 'x'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'plugins', 'p', 'SKILL.md'), '# real');
+    writeFileSync(join(home, '.claude', 'plugins', 'p', 'node_modules', 'x', 'SKILL.md'), '# dep');
+    writeFileSync(join(home, '.claude', 'plugins', 'p', '.git', 'x', 'SKILL.md'), '# git');
+    expect(contextSurface(cwd, home).skills).toBe(1);
+  });
+
   it('does not call an ordinary tree capped', () => {
     const home = fixture();
     const cwd = fixture();

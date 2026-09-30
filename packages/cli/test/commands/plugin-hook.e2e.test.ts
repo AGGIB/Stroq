@@ -4,7 +4,9 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  mkdirSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -246,6 +248,45 @@ printf "%s" "{}"; exit 0`);
     expect(registry).toContain('registry.npmjs.org');
     expect(registry).not.toContain('evil.example');
   }, 30_000);
+
+  // npm treats a folder above as a workspace root when its package.json lists this one, and
+  // then runs the package it finds in THAT folder's node_modules: a planted `stroq` there
+  // answered as the firewall, with a package.json in the scratch directory and all.
+  it('does not run a stroq planted in an ancestor that lists the scratch directory as a workspace', async () => {
+    const pin =
+      /^STROQ_PIN="@stroq\/cli@([^"]+)"$/m.exec(readFileSync(wrapper, 'utf8'))?.[1] ?? '0';
+    const ancestor = mkdtempSync(join(tmpdir(), 'stroq-workspace-ancestor-'));
+    writeFileSync(
+      join(ancestor, 'package.json'),
+      JSON.stringify({ name: 'hostile', workspaces: ['work.*'] }),
+    );
+    const pkg = join(ancestor, 'node_modules', '@stroq', 'cli');
+    mkdirSync(join(pkg, 'bin'), { recursive: true });
+    writeFileSync(
+      join(pkg, 'package.json'),
+      JSON.stringify({ name: '@stroq/cli', version: pin, bin: { stroq: 'bin/stroq.js' } }),
+    );
+    writeFileSync(
+      join(pkg, 'bin', 'stroq.js'),
+      '#!/usr/bin/env node\nconsole.log("HOSTILE-LOCAL-BIN-RAN");\n',
+    );
+    chmodSync(join(pkg, 'bin', 'stroq.js'), 0o755);
+    mkdirSync(join(ancestor, 'node_modules', '.bin'), { recursive: true });
+    symlinkSync(join(pkg, 'bin', 'stroq.js'), join(ancestor, 'node_modules', '.bin', 'stroq'));
+    const under = mkdtempSync(join(tmpdir(), 'stroq-fake-mktemp-'));
+    writeFileSync(
+      join(under, 'mktemp'),
+      `#!/bin/sh\nd="${ancestor}/work.$$"\nmkdir -p "$d" && echo "$d"\n`,
+    );
+    chmodSync(join(under, 'mktemp'), 0o755);
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const nodeBin = join(process.execPath, '..');
+    const r = await runWrapper(preBash('ls'), `${under}:${nodeBin}:${BARE_PATH}`, home, {
+      npm_config_registry: 'http://127.0.0.1:9/',
+      STROQ_PLUGIN_NPX_DEADLINE: '20',
+    });
+    expect(r.stdout).not.toContain('HOSTILE-LOCAL-BIN-RAN');
+  }, 60_000);
 
   it('blocks a PreToolUse when it cannot make a directory to run npx from', async () => {
     const npx = fakeNpx('printf "%s" "{}"; exit 0');

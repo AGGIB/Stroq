@@ -29,9 +29,11 @@
 #   Each fetch is also capped and not retried, so most failures come sooner.
 # - npm reads the `.npmrc` of the project it finds by walking up from where it runs, and a
 #   repository can carry one that names the registry the package comes from. npx is run
-#   from a fresh directory with a package.json of its own, so neither the project nor
-#   anything above the scratch directory chooses the code that acts as its firewall
-#   (Stroq takes the project's directory from the hook event, not from where it runs).
+#   from a fresh directory with a package.json of its own, and with --no-workspaces (a
+#   folder above that lists it as a workspace would supply its own node_modules), so
+#   neither the project nor anything above the scratch directory chooses the code that
+#   acts as its firewall (Stroq takes the project's directory from the hook event, not
+#   from where it runs).
 set -u
 STROQ_PIN="@stroq/cli@0.21.1"
 
@@ -60,7 +62,10 @@ run_bounded() {
   (
     cd "$work" || exit 126
     export npm_config_fetch_retries=0 npm_config_fetch_timeout=6000
-    exec npx -y "$package" hook claude-code <"$work/in" 2>"$work/err"
+    # --no-workspaces: a folder above that lists this one as a workspace makes npm run
+    # the package it finds in THAT folder's node_modules, and a `stroq` planted there
+    # would answer as the firewall.
+    exec npx --no-workspaces -y "$package" hook claude-code <"$work/in" 2>"$work/err"
   ) &
   pid=$!
   (
