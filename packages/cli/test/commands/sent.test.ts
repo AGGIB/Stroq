@@ -1,8 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuditLog } from '@stroq/core';
+import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { runSent, sessionBelongsHere } from '../../src/commands/sent.js';
 import { READERS } from '../../src/sent/readers.js';
 import { projectSlug } from '../../src/replay/transcript.js';
@@ -301,6 +308,16 @@ function claudeSession(ranIn: string, name: string, result: string, mtime?: Date
   if (mtime) utimesSync(file, mtime, mtime);
 }
 
+/** A Codex rollout recorded in `ranIn`, filed where Codex files them, at time `mtime`. */
+function codexRollout(ranIn: string, name: string, mtime: Date): void {
+  const dir = join(home, '.codex', 'sessions', '2026', '09', '01');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `rollout-${name}.jsonl`);
+  const meta = { type: 'session_meta', payload: { session_id: name, cwd: ranIn } };
+  writeFileSync(file, `${JSON.stringify(meta)}\n`);
+  utimesSync(file, mtime, mtime);
+}
+
 // The index was built from the directory `stroq sent` was run in, before the session was
 // read, so a project's `.env` was compared only when the command happened to be run from
 // the same folder the agent had been started in. Run one level down, it matched nothing
@@ -372,6 +389,102 @@ describe('stroq sent --last, run from another folder of the same project', () =>
     await runSent(['--last']);
     out.restore();
     expect(out.text()).toContain(`project .env files were read from ${cwd}`);
+  });
+});
+
+// Each reader falls back to every session on the machine when the directory has none of its
+// own, and the newest of those was picked and then refused as another project's, though the
+// project's own session (recorded in a folder above, or by another agent) was there.
+describe('stroq sent --last, finding the project’s own session', () => {
+  it('reads the session recorded in a folder above, not a newer one of another project', async () => {
+    claudeSession(cwd, 'parent', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    claudeSession('/elsewhere/one', 'other', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    const sub = join(cwd, 'packages', 'app');
+    mkdirSync(sub, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(sub);
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(0);
+    expect(out.text()).not.toContain('no agent session recorded');
+    expect(out.text()).toContain('parent');
+  });
+
+  it('prefers this directory’s own session over a newer one another agent recorded elsewhere', async () => {
+    claudeSession(cwd, 'mine', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    codexRollout('/elsewhere/one', 'foreign', new Date('2026-09-20T00:00:00Z'));
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(0);
+    expect(out.text()).not.toContain('no agent session recorded');
+    expect(out.text()).toContain('mine');
+  });
+
+  it('counts only this project’s sessions when another agent has a fallback list', async () => {
+    claudeSession(cwd, 'mine-a', 'nothing', new Date('2026-09-10T00:00:00Z'));
+    claudeSession(cwd, 'mine-b', 'nothing', new Date('2026-09-11T00:00:00Z'));
+    codexRollout('/elsewhere/one', 'foreign-1', new Date('2026-08-01T00:00:00Z'));
+    codexRollout('/elsewhere/two', 'foreign-2', new Date('2026-08-02T00:00:00Z'));
+    const out = capture();
+    await runSent(['--last', '--json']);
+    out.restore();
+    const parsed = JSON.parse(out.text()) as { coverage: { sessionsInProject?: number } };
+    expect(parsed.coverage.sessionsInProject).toBe(2);
+  });
+
+  it('reads a Codex session recorded in a folder above', async () => {
+    codexRollout(cwd, 'above', new Date('2026-09-01T00:00:00Z'));
+    const sub = join(cwd, 'packages', 'app');
+    mkdirSync(sub, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(sub);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).not.toContain('no agent session recorded');
+  });
+});
+
+describe('stroq sent --last, the private index it uses for the session’s folder', () => {
+  const ENV_SECRET = ['sk', 'live', '51H8xk2LkdIwHu7ix0abcdEFGH'].join('_');
+  const CANARY = 'canary-value-9x8y7z6w5v4u3t2s';
+  const scratchDirs = (): string[] =>
+    readdirSync(tmpdir()).filter((name) => name.startsWith('stroq-sent-index-'));
+
+  function subfolderSession(result: string): void {
+    const app = join(cwd, 'packages', 'app');
+    mkdirSync(app, { recursive: true });
+    writeFileSync(join(app, '.env'), `STRIPE_API_KEY=${ENV_SECRET}\n`);
+    claudeSession(app, 'union', result);
+  }
+
+  it('leaves nothing of it behind', async () => {
+    const before = scratchDirs();
+    subfolderSession(`STRIPE_API_KEY=${ENV_SECRET}\n`);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(scratchDirs()).toEqual(before);
+  });
+
+  it('still finds a canary the guard planted', async () => {
+    await new FileSecretIndex(secretsFile(), home).addCanary(CANARY, 'decoy_token');
+    subfolderSession(`saw ${CANARY} in the file\n`);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain('decoy_token');
+    expect(out.text()).toContain('canary');
+    expect(out.text()).not.toContain(CANARY);
+  });
+
+  it('names both folders whose .env files it read', async () => {
+    subfolderSession('nothing');
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    const app = join(cwd, 'packages', 'app');
+    expect(out.text()).toContain(`project .env files were read from ${app} and ${cwd}`);
   });
 });
 

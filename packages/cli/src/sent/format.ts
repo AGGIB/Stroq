@@ -68,9 +68,9 @@ function coverageLines(report: SentReport): string[] {
   const lines = [
     'COVERAGE',
     `  Matched against ${c.indexedSecrets} value(s) indexed from: ${sources}`,
-    ...(c.projectDir === undefined
+    ...(c.projectDirs === undefined || c.projectDirs.length === 0
       ? []
-      : [`  (project .env files were read from ${c.projectDir})`]),
+      : [`  (project .env files were read from ${c.projectDirs.join(' and ')})`]),
     '  To match known values, this command reads supported local credential files',
     '  and project .env sources. It stores and prints names and sources, never values.',
     '  Credential-shaped variables in the environment this command ran with are matched',

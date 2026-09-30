@@ -206,12 +206,16 @@ export interface FoundTranscript {
  * this.
  */
 export async function newestTranscript(cwd: string): Promise<FoundTranscript | null> {
+  const lists = await Promise.all(
+    READERS.map(async (reader) => ({ reader, ...(await reader.find(cwd)) })),
+  );
+  // A reader with sessions of this directory's own outranks one that only has the
+  // fallback list of every project: the newest session on the machine is very often
+  // another project's, and `--last` refused it while this one's own was there.
+  const own = lists.filter((list) => list.scoped && list.files.length > 0);
+  const candidates = own.length > 0 ? own : lists;
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
-  let sessions: number | undefined;
-  for (const reader of READERS) {
-    const { files, scoped } = await reader.find(cwd);
-    // Only a directory's own sessions are its count; the fallback list is every project's.
-    if (scoped) sessions = (sessions ?? 0) + files.length;
+  for (const { reader, files } of candidates) {
     const newest = files[0];
     if (!newest) continue;
     if (best === null || newest.mtimeMs > best.mtimeMs) {
@@ -219,9 +223,11 @@ export async function newestTranscript(cwd: string): Promise<FoundTranscript | n
     }
   }
   if (best === null) return null;
+  // The count is the directory's own sessions, across the readers that have any.
+  const sessions = own.reduce((total, list) => total + list.files.length, 0);
   return {
     reader: best.reader,
     path: best.path,
-    ...(sessions === undefined ? {} : { sessions }),
+    ...(own.length === 0 ? {} : { sessions }),
   };
 }

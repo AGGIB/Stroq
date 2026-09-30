@@ -176,7 +176,7 @@ async function scanInProject(
 ): Promise<SentReport> {
   if (where.projectDir === where.cwd)
     return scanTranscript(transcript, source, where.index, where.scope);
-  const scratch = mkdtempSync(join(tmpdir(), 'stroq-sent-'));
+  const scratch = mkdtempSync(join(tmpdir(), 'stroq-sent-index-'));
   try {
     const copy = join(scratch, 'secrets.json');
     if (existsSync(secretsFile())) copyFileSync(secretsFile(), copy);
@@ -188,7 +188,11 @@ async function scanInProject(
     ]);
     // The session's own folder is the scope's `cwd`, so a `.env` it named by a relative
     // path is recognised; the absolute paths of both folders' files are all in the index.
-    const scope = { ...(await buildScope(both, where.cwd, where.home)), cwd: where.projectDir };
+    const scope = {
+      ...(await buildScope(both, where.cwd, where.home)),
+      cwd: where.projectDir,
+      projectDirs: [where.projectDir, where.cwd],
+    };
     return await scanTranscript(transcript, source, both, scope);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

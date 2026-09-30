@@ -13,7 +13,7 @@ import { createReadStream } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 export interface TranscriptPre {
   readonly kind: 'pre';
@@ -189,6 +189,18 @@ export interface TranscriptFile {
   readonly mtimeMs: number;
 }
 
+/** `dir` and each folder above it, nearest first, stopping short of the filesystem root. */
+export function directoryAndParents(dir: string): string[] {
+  const out: string[] = [];
+  let current = resolve(dir);
+  for (;;) {
+    out.push(current);
+    const parent = dirname(current);
+    if (parent === current || parent === dirname(parent)) return out;
+    current = parent;
+  }
+}
+
 /** Sessions found for a directory, newest first, and whether they are its own. */
 export interface SessionList {
   readonly files: readonly TranscriptFile[];
@@ -211,9 +223,14 @@ export async function findTranscripts(cwd: string): Promise<TranscriptFile[]> {
  */
 export async function findTranscriptsScoped(cwd: string): Promise<SessionList> {
   const root = transcriptRoot();
-  const scoped = join(root, projectSlug(cwd));
-  const found = (await listJsonl(scoped)) ?? [];
-  if (found.length > 0) return { files: found.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: true };
+  // This directory's own sessions, else those of the nearest folder above it that has any:
+  // an agent started at the project's root and a command typed in one of its subfolders are
+  // the same project, and the sessions of the folder above are the ones to read.
+  for (const dir of directoryAndParents(cwd)) {
+    const found = (await listJsonl(join(root, projectSlug(dir)))) ?? [];
+    if (found.length > 0)
+      return { files: found.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: true };
+  }
 
   let dirs: string[];
   try {
