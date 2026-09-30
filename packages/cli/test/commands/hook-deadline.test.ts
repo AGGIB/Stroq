@@ -65,6 +65,29 @@ describe('the timeout Stroq installs matches the deadline it gives itself', () =
     expect(matchers('PostToolUseFailure')).toEqual([POST_MATCHER]);
   });
 
+  // The classifier judges Grep (a search over a path can reach a credential or a decoy
+  // file) but the matcher did not name it, so the call never reached the classifier and
+  // the documented protection held for Read and not for Grep. Every tool the
+  // classifier knows has to be one the matcher sends it.
+  it('sends the classifier every tool it has a rule for', () => {
+    const CLASSIFIED = [
+      'Bash',
+      'PowerShell',
+      'Monitor',
+      'Write',
+      'Edit',
+      'MultiEdit',
+      'NotebookEdit',
+      'Read',
+      'Grep',
+      'WebFetch',
+      'mcp__server__tool',
+    ];
+    const pre = new RegExp(`^(?:${PRE_MATCHER})$`);
+    for (const tool of CLASSIFIED) expect(pre.test(tool), tool).toBe(true);
+    for (const tool of ['Grep', 'Read']) expect(HIGH_IMPACT_TOOL.test(tool)).toBe(false);
+  });
+
   // Claude Code runs shell commands through `Monitor` and `PowerShell` as well as Bash.
   it('covers every Claude Code tool that runs a shell command', () => {
     for (const tool of ['Bash', 'Monitor', 'PowerShell']) {

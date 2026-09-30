@@ -59,7 +59,7 @@ import {
 import { initMcp } from './init-mcp.js';
 
 export const PRE_MATCHER =
-  'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
+  'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
