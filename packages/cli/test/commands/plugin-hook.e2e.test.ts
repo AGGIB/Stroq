@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -23,13 +23,14 @@ function runWrapper(
   stdin: string,
   path: string,
   home: string,
+  extraEnv: Readonly<Record<string, string>> = {},
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
     // The wrapper runs the built, self-contained bundle, so cwd matters to nothing
     // but the hook's own idea of the project.
     const child = spawn('bash', [wrapper], {
       cwd: cliDir,
-      env: { ...process.env, PATH: path, STROQ_HOME: home },
+      env: { ...process.env, PATH: path, STROQ_HOME: home, ...extraEnv },
     });
     let stdout = '';
     let stderr = '';
@@ -107,6 +108,103 @@ describe.skipIf(process.platform === 'win32')(
     }, 60_000);
   },
 );
+
+/**
+ * A fake `npx` on PATH, so the wrapper's second way of starting Stroq can be exercised
+ * without a network. It logs what it was asked to run and the npm settings it was given,
+ * swallows stdin like the real one would hand it to the program, and then behaves as
+ * `body` (a shell fragment) says.
+ */
+function fakeNpx(body: string): { dir: string; log: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'stroq-fake-npx-'));
+  const log = join(dir, 'calls.log');
+  writeFileSync(
+    join(dir, 'npx'),
+    `#!/bin/sh
+echo "call: $* | timeout=$npm_config_fetch_timeout retries=$npm_config_fetch_retries" >> "${log}"
+cat > /dev/null
+${body}
+`,
+  );
+  chmodSync(join(dir, 'npx'), 0o755);
+  return { dir, log };
+}
+
+const calls = (log: string): string[] =>
+  existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
+
+const ETARGET_STDERR =
+  "echo 'npm error code ETARGET' >&2; echo 'npm error notarget No matching version found for @stroq/cli@99.0.0.' >&2; exit 1";
+
+describe.skipIf(process.platform === 'win32')('the plugin wrapper, going through npx', () => {
+  const pinnedThenLatest = (): { dir: string; log: string } =>
+    fakeNpx(`case "$*" in
+  *'@stroq/cli@latest'*) printf '%s' '{"hookSpecificOutput":{"permissionDecision":"allow"}}'; exit 0 ;;
+  *) ${ETARGET_STDERR} ;;
+esac`);
+
+  // The pin reaches main before npm has the version: main is what plugin users update
+  // from, and the release is staged for approval. Until it is approved the pinned
+  // version does not exist, npx says ETARGET, and the wrapper blocked every PreToolUse
+  // of every plugin user without a global stroq.
+  it('runs the newest release when the pinned version is not on npm yet', async () => {
+    const npx = pinnedThenLatest();
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('permissionDecision');
+    const seen = calls(npx.log);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toContain('@stroq/cli@0.');
+    expect(seen[1]).toContain('@stroq/cli@latest');
+  }, 30_000);
+
+  it('does not fall back to latest when the failure is anything else', async () => {
+    const npx = fakeNpx("echo 'npm error code E503' >&2; exit 1");
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    expect(r.code).toBe(2);
+    expect(calls(npx.log).filter((line) => line.startsWith('call:'))).toHaveLength(1);
+  }, 30_000);
+
+  it('does not run latest because stroq itself failed on the pinned version', async () => {
+    const npx = fakeNpx("echo 'stroq: internal error' >&2; exit 1");
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    expect(r.code).toBe(2);
+    expect(calls(npx.log)).toHaveLength(1);
+  }, 30_000);
+
+  it('still lets a PostToolUse through when neither version can be run', async () => {
+    const npx = fakeNpx(ETARGET_STDERR);
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const r = await runWrapper(postRead, `${npx.dir}:${BARE_PATH}`, home);
+    expect(r.code).toBe(0);
+  }, 30_000);
+
+  // npx has no deadline, and Claude Code lifts a hook that outlives its timeout and lets
+  // the call through: a registry that hangs turned the firewall off instead of blocking.
+  it('gives npx a fetch deadline that fits inside the hook timeout, and no retries', async () => {
+    const npx = fakeNpx('printf "%s" "{}"; exit 0');
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    const [first] = calls(npx.log);
+    expect(first).toContain('retries=0');
+    const timeout = Number(/timeout=(\d+)/.exec(first ?? '')?.[1]);
+    // The hook timeout is 15 s; the pinned attempt and the fallback both fetch.
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(6_000);
+  }, 30_000);
+
+  it('prefers a global stroq and never calls npx', async () => {
+    const npx = fakeNpx('exit 1');
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const path = `${stroqShim()}:${npx.dir}:${BARE_PATH}`;
+    const r = await runWrapper(preBash('ls'), path, home);
+    expect(r.code).toBe(0);
+    expect(calls(npx.log)).toHaveLength(0);
+  }, 30_000);
+});
 
 describe('the Claude Code plugin wrapper', () => {
   // Without a global `stroq`, the plugin runs this pin through npx. It sat at 0.12.1
