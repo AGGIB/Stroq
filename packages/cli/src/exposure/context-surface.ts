@@ -55,6 +55,19 @@ const INSTRUCTION_NAMES = [
 class FileSet {
   private readonly seen = new Set<string>();
   readonly paths: string[] = [];
+  private dirs = 0;
+  /** True when a walk stopped at `MAX_WALK_DIRS` directories, so what was found is a lower bound. */
+  exhausted = false;
+
+  /** Counts a directory about to be read; false, and remembered, once the budget is spent. */
+  enter(): boolean {
+    if (this.dirs >= MAX_WALK_DIRS) {
+      this.exhausted = true;
+      return false;
+    }
+    this.dirs += 1;
+    return true;
+  }
 
   add(path: string): void {
     if (this.seen.has(path) || this.full) return;
@@ -73,6 +86,12 @@ class FileSet {
 
 /** Directories nested deeper than this are not searched: no instruction tree is this deep. */
 const MAX_WALK_DEPTH = 12;
+/**
+ * Directories read per kind of file. A repository can commit a symlink to a directory it
+ * does not own; followed with no budget, a link to a filesystem root walked it for minutes
+ * (92 s measured for `/System`) before the file cap was reached.
+ */
+const MAX_WALK_DIRS = 2_000;
 
 /**
  * Every file under `dir` for which `match` holds, into `out`.
@@ -98,6 +117,7 @@ function walk(
   }
   if (visited.has(real)) return;
   visited.add(real);
+  if (!out.enter()) return;
   let entries: readonly string[];
   try {
     entries = readdirSync(dir);
@@ -231,7 +251,15 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
     flagged,
     digests,
     foreignHooks: countForeignHooks(cwd),
-    capped: skills.full || subagents.full || commands.full,
+    capped:
+      skills.full ||
+      subagents.full ||
+      commands.full ||
+      instruction.full ||
+      skills.exhausted ||
+      subagents.exhausted ||
+      commands.exhausted ||
+      instruction.exhausted,
   };
 }
 

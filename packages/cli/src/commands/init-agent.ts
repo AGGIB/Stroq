@@ -22,7 +22,8 @@ import { HOOK_AGENTS, runInit } from './init.js';
  */
 const isHookAgent = (id: string): boolean => (HOOK_AGENTS as readonly string[]).includes(id);
 const isAgentFlag = (arg: string): boolean => arg === '--agent' || arg.startsWith('--agent=');
-const command = (id: string): string => `stroq init --agent ${id}`;
+const command = (id: string, user: boolean): string =>
+  `stroq init --agent ${id}${user ? ' --user' : ''}`;
 const nameOf = (id: string, cwd: string): string => agentHookStatus(id, cwd)?.name ?? id;
 
 export interface InitWhere {
@@ -36,6 +37,8 @@ export async function runInitCommand(
 ): Promise<number> {
   if (args.some(isAgentFlag)) return runInit(args);
   const cwd = where.cwd ?? process.cwd();
+  // The advice below is a command to run, and `--user` is part of what was asked for.
+  const user = args.includes('--user');
   // The home directory only: a `.agents` or `.cursor` folder that came with a repository
   // says what its authors use, and would otherwise decide which config gets written.
   const found = detectedAgents(cwd, where.home ?? homedir(), 'user').filter(isHookAgent);
@@ -46,6 +49,7 @@ export async function runInitCommand(
       noteUnguarded(
         found.filter((id) => id !== 'claude-code'),
         cwd,
+        user,
       );
     return code;
   }
@@ -58,7 +62,7 @@ export async function runInitCommand(
 
   process.stdout.write(
     `Found ${found.length} agents here, none of them Claude Code, and nothing was installed:\n` +
-      `${found.map((id) => `  ${command(id).padEnd(34)}${nameOf(id, cwd)}`).join('\n')}\n` +
+      `${found.map((id) => `  ${command(id, user).padEnd(34)}${nameOf(id, cwd)}`).join('\n')}\n` +
       'Run the one for the agent you want guarded first.\n',
   );
   return 1;
@@ -73,12 +77,12 @@ const note = (text: string): void => {
 };
 
 /** The agents found on this machine that Stroq is not guarding, with the command for each. */
-function noteUnguarded(candidates: readonly string[], cwd: string): void {
+function noteUnguarded(candidates: readonly string[], cwd: string, user: boolean): void {
   const unguarded = candidates.filter((id) => agentHookStatus(id, cwd)?.installed !== true);
   if (unguarded.length === 0) return;
   note(
     `Also found here, not guarded: ${unguarded.map((id) => nameOf(id, cwd)).join(', ')}\n${unguarded
-      .map((id) => `  ${command(id)}\n`)
+      .map((id) => `  ${command(id, user)}\n`)
       .join('')}`,
   );
 }

@@ -158,4 +158,28 @@ describe('stroq init with no --agent', () => {
       expect(stderr).not.toContain('was not found here');
     },
   );
+
+  // The advice is a command to run, and `--user` is part of what was asked for.
+  it('keeps --user in the commands it prints when several agents are found', async () => {
+    has('.cursor');
+    has('.codex');
+    const { text } = await bare('--user');
+    expect(text).toContain('stroq init --agent cursor --user');
+    expect(text).toContain('stroq init --agent codex --user');
+  });
+
+  it('keeps --user in the commands it advises after installing', async () => {
+    has('.claude');
+    has('.cursor');
+    const { stderr } = await bare('--user');
+    expect(stderr).toContain('stroq init --agent cursor --user');
+  });
+
+  it('prints no --user when it was not asked for', async () => {
+    has('.claude');
+    has('.cursor');
+    const { stderr } = await bare();
+    expect(stderr).toContain('stroq init --agent cursor');
+    expect(stderr).not.toContain('--user');
+  });
 });

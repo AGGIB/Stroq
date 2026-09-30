@@ -221,6 +221,32 @@ esac`);
     expect(where.startsWith(realpathSync(repoRoot))).toBe(false);
   }, 30_000);
 
+  // npm finds the project by walking up from where it runs to the nearest package.json (or
+  // node_modules) and reads that folder's .npmrc, so an empty directory inside a directory
+  // that has one is not isolated: it inherited the registry the ancestor named. This asks
+  // the real npm which registry it would use, from where the wrapper ran it.
+  it('does not let a .npmrc above the scratch directory choose the registry', async () => {
+    const ancestor = mkdtempSync(join(tmpdir(), 'stroq-npmrc-ancestor-'));
+    writeFileSync(join(ancestor, 'package.json'), '{"name":"hostile"}');
+    writeFileSync(join(ancestor, '.npmrc'), 'registry=http://evil.example:9/\n');
+    const npx = fakeNpx(`npm config get registry >> "$(dirname "$0")/registry.log" 2>&1
+printf "%s" "{}"; exit 0`);
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const nodeBin = join(process.execPath, '..');
+    // GNU mktemp puts the directory under $TMPDIR; BSD mktemp ignores it. A `mktemp` that
+    // always does, so the test means the same thing on both.
+    const under = mkdtempSync(join(tmpdir(), 'stroq-fake-mktemp-'));
+    writeFileSync(
+      join(under, 'mktemp'),
+      `#!/bin/sh\nd="${ancestor}/work.$$"\nmkdir -p "$d" && echo "$d"\n`,
+    );
+    chmodSync(join(under, 'mktemp'), 0o755);
+    await runWrapper(preBash('ls'), `${under}:${npx.dir}:${nodeBin}:${BARE_PATH}`, home);
+    const registry = readFileSync(join(npx.dir, 'registry.log'), 'utf8');
+    expect(registry).toContain('registry.npmjs.org');
+    expect(registry).not.toContain('evil.example');
+  }, 30_000);
+
   it('blocks a PreToolUse when it cannot make a directory to run npx from', async () => {
     const npx = fakeNpx('printf "%s" "{}"; exit 0');
     const noTemp = mkdtempSync(join(tmpdir(), 'stroq-no-mktemp-'));

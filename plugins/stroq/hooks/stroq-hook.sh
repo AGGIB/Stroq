@@ -27,9 +27,10 @@
 #   attempt and the fallback together, gets one deadline (11 s), after which npx and
 #   everything it started are ended and the exit is non-zero, so a PreToolUse blocks.
 #   Each fetch is also capped and not retried, so most failures come sooner.
-# - npm reads a `.npmrc` from the directory it runs in, and a repository can carry one
-#   that names the registry the package comes from. npx is run from a fresh empty
-#   directory, so the project does not choose the code that acts as its firewall
+# - npm reads the `.npmrc` of the project it finds by walking up from where it runs, and a
+#   repository can carry one that names the registry the package comes from. npx is run
+#   from a fresh directory with a package.json of its own, so neither the project nor
+#   anything above the scratch directory chooses the code that acts as its firewall
 #   (Stroq takes the project's directory from the hook event, not from where it runs).
 set -u
 STROQ_PIN="@stroq/cli@0.21.1"
@@ -85,6 +86,10 @@ run_npx() {
     return 1
   fi
   printf '%s' "$input" >"$work/in"
+  # npm finds the project by walking up to the nearest package.json (or node_modules) and
+  # reads that folder's .npmrc: an empty directory inside one that has a hostile .npmrc
+  # would inherit it. A package.json of its own makes this directory the project.
+  printf '{}' >"$work/package.json"
   run_bounded "$NPX_DEADLINE" "$STROQ_PIN"
   code=$?
   cat "$work/err" >&2
