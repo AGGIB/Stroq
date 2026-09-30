@@ -7,6 +7,11 @@ import type { Policy } from './policy/policy-types.js';
 import { withWayOut } from './policy/way-out.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
+import {
+  candidatesOfVariants,
+  excerptRedactor,
+  percentDecodedLeniently,
+} from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
@@ -94,7 +99,7 @@ export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp
  * rules that matter there and therefore the safe way to be wrong.
  */
 const INSTRUCTION_READ_PATH =
-  /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]/i;
+  /(?:^|[/\\])(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]|(?:^|[/\\])\.github[/\\]instructions[/\\]/i;
 
 /**
  * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
@@ -341,12 +346,47 @@ export class StroqEngine {
     const index = this.opts.secrets;
     if (!index) return redactMatches(summary, known);
     try {
-      const matches = await index.lookup(candidatesFromText(summary), cwd);
-      return redactMatches(summary, [...known, ...matches]);
+      const decoded = percentDecodedLeniently(summary);
+      const found = await index.lookup(
+        decoded === summary
+          ? candidatesFromText(summary)
+          : [...candidatesFromText(summary), ...candidatesFromText(decoded)],
+        cwd,
+      );
+      const matches = [...known, ...found];
+      const redacted = redactMatches(summary, matches);
+      // A value spelled with percent-escapes (`%53up3r...`) is not the text the lookup
+      // matched, and cannot be cut out of the original: keep the decoded text, redacted.
+      return decoded !== summary &&
+        matches.some((m) => percentDecodedLeniently(redacted).includes(m.token))
+        ? redactMatches(percentDecodedLeniently(redacted), matches)
+        : redacted;
     } catch {
       // A failed index must not turn a local command into an audit disclosure,
       // nor suppress a post-scan and its taint by throwing before it runs.
       return '[REDACTED:secret-index-unavailable]';
+    }
+  }
+
+  /**
+   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted, clipped,
+   * and with every value the secret index knows taken out (see `excerptRedactor` for the
+   * spellings an atom can hold one in). The values are looked up in every form the atoms
+   * were read from. A failing index withholds the excerpt rather than storing it unchecked,
+   * and so does a result that holds too many known values to check.
+   */
+  private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
+    const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
+    const index = this.opts.secrets;
+    if (!index) return atoms.map((atom) => clip(atom.value));
+    try {
+      const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
+      if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
+      const scrub = excerptRedactor(event.toolResultText, matches);
+      if (scrub === null) return atoms.map(() => '[REDACTED:too-many-secrets]');
+      return atoms.map((atom) => clip(scrub(atom)));
+    } catch {
+      return atoms.map(() => '[REDACTED:secret-index-unavailable]');
     }
   }
 
@@ -365,15 +405,16 @@ export class StroqEngine {
     const store = this.opts.provenance;
     if (!store || atoms.length === 0) return null;
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
+    const excerpts = await this.safeExcerpts(event, atoms);
     try {
       await store.record(
         event.sessionId,
-        atoms.map((atom) => ({
+        atoms.map((atom, i) => ({
           tool: event.toolName,
           source,
           kind: atom.kind,
           hash: atomHash(atom),
-          excerpt: redact(atom.value).slice(0, MAX_STORED_CHARS),
+          excerpt: excerpts[i] ?? '',
           suspect,
         })),
       );

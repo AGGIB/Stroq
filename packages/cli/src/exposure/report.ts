@@ -110,7 +110,7 @@ export function formatExposure(
     row(
       'Context the agent reads',
       ctx.skills + ctx.subagents + ctx.commands + ctx.instructionFiles,
-      `${Math.round(ctx.bytes / 1024)} KB${ctx.capped ? ' — a lower bound: discovery hit its file cap' : ''}`,
+      `${Math.round(ctx.bytes / 1024)} KB${ctx.capped ? ' — a lower bound: discovery hit its file or directory cap' : ''}`,
     ),
     row('skills', ctx.skills),
     row('subagents', ctx.subagents),

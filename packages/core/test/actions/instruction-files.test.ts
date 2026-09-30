@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
 import { classifyTool } from '../../src/actions/classify-tool.js';
 import { INSTRUCTION_FILE } from '../../src/actions/self-config.js';
+import { scanTargetForTool } from '../../src/engine.js';
 
 /**
  * Files an agent loads as instructions in every later session. Writing one is how a
@@ -29,6 +30,27 @@ const INSTRUCTION_PATHS = [
   'C:\\Users\\dev\\.claude\\projects\\p\\memory\\notes.md',
   '.cursor/rules/style.mdc',
   '.windsurf/rules/style.md',
+  // Loaded into every session by the host, and missing from the list until 0.21.2.
+  // Each name is one Claude Code 2.1.271 itself refers to.
+  'CLAUDE.local.md',
+  '/home/dev/project/CLAUDE.local.md',
+  'AGENTS.override.md',
+  '.codex/AGENTS.override.md',
+  '/home/dev/.claude/rules/style.md',
+  '.claude/rules/testing/unit.md',
+  '.claude/rules',
+  '.claude/output-styles/terse.md',
+  '.github/instructions/typescript.instructions.md',
+  '.claude/scheduled_tasks.json',
+  'C:\\Users\\dev\\.claude\\rules\\style.md',
+  // Named by the same binary and loaded or run by it: the loop prompt, the memory of a
+  // subagent, saved routines and workflows.
+  '.claude/loop.md',
+  '/home/dev/.claude/loop.md',
+  '.claude/agent-memory/reviewer/MEMORY.md',
+  '.claude/agent-memory-local/reviewer/MEMORY.md',
+  '.claude/routines/nightly.md',
+  '.claude/workflows/release.js',
 ];
 
 const LOOK_ALIKES = [
@@ -41,6 +63,19 @@ const LOOK_ALIKES = [
   'src/memory/cache.ts',
   '.cursor/rules.md',
   'README.md',
+  'CLAUDE.local.md.bak',
+  'MYCLAUDE.local.md',
+  'AGENTS.overrides.md',
+  '.claude/rules-notes.md',
+  '.claude/output-styles-old.md',
+  '.github/instructions-notes.md',
+  '.claude/scheduled_tasks.json.bak',
+  '.claude/scheduled_tasks.lock',
+  '.claude/loop.md.bak',
+  '.claude/loop.mdx',
+  '.claude/agent-memory-notes.md',
+  '.claude/routines-old.md',
+  '.claude/workflows.md',
 ];
 
 describe('INSTRUCTION_FILE', () => {
@@ -57,6 +92,22 @@ describe('a write to an instruction file', () => {
   it.each(['Write', 'Edit', 'MultiEdit'])('is config.instructions through %s', (tool) => {
     const { classes } = classifyTool(tool, { file_path: 'CLAUDE.md', content: 'x' }, '/w');
     expect(classes).toContain('config.instructions');
+  });
+
+  it.each([
+    'CLAUDE.local.md',
+    'AGENTS.override.md',
+    '.claude/rules/style.md',
+    '.claude/output-styles/terse.md',
+    '.github/instructions/typescript.instructions.md',
+    '.claude/scheduled_tasks.json',
+  ])('is config.instructions for the newer instruction file %s', (path) => {
+    expect(classifyTool('Write', { file_path: path, content: 'x' }, '/w').classes).toContain(
+      'config.instructions',
+    );
+    expect(classifyCommand(`echo always-run-setup >> ${path}`, '/w').classes).toContain(
+      'config.instructions',
+    );
   });
 
   it('is not a class of its own when the file is only read', () => {
@@ -133,5 +184,23 @@ describe('a write to an instruction file', () => {
     'wc -l .cursorrules',
   ])('is not a write when Bash only reads: %s', (command) => {
     expect(classifyCommand(command, '/w').classes).not.toContain('config.instructions');
+  });
+});
+
+describe('the read side names the same files', () => {
+  // A file the host loads as instructions is scanned as one when it is read, so a rule
+  // scoped to instruction files fires on it. `scanTargetForTool` has its own pattern.
+  it.each([
+    'CLAUDE.local.md',
+    'AGENTS.override.md',
+    '.github/copilot-instructions.md',
+    '.github/instructions/typescript.instructions.md',
+    '.claude/rules/style.md',
+  ])('reads %s as an instruction file', (path) => {
+    expect(scanTargetForTool('Read', { file_path: path })).toBe('instruction_file');
+  });
+
+  it('still reads an ordinary document as repository content', () => {
+    expect(scanTargetForTool('Read', { file_path: 'docs/README.md' })).toBe('repo_content');
   });
 });

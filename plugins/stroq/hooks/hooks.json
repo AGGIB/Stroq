@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*",
+        "matcher": "Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|WebFetch|mcp__.*",
         "hooks": [
           {
             "type": "command",
@@ -22,6 +22,19 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stroq-hook.sh\"",
             "timeout": 15,
             "statusMessage": "Stroq: scanning tool output"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stroq-hook.sh\"",
+            "timeout": 15,
+            "statusMessage": "Stroq: scanning a failed tool's output"
           }
         ]
       }

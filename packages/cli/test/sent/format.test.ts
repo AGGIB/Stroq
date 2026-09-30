@@ -151,6 +151,29 @@ describe('the verdict at the top of stroq sent', () => {
     expect(line).toContain('41 indexed value(s)');
   });
 
+  // A tick over "checked against 0 values" is comfort with nothing behind it, and it
+  // is the line the report opens with.
+  it('does not tick when there was nothing to check against', () => {
+    const empty = report({
+      credentials: [],
+      files: [],
+      coverage: { ...report().coverage, indexedSecrets: 0, indexedSources: [] },
+    });
+    const line = verdict(formatSent(empty));
+    expect(line).toMatch(/^\? /);
+    expect(line).not.toContain('✓');
+    expect(line).toContain('no credential files or .env');
+  });
+
+  it('still ticks when at least one value was indexed', () => {
+    const one = report({
+      credentials: [],
+      files: [],
+      coverage: { ...report().coverage, indexedSecrets: 1 },
+    });
+    expect(verdict(formatSent(one))).toMatch(/^✓ /);
+  });
+
   it('keeps a file touched without a value from reading as clean', () => {
     const line = verdict(formatSent(report({ credentials: [] })));
     expect(line).toMatch(/^! /);
@@ -160,5 +183,57 @@ describe('the verdict at the top of stroq sent', () => {
   it('points to where each found credential is rotated', () => {
     const text = formatSent(report());
     expect(text).toContain('https://console.aws.amazon.com/iam/home#/security_credentials');
+  });
+});
+
+// The link was chosen from the name AND the whole path, first match wins, so a Stripe key
+// in a folder called GitHub was sent to GitHub's token page: the first step of the report,
+// pointing at the wrong provider.
+describe('the rotation link', () => {
+  const rotation = (c: Partial<SentCredential>): string =>
+    formatSent(report({ credentials: [credential({ canary: false, ...c })], files: [] }));
+
+  it.each([
+    ['STRIPE_API_KEY', '~/GitHub/app/.env', 'https://dashboard.stripe.com/apikeys'],
+    ['OPENAI_API_KEY', '~/aws-infra/.env', 'https://platform.openai.com/api-keys'],
+    ['ANTHROPIC_API_KEY', '~/pnpm-workspace/.env', 'https://console.anthropic.com/settings/keys'],
+    ['GITHUB_TOKEN', '.env', 'https://github.com/settings/tokens'],
+    ['NPM_TOKEN', '.env', 'https://www.npmjs.com/settings/~/tokens'],
+    ['_authToken', '~/.npmrc', 'https://www.npmjs.com/settings/~/tokens'],
+    [
+      'aws_secret_access_key',
+      '~/.aws/credentials',
+      'https://console.aws.amazon.com/iam/home#/security_credentials',
+    ],
+  ])('sends %s in %s to its own provider', (name, source, url) => {
+    const text = rotation({ name, source });
+    expect(text).toContain(url);
+    for (const other of [
+      'github.com/settings/tokens',
+      'dashboard.stripe.com',
+      'console.aws.amazon.com',
+    ])
+      if (!url.includes(other)) expect(text).not.toContain(other);
+  });
+
+  it('prints no link when nothing says which provider issued the value', () => {
+    const text = rotation({
+      name: 'DATABASE_PASSWORD',
+      source: '~/pnpm-monorepo/github-actions-demo/.env',
+    });
+    // The fixture's own occurrence mentions an https URL, so look for the providers'.
+    for (const host of [
+      'console.aws.amazon.com',
+      'github.com/settings',
+      'npmjs.com',
+      'platform.openai.com',
+      'console.anthropic.com',
+      'dashboard.stripe.com',
+    ])
+      expect(text).not.toContain(host);
+  });
+
+  it('does not read pnpm as npm', () => {
+    expect(rotation({ name: 'PNPM_HOME_TOKEN', source: '.env' })).not.toContain('npmjs.com');
   });
 });

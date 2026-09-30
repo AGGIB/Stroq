@@ -9,11 +9,11 @@
 //
 // Nothing here writes to the user's real `~/.stroq`: the caller runs these events
 // against a throwaway home, exactly as `stroq attack` does.
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export interface TranscriptPre {
   readonly kind: 'pre';
@@ -190,14 +190,83 @@ export interface TranscriptFile {
 }
 
 /**
+ * `dir` and each folder above it, nearest first: the folders a session for `dir`'s project
+ * may have been started in. Not the user's home directory or anything above it when `dir`
+ * is inside it (a session started in `~` is not any project's), and not the filesystem root.
+ */
+export function directoryAndParents(dir: string, home: string = homedir()): string[] {
+  const start = resolve(dir);
+  const homeDir = resolve(home);
+  const homeReal = realOrSelf(homeDir);
+  // The same folder however it is spelled: through a symlink, or in another case on Windows.
+  const sameFolder = (a: string, b: string): boolean =>
+    samePath(a, b) || samePath(realOrSelf(a), realOrSelf(b));
+  const inside = (child: string, root: string): boolean => {
+    const from = relative(root, child);
+    return from !== '' && !from.startsWith('..') && !isAbsolute(from);
+  };
+  const insideHome = inside(start, homeDir) || inside(realOrSelf(start), homeReal);
+  const out: string[] = [];
+  let current = start;
+  for (;;) {
+    out.push(current);
+    const parent = dirname(current);
+    if (parent === current || parent === dirname(parent)) return out;
+    if (insideHome && sameFolder(parent, homeDir)) return out;
+    if (!insideHome && sameFolder(current, homeDir)) return out;
+    current = parent;
+  }
+}
+
+/** `path` with symlinks resolved as far as it exists, or as it was. */
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Whether two paths are the same, which on Windows is not a question of case. */
+export const samePath = (a: string, b: string): boolean =>
+  process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+
+/** Sessions found for a directory, newest first, and whether they are its own. */
+export interface SessionList {
+  readonly files: readonly TranscriptFile[];
+  /** False when nothing was recorded for the directory and this is every session. */
+  readonly scoped: boolean;
+  /**
+   * How many folders above the directory the sessions were found: 0 for its own. A reader
+   * with sessions nearer the directory outranks one with newer sessions further up.
+   */
+  readonly depth: number;
+}
+
+/**
  * Transcripts for `cwd`, newest first. Falls back to every project when this
  * directory has none, so `--last` still finds something to show.
  */
 export async function findTranscripts(cwd: string): Promise<TranscriptFile[]> {
+  return [...(await findTranscriptsScoped(cwd)).files];
+}
+
+/**
+ * `findTranscripts`, and whether the list is this directory's own (`scoped`) or the
+ * fallback over every project. A caller that reports HOW MANY sessions the project has
+ * needs to know which, or it counts other projects' sessions as the project's.
+ */
+export async function findTranscriptsScoped(cwd: string): Promise<SessionList> {
   const root = transcriptRoot();
-  const scoped = join(root, projectSlug(cwd));
-  const found = (await listJsonl(scoped)) ?? [];
-  if (found.length > 0) return found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  // This directory's own sessions, else those of the nearest folder above it that has any:
+  // an agent started at the project's root and a command typed in one of its subfolders are
+  // the same project, and the sessions of the folder above are the ones to read.
+  const folders = directoryAndParents(cwd);
+  for (const [depth, dir] of folders.entries()) {
+    const found = (await listJsonl(join(root, projectSlug(dir)))) ?? [];
+    if (found.length > 0)
+      return { files: found.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: true, depth };
+  }
 
   let dirs: string[];
   try {
@@ -205,11 +274,11 @@ export async function findTranscripts(cwd: string): Promise<TranscriptFile[]> {
       .filter((d) => d.isDirectory())
       .map((d) => join(root, d.name));
   } catch {
-    return [];
+    return { files: [], scoped: false, depth: 0 };
   }
   const all: TranscriptFile[] = [];
   for (const dir of dirs) all.push(...((await listJsonl(dir)) ?? []));
-  return all.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return { files: all.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: false, depth: 0 };
 }
 
 async function listJsonl(dir: string): Promise<TranscriptFile[] | null> {

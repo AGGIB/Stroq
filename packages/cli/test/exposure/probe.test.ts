@@ -23,6 +23,7 @@ vi.mock('@stroq/core', async (importOriginal) => {
 
 afterEach(() => {
   probeRuleState.rules = [];
+  vi.unstubAllEnvs();
 });
 
 const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-probe-'));
@@ -82,15 +83,49 @@ process.stdin.on('data', (chunk) => {
 });
 `;
 
+/**
+ * Reports what environment it was started with, as a number of tools: one, plus one if
+ * the secret the test put in the parent's environment reached it, plus two if the
+ * variable its config declared did, plus four if `PATH` did. The probe returns only a
+ * count, so this is how a test sees inside the child.
+ */
+const SERVER_ENV_COUNT = `
+let buf = '';
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
+const count = 1 + (process.env.STROQ_PROBE_LEAK ? 1 : 0) + (process.env.STROQ_PROBE_DECLARED ? 2 : 0) + (process.env.PATH ? 4 : 0);
+process.stdin.on('data', (chunk) => {
+  buf += chunk;
+  let nl;
+  while ((nl = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    if (line.trim() === '') continue;
+    const req = JSON.parse(line);
+    if (req.method === 'initialize') {
+      send({ jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'fixture', version: '1' } } });
+    } else if (req.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id: req.id, result: { tools: Array.from({ length: count }, (_, i) => ({ name: 't' + i, description: 'benign' })) } });
+    }
+  }
+});
+`;
+
 const surfaceFor = (file: string): McpSurface[] => [
   { client: 'claude-code', scope: 'project', file, stdio: 1, wrapped: 0, http: 0 },
 ];
 
-const withServer = (source: string, servers: Record<string, unknown>): string => {
+const withServer = (
+  source: string,
+  servers: Record<string, unknown> | ((server: string) => Record<string, unknown>),
+): string => {
   const dir = fixture();
-  writeFileSync(join(dir, 'server.mjs'), source);
+  const server = join(dir, 'server.mjs');
+  writeFileSync(server, source);
   const config = join(dir, '.mcp.json');
-  writeFileSync(config, JSON.stringify({ mcpServers: servers }));
+  writeFileSync(
+    config,
+    JSON.stringify({ mcpServers: typeof servers === 'function' ? servers(server) : servers }),
+  );
   return config;
 };
 
@@ -215,6 +250,34 @@ describe('probeServers', () => {
     const results = await probeServers(surfaceFor(config));
     expect(results[0]?.flagged).toContain('pos');
     expect(results[0]?.flagged).not.toContain('neg');
+  });
+
+  // A cloned repository's `.mcp.json` names the command the probe starts. Started with
+  // the whole environment, that command receives every credential the user's shell
+  // holds, from a repository the user has only just opened: the leak `exposure` exists
+  // to warn about, done by `exposure --probe` itself.
+  it('does not hand the parent environment to the server it starts', async () => {
+    vi.stubEnv('STROQ_PROBE_LEAK', 'AKIAIOSFODNN7EXAMPLE');
+    const config = withServer(SERVER_ENV_COUNT, (server) => ({
+      helper: { command: process.execPath, args: [server] },
+    }));
+    const results = await probeServers(surfaceFor(config));
+    // 1 (base) + 4 (PATH survives): the secret (+1) did not arrive.
+    expect(results[0]?.tools).toBe(5);
+  });
+
+  it('still hands the server the environment its own config declares', async () => {
+    vi.stubEnv('STROQ_PROBE_LEAK', 'AKIAIOSFODNN7EXAMPLE');
+    const config = withServer(SERVER_ENV_COUNT, (server) => ({
+      helper: {
+        command: process.execPath,
+        args: [server],
+        env: { STROQ_PROBE_DECLARED: '1' },
+      },
+    }));
+    const results = await probeServers(surfaceFor(config));
+    // 1 + 2 (declared) + 4 (PATH): declared arrives, the parent's secret still does not.
+    expect(results[0]?.tools).toBe(7);
   });
 
   it('records an error for a server that never answers', async () => {

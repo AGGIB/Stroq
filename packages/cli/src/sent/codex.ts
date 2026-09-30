@@ -23,11 +23,14 @@
  */
 import { open, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { codexToolName, commandOf, isPatchTool } from '../adapters/codex-input.js';
 import {
+  directoryAndParents,
   feedLines,
+  samePath,
   type LineParser,
+  type SessionList,
   type Transcript,
   type TranscriptEvent,
   type TranscriptFile,
@@ -291,12 +294,25 @@ async function everyRollout(root: string): Promise<TranscriptFile[]> {
  * reader, so `--last` behaves identically whichever agent recorded the session.
  */
 export async function findCodexRollouts(cwd: string, home?: string): Promise<TranscriptFile[]> {
+  return [...(await findCodexRolloutsScoped(cwd, home)).files];
+}
+
+/** Whether a recorded working directory is `dir`, however the two are spelled. */
+const sameFolder = (recorded: string | null, dir: string): boolean =>
+  recorded !== null && samePath(resolve(recorded), dir);
+
+/** `findCodexRollouts`, and whether the list is this directory's own; see `SessionList`. */
+export async function findCodexRolloutsScoped(cwd: string, home?: string): Promise<SessionList> {
   const all = await everyRollout(codexRoot(home));
-  const here: TranscriptFile[] = [];
-  for (const file of all) {
-    if ((await rolloutCwd(file.path)) === cwd) here.push(file);
+  const recorded = new Map<TranscriptFile, string | null>();
+  for (const file of all) recorded.set(file, await rolloutCwd(file.path));
+  // This directory's own rollouts, else those of the nearest folder above it that has any:
+  // the same reading of "the project's session" as the Claude reader's.
+  for (const [depth, dir] of directoryAndParents(cwd).entries()) {
+    const here = all.filter((file) => sameFolder(recorded.get(file) ?? null, dir));
+    if (here.length > 0) return { files: here, scoped: true, depth };
   }
-  return here.length > 0 ? here : all;
+  return { files: all, scoped: false, depth: 0 };
 }
 
 export async function readCodexRollout(path: string): Promise<Transcript> {

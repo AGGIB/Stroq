@@ -15,18 +15,19 @@
 // trajectories as base64-wrapped protobuf in a VS Code state database, with no
 // transcript on disk to read.
 import {
-  findTranscripts,
+  findTranscriptsScoped,
   readTranscript,
+  type SessionList,
   type Transcript,
   type TranscriptFile,
 } from '../replay/transcript.js';
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { findCodexRollouts, readCodexRollout } from './codex.js';
+import { findCodexRolloutsScoped, readCodexRollout } from './codex.js';
 import {
   cursorStateDb,
   cursorUnavailable,
-  findCursorSessions,
+  findCursorSessionsScoped,
   readCursorSession,
   splitCursorSessionPath,
 } from './cursor.js';
@@ -39,8 +40,12 @@ export interface TranscriptReader {
   readonly agent: string;
   /** The agent's name as a person writes it, for `--help` and other prose. */
   readonly label: string;
-  /** Recorded sessions for `cwd`, newest first; empty when this agent leaves none. */
-  find(cwd: string): Promise<readonly TranscriptFile[]>;
+  /**
+   * Recorded sessions for `cwd`, newest first; empty when this agent leaves none. When
+   * the directory has none of its own the list is every session (`scoped` is false),
+   * so `--last` still finds something to show: a count of it is not the project's.
+   */
+  find(cwd: string): Promise<SessionList>;
   read(path: string): Promise<Transcript>;
   /** Whether this reader wrote the file whose first line is `head`. */
   claims(head: string): boolean;
@@ -58,7 +63,7 @@ export interface TranscriptReader {
 export const claudeCodeReader: TranscriptReader = {
   agent: 'claude-code',
   label: 'Claude Code',
-  find: findTranscripts,
+  find: findTranscriptsScoped,
   read: readTranscript,
   root: '~/.claude/projects',
   /* A Claude record is the message itself: `{type:'user'|'assistant', message:{…}}`,
@@ -79,7 +84,7 @@ export const claudeCodeReader: TranscriptReader = {
 export const codexReader: TranscriptReader = {
   agent: 'codex',
   label: 'Codex CLI',
-  find: (cwd) => findCodexRollouts(cwd),
+  find: (cwd) => findCodexRolloutsScoped(cwd),
   read: readCodexRollout,
   root: '~/.codex/sessions',
   /* Codex wraps every record: `{timestamp, ordinal, type, payload}`. The envelope
@@ -98,7 +103,7 @@ export const codexReader: TranscriptReader = {
 export const cursorReader: TranscriptReader = {
   agent: 'cursor',
   label: 'Cursor',
-  find: (cwd) => findCursorSessions(cwd),
+  find: (cwd) => findCursorSessionsScoped(cwd),
   read: readCursorSession,
   root: tilde(cursorStateDb()),
   unavailable: cursorUnavailable,
@@ -183,6 +188,11 @@ export async function readerForFile(path: string): Promise<TranscriptReader> {
 export interface FoundTranscript {
   readonly reader: TranscriptReader;
   readonly path: string;
+  /**
+   * How many sessions were recorded for the directory, across every reader, when the
+   * transcript was chosen as the newest of them; absent when the user named a file.
+   */
+  readonly sessions?: number;
 }
 
 /**
@@ -196,13 +206,32 @@ export interface FoundTranscript {
  * this.
  */
 export async function newestTranscript(cwd: string): Promise<FoundTranscript | null> {
+  const lists = await Promise.all(
+    READERS.map(async (reader) => ({ reader, ...(await reader.find(cwd)) })),
+  );
+  // A reader with sessions of this directory's own outranks one that only has the
+  // fallback list of every project: the newest session on the machine is very often
+  // another project's, and `--last` refused it while this one's own was there.
+  const withSessions = lists.filter((list) => list.scoped && list.files.length > 0);
+  // Nearest folder first: sessions in this very directory beat newer ones only in a folder
+  // above it, whichever agent recorded them.
+  const nearest = Math.min(...withSessions.map((list) => list.depth));
+  const own = withSessions.filter((list) => list.depth === nearest);
+  const candidates = own.length > 0 ? own : lists;
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
-  for (const reader of READERS) {
-    const newest = (await reader.find(cwd))[0];
+  for (const { reader, files } of candidates) {
+    const newest = files[0];
     if (!newest) continue;
     if (best === null || newest.mtimeMs > best.mtimeMs) {
       best = { reader, path: newest.path, mtimeMs: newest.mtimeMs };
     }
   }
-  return best === null ? null : { reader: best.reader, path: best.path };
+  if (best === null) return null;
+  // The count is the directory's own sessions, across the readers that have any.
+  const sessions = own.reduce((total, list) => total + list.files.length, 0);
+  return {
+    reader: best.reader,
+    path: best.path,
+    ...(own.length === 0 ? {} : { sessions }),
+  };
 }

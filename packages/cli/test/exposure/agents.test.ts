@@ -9,8 +9,11 @@ const fixture = (): string => mkdtempSync(join(tmpdir(), 'stroq-exposure-'));
 
 const stroq = [{ type: 'command', command: 'stroq hook claude-code' }];
 
-/** The full install `stroq init` writes: both events, with its own matchers. */
-const withStroqClaudeHooks = (cwd: string, events = ['PreToolUse', 'PostToolUse']): void => {
+/** The full install `stroq init` writes: all three events, with its own matchers. */
+const withStroqClaudeHooks = (
+  cwd: string,
+  events = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure'],
+): void => {
   mkdirSync(join(cwd, '.claude'), { recursive: true });
   const matcher = (event: string): string => (event === 'PreToolUse' ? PRE_MATCHER : POST_MATCHER);
   writeFileSync(

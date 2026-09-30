@@ -5,7 +5,7 @@ import { runCoverageCommand } from './commands/coverage.js';
 import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
 import { runHookCommand } from './commands/hook.js';
-import { runInit } from './commands/init.js';
+import { runInitCommand } from './commands/init-agent.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
@@ -34,7 +34,7 @@ type Runner = (args: readonly string[]) => number | Promise<number>;
 /** Every command that prints for a person, by name. */
 const COMMANDS: Readonly<Record<string, Runner>> = {
   inspect: runInspect,
-  init: runInit,
+  init: runInitCommand,
   uninstall: runUninstall,
   run: runRun,
   doctor: runDoctor,

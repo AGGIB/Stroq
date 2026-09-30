@@ -100,6 +100,13 @@ export interface SentCoverage {
   readonly calls: number;
   /** Tool results whose text was actually scanned; 0 on the audit-log branch. */
   readonly results: number;
+  /** The folders the project's `.env` files were read from, as a report shows a path. */
+  readonly projectDirs?: readonly string[];
+  /**
+   * How many sessions were recorded for this project when `--last` read the newest of
+   * them. Absent when the user named the session, and for the audit-log branch.
+   */
+  readonly sessionsInProject?: number;
 }
 
 export type SentOrigin = 'transcript' | 'audit-log';

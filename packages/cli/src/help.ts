@@ -28,7 +28,7 @@ const COMMANDS: readonly CommandHelp[] = [
     flags: [
       [
         '--agent <name>',
-        'claude-code (default), cursor, codex, copilot, openclaw, windsurf, antigravity or mcp',
+        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
       ],
       ['--user', "install into the user's config instead of this project's"],
       ['--dry-run', 'print the change and write nothing'],
@@ -153,7 +153,10 @@ const COMMANDS: readonly CommandHelp[] = [
       'sessions that ran before you installed',
     ],
     flags: [
-      ['--last', 'the newest session recorded for this directory'],
+      [
+        '--last',
+        'the newest session recorded for this project (this directory, or the folder above it)',
+      ],
       ['--transcript <path>', 'a specific transcript'],
       ['--json', 'machine-readable output'],
       ['--list', 'list the sessions in the audit log'],
@@ -167,7 +170,10 @@ const COMMANDS: readonly CommandHelp[] = [
       'or call. Reads names and sources only, never a value',
     ],
     flags: [
-      ['--last', 'the newest session recorded for this directory'],
+      [
+        '--last',
+        'the newest session recorded for this project (this directory, or the folder above it)',
+      ],
       ['--transcript <path>', 'a specific transcript or rollout'],
       ['--json', 'machine-readable output'],
       ['--fail-on-finding', 'exit 1 when a credential is found'],

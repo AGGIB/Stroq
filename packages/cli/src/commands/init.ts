@@ -59,7 +59,7 @@ import {
 import { initMcp } from './init-mcp.js';
 
 export const PRE_MATCHER =
-  'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|WebFetch|mcp__.*';
+  'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|WebFetch|mcp__.*';
 export const POST_MATCHER = 'Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__.*';
 
 /** Agents `stroq init --agent <name>` can install hooks for. */
@@ -185,6 +185,12 @@ export function mergeHooks(settings: SettingsJson, command: string): SettingsJso
         ...withoutStroq(hooks['PostToolUse'] ?? []),
         { matcher: POST_MATCHER, hooks: [stroqHandler(command)] },
       ],
+      // A tool that failed reports through its own event, and what a failing command
+      // printed is content the model reads all the same.
+      PostToolUseFailure: [
+        ...withoutStroq(hooks['PostToolUseFailure'] ?? []),
+        { matcher: POST_MATCHER, hooks: [stroqHandler(command)] },
+      ],
     },
   };
 }
@@ -211,7 +217,7 @@ function initClaudeCode(scope: 'project' | 'user', command: string, dryRun: bool
   }
   installHooks(file, command);
   process.stdout.write(
-    `Stroq hooks installed in ${file}\n  PreToolUse  → ${PRE_MATCHER}\n  PostToolUse → ${POST_MATCHER}\nRun "stroq doctor" to verify.\n`,
+    `Stroq hooks installed in ${file}\n  PreToolUse         → ${PRE_MATCHER}\n  PostToolUse        → ${POST_MATCHER}\n  PostToolUseFailure → ${POST_MATCHER}\nRun "stroq doctor" to verify.\n`,
   );
   return 0;
 }

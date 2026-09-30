@@ -53,6 +53,8 @@ export interface SentIndexScope {
   /** Absolute paths of the credential files the index was built from. */
   readonly sourcePaths: readonly string[];
   readonly indexedSecrets: number;
+  /** Every folder whose `.env` files were read, when more than `cwd`'s were. */
+  readonly projectDirs?: readonly string[];
 }
 
 /** Same ceiling a provenance record's `source` uses, for the same reason. */
@@ -295,6 +297,7 @@ export async function scanTranscript(
       toolResultsRead: true,
       indexedSecrets: scope.indexedSecrets,
       indexedSources: scope.sourcePaths.map((p) => displayPath(p, scope.home)),
+      projectDirs: (scope.projectDirs ?? [scope.cwd]).map((dir) => displayPath(dir, scope.home)),
       calls,
       results,
     },
@@ -373,6 +376,7 @@ export function scanAuditLog(
       toolResultsRead: false,
       indexedSecrets: scope.indexedSecrets,
       indexedSources: scope.sourcePaths.map((p) => displayPath(p, scope.home)),
+      projectDirs: (scope.projectDirs ?? [scope.cwd]).map((dir) => displayPath(dir, scope.home)),
       calls: entries.filter((e) => e.phase === 'pre').length,
       results: 0,
     },

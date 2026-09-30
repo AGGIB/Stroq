@@ -788,3 +788,66 @@ describe('stableEntry', () => {
     expect(existsSync(join(home, 'cli'))).toBe(false);
   });
 });
+
+describe('the Claude Code failure event', () => {
+  const cmd = '"/usr/bin/node" "/x/index.js" hook claude-code';
+
+  // What a failing command printed is content the model reads, and Claude Code sends it
+  // as PostToolUseFailure, not PostToolUse. An install without the event never sees it.
+  it('is installed with the same matcher as PostToolUse, and replaced rather than stacked', () => {
+    const once = mergeHooks({}, cmd);
+    const twice = mergeHooks(once, cmd);
+    for (const merged of [once, twice]) {
+      const groups = merged.hooks?.['PostToolUseFailure'] ?? [];
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.matcher).toBe(POST_MATCHER);
+      expect(groups[0]?.hooks.map((h) => h.command)).toEqual([cmd]);
+    }
+  });
+
+  it('keeps a hook of the user’s own on that event', () => {
+    const mine = {
+      matcher: 'Bash',
+      hooks: [{ type: 'command' as const, command: 'my-failure-logger', timeout: 5 }],
+    };
+    const merged = mergeHooks({ hooks: { PostToolUseFailure: [mine] } }, cmd);
+    expect(merged.hooks?.['PostToolUseFailure']).toHaveLength(2);
+    expect(merged.hooks?.['PostToolUseFailure']?.[0]).toEqual(mine);
+  });
+});
+
+// A hook sees only the tools its matcher names, so a tool the classifier has a rule for and
+// the matcher does not name is judged by nothing. Claude Code anchors a matcher as a whole
+// name, so that is how it is tested here. The names are the classifier's branches
+// (`classifyTool`); a new branch belongs in this list.
+describe('the Claude Code matchers name every tool the classifier judges', () => {
+  const anchored = (matcher: string): RegExp => new RegExp(`^(?:${matcher})$`);
+  const CLASSIFIED = [
+    'Bash',
+    'PowerShell',
+    'Monitor',
+    'Write',
+    'Edit',
+    'MultiEdit',
+    'NotebookEdit',
+    'Read',
+    'Grep',
+    'WebFetch',
+    'mcp__server__tool',
+  ];
+
+  it.each(CLASSIFIED)('PRE_MATCHER names %s', (tool) => {
+    expect(anchored(PRE_MATCHER).test(tool)).toBe(true);
+  });
+
+  it.each(['Bash', 'PowerShell', 'Read', 'Grep', 'WebFetch', 'WebSearch', 'mcp__server__tool'])(
+    'POST_MATCHER names %s, whose output is scanned',
+    (tool) => {
+      expect(anchored(POST_MATCHER).test(tool)).toBe(true);
+    },
+  );
+
+  it('does not name a tool nothing judges', () => {
+    expect(anchored(PRE_MATCHER).test('TodoWrite')).toBe(false);
+  });
+});

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { loadBundledRules, scanContent } from '@stroq/core';
 import { readMcpConfig, unwrapArgs } from '../commands/mcp-config.js';
+import { childEnv } from '../mcp/child-env.js';
 import { killChildTree } from '../mcp/kill-child.js';
 import type { Finding } from './findings.js';
 import type { McpSurface } from './mcp-surface.js';
@@ -111,7 +112,12 @@ async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResul
     try {
       child = spawn(spec.command, [...spec.args], {
         ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
-        env: { ...process.env, ...spec.env },
+        // Not the whole environment: the command comes from a `.mcp.json` that may have
+        // arrived with a repository the user has only just cloned, and it would get
+        // every credential in their shell. The infrastructure variables a server needs
+        // to start, plus what its own config declares, which is what a real client
+        // passes it and what `stroq mcp` does too.
+        env: { ...childEnv([]), ...spec.env },
         stdio: ['pipe', 'pipe', 'ignore'],
       });
     } catch (err) {

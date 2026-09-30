@@ -105,6 +105,20 @@ describe('doctorReport', () => {
     expect(agentHookStatus('claude-code', cwd)?.installed).toBe(false);
   });
 
+  // Before 0.21.2 `init` wrote two events. An install like that keeps working, but it
+  // never sees the output of a failed tool, so doctor says so and how to fix it.
+  it('calls an install without PostToolUseFailure incomplete and says to re-run init', async () => {
+    const file = settingsPath('project', cwd);
+    installHooks(file, `${STROQ} hook claude-code`);
+    const settings = JSON.parse(readFileSync(file, 'utf8')) as { hooks: Record<string, unknown> };
+    delete settings.hooks['PostToolUseFailure'];
+    writeFileSync(file, JSON.stringify(settings));
+    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'hooks');
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('PostToolUseFailure');
+    expect(check?.detail).toContain('stroq init');
+  });
+
   it('reports a broken hooks check instead of throwing when settings.json is corrupt', async () => {
     const file = settingsPath('project', cwd);
     mkdirSync(dirname(file), { recursive: true });
