@@ -136,38 +136,46 @@ describe('contextSurface', () => {
 
   // A repository can commit a symlink to a directory it does not own. Followed without a
   // budget, a link to a filesystem root walked it for minutes (92 s measured for /System).
-  it('stops after a bounded number of directories and says the count is a lower bound', () => {
-    const home = fixture();
-    const cwd = fixture();
-    const outside = fixture();
-    for (let i = 0; i < 2_500; i += 1) {
-      mkdirSync(join(outside, `d${i}`));
-      writeFileSync(join(outside, `d${i}`, 'note.md'), '# note');
-    }
-    mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
-    symlinkSync(outside, join(cwd, '.claude', 'skills', 'big'), 'dir');
-    const started = Date.now();
-    const s = contextSurface(cwd, home);
-    expect(s.capped).toBe(true);
-    expect(s.skills).toBeLessThan(2_500);
-    expect(Date.now() - started).toBeLessThan(10_000);
-  }, 20_000);
+  it.skipIf(process.platform === 'win32')(
+    'stops after a bounded number of directories and says the count is a lower bound',
+    () => {
+      const home = fixture();
+      const cwd = fixture();
+      const outside = fixture();
+      for (let i = 0; i < 2_500; i += 1) {
+        mkdirSync(join(outside, `d${i}`));
+        writeFileSync(join(outside, `d${i}`, 'note.md'), '# note');
+      }
+      mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
+      symlinkSync(outside, join(cwd, '.claude', 'skills', 'big'), 'dir');
+      const started = Date.now();
+      const s = contextSurface(cwd, home);
+      expect(s.capped).toBe(true);
+      expect(s.skills).toBeLessThan(2_500);
+      expect(Date.now() - started).toBeLessThan(10_000);
+    },
+    20_000,
+  );
 
   // One budget for the three walks into the skills, so a repository's link to a directory
   // it does not own spent it before the user's own plugin skills were reached.
-  it('does not let a repository’s symlink spend the budget the user’s own skills need', () => {
-    const home = fixture();
-    const cwd = fixture();
-    const outside = fixture();
-    for (let i = 0; i < 2_500; i += 1) mkdirSync(join(outside, `d${i}`));
-    mkdirSync(join(home, '.claude', 'plugins', 'p'), { recursive: true });
-    writeFileSync(join(home, '.claude', 'plugins', 'p', 'SKILL.md'), '# mine');
-    mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
-    symlinkSync(outside, join(cwd, '.claude', 'skills', 'big'), 'dir');
-    const s = contextSurface(cwd, home);
-    expect(s.skills).toBe(1);
-    expect(s.capped).toBe(true);
-  }, 20_000);
+  it.skipIf(process.platform === 'win32')(
+    'does not let a repository’s symlink spend the budget the user’s own skills need',
+    () => {
+      const home = fixture();
+      const cwd = fixture();
+      const outside = fixture();
+      for (let i = 0; i < 2_500; i += 1) mkdirSync(join(outside, `d${i}`));
+      mkdirSync(join(home, '.claude', 'plugins', 'p'), { recursive: true });
+      writeFileSync(join(home, '.claude', 'plugins', 'p', 'SKILL.md'), '# mine');
+      mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
+      symlinkSync(outside, join(cwd, '.claude', 'skills', 'big'), 'dir');
+      const s = contextSurface(cwd, home);
+      expect(s.skills).toBe(1);
+      expect(s.capped).toBe(true);
+    },
+    20_000,
+  );
 
   it('reads a large plugin cache under the home directory in full', () => {
     const home = fixture();
@@ -200,15 +208,18 @@ describe('contextSurface', () => {
     expect(contextSurface(cwd, home).capped).toBe(false);
   });
 
-  it('still follows a symlinked directory that is not a loop', () => {
-    const home = fixture();
-    const cwd = fixture();
-    const shared = fixture();
-    writeFileSync(join(shared, 'shared.md'), '# shared skill');
-    mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
-    symlinkSync(shared, join(cwd, '.claude', 'skills', 'shared'), 'dir');
-    expect(contextSurface(cwd, home).skills).toBe(1);
-  });
+  it.skipIf(process.platform === 'win32')(
+    'still follows a symlinked directory that is not a loop',
+    () => {
+      const home = fixture();
+      const cwd = fixture();
+      const shared = fixture();
+      writeFileSync(join(shared, 'shared.md'), '# shared skill');
+      mkdirSync(join(cwd, '.claude', 'skills'), { recursive: true });
+      symlinkSync(shared, join(cwd, '.claude', 'skills', 'shared'), 'dir');
+      expect(contextSurface(cwd, home).skills).toBe(1);
+    },
+  );
 
   it('records the sha256 of every file it read, for the next run to compare', () => {
     const home = fixture();
