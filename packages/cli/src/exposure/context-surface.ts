@@ -36,7 +36,9 @@ export interface ContextSurface {
 
 const INSTRUCTION_NAMES = [
   'CLAUDE.md',
+  'CLAUDE.local.md',
   'AGENTS.md',
+  'AGENTS.override.md',
   'GEMINI.md',
   '.cursorrules',
   '.windsurfrules',
@@ -145,6 +147,13 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
   // session would save an instruction for the next one.
   const userClaude = join(home, '.claude', 'CLAUDE.md');
   if (existsSync(userClaude)) instruction.add(userClaude);
+  // Rules, output styles and Copilot's per-path instructions: loaded into every session
+  // by the host, so a poisoned one persists exactly as a poisoned CLAUDE.md does.
+  for (const base of [cwd, home]) {
+    walk(join(base, '.claude', 'rules'), isMarkdown, instruction);
+    walk(join(base, '.claude', 'output-styles'), isMarkdown, instruction);
+  }
+  walk(join(cwd, '.github', 'instructions'), isMarkdown, instruction);
   for (const project of subdirectories(join(home, '.claude', 'projects')))
     walk(join(project, 'memory'), isMarkdown, instruction);
 

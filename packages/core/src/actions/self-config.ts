@@ -148,7 +148,7 @@ export const SELF_CONFIG_FILE =
  * filesystems that resolve `claude.md` to the same file are.
  */
 export const INSTRUCTION_FILE =
-  /(?<![\w.-])(?:(?:CLAUDE|AGENTS|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])/i;
+  /(?<![\w.-])(?:(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands|rules|output-styles)(?![\w-]|\.+[\w-])|\.claude[/\\]+scheduled_tasks\.json(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])|\.github[/\\]+instructions(?![\w-]|\.+[\w-])/i;
 
 export const PROTECTED_DIRS =
   /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;

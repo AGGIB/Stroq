@@ -94,7 +94,7 @@ export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp
  * rules that matter there and therefore the safe way to be wrong.
  */
 const INSTRUCTION_READ_PATH =
-  /(?:^|[/\\])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]/i;
+  /(?:^|[/\\])(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]|(?:^|[/\\])\.github[/\\]instructions[/\\]/i;
 
 /**
  * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
