@@ -613,7 +613,12 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
       ['sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc'].join('_'),
       '4eC39HqLyjWDarjtT1zdp7dc',
     ],
-    ['a Slack token', 'SLACK_TOKEN', ['xoxb', '1234567890', 'abcdefghijklmnop'].join('-'), 'abcdefghijklmnop'],
+    [
+      'a Slack token',
+      'SLACK_TOKEN',
+      ['xoxb', '1234567890', 'abcdefghijklmnop'].join('-'),
+      'abcdefghijklmnop',
+    ],
   ])('does not store a piece of %s', async (_name, key, value, piece) => {
     const fx = fixture();
     const { store, recorded } = recorder();
