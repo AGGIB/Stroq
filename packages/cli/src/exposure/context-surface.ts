@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadBundledRules, readRegularFile, scanContent } from '@stroq/core';
@@ -33,6 +33,9 @@ export interface ContextSurface {
   /** True when discovery stopped at `MAX_CONTEXT_FILES`, so every count is a lower bound. */
   readonly capped: boolean;
 }
+
+/** Files directly under `.claude` that Claude Code loads or runs from, besides directories. */
+const CLAUDE_STATE_FILES = ['scheduled_tasks.json', 'loop.md'] as const;
 
 const INSTRUCTION_NAMES = [
   'CLAUDE.md',
@@ -68,8 +71,33 @@ class FileSet {
   }
 }
 
-function walk(dir: string, match: (name: string) => boolean, out: FileSet): void {
-  if (out.full || !existsSync(dir)) return;
+/** Directories nested deeper than this are not searched: no instruction tree is this deep. */
+const MAX_WALK_DEPTH = 12;
+
+/**
+ * Every file under `dir` for which `match` holds, into `out`.
+ *
+ * A directory is walked once, by its real path: a repository can commit a symlink that
+ * points back at its own directory, and with two of them each level doubled the walk
+ * until `exposure` did not come back. A symlink to a directory elsewhere is still
+ * followed, once, because people do share a skills directory that way.
+ */
+function walk(
+  dir: string,
+  match: (name: string) => boolean,
+  out: FileSet,
+  visited: Set<string> = new Set(),
+  depth = 0,
+): void {
+  if (out.full || depth > MAX_WALK_DEPTH || !existsSync(dir)) return;
+  let real: string;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return;
+  }
+  if (visited.has(real)) return;
+  visited.add(real);
   let entries: readonly string[];
   try {
     entries = readdirSync(dir);
@@ -85,7 +113,7 @@ function walk(dir: string, match: (name: string) => boolean, out: FileSet): void
     } catch {
       continue;
     }
-    if (isDir) walk(full, match, out);
+    if (isDir) walk(full, match, out, visited, depth + 1);
     else if (match(name)) out.add(full);
   }
 }
@@ -152,6 +180,14 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
   for (const base of [cwd, home]) {
     walk(join(base, '.claude', 'rules'), isMarkdown, instruction);
     walk(join(base, '.claude', 'output-styles'), isMarkdown, instruction);
+    // A subagent's own memory, and the two files Claude Code reads its loop and its
+    // scheduled tasks from: on the guard's list, so on the inventory too.
+    walk(join(base, '.claude', 'agent-memory'), isMarkdown, instruction);
+    walk(join(base, '.claude', 'agent-memory-local'), isMarkdown, instruction);
+    for (const name of CLAUDE_STATE_FILES) {
+      const file = join(base, '.claude', name);
+      if (existsSync(file)) instruction.add(file);
+    }
   }
   walk(join(cwd, '.github', 'instructions'), isMarkdown, instruction);
   for (const project of subdirectories(join(home, '.claude', 'projects')))

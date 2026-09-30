@@ -43,6 +43,14 @@ const INSTRUCTION_PATHS = [
   '.github/instructions/typescript.instructions.md',
   '.claude/scheduled_tasks.json',
   'C:\\Users\\dev\\.claude\\rules\\style.md',
+  // Named by the same binary and loaded or run by it: the loop prompt, the memory of a
+  // subagent, saved routines and workflows.
+  '.claude/loop.md',
+  '/home/dev/.claude/loop.md',
+  '.claude/agent-memory/reviewer/MEMORY.md',
+  '.claude/agent-memory-local/reviewer/MEMORY.md',
+  '.claude/routines/nightly.md',
+  '.claude/workflows/release.js',
 ];
 
 const LOOK_ALIKES = [
@@ -63,6 +71,11 @@ const LOOK_ALIKES = [
   '.github/instructions-notes.md',
   '.claude/scheduled_tasks.json.bak',
   '.claude/scheduled_tasks.lock',
+  '.claude/loop.md.bak',
+  '.claude/loop.mdx',
+  '.claude/agent-memory-notes.md',
+  '.claude/routines-old.md',
+  '.claude/workflows.md',
 ];
 
 describe('INSTRUCTION_FILE', () => {
