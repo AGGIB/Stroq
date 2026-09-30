@@ -246,3 +246,94 @@ describe('the other tools that run a shell command', () => {
     expect(classifyTool(tool, input, '/w').classes).toEqual(['shell.unparsed']);
   });
 });
+
+// The path checks for an MCP call ran only when the tool's NAME matched a short list of
+// verbs and only read a short list of KEY names, so a file tool called `copy_file`,
+// `str_replace` or `get_file_contents`, or one that names its path `source_path` or
+// `relativePath`, reached the policy with no idea what file it touched.
+describe('an MCP call’s path is read whatever the tool and the key are called', () => {
+  it.each([
+    'mcp__fs__copy_file',
+    'mcp__fs__get_file_contents',
+    'mcp__fs__touch',
+    'mcp__fs__str_replace',
+    'mcp__fs__chmod',
+    'mcp__fs__open_document',
+    'mcp__fs__readFileContent',
+    'mcp__fs__fetch_local',
+  ])('%s reaching a credential file is fs.secrets', (tool) => {
+    expect(classifyTool(tool, { path: '/home/dev/.ssh/id_ed25519' }, cwd).classes).toContain(
+      'fs.secrets',
+    );
+  });
+
+  it.each([
+    'source_path',
+    'relativePath',
+    'sourceFile',
+    'file_name',
+    'outputDir',
+    'src',
+    'from',
+    'location',
+    'filePaths',
+  ])('a path under the key %s is read', (key) => {
+    expect(
+      classifyTool('mcp__fs__get_file', { [key]: '/home/dev/.aws/credentials' }, cwd).classes,
+    ).toContain('fs.secrets');
+  });
+
+  it('reads a path one object down, where tools that take an options bag put it', () => {
+    const r = classifyTool(
+      'mcp__fs__get_file',
+      { options: { path: '/home/dev/.aws/credentials', encoding: 'utf8' } },
+      cwd,
+    );
+    expect(r.classes).toContain('fs.secrets');
+  });
+
+  it.each([
+    'mcp__fs__copy_file',
+    'mcp__fs__patch_file',
+    'mcp__fs__str_replace',
+    'mcp__fs__insert_text',
+    'mcp__fs__overwrite',
+    'mcp__fs__touch',
+    'mcp__fs__truncate',
+    'mcp__fs__modify_file',
+  ])('%s writing the agent’s own config is config.self', (tool) => {
+    expect(classifyTool(tool, { path: '.claude/settings.json' }, cwd).classes).toContain(
+      'config.self',
+    );
+  });
+
+  it.each([
+    ['mcp__fs__str_replace', 'CLAUDE.local.md'],
+    ['mcp__fs__copy_file', '.claude/rules/x.md'],
+  ])('%s writing %s is config.instructions', (tool, path) => {
+    expect(classifyTool(tool, { path }, cwd).classes).toContain('config.instructions');
+  });
+
+  // The precision the original gate was built around must survive the wider reading:
+  // a path in prose, or a tool that only looks, is not a write to it.
+  it.each([
+    ['mcp__fs__get_file_contents', { path: '.claude/settings.json' }],
+    ['mcp__fs__stat', { path: '.claude/settings.json' }],
+    ['mcp__github__create_issue', { body: 'see /home/dev/.ssh/id_rsa and .claude/settings.json' }],
+    ['mcp__slack__send_message', { text: 'rotate /home/dev/.aws/credentials today' }],
+    ['mcp__db__query', { sql: 'select 1', comment: '.env' }],
+  ])('%s with %j is neither config.self nor fs.secrets', (tool, input) => {
+    const { classes } = classifyTool(tool, input, cwd);
+    expect(classes).not.toContain('config.self');
+    expect(classes).not.toContain('fs.secrets');
+  });
+
+  it('does not read a path out of a very wide input', () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 5000 }, (_, i) => [`path${i}`, `/tmp/f${i}`]),
+    );
+    const started = performance.now();
+    classifyTool('mcp__fs__get_file', { ...wide, options: wide }, cwd);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});
