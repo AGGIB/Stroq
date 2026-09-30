@@ -310,6 +310,50 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
 const candidatesOfVariants = (text: string): SecretCandidate[] =>
   expandVariants(text).flatMap((variant) => candidatesFromText(variant.text));
 
+/** What prose and URLs put after a value that is not part of it, and base64 padding. */
+const VALUE_TAIL = '.,;:!?\'")]}>`=';
+/** A spelling shorter than this is not redacted: it would be found inside other text. */
+const MIN_SPELLING_CHARS = 6;
+
+/** `value` without the characters of `tail` at its end, in one pass (no regex to restart). */
+function withoutTail(value: string, tail: string): string {
+  let end = value.length;
+  while (end > 0 && tail.includes(value.charAt(end - 1))) end -= 1;
+  return value.slice(0, end);
+}
+
+/**
+ * The other spellings an ATOM can hold of a known value, as matches to redact alongside it.
+ * Atoms are cut from normalised text, not from the text as written: a URL loses its
+ * trailing punctuation and is lowercased (the dotted capital I becomes two characters),
+ * and compatibility characters and look-alike letters are folded, in the context of the
+ * letters around them. So a value is also looked for without its tail, lowercased, and
+ * folded in a Latin context, and each spelling is a match of its own.
+ */
+function atomSpellings(matches: readonly SecretMatch[]): SecretMatch[] {
+  const seen = new Set(matches.flatMap((match) => [match.raw, match.token]));
+  const extra: SecretMatch[] = [];
+  for (const match of matches) {
+    for (const form of new Set([match.raw, match.token])) {
+      for (const base of new Set([form, withoutTail(form, VALUE_TAIL)])) {
+        if (base.length < MIN_SPELLING_CHARS) continue;
+        const spellings = [
+          base,
+          base.toLowerCase(),
+          normalizeText(`a${base}`).slice(1),
+          normalizeText(`a?${base}&`).slice(2, -1),
+        ];
+        for (const spelling of spellings) {
+          if (spelling.length < MIN_SPELLING_CHARS || seen.has(spelling)) continue;
+          seen.add(spelling);
+          extra.push({ ...match, token: spelling, raw: spelling });
+        }
+      }
+    }
+  }
+  return extra;
+}
+
 /** Whether `value`, or something it decodes to, holds one of the tokens in `known`. */
 const decodesToKnown = (value: string, known: ReadonlySet<string>): boolean =>
   candidatesOfVariants(value).some((candidate) => known.has(candidate.token));
@@ -398,10 +442,11 @@ export class StroqEngine {
       const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
       if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
       const known = new Set(matches.map((match) => match.token));
+      const spelled = [...matches, ...atomSpellings(matches)];
       return atoms.map((atom) =>
         atom.kind === 'encoded' && decodesToKnown(atom.value, known)
           ? '[REDACTED:encoded-secret]'
-          : clip(redactMatches(atom.value, matches, true)),
+          : clip(redactMatches(atom.value, spelled, true)),
       );
     } catch {
       return atoms.map(() => '[REDACTED:secret-index-unavailable]');

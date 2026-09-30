@@ -402,6 +402,68 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
       expect(record.excerpt.toLowerCase()).not.toContain('sup3rs3cret');
   });
 
+  it('does not store the secret from a percent-encoded URL when the result also has a stray percent sign', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), 'DB_PASSWORD=Sup3rS3cretPw9x\n');
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `saved 50% today: https://a.example/login?next=${encodeURIComponent('https://x/Sup3rS3cretPw9x/y')}`,
+      cwd: fx.cwd,
+    });
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const record of recorded)
+      expect(record.excerpt.toLowerCase()).not.toContain('sup3rs3cret');
+  });
+
+  // Atoms are cut from normalised text: a URL comes out lowercased, without its trailing
+  // punctuation, and with compatibility characters and look-alike letters folded. A value
+  // spelled any of those ways in the atom is still the value.
+  it.each([
+    [
+      'trailing punctuation',
+      'Sup3rS3cretPw9x!',
+      'https://x.example/u/Sup3rS3cretPw9x!\nnext',
+      'sup3rs3cret',
+    ],
+    [
+      'a ligature and a superscript',
+      'ﬁle²Secret-Pw9xyz1',
+      'https://x.example/a?k=ﬁle²Secret-Pw9xyz1&v=1',
+      'secret-pw9xyz1',
+    ],
+    [
+      'a Cyrillic value',
+      'Пароль-Секрет-1234',
+      'https://x.example/a?k=Пароль-Секрет-1234&v=1',
+      '1234',
+    ],
+    [
+      'a dotted capital I',
+      'İstanbulSecret9xyz',
+      'https://x.example/a?k=İstanbulSecret9xyz&v=1',
+      'stanbulsecret9xyz',
+    ],
+  ])(
+    'does not store a value that the atom spells differently: %s',
+    async (_name, password, result, fragment) => {
+      const fx = fixture();
+      const { store, recorded } = recorder();
+      writeFileSync(join(fx.cwd, '.env'), `DB_PASSWORD=${password}\n`);
+      await engineWith(fx, store).post({
+        sessionId: 's1',
+        toolName: 'Bash',
+        toolInput: { command: 'curl -s https://collect.example/status' },
+        toolResultText: result,
+        cwd: fx.cwd,
+      });
+      expect(recorded.length).toBeGreaterThan(0);
+      for (const record of recorded) expect(record.excerpt.toLowerCase()).not.toContain(fragment);
+    },
+  );
+
   it('does not store a base64 blob that decodes to a known secret', async () => {
     const fx = fixture();
     const { store, recorded } = recorder();
