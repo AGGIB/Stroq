@@ -191,7 +191,11 @@ npx @stroq/cli sent              # a session from Stroq's own audit log
 
 **Claude Code, Codex CLI and Cursor.** `--last` takes the newest session any of them
 recorded for this directory, and a file named with `--transcript` is matched to a
-reader by what is inside it rather than by where it sits.
+reader by what is inside it rather than by where it sits. The project's `.env` files
+are the ones in the folder that session ran in, whichever folder of the project you
+typed the command in, and the coverage section says which folder that was and how many
+sessions the project has (`--last` reads one). A run with no credential file or `.env`
+to compare against opens with `?`, not `✓`.
 
 Cursor keeps no transcript files: every session is a set of rows in one SQLite store,
 `…/User/globalStorage/state.vscdb`, so a session is addressed as `<store>#<session>`

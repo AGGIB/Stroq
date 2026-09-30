@@ -68,6 +68,9 @@ function coverageLines(report: SentReport): string[] {
   const lines = [
     'COVERAGE',
     `  Matched against ${c.indexedSecrets} value(s) indexed from: ${sources}`,
+    ...(c.projectDir === undefined
+      ? []
+      : [`  (project .env files were read from ${c.projectDir})`]),
     '  To match known values, this command reads supported local credential files',
     '  and project .env sources. It stores and prints names and sources, never values.',
     '  Credential-shaped variables in the environment this command ran with are matched',
@@ -75,6 +78,12 @@ function coverageLines(report: SentReport): string[] {
     '  A credential you have rotated or deleted since that session is not in the index,',
     '  so it cannot appear above.',
   ];
+  if (c.sessionsInProject !== undefined && c.sessionsInProject > 1) {
+    lines.push(
+      `  Read the newest of ${c.sessionsInProject} sessions recorded for this project; the`,
+      '  others were not read. Name one with --transcript <path>.',
+    );
+  }
   if (c.toolResultsRead) {
     lines.push(
       `  Recorded tool result text was scanned from the agent transcript (${c.results} of ${c.calls} calls).`,
@@ -107,21 +116,46 @@ const MEANING: readonly string[] = [
 ];
 
 /**
- * Where a credential of this kind is rotated, when its name or source says which
+ * Where a credential of this kind is rotated, when the credential itself says which
  * provider issued it. A finding that ends in "rotate it" and no address is one more
- * search the user has to do before acting on it.
+ * search the user has to do before acting on it; one that ends in the wrong address is
+ * worse, so nothing is printed when the provider is not known.
+ *
+ * Decided by the NAME the index gave the value, whole words only (`NPM_TOKEN`, not
+ * `PNPM_HOME`), and never by the folder it was found in: a Stripe key in a directory
+ * called `GitHub` is a Stripe key. The source is used only where it is itself a
+ * provider's file, and for what such a file holds.
  */
-const ROTATE: ReadonlyArray<readonly [RegExp, string]> = [
-  [/\baws|aws_/i, 'https://console.aws.amazon.com/iam/home#/security_credentials'],
-  [/github|\bgh_|^gh[a-z]?_/i, 'https://github.com/settings/tokens'],
-  [/npm|_authtoken/i, 'https://www.npmjs.com/settings/~/tokens'],
-  [/openai/i, 'https://platform.openai.com/api-keys'],
-  [/anthropic/i, 'https://console.anthropic.com/settings/keys'],
-  [/stripe/i, 'https://dashboard.stripe.com/apikeys'],
+const ROTATE: ReadonlyArray<{
+  readonly name: RegExp;
+  readonly file: RegExp | null;
+  readonly url: string;
+}> = [
+  {
+    name: /(?:^|[^a-z])aws(?:[^a-z]|$)/i,
+    file: /^~?[/\\]?(?:.*[/\\])?\.aws[/\\]credentials$/i,
+    url: 'https://console.aws.amazon.com/iam/home#/security_credentials',
+  },
+  {
+    name: /github|(?:^|_)gh[a-z]?_/i,
+    file: null,
+    url: 'https://github.com/settings/tokens',
+  },
+  {
+    name: /(?:^|[^a-z])npm(?:[^a-z]|$)|_authtoken/i,
+    file: /(?:^|[/\\])\.npmrc$/i,
+    url: 'https://www.npmjs.com/settings/~/tokens',
+  },
+  { name: /openai/i, file: null, url: 'https://platform.openai.com/api-keys' },
+  { name: /anthropic/i, file: null, url: 'https://console.anthropic.com/settings/keys' },
+  { name: /stripe/i, file: null, url: 'https://dashboard.stripe.com/apikeys' },
 ];
 
 const rotationUrl = (credential: SentCredential): string | null =>
-  ROTATE.find(([pattern]) => pattern.test(`${credential.name} ${credential.source}`))?.[1] ?? null;
+  (
+    ROTATE.find(({ name }) => name.test(credential.name)) ??
+    ROTATE.find(({ file }) => file?.test(credential.source) === true)
+  )?.url ?? null;
 
 /**
  * The one line that says what the scan concluded, before any detail: the line a user
@@ -138,6 +172,11 @@ function verdictLine(report: SentReport): string {
   if (report.files.length > 0)
     return `! No known credential value matched, but the session touched ${report.files.length} credential file(s) — see below`;
   const { calls, indexedSecrets, toolResultsRead } = report.coverage;
+  // A tick over "checked against 0 values" is comfort with nothing behind it, and this
+  // is the line the report opens with. Environment variables are still matched, so the
+  // wording says what was missing, not that nothing was checked.
+  if (indexedSecrets === 0)
+    return `? Nothing to compare with: no credential files or .env files were indexed, so only credential-shaped environment variables were checked in ${calls} tool call(s) — see coverage`;
   return `✓ No known credential value in ${calls} tool call(s), checked against ${indexedSecrets} indexed value(s)${toolResultsRead ? '' : ' — arguments only, see coverage'}`;
 }
 

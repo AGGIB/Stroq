@@ -22,7 +22,7 @@
 // good its reason. Nothing is written or printed but names and sources — matching
 // goes through the same salted-hash lookup the live guard uses.
 import { homedir } from 'node:os';
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
@@ -117,6 +117,50 @@ export function sessionBelongsHere(cwd: string, recorded: string): boolean {
   return isWithin(cwd, recorded) || isWithin(recorded, cwd);
 }
 
+/** Builds the index for `dir`'s project `.env` files and says what it holds. */
+async function buildScope(
+  index: FileSecretIndex,
+  dir: string,
+  home: string,
+): Promise<SentIndexScope> {
+  // Built before anything is scanned so the report can state what it matched against.
+  // A report that found nothing because the index was empty must not read like a
+  // report that found nothing because the session was clean.
+  const stats = await index.refresh(dir);
+  return {
+    cwd: dir,
+    home,
+    sourcePaths: index.sourcePaths(dir),
+    indexedSecrets: stats.entries + stats.canaries,
+  };
+}
+
+/**
+ * The folder whose `.env` files belong to a session recorded at `recorded`. The
+ * session's own folder, when it is one and still there: that is where the agent was
+ * started, and so where the project's secrets are, whichever folder of the project
+ * `stroq sent` was run from. A recorded FILE (Cursor names the files a session touched,
+ * not a folder) or one that has gone says nothing better than the directory we are in.
+ */
+function projectDirOf(recorded: string | null, cwd: string): string {
+  if (recorded === null) return cwd;
+  try {
+    return statSync(recorded).isDirectory() ? recorded : cwd;
+  } catch {
+    return cwd;
+  }
+}
+
+/**
+ * What to do when there is no session to read. A newcomer's first run, before any agent
+ * has been used in this directory, used to end on a line that named only what was
+ * missing. Both of these work with no session and no install.
+ */
+const NO_SESSION_NEXT =
+  'Nothing to read yet? Two commands need no session:\n' +
+  '  stroq attack              replay the attack corpus against the default policy\n' +
+  '  stroq init --agent <name> guard the next session, then read it with `stroq sent`\n';
+
 export async function runSent(args: readonly string[]): Promise<number> {
   let parsed;
   try {
@@ -152,16 +196,7 @@ export async function runSent(args: readonly string[]): Promise<number> {
   const cwd = process.cwd();
   const home = homedir();
   const index = new FileSecretIndex(secretsFile(), home);
-  // Built before anything is scanned so the report can state what it matched against.
-  // A report that found nothing because the index was empty must not read like a
-  // report that found nothing because the session was clean.
-  const stats = await index.refresh(cwd);
-  const scope: SentIndexScope = {
-    cwd,
-    home,
-    sourcePaths: index.sourcePaths(cwd),
-    indexedSecrets: stats.entries + stats.canaries,
-  };
+  const scope = await buildScope(index, cwd, home);
 
   // The transcript branch is the one that needs no install: the agent recorded the
   // session itself, result text and all, so a credential that only ever appeared in
@@ -181,7 +216,8 @@ export async function runSent(args: readonly string[]): Promise<number> {
       const notices = await readerNotices();
       process.stdout.write(
         `no agent transcript found — looked under ${READER_ROOTS()}\n` +
-          notices.map((why) => `  note: ${why}\n`).join(''),
+          notices.map((why) => `  note: ${why}\n`).join('') +
+          NO_SESSION_NEXT,
       );
       return 1;
     }
@@ -206,13 +242,22 @@ export async function runSent(args: readonly string[]): Promise<number> {
       process.stdout.write(`no tool calls recorded in ${found.path}\n`);
       return 1;
     }
+    // `--last` has confirmed the session is this project's, so the project's `.env`
+    // files are the ones in the folder it ran in, not in whichever folder of the
+    // project this command was typed in.
+    const projectDir = values.transcript === undefined ? projectDirOf(transcript.cwd, cwd) : cwd;
     const report = await scanTranscript(
       transcript,
       { agent: found.reader.agent, path: found.path },
       index,
-      scope,
+      projectDir === cwd ? scope : await buildScope(index, projectDir, home),
     );
-    return emit(report, out);
+    return emit(
+      found.sessions === undefined
+        ? report
+        : { ...report, coverage: { ...report.coverage, sessionsInProject: found.sessions } },
+      out,
+    );
   }
 
   const entries = await new AuditLog(auditFile()).readAll();
@@ -221,7 +266,8 @@ export async function runSent(args: readonly string[]): Promise<number> {
     process.stdout.write(
       'no audit entries yet — Stroq was not running for any session it can see.\n' +
         "Run `stroq sent --last` to read the agent's own transcript instead: that works\n" +
-        'on sessions from before Stroq was installed, and it can see tool results.\n',
+        'on sessions from before Stroq was installed, and it can see tool results.\n' +
+        NO_SESSION_NEXT,
     );
     return 1;
   }

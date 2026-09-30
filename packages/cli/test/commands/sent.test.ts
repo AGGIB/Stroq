@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -276,6 +276,125 @@ describe('stroq sent --last, when this directory has no session', () => {
     out.restore();
     expect(code).toBe(0);
     expect(out.text()).toContain('aws_secret_access_key');
+  });
+});
+
+/** A one-call Claude Code session recorded in `ranIn`, whose tool result is `result`. */
+function claudeSession(ranIn: string, name: string, result: string, mtime?: Date): void {
+  const dir = join(home, '.claude', 'projects', projectSlug(ranIn));
+  mkdirSync(dir, { recursive: true });
+  const base = { sessionId: name, cwd: ranIn, timestamp: AT };
+  const lines = [
+    {
+      ...base,
+      message: {
+        content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: { command: 'env' } }],
+      },
+    },
+    {
+      ...base,
+      message: { content: [{ type: 'tool_result', tool_use_id: 'a', content: result }] },
+    },
+  ];
+  const file = join(dir, `${name}.jsonl`);
+  writeFileSync(file, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+  if (mtime) utimesSync(file, mtime, mtime);
+}
+
+// The index was built from the directory `stroq sent` was run in, before the session was
+// read, so a project's `.env` was compared only when the command happened to be run from
+// the same folder the agent had been started in. Run one level down, it matched nothing
+// and printed a clean verdict about a session that had carried the value.
+describe('stroq sent --last, run from another folder of the same project', () => {
+  const ENV_SECRET = ['sk', 'live', '51H8xk2LkdIwHu7ix0abcdEFGH'].join('_');
+  const projectEnv = (dir: string): void => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '.env'), `STRIPE_API_KEY=${ENV_SECRET}\n`);
+  };
+
+  it('compares the session against the .env of the folder it ran in, from a subfolder', async () => {
+    projectEnv(cwd);
+    claudeSession(cwd, 'sub', `STRIPE_API_KEY=${ENV_SECRET}\n`);
+    const sub = join(cwd, 'packages', 'app');
+    mkdirSync(sub, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(sub);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain('STRIPE_API_KEY');
+    expect(out.text()).toMatch(/^✗ /m);
+    expect(out.text()).not.toContain(ENV_SECRET);
+  });
+
+  it('compares the session against the .env of the folder it ran in, from the parent', async () => {
+    const app = join(cwd, 'packages', 'app');
+    projectEnv(app);
+    claudeSession(app, 'parent', `STRIPE_API_KEY=${ENV_SECRET}\n`);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain('STRIPE_API_KEY');
+  });
+
+  it('says which folder the project .env files were read from', async () => {
+    projectEnv(cwd);
+    claudeSession(cwd, 'where', 'nothing here');
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain(`project .env files were read from ${cwd}`);
+  });
+});
+
+describe('stroq sent --last, how much it read', () => {
+  it('says it read one session of several, and how to read another', async () => {
+    claudeSession(cwd, 'old', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    claudeSession(cwd, 'mid', 'nothing', new Date('2026-09-10T00:00:00Z'));
+    claudeSession(cwd, 'new', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain('Read the newest of 3 sessions recorded for this project');
+    expect(out.text()).toContain('--transcript');
+    expect(out.text()).not.toContain('--all');
+  });
+
+  it('says nothing about other sessions when there is only one', async () => {
+    claudeSession(cwd, 'only', 'nothing');
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).not.toContain('sessions recorded for this project');
+  });
+
+  it('carries the count in the JSON report', async () => {
+    claudeSession(cwd, 'a', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    claudeSession(cwd, 'b', 'nothing', new Date('2026-09-02T00:00:00Z'));
+    const out = capture();
+    await runSent(['--last', '--json']);
+    out.restore();
+    const parsed = JSON.parse(out.text()) as { coverage: { sessionsInProject?: number } };
+    expect(parsed.coverage.sessionsInProject).toBe(2);
+  });
+});
+
+describe('stroq sent, with no session to read', () => {
+  it('ends with two commands that need no session: attack, and init for an agent', async () => {
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.text()).toContain('stroq attack');
+    expect(out.text()).toContain('stroq init --agent');
+  });
+
+  it('does the same when Stroq recorded nothing either', async () => {
+    const out = capture();
+    const code = await runSent([]);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.text()).toContain('stroq attack');
+    expect(out.text()).toContain('stroq init --agent');
   });
 });
 

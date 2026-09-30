@@ -183,6 +183,11 @@ export async function readerForFile(path: string): Promise<TranscriptReader> {
 export interface FoundTranscript {
   readonly reader: TranscriptReader;
   readonly path: string;
+  /**
+   * How many sessions were recorded for the directory, across every reader, when the
+   * transcript was chosen as the newest of them; absent when the user named a file.
+   */
+  readonly sessions?: number;
 }
 
 /**
@@ -197,12 +202,15 @@ export interface FoundTranscript {
  */
 export async function newestTranscript(cwd: string): Promise<FoundTranscript | null> {
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
+  let sessions = 0;
   for (const reader of READERS) {
-    const newest = (await reader.find(cwd))[0];
+    const found = await reader.find(cwd);
+    sessions += found.length;
+    const newest = found[0];
     if (!newest) continue;
     if (best === null || newest.mtimeMs > best.mtimeMs) {
       best = { reader, path: newest.path, mtimeMs: newest.mtimeMs };
     }
   }
-  return best === null ? null : { reader: best.reader, path: best.path };
+  return best === null ? null : { reader: best.reader, path: best.path, sessions };
 }

@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`Grep` is in the `PreToolUse` matcher.** The classifier judges a `Grep` over a path (a credential file, a decoy) but the matcher did not name it, so on hosts that have the tool the call never reached it. Claude Code 2.1.271 no longer has a `Grep` tool — it searches through `Bash`, which was already covered, and a `grep` of a decoy through a real 2.1.271 is denied as `deny-canary-file` — so this matters for older Claude Code and the Agent SDK. A test now requires the matcher to name every tool the classifier has a rule for.
 
+### Fixed
+
+- **`stroq sent --last` compared a session with the wrong folder's `.env`.** The index of project secrets was built from the folder the command was typed in, before the session was read, so run one level below the folder the agent was started in (or above it) it matched nothing and printed a clean verdict about a session that had carried the value. It is now built from the folder the session ran in, and the coverage section names that folder.
+- **`stroq sent` ticked `✓` when there was nothing to check against.** With no credential file or `.env` indexed the report opened with "No known credential value … checked against 0 indexed value(s)". It now opens with `?` and says what was missing; the tick is kept for a run that indexed at least one value.
+- **`stroq sent --last` read one session and did not say so.** A clean verdict about the newest session of a project with 237 of them read as "the project is clean". The coverage section now says "Read the newest of N sessions recorded for this project", and the JSON carries `coverage.sessionsInProject`.
+- **`stroq sent` with no session ended on a dead end.** It now ends with the two commands that need no session: `stroq attack` and `stroq init --agent <name>`.
+- **A Stripe key found in a folder called `GitHub` was sent to GitHub's token page.** The rotation link was chosen from the credential's name and its whole path, first match wins. It is now chosen from the name, as whole words (`NPM_TOKEN`, not `PNPM_HOME`), falling back to the file only where the file is itself a provider's (`~/.aws/credentials`, `~/.npmrc`); when nothing says which provider issued the value, no link is printed.
+
 ## [0.21.1] - 2026-09-30
 
 ### Fixed
