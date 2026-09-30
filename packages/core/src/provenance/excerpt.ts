@@ -48,7 +48,9 @@ const MIN_TAIL_SPELLING_CHARS = 10;
 const VALUE_TAIL = '.,;:!?\'")]}>`=';
 /** A run that could be a base64 or hex blob: what fits inside one atom. */
 const BLOB_RUN = /[A-Za-z0-9+/_-]{16,600}={0,2}/g;
-const MAX_BLOB_RUNS = 500;
+/** A piece of a value shorter than this is not compared with an encoded blob. */
+const MIN_PIECE_CHARS = 8;
+const MAX_BLOB_RUNS = 2_000;
 
 /** `value` without the characters of `tail` at its end, in one pass (no regex to restart). */
 function withoutTail(value: string, tail: string): string {
@@ -113,10 +115,10 @@ export function excerptRedactor(
   // A blob glued into a URL is part of a url atom, not an `encoded` atom, and it is the
   // blob that has to go: it is not spelled like the value it decodes to.
   const runs = new Set(text.match(BLOB_RUN) ?? []);
-  let examined = 0;
+  // Not silently: a result with more runs than can be examined may hold the blob that matters
+  // past the ones that were, and the caller withholds the excerpts rather than guess.
+  if (runs.size > MAX_BLOB_RUNS) return null;
   for (const run of runs) {
-    if (examined >= MAX_BLOB_RUNS) break;
-    examined += 1;
     const name = knownNameIn(run, known);
     if (name !== undefined) add(run, name);
   }
@@ -125,10 +127,23 @@ export function excerptRedactor(
   const forms = [...names.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp(forms.map(escapeRegExp).join('|'), 'gi');
   const checkable = forms.filter((form) => form.length >= MIN_SPELLING_CHARS);
+  // The pieces of a value between the characters an encoded blob cannot hold (the `_` of
+  // `sk_live_...`): an `encoded` atom is cut out of the text at those, so it can be one piece.
+  const pieces = [...new Set(forms.flatMap((form) => form.split(/[^a-z0-9+/]+/)))].filter(
+    (piece) => piece.length >= MIN_PIECE_CHARS,
+  );
 
   return (atom) => {
-    if (atom.kind === 'encoded' && knownNameIn(atom.value, known) !== undefined)
-      return '[REDACTED:encoded-secret]';
+    if (atom.kind === 'encoded') {
+      const lower = atom.value.toLowerCase();
+      if (
+        knownNameIn(atom.value, known) !== undefined ||
+        pieces.some(
+          (piece) => lower.includes(piece) || (lower.length >= 16 && piece.includes(lower)),
+        )
+      )
+        return '[REDACTED:encoded-secret]';
+    }
     const out = atom.value.replace(
       pattern,
       (found) => `[REDACTED:${names.get(found.toLowerCase()) ?? 'secret'}]`,

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { samePath } from '../replay/transcript.js';
 import { loadBundledRules, readRegularFile, scanContent } from '@stroq/core';
 import { isStroqHandler, readSettings, settingsPath } from '../commands/init.js';
 import type { Finding } from './findings.js';
@@ -95,6 +96,15 @@ const SKIPPED_DIRS: ReadonlySet<string> = new Set(['node_modules', '.git']);
  * until `exposure` did not come back. A symlink to a directory elsewhere is still
  * followed, once, because people do share a skills directory that way.
  */
+/** `path` with symlinks resolved as far as it exists, or as it was. */
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 function walk(
   dir: string,
   match: (name: string) => boolean,
@@ -186,7 +196,9 @@ export function contextSurface(cwd: string, home: string = homedir()): ContextSu
   // The user's own folders get the large budget, a repository's the small one. A project
   // that IS the home directory (a dotfiles repository) is the user's.
   const dirsFor = (base: string): number =>
-    resolve(base) === resolve(home) ? MAX_HOME_WALK_DIRS : MAX_REPO_WALK_DIRS;
+    samePath(resolve(base), resolve(home)) || samePath(realOrSelf(base), realOrSelf(home))
+      ? MAX_HOME_WALK_DIRS
+      : MAX_REPO_WALK_DIRS;
   const skills = new FileSet();
   walk(join(home, '.claude', 'skills'), isMarkdown, skills, dirsFor(home));
   walk(join(cwd, '.claude', 'skills'), isMarkdown, skills, dirsFor(cwd));

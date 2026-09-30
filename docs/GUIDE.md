@@ -492,7 +492,7 @@ The repository is also a plugin marketplace. Inside Claude Code:
 /plugin install stroq@stroq
 ```
 
-This registers the same `PreToolUse`, `PostToolUse` and `PostToolUseFailure` hooks as `stroq init` without touching your `.claude/settings.json`, so `stroq doctor` will report the settings-file hooks as missing — that is expected. The plugin's hook wrapper runs a globally installed `stroq` when there is one (fastest), and otherwise `npx -y @stroq/cli@<pinned version>` from a scratch directory, within an 11-second deadline for the whole path (the first run downloads the package; while a release is not on npm yet, the newest one runs). If neither can start, a `PreToolUse` event exits with code 2, which Claude Code treats as _block_: a missing runtime never silently disables the firewall. For the lowest per-call latency, `npm install -g @stroq/cli` alongside the plugin.
+This registers the same `PreToolUse`, `PostToolUse` and `PostToolUseFailure` hooks as `stroq init` without touching your `.claude/settings.json`, so `stroq doctor` will report the settings-file hooks as missing — that is expected. The plugin's hook wrapper runs a globally installed `stroq` when there is one (fastest), and otherwise `npx -y @stroq/cli@<pinned version>` from a scratch directory under `~/.stroq`, within an 11-second deadline for the whole path (the first run downloads the package; while a release is not on npm yet, the newest one runs). If neither can start, a `PreToolUse` event exits with code 2, which Claude Code treats as _block_: a missing runtime never silently disables the firewall. For the lowest per-call latency, `npm install -g @stroq/cli` alongside the plugin.
 
 ### From source
 

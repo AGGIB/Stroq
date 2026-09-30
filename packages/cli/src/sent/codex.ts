@@ -28,6 +28,7 @@ import { codexToolName, commandOf, isPatchTool } from '../adapters/codex-input.j
 import {
   directoryAndParents,
   feedLines,
+  samePath,
   type LineParser,
   type SessionList,
   type Transcript,
@@ -298,7 +299,7 @@ export async function findCodexRollouts(cwd: string, home?: string): Promise<Tra
 
 /** Whether a recorded working directory is `dir`, however the two are spelled. */
 const sameFolder = (recorded: string | null, dir: string): boolean =>
-  recorded !== null && resolve(recorded) === dir;
+  recorded !== null && samePath(resolve(recorded), dir);
 
 /** `findCodexRollouts`, and whether the list is this directory's own; see `SessionList`. */
 export async function findCodexRolloutsScoped(cwd: string, home?: string): Promise<SessionList> {

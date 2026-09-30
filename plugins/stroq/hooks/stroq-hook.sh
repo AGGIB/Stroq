@@ -27,6 +27,10 @@
 #   attempt and the fallback together, gets one deadline (11 s), after which npx and
 #   everything it started are ended and the exit is non-zero, so a PreToolUse blocks.
 #   Each fetch is also capped and not retried, so most failures come sooner.
+# - npm puts the node_modules/.bin of every folder above where it runs on PATH, and the
+#   installed stroq starts with `#!/usr/bin/env node`, so the scratch directory is made
+#   under Stroq's own home (whose ancestors are the user's), never in a shared temp
+#   directory where another user of the machine could plant a `node`.
 # - npm reads the `.npmrc` of the project it finds by walking up from where it runs, and a
 #   repository can carry one that names the registry the package comes from. npx is run
 #   from a fresh directory with a package.json of its own, and with --no-workspaces (a
@@ -85,7 +89,19 @@ run_bounded() {
 
 run_npx() {
   local start="$SECONDS" code left
-  work="$(mktemp -d 2>/dev/null)" || work=""
+  # Under Stroq's own home, not in a shared temp directory: npm puts the node_modules/.bin of
+  # every folder above its working directory on PATH, ahead of the user's, and the installed
+  # stroq starts with `#!/usr/bin/env node`. In /tmp (where mktemp puts it on Linux) any other
+  # user of the machine can plant a `node` there that then answers as the firewall.
+  base="${STROQ_HOME:-${HOME:-}/.stroq}/plugin-tmp"
+  if [ -z "${STROQ_HOME:-}" ] && [ -z "${HOME:-}" ]; then
+    echo "Stroq plugin: neither STROQ_HOME nor HOME is set, so there is nowhere private to run npx from" >&2
+    return 1
+  fi
+  mkdir -p "$base" 2>/dev/null && chmod 700 "$base" 2>/dev/null
+  # What an earlier hook left when it was killed before it could clean up.
+  find "$base" -maxdepth 1 -name 'run.*' -mtime +1 -exec rm -rf {} + 2>/dev/null
+  work="$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)" || work=""
   if [ -z "$work" ]; then
     echo "Stroq plugin: could not make a scratch directory to run npx from" >&2
     return 1

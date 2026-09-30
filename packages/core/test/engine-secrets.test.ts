@@ -583,6 +583,51 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
     expect(last.summary).not.toContain('Sup3rS3cret');
   });
 
+  // Blobs are looked for in the result, and a result with a great many of them stopped
+  // being looked in after 500: the hex blob in the URL after them was stored.
+  it('does not stop looking for encoded blobs after the first few hundred', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), 'DB_PASSWORD=Sup3rS3cretPw9x\n');
+    const filler = Array.from(
+      { length: 700 },
+      (_, i) => `src/components/feature${i}/Widget${i}.tsx`,
+    ).join('\n');
+    const hex = Buffer.from('bot:Sup3rS3cretPw9x').toString('hex');
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      toolResultText: `${filler}\nsee https://x.example/cb?state=${hex}&v=1 now`,
+      cwd: fx.cwd,
+    });
+    for (const record of recorded) expect(record.excerpt).not.toContain(hex);
+  });
+
+  // A key whose secret part is not base64 (the `_` of `sk_live_...`) was stored in pieces: the
+  // part after it is 24 characters, under the structural redactor's floor, and is an atom.
+  it.each([
+    [
+      'a Stripe key',
+      'STRIPE_SECRET_KEY',
+      ['sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc'].join('_'),
+      '4eC39HqLyjWDarjtT1zdp7dc',
+    ],
+    ['a Slack token', 'SLACK_TOKEN', ['xoxb', '1234567890', 'abcdefghijklmnop'].join('-'), 'abcdefghijklmnop'],
+  ])('does not store a piece of %s', async (_name, key, value, piece) => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), `${key}=${value}\n`);
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'ls' },
+      toolResultText: `Set ${key}=${value} in prod`,
+      cwd: fx.cwd,
+    });
+    for (const record of recorded) expect(record.excerpt).not.toContain(piece);
+  });
+
   it('does not store a base64 blob that decodes to a known secret', async () => {
     const fx = fixture();
     const { store, recorded } = recorder();

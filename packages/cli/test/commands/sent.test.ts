@@ -472,6 +472,23 @@ describe('stroq sent --last, finding the project’s own session', () => {
     expect(out.text()).not.toContain('at-home');
   });
 
+  // The fallback list ends at the newest session on the machine, and the belongs-here check
+  // accepted it because its folder CONTAINS the directory: the home directory contains every
+  // project. It is not a project, and a clean verdict about it is about the wrong session.
+  it('does not accept a session recorded in the home directory as the project’s when it is the newest', async () => {
+    claudeSession(home, 'at-home', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    claudeSession('/elsewhere/one', 'other', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    const project = join(home, 'work', 'app');
+    mkdirSync(project, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(project);
+    const out = capture();
+    const code = await runSent(['--last']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.text()).toContain('no agent session recorded');
+    expect(out.text()).not.toContain('No known credential value');
+  });
+
   it('still reads a session recorded in the home directory when that is where it is run', async () => {
     claudeSession(home, 'at-home', 'nothing', new Date('2026-09-01T00:00:00Z'));
     vi.spyOn(process, 'cwd').mockReturnValue(home);

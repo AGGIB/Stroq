@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -227,6 +228,33 @@ esac`);
   // node_modules) and reads that folder's .npmrc, so an empty directory inside a directory
   // that has one is not isolated: it inherited the registry the ancestor named. This asks
   // the real npm which registry it would use, from where the wrapper ran it.
+  // npm puts the node_modules/.bin of EVERY folder above its working directory on PATH,
+  // ahead of the user's, and the installed stroq starts with `#!/usr/bin/env node`: a `node`
+  // planted in a folder above the scratch directory answers as the firewall. In /tmp, which
+  // is where mktemp puts it on Linux, any other user of the machine can plant one. So the
+  // scratch directory is not made in a shared temp directory: it is made under Stroq's own
+  // home, whose ancestors are the user's.
+  it('makes its scratch directory under Stroq’s home, not in a shared temp directory', async () => {
+    const npx = fakeNpx('printf "%s" "{}"; exit 0');
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const shared = mkdtempSync(join(tmpdir(), 'stroq-shared-tmp-'));
+    await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home, { TMPDIR: shared });
+    const where =
+      logLines(npx.log)
+        .find((line) => line.startsWith('pwd: '))
+        ?.slice(5) ?? '';
+    expect(where.startsWith(realpathSync(join(home, 'plugin-tmp')))).toBe(true);
+    expect(where.startsWith(realpathSync(shared))).toBe(false);
+  }, 30_000);
+
+  it('leaves no scratch directory behind', async () => {
+    const npx = fakeNpx('printf "%s" "{}"; exit 0');
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    expect(existsSync(join(home, 'plugin-tmp'))).toBe(true);
+    expect(readdirSync(join(home, 'plugin-tmp'))).toEqual([]);
+  }, 30_000);
+
   it('does not let a .npmrc above the scratch directory choose the registry', async () => {
     const ancestor = mkdtempSync(join(tmpdir(), 'stroq-npmrc-ancestor-'));
     writeFileSync(join(ancestor, 'package.json'), '{"name":"hostile"}');

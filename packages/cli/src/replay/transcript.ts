@@ -9,7 +9,7 @@
 //
 // Nothing here writes to the user's real `~/.stroq`: the caller runs these events
 // against a throwaway home, exactly as `stroq attack` does.
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
@@ -196,19 +196,40 @@ export interface TranscriptFile {
  */
 export function directoryAndParents(dir: string, home: string = homedir()): string[] {
   const start = resolve(dir);
-  const fromHome = relative(resolve(home), start);
-  const insideHome = fromHome !== '' && !fromHome.startsWith('..') && !isAbsolute(fromHome);
+  const homeDir = resolve(home);
+  const homeReal = realOrSelf(homeDir);
+  // The same folder however it is spelled: through a symlink, or in another case on Windows.
+  const sameFolder = (a: string, b: string): boolean =>
+    samePath(a, b) || samePath(realOrSelf(a), realOrSelf(b));
+  const inside = (child: string, root: string): boolean => {
+    const from = relative(root, child);
+    return from !== '' && !from.startsWith('..') && !isAbsolute(from);
+  };
+  const insideHome = inside(start, homeDir) || inside(realOrSelf(start), homeReal);
   const out: string[] = [];
   let current = start;
   for (;;) {
     out.push(current);
     const parent = dirname(current);
     if (parent === current || parent === dirname(parent)) return out;
-    if (insideHome && parent === resolve(home)) return out;
-    if (!insideHome && current === resolve(home)) return out;
+    if (insideHome && sameFolder(parent, homeDir)) return out;
+    if (!insideHome && sameFolder(current, homeDir)) return out;
     current = parent;
   }
 }
+
+/** `path` with symlinks resolved as far as it exists, or as it was. */
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Whether two paths are the same, which on Windows is not a question of case. */
+export const samePath = (a: string, b: string): boolean =>
+  process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 
 /** Sessions found for a directory, newest first, and whether they are its own. */
 export interface SessionList {

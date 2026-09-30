@@ -115,7 +115,11 @@ function isWithin(dir: string, root: string): boolean {
  * refused, for every Cursor session.
  */
 export function sessionBelongsHere(cwd: string, recorded: string): boolean {
-  return isWithin(cwd, recorded) || isWithin(recorded, cwd);
+  if (isWithin(recorded, cwd)) return true;
+  if (!isWithin(cwd, recorded)) return false;
+  // `recorded` contains this directory. A project's own folder above it is the same project;
+  // the home directory, or anything above it, contains every project and is none of them.
+  return !isWithin(homedir(), recorded);
 }
 
 /** Builds the index for `dir`'s project `.env` files and says what it holds. */
