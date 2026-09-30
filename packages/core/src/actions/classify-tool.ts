@@ -54,11 +54,13 @@ const WRITE_WORDS: ReadonlySet<string> = new Set([
   'move',
   'rename',
   'append',
+  'prepend',
   'put',
   'save',
   'saveas',
   'update',
-  'create',
+  'upsert',
+  'persist',
   'mkdir',
   'mkfile',
   'copy',
@@ -73,33 +75,46 @@ const WRITE_WORDS: ReadonlySet<string> = new Set([
   'chown',
   'truncate',
   'modify',
-  'apply',
-  'set',
-  'link',
   'symlink',
   'ln',
   'download',
   'extract',
   'unzip',
   'untar',
+  'unpack',
+  'decompress',
   'rm',
+  'unlink',
+  'rmdir',
+  'erase',
+  'wipe',
+  'purge',
   'screenshot',
   'snapshot',
   'export',
   'dump',
   'store',
-  'generate',
   'clone',
-  'checkout',
-  'add',
-  'new',
-  'make',
-  'unpack',
-  'decompress',
-  'import',
-  'sync',
-  'install',
   'pdf',
+]);
+/**
+ * Verbs that write only beside a noun that says what: `create_directory`, `create_note`
+ * write, `create_issue` and `create_pull_request_review` do not, and a review comment
+ * carries a `path` that is merely the file it is about. The same reasoning kept `add`,
+ * `set`, `apply`, `link`, `import`, `sync`, `generate`, `make` and `checkout` off the list
+ * altogether: each names a file as INPUT as often as it writes one, and a tool that
+ * takes a destination has a key that says so (`isDestKey`).
+ */
+const CREATE_NOUNS: ReadonlySet<string> = new Set([
+  'file',
+  'files',
+  'directory',
+  'dir',
+  'folder',
+  'document',
+  'doc',
+  'note',
+  'text',
 ]);
 /**
  * Words of a name, after a snake-, kebab- or camelCase split that also breaks an acronym
@@ -107,13 +122,21 @@ const WRITE_WORDS: ReadonlySet<string> = new Set([
  */
 const wordsOf = (name: string): string[] =>
   name
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])(?=[A-Z])/g, '$1 ')
+    // A lookahead, not a group that runs on: `([A-Z]+)([A-Z][a-z])` was quadratic on a long
+    // run of capitals, and a key name is chosen by the agent.
+    .replace(/([A-Z])(?=[A-Z][a-z])/g, '$1 ')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word !== '');
-const isWriteShaped = (tool: string): boolean =>
-  WRITE_SHAPED_TOOL.test(tool) || wordsOf(tool).some((word) => WRITE_WORDS.has(word));
+const isWriteShaped = (tool: string): boolean => {
+  if (WRITE_SHAPED_TOOL.test(tool)) return true;
+  const words = wordsOf(tool);
+  return (
+    words.some((word) => WRITE_WORDS.has(word)) ||
+    (words.includes('create') && words.some((word) => CREATE_NOUNS.has(word)))
+  );
+};
 
 const DEST_WORDS: ReadonlySet<string> = new Set([
   'dst',
@@ -124,18 +147,21 @@ const DEST_WORDS: ReadonlySet<string> = new Set([
   'outputs',
   'outdir',
   'saveas',
+  'saveto',
+  'write',
+  'save',
+  'export',
 ]);
 /**
  * Whether an argument key names where the tool WRITES (`dst`, `output`, `outputPath`,
- * `save_as`, `new_name`). A value under one is a write target even when the tool's own
- * name says nothing about writing: `convert_asset`, `render` and `export` are not verbs
- * anyone lists, and the argument is the more reliable witness.
+ * `save_as`, `write_to`, `export_file`, `new_name`). A value under one is a write target
+ * even when the tool's own name says nothing about writing: `convert_asset`, `render` and
+ * `export` are not verbs anyone lists, and the argument is the more reliable witness.
  */
 function isDestKey(key: string): boolean {
   const words = wordsOf(key);
   if (words.some((word) => DEST_WORDS.has(word))) return true;
-  const joined = words.join(' ');
-  return joined.includes('save as') || /\bnew (?:name|path|file)\b/.test(joined);
+  return /\bnew (?:name|path|file)\b/.test(words.join(' '));
 }
 
 /**
@@ -147,7 +173,7 @@ function isDestKey(key: string): boolean {
  * message.
  */
 const PATH_LIKE_KEY =
-  /(?:path|file|dir|directory|folder)(?:[_-]?name)?\d*s?$|^(?:src|source|from|to|dest|destination|dst|out|output|save_?as|new_?(?:name|path)|target|location|uri|url|cwd|root)\d*s?$/i;
+  /(?:path|file|dir|directory|folder)(?:[_-]?name)?\d*s?$|^(?:src|source|from|to|dest|destination|dst|out|output|save_?as|save_?to|write_?to|export_?to|new_?(?:name|path)|target|location|uri|url|cwd|root)\d*s?$/i;
 /**
  * The short keys that are sometimes a path and sometimes a paragraph (`source` is a file
  * for a copy tool and the code under analysis for a linter). A value under one is read
@@ -166,8 +192,18 @@ const PROSE_KEY =
  */
 const MAX_PATH_VALUES = 4096;
 const MAX_PATH_CHARS = 2 * 1024 * 1024;
-/** Objects nested deeper than this are not searched; arrays do not count as a level. */
-const MAX_PATH_DEPTH = 3;
+/**
+ * Containers nested deeper than this are not searched. Arrays count as a level as well as
+ * objects, or a deep enough array overflows the stack, and a throw is an allow for the
+ * tools the hook does not fail closed on.
+ */
+const MAX_PATH_DEPTH = 6;
+/**
+ * A key longer than this is not a key: nobody names an argument with a paragraph. One that
+ * would otherwise be read as a path key makes the call unreadable, and no work is done on
+ * its text.
+ */
+const MAX_KEY_CHARS = 256;
 const GREP_PATH_KEY = /^(path|file_path|notebook_path|directory|root|files|paths)$/i;
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const EMPTY: CommandClassification = { classes: [], hosts: [], signals: [] };
@@ -189,17 +225,27 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
 }
 
 /**
- * A `file:` URI as the path it names, with its escapes undone: `file:///p/%2Eclaude/x`
- * is `/p/.claude/x` to the server that opens it and has to be to the classifier.
+ * A `file:` URI as the path it names, read the way the server that opens it reads it: a
+ * URL parser drops tabs and line breaks, the host, the query and the fragment, resolves
+ * `.` and `..` segments and treats `%2e` as a dot, and what is left is percent-decoded a
+ * run at a time, so one malformed escape cannot leave the rest of the path undecoded.
  */
 function fileUriPath(raw: string): string {
   if (!/^file:/i.test(raw)) return raw;
-  const rest = raw.replace(/^file:(?:\/\/[^/]*)?/i, '');
+  const cleaned = raw.replace(/[\t\r\n]/g, '');
+  let path: string;
   try {
-    return decodeURIComponent(rest);
+    path = new URL(cleaned).pathname;
   } catch {
-    return rest;
+    path = cleaned.replace(/^file:(?:\/\/[^/]*)?/i, '').replace(/[?#][\s\S]*$/, '');
   }
+  return path.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
 }
 
 function classifyPath(rawPath: string, write: boolean): ToolClassification {
@@ -279,22 +325,40 @@ function visit(
     if (isPathKey) addPath(value, key, dest, state);
     return;
   }
-  if (typeof value !== 'object' || value === null) return;
+  if (typeof value !== 'object' || value === null || depth >= MAX_PATH_DEPTH) return;
   if (Array.isArray(value)) {
-    for (const item of value) visit(item, keyPattern, key, isPathKey, dest, depth, state);
+    for (const item of value) visit(item, keyPattern, key, isPathKey, dest, depth + 1, state);
     return;
   }
-  if (depth >= MAX_PATH_DEPTH) return;
   for (const [childKey, child] of Object.entries(value)) {
     const childIsPath = keyPattern.test(childKey);
     if (!childIsPath && PROSE_KEY.test(childKey)) continue;
+    if (childIsPath && childKey.length > MAX_KEY_CHARS) {
+      state.complete = false;
+      continue;
+    }
     const childDest = dest || (childIsPath && isDestKey(childKey));
     visit(child, keyPattern, childKey, childIsPath, childDest, depth + 1, state);
   }
 }
 
 function addPath(value: string, key: string, dest: boolean, state: ScanState): void {
-  if (AMBIGUOUS_KEY.test(key) && /[\r\n]/.test(value)) return;
+  // A value with a line break under a short key that is sometimes prose is read a line at a
+  // time, keeping the lines that could be a path (no whitespace inside): a server that takes
+  // a list of files takes them one per line, and one that trims a stray newline still opens
+  // the file. Dropping the whole value because it had a break let the agent hide a path by
+  // adding one.
+  if (/[\r\n]/.test(value) && AMBIGUOUS_KEY.test(key)) {
+    for (const line of value.split(/\r\n|\r|\n/)) {
+      const path = line.trim();
+      if (path !== '' && !/\s/.test(path)) addOne(path, dest, state);
+    }
+    return;
+  }
+  addOne(value, dest, state);
+}
+
+function addOne(value: string, dest: boolean, state: ScanState): void {
   const id = `${dest ? 'w' : 'r'}\n${value}`;
   if (state.seen.has(id)) return;
   if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS) {

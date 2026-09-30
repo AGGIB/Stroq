@@ -490,9 +490,6 @@ describe('the shapes an MCP call carries its paths in', () => {
     'mcp__fs__store_blob',
     'mcp__git__clone_repo',
     'mcp__fs__unpack_archive',
-    'mcp__pkg__install_package',
-    'mcp__fs__sync_folder',
-    'mcp__fs__import_bundle',
     'mcp__fs__saveAs',
   ])('%s writing the agent’s own config is config.self', (tool) => {
     expect(classifyTool(tool, { path: '.claude/settings.json' }, cwd).classes).toContain(
@@ -526,5 +523,155 @@ describe('the shapes an MCP call carries its paths in', () => {
   it('still reads a long single-line value under an ambiguous key', () => {
     const to = `/proj/${'./'.repeat(2100)}.claude/settings.json`;
     expect(classifyTool('mcp__fs__write_file', { to }, cwd).classes).toContain('config.self');
+  });
+});
+
+// Round two of review: the code written to close the padding hole had holes of its own.
+describe('the scan of an MCP call’s arguments is bounded and hard to slip past', () => {
+  const started = (): number => performance.now();
+
+  // The split of an acronym from the word after it was quadratic on a long run of capitals,
+  // and it ran on key names, which the agent chooses: past the host's hook timeout the
+  // host lets the call through.
+  it('does not take long over a very long key of capitals', () => {
+    const t = started();
+    const key = `${'A'.repeat(200_000)}PATH`;
+    const r = classifyTool('mcp__fs__write_file', { [key]: '.claude/settings.json' }, cwd);
+    expect(performance.now() - t).toBeLessThan(500);
+    expect(r.classes).toContain('shell.unparsed');
+  });
+
+  it('does not take long over many long keys either', () => {
+    const t = started();
+    const input = Object.fromEntries(
+      Array.from({ length: 500 }, (_, i) => [`${'A'.repeat(5000)}${i}_path`, 'x']),
+    );
+    classifyTool('mcp__fs__write_file', input, cwd);
+    expect(performance.now() - t).toBeLessThan(1000);
+  });
+
+  it('does not take long over a tool name made of capitals', () => {
+    const t = started();
+    classifyTool(`mcp__fs__${'A'.repeat(200_000)}`, { path: 'x' }, cwd);
+    expect(performance.now() - t).toBeLessThan(500);
+  });
+
+  // Arrays did not count as a level, so a deep enough one overflowed the stack, and a
+  // throw is an allow for the tools the hook does not fail closed on.
+  const nested = (depth: number): unknown => {
+    let inner: unknown = 'x';
+    for (let i = 0; i < depth; i += 1) inner = [inner];
+    return inner;
+  };
+  it.each([
+    ['Grep', { pattern: 'x', path: '/home/u/.ssh' }],
+    ['mcp__fs__read_file', { path: '/home/u/.ssh/id_rsa' }],
+  ])('%s still reads its path beside a 20,000-deep array', (tool, input) => {
+    const t = started();
+    const r = classifyTool(tool, { ...input, junk: nested(20_000) }, cwd);
+    expect(r.classes).toContain('fs.secrets');
+    expect(performance.now() - t).toBeLessThan(500);
+  });
+
+  it('does not throw on a deep array under a path-like key either', () => {
+    expect(() =>
+      classifyTool(
+        'mcp__fs__write_file',
+        { files: nested(20_000), path: '.claude/settings.json' },
+        cwd,
+      ),
+    ).not.toThrow();
+  });
+
+  it('reads a list of objects inside an options bag', () => {
+    const r = classifyTool(
+      'mcp__fs__write_file',
+      { options: { files: [{ path: '.claude/settings.json' }] } },
+      cwd,
+    );
+    expect(r.classes).toContain('config.self');
+  });
+
+  // The URI is what the server opens, so it is read the way a URL parser reads it.
+  it.each([
+    ['a malformed escape beside a good one', 'file:///p/%zz/../%2Eclaude/settings.json'],
+    ['a query', 'file:///p/.claude/settings.json?x=1'],
+    ['a fragment', 'file:///p/.claude/settings.json#top'],
+    ['a tab inside the path', 'file:///p/.cla\tude/settings.json'],
+    ['a newline inside the path', 'file:///p/.claude/set\ntings.json'],
+    ['a host of localhost', 'file://localhost/p/.claude/settings.json'],
+    ['dot segments', 'file:///p/x/../.claude/settings.json'],
+  ])('reads a write to a file URI with %s', (_name, uri) => {
+    expect(classifyTool('mcp__fs__write_file', { uri }, cwd).classes).toContain('config.self');
+  });
+
+  it('reads a credential in a file URI with a fragment', () => {
+    const r = classifyTool('mcp__fs__read_file', { uri: 'file:///home/u/.ssh/id_rsa#x' }, cwd);
+    expect(r.classes).toContain('fs.secrets');
+  });
+
+  // A newline under a short key made the value "prose" and dropped it whole, and the agent
+  // writes the value. A path per line is read; a line with words in it is not.
+  it.each([
+    ['a path after a first line', { source: '/tmp/a\n.claude/settings.json' }],
+    ['a trailing newline', { source: '.claude/settings.json\n' }],
+    ['a leading newline', { to: '\n.claude/settings.json' }],
+    ['carriage returns', { target: '/tmp/a\r\n.claude/settings.json\r\n' }],
+  ])('reads a write to a path with %s under a short key', (_name, input) => {
+    expect(classifyTool('mcp__fs__write_file', input, cwd).classes).toContain('config.self');
+  });
+
+  it('reads a credential on the second line of a value under a short key', () => {
+    const r = classifyTool('mcp__fs__read_file', { source: '/tmp/a\n/home/u/.ssh/id_rsa' }, cwd);
+    expect(r.classes).toContain('fs.secrets');
+  });
+
+  // Verbs that take a path as INPUT are not writes: a review comment on a file, staging a
+  // file, adding a file to a context. Each was denied at any taint as a write to the
+  // agent's own config when the file was one the pull request touched.
+  it.each([
+    ['mcp__git__git_add', { repo_path: '/r', files: ['.claude/settings.json'] }],
+    ['mcp__github__add_comment_to_pending_review', { path: '.claude/settings.json', body: 'x' }],
+    [
+      'mcp__github__create_pull_request_review',
+      { comments: [{ path: '.claude/settings.json', body: 'x' }] },
+    ],
+    ['mcp__ctx__add_file_to_context', { path: 'CLAUDE.md' }],
+    ['mcp__ui__apply_filters', { file: '.claude/settings.json' }],
+    ['mcp__ui__set_theme', { path: '.claude/settings.json' }],
+    ['mcp__git__checkout_branch', { path: '.claude/settings.json' }],
+    ['mcp__docs__generate_summary', { path: '.claude/settings.json' }],
+    ['mcp__fs__sync_status', { path: '.claude/settings.json' }],
+  ])('%s naming a protected path is not a write to it', (tool, input) => {
+    const { classes } = classifyTool(tool, input, cwd);
+    expect(classes).not.toContain('config.self');
+    expect(classes).not.toContain('config.instructions');
+  });
+
+  it.each([
+    'mcp__fs__unlink',
+    'mcp__fs__rmdir',
+    'mcp__fs__erase_file',
+    'mcp__fs__wipe',
+    'mcp__fs__purge_file',
+    'mcp__fs__prepend_text',
+    'mcp__db__upsert_file',
+    'mcp__fs__create_directory',
+    'mcp__fs__create_note',
+  ])('%s writing the agent’s own config is config.self', (tool) => {
+    expect(classifyTool(tool, { path: '.claude/settings.json' }, cwd).classes).toContain(
+      'config.self',
+    );
+  });
+
+  it.each([
+    ['write_to', { write_to: '.claude/settings.json' }],
+    ['writePath', { writePath: '.claude/settings.json' }],
+    ['save_dir', { save_dir: '.claude/rules' }],
+    ['export_file', { export_file: '.claude/settings.json' }],
+    ['save_to', { save_to: '.claude/settings.json' }],
+  ])('a value under %s is a write target', (_name, input) => {
+    const { classes } = classifyTool('mcp__media__render_asset', input, cwd);
+    expect(classes.some((c) => c === 'config.self' || c === 'config.instructions')).toBe(true);
   });
 });
