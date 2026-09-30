@@ -3,9 +3,10 @@ export type ActionClass =
   | 'shell.network'
   | 'shell.destructive'
   /**
-   * The command runs something Stroq could not read — a dynamic-execution form
-   * whose operand is not a literal. Distinct from the four above because it is not
-   * a claim that the command is dangerous, it is a refusal to claim it is safe.
+   * The action does something Stroq could not read — a dynamic-execution form
+   * whose operand is not a literal, or an MCP call or search with more file arguments
+   * than it will read. Distinct from the four above because it is not a claim that the
+   * action is dangerous, it is a refusal to claim it is safe.
    */
   | 'shell.unparsed'
   | 'fs.secrets'

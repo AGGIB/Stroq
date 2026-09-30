@@ -37,7 +37,14 @@ const WRITE_SHAPED_TOOL =
  * Whole words of a tool name that mean it changes a file. Read as words, after a
  * snake-, kebab- or camelCase split, because the list of verbs above is matched inside
  * the name and a file tool is called what its author liked: `copy_file`, `str_replace`,
- * `touch`, `chmod`, `modifyFile` all wrote a file and none of them was on it.
+ * `touch`, `chmod`, `modifyFile`, `take_screenshot`, `FSCopy` all wrote a file and none of
+ * them was on it.
+ *
+ * It is still a list, and a tool named with a verb that is not here reads as a tool that
+ * only looks. What makes that safe to leave open on the read side is that a credential
+ * path is caught whatever the tool is called (see `classifyMcp`), and on the write side
+ * that a key which names a DESTINATION (`dst`, `output`, `save_as`) makes its value a
+ * write target whatever the tool is called (see `isDestKey`).
  */
 const WRITE_WORDS: ReadonlySet<string> = new Set([
   'write',
@@ -49,9 +56,11 @@ const WRITE_WORDS: ReadonlySet<string> = new Set([
   'append',
   'put',
   'save',
+  'saveas',
   'update',
   'create',
   'mkdir',
+  'mkfile',
   'copy',
   'cp',
   'mv',
@@ -74,29 +83,91 @@ const WRITE_WORDS: ReadonlySet<string> = new Set([
   'unzip',
   'untar',
   'rm',
+  'screenshot',
+  'snapshot',
+  'export',
+  'dump',
+  'store',
+  'generate',
+  'clone',
+  'checkout',
+  'add',
+  'new',
+  'make',
+  'unpack',
+  'decompress',
+  'import',
+  'sync',
+  'install',
+  'pdf',
 ]);
-const toolWords = (tool: string): string[] =>
-  tool
+/**
+ * Words of a name, after a snake-, kebab- or camelCase split that also breaks an acronym
+ * from the word after it (`FSCopy` is `fs copy`, `JSONPatch` is `json patch`).
+ */
+const wordsOf = (name: string): string[] =>
+  name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word !== '');
 const isWriteShaped = (tool: string): boolean =>
-  WRITE_SHAPED_TOOL.test(tool) || toolWords(tool).some((word) => WRITE_WORDS.has(word));
+  WRITE_SHAPED_TOOL.test(tool) || wordsOf(tool).some((word) => WRITE_WORDS.has(word));
+
+const DEST_WORDS: ReadonlySet<string> = new Set([
+  'dst',
+  'dest',
+  'destination',
+  'out',
+  'output',
+  'outputs',
+  'outdir',
+  'saveas',
+]);
+/**
+ * Whether an argument key names where the tool WRITES (`dst`, `output`, `outputPath`,
+ * `save_as`, `new_name`). A value under one is a write target even when the tool's own
+ * name says nothing about writing: `convert_asset`, `render` and `export` are not verbs
+ * anyone lists, and the argument is the more reliable witness.
+ */
+function isDestKey(key: string): boolean {
+  const words = wordsOf(key);
+  if (words.some((word) => DEST_WORDS.has(word))) return true;
+  const joined = words.join(' ');
+  return joined.includes('save as') || /\bnew (?:name|path|file)\b/.test(joined);
+}
+
 /**
  * The argument keys that tell a tool WHERE to act, by what a tool author would call
  * them: anything ending in path, file, dir, directory or folder, with or without a
- * `name` after it (`source_path`, `relativePath`, `outputDir`, `file_name`), and the
- * short names for a source or a destination. A key that carries prose (`body`, `text`,
- * `title`) is not one, so a path mentioned in a message is still just a message.
+ * `name` after it and a digit (`source_path`, `relativePath`, `outputDir`, `file_name`,
+ * `path2`), and the short names for a source or a destination. A key that carries prose
+ * (`body`, `text`, `title`) is not one, so a path mentioned in a message is still just a
+ * message.
  */
 const PATH_LIKE_KEY =
-  /(?:path|file|dir|directory|folder)(?:[_-]?name)?s?$|^(?:src|source|from|to|dest|destination|target|location|uri|url|cwd|root)s?$/i;
+  /(?:path|file|dir|directory|folder)(?:[_-]?name)?\d*s?$|^(?:src|source|from|to|dest|destination|dst|out|output|save_?as|new_?(?:name|path)|target|location|uri|url|cwd|root)\d*s?$/i;
+/**
+ * The short keys that are sometimes a path and sometimes a paragraph (`source` is a file
+ * for a copy tool and the code under analysis for a linter). A value under one is read
+ * as a path only when it is one line, which a path is and prose seldom is; a value under
+ * a key that ENDS in `path` or `file` is read whatever it looks like.
+ */
+const AMBIGUOUS_KEY = /^(?:src|source|from|to|output|out|target|location)\d*s?$/i;
 /** Keys whose value is prose or a payload: not searched for a path, at any depth. */
 const PROSE_KEY =
   /^(?:body|text|content|contents|message|comment|description|title|note|query|sql|prompt|html|markdown)$/i;
-const MAX_PATH_VALUE = 4096;
-const MAX_PATH_VALUES = 256;
+/**
+ * What is read of one call's arguments, and no more, so that an input made of thousands
+ * of keys is not thousands of checks. Past any of these the call is reported unreadable
+ * (see `scanPaths`), never silently truncated: the agent writes the arguments, and a
+ * limit it can fill with decoys is a limit it can use to hide the real path.
+ */
+const MAX_PATH_VALUES = 4096;
+const MAX_PATH_CHARS = 2 * 1024 * 1024;
+/** Objects nested deeper than this are not searched; arrays do not count as a level. */
+const MAX_PATH_DEPTH = 3;
 const GREP_PATH_KEY = /^(path|file_path|notebook_path|directory|root|files|paths)$/i;
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const EMPTY: CommandClassification = { classes: [], hosts: [], signals: [] };
@@ -117,8 +188,22 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
   return typeof candidate === 'string' ? candidate : '';
 }
 
+/**
+ * A `file:` URI as the path it names, with its escapes undone: `file:///p/%2Eclaude/x`
+ * is `/p/.claude/x` to the server that opens it and has to be to the classifier.
+ */
+function fileUriPath(raw: string): string {
+  if (!/^file:/i.test(raw)) return raw;
+  const rest = raw.replace(/^file:(?:\/\/[^/]*)?/i, '');
+  try {
+    return decodeURIComponent(rest);
+  } catch {
+    return rest;
+  }
+}
+
 function classifyPath(rawPath: string, write: boolean): ToolClassification {
-  const path = normalizePathForMatch(rawPath);
+  const path = normalizePathForMatch(fileUriPath(rawPath));
   const classes: ActionClass[] = [];
   const signals: string[] = [];
   if (write && SELF_CONFIG_FILE.test(path)) {
@@ -143,49 +228,111 @@ function classifyPath(rawPath: string, write: boolean): ToolClassification {
   return { classes, hosts: [], signals };
 }
 
-/**
- * Scans path-like keys of `toolInput` (one level deep, plus arrays of
- * strings under such a key) for the protected path. A path mentioned in a
- * non-path key (`body`, `text`, `title`, …) does not count — that is
- * incidental text, not an argument telling the tool where to write.
- */
-function pathValues(toolInput: Readonly<Record<string, unknown>>, keyPattern: RegExp): string[] {
-  const out: string[] = [];
-  collectPaths(toolInput, keyPattern, 0, out);
-  return out;
+interface PathEntry {
+  readonly path: string;
+  /** The value sat under a key that names where the tool writes. */
+  readonly dest: boolean;
+}
+
+interface PathScan {
+  readonly entries: readonly PathEntry[];
+  /** False when a limit was reached and some path-like values were not read. */
+  readonly complete: boolean;
+}
+
+interface ScanState {
+  readonly entries: PathEntry[];
+  readonly seen: Set<string>;
+  chars: number;
+  complete: boolean;
 }
 
 /**
- * The values under path-like keys, at the top level and one object down: tools that
- * take an options bag (`{ options: { path } }`) or a list of targets
- * (`{ files: [{ path }] }`) put the path there. A value is a path, so it is cut at
- * `MAX_PATH_VALUE`; and at most `MAX_PATH_VALUES` are collected, so an input with
- * thousands of keys is not thousands of checks.
+ * The values under path-like keys of `toolInput`: at the top level, inside an options
+ * bag (`{ options: { path } }`), in a list of targets (`{ files: [{ path }] }`) and in an
+ * object under a path-like key (`{ output: { path } }`), to `MAX_PATH_DEPTH` objects
+ * deep. A path mentioned under a key that carries prose (`body`, `text`, `title`, …)
+ * does not count: that is incidental text, not an argument telling the tool where to act.
+ *
+ * Every value is read IN FULL, because `./` padding, `a/..` pairs and doubled slashes are
+ * resolved away by the server, so the protected part of a path can be its tail. Identical
+ * values are read once, so a thousand decoys of `x` cost one; a call with more distinct
+ * values than `MAX_PATH_VALUES`, or more text than `MAX_PATH_CHARS`, comes back with
+ * `complete: false` rather than with what happened to fit.
  */
-function collectPaths(value: unknown, keyPattern: RegExp, depth: number, out: string[]): void {
-  if (out.length >= MAX_PATH_VALUES || depth > 1 || typeof value !== 'object' || value === null)
+function scanPaths(toolInput: Readonly<Record<string, unknown>>, keyPattern: RegExp): PathScan {
+  const state: ScanState = { entries: [], seen: new Set(), chars: 0, complete: true };
+  visit(toolInput, keyPattern, '', false, false, 0, state);
+  return { entries: state.entries, complete: state.complete };
+}
+
+function visit(
+  value: unknown,
+  keyPattern: RegExp,
+  key: string,
+  isPathKey: boolean,
+  dest: boolean,
+  depth: number,
+  state: ScanState,
+): void {
+  if (typeof value === 'string') {
+    if (isPathKey) addPath(value, key, dest, state);
     return;
+  }
+  if (typeof value !== 'object' || value === null) return;
   if (Array.isArray(value)) {
-    for (const item of value) collectPaths(item, keyPattern, depth + 1, out);
+    for (const item of value) visit(item, keyPattern, key, isPathKey, dest, depth, state);
     return;
   }
-  for (const [key, entry] of Object.entries(value)) {
-    if (out.length >= MAX_PATH_VALUES) return;
-    if (keyPattern.test(key)) {
-      const values = Array.isArray(entry) ? entry : [entry];
-      for (const v of values) if (typeof v === 'string') out.push(v.slice(0, MAX_PATH_VALUE));
-    } else if (!PROSE_KEY.test(key)) {
-      collectPaths(entry, keyPattern, depth + 1, out);
-    }
+  if (depth >= MAX_PATH_DEPTH) return;
+  for (const [childKey, child] of Object.entries(value)) {
+    const childIsPath = keyPattern.test(childKey);
+    if (!childIsPath && PROSE_KEY.test(childKey)) continue;
+    const childDest = dest || (childIsPath && isDestKey(childKey));
+    visit(child, keyPattern, childKey, childIsPath, childDest, depth + 1, state);
   }
 }
 
-function classifyPaths(paths: readonly string[], write: boolean): ToolClassification {
-  const results = paths.map((path) => classifyPath(path, write));
+function addPath(value: string, key: string, dest: boolean, state: ScanState): void {
+  if (AMBIGUOUS_KEY.test(key) && /[\r\n]/.test(value)) return;
+  const id = `${dest ? 'w' : 'r'}\n${value}`;
+  if (state.seen.has(id)) return;
+  if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS) {
+    state.complete = false;
+    return;
+  }
+  state.seen.add(id);
+  state.chars += value.length;
+  state.entries.push({ path: value, dest });
+}
+
+function classifyPaths(entries: readonly PathEntry[], write: boolean): ToolClassification {
+  const results = entries.map((entry) => classifyPath(entry.path, write || entry.dest));
   return {
     classes: [...new Set(results.flatMap((result) => result.classes))],
     hosts: [],
     signals: [...new Set(results.flatMap((result) => result.signals))],
+  };
+}
+
+/**
+ * A scan that hit a limit is the same kind of answer as a shell command Stroq could not
+ * read: not a claim that the call is dangerous, a refusal to claim it is safe. It reuses
+ * that class, and the policy that turns it into an `ask`.
+ */
+const UNREADABLE_ARGUMENTS = {
+  classes: ['shell.unparsed'] as const,
+  signal: 'mcp-args-unreadable',
+};
+
+function classifyGrep(toolInput: Readonly<Record<string, unknown>>): ToolClassification {
+  const scan = scanPaths(toolInput, GREP_PATH_KEY);
+  const files = classifyPaths(scan.entries, false);
+  if (scan.complete) return files;
+  return {
+    classes: [...files.classes, ...UNREADABLE_ARGUMENTS.classes],
+    hosts: [],
+    signals: [...files.signals, UNREADABLE_ARGUMENTS.signal],
   };
 }
 
@@ -199,12 +346,15 @@ function classifyMcp(
   const write = isWriteShaped(mcp.tool);
   // Read for every tool, not only the ones whose name says read or write: a credential
   // path in a path-like argument is a credential read however the tool is named. The
-  // write classes still need a write-shaped tool.
-  const files = classifyPaths(pathValues(toolInput, PATH_LIKE_KEY), write);
+  // write classes still need a write-shaped tool, or a key that names a destination.
+  const scan = scanPaths(toolInput, PATH_LIKE_KEY);
+  const files = classifyPaths(scan.entries, write);
   const classes: ActionClass[] = ['mcp.call', ...files.classes];
   if (sideEffect) classes.push('mcp.side_effect');
+  if (!scan.complete) classes.push(...UNREADABLE_ARGUMENTS.classes);
   const signals: string[] = [...files.signals];
   if (sideEffect) signals.push('mcp-side-effect-name');
+  if (!scan.complete) signals.push(UNREADABLE_ARGUMENTS.signal);
   return { classes, hosts: [], signals, mcp };
 }
 
@@ -241,7 +391,7 @@ export function classifyTool(
   }
   if (WRITE_TOOLS.has(toolName)) return classifyPath(pathOf(toolInput), true);
   if (toolName === 'Read') return classifyPath(pathOf(toolInput), false);
-  if (toolName === 'Grep') return classifyPaths(pathValues(toolInput, GREP_PATH_KEY), false);
+  if (toolName === 'Grep') return classifyGrep(toolInput);
   if (toolName === 'WebFetch') return classifyFetch(toolInput);
   if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput);
   return EMPTY;

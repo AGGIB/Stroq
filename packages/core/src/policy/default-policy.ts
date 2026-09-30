@@ -128,7 +128,7 @@ export const DEFAULT_POLICY: Policy = {
       id: 'ask-shell-unparsed',
       effect: 'ask',
       reason:
-        'Stroq could not read what this command executes (a dynamic-execution form with a non-literal operand, or nesting too deep to read in time); confirm',
+        'Stroq could not read all of this action (a dynamic-execution form with a non-literal operand, nesting too deep to read in time, or more file arguments than it will read); confirm',
       when: { classes: ['shell.unparsed'], taint: 'any' },
     },
     {
