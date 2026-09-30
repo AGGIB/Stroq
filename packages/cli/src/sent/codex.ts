@@ -28,6 +28,7 @@ import { codexToolName, commandOf, isPatchTool } from '../adapters/codex-input.j
 import {
   feedLines,
   type LineParser,
+  type SessionList,
   type Transcript,
   type TranscriptEvent,
   type TranscriptFile,
@@ -291,12 +292,17 @@ async function everyRollout(root: string): Promise<TranscriptFile[]> {
  * reader, so `--last` behaves identically whichever agent recorded the session.
  */
 export async function findCodexRollouts(cwd: string, home?: string): Promise<TranscriptFile[]> {
+  return [...(await findCodexRolloutsScoped(cwd, home)).files];
+}
+
+/** `findCodexRollouts`, and whether the list is this directory's own; see `SessionList`. */
+export async function findCodexRolloutsScoped(cwd: string, home?: string): Promise<SessionList> {
   const all = await everyRollout(codexRoot(home));
   const here: TranscriptFile[] = [];
   for (const file of all) {
     if ((await rolloutCwd(file.path)) === cwd) here.push(file);
   }
-  return here.length > 0 ? here : all;
+  return here.length > 0 ? { files: here, scoped: true } : { files: all, scoped: false };
 }
 
 export async function readCodexRollout(path: string): Promise<Transcript> {

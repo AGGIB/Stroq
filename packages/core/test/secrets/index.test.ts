@@ -137,6 +137,31 @@ describe('FileSecretIndex', () => {
     expect((JSON.parse(readFileSync(file, 'utf8')) as { salt: string }).salt).toBe(before.salt);
   });
 
+  // `stroq sent` reads a session that may have run in another folder of the project than
+  // the one it is typed in, and needs the `.env` of both without touching the shared index.
+  it('reads the .env files of the extra project folders too, never the same one twice', async () => {
+    const { home, cwd, file } = fixture();
+    const other = mkdtempSync(join(tmpdir(), 'stroq-sec-other-'));
+    writeFileSync(join(other, '.env'), `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`);
+    const both = new FileSecretIndex(file, home, {}, undefined, [other, cwd, other]);
+    const hits = await both.lookup(cands('p@ssw0rd-1234567', ['sk', 'live', 'abcdefghijklmnop123'].join('_')), cwd);
+    expect(hits.map((h) => h.token).sort()).toEqual([
+      'p@ssw0rd-1234567',
+      ['sk', 'live', 'abcdefghijklmnop123'].join('_'),
+    ]);
+    const paths = both.sourcePaths(cwd);
+    expect(paths.filter((p) => p === join(cwd, '.env'))).toHaveLength(1);
+    expect(paths).toContain(join(other, '.env'));
+  });
+
+  it('reads only the folder it is given when there are no extra folders', () => {
+    const { home, cwd, file } = fixture();
+    const other = mkdtempSync(join(tmpdir(), 'stroq-sec-other-'));
+    writeFileSync(join(other, '.env'), `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`);
+    const plain = new FileSecretIndex(file, home, {});
+    expect(plain.sourcePaths(cwd)).not.toContain(join(other, '.env'));
+  });
+
   it('records canaries, survives a rebuild, and flags them on lookup', async () => {
     const { cwd, index } = fixture();
     await index.addCanary('stroq_canary_0123456789abcdefghijkl');

@@ -189,15 +189,31 @@ export interface TranscriptFile {
   readonly mtimeMs: number;
 }
 
+/** Sessions found for a directory, newest first, and whether they are its own. */
+export interface SessionList {
+  readonly files: readonly TranscriptFile[];
+  /** False when nothing was recorded for the directory and this is every session. */
+  readonly scoped: boolean;
+}
+
 /**
  * Transcripts for `cwd`, newest first. Falls back to every project when this
  * directory has none, so `--last` still finds something to show.
  */
 export async function findTranscripts(cwd: string): Promise<TranscriptFile[]> {
+  return [...(await findTranscriptsScoped(cwd)).files];
+}
+
+/**
+ * `findTranscripts`, and whether the list is this directory's own (`scoped`) or the
+ * fallback over every project. A caller that reports HOW MANY sessions the project has
+ * needs to know which, or it counts other projects' sessions as the project's.
+ */
+export async function findTranscriptsScoped(cwd: string): Promise<SessionList> {
   const root = transcriptRoot();
   const scoped = join(root, projectSlug(cwd));
   const found = (await listJsonl(scoped)) ?? [];
-  if (found.length > 0) return found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (found.length > 0) return { files: found.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: true };
 
   let dirs: string[];
   try {
@@ -205,11 +221,11 @@ export async function findTranscripts(cwd: string): Promise<TranscriptFile[]> {
       .filter((d) => d.isDirectory())
       .map((d) => join(root, d.name));
   } catch {
-    return [];
+    return { files: [], scoped: false };
   }
   const all: TranscriptFile[] = [];
   for (const dir of dirs) all.push(...((await listJsonl(dir)) ?? []));
-  return all.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return { files: all.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: false };
 }
 
 async function listJsonl(dir: string): Promise<TranscriptFile[] | null> {

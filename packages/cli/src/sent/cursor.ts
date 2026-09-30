@@ -30,7 +30,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
 import { isRecord, toolInputRecord } from '../adapters/tool-input.js';
-import type { Transcript, TranscriptEvent, TranscriptFile } from '../replay/transcript.js';
+import type {
+  SessionList,
+  Transcript,
+  TranscriptEvent,
+  TranscriptFile,
+} from '../replay/transcript.js';
 
 /** One `cursorDiskKV` row, as the store holds it. */
 export interface CursorRow {
@@ -348,12 +353,19 @@ function isUnder(path: string, dir: string): boolean {
  * session.
  */
 export async function findCursorSessions(cwd: string, db?: string): Promise<TranscriptFile[]> {
+  return [...(await findCursorSessionsScoped(cwd, db)).files];
+}
+
+/** `findCursorSessions`, and whether the list is this directory's own; see `SessionList`. */
+export async function findCursorSessionsScoped(cwd: string, db?: string): Promise<SessionList> {
   const store = db ?? cursorStateDb();
   const sessions = parseCursorStore(await storeRows(store, null));
   const files = (list: readonly CursorSession[]): TranscriptFile[] =>
     list.map((s) => ({ path: cursorSessionPath(store, s.id), mtimeMs: s.mtimeMs }));
   const here = sessions.filter((s) => s.roots.some((root) => isUnder(root, cwd)));
-  return here.length > 0 ? files(here) : files(sessions);
+  return here.length > 0
+    ? { files: files(here), scoped: true }
+    : { files: files(sessions), scoped: false };
 }
 
 /** One session out of a store, or the newest one when the path names no session. */

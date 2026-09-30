@@ -21,8 +21,8 @@
 // tool that quietly starts reading `~/.aws/credentials` is a nasty surprise however
 // good its reason. Nothing is written or printed but names and sources — matching
 // goes through the same salted-hash lookup the live guard uses.
-import { homedir } from 'node:os';
-import { realpathSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
@@ -35,6 +35,7 @@ import {
   readerNotices,
   READER_ROOTS,
 } from '../sent/readers.js';
+import type { Transcript } from '../replay/transcript.js';
 import type { SentReport } from '../sent/report.js';
 import { scanAuditLog, scanTranscript, type SentIndexScope } from '../sent/scan.js';
 import { sessionsIn } from './replay.js';
@@ -152,6 +153,49 @@ function projectDirOf(recorded: string | null, cwd: string): string {
 }
 
 /**
+ * Scans `transcript` against this folder's index, or, when the session ran in another
+ * folder of the project, against a PRIVATE copy of that index that also reads the other
+ * folder's `.env` files.
+ *
+ * Private, because `~/.stroq/secrets.json` is the live guard's index and is rebuilt for
+ * whichever folder it is asked about: building it for a folder the guard never runs in
+ * would drop that guard's own project sources, and a sealed sandbox run (which trusts
+ * the file as it stands) would then not know the project's secrets. The copy carries
+ * the salt and the canaries, so a canary is still found; it is deleted when the scan ends.
+ */
+async function scanInProject(
+  transcript: Transcript,
+  source: { readonly agent: string; readonly path: string },
+  where: {
+    readonly index: FileSecretIndex;
+    readonly scope: SentIndexScope;
+    readonly cwd: string;
+    readonly projectDir: string;
+    readonly home: string;
+  },
+): Promise<SentReport> {
+  if (where.projectDir === where.cwd)
+    return scanTranscript(transcript, source, where.index, where.scope);
+  const scratch = mkdtempSync(join(tmpdir(), 'stroq-sent-'));
+  try {
+    const copy = join(scratch, 'secrets.json');
+    if (existsSync(secretsFile())) copyFileSync(secretsFile(), copy);
+    // Both folders, whichever one the scan is asked about: the index reads its own
+    // argument's `.env` plus these, so the union is the same from either.
+    const both = new FileSecretIndex(copy, where.home, process.env, undefined, [
+      where.cwd,
+      where.projectDir,
+    ]);
+    // The session's own folder is the scope's `cwd`, so a `.env` it named by a relative
+    // path is recognised; the absolute paths of both folders' files are all in the index.
+    const scope = { ...(await buildScope(both, where.cwd, where.home)), cwd: where.projectDir };
+    return await scanTranscript(transcript, source, both, scope);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
  * What to do when there is no session to read. A newcomer's first run, before any agent
  * has been used in this directory, used to end on a line that named only what was
  * missing. Both of these work with no session and no install.
@@ -242,15 +286,13 @@ export async function runSent(args: readonly string[]): Promise<number> {
       process.stdout.write(`no tool calls recorded in ${found.path}\n`);
       return 1;
     }
-    // `--last` has confirmed the session is this project's, so the project's `.env`
-    // files are the ones in the folder it ran in, not in whichever folder of the
-    // project this command was typed in.
+    // `--last` has confirmed the session is this project's, so the `.env` files of the
+    // folder it ran in are compared as well as the ones here: the value can be in either.
     const projectDir = values.transcript === undefined ? projectDirOf(transcript.cwd, cwd) : cwd;
-    const report = await scanTranscript(
+    const report = await scanInProject(
       transcript,
       { agent: found.reader.agent, path: found.path },
-      index,
-      projectDir === cwd ? scope : await buildScope(index, projectDir, home),
+      { index, scope, cwd, projectDir, home },
     );
     return emit(
       found.sessions === undefined

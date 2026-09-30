@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +6,7 @@ import { AuditLog } from '@stroq/core';
 import { runSent, sessionBelongsHere } from '../../src/commands/sent.js';
 import { READERS } from '../../src/sent/readers.js';
 import { projectSlug } from '../../src/replay/transcript.js';
-import { auditFile } from '../../src/paths.js';
+import { auditFile, secretsFile } from '../../src/paths.js';
 
 const KEY = 'wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY';
 const AT = '2026-09-14T11:02:14.000Z';
@@ -336,6 +336,35 @@ describe('stroq sent --last, run from another folder of the same project', () =>
     expect(out.text()).toContain('STRIPE_API_KEY');
   });
 
+  // Choosing the folder the session ran in must ADD it, not swap it for the folder the
+  // command was typed in: the value can just as well be in the .env of the folder you are in.
+  it('still compares the session with the .env of the folder the command was typed in', async () => {
+    projectEnv(cwd);
+    const app = join(cwd, 'packages', 'app');
+    mkdirSync(app, { recursive: true });
+    claudeSession(app, 'reverse', `STRIPE_API_KEY=${ENV_SECRET}\n`);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).toContain('STRIPE_API_KEY');
+    expect(out.text()).toMatch(/^✗ /m);
+  });
+
+  // The index at ~/.stroq/secrets.json is the live guard's, built for the folder its hooks
+  // run in. Reading a session from another folder must not rebuild it for that folder.
+  it('does not rewrite the shared secret index for the folder the session ran in', async () => {
+    const app = join(cwd, 'packages', 'app');
+    projectEnv(app);
+    claudeSession(app, 'shared', `STRIPE_API_KEY=${ENV_SECRET}\n`);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    const shared = JSON.parse(readFileSync(secretsFile(), 'utf8')) as {
+      sources: { path: string }[];
+    };
+    expect(shared.sources.map((s) => s.path)).not.toContain(join(app, '.env'));
+  });
+
   it('says which folder the project .env files were read from', async () => {
     projectEnv(cwd);
     claudeSession(cwd, 'where', 'nothing here');
@@ -357,6 +386,35 @@ describe('stroq sent --last, how much it read', () => {
     expect(out.text()).toContain('Read the newest of 3 sessions recorded for this project');
     expect(out.text()).toContain('--transcript');
     expect(out.text()).not.toContain('--all');
+  });
+
+  // Every reader falls back to the sessions of ALL projects when this directory has
+  // none, so summing what `find` returned counted other projects' sessions and called
+  // them "recorded for this project", in a security report.
+  it("counts only this project's sessions, not the fallback list of every project", async () => {
+    claudeSession(cwd, 'mine-a', 'nothing', new Date('2026-09-01T00:00:00Z'));
+    claudeSession(cwd, 'mine-b', 'nothing', new Date('2026-09-02T00:00:00Z'));
+    claudeSession('/elsewhere/one', 'other-1', 'nothing', new Date('2026-08-01T00:00:00Z'));
+    claudeSession('/elsewhere/two', 'other-2', 'nothing', new Date('2026-08-02T00:00:00Z'));
+    claudeSession('/elsewhere/three', 'other-3', 'nothing', new Date('2026-08-03T00:00:00Z'));
+    const out = capture();
+    await runSent(['--last', '--json']);
+    out.restore();
+    const parsed = JSON.parse(out.text()) as { coverage: { sessionsInProject?: number } };
+    expect(parsed.coverage.sessionsInProject).toBe(2);
+  });
+
+  it('says nothing about a count it does not have, when the folder has no session of its own', async () => {
+    claudeSession(cwd, 'parent', 'nothing', new Date('2026-09-20T00:00:00Z'));
+    claudeSession('/elsewhere/one', 'other-1', 'nothing', new Date('2026-08-01T00:00:00Z'));
+    claudeSession('/elsewhere/two', 'other-2', 'nothing', new Date('2026-08-02T00:00:00Z'));
+    const sub = join(cwd, 'packages', 'app');
+    mkdirSync(sub, { recursive: true });
+    vi.spyOn(process, 'cwd').mockReturnValue(sub);
+    const out = capture();
+    await runSent(['--last']);
+    out.restore();
+    expect(out.text()).not.toContain('sessions recorded for this project');
   });
 
   it('says nothing about other sessions when there is only one', async () => {

@@ -191,12 +191,21 @@ export class FileSecretIndex implements SecretIndex {
     private readonly home: string,
     private readonly env: Readonly<Record<string, string | undefined>> = process.env,
     private readonly now: () => Date = () => new Date(),
+    /**
+     * Further project folders whose `.env*` files are read as well as `cwd`'s. For a
+     * caller that asks about a session that ran in another folder of the project than the
+     * one it stands in (`stroq sent`), and needs both.
+     */
+    private readonly extraProjectDirs: readonly string[] = [],
   ) {}
 
   private sources(cwd: string): { readonly list: IndexedSource[]; readonly truncated: boolean } {
     const homeFiles = HOME_SOURCES.map((rel) => join(this.home, rel));
-    const project = projectEnvFiles(cwd);
-    return { list: statSources([...homeFiles, ...project.files]), truncated: project.truncated };
+    const projects = [...new Set([cwd, ...this.extraProjectDirs])].map(projectEnvFiles);
+    return {
+      list: statSources([...homeFiles, ...projects.flatMap((project) => project.files)]),
+      truncated: projects.some((project) => project.truncated),
+    };
   }
 
   /**

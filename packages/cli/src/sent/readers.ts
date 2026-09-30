@@ -15,18 +15,19 @@
 // trajectories as base64-wrapped protobuf in a VS Code state database, with no
 // transcript on disk to read.
 import {
-  findTranscripts,
+  findTranscriptsScoped,
   readTranscript,
+  type SessionList,
   type Transcript,
   type TranscriptFile,
 } from '../replay/transcript.js';
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { findCodexRollouts, readCodexRollout } from './codex.js';
+import { findCodexRolloutsScoped, readCodexRollout } from './codex.js';
 import {
   cursorStateDb,
   cursorUnavailable,
-  findCursorSessions,
+  findCursorSessionsScoped,
   readCursorSession,
   splitCursorSessionPath,
 } from './cursor.js';
@@ -39,8 +40,12 @@ export interface TranscriptReader {
   readonly agent: string;
   /** The agent's name as a person writes it, for `--help` and other prose. */
   readonly label: string;
-  /** Recorded sessions for `cwd`, newest first; empty when this agent leaves none. */
-  find(cwd: string): Promise<readonly TranscriptFile[]>;
+  /**
+   * Recorded sessions for `cwd`, newest first; empty when this agent leaves none. When
+   * the directory has none of its own the list is every session (`scoped` is false),
+   * so `--last` still finds something to show: a count of it is not the project's.
+   */
+  find(cwd: string): Promise<SessionList>;
   read(path: string): Promise<Transcript>;
   /** Whether this reader wrote the file whose first line is `head`. */
   claims(head: string): boolean;
@@ -58,7 +63,7 @@ export interface TranscriptReader {
 export const claudeCodeReader: TranscriptReader = {
   agent: 'claude-code',
   label: 'Claude Code',
-  find: findTranscripts,
+  find: findTranscriptsScoped,
   read: readTranscript,
   root: '~/.claude/projects',
   /* A Claude record is the message itself: `{type:'user'|'assistant', message:{…}}`,
@@ -79,7 +84,7 @@ export const claudeCodeReader: TranscriptReader = {
 export const codexReader: TranscriptReader = {
   agent: 'codex',
   label: 'Codex CLI',
-  find: (cwd) => findCodexRollouts(cwd),
+  find: (cwd) => findCodexRolloutsScoped(cwd),
   read: readCodexRollout,
   root: '~/.codex/sessions',
   /* Codex wraps every record: `{timestamp, ordinal, type, payload}`. The envelope
@@ -98,7 +103,7 @@ export const codexReader: TranscriptReader = {
 export const cursorReader: TranscriptReader = {
   agent: 'cursor',
   label: 'Cursor',
-  find: (cwd) => findCursorSessions(cwd),
+  find: (cwd) => findCursorSessionsScoped(cwd),
   read: readCursorSession,
   root: tilde(cursorStateDb()),
   unavailable: cursorUnavailable,
@@ -202,15 +207,21 @@ export interface FoundTranscript {
  */
 export async function newestTranscript(cwd: string): Promise<FoundTranscript | null> {
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
-  let sessions = 0;
+  let sessions: number | undefined;
   for (const reader of READERS) {
-    const found = await reader.find(cwd);
-    sessions += found.length;
-    const newest = found[0];
+    const { files, scoped } = await reader.find(cwd);
+    // Only a directory's own sessions are its count; the fallback list is every project's.
+    if (scoped) sessions = (sessions ?? 0) + files.length;
+    const newest = files[0];
     if (!newest) continue;
     if (best === null || newest.mtimeMs > best.mtimeMs) {
       best = { reader, path: newest.path, mtimeMs: newest.mtimeMs };
     }
   }
-  return best === null ? null : { reader: best.reader, path: best.path, sessions };
+  if (best === null) return null;
+  return {
+    reader: best.reader,
+    path: best.path,
+    ...(sessions === undefined ? {} : { sessions }),
+  };
 }
