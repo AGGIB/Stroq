@@ -306,9 +306,32 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
-/** Every secret-index candidate in `text` and in each form `expandVariants` reads from it. */
-const candidatesOfVariants = (text: string): SecretCandidate[] =>
-  expandVariants(text).flatMap((variant) => candidatesFromText(variant.text));
+/**
+ * `text` with each run of valid percent-escapes decoded on its own and an invalid one left
+ * as it was. The scanner's own percent layer decodes the whole text at once and drops the
+ * layer on the first bad escape, and it has to stay that way: read leniently, the same
+ * layer flagged seven more of the benign documents in `stroq bench` (14.9% to 20.7%).
+ * Looking for a KNOWN VALUE has no such cost, so here a stray `50%` does not hide the
+ * escapes beside it.
+ */
+function percentDecodedLeniently(text: string): string {
+  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+}
+
+/**
+ * Every secret-index candidate in `text`, in each form `expandVariants` reads from it,
+ * and in its leniently percent-decoded form.
+ */
+const candidatesOfVariants = (text: string): SecretCandidate[] => [
+  ...expandVariants(text).flatMap((variant) => candidatesFromText(variant.text)),
+  ...candidatesFromText(percentDecodedLeniently(text)),
+];
 
 /** What prose and URLs put after a value that is not part of it, and base64 padding. */
 const VALUE_TAIL = '.,;:!?\'")]}>`=';

@@ -180,22 +180,14 @@ function decodeHex(token: string): string | null {
   return looksLikeText(decoded) ? decoded : null;
 }
 
-/**
- * Each run of valid escapes is decoded on its own, and one that is not valid UTF-8 is left
- * as it was. Decoding the whole text at once threw on the first bad escape and dropped the
- * layer entirely, so a stray `50%` anywhere in a result hid every escape beside it: an
- * injection written percent-encoded, or a secret inside an encoded URL, went unread.
- */
 function decodeUrl(text: string): string | null {
   if (!URL_ENCODED.test(text)) return null;
-  const decoded = text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
-  return decoded !== text && looksLikeText(decoded) ? decoded : null;
+  try {
+    const decoded = decodeURIComponent(text);
+    return decoded !== text && looksLikeText(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
 }
 
 function decodeLayer(text: string, depth: number, maxDepth: number): Variant[] {
