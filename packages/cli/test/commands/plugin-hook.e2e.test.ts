@@ -1,5 +1,12 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -122,6 +129,7 @@ function fakeNpx(body: string): { dir: string; log: string } {
     join(dir, 'npx'),
     `#!/bin/sh
 echo "call: $* | timeout=$npm_config_fetch_timeout retries=$npm_config_fetch_retries" >> "${log}"
+echo "pwd: $(pwd -P)" >> "${log}"
 cat > /dev/null
 ${body}
 `,
@@ -130,8 +138,9 @@ ${body}
   return { dir, log };
 }
 
-const calls = (log: string): string[] =>
+const logLines = (log: string): string[] =>
   existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
+const calls = (log: string): string[] => logLines(log).filter((line) => line.startsWith('call:'));
 
 const ETARGET_STDERR =
   "echo 'npm error code ETARGET' >&2; echo 'npm error notarget No matching version found for @stroq/cli@99.0.0.' >&2; exit 1";
@@ -164,7 +173,7 @@ esac`);
     const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
     const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
     expect(r.code).toBe(2);
-    expect(calls(npx.log).filter((line) => line.startsWith('call:'))).toHaveLength(1);
+    expect(calls(npx.log)).toHaveLength(1);
   }, 30_000);
 
   it('does not run latest because stroq itself failed on the pinned version', async () => {
@@ -195,6 +204,91 @@ esac`);
     expect(timeout).toBeGreaterThan(0);
     expect(timeout).toBeLessThanOrEqual(6_000);
   }, 30_000);
+
+  // A repository can carry a `.npmrc` that names the registry npm downloads from, and npm
+  // reads it from the directory it runs in: run from the project, the repository chose the
+  // code that acts as the firewall.
+  it('runs npx from a neutral directory, not the project', async () => {
+    const npx = fakeNpx('printf "%s" "{}"; exit 0');
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
+    const where =
+      logLines(npx.log)
+        .find((line) => line.startsWith('pwd: '))
+        ?.slice(5) ?? '';
+    expect(where).not.toBe('');
+    expect(where).not.toBe(realpathSync(cliDir));
+    expect(where.startsWith(realpathSync(repoRoot))).toBe(false);
+  }, 30_000);
+
+  it('blocks a PreToolUse when it cannot make a directory to run npx from', async () => {
+    const npx = fakeNpx('printf "%s" "{}"; exit 0');
+    const noTemp = mkdtempSync(join(tmpdir(), 'stroq-no-mktemp-'));
+    writeFileSync(join(noTemp, 'mktemp'), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(noTemp, 'mktemp'), 0o755);
+    const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+    const r = await runWrapper(preBash('ls'), `${noTemp}:${npx.dir}:${BARE_PATH}`, home);
+    expect(r.code).toBe(2);
+    expect(calls(npx.log)).toHaveLength(0);
+  }, 30_000);
+
+  // npx has no deadline of its own and Claude Code lifts a hook that outlives its
+  // timeout, letting the call through. The whole npx path is bounded here, and the
+  // whole process tree it started ends with it.
+  describe('when the registry does not answer', () => {
+    const SLOW = 'sleep 30 & echo $! > "$(dirname "$0")/sleeper.pid"; wait';
+
+    it('ends a hung npx at the deadline and blocks a PreToolUse', async () => {
+      const npx = fakeNpx(SLOW);
+      const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+      const started = Date.now();
+      const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home, {
+        STROQ_PLUGIN_NPX_DEADLINE: '2',
+      });
+      expect(r.code).toBe(2);
+      expect(Date.now() - started).toBeLessThan(9_000);
+      // The sleeper npx started went with it: nothing is left holding the hook's pipes.
+      const pid = Number(readFileSync(join(npx.dir, 'sleeper.pid'), 'utf8').trim());
+      await new Promise((done) => setTimeout(done, 1_500));
+      expect(() => process.kill(pid, 0)).toThrow();
+    }, 30_000);
+
+    it('lets a PostToolUse through when npx hangs', async () => {
+      const npx = fakeNpx(SLOW);
+      const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+      const started = Date.now();
+      const r = await runWrapper(postRead, `${npx.dir}:${BARE_PATH}`, home, {
+        STROQ_PLUGIN_NPX_DEADLINE: '2',
+      });
+      expect(r.code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(9_000);
+    }, 30_000);
+
+    // Both attempts share one budget: a fallback started with no time left would only
+    // run past the hook's timeout.
+    it('does not start the fallback when the pinned attempt used up the time', async () => {
+      const npx = fakeNpx(`sleep 2; ${ETARGET_STDERR}`);
+      const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+      const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home, {
+        STROQ_PLUGIN_NPX_DEADLINE: '4',
+      });
+      expect(r.code).toBe(2);
+      expect(calls(npx.log)).toHaveLength(1);
+    }, 30_000);
+
+    it('starts the fallback when there is time for it', async () => {
+      const npx = fakeNpx(`case "$*" in
+  *'@stroq/cli@latest'*) printf '%s' '{}'; exit 0 ;;
+  *) sleep 1; ${ETARGET_STDERR} ;;
+esac`);
+      const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
+      const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home, {
+        STROQ_PLUGIN_NPX_DEADLINE: '8',
+      });
+      expect(r.code).toBe(0);
+      expect(calls(npx.log)).toHaveLength(2);
+    }, 30_000);
+  });
 
   it('prefers a global stroq and never calls npx', async () => {
     const npx = fakeNpx('exit 1');
