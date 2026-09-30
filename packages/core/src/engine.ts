@@ -1,23 +1,23 @@
 import { classifyTool } from './actions/classify-tool.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
-import { expandVariants, normalizeText } from './normalize/normalizer.js';
+import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withWayOut } from './policy/way-out.js';
 import { atomsForAction, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
+import {
+  candidatesOfVariants,
+  excerptRedactor,
+  percentDecodedLeniently,
+} from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import {
-  candidateTokens,
-  candidatesFromText,
-  exceedsSecretScan,
-  type SecretCandidate,
-} from './secrets/candidates.js';
+import { candidateTokens, candidatesFromText, exceedsSecretScan } from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
@@ -226,23 +226,12 @@ const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
  * a second chance to get it wrong, in the one place where getting it wrong writes a
  * credential to the user's terminal.
  */
-export function redactMatches(
-  summary: string,
-  matches: readonly SecretMatch[],
-  ignoreCase = false,
-): string {
+export function redactMatches(summary: string, matches: readonly SecretMatch[]): string {
   return matches.reduce((text, m) => {
     const encoded = encodeURIComponent(m.token);
     const lowerEncoded = encoded.replace(/%[0-9A-F]{2}/g, (hex) => hex.toLowerCase());
     const forms = new Set([m.raw, m.token, encoded, lowerEncoded]);
-    const mark = `[REDACTED:${m.name}]`;
-    return [...forms].reduce(
-      (t, form) =>
-        ignoreCase
-          ? t.replace(new RegExp(form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), () => mark)
-          : t.split(form).join(mark),
-      text,
-    );
+    return [...forms].reduce((t, form) => t.split(form).join(`[REDACTED:${m.name}]`), text);
   }, summary);
 }
 
@@ -306,81 +295,6 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
-/**
- * `text` with each run of valid percent-escapes decoded on its own and an invalid one left
- * as it was. The scanner's own percent layer decodes the whole text at once and drops the
- * layer on the first bad escape, and it has to stay that way: read leniently, the same
- * layer flagged seven more of the benign documents in `stroq bench` (14.9% to 20.7%).
- * Looking for a KNOWN VALUE has no such cost, so here a stray `50%` does not hide the
- * escapes beside it.
- */
-function percentDecodedLeniently(text: string): string {
-  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
-    }
-  });
-}
-
-/**
- * Every secret-index candidate in `text`, in each form `expandVariants` reads from it,
- * and in its leniently percent-decoded form.
- */
-const candidatesOfVariants = (text: string): SecretCandidate[] => [
-  ...expandVariants(text).flatMap((variant) => candidatesFromText(variant.text)),
-  ...candidatesFromText(percentDecodedLeniently(text)),
-];
-
-/** What prose and URLs put after a value that is not part of it, and base64 padding. */
-const VALUE_TAIL = '.,;:!?\'")]}>`=';
-/** A spelling shorter than this is not redacted: it would be found inside other text. */
-const MIN_SPELLING_CHARS = 6;
-
-/** `value` without the characters of `tail` at its end, in one pass (no regex to restart). */
-function withoutTail(value: string, tail: string): string {
-  let end = value.length;
-  while (end > 0 && tail.includes(value.charAt(end - 1))) end -= 1;
-  return value.slice(0, end);
-}
-
-/**
- * The other spellings an ATOM can hold of a known value, as matches to redact alongside it.
- * Atoms are cut from normalised text, not from the text as written: a URL loses its
- * trailing punctuation and is lowercased (the dotted capital I becomes two characters),
- * and compatibility characters and look-alike letters are folded, in the context of the
- * letters around them. So a value is also looked for without its tail, lowercased, and
- * folded in a Latin context, and each spelling is a match of its own.
- */
-function atomSpellings(matches: readonly SecretMatch[]): SecretMatch[] {
-  const seen = new Set(matches.flatMap((match) => [match.raw, match.token]));
-  const extra: SecretMatch[] = [];
-  for (const match of matches) {
-    for (const form of new Set([match.raw, match.token])) {
-      for (const base of new Set([form, withoutTail(form, VALUE_TAIL)])) {
-        if (base.length < MIN_SPELLING_CHARS) continue;
-        const spellings = [
-          base,
-          base.toLowerCase(),
-          normalizeText(`a${base}`).slice(1),
-          normalizeText(`a?${base}&`).slice(2, -1),
-        ];
-        for (const spelling of spellings) {
-          if (spelling.length < MIN_SPELLING_CHARS || seen.has(spelling)) continue;
-          seen.add(spelling);
-          extra.push({ ...match, token: spelling, raw: spelling });
-        }
-      }
-    }
-  }
-  return extra;
-}
-
-/** Whether `value`, or something it decodes to, holds one of the tokens in `known`. */
-const decodesToKnown = (value: string, known: ReadonlySet<string>): boolean =>
-  candidatesOfVariants(value).some((candidate) => known.has(candidate.token));
-
 export class StroqEngine {
   constructor(private readonly opts: EngineOptions) {}
 
@@ -432,8 +346,21 @@ export class StroqEngine {
     const index = this.opts.secrets;
     if (!index) return redactMatches(summary, known);
     try {
-      const matches = await index.lookup(candidatesFromText(summary), cwd);
-      return redactMatches(summary, [...known, ...matches]);
+      const decoded = percentDecodedLeniently(summary);
+      const found = await index.lookup(
+        decoded === summary
+          ? candidatesFromText(summary)
+          : [...candidatesFromText(summary), ...candidatesFromText(decoded)],
+        cwd,
+      );
+      const matches = [...known, ...found];
+      const redacted = redactMatches(summary, matches);
+      // A value spelled with percent-escapes (`%53up3r...`) is not the text the lookup
+      // matched, and cannot be cut out of the original: keep the decoded text, redacted.
+      return decoded !== summary &&
+        matches.some((m) => percentDecodedLeniently(redacted).includes(m.token))
+        ? redactMatches(percentDecodedLeniently(redacted), matches)
+        : redacted;
     } catch {
       // A failed index must not turn a local command into an audit disclosure,
       // nor suppress a post-scan and its taint by throwing before it runs.
@@ -442,20 +369,11 @@ export class StroqEngine {
   }
 
   /**
-   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted,
-   * clipped, and with every value the secret index knows taken out.
-   *
-   * An atom is a slice of a tool result, and a result can echo a credential: a URL with
-   * a token in its query, a package name a page built from one. Provenance keeps the
-   * excerpt on disk to show the user later, so it is scrubbed as an audit summary is.
-   *
-   * The values are looked up in every form the atoms were read from: the result as it
-   * was written, and its base64, hex and percent-decoded layers, because atoms are read
-   * from those too and the index hashes plain spellings. They are then removed from the
-   * atom without regard to case, since an atom is read from normalised text (a URL comes
-   * out lowercased) and the value in it is not spelled as the value in the index. An
-   * encoded blob is not text a value can be removed from: when it decodes to one, it is
-   * replaced whole. A failing index withholds the excerpt rather than storing it unchecked.
+   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted, clipped,
+   * and with every value the secret index knows taken out (see `excerptRedactor` for the
+   * spellings an atom can hold one in). The values are looked up in every form the atoms
+   * were read from. A failing index withholds the excerpt rather than storing it unchecked,
+   * and so does a result that holds too many known values to check.
    */
   private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
     const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
@@ -464,13 +382,9 @@ export class StroqEngine {
     try {
       const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
       if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
-      const known = new Set(matches.map((match) => match.token));
-      const spelled = [...matches, ...atomSpellings(matches)];
-      return atoms.map((atom) =>
-        atom.kind === 'encoded' && decodesToKnown(atom.value, known)
-          ? '[REDACTED:encoded-secret]'
-          : clip(redactMatches(atom.value, spelled, true)),
-      );
+      const scrub = excerptRedactor(event.toolResultText, matches);
+      if (scrub === null) return atoms.map(() => '[REDACTED:too-many-secrets]');
+      return atoms.map((atom) => clip(scrub(atom)));
     } catch {
       return atoms.map(() => '[REDACTED:secret-index-unavailable]');
     }

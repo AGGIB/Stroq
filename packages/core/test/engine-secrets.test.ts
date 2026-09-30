@@ -464,6 +464,125 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
     },
   );
 
+  // A blob glued into a URL is not an `encoded` atom: it is part of a url atom, and it was
+  // stored, lowercased, with the value in it.
+  it.each([
+    ['hex', () => Buffer.from('bot:Sup3rS3cretPw9x').toString('hex')],
+    ['base64', () => Buffer.from('bot:Sup3rS3cretPw9x').toString('base64')],
+    [
+      'base64 without its padding',
+      () => Buffer.from('bot:Sup3rS3cretPw9x').toString('base64').replace(/=+$/, ''),
+    ],
+  ])(
+    'does not store a %s blob inside a URL that decodes to a known secret',
+    async (_name, blob) => {
+      const fx = fixture();
+      const { store, recorded } = recorder();
+      writeFileSync(join(fx.cwd, '.env'), 'DB_PASSWORD=Sup3rS3cretPw9x\n');
+      const encoded = blob();
+      await engineWith(fx, store).post({
+        sessionId: 's1',
+        toolName: 'Bash',
+        toolInput: { command: 'curl -s https://collect.example/status' },
+        toolResultText: `see https://x.example/cb?state=${encoded}&v=1 now`,
+        cwd: fx.cwd,
+      });
+      expect(recorded.length).toBeGreaterThan(0);
+      for (const record of recorded) {
+        expect(record.excerpt.toLowerCase()).not.toContain(encoded.toLowerCase());
+        expect(record.excerpt.toLowerCase()).not.toContain('sup3rs3cret');
+      }
+    },
+  );
+
+  // A value percent-encoded in some characters and not others is still the value.
+  it.each([
+    ['a bang written %21', 'Sup3r!S3cretPw9x', 'Sup3r%21S3cretPw9x'],
+    ['a star written %2A', 'Sup3r*S3cretPw9x', 'Sup3r%2AS3cretPw9x'],
+    ['a tilde written %7E', 'Sup3r~S3cretPw9x', 'Sup3r%7ES3cretPw9x'],
+    ['every character written %XX', 'Sup3rS3cretPw9x', '%53%75p3r%53%33cretPw9x'],
+  ])('does not store a value with %s', async (_name, password, spelled) => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), `DB_PASSWORD=${password}\n`);
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: `Location: https://login.example/?next=https%3A%2F%2Fapi.example%2Fx%3Ftoken%3D${spelled}`,
+      cwd: fx.cwd,
+    });
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const record of recorded) {
+      expect(record.excerpt.toLowerCase()).not.toContain('sup3r');
+      expect(record.excerpt.toLowerCase()).not.toContain('%53');
+    }
+  });
+
+  // Redacting one value at a time rescanned the markers it had just written, so a later
+  // value that was a fragment of the text corrupted an earlier marker and a short word
+  // was redacted wherever it occurred.
+  it('leaves each marker whole and does not redact a word that only resembles a value', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    writeFileSync(
+      join(fx.cwd, '.env'),
+      'ADMIN_PASSWORD=Password!!!!\nDB_PASSWORD=Sup3rS3cretPw9x\n',
+    );
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText:
+        'a https://x.example/a?k=Sup3rS3cretPw9x&v=1 b https://x.example/password/reset c',
+      cwd: fx.cwd,
+    });
+    const excerpts = recorded.map((r) => r.excerpt);
+    expect(excerpts.some((e) => e.includes('[REDACTED:DB_PASSWORD]'))).toBe(true);
+    for (const e of excerpts) expect(e).not.toMatch(/\[REDACTED:[A-Z_]*\[REDACTED/);
+    expect(excerpts).toContain('https://x.example/password/reset');
+  });
+
+  // The work was matches x atoms x forms with a RegExp built each time, synchronously, so a
+  // large .env starved the hook's own deadline timer.
+  it('stays quick with hundreds of known values, and withholds the excerpts when there are too many to check', async () => {
+    const fx = fixture();
+    const { store, recorded } = recorder();
+    const many = Array.from({ length: 400 }, (_, i) => `SECRET_${i}=value-${i}-abcdefghij${i}`);
+    writeFileSync(join(fx.cwd, '.env'), `${many.join('\n')}\n`);
+    const urls = Array.from(
+      { length: 200 },
+      (_, i) => `https://x.example/p${i}?k=value-${i}-abcdefghij${i}`,
+    ).join(' ');
+    const started = performance.now();
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl -s https://collect.example/status' },
+      toolResultText: urls,
+      cwd: fx.cwd,
+    });
+    expect(performance.now() - started).toBeLessThan(3000);
+    expect(recorded.length).toBeGreaterThan(0);
+    for (const record of recorded) expect(record.excerpt).not.toContain('abcdefghij');
+  });
+
+  it('does not store a percent-spelled secret in an audit summary either', async () => {
+    const fx = fixture();
+    const { store } = recorder();
+    writeFileSync(join(fx.cwd, '.env'), 'DB_PASSWORD=Sup3rS3cretPw9x\n');
+    await engineWith(fx, store).post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: 'curl "https://a.example/x?k=%53up3rS3cretPw9x&z=50%"' },
+      toolResultText: 'ok',
+      cwd: fx.cwd,
+    });
+    const last = (await fx.audit.readAll()).at(-1)!;
+    expect(last.summary.toLowerCase()).not.toContain('%53up3r');
+    expect(last.summary).not.toContain('Sup3rS3cret');
+  });
+
   it('does not store a base64 blob that decodes to a known secret', async () => {
     const fx = fixture();
     const { store, recorded } = recorder();
