@@ -28,24 +28,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function capture(): { text: () => string; restore: () => void } {
-  const lines: string[] = [];
-  const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    lines.push(String(chunk));
+function capture(): { out: () => string; err: () => string; restore: () => void } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const spyOut = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    out.push(String(chunk));
     return true;
   });
-  return { text: () => lines.join(''), restore: () => spy.mockRestore() };
+  const spyErr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+    err.push(String(chunk));
+    return true;
+  });
+  return {
+    out: () => out.join(''),
+    err: () => err.join(''),
+    restore: () => {
+      spyOut.mockRestore();
+      spyErr.mockRestore();
+    },
+  };
 }
 
 const has = (dir: string): void => {
   mkdirSync(join(home, dir), { recursive: true });
 };
 
-async function bare(...args: string[]): Promise<{ code: number; text: string }> {
-  const out = capture();
+async function bare(
+  ...args: string[]
+): Promise<{ code: number; text: string; stdout: string; stderr: string }> {
+  const cap = capture();
   const code = await runInitCommand(['--dry-run', ...args]);
-  out.restore();
-  return { code, text: out.text() };
+  cap.restore();
+  return { code, text: cap.out() + cap.err(), stdout: cap.out(), stderr: cap.err() };
 }
 
 describe('stroq init with no --agent', () => {
@@ -119,4 +133,29 @@ describe('stroq init with no --agent', () => {
     expect(code).toBe(0);
     expect(text).not.toMatch(/Claude Code was not found here/);
   });
+
+  // `init --dry-run` prints the config it would write, and prose in front of it is a
+  // file that no longer parses; the advice goes to stderr.
+  it('keeps --dry-run output pure JSON when it also has advice to give', async () => {
+    has('.claude');
+    has('.cursor');
+    const { stdout, stderr } = await bare();
+    expect(() => JSON.parse(stdout)).not.toThrow();
+    expect(stderr).toContain('not guarded');
+    expect(stdout).not.toContain('not guarded');
+  });
+
+  // A folder that came with a repository says what its authors use, not what is
+  // installed here; it must not decide which agent's config is written.
+  it.each(['.agents', '.cursor', '.codex'])(
+    'is not decided by a %s folder in the project',
+    async (dir) => {
+      mkdirSync(join(cwd, dir), { recursive: true });
+      const { code, stdout, stderr } = await bare();
+      expect(code).toBe(0);
+      expect(stdout).toContain('"PreToolUse"');
+      expect(stderr).not.toContain('not guarded');
+      expect(stderr).not.toContain('was not found here');
+    },
+  );
 });

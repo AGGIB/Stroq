@@ -36,7 +36,9 @@ export async function runInitCommand(
 ): Promise<number> {
   if (args.some(isAgentFlag)) return runInit(args);
   const cwd = where.cwd ?? process.cwd();
-  const found = detectedAgents(cwd, where.home ?? homedir()).filter(isHookAgent);
+  // The home directory only: a `.agents` or `.cursor` folder that came with a repository
+  // says what its authors use, and would otherwise decide which config gets written.
+  const found = detectedAgents(cwd, where.home ?? homedir(), 'user').filter(isHookAgent);
 
   if (found.length === 0 || found.includes('claude-code')) {
     const code = await runInit(args);
@@ -50,9 +52,7 @@ export async function runInitCommand(
 
   const [only, ...others] = found;
   if (only !== undefined && others.length === 0) {
-    process.stdout.write(
-      `Claude Code was not found here; ${nameOf(only, cwd)} was, so that is the one guarded.\n`,
-    );
+    note(`Claude Code was not found here; ${nameOf(only, cwd)} was, so that is the one guarded.\n`);
     return runInit([...args, '--agent', only]);
   }
 
@@ -64,11 +64,19 @@ export async function runInitCommand(
   return 1;
 }
 
+/**
+ * Advice goes to stderr: `init --dry-run` prints the config it would write on stdout,
+ * and a line of prose in front of it is a file that no longer parses.
+ */
+const note = (text: string): void => {
+  process.stderr.write(text);
+};
+
 /** The agents found on this machine that Stroq is not guarding, with the command for each. */
 function noteUnguarded(candidates: readonly string[], cwd: string): void {
   const unguarded = candidates.filter((id) => agentHookStatus(id, cwd)?.installed !== true);
   if (unguarded.length === 0) return;
-  process.stdout.write(
+  note(
     `Also found here, not guarded: ${unguarded.map((id) => nameOf(id, cwd)).join(', ')}\n${unguarded
       .map((id) => `  ${command(id)}\n`)
       .join('')}`,

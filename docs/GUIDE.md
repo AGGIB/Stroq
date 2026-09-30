@@ -449,7 +449,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop   # any MCP client: wrap
 npx @stroq/cli doctor                # check the installation
 ```
 
-`init` writes hooks into the project's `.claude/settings.json` by default; pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change without writing anything. Then open Claude Code in that project.
+`init` writes hooks into the project's `.claude/settings.json` by default, unless Claude Code is not installed here and exactly one other supported agent is (looked for in your home directory, not in the project, so a folder that came with a repository does not choose): then it guards that one and says so. With several other agents and no Claude Code it installs nothing and prints the command for each; `--agent <name>` always wins. Pass `--user` to install into `~/.claude/settings.json` instead, or `--dry-run` to preview the change without writing anything. Then open Claude Code in that project.
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 

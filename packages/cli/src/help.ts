@@ -28,7 +28,7 @@ const COMMANDS: readonly CommandHelp[] = [
     flags: [
       [
         '--agent <name>',
-        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp; with none, the agent found here (claude-code when none or several)',
+        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
       ],
       ['--user', "install into the user's config instead of this project's"],
       ['--dry-run', 'print the change and write nothing'],

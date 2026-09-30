@@ -72,12 +72,21 @@ const AGENT_DIRS: Readonly<
   antigravity: { project: ['.agents'], user: [join('.gemini', 'antigravity-cli')] },
 };
 
-/** Agent ids whose config directory exists in `cwd` or the user's home. */
-export function detectedAgents(cwd: string, home: string = homedir()): readonly string[] {
+/**
+ * Agent ids whose config directory exists in `cwd` or the user's home; with
+ * `scope: 'user'`, in the home only. A directory in a repository says what the
+ * repository's authors use, not what is installed here, which is what `stroq init` has
+ * to know before it writes a config.
+ */
+export function detectedAgents(
+  cwd: string,
+  home: string = homedir(),
+  scope: 'any' | 'user' = 'any',
+): readonly string[] {
   return Object.entries(AGENT_DIRS)
     .filter(
       ([, dirs]) =>
-        dirs.project.some((d) => existsSync(join(cwd, d))) ||
+        (scope === 'any' && dirs.project.some((d) => existsSync(join(cwd, d)))) ||
         dirs.user.some((d) => existsSync(join(home, d))),
     )
     .map(([agent]) => agent);
