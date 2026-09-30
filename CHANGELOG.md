@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **What a failed tool printed was never scanned.** Claude Code reports a tool that failed — a `Bash` command that exits non-zero, a failing MCP call — through its own event, `PostToolUseFailure`, with the output in `error`; a failed command produces no `PostToolUse` at all. Stroq subscribed only to `PostToolUse`, so text a failing `curl`, test run or MCP call printed, which a hostile page or package can choose, never reached the scan, the taint or provenance. Checked end to end on a real Claude Code 2.1.271: a command that failed after printing an injected line to stderr left no trace in the audit before, and is now `post Bash suspect(1.00)`. `init` and the plugin install the event with the same matcher as `PostToolUse`, the adapter answers in the failure event's own output shape (`additionalContext` only), and `doctor` reports an install without it as incomplete: run `stroq init` again (or `/plugin update stroq`).
+
 ## [0.21.1] - 2026-09-30
 
 ### Fixed

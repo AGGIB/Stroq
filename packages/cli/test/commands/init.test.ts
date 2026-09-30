@@ -788,3 +788,30 @@ describe('stableEntry', () => {
     expect(existsSync(join(home, 'cli'))).toBe(false);
   });
 });
+
+describe('the Claude Code failure event', () => {
+  const cmd = '"/usr/bin/node" "/x/index.js" hook claude-code';
+
+  // What a failing command printed is content the model reads, and Claude Code sends it
+  // as PostToolUseFailure, not PostToolUse. An install without the event never sees it.
+  it('is installed with the same matcher as PostToolUse, and replaced rather than stacked', () => {
+    const once = mergeHooks({}, cmd);
+    const twice = mergeHooks(once, cmd);
+    for (const merged of [once, twice]) {
+      const groups = merged.hooks?.['PostToolUseFailure'] ?? [];
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.matcher).toBe(POST_MATCHER);
+      expect(groups[0]?.hooks.map((h) => h.command)).toEqual([cmd]);
+    }
+  });
+
+  it('keeps a hook of the user’s own on that event', () => {
+    const mine = {
+      matcher: 'Bash',
+      hooks: [{ type: 'command' as const, command: 'my-failure-logger', timeout: 5 }],
+    };
+    const merged = mergeHooks({ hooks: { PostToolUseFailure: [mine] } }, cmd);
+    expect(merged.hooks?.['PostToolUseFailure']).toHaveLength(2);
+    expect(merged.hooks?.['PostToolUseFailure']?.[0]).toEqual(mine);
+  });
+});

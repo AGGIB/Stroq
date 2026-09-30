@@ -98,6 +98,12 @@ describe('runExposure', () => {
               hooks: [{ type: 'command', command: 'stroq hook claude-code' }],
             },
           ],
+          PostToolUseFailure: [
+            {
+              matcher: POST_MATCHER,
+              hooks: [{ type: 'command', command: 'stroq hook claude-code' }],
+            },
+          ],
         },
       }),
     );

@@ -62,6 +62,7 @@ describe('the timeout Stroq installs matches the deadline it gives itself', () =
       );
     expect(matchers('PreToolUse')).toEqual([PRE_MATCHER]);
     expect(matchers('PostToolUse')).toEqual([POST_MATCHER]);
+    expect(matchers('PostToolUseFailure')).toEqual([POST_MATCHER]);
   });
 
   // Claude Code runs shell commands through `Monitor` and `PowerShell` as well as Bash.

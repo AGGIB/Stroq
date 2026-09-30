@@ -15,7 +15,7 @@ import { logError } from '../log.js';
 
 export const ClaudeHookInputSchema = z.looseObject({
   session_id: z.string().min(1),
-  hook_event_name: z.enum(['PreToolUse', 'PostToolUse']),
+  hook_event_name: z.enum(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']),
   tool_name: z.string().min(1),
   tool_input: z.record(z.string(), z.unknown()).default({}),
   cwd: z.string().default(''),
@@ -23,6 +23,11 @@ export const ClaudeHookInputSchema = z.looseObject({
   // Real Claude Code (v2.1.226) sends the tool output as `tool_response`;
   // `tool_result` is kept as a fallback for other agents/older payloads.
   tool_response: z.unknown().optional(),
+  // A tool that FAILED reports through its own event, `PostToolUseFailure`, and its
+  // output is `error` (a string in Claude Code 2.1.271's schema). What a failing
+  // command printed is as much content the model reads as a success's, and a hostile
+  // page or package can decide what it says.
+  error: z.unknown().optional(),
 });
 export type ClaudeHookInput = z.infer<typeof ClaudeHookInputSchema>;
 /** The shape a recorded event has before parsing (defaults still optional); used by `stroq attack` scenarios. */
@@ -90,10 +95,13 @@ export function countAtoms(atoms: readonly Atom[]): Partial<Record<AtomKind, num
     );
 }
 
-function postOutput(fields: Readonly<Record<string, unknown>>): HookOutput {
+function postOutput(
+  fields: Readonly<Record<string, unknown>>,
+  event: 'PostToolUse' | 'PostToolUseFailure' = 'PostToolUse',
+): HookOutput {
   return {
     stdout: JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'PostToolUse', ...fields },
+      hookSpecificOutput: { hookEventName: event, ...fields },
     }),
     exitCode: 0,
   };
@@ -181,7 +189,8 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
       );
     return NO_OUTPUT;
   }
-  const response = input.tool_response ?? input.tool_result;
+  const failed = input.hook_event_name === 'PostToolUseFailure';
+  const response = failed ? input.error : (input.tool_response ?? input.tool_result);
   const result = await engine.post({
     ...base,
     toolResultText: toolResultToText(response),
@@ -199,15 +208,20 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     ruleIds,
     atoms,
   };
+  const warning = warningFor(result.scan, input.tool_name, taintSource(result));
+  // The failure event's output carries `additionalContext` and nothing else: the
+  // classifier's context is a PostToolUse field, and a hookEventName that does not
+  // match the event Claude Code fired is not accepted.
+  if (failed)
+    return result.scan.verdict === 'suspect' && result.trusted !== true
+      ? postOutput({ additionalContext: warning }, 'PostToolUseFailure')
+      : NO_OUTPUT;
   if (result.scan.verdict !== 'suspect' || result.trusted === true) {
     return Object.keys(atoms).length === 0
       ? NO_OUTPUT
       : postOutput({ classifierContext: { stroq } });
   }
-  return postOutput({
-    additionalContext: warningFor(result.scan, input.tool_name, taintSource(result)),
-    classifierContext: { stroq },
-  });
+  return postOutput({ additionalContext: warning, classifierContext: { stroq } });
 }
 
 export function failClosedOutput(raw: unknown, err: unknown): HookOutput {

@@ -133,6 +133,8 @@ function checkClaudeHooks(file: string): {
     const missing = [
       ...(!hasEvent('PreToolUse', PRE_MATCHER) ? ['PreToolUse (matcher)'] : []),
       ...(!hasEvent('PostToolUse', POST_MATCHER) ? ['PostToolUse (matcher)'] : []),
+      // Installs from before 0.21.2 lack it, and never see what a failed tool printed.
+      ...(!hasEvent('PostToolUseFailure', POST_MATCHER) ? ['PostToolUseFailure (matcher)'] : []),
     ];
     return { installed: missing.length === 0, error: null, missing };
   } catch (err) {
