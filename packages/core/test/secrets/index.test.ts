@@ -142,9 +142,15 @@ describe('FileSecretIndex', () => {
   it('reads the .env files of the extra project folders too, never the same one twice', async () => {
     const { home, cwd, file } = fixture();
     const other = mkdtempSync(join(tmpdir(), 'stroq-sec-other-'));
-    writeFileSync(join(other, '.env'), `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`);
+    writeFileSync(
+      join(other, '.env'),
+      `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`,
+    );
     const both = new FileSecretIndex(file, home, {}, undefined, [other, cwd, other]);
-    const hits = await both.lookup(cands('p@ssw0rd-1234567', ['sk', 'live', 'abcdefghijklmnop123'].join('_')), cwd);
+    const hits = await both.lookup(
+      cands('p@ssw0rd-1234567', ['sk', 'live', 'abcdefghijklmnop123'].join('_')),
+      cwd,
+    );
     expect(hits.map((h) => h.token).sort()).toEqual([
       'p@ssw0rd-1234567',
       ['sk', 'live', 'abcdefghijklmnop123'].join('_'),
@@ -157,7 +163,10 @@ describe('FileSecretIndex', () => {
   it('reads only the folder it is given when there are no extra folders', () => {
     const { home, cwd, file } = fixture();
     const other = mkdtempSync(join(tmpdir(), 'stroq-sec-other-'));
-    writeFileSync(join(other, '.env'), `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`);
+    writeFileSync(
+      join(other, '.env'),
+      `STRIPE_API_KEY=${['sk', 'live', 'abcdefghijklmnop123'].join('_')}\n`,
+    );
     const plain = new FileSecretIndex(file, home, {});
     expect(plain.sourcePaths(cwd)).not.toContain(join(other, '.env'));
   });
