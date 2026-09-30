@@ -168,12 +168,13 @@ function isDestKey(key: string): boolean {
  * The argument keys that tell a tool WHERE to act, by what a tool author would call
  * them: anything ending in path, file, dir, directory or folder, with or without a
  * `name` after it and a digit (`source_path`, `relativePath`, `outputDir`, `file_name`,
- * `path2`), and the short names for a source or a destination. A key that carries prose
+ * `path2`; not `profile`, which only ends in the letters), and the short names for a source
+ * or a destination. A key that carries prose
  * (`body`, `text`, `title`) is not one, so a path mentioned in a message is still just a
  * message.
  */
 const PATH_LIKE_KEY =
-  /(?:path|file|dir|directory|folder)(?:[_-]?name)?\d*s?$|^(?:src|source|from|to|dest|destination|dst|out|output|save_?as|save_?to|write_?to|export_?to|new_?(?:name|path)|target|location|uri|url|cwd|root)\d*s?$/i;
+  /(?:path|(?<!pro)file|dir|directory|folder)(?:[_-]?name)?\d*s?$|^(?:src|source|from|to|dest|destination|dst|out|output|save_?as|save_?to|write_?to|export_?to|new_?(?:name|path)|target|location|uri|url|cwd|root)\d*s?$/i;
 /**
  * The short keys that are sometimes a path and sometimes a paragraph (`source` is a file
  * for a copy tool and the code under analysis for a linter). A value under one is read
@@ -192,12 +193,6 @@ const PROSE_KEY =
  */
 const MAX_PATH_VALUES = 4096;
 const MAX_PATH_CHARS = 2 * 1024 * 1024;
-/**
- * Containers nested deeper than this are not searched. Arrays count as a level as well as
- * objects, or a deep enough array overflows the stack, and a throw is an allow for the
- * tools the hook does not fail closed on.
- */
-const MAX_PATH_DEPTH = 6;
 /**
  * A key longer than this is not a key: nobody names an argument with a paragraph. One that
  * would otherwise be read as a path key makes the call unreadable, and no work is done on
@@ -224,32 +219,59 @@ function pathOf(toolInput: Readonly<Record<string, unknown>>): string {
   return typeof candidate === 'string' ? candidate : '';
 }
 
-/**
- * A `file:` URI as the path it names, read the way the server that opens it reads it: a
- * URL parser drops tabs and line breaks, the host, the query and the fragment, resolves
- * `.` and `..` segments and treats `%2e` as a dot, and what is left is percent-decoded a
- * run at a time, so one malformed escape cannot leave the rest of the path undecoded.
- */
-function fileUriPath(raw: string): string {
-  if (!/^file:/i.test(raw)) return raw;
-  const cleaned = raw.replace(/[\t\r\n]/g, '');
-  let path: string;
-  try {
-    path = new URL(cleaned).pathname;
-  } catch {
-    path = cleaned.replace(/^file:(?:\/\/[^/]*)?/i, '').replace(/[?#][\s\S]*$/, '');
-  }
-  return path.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+/** `value` without control characters and spaces at either end, in one pass. */
+function trimControls(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) <= 0x20) start += 1;
+  while (end > start && value.charCodeAt(end - 1) <= 0x20) end -= 1;
+  return value.slice(start, end);
+}
+
+/** Each run of valid percent-escapes decoded on its own; an invalid one is left as it was. */
+const decodeRuns = (text: string): string =>
+  text.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
     try {
       return decodeURIComponent(run);
     } catch {
       return run;
     }
   });
+
+/**
+ * The paths a value can name. Ordinarily one: itself. A `file:` URI has more than one
+ * reading, and a server takes whichever it takes, so every one is classified: what a URL
+ * parser makes of it (host, query and fragment dropped, `.` and `..` resolved, `%2e` a
+ * dot), and what is left when `file://` is simply cut off the front, which is how a server
+ * that does `uri.replace('file://', '')` opens `file://.claude/settings.json`. Tabs and
+ * line breaks are dropped and leading and trailing controls and spaces trimmed first,
+ * as a URL parser does, or a space before the scheme hides the whole thing.
+ */
+function pathCandidates(raw: string): string[] {
+  const stripped = trimControls(raw).replace(/[\t\r\n]/g, '');
+  if (!/^file:/i.test(stripped)) return [raw];
+  const candidates = [stripped];
+  try {
+    candidates.push(decodeRuns(new URL(stripped).pathname));
+  } catch {
+    // Not a URL a parser accepts; the cut-off reading below is all there is.
+  }
+  candidates.push(decodeRuns(stripped.replace(/^file:\/*/i, '').replace(/[?#][\s\S]*$/, '')));
+  return [...new Set(candidates)];
 }
 
 function classifyPath(rawPath: string, write: boolean): ToolClassification {
-  const path = normalizePathForMatch(fileUriPath(rawPath));
+  const results = pathCandidates(rawPath).map((path) => classifyOnePath(path, write));
+  if (results.length === 1) return results[0] as ToolClassification;
+  return {
+    classes: [...new Set(results.flatMap((result) => result.classes))],
+    hosts: [],
+    signals: [...new Set(results.flatMap((result) => result.signals))],
+  };
+}
+
+function classifyOnePath(rawPath: string, write: boolean): ToolClassification {
+  const path = normalizePathForMatch(rawPath);
   const classes: ActionClass[] = [];
   const signals: string[] = [];
   if (write && SELF_CONFIG_FILE.test(path)) {
@@ -278,6 +300,11 @@ interface PathEntry {
   readonly path: string;
   /** The value sat under a key that names where the tool writes. */
   readonly dest: boolean;
+  /**
+   * The value sat under a key nobody said was a path and was read as one because it looks
+   * like one. Read only as a read, so it can find a credential and nothing else.
+   */
+  readonly weak: boolean;
 }
 
 interface PathScan {
@@ -293,53 +320,94 @@ interface ScanState {
   complete: boolean;
 }
 
+interface Frame {
+  readonly value: unknown;
+  readonly key: string;
+  readonly isPathKey: boolean;
+  readonly dest: boolean;
+}
+
 /**
- * The values under path-like keys of `toolInput`: at the top level, inside an options
- * bag (`{ options: { path } }`), in a list of targets (`{ files: [{ path }] }`) and in an
- * object under a path-like key (`{ output: { path } }`), to `MAX_PATH_DEPTH` objects
- * deep. A path mentioned under a key that carries prose (`body`, `text`, `title`, …)
- * does not count: that is incidental text, not an argument telling the tool where to act.
+ * The values under path-like keys of `toolInput`, wherever they are nested: in an options
+ * bag (`{ options: { path } }`), a list of targets (`{ files: [{ path }] }`), an object under
+ * a path-like key (`{ output: { path } }`), or anything deeper. A path mentioned under a
+ * key that carries prose (`body`, `text`, `title`, …) does not count: that is incidental
+ * text, not an argument telling the tool where to act.
  *
- * Every value is read IN FULL, because `./` padding, `a/..` pairs and doubled slashes are
- * resolved away by the server, so the protected part of a path can be its tail. Identical
- * values are read once, so a thousand decoys of `x` cost one; a call with more distinct
- * values than `MAX_PATH_VALUES`, or more text than `MAX_PATH_CHARS`, comes back with
- * `complete: false` rather than with what happened to fit.
+ * With `weak`, a string under any other key, and an object key, is also read when it looks
+ * like a path (one line, no whitespace, a separator or a leading dot or tilde), as a read
+ * only: tools name their inputs `attachments`, `document`, `image`, `input`, `privateKey`
+ * and no list of key names has them all, and a value is what gives a path away.
+ *
+ * The walk keeps its own stack, not the call stack, so a nesting the agent chooses cannot
+ * overflow it (a throw is an allow for the tools the hook does not fail closed on) and
+ * there is no depth to nest past. Every value is read IN FULL, because `./` padding, `a/..`
+ * pairs and doubled slashes are resolved away by the server, so the protected part of a
+ * path can be its tail. Identical values are read once, so a thousand decoys of `x` cost
+ * one; a call with more distinct path values than `MAX_PATH_VALUES`, or more text than
+ * `MAX_PATH_CHARS`, comes back with `complete: false` rather than with what happened to
+ * fit. A value read only because it looks like a path never does that: it is best effort.
  */
-function scanPaths(toolInput: Readonly<Record<string, unknown>>, keyPattern: RegExp): PathScan {
+function scanPaths(
+  toolInput: Readonly<Record<string, unknown>>,
+  keyPattern: RegExp,
+  weak: boolean,
+): PathScan {
   const state: ScanState = { entries: [], seen: new Set(), chars: 0, complete: true };
-  visit(toolInput, keyPattern, '', false, false, 0, state);
+  const stack: Frame[] = [{ value: toolInput, key: '', isPathKey: false, dest: false }];
+  for (let frame = stack.pop(); frame !== undefined; frame = stack.pop()) {
+    const { value } = frame;
+    if (typeof value === 'string') {
+      if (frame.isPathKey) addPath(value, frame.key, frame.dest, state);
+      else if (weak) addWeak(value, state);
+      continue;
+    }
+    if (typeof value !== 'object' || value === null) continue;
+    if (Array.isArray(value)) {
+      for (let i = value.length - 1; i >= 0; i -= 1) stack.push({ ...frame, value: value[i] });
+      continue;
+    }
+    const children: Frame[] = [];
+    for (const [childKey, child] of Object.entries(value)) {
+      const childIsPath = keyPattern.test(childKey);
+      if (!childIsPath && PROSE_KEY.test(childKey)) continue;
+      if (childIsPath && childKey.length > MAX_KEY_CHARS) {
+        state.complete = false;
+        continue;
+      }
+      if (!childIsPath && weak) addWeak(childKey, state);
+      children.push({
+        value: child,
+        key: childKey,
+        isPathKey: childIsPath,
+        dest: frame.dest || (childIsPath && isDestKey(childKey)),
+      });
+    }
+    for (let i = children.length - 1; i >= 0; i -= 1) stack.push(children[i] as Frame);
+  }
   return { entries: state.entries, complete: state.complete };
 }
 
-function visit(
-  value: unknown,
-  keyPattern: RegExp,
-  key: string,
-  isPathKey: boolean,
-  dest: boolean,
-  depth: number,
-  state: ScanState,
-): void {
-  if (typeof value === 'string') {
-    if (isPathKey) addPath(value, key, dest, state);
+/** A link is not a file the tool opens; `file:` is the one scheme that is. */
+const NOT_A_FILE = /^(?:https?|ftp|wss?|data|blob):/i;
+/** One line, no whitespace, and a separator or a leading dot or tilde: what a path looks like. */
+const WEAK_PATH_CHARS = 1024;
+const looksLikePath = (value: string): boolean =>
+  value.length > 0 &&
+  value.length <= WEAK_PATH_CHARS &&
+  !/\s/.test(value) &&
+  (/[\\/]/.test(value) || /^[.~]/.test(value)) &&
+  !NOT_A_FILE.test(value);
+
+function addWeak(value: string, state: ScanState): void {
+  if (!looksLikePath(value)) return;
+  const id = `r\n${value}`;
+  if (state.seen.has(id)) return;
+  if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS)
     return;
-  }
-  if (typeof value !== 'object' || value === null || depth >= MAX_PATH_DEPTH) return;
-  if (Array.isArray(value)) {
-    for (const item of value) visit(item, keyPattern, key, isPathKey, dest, depth + 1, state);
-    return;
-  }
-  for (const [childKey, child] of Object.entries(value)) {
-    const childIsPath = keyPattern.test(childKey);
-    if (!childIsPath && PROSE_KEY.test(childKey)) continue;
-    if (childIsPath && childKey.length > MAX_KEY_CHARS) {
-      state.complete = false;
-      continue;
-    }
-    const childDest = dest || (childIsPath && isDestKey(childKey));
-    visit(child, keyPattern, childKey, childIsPath, childDest, depth + 1, state);
-  }
+  state.seen.add(id);
+  state.chars += value.length;
+  state.entries.push({ path: value, dest: false, weak: true });
 }
 
 function addPath(value: string, key: string, dest: boolean, state: ScanState): void {
@@ -359,6 +427,9 @@ function addPath(value: string, key: string, dest: boolean, state: ScanState): v
 }
 
 function addOne(value: string, dest: boolean, state: ScanState): void {
+  // `url` and `uri` are path keys for the sake of `file:` URIs; an ordinary link under one
+  // is not a file, and `https://github.com/o/r/blob/main/.env.example` is not a read of it.
+  if (NOT_A_FILE.test(value)) return;
   const id = `${dest ? 'w' : 'r'}\n${value}`;
   if (state.seen.has(id)) return;
   if (state.entries.length >= MAX_PATH_VALUES || state.chars + value.length > MAX_PATH_CHARS) {
@@ -367,11 +438,13 @@ function addOne(value: string, dest: boolean, state: ScanState): void {
   }
   state.seen.add(id);
   state.chars += value.length;
-  state.entries.push({ path: value, dest });
+  state.entries.push({ path: value, dest, weak: false });
 }
 
 function classifyPaths(entries: readonly PathEntry[], write: boolean): ToolClassification {
-  const results = entries.map((entry) => classifyPath(entry.path, write || entry.dest));
+  const results = entries.map((entry) =>
+    classifyPath(entry.path, !entry.weak && (write || entry.dest)),
+  );
   return {
     classes: [...new Set(results.flatMap((result) => result.classes))],
     hosts: [],
@@ -390,7 +463,7 @@ const UNREADABLE_ARGUMENTS = {
 };
 
 function classifyGrep(toolInput: Readonly<Record<string, unknown>>): ToolClassification {
-  const scan = scanPaths(toolInput, GREP_PATH_KEY);
+  const scan = scanPaths(toolInput, GREP_PATH_KEY, false);
   const files = classifyPaths(scan.entries, false);
   if (scan.complete) return files;
   return {
@@ -411,7 +484,7 @@ function classifyMcp(
   // Read for every tool, not only the ones whose name says read or write: a credential
   // path in a path-like argument is a credential read however the tool is named. The
   // write classes still need a write-shaped tool, or a key that names a destination.
-  const scan = scanPaths(toolInput, PATH_LIKE_KEY);
+  const scan = scanPaths(toolInput, PATH_LIKE_KEY, true);
   const files = classifyPaths(scan.entries, write);
   const classes: ActionClass[] = ['mcp.call', ...files.classes];
   if (sideEffect) classes.push('mcp.side_effect');

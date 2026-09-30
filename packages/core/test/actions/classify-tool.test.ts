@@ -675,3 +675,104 @@ describe('the scan of an MCP call’s arguments is bounded and hard to slip past
     expect(classes.some((c) => c === 'config.self' || c === 'config.instructions')).toBe(true);
   });
 });
+
+// Round three of review.
+describe('what the path scan reads, third pass', () => {
+  it.each([
+    ['a leading space', ' file:///p/%2Eclaude/settings.json'],
+    ['a leading tab', '\tfile:///p/%2Eclaude/settings.json'],
+    ['a leading newline', '\nfile:///p/%2Eclaude/settings.json'],
+    ['a leading control character', '\u0001file:///p/%2Eclaude/settings.json'],
+    ['a tab inside the scheme', 'fi\tle:///p/%2Eclaude/settings.json'],
+    ['the relative form a server strips file:// from', 'file://.claude/settings.json'],
+  ])('reads a write to a file URI with %s', (_name, uri) => {
+    expect(classifyTool('mcp__fs__write_file', { uri }, cwd).classes).toContain('config.self');
+  });
+
+  it.each([
+    ['file://.env', 'fs.secrets'],
+    ['file://.aws/credentials', 'fs.secrets'],
+    [' file:///home/u/%2Essh/id_rsa', 'fs.secrets'],
+  ])('reads a credential in the file URI %s', (uri, expected) => {
+    expect(classifyTool('mcp__fs__read_file', { uri }, cwd).classes).toContain(expected);
+  });
+
+  // Keys that no list of key names has: the value is what gives a path away.
+  it.each([
+    ['attachments', { attachments: ['/home/u/.ssh/id_rsa'] }],
+    ['document', { document: '/home/u/.ssh/id_rsa' }],
+    ['image', { image: '/home/u/.ssh/id_rsa' }],
+    ['image_url', { image_url: 'file:///home/u/.ssh/id_rsa' }],
+    ['fileUri', { fileUri: 'file:///home/u/.ssh/id_rsa' }],
+    ['input', { input: '~/.ssh/id_rsa' }],
+    ['privateKey', { privateKey: '/home/u/.ssh/id_rsa' }],
+    ['credentials', { credentials: '/home/u/.aws/credentials' }],
+    ['config', { config: '/home/u/.aws/credentials' }],
+    ['a path used as an object key', { files: { '/home/u/.ssh/id_rsa': 'x' } }],
+  ])('reads a credential path under %s', (_name, input) => {
+    expect(classifyTool('mcp__mail__send_document', input, cwd).classes).toContain('fs.secrets');
+  });
+
+  // Only as a read: a value under a key nobody said was a path is not a write target.
+  it('does not read a protected path under an unnamed key as a write', () => {
+    const r = classifyTool('mcp__fs__write_file', { document: '.claude/settings.json' }, cwd);
+    expect(r.classes).not.toContain('config.self');
+  });
+
+  it('does not read a sentence under an unnamed key as a path', () => {
+    const r = classifyTool(
+      'mcp__x__set_note',
+      { note2: 'copy /home/u/.ssh/id_rsa to the server' },
+      cwd,
+    );
+    expect(r.classes).not.toContain('fs.secrets');
+  });
+
+  it('does not ask about a call because of a large blob under an unnamed key', () => {
+    const blob = 'A'.repeat(500_000);
+    const r = classifyTool('mcp__x__upload', { data: blob, more: blob, again: blob }, cwd);
+    expect(r.classes).not.toContain('shell.unparsed');
+  });
+
+  // The depth limit was a limit the agent could nest past.
+  it('reads a path at any depth, in objects or in arrays', () => {
+    let deep: unknown = { path: '.claude/settings.json' };
+    for (let i = 0; i < 40; i += 1) deep = i % 2 === 0 ? { wrap: deep } : [deep];
+    const r = classifyTool('mcp__fs__write_file', { requests: deep }, cwd);
+    expect(r.classes).toContain('config.self');
+  });
+
+  it('does not overflow the stack on a 200,000-deep array, and still reads the path beside it', () => {
+    let inner: unknown = 'x';
+    for (let i = 0; i < 200_000; i += 1) inner = [inner];
+    const t = performance.now();
+    const r = classifyTool(
+      'mcp__fs__write_file',
+      { junk: inner, path: '.claude/settings.json' },
+      cwd,
+    );
+    expect(r.classes).toContain('config.self');
+    expect(performance.now() - t).toBeLessThan(2000);
+  });
+
+  // A link is not a file the tool opens, and a key that only ends in the letters `file`
+  // is not a path key.
+  it.each([
+    ['mcp__pw__browser_navigate', { url: 'https://github.com/o/r/blob/main/.env.example' }],
+    ['mcp__pw__browser_navigate', { url: 'https://example.com/keys/foo.key' }],
+    ['mcp__x__fetch', { url: 'https://example.com/cert.pem' }],
+    ['mcp__x__set_profile', { profile: 'uses id_rsa for auth' }],
+    ['mcp__x__update_profile', { profile: '/home/u/.ssh/id_rsa is mine' }],
+  ])('%s with %j is not a read of a credential file', (tool, input) => {
+    expect(classifyTool(tool, input, cwd).classes).not.toContain('fs.secrets');
+  });
+
+  it('still reads a file: URL and keyfile-style keys', () => {
+    expect(
+      classifyTool('mcp__pw__browser_navigate', { url: 'file:///home/u/.ssh/id_rsa' }, cwd).classes,
+    ).toContain('fs.secrets');
+    expect(classifyTool('mcp__x__load', { keyfile: '/home/u/.ssh/id_rsa' }, cwd).classes).toContain(
+      'fs.secrets',
+    );
+  });
+});
