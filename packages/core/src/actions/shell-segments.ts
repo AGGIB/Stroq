@@ -335,6 +335,101 @@ function extractArguments(command: string, head: RegExp, budget: Budget): string
 const GIT_FOREACH_OR_BISECT_RUN = /\bgit\s+(?:submodule\s+foreach|bisect\s+run)\s+/g;
 
 /**
+ * `trap '<commands>' EXIT`: the quoted string is a command that runs later, on exit or on
+ * a signal, and it is where a script hides a delete it does not want to run in the
+ * visible flow (claude-code #88462). Read like `eval`'s argument, with two differences:
+ * `trap -- '…'` ends the options first, and a double-quoted body may hold `\"` and `\$`,
+ * which are the quote and the dollar and not the end of the string.
+ */
+const TRAP_HEAD = /\btrap\s+(?:--\s+)?/g;
+const MAX_TRAPS = 256;
+const MAX_TRAP_BODY_CHARS = 32 * 1024;
+
+function extractTrapBodies(command: string, budget: Budget): string[] {
+  const results: string[] = [];
+  const unquotedEnd = /[;\n|&]/g;
+  TRAP_HEAD.lastIndex = 0;
+  let head: RegExpExecArray | null;
+  while ((head = TRAP_HEAD.exec(command)) !== null && results.length < MAX_TRAPS) {
+    const start = head.index + head[0].length;
+    const quote = command.charAt(start);
+    let body: string;
+    if (quote === "'") {
+      const end = command.indexOf("'", start + 1);
+      if (end === -1) continue;
+      body = command.slice(start + 1, end);
+    } else if (quote === '"') {
+      let end = -1;
+      const limit = Math.min(command.length, start + 1 + MAX_TRAP_BODY_CHARS);
+      for (let i = start + 1; i < limit; i += 1) {
+        const ch = command.charAt(i);
+        if (ch === '\\') i += 1;
+        else if (ch === '"') {
+          end = i;
+          break;
+        }
+      }
+      if (end === -1) continue;
+      body = command.slice(start + 1, end).replace(/\\(["$`\\])/g, '$1');
+    } else {
+      unquotedEnd.lastIndex = start;
+      const stop = unquotedEnd.exec(command)?.index ?? command.length;
+      body = command.slice(start, stop);
+    }
+    if (body.length > budget.remaining) {
+      budget.exceeded = true;
+      break;
+    }
+    budget.remaining -= body.length;
+    results.push(body);
+  }
+  return results;
+}
+
+/**
+ * `cmd /c "<commands>"` and `powershell -Command "<commands>"`: a nested shell invocation
+ * in the Windows dialects, where the body is quoted with `"` and a quote inside it is
+ * written `\"`. The `sh -c` extractor ends a body at the first quote, which cuts
+ * `cmd /c "rmdir /s /q \"D:\x\""` off before the path it deletes.
+ */
+const WINDOWS_SHELL_HEAD =
+  /\b(?:cmd(?:\.exe)?\s+\/[ck]|(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*?-c(?:ommand)?)\s+/gi;
+
+function extractWindowsShellBodies(command: string): string[] {
+  const results: string[] = [];
+  WINDOWS_SHELL_HEAD.lastIndex = 0;
+  let head: RegExpExecArray | null;
+  while ((head = WINDOWS_SHELL_HEAD.exec(command)) !== null) {
+    const start = head.index + head[0].length;
+    if (command[start] !== '"') continue;
+    let end = -1;
+    for (let i = start + 1; i < command.length; i += 1) {
+      const ch = command[i];
+      if (ch === '\\' && command[i + 1] === '"') {
+        i += 1;
+        continue;
+      }
+      if (ch === '"') {
+        end = i;
+        break;
+      }
+    }
+    if (end === -1) {
+      // `cmd /c "rmdir /s /q C:\"`: to cmd a backslash is a path separator, not an escape,
+      // so a body that only closes on the quote after one is read to that quote.
+      const literal = command.indexOf('"', start + 1);
+      if (literal === -1) continue;
+      results.push(command.slice(start + 1, literal));
+      WINDOWS_SHELL_HEAD.lastIndex = literal + 1;
+      continue;
+    }
+    results.push(command.slice(start + 1, end).replace(/\\"/g, '"'));
+    WINDOWS_SHELL_HEAD.lastIndex = end + 1;
+  }
+  return results;
+}
+
+/**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
  * the (further-split) inner text of any process/command substitutions,
  * backtick expressions, `sh -c '...'` string bodies, `find -exec ... \;`
@@ -366,6 +461,8 @@ export function splitCommand(command: string): SplitCommand {
     extractFindExecCommands(command),
     extractArguments(command, EVAL_ARG, budget),
     extractArguments(command, GIT_FOREACH_OR_BISECT_RUN, budget),
+    extractTrapBodies(command, budget),
+    extractWindowsShellBodies(command),
   ];
   return {
     segments: [...splitTop(command), ...nested.flatMap((texts) => texts.flatMap(splitTop))],

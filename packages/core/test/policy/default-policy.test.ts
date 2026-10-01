@@ -32,4 +32,27 @@ describe('policies/default.yaml', () => {
       when: { classes: ['secret.unscannable'], taint: 'any' },
     });
   });
+
+  it('denies installing something a trusted process runs later when the session is tainted, and asks otherwise', () => {
+    const ids = DEFAULT_POLICY.rules.map((r) => r.id);
+    const deny = DEFAULT_POLICY.rules.find((r) => r.id === 'deny-persistence-when-tainted');
+    const ask = DEFAULT_POLICY.rules.find((r) => r.id === 'ask-persistence');
+    expect(deny).toMatchObject({
+      effect: 'deny',
+      when: { classes: ['config.persistence'], taint: 'suspect' },
+    });
+    expect(ask).toMatchObject({
+      effect: 'ask',
+      when: { classes: ['config.persistence'], taint: 'any' },
+    });
+    // A tainted session is denied before the ask rules could answer it, and before a push
+    // rule that would otherwise name the same command first.
+    expect(ids.indexOf('deny-persistence-when-tainted')).toBeLessThan(
+      ids.indexOf('ask-persistence'),
+    );
+    expect(ids.indexOf('ask-persistence')).toBeLessThan(ids.indexOf('ask-instructions-payload'));
+    expect(ids.indexOf('deny-persistence-when-tainted')).toBeLessThan(
+      ids.indexOf('deny-push-external-when-tainted'),
+    );
+  });
 });

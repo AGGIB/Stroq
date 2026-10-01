@@ -259,10 +259,12 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>deny-network-when-tainted</td><td class="tag-deny">deny</td><td><code>shell.network</code>, taint = suspect</td></tr>
         <tr><td>deny-fetch-when-tainted</td><td class="tag-deny">deny</td><td><code>network.fetch</code>, taint = suspect</td></tr>
         <tr><td>deny-secrets-when-tainted</td><td class="tag-deny">deny</td><td><code>fs.secrets</code>, taint = suspect</td></tr>
+        <tr><td>deny-persistence-when-tainted</td><td class="tag-deny">deny</td><td><code>config.persistence</code>, taint = suspect</td></tr>
         <tr><td>deny-push-external-when-tainted</td><td class="tag-deny">deny</td><td><code>git.push_external</code>, taint = suspect</td></tr>
         <tr><td>ask-origin-untrusted</td><td class="tag-ask">ask</td><td><code>origin.untrusted</code>, any taint</td></tr>
         <tr><td>ask-mcp-side-effect-when-tainted</td><td class="tag-ask">ask</td><td><code>mcp.side_effect</code>, taint = suspect</td></tr>
         <tr><td>ask-self-touch</td><td class="tag-ask">ask</td><td><code>config.self_touch</code>, any taint</td></tr>
+        <tr><td>ask-persistence</td><td class="tag-ask">ask</td><td><code>config.persistence</code>, any taint</td></tr>
         <tr><td>ask-instructions-payload</td><td class="tag-ask">ask</td><td><code>config.instructions_payload</code>, any taint</td></tr>
         <tr><td>ask-instructions-when-tainted</td><td class="tag-ask">ask</td><td><code>config.instructions</code>, taint = suspect</td></tr>
         <tr><td>ask-destructive</td><td class="tag-ask">ask</td><td><code>shell.destructive</code>, any taint</td></tr>
@@ -311,7 +313,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>stroq replay</td><td>Rebuild the recorded sequence and show earlier content matching later actions; this is evidence of a link, not proof of the model's reasoning</td></tr>
         <tr><td>stroq sent</td><td>Find known credentials in a recorded agent session's tool arguments and available results; reads this machine's credential files to match values and reports names and sources, not values. Provider delivery is not established by the transcript alone.</td></tr>
         <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
-        <tr><td>stroq attack</td><td>Replay 21 recorded incidents against your policy; exit 1 if any gets through</td></tr>
+        <tr><td>stroq attack</td><td>Replay 35 attack scenarios (26 recorded incidents, 9 synthetic) against your policy; exit 1 if any gets through</td></tr>
         <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>
         <tr><td>stroq inspect</td><td>Read what a repository runs when you open it, before you point an agent at it</td></tr>
       </tbody>
@@ -330,9 +332,9 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 
 <section class="docs-section" id="attack" aria-labelledby="attack-title">
   <h2 id="attack-title">Attack corpus</h2>
-  <p><code>stroq attack</code> replays recorded hook events from twelve public incidents and nine synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
-  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>21 scenarios: 15 blocked, 6 asked, 0 passed through — every attack was stopped.</code></pre>
-  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-twenty-one-real-and-synthetic-attacks">the guide on GitHub</a>.</p>
+  <p><code>stroq attack</code> replays recorded hook events from twenty-six public incidents and nine synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
+  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>35 scenarios: 16 blocked, 19 asked, 0 passed through — every attack was stopped.</code></pre>
+  <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario that carries untrusted text with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-thirty-five-real-and-synthetic-attacks">the guide on GitHub</a>.</p>
 </section>
 
 <section class="docs-section" id="exposure" aria-labelledby="exposure-title">
@@ -356,7 +358,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <div class="report-stat"><span class="n">15%</span><span class="label">flagged on 121 files of real, benign developer documentation</span></div>
   <p>Measured by a method we publish, on a corpus we vendor — not a third-party audit. <code>stroq bench --corpus &lt;dir&gt;</code> reproduces the same measurement on your own files. Full method and the files it flags: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md">docs/BENCH.md</a>.</p>
   <h3>stroq coverage — technique mapping</h3>
-  <p>Maps the 21 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
+  <p>Maps the 35 attack scenarios against MITRE ATLAS 2026.08 and OWASP's Agentic Security Initiative taxonomy. This is a control mapping with evidence, not a compliance claim: a technique reads <code>covered</code> only when a scenario exercises it end to end with no stated limitation — every other row names the limitation that qualifies it. Full table: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/COVERAGE.md">docs/COVERAGE.md</a>.</p>
 </section>
 
 <section class="docs-section" id="limits" aria-labelledby="limits-title">

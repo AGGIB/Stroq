@@ -10,7 +10,7 @@
 Stroq's false-positive rate against real, benign developer documentation. This number is ours — measured by a method we publish, on a corpus we vendor. It is not a third-party audit.
 
 ```text
-stroq bench: 121 files, 2307 KB, 639 rules
+stroq bench: 121 files, 2307 KB, 640 rules
 flagged:   18 / 121   (14.9%)
 
   STROQ-2026-00005   Remote script piped into a shell                 8 files

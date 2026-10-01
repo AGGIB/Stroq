@@ -3,6 +3,7 @@ import {
   SYNTHETIC_SECRET_PREFIX,
   type Scenario,
   type ScenarioStep,
+  isScriptFixture,
 } from './scenario.js';
 
 export interface Mutation {
@@ -276,7 +277,8 @@ function mutateStep(step: ScenarioStep, mutation: Mutation): { step: ScenarioSte
 }
 
 /**
- * Mutates every `files` entry except one whose body carries a planted synthetic
+ * Mutates every `files` entry except a script (code the scenario runs: see
+ * `isScriptFixture`) and one whose body carries a planted synthetic
  * secret (`SYNTHETIC_SECRET_PREFIX`). That content is fixture state the attack step
  * reproduces verbatim (e.g. a token embedded in an egress URL) — not untrusted text
  * an agent read from somewhere. Mutating it would change the secret's value while
@@ -291,7 +293,7 @@ function mutateFiles(
   let hit = false;
   const next = Object.fromEntries(
     Object.entries(files).map(([name, body]) => {
-      if (body.includes(SYNTHETIC_SECRET_PREFIX)) return [name, body];
+      if (body.includes(SYNTHETIC_SECRET_PREFIX) || isScriptFixture(name)) return [name, body];
       hit = true;
       return [name, mutation.apply(body)];
     }),

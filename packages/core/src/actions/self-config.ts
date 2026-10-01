@@ -6,6 +6,7 @@
  * same protected-file regex.
  */
 import { normalizePathForMatch } from './normalize-path.js';
+import { anyOf, followedBy } from './followed-by.js';
 import { commandWord } from './shell-segments.js';
 
 /**
@@ -80,8 +81,8 @@ import { commandWord } from './shell-segments.js';
  * The PROJECT MCP configs are deliberately absent: adding an MCP server to
  * `.mcp.json` or `.cursor/mcp.json` is routine agent work, and denying it would be
  * the bare `.claude` false positive again. That gap is stated in the README and
- * SECURITY.md; a content-aware check that protects only the wrapped entries is the
- * follow-up.
+ * SECURITY.md; they are asked about by `INSTRUCTION_FILE` and `agent-config.ts`, and a
+ * check that protects only the wrapped entries is the follow-up.
  *
  * Every separator below is `[/\\]+` rather than `\/`, which is the convention this
  * whole file now follows. On Windows each of these paths arrives spelled with
@@ -140,6 +141,13 @@ export const SELF_CONFIG_FILE =
  * decides with the taint: `config.instructions` is asked about in a tainted session,
  * and a write whose own text trips a rule in any session.
  *
+ * MCP server lists are here too, for the same reason: `.mcp.json`, `.cursor/mcp.json`,
+ * `.kiro/settings/mcp.json` and `.gemini/settings.json` name programs the agent starts in
+ * every later session, and an injected page that gets one written (Kiro, CVE-2026-10591)
+ * has outlived itself the same way. Adding a server is routine, so the file is asked
+ * about only in a tainted session, or when the text written registers a shell or an
+ * inline interpreter as the server (`agent-config.ts`).
+ *
  * Each name is a whole path segment — `CLAUDE.md.bak` and `my-AGENTS.md` are
  * somebody's own files — and each directory ends at a segment boundary, so
  * `.claude/skills-notes.md` and `.cursor/rules.md` are not the directories they
@@ -148,7 +156,7 @@ export const SELF_CONFIG_FILE =
  * filesystems that resolve `claude.md` to the same file are.
  */
 export const INSTRUCTION_FILE =
-  /(?<![\w.-])(?:(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands|rules|output-styles|agent-memory(?:-local)?|routines|workflows)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:scheduled_tasks\.json|loop\.md)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])|\.github[/\\]+instructions(?![\w-]|\.+[\w-])/i;
+  /(?<![\w.-])(?:(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands|rules|output-styles|agent-memory(?:-local)?|routines|workflows)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:scheduled_tasks\.json|loop\.md)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])|\.github[/\\]+(?:instructions|agents|prompts|chatmodes)(?![\w-]|\.+[\w-])|\.(?:agent|agents)[/\\]+(?:rules|workflows|skills)(?![\w-]|\.+[\w-])|\.kiro[/\\]+(?:steering|hooks)(?![\w-]|\.+[\w-])|(?<![\w.-])\.mcp\.json(?![\w-]|\.+[\w-])|\.(?:cursor|vscode|roo)[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.kiro[/\\]+settings[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.gemini[/\\]+settings\.json(?![\w-]|\.+[\w-])/i;
 
 export const PROTECTED_DIRS =
   /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
@@ -241,7 +249,7 @@ export const SELF_CONFIG_WRITE_COMMANDS = new Set([
  * command that merely mentions a protected path. `del`, `rd` and `rmdir` are in,
  * since none of the three is a POSIX command at all.
  */
-const WINDOWS_WRITE_COMMANDS: ReadonlySet<string> = new Set([
+export const WINDOWS_WRITE_COMMANDS: ReadonlySet<string> = new Set([
   'remove-item',
   'remove-itemproperty',
   'set-content',
@@ -261,7 +269,7 @@ const WINDOWS_WRITE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Directory and Windows extension removed, then folded — `C:\…\del.exe` is `del`. */
-const windowsVerb = (word: string): string =>
+export const windowsVerb = (word: string): string =>
   word
     .replace(/^.*[/\\]/, '')
     .replace(/\.(?:exe|cmd|bat|ps1)$/i, '')
@@ -270,7 +278,7 @@ const windowsVerb = (word: string): string =>
 // Interpreters are write intent only when invoked with inline code
 // (`-c`/`-e`, including combined short flags like `perl -pi -e` or
 // `perl -pe`); a bare `python3 -m json.tool file` is not write intent.
-const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
+export const SELF_CONFIG_INTERPRETERS = new Set(['perl', 'python', 'python3', 'node', 'ruby']);
 const GIT_WRITE_SUBCOMMAND = /^git\s+(checkout|restore|reset|clean|rm|stash)\b/;
 const GIT_READ_SUBCOMMAND = /^git\s+(status|diff|log|show|add|blame)\b/;
 
@@ -319,7 +327,7 @@ function isInlineCodeToken(token: string): boolean {
   return /[ec]/.test(token.slice(1));
 }
 
-function hasInlineCode(segment: string): boolean {
+export function hasInlineCode(segment: string): boolean {
   return segment.split(/\s+/).some(isInlineCodeToken);
 }
 
@@ -376,7 +384,7 @@ const DOWNLOAD_LONG_OUTPUT: ReadonlySet<string> = new Set([
  * controls is the plainest way to plant one. Read token by token, not with one
  * pattern: a flag cluster matched as `-[a-z]*o[a-z]*` backtracks over itself.
  */
-function isDownloadToFile(segment: string, word: string): boolean {
+export function isDownloadToFile(segment: string, word: string): boolean {
   const verb = windowsVerb(word);
   const tokens = segment.split(/\s+/);
   if (DOWNLOADERS.has(verb))
@@ -390,8 +398,21 @@ function isDownloadToFile(segment: string, word: string): boolean {
   return false;
 }
 
-function isSelfConfigWriteIntent(segment: string, word: string): boolean {
+/**
+ * `git show|log|diff|format-patch|archive` with an output option. `--output=<file>` is
+ * the one that matters: `git show` sits on Codex's safe-command allowlist as read-only,
+ * and `git show --output=./.git/config …` writes a file git later executes from
+ * (GitPwned, Pillar Security, 2026-07). None of the writer verbs or a `>` is in the text.
+ */
+export const GIT_OUTPUT_OPTION = anyOf(
+  followedBy(/\bgit\b/, /\s(?:--output(?:=|\s)|--output-directory(?:=|\s))/),
+  // `-o` is `--only` for `commit` and `--push-option` for `push`; it is an output only here.
+  followedBy(/\bgit\s+(?:archive|format-patch)\b/, /\s-o\s/),
+);
+
+export function isSelfConfigWriteIntent(segment: string, word: string): boolean {
   if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
+  if (word === 'git' && GIT_OUTPUT_OPTION.test(segment)) return true;
   if (isDownloadToFile(segment, word)) return true;
   if (WINDOWS_WRITE_COMMANDS.has(windowsVerb(word))) return true;
   if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
@@ -500,7 +521,7 @@ const VARIABLE = /\$\{?([A-Za-z_]\w*)\}?/g;
 const REDIRECT_PREFIX = /^\d*>+\|?/;
 
 /** `NAME=value` words anywhere in the command, quotes removed: `F=CLAUDE.md; … > $F`. */
-function shellAssignments(segments: readonly string[]): ReadonlyMap<string, string> {
+export function shellAssignments(segments: readonly string[]): ReadonlyMap<string, string> {
   const assigned = new Map<string, string>();
   for (const segment of segments)
     for (const word of segment.split(/\s+/)) {
@@ -518,19 +539,26 @@ function shellAssignments(segments: readonly string[]): ReadonlyMap<string, stri
  * `normalizePathForMatch` does for a tool's path (`.claude/./skills/x.md`). A
  * backslash is tried both as a separator and as the escape the shell drops.
  */
-function namesInstructionFile(segment: string, assigned: ReadonlyMap<string, string>): boolean {
-  if (INSTRUCTION_FILE.test(segment)) return true;
+export function namesFile(
+  segment: string,
+  assigned: ReadonlyMap<string, string>,
+  pattern: RegExp,
+): boolean {
+  if (pattern.test(segment)) return true;
   return segment.split(/\s+/).some((word) => {
     const expanded = word
       .replace(REDIRECT_PREFIX, '')
       .replace(/["']/g, '')
       .replace(VARIABLE, (whole, name: string) => assigned.get(name) ?? whole);
     return (
-      INSTRUCTION_FILE.test(normalizePathForMatch(expanded)) ||
-      INSTRUCTION_FILE.test(normalizePathForMatch(expanded.replace(/\\/g, '')))
+      pattern.test(normalizePathForMatch(expanded)) ||
+      pattern.test(normalizePathForMatch(expanded.replace(/\\/g, '')))
     );
   });
 }
+
+const namesInstructionFile = (segment: string, assigned: ReadonlyMap<string, string>): boolean =>
+  namesFile(segment, assigned, INSTRUCTION_FILE);
 
 export function selfTamperSignals(segments: readonly string[]): SelfConfigSignals {
   const interpreterInlineElsewhere = anySegmentIsInterpreterInlineCode(segments);

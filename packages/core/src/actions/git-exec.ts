@@ -1,5 +1,5 @@
 import { followedBy, type TextTest } from './followed-by.js';
-import { SELF_CONFIG_WRITE_COMMANDS } from './self-config.js';
+import { GIT_OUTPUT_OPTION, SELF_CONFIG_WRITE_COMMANDS } from './self-config.js';
 import { commandWord } from './shell-segments.js';
 
 /**
@@ -95,7 +95,10 @@ export function isGitExecPath(path: string): boolean {
 
 function isWriteIntent(segment: string): boolean {
   if (segment.includes('>')) return true;
-  return SELF_CONFIG_WRITE_COMMANDS.has(commandWord(segment));
+  const word = commandWord(segment);
+  // `git show --output=.git/config`: a read verb that writes where it is told to.
+  if (word === 'git' && GIT_OUTPUT_OPTION.test(segment)) return true;
+  return SELF_CONFIG_WRITE_COMMANDS.has(word);
 }
 
 /**
@@ -112,4 +115,132 @@ export function gitExecSignals(segments: readonly string[]): string[] {
     if (isWriteIntent(seg) && GIT_EXEC_FILE.test(seg)) out.add('git-exec-file');
   }
   return [...out];
+}
+
+/**
+ * Git configuration written as TEXT: the `[diff] external = …` a `git show --output`
+ * leaves behind, or the `core.fsmonitor` in a config an agent writes at a path that is
+ * not literally `.git/config` — a `gitdir:` pointer to `.alt/config`, or a file a
+ * `[include]` pulls in. The path rule above cannot see either, and a repository's
+ * `.git` directory does not have to be called `.git` (Pillar Security, 2026-07).
+ *
+ * Read as INI, section by section. Only the keys whose value git runs are read, and a
+ * value that is not a command (`fsmonitor = true`, `editor = vim`) is not an
+ * installation: the aim is the shape that executes, not every mention. What is not read
+ * is a file whose name says it is not configuration (a document, a source file, a data
+ * file): those quote config sections. A share of INI-shaped lines used to be required as
+ * well, and padding the text with prose took it below the share.
+ */
+const MAX_CONFIG_TEXT_CHARS = 4 * 1024 * 1024;
+const MAX_DOTTED_KEY_CHARS = 300;
+const INI_HEADER = /^\[\s*([A-Za-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]\s*(.*)$/;
+const INI_ASSIGNMENT = /^([A-Za-z][\w-]*)\s*(?:=\s*(.*))?$/;
+const STRONG_TEXT_KEY =
+  /^(?:core\.(?:fsmonitor|hookspath|sshcommand|gitproxy|askpass|alternaterefscommand)|diff\.external|diff\..+?\.(?:textconv|command)|filter\..+?\.(?:clean|smudge|process)|merge\..+?\.driver|uploadpack\.packobjectshook|receivepack\.[\w-]*hook|protocol\.ext\.allow|remote\..+?\.(?:uploadpack|receivepack|vcs)|gpg\.(?:.+?\.)?program|trailer\..+?\.cmd|init\.templatedir|include\.path|includeif\..+?\.path)$/i;
+/**
+ * Keys that name a program only sometimes: a pager or an editor is usually just `less`,
+ * and a merge tool's `cmd` runs only when somebody starts the tool, with `$MERGED` in it.
+ */
+const SOMETIMES_TEXT_KEY =
+  /^(?:core\.(?:pager|editor)|sequence\.editor|pager\.[\w-]+|credential\.(?:.+?\.)?helper|(?:mergetool|difftool|browser)\..+?\.cmd)$/i;
+/** Keys whose value is a git command unless it starts with `!`, which hands it to a shell. */
+const BANG_KEY = /^(?:alias\.[\w-]+|submodule\..+?\.update)$/i;
+const BOOLEAN_VALUE = /^(?:true|false|yes|no|on|off|0|1)$/i;
+/** Git LFS's own filter, which `git lfs install` writes into every user's `~/.gitconfig`. */
+const GIT_LFS_VALUE = /^git-lfs\s/;
+/**
+ * A value that starts a shell or another program that fetches or runs code. A pipe or a
+ * `$VARIABLE` alone is not it: `diff-so-fancy | less` and `code --wait $MERGED` are pagers
+ * and merge tools, and `sh -c …`, `curl … | sh` and `$(…)` are what an attack writes.
+ */
+const ACTIVE_VALUE =
+  /[;`]|\$\(|&&|\|\||^!|\b(?:sh|bash|zsh|cmd|powershell|pwsh|curl|wget|nc|python3?|node|perl)\b/i;
+/**
+ * Files that are not git configuration whatever they quote: documents, source files and
+ * data files. A fixture that holds a config section is a `.ts` or a `.json`, not a config.
+ */
+const DOCUMENT_PATH =
+  /\.(?:md|mdx|markdown|txt|rst|adoc|html?|tsx?|[cm]?jsx?|py|rb|go|rs|java|kt|swift|cc?|cpp|hpp?|cs|php|sh|bash|zsh|json|ya?ml|toml|xml|lock|snap)$/i;
+
+function textRunsCommand(dotted: string, value: string): boolean {
+  if (dotted.length > MAX_DOTTED_KEY_CHARS) return false;
+  if (STRONG_TEXT_KEY.test(dotted)) {
+    if (/^filter\./i.test(dotted) && GIT_LFS_VALUE.test(value)) return false;
+    return value !== '' && !BOOLEAN_VALUE.test(value);
+  }
+  if (BANG_KEY.test(dotted)) return value.startsWith('!') && value.length > 1;
+  if (SOMETIMES_TEXT_KEY.test(dotted)) return value.startsWith('!') || ACTIVE_VALUE.test(value);
+  return false;
+}
+
+/** Whether `path` is a document or a source file, which quotes a config section and is not one. */
+export const isDocumentPath = (path: string): boolean => DOCUMENT_PATH.test(path);
+
+export function gitConfigTextRunsCommand(path: string, text: string): boolean {
+  return !isDocumentPath(path) && iniRunsCommand(text);
+}
+
+/**
+ * The part of `gitConfigTextRunsCommand` that does not depend on the path, for a caller
+ * that asks it about one text and many paths and must not parse the text for each.
+ */
+export function iniRunsCommand(text: string): boolean {
+  if (text.length === 0) return false;
+  let section = '';
+  const assign = (line: string): boolean => {
+    const assignment = section === '' ? null : INI_ASSIGNMENT.exec(line);
+    if (!assignment) return false;
+    const eq = line.indexOf('=');
+    const key = (assignment[1] as string).toLowerCase();
+    const value = eq === -1 ? '' : line.slice(eq + 1).trim();
+    return textRunsCommand(`${section}.${key}`, value);
+  };
+  for (const raw of text.slice(0, MAX_CONFIG_TEXT_CHARS).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
+    const header = INI_HEADER.exec(line);
+    if (header) {
+      const sub = header[2];
+      section = (sub === undefined ? header[1] : `${header[1]}.${sub}`) as string;
+      // `[core] fsmonitor = x` is a section and its first key on one line.
+      const tail = (header[3] as string).trim();
+      if (tail !== '' && !tail.startsWith('#') && !tail.startsWith(';') && assign(tail))
+        return true;
+      continue;
+    }
+    if (assign(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * An editor task that runs when the folder is opened: VS Code's `"runOn": "folderOpen"`,
+ * or the `task.allowAutomaticTasks` switch that lets one run unasked. The Antigravity
+ * time bomb, Miasma and ChainDrop all plant exactly this, because opening the project
+ * is something the developer does anyway. These files are JSON with comments, so a
+ * comment may sit between the key and its value, and a `.code-workspace` file carries
+ * both the tasks and the settings.
+ */
+const COMMENTS = String.raw`(?:\/\*[\s\S]{0,200}?\*\/\s*|\/\/[^\n]{0,200}\n\s*)*`;
+const RUN_ON_FOLDER_OPEN = new RegExp(String.raw`"runOn"\s*:\s*${COMMENTS}"folderOpen"`, 'i');
+const ALLOW_AUTOMATIC_TASKS = new RegExp(
+  String.raw`"task\.allowAutomaticTasks"\s*:\s*${COMMENTS}"on"`,
+  'i',
+);
+/** The text of either, for a caller that has a command and not a file to look at. */
+export const EDITOR_AUTORUN_TEXT = new RegExp(
+  `${RUN_ON_FOLDER_OPEN.source}|${ALLOW_AUTOMATIC_TASKS.source}`,
+  'i',
+);
+
+/** Whether `path` is a file an editor reads an auto-run task from. */
+export const isEditorAutorunPath = (path: string): boolean =>
+  /(?:^|\/)(?:tasks\.json|settings\.json)$|\.code-workspace$/i.test(path.replace(/\\/g, '/'));
+
+export function editorAutorunText(path: string, text: string): boolean {
+  const lowered = path.replace(/\\/g, '/').toLowerCase();
+  if (/(?:^|\/)tasks\.json$/.test(lowered)) return RUN_ON_FOLDER_OPEN.test(text);
+  if (/(?:^|\/)settings\.json$/.test(lowered)) return ALLOW_AUTOMATIC_TASKS.test(text);
+  if (/\.code-workspace$/.test(lowered)) return EDITOR_AUTORUN_TEXT.test(text);
+  return false;
 }

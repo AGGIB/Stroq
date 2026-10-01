@@ -19,8 +19,9 @@
  *
  * Lexical, not `realpath`: resolving on disk would follow symlinks and stat files the
  * agent named, which is both slow on a hot path and a way to be pointed at something.
- * A symlink into a protected directory is therefore still uncovered, and is recorded
- * as a limit rather than implied away.
+ * A symlink is therefore not followed here. The file tools resolve their one path on disk
+ * separately (`symlink.ts`); a link named inside a shell command is still not covered,
+ * and is recorded as a limit rather than implied away.
  */
 export function normalizePathForMatch(path: string): string {
   // `/./` first, then the `//` it leaves behind — the other order leaves a double slash.

@@ -282,8 +282,8 @@
       <dl class="stats">
         <div class="stat">
           <dt class="stat-label">Gated rules</dt>
-          <dd class="stat-num">639</dd>
-          <dd class="stat-sub">12 ours, 627 vendored. 9 of 648 failed the false-positive and regex-cost gates.</dd>
+          <dd class="stat-num">640</dd>
+          <dd class="stat-sub">13 ours, 627 vendored. 9 of 649 failed the false-positive and regex-cost gates.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Agents</dt>
@@ -293,7 +293,7 @@
         <div class="stat">
           <dt class="stat-label">Checks</dt>
           <dd class="stat-num">CI</dd>
-          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, twenty-one replayed incidents.</dd>
+          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, thirty-five replayed attacks.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -418,7 +418,7 @@
 
           <rect class="fl-node" x="438" y="48" width="140" height="80" rx="10"/>
           <text class="fl-t" x="454" y="80">Scan</text>
-          <text class="fl-s" x="454" y="100">639 rules</text>
+          <text class="fl-s" x="454" y="100">640 rules</text>
           <text class="fl-s" x="454" y="116">highest score</text>
           <path class="fl-arrow" d="M578 88H602" marker-end="url(#arr)"/>
 
@@ -484,16 +484,16 @@
   <section class="score" id="attacks" aria-labelledby="score-title">
     <div class="container">
       <div class="section-head reveal">
-        <h2 id="score-title">21 attacks replayed. <span class="hi-deny">15 blocked</span>, <span class="hi-ask">6 asked</span>, none through.</h2>
+        <h2 id="score-title">35 attacks replayed. <span class="hi-deny">16 blocked</span>, <span class="hi-ask">19 asked</span>, none through.</h2>
         <p class="section-lead">Published incidents and synthetic cases are replayed as hook events through <em>your</em> policy on every commit. This tests the policy, not a live agent. <code>stroq attack</code> exits 1 if a scenario gets through.</p>
       </div>
 
       <div class="sc-board reveal">
-        <div class="sc-bar" role="img" aria-label="Of 21 replayed incidents, 15 were blocked outright, 6 were turned into a prompt, and none passed through.">
-          <span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>
-          <span class="sc-seg sc-seg-ask"><b>6</b> asked</span>
+        <div class="sc-bar" role="img" aria-label="Of 35 replayed attacks, 16 were blocked outright, 19 were turned into a prompt, and none passed through.">
+          <span class="sc-seg sc-seg-deny"><b>16</b> blocked</span>
+          <span class="sc-seg sc-seg-ask"><b>19</b> asked</span>
         </div>
-        <p class="sc-zero">Each one is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 375 mutated variants escaped.</p>
+        <p class="sc-zero">Every scenario that carries untrusted text (19 of the 35) is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 475 mutated variants escaped.</p>
       </div>
 
       <ol class="sc-list reveal">
@@ -651,6 +651,104 @@
           <span class="sc-src sc-src-own">Stroq-authored</span>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
         </li>
+        <li class="sc-row sc-deny">
+          <span class="sc-n">22</span>
+          <span class="sc-what">A git show --output writes a git config whose diff.external runs a command</span>
+          <span class="sc-effect">code execution</span>
+          <a class="sc-src" href="https://www.pillar.security/blog/gitpwned-allowlist-to-rce">Pillar Security<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">23</span>
+          <span class="sc-what">A worktree path trick ends in a write to ~/.zshenv</span>
+          <span class="sc-effect">persistence</span>
+          <a class="sc-src" href="https://github.com/advisories/GHSA-7835-87q9-rgvv">CVE-2026-55607<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">24</span>
+          <span class="sc-what">A README asks the agent to update a settings file that is a symlink to authorized_keys</span>
+          <span class="sc-effect">persistence</span>
+          <a class="sc-src" href="https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants">Wiz<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">25</span>
+          <span class="sc-what">A script the assistant wrote traps EXIT and removes $HOME</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/88462">claude-code #88462<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">26</span>
+          <span class="sc-what">An agent-written PowerShell script runs git clean -xdff at the workspace root</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/87360">claude-code #87360<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">27</span>
+          <span class="sc-what">The agent writes an editor task that runs whenever the folder is reopened</span>
+          <span class="sc-effect">persistence</span>
+          <a class="sc-src" href="https://www.pillar.security/blog/the-week-of-sandbox-escapes">Pillar Security<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">28</span>
+          <span class="sc-what">Hidden page text makes the agent register an MCP server that starts a shell</span>
+          <span class="sc-effect">code execution</span>
+          <a class="sc-src" href="https://research.intezer.com/blog/2026/07/remote-code-execution-kiro/">Intezer<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">29</span>
+          <span class="sc-what">An MCP tool tells the agent to harvest ~/.claude and ~/.cursor and submit the files</span>
+          <span class="sc-effect">credential theft</span>
+          <a class="sc-src" href="https://osv.dev/vulnerability/MAL-2026-10736">OSV MAL-2026-10736<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">30</span>
+          <span class="sc-what">An issue title steers an AI triage workflow into installing an attacker package</span>
+          <span class="sc-effect">code execution</span>
+          <a class="sc-src" href="https://adnanthekhan.com/posts/clinejection/">Clinejection<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">31</span>
+          <span class="sc-what">The agent removes the production container image over ssh</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/94579">claude-code #94579<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">32</span>
+          <span class="sc-what">The agent disables a live Firebase hosting site on its own</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/93002">claude-code #93002<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">33</span>
+          <span class="sc-what">lftp mirror --delete wipes customer uploads on a production host</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/89014">claude-code #89014<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">34</span>
+          <span class="sc-what">A quoted rmdir path collapses to the drive root</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://forum.cursor.com/t/cursor-chat-agent-delete-whole-disk-file/172094">Cursor forum<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-ask">
+          <span class="sc-n">35</span>
+          <span class="sc-what">git reset --hard and a force-push on a branch with an open public PR</span>
+          <span class="sc-effect">data loss</span>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/85450">claude-code #85450<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
       </ol>
 
       <div class="cta-pair reveal">
@@ -774,7 +872,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
     <div class="container policy-grid">
       <div class="section-head section-head-stack reveal">
         <h2 id="policy-title">One YAML file. First match wins.</h2>
-        <p class="section-lead">Eighteen action classes, one ordered file, first match wins.</p>
+        <p class="section-lead">Nineteen action classes, one ordered file, first match wins.</p>
         <p class="list-title">Action classes named in the default policy</p>
         <ul class="class-list" aria-label="Action classes named in the default policy">
           <li><code>secret.egress</code></li>
@@ -788,6 +886,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
           <li><code>shell.network</code></li>
           <li><code>network.fetch</code></li>
           <li><code>fs.secrets</code></li>
+          <li><code>config.persistence</code></li>
           <li><code>git.push_external</code></li>
           <li><code>mcp.side_effect</code></li>
           <li><code>config.self_touch</code></li>
@@ -836,7 +935,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
           <p class="plan-tag">Free forever · Apache-2.0</p>
           <ul>
             <li>The whole engine, all seven agent integrations and the MCP proxy</li>
-            <li>All 639 gated rules and the gates that built them</li>
+            <li>All 640 gated rules and the gates that built them</li>
             <li>Hash-chained audit, <code>stroq verify</code>, and the full CLI</li>
           </ul>
           <a class="btn btn-primary" href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>

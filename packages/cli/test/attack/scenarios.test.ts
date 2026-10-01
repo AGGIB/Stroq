@@ -3,6 +3,7 @@ import { ClaudeHookInputSchema } from '../../src/adapters/claude-code.js';
 import {
   CWD_PLACEHOLDER,
   SYNTHETIC_SECRET_PREFIX,
+  isScriptFixture,
   type Scenario,
 } from '../../src/attack/scenario.js';
 import { SCENARIOS } from '../../src/attack/scenarios/index.js';
@@ -19,15 +20,15 @@ const REAL_SECRET_SHAPES = [
 const lastStep = (s: Scenario) => s.steps[s.steps.length - 1];
 
 describe('attack scenarios', () => {
-  it('ships twenty-one scenarios with unique, ascending ids', () => {
-    expect(SCENARIOS).toHaveLength(21);
+  it('ships thirty-five scenarios with unique, ascending ids', () => {
+    expect(SCENARIOS).toHaveLength(35);
     SCENARIOS.forEach((s, i) =>
       expect(s.id).toMatch(new RegExp(`^${String(i + 1).padStart(2, '0')}-[a-z0-9-]+$`)),
     );
-    expect(new Set(SCENARIOS.map((s) => s.id)).size).toBe(21);
+    expect(new Set(SCENARIOS.map((s) => s.id)).size).toBe(35);
   });
 
-  it('cites a dated public incident for each scenario, except the one synthetic cell', () => {
+  it('cites a dated public incident for each documented scenario, and names the class of each synthetic one', () => {
     for (const s of SCENARIOS) {
       if (s.incident === null) {
         expect(s.class).not.toBeNull();
@@ -72,8 +73,11 @@ describe('attack scenarios', () => {
     const text = JSON.stringify(SCENARIOS);
     for (const re of REAL_SECRET_SHAPES) expect(text).not.toMatch(re);
     for (const s of SCENARIOS)
-      for (const body of Object.values(s.files ?? {}))
-        for (const line of body.split('\n').filter((l) => l.includes('=')))
-          expect(line.split('=')[1]).toMatch(new RegExp(`^${SYNTHETIC_SECRET_PREFIX}`));
+      for (const [name, body] of Object.entries(s.files ?? {}))
+        // A script is code the scenario runs, not a file of values: its `NAME=value`
+        // lines are assignments, and a credential in one would be caught by the shapes above.
+        if (!isScriptFixture(name))
+          for (const line of body.split('\n').filter((l) => l.includes('=')))
+            expect(line.split('=')[1]).toMatch(new RegExp(`^${SYNTHETIC_SECRET_PREFIX}`));
   });
 });

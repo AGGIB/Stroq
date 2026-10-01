@@ -1,6 +1,28 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
-import { isGitExecPath } from './git-exec.js';
+import { splitCommand } from './shell-segments.js';
+import {
+  agentDefinitionHasHooks,
+  isAgentDefinitionPath,
+  isMcpConfigPath,
+  mcpConfigRunsCode,
+} from './agent-config.js';
+import {
+  editorAutorunText,
+  iniRunsCommand,
+  isDocumentPath,
+  isEditorAutorunPath,
+  isGitExecPath,
+} from './git-exec.js';
+import {
+  commandWrittenFiles,
+  isPersistencePath,
+  isSshConfigPath,
+  sshConfigRunsCommand,
+} from './persistence.js';
+import { classifyReferencedScripts } from './script-exec.js';
+import { resolveThroughLinks } from './symlink.js';
+import { commandTexts, writtenTexts } from './written-text.js';
 import { decodePercentRuns } from '../normalize/percent-runs.js';
 import { normalizePathForMatch } from './normalize-path.js';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
@@ -282,6 +304,12 @@ function classifyOnePath(rawPath: string, write: boolean): ToolClassification {
     classes.push('config.instructions');
     signals.push('instruction-file-write');
   }
+  // A shell startup file, SSH `authorized_keys`, a scheduler or service directory: a
+  // write that something else will run later, as the user.
+  if (write && isPersistencePath(rawPath)) {
+    classes.push('config.persistence');
+    signals.push('persistence-file-write');
+  }
   if (SECRET_PATH.test(path)) {
     classes.push('fs.secrets');
     signals.push('secret-path');
@@ -463,6 +491,113 @@ function addOne(value: string, dest: boolean, state: ScanState): void {
   state.entries.push({ path: value, dest, weak: false });
 }
 
+const NONE: ToolClassification = { classes: [], hosts: [], signals: [] };
+
+function mergeClassifications(...items: readonly ToolClassification[]): ToolClassification {
+  const mcp = items.find((item) => item.mcp !== undefined)?.mcp;
+  return {
+    classes: [...new Set(items.flatMap((item) => item.classes))],
+    hosts: [...new Set(items.flatMap((item) => item.hosts))],
+    signals: [...new Set(items.flatMap((item) => item.signals))],
+    ...(mcp === undefined ? {} : { mcp }),
+  };
+}
+
+/**
+ * What the TEXT written to `path` is, beyond where it goes: git configuration that runs a
+ * command, an editor task that runs on opening the folder, an SSH client configuration
+ * that runs a program, an MCP server that starts a shell, an agent definition with hooks.
+ * The path rules cannot see these, and the pages that steer an agent into writing them
+ * are the ones the scan calls clean.
+ *
+ * Each string a write carries is read on its own: joined, a harmless `description` beside
+ * the content diluted a config that was otherwise recognised.
+ */
+function classifyWrittenText(path: string, facts: WrittenTextFacts | null): ToolClassification {
+  if (facts === null) return NONE;
+  const { bodies } = facts;
+  const classes: ActionClass[] = [];
+  const signals: string[] = [];
+  const found = (test: (body: string) => boolean): boolean => bodies.some(test);
+  if (facts.runsGitConfig && !isDocumentPath(path)) {
+    classes.push('config.git_exec');
+    signals.push('git-exec-config-text');
+  }
+  // The path is asked first: a call can name thousands of paths and carry thousands of
+  // strings, and only a file of one of these kinds is read for its text.
+  if (isEditorAutorunPath(path) && found((body) => editorAutorunText(path, body))) {
+    classes.push('config.persistence');
+    signals.push('editor-autorun-task');
+  }
+  if (isSshConfigPath(path) && found((body) => sshConfigRunsCommand(path, body))) {
+    classes.push('config.persistence');
+    signals.push('ssh-config-command');
+  }
+  if (isMcpConfigPath(path) && found((body) => mcpConfigRunsCode(path, body))) {
+    classes.push('config.instructions_payload');
+    signals.push('mcp-config-runs-code');
+  }
+  if (isAgentDefinitionPath(path) && found((body) => agentDefinitionHasHooks(path, body))) {
+    classes.push('config.instructions_payload');
+    signals.push('agent-definition-hooks');
+  }
+  return { classes, hosts: [], signals };
+}
+
+/**
+ * What about the written texts does not depend on where they are written, worked out once:
+ * a call can name thousands of paths, and the text is the same for each. Null for no text.
+ */
+interface WrittenTextFacts {
+  readonly bodies: readonly string[];
+  readonly runsGitConfig: boolean;
+}
+
+function writtenTextFacts(texts: readonly string[]): WrittenTextFacts | null {
+  const bodies = texts.filter((text) => text !== '');
+  if (bodies.length === 0) return null;
+  return { bodies, runsGitConfig: bodies.some(iniRunsCommand) };
+}
+
+/**
+ * A file tool's path judged as written, as read through any symlink on the way, and by
+ * what is being written to it. The literal spelling and the real target are both
+ * classified: an agent shown `project_settings.json` is writing `~/.ssh/authorized_keys`.
+ */
+function classifyFilePath(
+  toolInput: Readonly<Record<string, unknown>>,
+  cwd: string,
+  write: boolean,
+): ToolClassification {
+  const path = pathOf(toolInput);
+  // The text without the path: it is among the strings a write carries, and a line of
+  // path in front of a config file is a line that is not config.
+  const facts = writtenTextFacts(write ? writtenTexts(toolInput).filter((t) => t !== path) : []);
+  const literal = mergeClassifications(classifyPath(path, write), classifyWrittenText(path, facts));
+  const real = resolveThroughLinks(path, cwd);
+  if (real === null) return literal;
+  const through = mergeClassifications(classifyPath(real, write), classifyWrittenText(real, facts));
+  const added = through.classes.filter((cls) => !literal.classes.includes(cls));
+  return mergeClassifications(
+    literal,
+    through,
+    added.length > 0 ? { classes: [], hosts: [], signals: ['via-symlink'] } : NONE,
+  );
+}
+
+/**
+ * What a shell command writes into a file whose contents are the point: the command is
+ * its own text (a heredoc body is its lines) and so is each quoted string in it, so
+ * `cat > .mcp.json <<EOF …` and `echo '[core] fsmonitor = x' > .alt/config` are read as
+ * the `Write` of the same text would be.
+ */
+function classifyCommandWrites(command: string, segments: readonly string[]): ToolClassification {
+  const files = commandWrittenFiles(segments);
+  if (files.length === 0) return NONE;
+  const facts = writtenTextFacts(commandTexts(command));
+  return mergeClassifications(...files.map((file) => classifyWrittenText(file, facts)));
+}
+
 function classifyPaths(entries: readonly PathEntry[], write: boolean): ToolClassification {
   const results = entries.map((entry) =>
     classifyPath(entry.path, !entry.weak && (write || entry.dest)),
@@ -495,9 +630,13 @@ function classifyGrep(toolInput: Readonly<Record<string, unknown>>): ToolClassif
   };
 }
 
+/** The most paths of one call that are resolved on disk for links: each is a system call. */
+const MAX_LINK_CHECKS = 8;
+
 function classifyMcp(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
+  cwd: string,
 ): ToolClassification {
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return EMPTY;
@@ -508,10 +647,40 @@ function classifyMcp(
   // write classes still need a write-shaped tool, or a key that names a destination.
   const scan = scanPaths(toolInput, PATH_LIKE_KEY, true);
   const files = classifyPaths(scan.entries, write);
-  const classes: ActionClass[] = ['mcp.call', ...files.classes];
+  const written = scan.entries.filter((entry) => !entry.weak && (write || entry.dest));
+  // The text without the paths: they are among the strings a call carries, and they are
+  // not config lines.
+  const pathStrings = new Set(scan.entries.map((entry) => entry.path));
+  const facts = writtenTextFacts(
+    write || scan.entries.some((e) => e.dest)
+      ? writtenTexts(toolInput).filter((t) => !pathStrings.has(t))
+      : [],
+  );
+  const literalContent = mergeClassifications(
+    ...written.map((entry) => classifyWrittenText(entry.path, facts)),
+  );
+  // Where a path really goes: a link named like a settings file is a write through it.
+  // Counted only for what it adds to what the spelled paths already raised.
+  const known = new Set<ActionClass>([...files.classes, ...literalContent.classes]);
+  const through = written.slice(0, MAX_LINK_CHECKS).map((entry) => {
+    const real = resolveThroughLinks(entry.path, cwd);
+    if (real === null) return NONE;
+    const resolved = mergeClassifications(
+      classifyPath(real, true),
+      classifyWrittenText(real, facts),
+    );
+    return resolved.classes.some((cls) => !known.has(cls))
+      ? mergeClassifications(resolved, { classes: [], hosts: [], signals: ['via-symlink'] })
+      : NONE;
+  });
+  const content = mergeClassifications(literalContent, ...through);
+  const classes: ActionClass[] = [
+    'mcp.call',
+    ...new Set<ActionClass>([...files.classes, ...content.classes]),
+  ];
   if (sideEffect) classes.push('mcp.side_effect');
   if (!scan.complete) classes.push(...UNREADABLE_ARGUMENTS.classes);
-  const signals: string[] = [...files.signals];
+  const signals: string[] = [...files.signals, ...content.signals];
   if (sideEffect) signals.push('mcp-side-effect-name');
   if (!scan.complete) signals.push(UNREADABLE_ARGUMENTS.signal);
   return { classes, hosts: [], signals, mcp };
@@ -546,12 +715,21 @@ export function classifyTool(
     // A shell tool whose command Stroq cannot read is not an empty command: a host
     // that renamed the field would otherwise have every call allowed without a word.
     if (typeof command !== 'string') return UNREADABLE_COMMAND;
-    return classifyCommand(command, cwd);
+    const typed = classifyCommand(command, cwd);
+    const { segments } = splitCommand(command);
+    // A script the command runs is read as the commands it contains: the hook sees
+    // `bash cleanup.sh`, and what that deletes is in the file (see `script-exec.ts`).
+    const scripts = classifyReferencedScripts(segments, cwd);
+    return mergeClassifications(
+      typed,
+      ...(scripts === null ? [] : [scripts]),
+      classifyCommandWrites(command, segments),
+    );
   }
-  if (WRITE_TOOLS.has(toolName)) return classifyPath(pathOf(toolInput), true);
-  if (toolName === 'Read') return classifyPath(pathOf(toolInput), false);
+  if (WRITE_TOOLS.has(toolName)) return classifyFilePath(toolInput, cwd, true);
+  if (toolName === 'Read') return classifyFilePath(toolInput, cwd, false);
   if (toolName === 'Grep') return classifyGrep(toolInput);
   if (toolName === 'WebFetch') return classifyFetch(toolInput);
-  if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput);
+  if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput, cwd);
   return EMPTY;
 }

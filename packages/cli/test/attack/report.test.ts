@@ -46,8 +46,8 @@ const report = (scenarios: ScenarioResult[], ok: boolean): AttackReport => ({
 describe('formatReport', () => {
   it('prints one line per scenario and a summary when everything was stopped', () => {
     const text = formatReport(report([blocked], true));
-    expect(text).toContain('stroq attack: 1 recorded incident');
-    expect(text).toContain('against policy default');
+    expect(text).toContain('stroq attack: 1 scenario against policy default');
+    expect(text).toContain('(1 recorded incident, 0 synthetic)');
     expect(text).toMatch(
       /✔ 01-readme-pipe-to-shell\s+blocked\s+deny-encoded-exec\s+Some incident \(2026-05\)/,
     );

@@ -25,7 +25,7 @@ describe('the attack matrix', () => {
   it('keeps documented and synthetic cells countable apart', () => {
     const documented = SCENARIOS.filter((s) => s.incident !== null);
     const synthetic = SCENARIOS.filter((s) => s.incident === null);
-    expect(documented.length).toBe(12);
+    expect(documented.length).toBe(26);
     expect(synthetic.length).toBeGreaterThanOrEqual(7);
     for (const s of synthetic) expect(s.class).not.toBeNull();
   });

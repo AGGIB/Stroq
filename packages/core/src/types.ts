@@ -20,6 +20,14 @@ export type ActionClass =
   | 'config.self_touch'
   | 'config.git_exec'
   /**
+   * A write that installs something a trusted process will run later, on its own: a
+   * shell startup file (`~/.zshrc`, `~/.zshenv`), SSH `authorized_keys` or `rc`, a
+   * scheduled job or service unit, an editor task that runs when the folder is opened.
+   * Not self-tamper and not repository execution: it is how an injected instruction
+   * outlives the session that carried it, without the agent having to be running.
+   */
+  | 'config.persistence'
+  /**
    * A write to a file the agent loads as instructions in every later session —
    * `CLAUDE.md`, `AGENTS.md`, rules, skills, memory. Ordinary work until the session
    * has read something hostile, and then the way that session outlives itself.
@@ -46,6 +54,7 @@ export const ACTION_CLASSES: readonly ActionClass[] = [
   'config.self',
   'config.self_touch',
   'config.git_exec',
+  'config.persistence',
   'config.instructions',
   'config.instructions_payload',
   'network.fetch',
