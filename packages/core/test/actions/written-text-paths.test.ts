@@ -168,10 +168,10 @@ describe('which agent definitions carry hooks', () => {
 
 describe('git config text, read as git reads it', () => {
   it('takes a section and its first key on one line', () => {
-    expect(gitConfigTextRunsCommand('/r/c', '[core] fsmonitor = ./x.sh\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[diff] external = ./x.sh # why\n')).toBe(true);
-    expect(gitConfigTextRunsCommand('/r/c', '[core] fsmonitor = true\n')).toBe(false);
-    expect(gitConfigTextRunsCommand('/r/c', '[core] # a comment\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[core] fsmonitor = ./x.sh\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', '[diff] external = ./x.sh # why\n')).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', '[core] fsmonitor = true\n')).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', '[core] # a comment\n')).toBe(false);
   });
 
   it.each([
@@ -188,7 +188,7 @@ describe('git config text, read as git reads it', () => {
     '[submodule "m"]\n\tupdate = !./x.sh\n',
     '[filter "my.lfs"]\n\tsmudge = ./x.sh\n',
   ])('reads %j', (text) => {
-    expect(gitConfigTextRunsCommand('/r/c', text)).toBe(true);
+    expect(gitConfigTextRunsCommand('/r/config', text)).toBe(true);
   });
 
   it.each([
@@ -199,12 +199,12 @@ describe('git config text, read as git reads it', () => {
     '[init]\n\tdefaultBranch = main\n',
     '[user]\n\tname = A\n\temail = a@example.com\n',
   ])('leaves %j alone', (text) => {
-    expect(gitConfigTextRunsCommand('/r/c', text)).toBe(false);
+    expect(gitConfigTextRunsCommand('/r/config', text)).toBe(false);
   });
 
   it('does not take a very long dotted name for anything', () => {
     const header = `[core "${'a.'.repeat(500)}"]\n\tfsmonitor = x\n`;
-    expect(() => gitConfigTextRunsCommand('/r/c', header)).not.toThrow();
+    expect(() => gitConfigTextRunsCommand('/r/config', header)).not.toThrow();
   });
 });
 

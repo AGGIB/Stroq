@@ -181,14 +181,23 @@ describe('what a script reading does not do', () => {
     ).toBeNull();
   });
 
-  it('reads at most four scripts from one command, and says so about the rest', () => {
-    for (const n of [1, 2, 3, 4, 5]) put(`s${n}.sh`, n === 5 ? 'rm -rf ~\n' : 'echo x\n');
-    const segments = [1, 2, 3, 4, 5].map((n) => `bash s${n}.sh`);
+  it('reads at most eight scripts from one command, and says so about the rest', () => {
+    for (let n = 1; n <= 9; n += 1) put(`s${n}.sh`, n === 9 ? 'rm -rf ~\n' : 'echo x\n');
+    const segments = Array.from({ length: 9 }, (_, i) => `bash s${i + 1}.sh`);
     const found = classifyReferencedScripts(segments, dir);
     expect(found?.classes).toEqual(['shell.unparsed']);
     expect(found?.signals).toContain('script-limit');
-    expect(classifyReferencedScripts(['bash s5.sh'], dir)?.classes).toContain('shell.destructive');
-    expect(classifyReferencedScripts(segments.slice(0, 4), dir)).toBeNull();
+    expect(classifyReferencedScripts(['bash s9.sh'], dir)?.classes).toContain('shell.destructive');
+    expect(classifyReferencedScripts(segments.slice(0, 8), dir)).toBeNull();
+  });
+
+  it('counts only files that are shell scripts toward the limit (a git add list, a heredoc of paths)', () => {
+    put('real.sh', 'rm -rf ~\n');
+    const paths = Array.from({ length: 40 }, (_, i) => `lib/a/file${i}.dart \\`);
+    expect(classifyReferencedScripts([...paths, 'bash real.sh'], dir)?.classes).toEqual([
+      'shell.destructive',
+    ]);
+    expect(classifyReferencedScripts(paths, dir)).toBeNull();
   });
 
   it('counts a script named twice once', () => {
@@ -410,6 +419,27 @@ describe('reading a script stays linear on text built to be slow', () => {
     ['spaces after an assignment', (size) => `A=${' '.repeat(size)}x\n`],
     ['tabs after an assignment', (size) => `A=${'\t'.repeat(size)}x\n`],
     ['spaces before a hash', (size) => `A=x${' '.repeat(size)}#y\n`],
+    // The 2026-10-01 review: variables with many values, heredoc bodies, runner lines.
+    [
+      'variables reassigned many times',
+      (size) =>
+        Array.from(
+          { length: Math.ceil(size / 12) },
+          (_, i) => `V${i % 9}=$V${(i + 1) % 9}x\nrm $V${i % 9}\n`,
+        ).join(''),
+    ],
+    [
+      'many heredocs written to files',
+      (size) =>
+        Array.from(
+          { length: Math.ceil(size / 24) },
+          (_, i) => `cat > f${i} <<E${i}\nx\nE${i}\n`,
+        ).join(''),
+    ],
+    ['unclosed heredocs', repeated('cat <<A\n')],
+    ['runner lines', repeated('bash ./a/b/c.sh; chmod +x d\n')],
+    ['option clusters', repeated('bash -euo pipefail x.sh\n')],
+    ['cd chains in a script', repeated('cd a && ')],
     [
       'heredoc openers with distinct delimiters',
       (size) => Array.from({ length: Math.ceil(size / 14) }, (_, i) => `cat <<D${i}\n`).join(''),

@@ -9,6 +9,7 @@ import {
   windowsVerb,
 } from './self-config.js';
 import { commandWord } from './shell-segments.js';
+import { quotedSpans } from './written-text.js';
 
 /**
  * Files that a trusted process runs later, by itself, as the user: a shell's startup
@@ -33,8 +34,11 @@ export const PERSISTENCE_FILE = new RegExp(
   [
     String.raw`(?<![\w.-])\.(?:zshrc|zshenv|zprofile|zlogin|zlogout|bashrc|bash_profile|bash_login|bash_logout|bash_aliases|profile|pam_environment|kshrc|cshrc|tcshrc|xprofile|xinitrc|xsession)(?![\w.-])`,
     String.raw`\.config[/\\]+fish[/\\]+(?:config\.fish|conf\.d|functions)(?![\w.-])`,
-    String.raw`(?<![\w.-])[/\\]etc[/\\]+(?:profile|bash\.bashrc|bashrc|zshenv|zshrc|zprofile|zlogin|environment|sudoers)(?![\w-])`,
+    // `/private/etc` is where macOS keeps `/etc`, and where a link to it resolves.
+    String.raw`(?:(?<![\w.-])|(?<=[/\\]private))[/\\]etc[/\\]+(?:profile|bash\.bashrc|bashrc|zshenv|zshrc|zprofile|zlogin|environment|sudoers)(?![\w-])`,
     String.raw`(?<![\w.-])(?:[\w.]*_)?profile\.ps1(?![\w.-])`,
+    // PowerShell's own name for its profile files, as a shell command writes it.
+    String.raw`(?<![\w$])\$profile(?:\.(?:CurrentUser|AllUsers)(?:AllHosts|CurrentHost))?(?![\w])`,
     String.raw`\.ssh[/\\]+(?:authorized_keys2?|rc|environment)(?![\w.-])`,
     String.raw`[/\\]Library[/\\]+Launch(?:Agents|Daemons)(?![\w-])`,
     String.raw`\.config[/\\]+autostart(?![\w-])`,
@@ -66,11 +70,12 @@ const INLINE_INTERPRETER = /^(?:perl|python|ruby|node|bun|deno)[\d.]*$/;
  * bounded; unbounded, a command of 100,000 `open(` took 21 s.
  */
 const INLINE_WRITE =
-  /write|append|\bopen\s*\([^)]{0,200},\s*['"][^'"]{0,8}[wax+]|\b(?:copy\w*|move|rename|symlink|link|system|popen|exec\w*|spawn\w*|subprocess|tee|sed)\b|>/i;
+  /write|append|\bopen\s*\([^)]{0,200},\s*['"][^'"]{0,8}[wax+]|\b(?:copy\w*|move|rename|symlink|link|system|popen|exec\w*|spawn\w*|subprocess|tee|sed)\b|>>/i;
 /** An interpreter started with its program on the command line: `python3.12 -c`, `perl -le`, `node -pe`. */
 /** Interpreters that take a program on the command line, followed by their options. */
 const INTERPRETER_WORD = /\b(?:perl|python|ruby|node|bun)[\d.]*(?=\s)/g;
 const MAX_INTERPRETER_CALLS = 64;
+const MAX_INLINE_CODE_CHARS = 64 * 1024;
 
 /**
  * Whether the command starts an interpreter with its program on the command line:
@@ -78,27 +83,39 @@ const MAX_INTERPRETER_CALLS = 64;
  * a regular expression that let a run of option letters be split two ways took 3.3 s on
  * `python3 -EEEE…` of 64 KiB.
  */
-function startsInlineInterpreter(command: string): boolean {
+function inlineInterpreterCode(command: string): string[] {
   INTERPRETER_WORD.lastIndex = 0;
+  const code: string[] = [];
   let calls = 0;
   for (let m = INTERPRETER_WORD.exec(command); m !== null; m = INTERPRETER_WORD.exec(command)) {
     calls += 1;
-    if (calls > MAX_INTERPRETER_CALLS) return true;
+    if (calls > MAX_INTERPRETER_CALLS) return [command];
+    const after = m.index + m[0].length;
     const options = command
-      .slice(m.index + m[0].length, m.index + m[0].length + 400)
+      .slice(after, after + 400)
       .trim()
       .split(/\s+/)
       .slice(0, 5);
+    let inline = false;
     for (const word of options) {
       if (!word.startsWith('-')) break;
       const letters = /^-([A-Za-z]+)(?:=.*)?$/.exec(word)?.[1];
-      if (letters !== undefined && /[ecEp]/.test(letters)) return true;
-      if (/^--(?:eval|print)(?:=|$)/.test(word)) return true;
+      if (
+        (letters !== undefined && /[ecEp]/.test(letters)) ||
+        /^--(?:eval|print)(?:=|$)/.test(word)
+      ) {
+        inline = true;
+        break;
+      }
     }
+    if (!inline) continue;
+    // The program is the first quoted string after the interpreter; unquoted, the rest of the line.
+    const rest = command.slice(after, after + MAX_INLINE_CODE_CHARS);
+    const quoted = quotedSpans(rest)[0];
+    code.push(quoted ?? rest.split('\n')[0] ?? '');
   }
-  return false;
-}
-/** A URL is where a download comes from, not where it goes: `curl -o /tmp/x https://…/.bashrc`. */
+  return code;
+} /** A URL is where a download comes from, not where it goes: `curl -o /tmp/x https://…/.bashrc`. */
 const URL_WORD = /^[a-z][a-z0-9+.-]*:\/\//i;
 const REDIRECT_OPERATOR = /^\d*>>?\|?$/;
 const REDIRECT_GLUED = /^\d*>>?\|?(.+)$/;
@@ -133,6 +150,30 @@ function braceExpanded(word: string): string[] {
   }
   return current;
 }
+
+/** A shell word: quoted spans and other non-space characters, run together. */
+const SHELL_WORD = /(?:"[^"]*"|'[^']*'|[^\s"'])+/g;
+
+/** `git show --output=<f>`, `git diff --output <f>`, `git archive -o <f>`: the file git writes. */
+function gitOutputs(words: readonly string[]): string[] {
+  const out: string[] = [];
+  const archive = words.some((w) => w === 'archive' || w === 'format-patch');
+  words.forEach((w, i) => {
+    const glued = /^--output(?:-directory)?=(.+)$/.exec(w);
+    if (glued) out.push(unquote(glued[1] as string));
+    else if (
+      (w === '--output' || w === '--output-directory' || (archive && w === '-o')) &&
+      words[i + 1] !== undefined
+    ) {
+      out.push(unquote(words[i + 1] as string));
+    }
+  });
+  return out;
+}
+
+/** Whether an interpreter's options ask it to edit its files in place (`perl -pi`, `ruby -i.bak`). */
+const inPlaceEdit = (words: readonly string[]): boolean =>
+  words.slice(1, 6).some((w) => /^-[A-Za-z]*i/.test(w));
 
 /** The files a segment's redirects write: `>> ~/.zshrc`, `>~/.zshrc`, not `2>/dev/null`. */
 function redirectTargets(words: readonly string[]): string[] {
@@ -171,7 +212,9 @@ function extractionDirectories(words: readonly string[]): string[] {
  * it, and for the verbs that have a source and a destination it must be the destination.
  */
 function writtenFiles(segment: string, word: string): string[] {
-  const words = segment.split(/\s+/).filter((w) => w !== '');
+  // A quoted string is one word: `git commit -m "… >> ~/.zshrc"` has no redirect in it, and
+  // `"C:\…\Start Menu\Programs\Startup\x.bat"` is one path though it has a space.
+  const words = segment.match(SHELL_WORD) ?? [];
   const targets = redirectTargets(words);
   const verb = windowsVerb(word);
   const args = words
@@ -182,6 +225,15 @@ function writtenFiles(segment: string, word: string): string[] {
   if (DESTINATION_LAST.has(word) && args.length > 0) targets.push(args[args.length - 1] as string);
   else if (word === 'git' && args[0] === 'clone' && args.length > 2) {
     targets.push(args[args.length - 1] as string);
+  } else if (word === 'git') targets.push(...gitOutputs(words));
+  else if (INLINE_INTERPRETER.test(lower) && inPlaceEdit(words)) {
+    // `perl -pi -e '…' ~/.zshrc`, `ruby -i -pe …`: the interpreter rewrites the files it is given.
+    targets.push(
+      ...words
+        .slice(1)
+        .filter((w) => !w.startsWith('-') && !/^['"]/.test(w))
+        .map(unquote),
+    );
   } else if (word === 'sed') {
     // `-i`, `-i.bak`, `-ni`, `--in-place`, `--in-place=.bak`: an option whose letters include `i`.
     if (words.some((w) => /^-[A-Za-z]*i/.test(w) || /^--in-place(?:=|$)/.test(w)))
@@ -196,8 +248,6 @@ function writtenFiles(segment: string, word: string): string[] {
     if (args.length > 0) targets.push(args[args.length - 1] as string);
   } else if (word === 'tar' || word === 'unzip') targets.push(...extractionDirectories(words));
   else if (WINDOWS_WRITE_COMMANDS.has(verb)) targets.push(...words.slice(1).map(unquote));
-  else if (INLINE_INTERPRETER.test(lower) && hasInlineCode(segment) && INLINE_WRITE.test(segment))
-    targets.push(...words.map(unquote));
   else if (isDownloadToFile(segment, word)) {
     targets.push(
       ...words
@@ -223,18 +273,53 @@ function changedDirectory(segment: string, word: string): string | null {
 interface SegmentWrites {
   readonly segment: string;
   readonly word: string;
+  /** The files the segment writes, as a writer verb, a redirect or a download names them. */
   readonly written: readonly string[];
+  /**
+   * Every word of an inline interpreter whose code writes (`python3 -c "open(…,'a')"`): the
+   * file is somewhere in the code, so each word is asked whether it names a startup file.
+   * Not a list of files, so it is not read for what is written to them.
+   */
+  readonly inline: readonly string[];
+}
+
+/** The words of a segment whose inline interpreter code writes a file, or none. */
+function inlineWriteWords(segment: string, word: string): string[] {
+  if (!INLINE_INTERPRETER.test(word.toLowerCase()) || !hasInlineCode(segment)) return [];
+  if (!inlineInterpreterCode(segment).some((code) => INLINE_WRITE.test(code))) return [];
+  return (segment.match(SHELL_WORD) ?? []).map(unquote);
 }
 
 /**
- * Each segment with the files it writes, a relative name joined to the directory an earlier
- * `cd` moved into (`cd ~/.ssh && echo k >> authorized_keys`) as well as spelled as written.
+ * How many `)` a segment ends with, read back from its end. Not `/[\s)]*$/`, which is
+ * retried from every position and took 35 s on a run of 256 KiB of spaces.
  */
-function segmentWrites(segments: readonly string[]): SegmentWrites[] {
-  let directory: string | null = null;
-  return segments.map((raw) => {
+function trailingCloses(raw: string): number {
+  let count = 0;
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    const ch = raw.charAt(i);
+    if (ch === ')') count += 1;
+    else if (!/\s/.test(ch)) break;
+  }
+  return count;
+}
+
+/**
+ * Each segment with the files it writes, a relative name joined to the directory the
+ * command is in as well as spelled as written: the process's own working directory, then
+ * whatever an earlier `cd` moved into (`cd ~/.ssh && echo k >> authorized_keys`). A `cd`
+ * inside parentheses runs in a subshell and is undone when it closes: `cd ~/.config/systemd/
+ * user && (cd /tmp) && echo … > x.service` writes the unit.
+ */
+function segmentWrites(segments: readonly string[], cwd: string | null): SegmentWrites[] {
+  let directory: string | null = cwd;
+  const saved: Array<string | null> = [];
+  const out: SegmentWrites[] = [];
+  for (const raw of segments) {
+    const opens = /^[\s(]*/.exec(raw)?.[0].replace(/\s/g, '').length ?? 0;
+    for (let k = 0; k < opens; k += 1) saved.push(directory);
     // `(cd ~/.ssh && …)` and `{ cd ~/.ssh; …; }` begin with the grouping, not the command.
-    const segment = raw.replace(/^[({]\s*/, '');
+    const segment = raw.replace(/^[\s({]+/, '');
     const word = commandWord(segment);
     directory = changedDirectory(segment, word) ?? directory;
     const spelled = writtenFiles(segment, word);
@@ -245,18 +330,23 @@ function segmentWrites(segments: readonly string[]): SegmentWrites[] {
         : spelled.flatMap((file) =>
             RELATIVE_PATH.test(file) ? [file, `${moved}/${file}`] : [file],
           );
-    return { segment, word, written };
-  });
+    out.push({ segment, word, written, inline: inlineWriteWords(segment, word) });
+    const closes = trailingCloses(raw);
+    for (let k = 0; k < closes && saved.length > 0; k += 1) directory = saved.pop() ?? null;
+  }
+  return out;
 }
 
-const MAX_WRITTEN_FILES = 64;
-
-/** Every file a command writes, as spelled and as a `cd` would resolve it, without repeats. */
-export function commandWrittenFiles(segments: readonly string[]): string[] {
-  return [...new Set(segmentWrites(segments).flatMap((entry) => entry.written))].slice(
-    0,
-    MAX_WRITTEN_FILES,
-  );
+/**
+ * Every file a command writes, as spelled and as its directory would resolve it, without
+ * repeats. Not capped: the caller asks each one only cheap questions about its path, and a
+ * cap was a place to hide the one that matters behind decoys.
+ */
+export function commandWrittenFiles(
+  segments: readonly string[],
+  cwd: string | null = null,
+): string[] {
+  return [...new Set(segmentWrites(segments, cwd).flatMap((entry) => entry.written))];
 }
 
 /**
@@ -265,7 +355,11 @@ export function commandWrittenFiles(segments: readonly string[]): string[] {
  * instruction-file check does. `crontab` and the other ways to schedule a job need no
  * file in the text: installing the job is the whole of what they do.
  */
-export function persistenceSignals(segments: readonly string[], command = ''): string[] {
+export function persistenceSignals(
+  segments: readonly string[],
+  command = '',
+  cwd: string | null = null,
+): string[] {
   const assigned = shellAssignments(segments);
   const out = new Set<string>();
   const autorunText = EDITOR_AUTORUN_TEXT.test(command);
@@ -274,16 +368,16 @@ export function persistenceSignals(segments: readonly string[], command = ''): s
   // whatever the quotes say, so the interpreter and the file it names can land in different
   // segments. The command as a whole is asked as well.
   if (
-    startsInlineInterpreter(command) &&
-    INLINE_WRITE.test(command) &&
-    PERSISTENCE_FILE.test(command)
+    inlineInterpreterCode(command).some(
+      (code) => INLINE_WRITE.test(code) && PERSISTENCE_FILE.test(code),
+    )
   ) {
     out.add('persistence-file-write');
   }
-  for (const { segment, word, written } of segmentWrites(segments)) {
+  for (const { segment, word, written, inline } of segmentWrites(segments, cwd)) {
     if (word === 'crontab' && !CRONTAB_READ.test(segment)) out.add('crontab-write');
     if (SCHEDULE_TASK.test(segment)) out.add('scheduled-task-create');
-    if (written.some((file) => namesFile(file, assigned, PERSISTENCE_FILE))) {
+    if ([...written, ...inline].some((file) => namesFile(file, assigned, PERSISTENCE_FILE))) {
       out.add('persistence-file-write');
     }
     if (sshDirective && written.some((file) => namesFile(file, assigned, SSH_CONFIG_FILE))) {

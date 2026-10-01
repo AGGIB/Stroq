@@ -1,6 +1,6 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
-import { splitCommand } from './shell-segments.js';
+import { commandSegments, splitCommand } from './shell-segments.js';
 import {
   agentDefinitionHasHooks,
   isAgentDefinitionPath,
@@ -9,10 +9,11 @@ import {
 } from './agent-config.js';
 import {
   editorAutorunText,
-  iniRunsCommand,
-  isDocumentPath,
+  iniRisk,
   isEditorAutorunPath,
+  isGitConfigPath,
   isGitExecPath,
+  type GitConfigRisk,
 } from './git-exec.js';
 import {
   commandWrittenFiles,
@@ -519,9 +520,16 @@ function classifyWrittenText(path: string, facts: WrittenTextFacts | null): Tool
   const classes: ActionClass[] = [];
   const signals: string[] = [];
   const found = (test: (body: string) => boolean): boolean => bodies.some(test);
-  if (facts.runsGitConfig && !isDocumentPath(path)) {
-    classes.push('config.git_exec');
-    signals.push('git-exec-config-text');
+  if (facts.gitConfig !== null && isGitConfigPath(path)) {
+    if (facts.gitConfig === 'exec') {
+      classes.push('config.git_exec');
+      signals.push('git-exec-config-text');
+    } else {
+      classes.push('config.persistence');
+      signals.push(
+        facts.gitConfig === 'unread' ? 'git-config-text-unread' : 'git-config-runs-program',
+      );
+    }
   }
   // The path is asked first: a call can name thousands of paths and carry thousands of
   // strings, and only a file of one of these kinds is read for its text.
@@ -550,13 +558,17 @@ function classifyWrittenText(path: string, facts: WrittenTextFacts | null): Tool
  */
 interface WrittenTextFacts {
   readonly bodies: readonly string[];
-  readonly runsGitConfig: boolean;
+  readonly gitConfig: GitConfigRisk;
 }
+
+const GIT_RISK_ORDER: readonly GitConfigRisk[] = ['exec', 'program', 'unread'];
 
 function writtenTextFacts(texts: readonly string[]): WrittenTextFacts | null {
   const bodies = texts.filter((text) => text !== '');
   if (bodies.length === 0) return null;
-  return { bodies, runsGitConfig: bodies.some(iniRunsCommand) };
+  const risks = new Set(bodies.map(iniRisk));
+  const gitConfig = GIT_RISK_ORDER.find((risk) => risks.has(risk)) ?? null;
+  return { bodies, gitConfig };
 }
 
 /**
@@ -591,8 +603,12 @@ function classifyFilePath(
  * `cat > .mcp.json <<EOF …` and `echo '[core] fsmonitor = x' > .alt/config` are read as
  * the `Write` of the same text would be.
  */
-function classifyCommandWrites(command: string, segments: readonly string[]): ToolClassification {
-  const files = commandWrittenFiles(segments);
+function classifyCommandWrites(
+  command: string,
+  segments: readonly string[],
+  cwd: string,
+): ToolClassification {
+  const files = commandWrittenFiles(segments, cwd);
   if (files.length === 0) return NONE;
   const facts = writtenTextFacts(commandTexts(command));
   return mergeClassifications(...files.map((file) => classifyWrittenText(file, facts)));
@@ -631,7 +647,12 @@ function classifyGrep(toolInput: Readonly<Record<string, unknown>>): ToolClassif
 }
 
 /** The most paths of one call that are resolved on disk for links: each is a system call. */
-const MAX_LINK_CHECKS = 8;
+/**
+ * The most paths of one call that are resolved on disk for links. A file tool names one
+ * or a few; past this many the call is reported as not fully read, rather than
+ * leaving the paths after the limit unchecked for a decoy to hide behind.
+ */
+const MAX_LINK_CHECKS = 64;
 
 function classifyMcp(
   toolName: string,
@@ -659,21 +680,32 @@ function classifyMcp(
   const literalContent = mergeClassifications(
     ...written.map((entry) => classifyWrittenText(entry.path, facts)),
   );
-  // Where a path really goes: a link named like a settings file is a write through it.
-  // Counted only for what it adds to what the spelled paths already raised.
+  // Where a path really goes, read or written: a link named like a settings file or a note
+  // is a write to, or a read of, its target. Counted only for what it adds to what the
+  // spelled paths already raised.
   const known = new Set<ActionClass>([...files.classes, ...literalContent.classes]);
-  const through = written.slice(0, MAX_LINK_CHECKS).map((entry) => {
+  const named = scan.entries.filter((entry) => !entry.weak);
+  const through = named.slice(0, MAX_LINK_CHECKS).map((entry) => {
     const real = resolveThroughLinks(entry.path, cwd);
     if (real === null) return NONE;
+    const writes = write || entry.dest;
     const resolved = mergeClassifications(
-      classifyPath(real, true),
-      classifyWrittenText(real, facts),
+      classifyPath(real, writes),
+      writes ? classifyWrittenText(real, facts) : NONE,
     );
     return resolved.classes.some((cls) => !known.has(cls))
       ? mergeClassifications(resolved, { classes: [], hosts: [], signals: ['via-symlink'] })
       : NONE;
   });
-  const content = mergeClassifications(literalContent, ...through);
+  const unchecked: ToolClassification =
+    named.length > MAX_LINK_CHECKS
+      ? {
+          classes: [...UNREADABLE_ARGUMENTS.classes],
+          hosts: [],
+          signals: ['mcp-links-unchecked'],
+        }
+      : NONE;
+  const content = mergeClassifications(literalContent, ...through, unchecked);
   const classes: ActionClass[] = [
     'mcp.call',
     ...new Set<ActionClass>([...files.classes, ...content.classes]),
@@ -716,14 +748,17 @@ export function classifyTool(
     // that renamed the field would otherwise have every call allowed without a word.
     if (typeof command !== 'string') return UNREADABLE_COMMAND;
     const typed = classifyCommand(command, cwd);
-    const { segments } = splitCommand(command);
+    const split = splitCommand(command);
+    // Cut where the shell cuts: a segment cut out of a quoted string runs nothing
+    // (`grep "x\|PIN=" deploy.sh`), and a quoted `|` does not take a file from its command.
+    const segments = commandSegments(command, split);
     // A script the command runs is read as the commands it contains: the hook sees
     // `bash cleanup.sh`, and what that deletes is in the file (see `script-exec.ts`).
     const scripts = classifyReferencedScripts(segments, cwd);
     return mergeClassifications(
       typed,
       ...(scripts === null ? [] : [scripts]),
-      classifyCommandWrites(command, segments),
+      classifyCommandWrites(command, segments, cwd),
     );
   }
   if (WRITE_TOOLS.has(toolName)) return classifyFilePath(toolInput, cwd, true);

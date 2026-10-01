@@ -914,8 +914,9 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
     <span class="y-k">when</span>:
       <span class="y-k">classes</span>: [secret.unscannable]
       <span class="y-k">taint</span>: any
-<span class="y-c"># … deny-self-tamper, deny-encoded-exec, deny-origin-suspect, four</span>
-<span class="y-c">#   tainted-session deny rules, and five ask rules — 14 in all.</span></code></pre>
+<span class="y-c"># … deny-canary-file, deny-self-tamper, deny-git-exec, deny-encoded-exec,</span>
+<span class="y-c">#   deny-origin-suspect, five tainted-session deny rules, and nine ask</span>
+<span class="y-c">#   rules — 21 in all.</span></code></pre>
         <figcaption>First match wins. Copy to <code>~/.stroq/policy.yaml</code> and edit.</figcaption>
       </figure>
     </div>

@@ -51,19 +51,30 @@ const SHELLS: ReadonlySet<string> = new Set([
   'pwsh',
 ]);
 
+/** The letters of a short option (`-lc` → `lc`), or undefined for anything else. */
+const optionLetters = (arg: string): string | undefined => /^-([A-Za-z]{1,64})$/.exec(arg)?.[1];
+const lettersInclude =
+  (wanted: RegExp) =>
+  (arg: string): boolean => {
+    const letters = optionLetters(arg);
+    return letters !== undefined && wanted.test(letters);
+  };
+
 /**
  * The flags that hand a program its code on the command line, per interpreter. A letter
  * that means something else to another one is not matched there: `bash -e` is errexit and
- * `python -E` ignores the environment.
+ * `python -E` ignores the environment. The letters are captured and then tested: a pattern
+ * of the form `-[A-Za-z]*c[A-Za-z]*` splits one long word two ways, and 64 KiB of `-cccc…`
+ * took 4.6 s.
  */
-const INLINE_CODE_FLAG: Readonly<Record<string, RegExp>> = {
-  shell: /^-[A-Za-z]*c[A-Za-z]*$/,
-  cmd: /^\/[ck]$/i,
-  powershell: /^-(?:c|command|encodedcommand|enc|ec)$/i,
-  node: /^(?:-[a-z]*[ep][a-z]*|--eval(?:=.*)?|--print(?:=.*)?)$/,
-  python: /^-[A-Za-z]*c[A-Za-z]*$/,
-  ruby: /^-[A-Za-z]*e[A-Za-z]*$/,
-  perl: /^-[A-Za-z]*[eE][A-Za-z]*$/,
+const INLINE_CODE_FLAG: Readonly<Record<string, (arg: string) => boolean>> = {
+  shell: lettersInclude(/c/),
+  cmd: (arg) => /^\/[ck]$/i.test(arg),
+  powershell: (arg) => /^-(?:c|command|encodedcommand|enc|ec)$/i.test(arg),
+  node: (arg) => lettersInclude(/[ep]/)(arg) || /^--(?:eval|print)(?:=|$)/.test(arg),
+  python: lettersInclude(/c/),
+  ruby: lettersInclude(/e/),
+  perl: lettersInclude(/[eE]/),
 };
 /** The interpreters, and which table of flags each takes. */
 const INTERPRETER_FAMILY: ReadonlyArray<readonly [RegExp, string]> = [
@@ -80,22 +91,37 @@ const RUNNER_SHELL_FLAG = /^(?:-c|--call)(?:=.*)?$/;
 const PACKAGE_RUNNER =
   /^(?:npx|uvx|bunx|pnpx|npm\s+exec|pnpm\s+dlx|yarn\s+dlx|deno\s+run|docker\s+run)\b[^;&|`$()<>\r\n]*$/i;
 /** What a wrapper may do before it starts the runner: load nvm, move into the project, set a variable. */
-const WRAPPER_SETUP =
-  /^(?:(?:source|\.)\s+[\w./~$"'-]+|cd\s+[\w./~$"'-]+|export\s+\w+=[\w./:@-]*)$/;
+/**
+ * What a wrapper may do before it starts the runner: load the user's own shell setup (nvm,
+ * a profile, cargo's env), move into a directory, set a variable. Sourcing any other file is
+ * running it: `source /tmp/x.sh && npx pkg` is a script with a runner after it.
+ */
+const SOURCED_SETUP =
+  /^(?:source|\.)\s+["']?(?:~|\$HOME|\$\{HOME\}|\$NVM_DIR|\$\{NVM_DIR\})\/(?:[\w.-]{1,64}\/){0,4}(?:nvm\.sh|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|env|asdf\.sh)["']?$/;
+const WRAPPER_SETUP = /^(?:cd\s+[\w./~$"'-]+|export\s+\w+=[\w./:@-]*)$/;
 
 /** True for `[setup &&]* runner args`: nothing but known setup steps before a package runner. */
 function isPackageRunnerPayload(payload: string): boolean {
   const steps = payload.split('&&').map((step) => step.trim());
   const runner = steps.pop() ?? '';
-  return PACKAGE_RUNNER.test(runner) && steps.every((step) => WRAPPER_SETUP.test(step));
+  return (
+    PACKAGE_RUNNER.test(runner) &&
+    steps.every((step) => WRAPPER_SETUP.test(step) || SOURCED_SETUP.test(step))
+  );
 }
 
 const FRAGMENT_SHELL_SERVER =
   /"command"\s*:\s*"(?:[^"\n]*[/\\])?(?:(?:sh|bash|zsh|dash|ksh|fish)(?:\.exe)?|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|env)"/i;
 const FRAGMENT_INLINE_SERVER =
   /"command"\s*:\s*"(?:[^"\n]*[/\\])?(?:node|python[\d.]*|ruby|perl|bun|deno)(?:\.exe)?"/i;
-const FRAGMENT_INLINE_ARGS =
-  /"args"\s*:\s*\[\s*"(?:-[A-Za-z]*[ecEp][A-Za-z]*|--eval|--print|eval)"/i;
+const FRAGMENT_INLINE_ARGS = /"args"\s*:\s*\[\s*"(-[A-Za-z]{1,64}|--eval|--print|eval)"/i;
+/** Whether the first argument of a fragment hands the program its code (see `INLINE_CODE_FLAG`). */
+function fragmentInlineArgs(text: string): boolean {
+  const first = FRAGMENT_INLINE_ARGS.exec(text)?.[1];
+  if (first === undefined) return false;
+  const letters = optionLetters(first);
+  return letters === undefined || /[ecEp]/.test(letters);
+}
 
 interface ServerEntry {
   readonly command: string;
@@ -124,11 +150,37 @@ function serverEntries(root: unknown): ServerEntry[] {
   return entries;
 }
 
-/** `env bash -c …` is `bash -c …`: look through the wrapper to the program it starts. */
+/**
+ * `env bash -c …` is `bash -c …`: look through the wrapper to the program it starts, past
+ * its own options, including the ones that take a value (`-u NAME`, `-C dir`) and `-S`,
+ * which splits one string into the program and its arguments.
+ */
 function throughEnv(entry: ServerEntry): ServerEntry {
   if (programName(entry.command) !== 'env') return entry;
-  const at = entry.args.findIndex((arg) => !arg.startsWith('-') && !/^\w+=/.test(arg));
-  return at === -1 ? entry : { command: entry.args[at] as string, args: entry.args.slice(at + 1) };
+  const args = entry.args;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === '--') {
+      const program = args[i + 1];
+      return program === undefined ? entry : { command: program, args: args.slice(i + 2) };
+    }
+    const split =
+      arg === '-S' || arg === '--split-string'
+        ? args[i + 1]
+        : /^(?:-S|--split-string=)(.+)$/.exec(arg)?.[1];
+    if (split !== undefined) {
+      const words = split.trim().split(/\s+/);
+      const skip = arg === '-S' || arg === '--split-string' ? 2 : 1;
+      return { command: words[0] ?? '', args: [...words.slice(1), ...args.slice(i + skip)] };
+    }
+    if (/^-(?:u|C|P)$/.test(arg) || arg === '--unset' || arg === '--chdir') {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('-') || /^\w+=/.test(arg)) continue;
+    return { command: arg, args: args.slice(i + 1) };
+  }
+  return entry;
 }
 
 /**
@@ -136,15 +188,21 @@ function throughEnv(entry: ServerEntry): ServerEntry {
  * the script count: in `node server.js -p 3000` and `python3 -m my_server -e prod` the
  * `-p` and `-e` are the server's options, not the interpreter's.
  */
-function inlineCodeAt(args: readonly string[], flag: RegExp): number {
+function inlineCodeAt(
+  args: readonly string[],
+  flag: (arg: string) => boolean,
+  slashOptions = false,
+): number {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] as string;
-    if (flag.test(arg)) return i;
+    if (flag(arg)) return i;
     if (VALUE_FLAG.test(arg)) {
       i += 1;
       continue;
     }
-    if (arg === '-m' || (!arg.startsWith('-') && !arg.startsWith('/'))) return -1;
+    // `/c` is an option only to cmd; to anything else `/Users/me/srv/index.js` is the script.
+    const option = arg.startsWith('-') || (slashOptions && arg.startsWith('/'));
+    if (arg === '-m' || !option) return -1;
   }
   return -1;
 }
@@ -154,8 +212,10 @@ function startsCode(raw: ServerEntry): boolean {
   const name = programName(entry.command);
   if (SHELLS.has(name)) {
     const family = name === 'cmd' || name === 'powershell' || name === 'pwsh' ? name : 'shell';
-    const flag = INLINE_CODE_FLAG[family === 'pwsh' ? 'powershell' : family] as RegExp;
-    const inlineAt = inlineCodeAt(entry.args, flag);
+    const flag = INLINE_CODE_FLAG[family === 'pwsh' ? 'powershell' : family] as (
+      arg: string,
+    ) => boolean;
+    const inlineAt = inlineCodeAt(entry.args, flag, family === 'cmd');
     if (inlineAt === -1) return true;
     return !isPackageRunnerPayload(entry.args.slice(inlineAt + 1).join(' '));
   }
@@ -173,7 +233,7 @@ function startsCode(raw: ServerEntry): boolean {
   // An interpreter given its program on the command line is a one-liner nobody reviewed.
   const family = INTERPRETER_FAMILY.find(([pattern]) => pattern.test(name));
   if (family === undefined) return false;
-  return inlineCodeAt(entry.args, INLINE_CODE_FLAG[family[1]] as RegExp) !== -1;
+  return inlineCodeAt(entry.args, INLINE_CODE_FLAG[family[1]] as (arg: string) => boolean) !== -1;
 }
 
 /**
@@ -190,7 +250,7 @@ export function mcpConfigRunsCode(path: string, text: string): boolean {
   } catch {
     return (
       FRAGMENT_SHELL_SERVER.test(text) ||
-      (FRAGMENT_INLINE_SERVER.test(text) && FRAGMENT_INLINE_ARGS.test(text))
+      (FRAGMENT_INLINE_SERVER.test(text) && fragmentInlineArgs(text))
     );
   }
 }

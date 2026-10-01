@@ -40,6 +40,12 @@ const holds = (name: string, run: (size: number) => unknown): void => {
 
 const TEXTS: ReadonlyArray<readonly [string, Build]> = [
   ['newlines', repeated('\n')],
+  // Found by the 2026-10-01 review: closed comments, each splittable two ways by a lazy body.
+  ['closed block comments after a key', (size) => `"runOn": ${'/**/'.repeat(size / 4)}"x"`],
+  [
+    'closed block comments after the switch',
+    (size) => `"task.allowAutomaticTasks": ${'/**/'.repeat(size / 4)}"x"`,
+  ],
   ['newlines then a key', (size) => `${'\n'.repeat(size)}hooks:`],
   ['spaces', repeated(' ')],
   ['tabs and newlines', repeated('\t\n')],
@@ -96,6 +102,36 @@ describe('the text an MCP call carries stays linear', () => {
       cwd,
     ),
   );
+  for (const [name, command, arg] of [
+    ['a shell', 'bash', 'c'],
+    ['node', 'node', 'e'],
+    ['python', 'python3', 'c'],
+    ['perl', 'perl', 'e'],
+  ] as const) {
+    holds(`one long option word given to ${name} in an MCP server list`, (size) =>
+      classifyTool(
+        'Write',
+        {
+          file_path: `${cwd}/.mcp.json`,
+          content: JSON.stringify({
+            mcpServers: { x: { command, args: [`-${arg.repeat(size)}1`] } },
+          }),
+        },
+        cwd,
+      ),
+    );
+  }
+  holds('one long option word in an Edit fragment of an MCP server list', (size) =>
+    classifyTool(
+      'Edit',
+      {
+        file_path: `${cwd}/.mcp.json`,
+        old_string: 'x',
+        new_string: `"command": "node", "args": ["-${'e'.repeat(size)}1"]`,
+      },
+      cwd,
+    ),
+  );
   holds('deeply nested junk after the server', (size) =>
     classifyTool(
       'mcp__fs__write_file',
@@ -113,6 +149,20 @@ const COMMANDS: ReadonlyArray<readonly [string, Build]> = [
   // double-quoted string that never closes.
   ['one long word of interpreter options', (size) => `python3 -${'E'.repeat(size)}!`],
   ['one long sed option', (size) => `sed -${'i'.repeat(size)}! ~/.zshrc`],
+  ['one long shell option word', (size) => `bash -${'n'.repeat(size)}1`],
+  [
+    'closed comments after runOn in a command',
+    (size) => `echo '"runOn": ${'/**/'.repeat(size / 4)}"x"'`,
+  ],
+  ['quoted alternations', repeated('grep "a|b|c" f; ')],
+  ['quotes that never close after pipes', (size) => `a | b | "${'x | '.repeat(size / 4)}`],
+  ['heredoc openers on one line', repeated('cat <<A ')],
+  [
+    'heredoc bodies with apostrophes',
+    (size) => `cat > f <<'E'\n${"it's\n".repeat(size / 5)}E\necho x >> ~/.zshrc`,
+  ],
+  ['subshells', repeated('(cd a) && ')],
+  ['env assignments before pushd', repeated('A=1 pushd b; ')],
   ['an unclosed quote of escaped quotes', (size) => `echo "${'\\"!'.repeat(size / 3)} > .mcp.json`],
   ['python open(', (size) => `python3 -c "${'open('.repeat(size / 5)}`],
   [

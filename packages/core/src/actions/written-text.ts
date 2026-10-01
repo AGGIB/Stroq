@@ -46,6 +46,8 @@ export function commandTexts(command: string): string[] {
   for (const inner of quotedSpans(command)) {
     if (inner.length < 4) continue;
     texts.push(inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t'));
+    // `git show --format='[core]%nfsmonitor = …' --output=…`: git's own newline.
+    if (inner.includes('%n')) texts.push(inner.replace(/%n/g, '\n'));
     if (texts.length > MAX_QUOTED_TEXTS) break;
   }
   return texts;
@@ -56,7 +58,7 @@ export function commandTexts(command: string): string[] {
  * every `"` of a string that never closes, which took 0.9 s on 64 KiB of `\"!`; this stops
  * at the first quote that does not close.
  */
-function quotedSpans(command: string): string[] {
+export function quotedSpans(command: string): string[] {
   const spans: string[] = [];
   let i = 0;
   while (i < command.length) {

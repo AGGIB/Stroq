@@ -128,9 +128,9 @@ describe('commandWrittenFiles', () => {
     expect(commandWrittenFiles(segments)).toEqual(['authorized_keys', '~/.ssh/authorized_keys']);
   });
 
-  it('stops at a limit', () => {
-    const many = Array.from({ length: 200 }, (_, i) => `echo x > f${i}`).join('\n');
-    expect(commandWrittenFiles(splitCommand(many).segments).length).toBeLessThanOrEqual(64);
+  it('lists every written file, with no cap for a decoy to hide behind, and no repeats', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `echo x > f${i % 150}`).join('\n');
+    expect(commandWrittenFiles(splitCommand(many).segments)).toHaveLength(150);
   });
 
   it('expands braces a few levels deep and no further', () => {

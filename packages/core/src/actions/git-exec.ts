@@ -124,19 +124,24 @@ export function gitExecSignals(segments: readonly string[]): string[] {
  * `[include]` pulls in. The path rule above cannot see either, and a repository's
  * `.git` directory does not have to be called `.git` (Pillar Security, 2026-07).
  *
- * Read as INI, section by section. Only the keys whose value git runs are read, and a
- * value that is not a command (`fsmonitor = true`, `editor = vim`) is not an
- * installation: the aim is the shape that executes, not every mention. What is not read
- * is a file whose name says it is not configuration (a document, a source file, a data
- * file): those quote config sections. A share of INI-shaped lines used to be required as
- * well, and padding the text with prose took it below the share.
+ * Read as INI, section by section, in files whose name is a configuration's: a gitdir's
+ * `config`, a `.gitconfig` or anything named like one, or `.cfg`/`.conf`/`.config`/`.ini`/
+ * `.inc`. A source file, a document or a data file quotes
+ * config sections and is not one. Two tiers. The keys git runs whenever it works in the
+ * repository (`core.fsmonitor`, `core.hooksPath`, `diff.external`, a filter or merge
+ * driver) are `exec`, which the policy denies. The keys that name a program for one feature
+ * (`gpg.program`, a `textconv`, an `include.path`, a shell alias, a credential helper that
+ * starts with `!`) are `program`: a user's own `~/.gitconfig` has them for 1Password
+ * signing or `bun` lockfiles, so they are asked about rather than refused.
  */
 const MAX_CONFIG_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_DOTTED_KEY_CHARS = 300;
-const INI_HEADER = /^\[\s*([A-Za-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]\s*(.*)$/;
+const INI_HEADER = /^\[\s*([A-Za-z][\w.-]*)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]\s*(.*)$/;
 const INI_ASSIGNMENT = /^([A-Za-z][\w-]*)\s*(?:=\s*(.*))?$/;
-const STRONG_TEXT_KEY =
-  /^(?:core\.(?:fsmonitor|hookspath|sshcommand|gitproxy|askpass|alternaterefscommand)|diff\.external|diff\..+?\.(?:textconv|command)|filter\..+?\.(?:clean|smudge|process)|merge\..+?\.driver|uploadpack\.packobjectshook|receivepack\.[\w-]*hook|protocol\.ext\.allow|remote\..+?\.(?:uploadpack|receivepack|vcs)|gpg\.(?:.+?\.)?program|trailer\..+?\.cmd|init\.templatedir|include\.path|includeif\..+?\.path)$/i;
+const EXEC_TEXT_KEY =
+  /^(?:core\.(?:fsmonitor|hookspath|sshcommand|gitproxy|askpass|alternaterefscommand)|diff\.external|diff\..+?\.command|filter\..+?\.(?:clean|smudge|process)|merge\..+?\.driver|uploadpack\.packobjectshook|receivepack\.[\w-]*hook|protocol\.ext\.allow|remote\..+?\.(?:uploadpack|receivepack|vcs))$/i;
+const PROGRAM_TEXT_KEY =
+  /^(?:diff\..+?\.textconv|gpg\.(?:.+?\.)?program|trailer\..+?\.cmd|init\.templatedir|include\.path|includeif\..+?\.path)$/i;
 /**
  * Keys that name a program only sometimes: a pager or an editor is usually just `less`,
  * and a merge tool's `cmd` runs only when somebody starts the tool, with `$MERGED` in it.
@@ -155,47 +160,67 @@ const GIT_LFS_VALUE = /^git-lfs\s/;
  */
 const ACTIVE_VALUE =
   /[;`]|\$\(|&&|\|\||^!|\b(?:sh|bash|zsh|cmd|powershell|pwsh|curl|wget|nc|python3?|node|perl)\b/i;
-/**
- * Files that are not git configuration whatever they quote: documents, source files and
- * data files. A fixture that holds a config section is a `.ts` or a `.json`, not a config.
- */
-const DOCUMENT_PATH =
-  /\.(?:md|mdx|markdown|txt|rst|adoc|html?|tsx?|[cm]?jsx?|py|rb|go|rs|java|kt|swift|cc?|cpp|hpp?|cs|php|sh|bash|zsh|json|ya?ml|toml|xml|lock|snap)$/i;
+const CONFIG_EXTENSION = /^\.(?:cfg|conf|config|ini|inc|gitconfig)$/i;
+/** Documents, source and data files: they quote config sections and are not one. */
+const NOT_CONFIG_EXTENSION =
+  /^\.(?:md|mdx|markdown|txt|rst|adoc|html?|[cm]?[jt]sx?|mts|cts|py|rb|go|rs|java|kts?|swift|c|cc|cpp|h|hpp|cs|php|sh|bash|zsh|ps1|json|jsonc|ya?ml|toml|xml|lock|snap|dart|vue|svelte|scala|lua|exs?|pl|sql|ipynb|gradle|tf|csv|log)$/i;
 
-function textRunsCommand(dotted: string, value: string): boolean {
-  if (dotted.length > MAX_DOTTED_KEY_CHARS) return false;
-  if (STRONG_TEXT_KEY.test(dotted)) {
-    if (/^filter\./i.test(dotted) && GIT_LFS_VALUE.test(value)) return false;
-    return value !== '' && !BOOLEAN_VALUE.test(value);
+/** What a git configuration text makes git run: on every operation, for one feature, or nothing. */
+export type GitConfigRisk = 'exec' | 'program' | 'unread' | null;
+
+function keyRisk(dotted: string, value: string): GitConfigRisk {
+  if (dotted.length > MAX_DOTTED_KEY_CHARS || value === '' || BOOLEAN_VALUE.test(value))
+    return null;
+  if (EXEC_TEXT_KEY.test(dotted)) {
+    return /^filter\./i.test(dotted) && GIT_LFS_VALUE.test(value) ? null : 'exec';
   }
-  if (BANG_KEY.test(dotted)) return value.startsWith('!') && value.length > 1;
-  if (SOMETIMES_TEXT_KEY.test(dotted)) return value.startsWith('!') || ACTIVE_VALUE.test(value);
-  return false;
+  if (PROGRAM_TEXT_KEY.test(dotted)) return 'program';
+  if (BANG_KEY.test(dotted)) return value.startsWith('!') && value.length > 1 ? 'program' : null;
+  if (SOMETIMES_TEXT_KEY.test(dotted)) {
+    return value.startsWith('!') || ACTIVE_VALUE.test(value) ? 'program' : null;
+  }
+  return null;
 }
 
-/** Whether `path` is a document or a source file, which quotes a config section and is not one. */
-export const isDocumentPath = (path: string): boolean => DOCUMENT_PATH.test(path);
+const stronger = (a: GitConfigRisk, b: GitConfigRisk): GitConfigRisk => {
+  const order: readonly GitConfigRisk[] = ['exec', 'program', 'unread'];
+  for (const risk of order) if (a === risk || b === risk) return risk;
+  return null;
+};
+
+/** Whether `path` is named like a git configuration (see above). */
+export function isGitConfigPath(path: string): boolean {
+  const base = path.split(/[/\\]/).pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 ? base.slice(dot) : '';
+  if (NOT_CONFIG_EXTENSION.test(ext)) return false;
+  // A gitdir's own file is `config`; a user's is `.gitconfig` or named like it.
+  return base.toLowerCase() === 'config' || /gitconfig/i.test(base) || CONFIG_EXTENSION.test(ext);
+}
 
 export function gitConfigTextRunsCommand(path: string, text: string): boolean {
-  return !isDocumentPath(path) && iniRunsCommand(text);
+  return isGitConfigPath(path) && iniRisk(text) !== null;
 }
 
 /**
  * The part of `gitConfigTextRunsCommand` that does not depend on the path, for a caller
- * that asks it about one text and many paths and must not parse the text for each.
+ * that asks it about one text and many paths and must not parse the text for each. A text
+ * past `MAX_CONFIG_TEXT_CHARS` is `unread`: padding ahead of a key is not a way past it.
  */
-export function iniRunsCommand(text: string): boolean {
-  if (text.length === 0) return false;
+export function iniRisk(text: string): GitConfigRisk {
+  if (text.length === 0) return null;
+  if (text.length > MAX_CONFIG_TEXT_CHARS) return 'unread';
   let section = '';
-  const assign = (line: string): boolean => {
+  let found: GitConfigRisk = null;
+  const assign = (line: string): void => {
     const assignment = section === '' ? null : INI_ASSIGNMENT.exec(line);
-    if (!assignment) return false;
+    if (!assignment) return;
     const eq = line.indexOf('=');
     const key = (assignment[1] as string).toLowerCase();
     const value = eq === -1 ? '' : line.slice(eq + 1).trim();
-    return textRunsCommand(`${section}.${key}`, value);
+    found = stronger(found, keyRisk(`${section}.${key}`, value));
   };
-  for (const raw of text.slice(0, MAX_CONFIG_TEXT_CHARS).split(/\r?\n/)) {
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
     const header = INI_HEADER.exec(line);
@@ -204,13 +229,11 @@ export function iniRunsCommand(text: string): boolean {
       section = (sub === undefined ? header[1] : `${header[1]}.${sub}`) as string;
       // `[core] fsmonitor = x` is a section and its first key on one line.
       const tail = (header[3] as string).trim();
-      if (tail !== '' && !tail.startsWith('#') && !tail.startsWith(';') && assign(tail))
-        return true;
-      continue;
-    }
-    if (assign(line)) return true;
+      if (tail !== '' && !tail.startsWith('#') && !tail.startsWith(';')) assign(tail);
+    } else assign(line);
+    if (found === 'exec') return found;
   }
-  return false;
+  return found;
 }
 
 /**
@@ -221,7 +244,10 @@ export function iniRunsCommand(text: string): boolean {
  * comment may sit between the key and its value, and a `.code-workspace` file carries
  * both the tasks and the settings.
  */
-const COMMENTS = String.raw`(?:\/\*[\s\S]{0,200}?\*\/\s*|\/\/[^\n]{0,200}\n\s*)*`;
+// A block comment's body cannot contain `*/`, so each comment parses one way only. With a
+// lazy `[\s\S]` body a run of `/**/` could be split 2^k ways, and 26 of them after
+// `"runOn":` took a second: every Bash command is tested against this.
+const COMMENTS = String.raw`(?:\/\*(?:[^*]|\*(?!\/)){0,200}\*\/\s*|\/\/[^\n]{0,200}\n\s*){0,8}`;
 const RUN_ON_FOLDER_OPEN = new RegExp(String.raw`"runOn"\s*:\s*${COMMENTS}"folderOpen"`, 'i');
 const ALLOW_AUTOMATIC_TASKS = new RegExp(
   String.raw`"task\.allowAutomaticTasks"\s*:\s*${COMMENTS}"on"`,

@@ -4,7 +4,13 @@ import { stroqStateSignals } from './stroq-state.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
 import { normalizePathForMatch } from './normalize-path.js';
 import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
-import { commandWord, firstArgAfter, splitCommand, tokenize } from './shell-segments.js';
+import {
+  commandWord,
+  firstArgAfter,
+  commandSegments,
+  splitCommand,
+  tokenize,
+} from './shell-segments.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
@@ -158,7 +164,14 @@ export const DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
   [/\bpulumi\s+destroy\b/, 'iac-destroy'],
   [followedBy(/\bdrizzle-kit\s+push\b/, /--force(?![\w-])/), 'db-force-migrate'],
   [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
-  [followedBy(/\bprisma\s+db\s+push\b/, /--(force-reset|accept-data-loss)\b/), 'db-force-migrate'],
+  // `--accept-data-loss=false` declines it.
+  [
+    followedBy(
+      /\bprisma\s+db\s+push\b/,
+      /--(?:force-reset|accept-data-loss)(?![\w-])(?!=(?:false|0)\b)/,
+    ),
+    'db-force-migrate',
+  ],
   // Only the remote-targeting forms: a bare `supabase db reset` resets the local dev stack.
   [followedBy(/\bsupabase\s+db\s+reset\b/, /--(linked|db-url)\b/), 'db-force-migrate'],
   [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
@@ -256,7 +269,10 @@ function rmIsDangerous(segment: string, cwd: string): boolean {
 const isShell = (seg: string): boolean => SHELLS.has(commandWord(seg));
 
 function hasNetworkSubcommand(seg: string, word: string): boolean {
-  const subcommands = NETWORK_SUBCOMMANDS[word];
+  // Own keys only: a word such as `toString` or `__proto__` is not a command in the table.
+  const subcommands = Object.hasOwn(NETWORK_SUBCOMMANDS, word)
+    ? NETWORK_SUBCOMMANDS[word]
+    : undefined;
   return subcommands !== undefined && subcommands.has(firstArgAfter(seg));
 }
 
@@ -275,7 +291,7 @@ function isClassifiedElsewhere(word: string): boolean {
     word === 'git' ||
     NETWORK_COMMANDS.has(word) ||
     SHELLS.has(word) ||
-    NETWORK_SUBCOMMANDS[word] !== undefined ||
+    Object.hasOwn(NETWORK_SUBCOMMANDS, word) ||
     SELF_CONFIG_READ_COMMANDS.has(word) ||
     SELF_CONFIG_WRITE_COMMANDS.has(word) ||
     TERMINAL_DATA_COMMANDS.has(word)
@@ -285,7 +301,9 @@ function isClassifiedElsewhere(word: string): boolean {
 function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
   return tokens.some((token, i) => {
     if (NETWORK_COMMANDS.has(token)) return true;
-    const subcommands = NETWORK_SUBCOMMANDS[token];
+    const subcommands = Object.hasOwn(NETWORK_SUBCOMMANDS, token)
+      ? NETWORK_SUBCOMMANDS[token]
+      : undefined;
     return subcommands !== undefined && subcommands.has(tokens[i + 1] ?? '');
   });
 }
@@ -410,8 +428,15 @@ function encodedExecSignals(
   ];
 }
 
-function destructiveSignals(segments: readonly string[], cwd: string): string[] {
+/**
+ * A segment that runs `ssh` or `sshpass` is a command for another machine, which
+ * `remoteClassification` reads with its own rules (`/tmp` is scratch there); read here as
+ * well, `ssh prod rm -rf /tmp/build` was a local delete of `/tmp/build`. Past the depth the
+ * remote reader stops at, the local reading is all there is, and it stays.
+ */
+function destructiveSignals(segments: readonly string[], cwd: string, depth: number): string[] {
   return segments.flatMap((seg) => {
+    if (depth < 2 && /^ssh(?:pass)?$/.test(commandWord(seg))) return [];
     const found = DESTRUCTIVE.filter(([re]) => re.test(seg)).map(([, name]) => name);
     return rmIsDangerous(seg, cwd) ? [...found, 'rm-dangerous-target'] : found;
   });
@@ -656,7 +681,10 @@ export function classifyCommand(command: string, cwd: string, depth = 0): Comman
 }
 
 export function classifyCommandGroups(command: string, cwd: string, depth = 0): CommandGroups {
-  const { segments, pipelines, truncated } = splitCommand(command);
+  const split = splitCommand(command);
+  const { segments, pipelines, truncated } = split;
+  // Cut where the shell cuts, not inside a quoted string (see `splitTopQuoted`).
+  const shellSegments = commandSegments(command, split);
   const selfConfig = selfTamperSignals(segments);
   // The PowerShell and cmd forms of the same four dangers, merged into the same
   // classes rather than given their own. A dangerous command is dangerous whichever
@@ -667,14 +695,14 @@ export function classifyCommandGroups(command: string, cwd: string, depth = 0): 
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
     ['shell.exec_encoded', [...encodedExecSignals(segments, pipelines), ...ps.encoded]],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
-    ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
+    ['shell.destructive', [...destructiveSignals(segments, cwd, depth), ...ps.destructive]],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
     ['git.push_external', pushExternalSignals(segments)],
     ['config.self', [...selfConfig.deny, ...stroqStateSignals(command)]],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
     ['config.instructions', instructionWriteSignals(segments)],
-    ['config.persistence', persistenceSignals(segments, command)],
+    ['config.persistence', persistenceSignals(shellSegments, command, cwd)],
     // Too much nesting to read is not reading it: see `nestedBudget`.
     ['shell.unparsed', truncated ? [...ps.unparsed, 'nested-commands-too-large'] : ps.unparsed],
   ];

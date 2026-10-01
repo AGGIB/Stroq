@@ -58,7 +58,12 @@ const SCRIPT_CLASS: ReadonlyMap<ActionClass, ActionClass> = new Map<ActionClass,
  */
 const NOT_CARRIED_OVER: ReadonlySet<string> = new Set(['eval-dynamic']);
 
-const MAX_SCRIPTS = 4;
+const MAX_SCRIPTS = 8;
+const MAX_PATH_CHARS = 4096;
+/** The most candidate paths one command may have looked up before it is reported as unread. */
+const MAX_REFERENCE_PROBES = 256;
+/** The most values one variable is tried with (see `withVariablesResolved`). */
+const MAX_VARIANTS = 4;
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_SCRIPT_LINES = 20_000;
 /** The longest value a variable keeps; past it the value is a stand-in (see `withVariablesResolved`). */
@@ -122,8 +127,12 @@ function shellScript(rest: readonly string[]): string | null {
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i] as string;
     if (token === '--') return rest[i + 1] ?? null;
-    if (token === '--noexec' || /^-[A-Za-z]*[cn][A-Za-z]*$/.test(token)) return null;
-    if (SHELL_VALUE_OPTIONS.has(token)) {
+    // Letters captured, then tested: `-[A-Za-z]*[cn][A-Za-z]*` split one long word two ways
+    // and took 2 s on `bash -nnnn…`.
+    const letters = /^-([A-Za-z]+)$/.exec(token)?.[1];
+    if (token === '--noexec' || (letters !== undefined && /[cn]/.test(letters))) return null;
+    // `-o pipefail`, and a cluster that ends in one: `-euo pipefail`, `-eO extglob`.
+    if (SHELL_VALUE_OPTIONS.has(token) || (letters !== undefined && /[oO]$/.test(letters))) {
       i += 1;
       continue;
     }
@@ -276,33 +285,75 @@ function stripQuotes(value: string): string {
  * the classifier reads larger than the file.
  */
 function withVariablesResolved(text: string): string {
-  const values = new Map<string, string>();
+  const lines = text.split(/\r?\n/).slice(0, MAX_SCRIPT_LINES);
   let scriptBudget = MAX_SCRIPT_EXPANSION;
-  const expand = (value: string): string => {
+  const expand = (line: string, choose: (name: string) => string | undefined): string => {
     let lineBudget = MAX_LINE_EXPANSION;
-    return value.replace(VARIABLE_USE, (whole, braced?: string, plain?: string) => {
+    return line.replace(VARIABLE_USE, (whole, braced?: string, plain?: string) => {
       const name = braced ?? plain;
       if (name === undefined) return SAFE_PLACEHOLDER;
-      const assigned = values.get(name);
-      if (assigned === undefined)
-        return HOME_LIKE.has(name.toLowerCase()) ? whole : SAFE_PLACEHOLDER;
-      if (assigned.length > lineBudget || assigned.length > scriptBudget) return SAFE_PLACEHOLDER;
-      lineBudget -= assigned.length;
-      scriptBudget -= assigned.length;
-      return assigned;
+      const value = choose(name);
+      if (value === undefined) return HOME_LIKE.has(name.toLowerCase()) ? whole : SAFE_PLACEHOLDER;
+      if (value.length > lineBudget || value.length > scriptBudget) return SAFE_PLACEHOLDER;
+      lineBudget -= value.length;
+      scriptBudget -= value.length;
+      return value;
     });
   };
-  const lines = text.split(/\r?\n/).slice(0, MAX_SCRIPT_LINES);
-  const assignments = new Set<number>();
+  // Pass 1: what each assignment sets, with the values known when it runs.
+  const current = new Map<string, string>();
+  const every = new Map<string, string[]>();
+  const assignedAt = new Map<number, readonly [string, string]>();
   lines.forEach((line, index) => {
     const match = BASH_ASSIGNMENT.exec(line) ?? POWERSHELL_ASSIGNMENT.exec(line);
     if (!match) return;
-    assignments.add(index);
-    const value = stripQuotes(match[2] ?? '');
-    const resolved = /\$\(|`|\$\(\(/.test(value) ? SAFE_PLACEHOLDER : expand(value);
-    values.set(match[1] as string, resolved.length > MAX_VALUE_CHARS ? SAFE_PLACEHOLDER : resolved);
+    const name = match[1] as string;
+    const raw = stripQuotes(match[2] ?? '');
+    const resolved = /\$\(|`|\$\(\(/.test(raw)
+      ? SAFE_PLACEHOLDER
+      : expand(raw, (n) => current.get(n));
+    const value = resolved.length > MAX_VALUE_CHARS ? SAFE_PLACEHOLDER : resolved;
+    current.set(name, value);
+    const seen = every.get(name) ?? [];
+    if (!seen.includes(value) && seen.length < MAX_VARIANTS) every.set(name, [...seen, value]);
+    assignedAt.set(index, [name, value]);
   });
-  return lines.map((line, index) => (assignments.has(index) ? line : expand(line))).join('\n');
+  // Pass 2: each line read with the value its variables hold there, and once more with each
+  // other value they take anywhere in the file, so that neither a reassignment after the use
+  // (`T=$HOME; rm -rf $T; T=./build`) nor a function defined before the assignment it reads
+  // hides what the line can do.
+  const now = new Map<string, string>();
+  const out: string[] = [];
+  lines.forEach((line, index) => {
+    const assignment = assignedAt.get(index);
+    if (assignment !== undefined) {
+      now.set(assignment[0], assignment[1]);
+      out.push(line);
+      return;
+    }
+    const names = new Set<string>();
+    for (const m of line.matchAll(VARIABLE_USE)) {
+      const name = m[1] ?? m[2];
+      if (name !== undefined) names.add(name);
+      if (names.size > 8) break;
+    }
+    const candidates = (name: string): string[] => {
+      const here = now.get(name);
+      const all = every.get(name) ?? [];
+      return here === undefined ? all : [here, ...all.filter((v) => v !== here)];
+    };
+    let variants = 1;
+    for (const name of names) variants = Math.max(variants, candidates(name).length);
+    for (let k = 0; k < Math.min(variants, MAX_VARIANTS); k += 1) {
+      out.push(
+        expand(line, (name) => {
+          const list = candidates(name);
+          return list.length === 0 ? undefined : list[Math.min(k, list.length - 1)];
+        }),
+      );
+    }
+  });
+  return out.join('\n');
 }
 
 const isComment = (line: string): boolean => /^\s*(?:#|::|rem\b)/i.test(line);
@@ -310,6 +361,10 @@ const isComment = (line: string): boolean => /^\s*(?:#|::|rem\b)/i.test(line);
 const TEXT_PRODUCERS: ReadonlySet<string> = new Set(['cat', 'echo', 'printf']);
 /** A heredoc piped anywhere is input to something: a shell, or `tee` into a file a later line runs. */
 const HEREDOC_PIPED = /\|/;
+/** A script that pipes into a shell anywhere may be piping a function's printed heredoc into it. */
+const FEEDS_A_SHELL = /\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\|\s*(?:source|\.)(?:\s|$)/;
+/** The file a redirect writes: `> p.sh`, `>>"$dir/run"`. */
+const REDIRECT_TARGET = /(?<![<>&\d])\d?>>?\s*(["']?)([^\s"'|;&<>]{1,512})\1/;
 const HEREDOC_DELIMITER = /^-?\s*(['"]?)([A-Za-z_]\w*)\1/;
 /** A redirect that leaves the terminal for a file: not `2>&1`, `>&2` or `>/dev/null`. */
 const REDIRECT_TO_FILE = /(?<![<>&\d])\d?>>?(?!&|\s*\/dev\/null)/;
@@ -361,24 +416,83 @@ function withoutTextHeredocs(text: string): string {
     if (seen === undefined) markers.set(marker, [index]);
     else seen.push(index);
   });
+  // A script that pipes into a shell anywhere outside a heredoc body can be piping a printed
+  // heredoc into it, from a function or a continued line: none of its heredocs is only text.
+  // A body's own `| bash` (a Dockerfile's RUN line) is the body's, and does not count.
+  const inBody = new Uint8Array(lines.length);
+  for (let i = 0; i < lines.length; i += 1) {
+    const delimiter = heredocDelimiter(lines[i] as string);
+    if (delimiter === null) continue;
+    const close = (markers.get(delimiter) ?? []).find((index) => index > i);
+    const end = close ?? lines.length;
+    for (let k = i + 1; k < end; k += 1) inBody[k] = 1;
+    i = end;
+  }
+  if (lines.some((line, index) => inBody[index] !== 1 && FEEDS_A_SHELL.test(line))) return text;
+  const run = runTargets(lines);
   const kept: string[] = [];
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] as string;
     kept.push(line);
     const delimiter = heredocDelimiter(line);
-    if (
-      delimiter === null ||
-      !TEXT_PRODUCERS.has(commandWord(line)) ||
-      HEREDOC_PIPED.test(line) ||
-      REDIRECT_TO_FILE.test(line)
-    ) {
-      continue;
+    if (delimiter === null || !TEXT_PRODUCERS.has(commandWord(line))) continue;
+    // Continued onto the next line, the heredoc may be piped there.
+    if (HEREDOC_PIPED.test(line) || /\\\s*$/.test(line)) continue;
+    if (REDIRECT_TO_FILE.test(line)) {
+      // Written to a file: a program if the file is one (`p.sh`), or if the script runs it
+      // (`bash p`, `./p`, `chmod +x p`); data otherwise (a Dockerfile, a README).
+      const target = REDIRECT_TARGET.exec(line)?.[2];
+      if (target === undefined || SCRIPT_EXTENSION.test(target) || run.has(baseOf(target)))
+        continue;
     }
     const close = (markers.get(delimiter) ?? []).find((index) => index > i);
     if (close !== undefined) i = close;
   }
   return kept.join('\n');
 }
+
+const RUNNERS: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'fish',
+  'source',
+  '.',
+  'exec',
+  'chmod',
+  'pwsh',
+  'powershell',
+]);
+
+/** The base names of the files a script runs anywhere: `bash x`, `./x`, `"$dir/x"`, `chmod +x x`. */
+function runTargets(lines: readonly string[]): Set<string> {
+  const names = new Set<string>();
+  for (const line of lines) {
+    for (const part of line.split(/[;&|()]+/)) {
+      const words = part
+        .trim()
+        .split(/\s+/)
+        .map((w) => w.replace(/^["']|["']$/g, ''));
+      let at = 0;
+      while (at < words.length && (words[at] === 'sudo' || isEnvAssignment(words[at] as string)))
+        at += 1;
+      const head = words[at];
+      if (head === undefined || head === '') continue;
+      if (/[/\\]/.test(head)) names.add(baseOf(head));
+      if (RUNNERS.has(head)) {
+        for (const w of words.slice(at + 1))
+          if (!w.startsWith('-') && !w.startsWith('+')) names.add(baseOf(w));
+      }
+    }
+  }
+  return names;
+}
+
+/** `eval "$(curl …)"`: a fetch run, which `NOT_CARRIED_OVER` must not take for a tool's init. */
+const EVAL_REMOTE =
+  /\beval\b[^\n]{0,200}?(?:\$\(|`)\s*(?:[A-Za-z_]\w*=\S*\s+){0,3}(?:curl|wget|nc|ncat|socat|fetch|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/i;
 
 /** What the script's own lines would be if run, merged from the classes in `SCRIPT_CLASSES`. */
 function classifyScriptText(text: string, cwd: string, name: string): CommandClassification | null {
@@ -396,6 +510,10 @@ function classifyScriptText(text: string, cwd: string, name: string): CommandCla
     classes.add(mapped);
     signals.push(...carried.map((signal) => `script:${name}:${signal}`));
   }
+  if (EVAL_REMOTE.test(body)) {
+    classes.add('shell.exec_encoded');
+    signals.push(`script:${name}:eval-remote`);
+  }
   return classes.size === 0 ? null : { classes: [...classes], hosts: found.hosts, signals };
 }
 
@@ -409,40 +527,87 @@ export function classifyReferencedScripts(
   segments: readonly string[],
   cwd: string,
 ): CommandClassification | null {
-  const targets = new Map<string, boolean>();
+  const classes = new Set<ActionClass>();
+  const signals: string[] = [];
+  const hosts = new Set<string>();
+  const seen = new Set<string>();
+  let probes = 0;
+  let scripts = 0;
   let overflow = false;
-  for (const segment of segments) {
+  let directory = cwd;
+  const saved: string[] = [];
+  for (const raw of segments) {
+    const opens = /^[\s(]*/.exec(raw)?.[0].replace(/\s/g, '').length ?? 0;
+    for (let k = 0; k < opens; k += 1) saved.push(directory);
+    const segment = raw.replace(/^[\s({]+/, '');
+    directory = directoryAfter(segment, directory);
     for (const reference of scriptReferences(segment)) {
-      const path = resolveScript(reference.token, cwd);
-      if (path === null || targets.has(path)) continue;
-      if (targets.size >= MAX_SCRIPTS) {
+      const path = resolveScript(reference.token, directory);
+      if (path === null || seen.has(path)) continue;
+      seen.add(path);
+      // Only a file that is a shell script counts toward the limit: a line of a `git add \`
+      // list or of a heredoc that starts with a path is looked up and passed over.
+      probes += 1;
+      if (probes > MAX_REFERENCE_PROBES) {
+        overflow = true;
+        break;
+      }
+      const read = readScript(path, reference.needsShebang);
+      if (read.kind === 'none') continue;
+      scripts += 1;
+      if (scripts > MAX_SCRIPTS) {
         overflow = true;
         continue;
       }
-      targets.set(path, reference.needsShebang);
+      if (read.kind === 'too-large') {
+        classes.add('shell.unparsed');
+        signals.push(`script:${basename(path)}:too-large`);
+        continue;
+      }
+      if (read.text.split('\n', MAX_SCRIPT_LINES + 1).length > MAX_SCRIPT_LINES) {
+        classes.add('shell.unparsed');
+        signals.push(`script:${basename(path)}:too-many-lines`);
+      }
+      const found = classifyScriptText(read.text, directory, basename(path));
+      if (found === null) continue;
+      for (const cls of found.classes) classes.add(cls);
+      signals.push(...found.signals);
+      for (const host of found.hosts) hosts.add(host);
+    }
+    for (let k = trailingCloses(raw); k > 0 && saved.length > 0; k -= 1) {
+      directory = saved.pop() ?? directory;
     }
   }
-  const classes = new Set<ActionClass>();
-  const signals: string[] = overflow ? ['script-limit'] : [];
-  const hosts = new Set<string>();
-  if (overflow) classes.add('shell.unparsed');
-  for (const [path, needsShebang] of targets) {
-    const read = readScript(path, needsShebang);
-    if (read.kind === 'none') continue;
-    if (read.kind === 'too-large') {
-      classes.add('shell.unparsed');
-      signals.push(`script:${basename(path)}:too-large`);
-      continue;
-    }
-    if (read.text.split('\n', MAX_SCRIPT_LINES + 1).length > MAX_SCRIPT_LINES) {
-      classes.add('shell.unparsed');
-      signals.push(`script:${basename(path)}:too-many-lines`);
-    }
-    const found = classifyScriptText(read.text, cwd, basename(path));
-    if (found === null) continue;
-    for (const cls of found.classes) classes.add(cls);
-    signals.push(...found.signals);
-    for (const host of found.hosts) hosts.add(host);
+  if (overflow) {
+    classes.add('shell.unparsed');
+    signals.unshift('script-limit');
   }
   return classes.size === 0 ? null : { classes: [...classes], hosts: [...hosts], signals };
+}
+
+/** How many `)` a segment ends with, read back from its end (a regex here was quadratic). */
+function trailingCloses(raw: string): number {
+  let count = 0;
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    const ch = raw.charAt(i);
+    if (ch === ')') count += 1;
+    else if (!/\s/.test(ch)) break;
+  }
+  return count;
+}
+
+/** The directory a `cd` or `pushd` leaves the command in; an unknown target leaves it as it was. */
+function directoryAfter(segment: string, directory: string): string {
+  const word = commandWord(segment);
+  if (word !== 'cd' && word !== 'pushd') return directory;
+  const target = words(segment)
+    .slice(1)
+    .find((w) => w === '-' || !w.startsWith('-'));
+  if (target === undefined) return homedir();
+  if (target === '-') return directory;
+  const expanded = expandedPath(target, directory);
+  if (expanded === null) return directory;
+  const next = isAbsolute(expanded) ? expanded : resolve(directory, expanded);
+  // No real path is this long; a chain of `pushd a` would otherwise grow it with every step.
+  return next.length > MAX_PATH_CHARS ? directory : next;
 }
