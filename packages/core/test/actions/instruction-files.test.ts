@@ -51,6 +51,23 @@ const INSTRUCTION_PATHS = [
   '.claude/agent-memory-local/reviewer/MEMORY.md',
   '.claude/routines/nightly.md',
   '.claude/workflows/release.js',
+  // Agent definitions, prompts, steering files and MCP server lists of the other hosts.
+  '.github/agents/reviewer.agent.md',
+  '.github/prompts/ship.prompt.md',
+  '.github/chatmodes/plan.chatmode.md',
+  '.agent/rules/style.md',
+  '.agents/workflows/release.md',
+  '.agents/skills/deploy/SKILL.md',
+  '.kiro/steering/product.md',
+  '.kiro/hooks/lint.json',
+  '.mcp.json',
+  '/home/dev/project/.mcp.json',
+  '.cursor/mcp.json',
+  '.vscode/mcp.json',
+  '.roo/mcp.json',
+  '.kiro/settings/mcp.json',
+  '/home/dev/.gemini/settings.json',
+  'C:\\Users\\dev\\project\\.mcp.json',
 ];
 
 const LOOK_ALIKES = [
@@ -76,6 +93,17 @@ const LOOK_ALIKES = [
   '.claude/agent-memory-notes.md',
   '.claude/routines-old.md',
   '.claude/workflows.md',
+  '.mcp.json.bak',
+  'old.mcp.json',
+  '.mcp.jsonc',
+  '.cursor/mcp.json.bak',
+  '.vscode/settings.json',
+  '.github/agents-notes.md',
+  '.github/prompts-old.md',
+  '.kiro/steering-old.md',
+  '.agents/rules-old.md',
+  '.gemini/settings.json.bak',
+  '.gemini/settings-old.json',
 ];
 
 describe('INSTRUCTION_FILE', () => {
@@ -202,5 +230,38 @@ describe('the read side names the same files', () => {
 
   it('still reads an ordinary document as repository content', () => {
     expect(scanTargetForTool('Read', { file_path: 'docs/README.md' })).toBe('repo_content');
+  });
+});
+
+describe('a write to an MCP server list or an agent definition', () => {
+  it.each(['.mcp.json', '.cursor/mcp.json', '.kiro/settings/mcp.json', '.gemini/settings.json'])(
+    'is config.instructions for %s, which a tainted session is asked about',
+    (path) => {
+      const { classes } = classifyTool('Write', { file_path: path, content: '{}' }, '/w');
+      expect(classes).toContain('config.instructions');
+    },
+  );
+
+  it.each([
+    '.github/agents/x.agent.md',
+    '.github/prompts/x.md',
+    '.kiro/steering/x.md',
+    '.agents/rules/x.md',
+  ])('is config.instructions for %s', (path) => {
+    const { classes } = classifyTool('Edit', { file_path: path, new_string: 'x' }, '/w');
+    expect(classes).toContain('config.instructions');
+  });
+
+  it('is read through Bash as well', () => {
+    expect(classifyCommand('echo "{}" > .mcp.json', '/w').classes).toContain('config.instructions');
+    expect(classifyCommand('cat x >> .github/agents/a.agent.md', '/w').classes).toContain(
+      'config.instructions',
+    );
+  });
+
+  it('is not config.instructions for a settings file that is not a server list', () => {
+    expect(
+      classifyTool('Write', { file_path: '.vscode/settings.json', content: '{}' }, '/w').classes,
+    ).not.toContain('config.instructions');
   });
 });

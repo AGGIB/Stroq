@@ -32,6 +32,11 @@ function summaryLine(report: AttackReport): string {
 }
 
 export function formatReport(report: AttackReport): string {
-  const header = `stroq attack: ${plural(report.scenarios.length, 'recorded incident')} against policy ${report.policy}`;
+  // Counted apart, as the suite's own schema counts them: a documented incident cites its
+  // report and a synthetic cell does not, and a header that called all of them incidents
+  // claimed more than the suite has.
+  const documented = report.scenarios.filter((r) => r.incident !== null).length;
+  const synthetic = report.scenarios.length - documented;
+  const header = `stroq attack: ${plural(report.scenarios.length, 'scenario')} against policy ${report.policy} (${plural(documented, 'recorded incident')}, ${synthetic} synthetic)`;
   return `${[header, ...report.scenarios.map(scenarioLine), summaryLine(report)].join('\n')}\n`;
 }

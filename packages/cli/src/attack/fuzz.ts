@@ -132,8 +132,15 @@ const ratio = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`;
 
 export function formatFuzz(report: FuzzReport): string {
+  // The variants come from the scenarios that carry untrusted text; the others have nothing
+  // to mutate, and a header that multiplied all of them said more than was run.
+  const mutated = report.scenarios - report.textless.length;
+  const apart =
+    report.textless.length === 0
+      ? ''
+      : ` (${report.textless.length} of ${report.scenarios} scenarios carry no untrusted text and are not mutated)`;
   const lines = [
-    `stroq attack --fuzz: ${report.scenarios} scenarios x ${report.mutations} mutations = ${report.variants} variants, policy ${report.policy}`,
+    `stroq attack --fuzz: ${mutated} scenarios x ${report.mutations} mutations = ${report.variants} variants${apart}, policy ${report.policy}`,
     `survived:  ${report.survived} / ${report.variants}   (${ratio(report.survived, report.variants)})`,
     `escaped:   ${report.escaped.length}`,
     ...report.escaped.map(variantLine),

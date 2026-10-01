@@ -2,8 +2,15 @@ import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
 import { stroqStateSignals } from './stroq-state.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
+import { normalizePathForMatch } from './normalize-path.js';
 import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
-import { commandWord, firstArgAfter, splitCommand, tokenize } from './shell-segments.js';
+import {
+  commandWord,
+  firstArgAfter,
+  commandSegments,
+  splitCommand,
+  tokenize,
+} from './shell-segments.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
@@ -19,6 +26,7 @@ export interface CommandClassification {
 
 export { commandWord, splitSegments } from './shell-segments.js';
 import { gitExecSignals } from './git-exec.js';
+import { persistenceSignals } from './persistence.js';
 
 const SHELLS = new Set([
   'sh',
@@ -118,6 +126,15 @@ export const SHELL_PROC_SUB_REMOTE = followedBy(
   /\b(bash|sh|zsh|dash|ksh|source|\.)\b/,
   /<\(\s*(curl|wget)\b/,
 );
+const RSYNC_DELETE = followedBy(/\brsync\b/, /\s--del(?:ete(?:-[a-z]+)?)?(?![\w-])/);
+/**
+ * `rsync --delete` is a deploy script's business locally; to a host it removes what is not
+ * in the source from somebody's server.
+ */
+const RSYNC_DELETE_TO_HOST: TextTest = {
+  test: (text) =>
+    RSYNC_DELETE.test(text) && /(?:\s(?:[\w.-]+@)?[\w.-]{2,}:(?!\/\/)\S)|rsync:\/\//.test(text),
+};
 export const DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
   [/\bgit\s+reset\s+--hard\b/, 'git-destructive'],
   [/\bgit\s+clean\s+-[a-zA-Z]*f/, 'git-destructive'],
@@ -147,10 +164,60 @@ export const DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
   [/\bpulumi\s+destroy\b/, 'iac-destroy'],
   [followedBy(/\bdrizzle-kit\s+push\b/, /--force(?![\w-])/), 'db-force-migrate'],
   [/\bprisma\s+migrate\s+reset\b/, 'db-force-migrate'],
-  [followedBy(/\bprisma\s+db\s+push\b/, /--(force-reset|accept-data-loss)\b/), 'db-force-migrate'],
+  // `--accept-data-loss=false` declines it.
+  [
+    followedBy(
+      /\bprisma\s+db\s+push\b/,
+      /--(?:force-reset|accept-data-loss)(?![\w-])(?!=(?:false|0)\b)/,
+    ),
+    'db-force-migrate',
+  ],
   // Only the remote-targeting forms: a bare `supabase db reset` resets the local dev stack.
   [followedBy(/\bsupabase\s+db\s+reset\b/, /--(linked|db-url)\b/), 'db-force-migrate'],
   [/\bgh\s+repo\s+delete\b/, 'gh-repo-delete'],
+  // Deletes on hosting, storage and clusters that agents ran on their own initiative in
+  // 2026: `firebase hosting:disable --force` on a live site (claude-code #93002), `lftp
+  // mirror --delete` over a production FTP root (#89014), a cloud-storage purge of every
+  // object version (#97084). Each names the verb that removes, not the tool: `firebase
+  // deploy`, `gsutil cp` and `kubectl get` are ordinary work and stay unclassified.
+  // Global options come before the verb (`kubectl -n prod delete`, `aws --profile p s3 rm`,
+  // `gcloud --project=p … delete`), so each tool allows a few words ahead of it. A verb is
+  // a whole word: `describe delete-me-vm` is the name of a machine.
+  [
+    /\bfirebase\s+(?:\S+\s+){0,5}?(?:hosting:disable|hosting:channel:delete|projects:delete|firestore:delete|database:remove|functions:delete|apphosting:backends:delete)(?![\w:-])/,
+    'cloud-destructive',
+  ],
+  [/\bgcloud\s+(?:\S+\s+){0,6}?(?:delete|rm)(?=\s|$)/, 'cloud-destructive'],
+  [/\bgsutil\s+(?:-[\w-]+\s+)*(?:rm|rb)\b/, 'cloud-destructive'],
+  [/\baws\s+(?:\S+\s+){0,5}?s3\s+(?:rm|rb)\b/, 'cloud-destructive'],
+  [followedBy(/\baws\s+(?:\S+\s+){0,5}?s3\s+sync\b/, /\s--delete\b/), 'cloud-destructive'],
+  [
+    /\baws\s+(?:\S+\s+){0,5}?[A-Za-z][\w-]*\s+(?:delete|terminate|deregister|remove)-[\w-]+/,
+    'cloud-destructive',
+  ],
+  [/\baz\s+(?:\S+\s+){1,6}?delete(?=\s|$)/, 'cloud-destructive'],
+  [
+    followedBy(
+      /\bkubectl\b/,
+      /\sdelete\s(?:[^|;&\n]{0,200}?[\s,])?(?:--all|--all-namespaces|-A|ns|namespaces?|pv|pvc|persistentvolumeclaims?|statefulsets?|sts|deployments?|deploy|nodes?|crds?)(?:[\s/,]|$)/,
+    ),
+    'cloud-destructive',
+  ],
+  [
+    /\b(?:heroku\s+(?:apps:destroy|pg:reset|addons:destroy)|netlify\s+sites:delete|vercel\s+(?:rm|remove))\b|\bhelm\s+(?:\S+\s+){0,5}?(?:uninstall|delete)(?=\s|$)/,
+    'cloud-destructive',
+  ],
+  [/\bfly(?:ctl)?\s+(?:apps\s+destroy|volumes?\s+destroy|destroy)\b/, 'cloud-destructive'],
+  // A volume holds data. `docker system prune` removes only what is rebuilt, until it is
+  // given `--volumes`.
+  [/\bdocker\s+volume\s+(?:rm|prune)\b/, 'cloud-destructive'],
+  [followedBy(/\bdocker\s+system\s+prune\b/, /\s--volumes\b/), 'cloud-destructive'],
+  [followedBy(/\bgh\s+api\b/, /(?:-X|--method)\s*=?\s*DELETE\b/i), 'cloud-destructive'],
+  [/\b(?:npm\s+unpublish|gh\s+release\s+delete)\b/, 'cloud-destructive'],
+  [followedBy(/\blftp\b/, /--delete\b/), 'remote-sync-delete'],
+  [RSYNC_DELETE_TO_HOST, 'remote-sync-delete'],
+  [/\bgit\s+(?:filter-branch|filter-repo|reflog\s+expire)\b/, 'git-history-rewrite'],
+  [followedBy(/\bgit\s+gc\b/, /--prune=now\b/), 'git-history-rewrite'],
 ];
 // Every separator here is `[/\\]`, for the reason spelled out over `SELF_CONFIG_FILE`
 // in self-config.ts: on Windows these paths arrive with backslashes, and the ones
@@ -202,7 +269,10 @@ function rmIsDangerous(segment: string, cwd: string): boolean {
 const isShell = (seg: string): boolean => SHELLS.has(commandWord(seg));
 
 function hasNetworkSubcommand(seg: string, word: string): boolean {
-  const subcommands = NETWORK_SUBCOMMANDS[word];
+  // Own keys only: a word such as `toString` or `__proto__` is not a command in the table.
+  const subcommands = Object.hasOwn(NETWORK_SUBCOMMANDS, word)
+    ? NETWORK_SUBCOMMANDS[word]
+    : undefined;
   return subcommands !== undefined && subcommands.has(firstArgAfter(seg));
 }
 
@@ -221,7 +291,7 @@ function isClassifiedElsewhere(word: string): boolean {
     word === 'git' ||
     NETWORK_COMMANDS.has(word) ||
     SHELLS.has(word) ||
-    NETWORK_SUBCOMMANDS[word] !== undefined ||
+    Object.hasOwn(NETWORK_SUBCOMMANDS, word) ||
     SELF_CONFIG_READ_COMMANDS.has(word) ||
     SELF_CONFIG_WRITE_COMMANDS.has(word) ||
     TERMINAL_DATA_COMMANDS.has(word)
@@ -231,7 +301,9 @@ function isClassifiedElsewhere(word: string): boolean {
 function hasEmbeddedNetworkToken(tokens: readonly string[]): boolean {
   return tokens.some((token, i) => {
     if (NETWORK_COMMANDS.has(token)) return true;
-    const subcommands = NETWORK_SUBCOMMANDS[token];
+    const subcommands = Object.hasOwn(NETWORK_SUBCOMMANDS, token)
+      ? NETWORK_SUBCOMMANDS[token]
+      : undefined;
     return subcommands !== undefined && subcommands.has(tokens[i + 1] ?? '');
   });
 }
@@ -324,15 +396,24 @@ function encodedExecSignals(
   segments: readonly string[],
   pipelines: readonly (readonly string[])[],
 ): string[] {
-  const piped = pipelines.flatMap((stages) =>
-    stages.flatMap((stage, i) => {
-      const downstream = stages.slice(i + 1);
+  const piped = pipelines.flatMap((stages) => {
+    // Whether a shell runs downstream of each stage, from one pass back from the end.
+    // `stages.slice(i + 1).some(isShell)` per stage is the square of the pipeline: 256 KiB
+    // of `x | x | …` took 1.3 s, and a hook has no length cap on what it is handed.
+    const shellAfter: boolean[] = new Array<boolean>(stages.length).fill(false);
+    let seen = false;
+    for (let i = stages.length - 1; i >= 0; i -= 1) {
+      shellAfter[i] = seen;
+      if (isShell(stages[i] as string)) seen = true;
+    }
+    return stages.flatMap((stage, i) => {
+      if (!shellAfter[i]) return [];
       const signals: string[] = [];
-      if (DECODE.test(stage) && downstream.some(isShell)) signals.push('decode-pipe-shell');
-      if (isNetwork(stage) && downstream.some(isShell)) signals.push('remote-pipe-shell');
+      if (DECODE.test(stage)) signals.push('decode-pipe-shell');
+      if (isNetwork(stage)) signals.push('remote-pipe-shell');
       return signals;
-    }),
-  );
+    });
+  });
   return [
     ...piped,
     ...segments.flatMap((seg) => {
@@ -347,8 +428,15 @@ function encodedExecSignals(
   ];
 }
 
-function destructiveSignals(segments: readonly string[], cwd: string): string[] {
+/**
+ * A segment that runs `ssh` or `sshpass` is a command for another machine, which
+ * `remoteClassification` reads with its own rules (`/tmp` is scratch there); read here as
+ * well, `ssh prod rm -rf /tmp/build` was a local delete of `/tmp/build`. Past the depth the
+ * remote reader stops at, the local reading is all there is, and it stays.
+ */
+function destructiveSignals(segments: readonly string[], cwd: string, depth: number): string[] {
   return segments.flatMap((seg) => {
+    if (depth < 2 && /^ssh(?:pass)?$/.test(commandWord(seg))) return [];
     const found = DESTRUCTIVE.filter(([re]) => re.test(seg)).map(([, name]) => name);
     return rmIsDangerous(seg, cwd) ? [...found, 'rm-dangerous-target'] : found;
   });
@@ -377,8 +465,226 @@ function hostsOf(command: string): string[] {
   return [...new Set(hosts.filter((h) => h.length > 0))];
 }
 
-export function classifyCommand(command: string, cwd: string): CommandClassification {
-  const { segments, pipelines, truncated } = splitCommand(command);
+/**
+ * The letters of the `ssh` options that take a value. In a cluster (`-tp 22`) the first
+ * one ends it: what follows in the same word is its value (`-p22`), and when nothing does
+ * the value is the next word.
+ */
+const SSH_VALUE_LETTERS: ReadonlySet<string> = new Set('pilFJLRDbcEeImOQSWwBo');
+
+/** Most `ssh` invocations in one command that are read, and the most text of each. */
+const MAX_SSH_INVOCATIONS = 16;
+const MAX_REMOTE_CHARS = 32 * 1024;
+/** A word, with a quoted span kept whole: `-o "A b"` is one option and one value. */
+const SHELL_WORD = /(?:"[^"]*"|'[^']*'|\S)+/g;
+const REMOTE_COMMAND_END = /[;\n|&]/;
+
+/**
+ * The command a remote shell is given by the `ssh` that starts at `from` in `text`: what
+ * follows the host, in the quotes it was given in when it was quoted (`ssh prod "a | b"`
+ * is one command to the remote side, though its `|` is no pipe to the local shell) and
+ * up to the next local operator when it was not. The second value is whether the text
+ * went on past what is read.
+ */
+function remoteAfterHost(text: string, from: number): readonly [string | null, boolean] {
+  SHELL_WORD.lastIndex = from;
+  let sawSsh = false;
+  let skipValue = false;
+  let optionsEnded = false;
+  for (let word = SHELL_WORD.exec(text); word !== null; word = SHELL_WORD.exec(text)) {
+    const token = word[0];
+    if (!sawSsh) {
+      sawSsh = token.replace(/^.*\//, '') === 'ssh';
+      continue;
+    }
+    if (skipValue) {
+      skipValue = false;
+      continue;
+    }
+    if (!optionsEnded && token === '--') {
+      optionsEnded = true;
+      continue;
+    }
+    if (!optionsEnded && token.startsWith('-')) {
+      const letters = token.slice(1);
+      for (let i = 0; i < letters.length; i += 1) {
+        if (SSH_VALUE_LETTERS.has(letters.charAt(i))) {
+          skipValue = i === letters.length - 1;
+          break;
+        }
+      }
+      continue;
+    }
+    const after = word.index + token.length;
+    const window = text.slice(after, after + MAX_REMOTE_CHARS + 1);
+    const rest = window.trimStart();
+    const quote = rest.charAt(0);
+    if (quote === '"' || quote === "'") {
+      let close = 1;
+      while (close < rest.length && rest.charAt(close) !== quote) {
+        close += quote === '"' && rest.charAt(close) === '\\' ? 2 : 1;
+      }
+      return [rest.slice(1, close), close >= MAX_REMOTE_CHARS];
+    }
+    const stop = rest.search(REMOTE_COMMAND_END);
+    const remote = (stop === -1 ? rest : rest.slice(0, stop)).trim();
+    return [remote === '' ? null : remote, stop === -1 && rest.length > MAX_REMOTE_CHARS];
+  }
+  return [null, false];
+}
+
+interface RemoteCommands {
+  readonly commands: readonly string[];
+  /** True when an `ssh` was left unread: past the invocation limit, or a command past the text limit. */
+  readonly truncated: boolean;
+}
+
+/**
+ * What a remote shell is told to run: the words after the host of an `ssh` invocation, as
+ * one command. A command sent over `ssh` runs on someone else's machine, usually a
+ * production one, and its text is written in the same shell syntax as a local one — so it
+ * is read as one (claude-code #94579: `ssh prod docker rmi <image>` removed the
+ * production image). Read from the command itself where the segment is a part of it,
+ * because the segments are cut at every `|`, quoted or not.
+ */
+function remoteCommands(command: string, segments: readonly string[]): RemoteCommands {
+  const commands: string[] = [];
+  let searchFrom = 0;
+  let seen = 0;
+  let truncated = false;
+  for (const segment of segments) {
+    const word = commandWord(segment);
+    if (word !== 'ssh' && word !== 'sshpass') continue;
+    seen += 1;
+    if (seen > MAX_SSH_INVOCATIONS) {
+      truncated = true;
+      break;
+    }
+    const at = command.indexOf(segment, searchFrom);
+    if (at !== -1) searchFrom = at + segment.length;
+    const [remote, cut] = at === -1 ? remoteAfterHost(segment, 0) : remoteAfterHost(command, at);
+    if (cut) truncated = true;
+    if (remote !== null && remote !== '') commands.push(remote);
+  }
+  return { commands, truncated };
+}
+
+/**
+ * What is routine to run locally and not on a production server: removing an image,
+ * pruning, and a recursive delete of anything but a scratch directory. (A volume's data is
+ * asked about wherever it is removed; see `DESTRUCTIVE`.) Stopping a service, rebooting
+ * and removing one file are an administrator's day, and a question for each would be the
+ * check people switch off.
+ */
+const REMOTE_DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
+  [
+    /\bdocker(?:-compose)?\s+(?:rmi|system\s+prune|volume\s+(?:rm|prune)|(?:container|image)\s+(?:rm|prune)|compose\s+down\s+(?:\S+\s+)*-v)\b/,
+    'remote-destructive',
+  ],
+];
+
+const REMOTE_CLASSES: ReadonlySet<ActionClass> = new Set<ActionClass>([
+  'shell.exec_encoded',
+  'shell.destructive',
+]);
+
+const REMOTE_SCRATCH = /^(?:\/var)?\/tmp\//;
+
+/**
+ * A recursive `rm` on a server, aimed anywhere but `/tmp`. A name that is not absolute is
+ * relative to the directory an earlier `cd` of the same command moved into, so the
+ * question is where that is; with no `cd` it is the login directory, as a local relative
+ * name is the project, and passes. The path is collapsed first: `/tmp/../var/www` is not
+ * in `/tmp`.
+ */
+function remoteRmIsDangerous(segment: string, directory: string | null): boolean {
+  const tokens = tokenize(segment);
+  const at = tokens.findIndex((t) => t.replace(/^.*\//, '') === 'rm');
+  if (at < 0) return false;
+  const args = tokens.slice(at + 1);
+  const recursive = args.some(
+    (a) => a === '--recursive' || (/^-[A-Za-z]+$/.test(a) && /[rR]/.test(a)),
+  );
+  if (!recursive) return false;
+  return args
+    .filter((a) => !a.startsWith('-'))
+    .some((a) => {
+      const target = a.replace(/["']/g, '');
+      const relative = !/^[/~$]/.test(target);
+      const full = relative && directory !== null ? `${directory}/${target}` : target;
+      const dangerous =
+        isDangerousRmTarget(target, '/__remote__') ||
+        (relative && directory !== null && isDangerousRmTarget(full, '/__remote__'));
+      return dangerous && !REMOTE_SCRATCH.test(normalizePathForMatch(full));
+    });
+}
+
+/** The directory a remote `cd` leaves the command in; a relative one only extends a known directory. */
+function remoteDirectoryAfter(segment: string, directory: string | null): string | null {
+  if (commandWord(segment) !== 'cd') return directory;
+  const target = segment
+    .split(/\s+/)
+    .slice(1)
+    .find((w) => w !== '' && !w.startsWith('-'))
+    ?.replace(/["']/g, '');
+  if (target === undefined) return directory;
+  if (/^[/~$]/.test(target)) return target;
+  return directory === null ? null : `${directory}/${target}`;
+}
+
+function remoteClassification(
+  command: string,
+  segments: readonly string[],
+  cwd: string,
+  depth: number,
+): ReadonlyArray<readonly [ActionClass, readonly string[]]> {
+  if (depth >= 2) return [];
+  const found = new Map<ActionClass, string[]>();
+  const add = (cls: ActionClass, signal: string): void => {
+    found.set(cls, [...(found.get(cls) ?? []), `ssh-remote:${signal}`]);
+  };
+  const remote = remoteCommands(command, segments);
+  // A command that could not be read to its end is not a command that is safe.
+  if (remote.truncated) add('shell.unparsed', 'too-large');
+  for (const text of remote.commands) {
+    for (const [cls, signals] of classifyCommandGroups(text, cwd, depth + 1).groups) {
+      if (!REMOTE_CLASSES.has(cls)) continue;
+      // Whether an `rm` target is outside the project is a question about THIS machine's
+      // checkout; the remote's own is asked below, with `/tmp` allowed.
+      const own = signals.filter((signal) => signal !== 'rm-dangerous-target');
+      if (own.length > 0) add(cls, own[0] as string);
+    }
+    let directory: string | null = null;
+    for (const seg of splitCommand(text).segments) {
+      directory = remoteDirectoryAfter(seg, directory);
+      for (const [test, name] of REMOTE_DESTRUCTIVE)
+        if (test.test(seg)) add('shell.destructive', name);
+      if (remoteRmIsDangerous(seg, directory)) add('shell.destructive', 'remote-rm-recursive');
+    }
+  }
+  return [...found.entries()];
+}
+
+/** A classification with each class's own signals kept apart, for callers that remap classes. */
+export interface CommandGroups {
+  readonly groups: ReadonlyArray<readonly [ActionClass, readonly string[]]>;
+  readonly hosts: readonly string[];
+}
+
+export function classifyCommand(command: string, cwd: string, depth = 0): CommandClassification {
+  const { groups, hosts } = classifyCommandGroups(command, cwd, depth);
+  return {
+    classes: groups.map(([cls]) => cls),
+    hosts,
+    signals: groups.flatMap(([, signals]) => signals),
+  };
+}
+
+export function classifyCommandGroups(command: string, cwd: string, depth = 0): CommandGroups {
+  const split = splitCommand(command);
+  const { segments, pipelines, truncated } = split;
+  // Cut where the shell cuts, not inside a quoted string (see `splitTopQuoted`).
+  const shellSegments = commandSegments(command, split);
   const selfConfig = selfTamperSignals(segments);
   // The PowerShell and cmd forms of the same four dangers, merged into the same
   // classes rather than given their own. A dangerous command is dangerous whichever
@@ -389,20 +695,27 @@ export function classifyCommand(command: string, cwd: string): CommandClassifica
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
     ['shell.exec_encoded', [...encodedExecSignals(segments, pipelines), ...ps.encoded]],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
-    ['shell.destructive', [...destructiveSignals(segments, cwd), ...ps.destructive]],
+    ['shell.destructive', [...destructiveSignals(segments, cwd, depth), ...ps.destructive]],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
     ['git.push_external', pushExternalSignals(segments)],
     ['config.self', [...selfConfig.deny, ...stroqStateSignals(command)]],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
     ['config.instructions', instructionWriteSignals(segments)],
+    ['config.persistence', persistenceSignals(shellSegments, command, cwd)],
     // Too much nesting to read is not reading it: see `nestedBudget`.
     ['shell.unparsed', truncated ? [...ps.unparsed, 'nested-commands-too-large'] : ps.unparsed],
   ];
-  const active = groups.filter(([, signals]) => signals.length > 0);
+  const remote = remoteClassification(command, segments, cwd, depth);
+  const merged = groups.map(([cls, signals]) => {
+    const extra = remote.filter(([c]) => c === cls).flatMap(([, more]) => more);
+    return [cls, [...signals, ...extra]] as const;
+  });
+  for (const [cls, more] of remote) {
+    if (!groups.some(([c]) => c === cls)) merged.push([cls, more] as const);
+  }
   return {
-    classes: active.map(([cls]) => cls),
+    groups: merged.filter(([, signals]) => signals.length > 0),
     hosts: hostsOf(command),
-    signals: active.flatMap(([, signals]) => signals),
   };
 }

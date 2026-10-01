@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { ACTION_CLASSES } from '../src/types.js';
 
 describe('types', () => {
-  it('exposes the nineteen action classes', () => {
-    expect(ACTION_CLASSES).toHaveLength(19);
+  it('exposes the twenty action classes', () => {
+    expect(ACTION_CLASSES).toHaveLength(20);
     expect(ACTION_CLASSES).toContain('shell.network');
     expect(ACTION_CLASSES).toContain('shell.unparsed');
     expect(ACTION_CLASSES).toContain('config.self_touch');
@@ -12,5 +12,6 @@ describe('types', () => {
     expect(ACTION_CLASSES).toContain('secret.egress');
     expect(ACTION_CLASSES).toContain('secret.unscannable');
     expect(ACTION_CLASSES).toContain('config.git_exec');
+    expect(ACTION_CLASSES).toContain('config.persistence');
   });
 });

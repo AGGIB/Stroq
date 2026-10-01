@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Policy, StroqEngine } from '@stroq/core';
@@ -6,6 +6,7 @@ import { ClaudeHookInputSchema, toolResultToText } from '../adapters/claude-code
 import { createEngineAt } from '../engine-factory.js';
 import {
   CWD_PLACEHOLDER,
+  HOME_PLACEHOLDER,
   type Incident,
   type Scenario,
   type ScenarioStep,
@@ -72,6 +73,18 @@ async function writeFixtures(dir: string, files: Readonly<Record<string, string>
     const file = containedPath(dir, rel);
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, body, { encoding: 'utf8', mode: 0o600 });
+  }
+}
+
+async function writeLinks(
+  dir: string,
+  home: string,
+  links: Readonly<Record<string, string>>,
+): Promise<void> {
+  for (const [rel, target] of Object.entries(links)) {
+    const link = containedPath(dir, rel);
+    await mkdir(dirname(link), { recursive: true });
+    await symlink(target.split(HOME_PLACEHOLDER).join(home).split(CWD_PLACEHOLDER).join(dir), link);
   }
 }
 
@@ -159,6 +172,7 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
     const userHome = join(root, 'user');
     await Promise.all([cwd, home, userHome].map((dir) => mkdir(dir, { recursive: true })));
     await writeFixtures(cwd, scenario.files ?? {});
+    await writeLinks(cwd, userHome, scenario.links ?? {});
     const engine = createEngineAt({ home, userHome, policy, env: {} });
     const steps: StepResult[] = [];
     for (const [index, step] of scenario.steps.entries()) {

@@ -335,6 +335,101 @@ function extractArguments(command: string, head: RegExp, budget: Budget): string
 const GIT_FOREACH_OR_BISECT_RUN = /\bgit\s+(?:submodule\s+foreach|bisect\s+run)\s+/g;
 
 /**
+ * `trap '<commands>' EXIT`: the quoted string is a command that runs later, on exit or on
+ * a signal, and it is where a script hides a delete it does not want to run in the
+ * visible flow (claude-code #88462). Read like `eval`'s argument, with two differences:
+ * `trap -- '…'` ends the options first, and a double-quoted body may hold `\"` and `\$`,
+ * which are the quote and the dollar and not the end of the string.
+ */
+const TRAP_HEAD = /\btrap\s+(?:--\s+)?/g;
+const MAX_TRAPS = 256;
+const MAX_TRAP_BODY_CHARS = 32 * 1024;
+
+function extractTrapBodies(command: string, budget: Budget): string[] {
+  const results: string[] = [];
+  const unquotedEnd = /[;\n|&]/g;
+  TRAP_HEAD.lastIndex = 0;
+  let head: RegExpExecArray | null;
+  while ((head = TRAP_HEAD.exec(command)) !== null && results.length < MAX_TRAPS) {
+    const start = head.index + head[0].length;
+    const quote = command.charAt(start);
+    let body: string;
+    if (quote === "'") {
+      const end = command.indexOf("'", start + 1);
+      if (end === -1) continue;
+      body = command.slice(start + 1, end);
+    } else if (quote === '"') {
+      let end = -1;
+      const limit = Math.min(command.length, start + 1 + MAX_TRAP_BODY_CHARS);
+      for (let i = start + 1; i < limit; i += 1) {
+        const ch = command.charAt(i);
+        if (ch === '\\') i += 1;
+        else if (ch === '"') {
+          end = i;
+          break;
+        }
+      }
+      if (end === -1) continue;
+      body = command.slice(start + 1, end).replace(/\\(["$`\\])/g, '$1');
+    } else {
+      unquotedEnd.lastIndex = start;
+      const stop = unquotedEnd.exec(command)?.index ?? command.length;
+      body = command.slice(start, stop);
+    }
+    if (body.length > budget.remaining) {
+      budget.exceeded = true;
+      break;
+    }
+    budget.remaining -= body.length;
+    results.push(body);
+  }
+  return results;
+}
+
+/**
+ * `cmd /c "<commands>"` and `powershell -Command "<commands>"`: a nested shell invocation
+ * in the Windows dialects, where the body is quoted with `"` and a quote inside it is
+ * written `\"`. The `sh -c` extractor ends a body at the first quote, which cuts
+ * `cmd /c "rmdir /s /q \"D:\x\""` off before the path it deletes.
+ */
+const WINDOWS_SHELL_HEAD =
+  /\b(?:cmd(?:\.exe)?\s+\/[ck]|(?:powershell|pwsh)(?:\.exe)?\s+(?:-\w+\s+)*?-c(?:ommand)?)\s+/gi;
+
+function extractWindowsShellBodies(command: string): string[] {
+  const results: string[] = [];
+  WINDOWS_SHELL_HEAD.lastIndex = 0;
+  let head: RegExpExecArray | null;
+  while ((head = WINDOWS_SHELL_HEAD.exec(command)) !== null) {
+    const start = head.index + head[0].length;
+    if (command[start] !== '"') continue;
+    let end = -1;
+    for (let i = start + 1; i < command.length; i += 1) {
+      const ch = command[i];
+      if (ch === '\\' && command[i + 1] === '"') {
+        i += 1;
+        continue;
+      }
+      if (ch === '"') {
+        end = i;
+        break;
+      }
+    }
+    if (end === -1) {
+      // `cmd /c "rmdir /s /q C:\"`: to cmd a backslash is a path separator, not an escape,
+      // so a body that only closes on the quote after one is read to that quote.
+      const literal = command.indexOf('"', start + 1);
+      if (literal === -1) continue;
+      results.push(command.slice(start + 1, literal));
+      WINDOWS_SHELL_HEAD.lastIndex = literal + 1;
+      continue;
+    }
+    results.push(command.slice(start + 1, end).replace(/\\"/g, '"'));
+    WINDOWS_SHELL_HEAD.lastIndex = end + 1;
+  }
+  return results;
+}
+
+/**
  * Splits a raw command into segments: top-level pipeline/chain segments plus
  * the (further-split) inner text of any process/command substitutions,
  * backtick expressions, `sh -c '...'` string bodies, `find -exec ... \;`
@@ -351,6 +446,8 @@ export interface SplitCommand {
   readonly pipelines: string[][];
   /** The nested arguments outgrew `nestedBudget`, so not all of them are here. */
   readonly truncated: boolean;
+  /** How many of `segments`, from the start, are the command's own top level. */
+  readonly topLevel: number;
 }
 
 /**
@@ -366,11 +463,15 @@ export function splitCommand(command: string): SplitCommand {
     extractFindExecCommands(command),
     extractArguments(command, EVAL_ARG, budget),
     extractArguments(command, GIT_FOREACH_OR_BISECT_RUN, budget),
+    extractTrapBodies(command, budget),
+    extractWindowsShellBodies(command),
   ];
+  const top = splitTop(command);
   return {
-    segments: [...splitTop(command), ...nested.flatMap((texts) => texts.flatMap(splitTop))],
+    segments: [...top, ...nested.flatMap((texts) => texts.flatMap(splitTop))],
     pipelines: [...pipelinesOf(command), ...nested.flatMap((texts) => texts.flatMap(pipelinesOf))],
     truncated: budget.exceeded,
+    topLevel: top.length,
   };
 }
 
@@ -457,4 +558,95 @@ export function firstArgAfter(segment: string): string {
     return token.replace(/^.*\//, '');
   }
   return '';
+}
+
+const HEREDOC_OPENER = /<<-?\s*(['"]?)([A-Za-z_]\w*)\1/y;
+
+/**
+ * The command's own top-level segments, cut only where the shell cuts: at `|`, `||`, `&&`,
+ * `;` and a line break outside quotes. The plain cut (`splitTop`) ignores quotes, so
+ * `perl -pi -e 's/a/b|c/' ~/.zshrc` lost its file to a segment `c/' ~/.zshrc`, and
+ * `grep -E "a|crontab|b"` grew a segment `crontab` that bash never runs. A heredoc body is
+ * not shell text, so an apostrophe in it opens no quote: its lines are cut as the plain
+ * cut does, as before. A quote that never closes runs to the end, as it does in the shell,
+ * which refuses the command.
+ */
+export function splitTopQuoted(command: string): string[] {
+  const out: string[] = [];
+  const pending: string[] = [];
+  let start = 0;
+  let quote = '';
+  const cut = (end: number): void => {
+    const piece = command.slice(start, end).trim();
+    if (piece !== '') out.push(piece);
+  };
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command.charAt(i);
+    if (quote !== '') {
+      if (ch === '\\' && quote === '"') i += 1;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '<' && command.charAt(i + 1) === '<' && command.charAt(i + 2) !== '<') {
+      HEREDOC_OPENER.lastIndex = i;
+      const opener = HEREDOC_OPENER.exec(command);
+      if (opener !== null) {
+        pending.push(opener[2] as string);
+        i = HEREDOC_OPENER.lastIndex - 1;
+      }
+      continue;
+    }
+    const two = command.slice(i, i + 2);
+    if (two === '&&' || two === '||') {
+      cut(i);
+      i += 1;
+      start = i + 1;
+      continue;
+    }
+    if (ch === ';' || (ch === '|' && command.charAt(i - 1) !== '>')) {
+      cut(i);
+      start = i + 1;
+      continue;
+    }
+    if (ch !== '\n') continue;
+    cut(i);
+    start = i + 1;
+    // The bodies of the heredocs this line opened, each up to its delimiter line.
+    // An index, not `shift()`: a line that opens thousands of heredocs would make each
+    // `shift` move the rest of the array.
+    for (let next = 0; next < pending.length; next += 1) {
+      const delimiter = pending[next] as string;
+      let lineStart = start;
+      while (lineStart <= command.length) {
+        const lineEnd = command.indexOf('\n', lineStart);
+        const end = lineEnd === -1 ? command.length : lineEnd;
+        const line = command.slice(lineStart, end);
+        lineStart = end + 1;
+        if (line.trim() === delimiter) break;
+        out.push(...splitTop(line));
+        if (lineEnd === -1) break;
+      }
+      start = Math.min(lineStart, command.length);
+      i = start - 1;
+    }
+    pending.length = 0;
+  }
+  if (quote === '' || start < command.length) cut(command.length);
+  return out;
+}
+
+/**
+ * The segments a detector that reads COMMANDS should see: the top level cut as the shell
+ * cuts it (see `splitTopQuoted`), then the nested commands `splitCommand` extracted.
+ */
+export function commandSegments(command: string, split: SplitCommand): string[] {
+  return [...splitTopQuoted(command), ...split.segments.slice(split.topLevel)];
 }

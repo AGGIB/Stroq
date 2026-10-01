@@ -68,6 +68,20 @@ const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = 
   ['19-dependency-postinstall-persistence', 'blocked', 'deny-self-tamper'],
   ['20-pdf-text-exec', 'blocked', 'deny-encoded-exec'],
   ['21-memory-persistence', 'asked', 'ask-instructions-payload'],
+  ['22-gitpwned-git-show-output', 'blocked', 'deny-git-exec'],
+  ['23-worktree-escape-zshenv', 'asked', 'ask-persistence'],
+  ['24-ghostapproval-symlink-authorized-keys', 'asked', 'ask-persistence'],
+  ['25-script-trap-removes-home', 'asked', 'ask-destructive'],
+  ['26-script-git-clean-workspace', 'asked', 'ask-destructive'],
+  ['27-vscode-task-folderopen', 'asked', 'ask-persistence'],
+  ['28-kiro-mcp-json-shell-server', 'asked', 'ask-instructions-payload'],
+  ['29-memtry-mcp-onboarding-harvest', 'asked', 'ask-mcp-side-effect-when-tainted'],
+  ['30-clinejection-issue-title-install', 'asked', 'ask-origin-untrusted'],
+  ['31-ssh-remote-docker-rmi', 'asked', 'ask-destructive'],
+  ['32-firebase-hosting-disable', 'asked', 'ask-destructive'],
+  ['33-lftp-mirror-delete', 'asked', 'ask-destructive'],
+  ['34-cmd-rmdir-quote-collapse', 'asked', 'ask-destructive'],
+  ['35-force-push-open-pr', 'asked', 'ask-destructive'],
 ];
 
 const OPEN_POLICY: Policy = { ...DEFAULT_POLICY, rules: [] };
@@ -83,12 +97,12 @@ describe('substituteCwd', () => {
 });
 
 describe('runAttack with the default policy', () => {
-  it('stops all twenty-one scenarios and reports rule ids', async () => {
+  it('stops all thirty-five scenarios and reports rule ids', async () => {
     const report = await runAttack(SCENARIOS, DEFAULT_POLICY, 'default');
     expect(report.version).toBe(1);
     expect(report.policy).toBe('default');
     expect(report.ok).toBe(true);
-    expect(report.totals).toEqual({ blocked: 15, asked: 6, passed: 0 });
+    expect(report.totals).toEqual({ blocked: 16, asked: 19, passed: 0 });
     expect(report.scenarios.map((r) => [r.id, r.outcome, r.ruleId])).toEqual(EXPECTED);
     for (const r of report.scenarios)
       expect(r.steps.every((s) => s.actual === s.expect)).toBe(true);
@@ -109,7 +123,7 @@ describe('runAttack with an open policy', () => {
   it('lets every attack through and fails the suite', async () => {
     const report = await runAttack(SCENARIOS, OPEN_POLICY, 'test');
     expect(report.ok).toBe(false);
-    expect(report.totals).toEqual({ blocked: 0, asked: 0, passed: 21 });
+    expect(report.totals).toEqual({ blocked: 0, asked: 0, passed: 35 });
     expect(report.scenarios.every((r) => r.outcome === 'passed' && r.ruleId === null)).toBe(true);
   }, 60_000);
 });

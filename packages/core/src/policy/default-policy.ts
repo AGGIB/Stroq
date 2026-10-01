@@ -74,6 +74,13 @@ export const DEFAULT_POLICY: Policy = {
       when: { classes: ['fs.secrets'], taint: 'suspect' },
     },
     {
+      id: 'deny-persistence-when-tainted',
+      effect: 'deny',
+      reason:
+        'Session is tainted by suspicious content; installing something a trusted process will run later (shell startup file, SSH key, scheduled job, auto-run task) is blocked',
+      when: { classes: ['config.persistence'], taint: 'suspect' },
+    },
+    {
       id: 'deny-push-external-when-tainted',
       effect: 'deny',
       reason: 'Session is tainted by suspicious content; push to external remote blocked',
@@ -97,6 +104,16 @@ export const DEFAULT_POLICY: Policy = {
       effect: 'ask',
       reason: 'Command references agent security configuration; confirm',
       when: { classes: ['config.self_touch'], taint: 'any' },
+    },
+    {
+      // Asked at any taint, because the pages that steer an agent here are the ones the
+      // scan calls clean: nothing in `~/.zshenv` or `authorized_keys` is ordinary agent
+      // work, and the cost of a question is one keystroke.
+      id: 'ask-persistence',
+      effect: 'ask',
+      reason:
+        'This installs something a trusted process will run later (shell startup file, SSH key, scheduled job, auto-run task); confirm',
+      when: { classes: ['config.persistence'], taint: 'any' },
     },
     {
       id: 'ask-instructions-payload',

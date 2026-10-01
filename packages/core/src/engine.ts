@@ -1,3 +1,4 @@
+import { writtenText } from './actions/written-text.js';
 import { classifyTool } from './actions/classify-tool.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
@@ -146,11 +147,6 @@ export function scanTargetForTool(
   return 'any';
 }
 /**
- * The text a write replaces rather than writes: an `Edit`'s `old_string`, Copilot's
- * `old_str`, Antigravity's `TargetContent`. Scanning it would ask about removing an
- * injection, the opposite of saving one.
- */
-/**
  * The score at which text written into an instruction file counts as a payload: a
  * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
  * because a README install line should not taint the session that reads it; saved into
@@ -158,31 +154,6 @@ export function scanTargetForTool(
  * costs little on a write that rare.
  */
 const INSTRUCTION_WRITE_THRESHOLD = 0.4;
-
-const REPLACED_TEXT_KEYS: ReadonlySet<string> = new Set(['old_string', 'old_str', 'TargetContent']);
-const MAX_WRITTEN_DEPTH = 4;
-
-/**
- * Every string a write carries, at any key, except the text it replaces. A list of the
- * keys agents are known to use was the first version, and a security review found
- * Antigravity's `create_file` sending its text as `CodeContent`, outside it — so the
- * payload was never scanned for a whole agent, and Cursor's field is undocumented.
- * Missing a key is a bypass; scanning a path or a flag is at worst a question. A Bash
- * command is its own text: the payload of `echo … >> CLAUDE.md` is in it.
- */
-function writtenText(toolInput: Readonly<Record<string, unknown>>): string {
-  const texts: string[] = [];
-  const walk = (value: unknown, depth: number): void => {
-    if (typeof value === 'string') texts.push(value);
-    else if (depth >= MAX_WRITTEN_DEPTH || value === null || typeof value !== 'object') return;
-    else if (Array.isArray(value)) for (const item of value) walk(item, depth + 1);
-    else
-      for (const [key, item] of Object.entries(value))
-        if (!REPLACED_TEXT_KEYS.has(key)) walk(item, depth + 1);
-  };
-  walk(toolInput, 0);
-  return texts.join('\n');
-}
 
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
 const MAX_STORED_CHARS = 120;

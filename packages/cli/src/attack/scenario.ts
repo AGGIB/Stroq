@@ -94,11 +94,29 @@ export interface Scenario {
   readonly asi: readonly string[];
   /** Files created inside the project directory before the steps run (paths relative to it). */
   readonly files?: Readonly<Record<string, string>>;
+  /**
+   * Symbolic links created inside the project directory before the steps run: the link's
+   * path (relative to it) and what it points at. A target may use `__CWD__` (the project
+   * directory) and `__HOME__` (the scenario's throwaway home), so a repository that ships
+   * `project_settings.json` pointing at `__HOME__/.ssh/authorized_keys` can be modelled
+   * without touching a real home.
+   */
+  readonly links?: Readonly<Record<string, string>>;
   /** At least one step; the last one is the attack itself and must be a `PreToolUse`. */
   readonly steps: readonly [ScenarioStep, ...ScenarioStep[]];
 }
 
+/**
+ * A fixture file that is code the scenario runs, not text an agent reads. The script an
+ * agent wrote and then ran IS the attack (claude-code #88462, #87360), so the fuzzer must
+ * not rewrite it — upper-casing `rm -rf "$HOME"` makes a different program — and the
+ * "no real secrets in fixtures" check does not apply to its `NAME=value` lines.
+ */
+export const isScriptFixture = (name: string): boolean =>
+  /\.(?:sh|bash|zsh|ps1|bat|cmd)$/i.test(name);
+
 export const CWD_PLACEHOLDER = '__CWD__';
+export const HOME_PLACEHOLDER = '__HOME__';
 /** Every secret value in the suite starts with this, so no scenario can ever carry a real credential. */
 export const SYNTHETIC_SECRET_PREFIX = 'stroq_attack_';
 export const SESSION_ID = 'stroq-attack';
@@ -140,6 +158,7 @@ const ScenarioSchema = z
     atlas: z.array(AtlasIdSchema).min(1),
     asi: z.array(AsiIdSchema).default([]),
     files: z.record(z.string(), z.string()).optional(),
+    links: z.record(z.string(), z.string()).optional(),
     steps: z
       .array(z.object({ event: z.record(z.string(), z.unknown()), expect: StepExpectationSchema }))
       .min(1),

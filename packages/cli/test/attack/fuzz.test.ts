@@ -10,8 +10,8 @@ const report = (over: Partial<FuzzReport> = {}): FuzzReport => ({
   policy: 'default',
   scenarios: 13,
   mutations: 25,
-  variants: 200,
-  survived: 198,
+  variants: 300,
+  survived: 298,
   escaped: [
     {
       scenarioId: '02-sentry-agentjacking',
@@ -24,7 +24,7 @@ const report = (over: Partial<FuzzReport> = {}): FuzzReport => ({
   ],
   recorded: [],
   errored: [],
-  notApplicable: 125,
+  notApplicable: 25,
   textless: ['08-rm-rf-home'],
   ok: false,
   ...over,
@@ -165,8 +165,10 @@ describe('runFuzz', () => {
 describe('formatFuzz', () => {
   it('leads with the variant count and the survival ratio', () => {
     const out = formatFuzz(report());
-    expect(out).toContain('13 scenarios x 25 mutations = 200 variants');
-    expect(out).toMatch(/survived:\s+198 \/ 200/);
+    expect(out).toContain(
+      '12 scenarios x 25 mutations = 300 variants (1 of 13 scenarios carry no untrusted text and are not mutated)',
+    );
+    expect(out).toMatch(/survived:\s+298 \/ 300/);
   });
 
   it('lists every escape with its scenario, mutation and rule', () => {
@@ -178,7 +180,7 @@ describe('formatFuzz', () => {
 
   it('states what it could not test rather than leaving it out', () => {
     const out = formatFuzz(report());
-    expect(out).toMatch(/not applicable:\s+125/);
+    expect(out).toMatch(/not applicable:\s+25/);
     expect(out).toContain('08-rm-rf-home');
   });
 
