@@ -1,6 +1,6 @@
 {
   "name": "stroq-monorepo",
-  "version": "0.21.2",
+  "version": "0.22.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
