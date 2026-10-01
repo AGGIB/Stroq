@@ -68,8 +68,36 @@ const INLINE_INTERPRETER = /^(?:perl|python|ruby|node|bun|deno)[\d.]*$/;
 const INLINE_WRITE =
   /write|append|\bopen\s*\([^)]{0,200},\s*['"][^'"]{0,8}[wax+]|\b(?:copy\w*|move|rename|symlink|link|system|popen|exec\w*|spawn\w*|subprocess|tee|sed)\b|>/i;
 /** An interpreter started with its program on the command line: `python3.12 -c`, `perl -le`, `node -pe`. */
-const INLINE_INTERPRETER_CALL =
-  /\b(?:perl|python|ruby|node|bun)[\d.]*\s+(?:-{1,2}[\w-]+\s+){0,4}?-[A-Za-z]*[ecEp][A-Za-z]*(?:\s|=|$)/;
+/** Interpreters that take a program on the command line, followed by their options. */
+const INTERPRETER_WORD = /\b(?:perl|python|ruby|node|bun)[\d.]*(?=\s)/g;
+const MAX_INTERPRETER_CALLS = 64;
+
+/**
+ * Whether the command starts an interpreter with its program on the command line:
+ * `python3.12 -c`, `perl -le`, `node -pe`, within the first few options. Read word by word:
+ * a regular expression that let a run of option letters be split two ways took 3.3 s on
+ * `python3 -EEEE…` of 64 KiB.
+ */
+function startsInlineInterpreter(command: string): boolean {
+  INTERPRETER_WORD.lastIndex = 0;
+  let calls = 0;
+  for (let m = INTERPRETER_WORD.exec(command); m !== null; m = INTERPRETER_WORD.exec(command)) {
+    calls += 1;
+    if (calls > MAX_INTERPRETER_CALLS) return true;
+    const options = command
+      .slice(m.index + m[0].length, m.index + m[0].length + 400)
+      .trim()
+      .split(/\s+/)
+      .slice(0, 5);
+    for (const word of options) {
+      if (!word.startsWith('-')) break;
+      const letters = /^-([A-Za-z]+)(?:=.*)?$/.exec(word)?.[1];
+      if (letters !== undefined && /[ecEp]/.test(letters)) return true;
+      if (/^--(?:eval|print)(?:=|$)/.test(word)) return true;
+    }
+  }
+  return false;
+}
 /** A URL is where a download comes from, not where it goes: `curl -o /tmp/x https://…/.bashrc`. */
 const URL_WORD = /^[a-z][a-z0-9+.-]*:\/\//i;
 const REDIRECT_OPERATOR = /^\d*>>?\|?$/;
@@ -155,7 +183,9 @@ function writtenFiles(segment: string, word: string): string[] {
   else if (word === 'git' && args[0] === 'clone' && args.length > 2) {
     targets.push(args[args.length - 1] as string);
   } else if (word === 'sed') {
-    if (words.some((w) => /^(?:-[A-Za-z]*i\S*|--in-place(?:=.*)?)$/.test(w))) targets.push(...args);
+    // `-i`, `-i.bak`, `-ni`, `--in-place`, `--in-place=.bak`: an option whose letters include `i`.
+    if (words.some((w) => /^-[A-Za-z]*i/.test(w) || /^--in-place(?:=|$)/.test(w)))
+      targets.push(...args);
   } else if (ANY_ARGUMENT.has(word)) targets.push(...args);
   else if (word === 'dd') {
     for (const w of words) if (w.startsWith('of=')) targets.push(unquote(w.slice(3)));
@@ -244,7 +274,7 @@ export function persistenceSignals(segments: readonly string[], command = ''): s
   // whatever the quotes say, so the interpreter and the file it names can land in different
   // segments. The command as a whole is asked as well.
   if (
-    INLINE_INTERPRETER_CALL.test(command) &&
+    startsInlineInterpreter(command) &&
     INLINE_WRITE.test(command) &&
     PERSISTENCE_FILE.test(command)
   ) {

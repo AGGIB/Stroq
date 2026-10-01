@@ -33,7 +33,6 @@ export function writtenText(toolInput: Readonly<Record<string, unknown>>): strin
 }
 
 const MAX_QUOTED_TEXTS = 64;
-const QUOTED_SPAN = /'([^']*)'|"((?:[^"\\]|\\.)*)"/g;
 
 /**
  * The texts a shell command may be writing: the command itself, which holds a heredoc
@@ -44,11 +43,40 @@ const QUOTED_SPAN = /'([^']*)'|"((?:[^"\\]|\\.)*)"/g;
  */
 export function commandTexts(command: string): string[] {
   const texts = [command];
-  for (const span of command.matchAll(QUOTED_SPAN)) {
-    const inner = span[1] ?? span[2] ?? '';
+  for (const inner of quotedSpans(command)) {
     if (inner.length < 4) continue;
     texts.push(inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t'));
     if (texts.length > MAX_QUOTED_TEXTS) break;
   }
   return texts;
+}
+
+/**
+ * The quoted strings of a command, in one pass. A global regular expression retried from
+ * every `"` of a string that never closes, which took 0.9 s on 64 KiB of `\"!`; this stops
+ * at the first quote that does not close.
+ */
+function quotedSpans(command: string): string[] {
+  const spans: string[] = [];
+  let i = 0;
+  while (i < command.length) {
+    const ch = command.charAt(i);
+    if (ch === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1) break;
+      spans.push(command.slice(i + 1, end));
+      i = end + 1;
+    } else if (ch === '"') {
+      let end = i + 1;
+      while (end < command.length && command.charAt(end) !== '"') {
+        end += command.charAt(end) === '\\' ? 2 : 1;
+      }
+      if (end >= command.length) break;
+      spans.push(command.slice(i + 1, end));
+      i = end + 1;
+    } else {
+      i += 1;
+    }
+  }
+  return spans;
 }

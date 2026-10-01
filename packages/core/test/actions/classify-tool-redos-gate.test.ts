@@ -109,6 +109,11 @@ describe('the text an MCP call carries stays linear', () => {
 });
 
 const COMMANDS: ReadonlyArray<readonly [string, Build]> = [
+  // The three shapes CodeQL found on the first push: one word of option letters, and a
+  // double-quoted string that never closes.
+  ['one long word of interpreter options', (size) => `python3 -${'E'.repeat(size)}!`],
+  ['one long sed option', (size) => `sed -${'i'.repeat(size)}! ~/.zshrc`],
+  ['an unclosed quote of escaped quotes', (size) => `echo "${'\\"!'.repeat(size / 3)} > .mcp.json`],
   ['python open(', (size) => `python3 -c "${'open('.repeat(size / 5)}`],
   [
     'python open( then a startup file',

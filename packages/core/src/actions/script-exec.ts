@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { ActionClass } from '../types.js';
@@ -194,30 +194,36 @@ type ScriptRead =
   | { readonly kind: 'too-large' }
   | { readonly kind: 'none' };
 
-function beginsWithShellShebang(path: string): boolean {
+/**
+ * The script's text, read through one descriptor: what is checked (a regular file, its
+ * size, a shell `#!` line) is what is read, so a file swapped between a check and a read is
+ * not a way around either.
+ */
+function readScript(path: string, needsShebang: boolean): ScriptRead {
   let fd: number | null = null;
   try {
     fd = openSync(path, 'r');
-    const head = Buffer.alloc(SHEBANG_BYTES);
-    const read = readSync(fd, head, 0, SHEBANG_BYTES, 0);
-    return SHELL_SHEBANG.test(head.toString('latin1', 0, read));
-  } catch {
-    return false;
-  } finally {
-    if (fd !== null) closeSync(fd);
-  }
-}
-
-function readScript(path: string, needsShebang: boolean): ScriptRead {
-  try {
-    const info = statSync(path);
+    const info = fstatSync(fd);
     if (!info.isFile()) return { kind: 'none' };
-    if (needsShebang && !beginsWithShellShebang(path)) return { kind: 'none' };
+    if (needsShebang) {
+      const head = Buffer.alloc(SHEBANG_BYTES);
+      const read = readSync(fd, head, 0, SHEBANG_BYTES, 0);
+      if (!SHELL_SHEBANG.test(head.toString('latin1', 0, read))) return { kind: 'none' };
+    }
     if (info.size > MAX_SCRIPT_BYTES) return { kind: 'too-large' };
-    const text = readFileSync(path, 'utf8');
+    const buffer = Buffer.alloc(info.size);
+    let filled = 0;
+    while (filled < info.size) {
+      const read = readSync(fd, buffer, filled, info.size - filled, filled);
+      if (read === 0) break;
+      filled += read;
+    }
+    const text = buffer.toString('utf8', 0, filled);
     return text.includes('\0') ? { kind: 'none' } : { kind: 'text', text };
   } catch {
     return { kind: 'none' };
+  } finally {
+    if (fd !== null) closeSync(fd);
   }
 }
 
