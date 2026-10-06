@@ -56,8 +56,8 @@ const PS_NETWORK =
   /\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm|Start-BitsTransfer|Net\.WebClient|DownloadString|DownloadFile|DownloadData)\b/i;
 /** `certutil` and `bitsadmin` are ordinary admin tools until they are given a transfer to do. */
 export const PS_LOLBIN_FETCH = anyOf(
-  followedBy(/\bcertutil\b/i, /-urlcache\b/i),
-  followedBy(/\bbitsadmin\b/i, /\/transfer\b/i),
+  followedBy(/\bcertutil\b/i, /[-/]urlcache\b/i),
+  followedBy(/\bbitsadmin\b/i, /[-/]transfer\b/i),
 );
 
 const isPsNetwork = (segment: string): boolean =>
@@ -90,10 +90,10 @@ const CALL_OPERATOR_EXPRESSION = /(?:^|[\s;|({])&\s*[$(]/;
 // it, ending earlier, and the flag cannot start inside `.exe` anyway.
 export const PS_ENCODED_COMMAND = followedBy(
   /\b(?:powershell|pwsh)\b/i,
-  /\s-e(?:c|nc|ncodedcommand)?\s+\S/i,
+  /\s[-/]e(?:c|nc|ncodedcommand)?\s+\S/i,
 );
 /** The same flag reached through a wrapper that does not name the interpreter. */
-const PS_ENCODED_COMMAND_LONG = /\s-(?:enc|encodedcommand)\s+\S/i;
+const PS_ENCODED_COMMAND_LONG = /\s[-/](?:enc|encodedcommand)\s+\S/i;
 /** Decoding in-process, which is how a payload avoids the flag above entirely. */
 const PS_BASE64_DECODE = /\[(?:System\.)?Convert\]::FromBase64String/i;
 

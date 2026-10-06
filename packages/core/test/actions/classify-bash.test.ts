@@ -51,6 +51,8 @@ describe('isDangerousRmTarget', () => {
     '.',
     '*',
     './*',
+    '.*',
+    './.*',
     '/etc',
     '$DIR',
     '/home/dev',
@@ -58,6 +60,9 @@ describe('isDangerousRmTarget', () => {
   it.each(['node_modules', 'dist/', `${cwd}/build`, 'tmp.txt'])('allows %s', (t) =>
     expect(isDangerousRmTarget(t, cwd)).toBe(false),
   );
+  it('allows safe subdirectories even when cwd has a trailing slash', () => {
+    expect(isDangerousRmTarget(`${cwd}/build`, `${cwd}/`)).toBe(false);
+  });
 
   it('drops trailing slashes from an absolute target exactly as `/\\/+$/` did', () => {
     expect(isDangerousRmTarget(`${cwd}/build///`, cwd)).toBe(false);
