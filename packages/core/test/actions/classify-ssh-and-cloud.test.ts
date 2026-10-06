@@ -19,6 +19,7 @@ describe('which host and which command an ssh invocation has', () => {
     'ssh -- prod "rm -rf /srv/app"',
     'sshpass -p secret ssh prod "docker rmi old-image"',
     'sshpass -f pw ssh -o StrictHostKeyChecking=no prod docker volume rm data',
+    'ssh prod "docker compose down --volumes"',
   ])('reads the remote command of %s', (command) => {
     expect(destructive(command)).toBe(true);
   });
@@ -42,6 +43,8 @@ describe('a recursive rm on a server', () => {
     'ssh prod "cd /srv && rm -rf ./*"',
     'ssh prod "rm -rf ~/app"',
     'ssh prod "rm -rf /var/www"',
+    'ssh prod "cd /tmp && cd && rm -rf out"',
+    'ssh prod "cd; rm -rf out"',
   ])('asks about %s', (command) => {
     expect(destructive(command)).toBe(true);
   });

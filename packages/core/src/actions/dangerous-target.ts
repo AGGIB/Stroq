@@ -29,7 +29,7 @@ function withoutTrailingSlashes(path: string): string {
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
   if (t === '') return false;
-  if (['/', '/*', '.', './', '*', './*'].includes(t)) return true;
+  if (['/', '/*', '.', './', '*', './*', '.*', './.*'].includes(t)) return true;
   // `~`, `~/…` and `~user/…` expand to a home directory, which is never inside a
   // project checkout; `$VAR` is unknown and `..` points upward — all treated as
   // outside the working tree. `$` also covers PowerShell's `$env:USERPROFILE`,
@@ -51,5 +51,6 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
   }
   if (!t.startsWith('/')) return false;
   const normalized = withoutTrailingSlashes(t);
-  return !normalized.startsWith(`${cwd}/`);
+  const root = withoutTrailingSlashes(cwd);
+  return !normalized.startsWith(`${root}/`);
 }
