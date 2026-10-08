@@ -15,7 +15,9 @@ import { cpuNow } from '../cpu-time.js';
  * sixteenth of its size, a quarter and its full size, and each is compared with the one
  * before. Linear work takes about four times as long; the patterns this guards against
  * took sixteen times as long or more. Only an input that is both slow and growing faster
- * than it should fails. A time alone does not work on a shared runner — linear work on
+ * than it should fails. A size that looks too slow is timed again, twice, and the least is kept: on a shared
+ * runner one measurement of the same input has differed by a factor of three, and a quadratic pattern is slow
+ * every time. A time alone does not work on a shared runner — linear work on
  * 37,000 lines of `eval x` took 1.3 s there under coverage, against 0.2 s on a laptop —
  * and a ratio alone does not work on timings of a millisecond, which are noise. Three
  * sizes and not two, because a command that is estimated to cost too much to read is not
@@ -354,9 +356,20 @@ const timed = (command: string): number => {
   return cpuNow() - started;
 };
 
+/** How often a size that looks too slow is timed, the first time included: noise only adds to a time. */
+const TRIES = 3;
+
 describe('classifyCommand stays linear on commands built to be slow', () => {
   it.each(ADVERSARIAL)('%s', (_name, build) => {
-    const times = SIZES.map((size) => timed(at(build, size)));
+    const times: number[] = [timed(at(build, SIZES[0]))];
+    for (let i = 1; i < SIZES.length; i += 1) {
+      const command = at(build, SIZES[i] as number);
+      const small = times[i - 1] as number;
+      let big = timed(command);
+      for (let tries = 1; tries < TRIES && big >= BOUND_MS && big >= MAX_GROWTH * small; tries += 1)
+        big = Math.min(big, timed(command));
+      times.push(big);
+    }
     const growth = times.map(
       (ms, i) => `${ms.toFixed(0)} ms at ${(SIZES[i] as number) / 1024} KiB`,
     );
