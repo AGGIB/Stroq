@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { classifyTool } from '../../src/actions/classify-tool.js';
+import { NOTHING_THERE } from './shell-matrix.js';
 import { spellings } from './spelling-matrix.js';
 
 /**
@@ -25,7 +26,8 @@ const SHELLS = ['/bin/bash', '/bin/zsh'].filter(
 );
 const SPAWN_TIMEOUT_MS = 4000;
 const CPU_LIMIT_SECONDS = 3;
-const PAYLOAD = 'rm -rf ~';
+// A delete of nothing (see `NOTHING_THERE`): a spelling that reaches the real `rm` and the real home removes no file.
+const PAYLOAD = `rm -rf ~/${NOTHING_THERE}`;
 
 let dir = '';
 let home = '';
@@ -54,6 +56,9 @@ afterAll(() => {
 });
 
 function ran(shell: string, command: string): boolean {
+  // Never a command that can reach something that exists: see `NOTHING_THERE`.
+  if (!command.includes(NOTHING_THERE) && /rm\s+-rf/i.test(command))
+    throw new Error(`refusing to run a delete of anything but nothing: ${command}`);
   rmSync(record, { force: true });
   // A spelling may loop for ever (the fake `rm` always succeeds), and killing the shell does not kill
   // what it started: a CPU limit, which children inherit, does.

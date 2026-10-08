@@ -5,6 +5,16 @@
  */
 export const PAYLOAD = 'rm -rf ~';
 
+/**
+ * The name under the home directory that the shapes delete when they are RUN, and that is never there.
+ * `shell-input-differential.test.ts` runs them in a real shell, and some of them (`env -i bash`) clear the
+ * environment, which takes the stand-in `rm` off the path and the fake `HOME` away: the real `rm` then runs on the
+ * real home. Run with `rm -rf ~` that removed the `.config` of the machine it ran on; run with `RUN_PAYLOAD` it
+ * removes nothing, and the classifier still reads it as a delete under the home directory.
+ */
+export const NOTHING_THERE = '.stroq-differential-nothing-is-here';
+export const RUN_PAYLOAD = `rm -rf ~/${NOTHING_THERE}`;
+
 export const SHELLS = [
   'bash',
   'sh',
@@ -82,7 +92,7 @@ export const WRAPS: [string, (command: string) => string][] = [
 ];
 
 /** Every command the three lists make, or every `stride`th, where a wrapper other than none is for bash and sh only. */
-export function* combinations(stride = 1): Generator<string> {
+export function* combinations(stride = 1, payload = PAYLOAD): Generator<string> {
   let n = 0;
   for (const [, source] of SOURCES)
     for (const shell of SHELLS)
@@ -90,6 +100,6 @@ export function* combinations(stride = 1): Generator<string> {
         const plain = shell === 'bash' || shell === 'sh';
         if (wrapName !== 'alone' && !plain) continue;
         n += 1;
-        if (n % stride === 0) yield wrap(source(shell));
+        if (n % stride === 0) yield wrap(source(shell)).replaceAll(PAYLOAD, payload);
       }
 }
