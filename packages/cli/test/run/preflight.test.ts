@@ -26,6 +26,7 @@ const hooks =
     installed: true,
     changed: false,
     detail: 'project: installed (/repo/.claude/settings.json)',
+    fix: `stroq init --agent ${id}`,
     ...over,
   });
 
@@ -53,6 +54,17 @@ describe('what stroq run checks before it starts an agent', () => {
     });
     expect(result.refusals).toHaveLength(1);
     expect(result.refusals[0]?.fix).toContain('stroq init --agent codex');
+  });
+
+  // The fix is the status's own: for a Windsurf install that a project `.devin/hooks.json`
+  // shadows, `stroq init --agent windsurf` writes the file that is skipped and changes nothing.
+  it('names the fix the status carries, not the one it would have guessed', () => {
+    const result = run(repo(), {
+      agent: 'windsurf',
+      command: 'windsurf',
+      hooks: hooks({ installed: false, fix: 'stroq init --agent windsurf --user' }),
+    });
+    expect(result.refusals[0]?.fix).toBe('stroq init --agent windsurf --user');
   });
 
   // An entry that still LOOKS installed but is no longer the command `init` wrote is

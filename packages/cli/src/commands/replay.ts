@@ -7,6 +7,7 @@
 // `pre` entry records the action plus the provenance evidence that links it
 // back — so this command reconstructs the graph from data already on disk. It
 // adds no telemetry and works on sessions recorded by earlier versions.
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ import {
 } from '@stroq/core';
 import { createEngineAt, loadPolicy } from '../engine-factory.js';
 import { auditFile, auditFileIn } from '../paths.js';
+import { formatReplayHtml } from '../replay/html.js';
 import { findTranscripts, readTranscript, type Transcript } from '../replay/transcript.js';
 
 /** One action that traced back to something the agent had read. */
@@ -194,7 +196,7 @@ const RULE_PREVIEW = 3;
  */
 export type ReplayVoice = 'recorded' | 'replayed';
 
-function verdictTag(entry: AuditEntry, voice: ReplayVoice): string {
+export function verdictTag(entry: AuditEntry, voice: ReplayVoice): string {
   const d = entry.decision;
   if (!d) return '';
   const rule = d.ruleId ?? 'default';
@@ -208,7 +210,7 @@ function verdictTag(entry: AuditEntry, voice: ReplayVoice): string {
   return `allowed ${rule}`;
 }
 
-function readLine(src: ReplaySource): string {
+export function readLine(src: ReplaySource): string {
   const scan = src.read?.scan;
   if (!scan) {
     return src.suspect
@@ -224,7 +226,7 @@ function readLine(src: ReplaySource): string {
   return `SUSPECT ${scan.score.toFixed(2)} — ${scan.ruleIds.length} rules: ${ids}${more}${waived}`;
 }
 
-const secretLine = (s: SecretHit): string =>
+export const secretLine = (s: SecretHit): string =>
   `${s.name} from ${s.source}${s.canary ? ' (canary)' : ''}`;
 
 function consequenceBlock(c: ReplayConsequence, last: boolean, voice: ReplayVoice): string[] {
@@ -374,6 +376,27 @@ export async function replayTranscript(transcript: Transcript): Promise<AuditEnt
   }
 }
 
+/**
+ * Prints the page, or writes it to a file that does not exist yet (`wx`: an existing file, or a link
+ * where it would go, is refused and not written through). Returns the exit code.
+ */
+function emitHtml(text: string, path: string | undefined): number {
+  if (path === undefined) {
+    process.stdout.write(text);
+    return 0;
+  }
+  try {
+    writeFileSync(path, text, { flag: 'wx', mode: 0o644 });
+  } catch (err) {
+    const why =
+      (err as NodeJS.ErrnoException).code === 'EEXIST' ? 'it exists' : (err as Error).message;
+    process.stderr.write(`not written: ${path} (${why})\n`);
+    return 2;
+  }
+  process.stdout.write(`wrote ${path}\n`);
+  return 0;
+}
+
 export async function runReplay(args: readonly string[]): Promise<number> {
   const { values, positionals } = parseArgs({
     args: [...args],
@@ -382,9 +405,17 @@ export async function runReplay(args: readonly string[]): Promise<number> {
       list: { type: 'boolean' },
       transcript: { type: 'string' },
       last: { type: 'boolean' },
+      html: { type: 'boolean' },
+      out: { type: 'string' },
     },
     allowPositionals: true,
   });
+  // `--out` is a page, so it implies `--html`; a page and JSON, or a page and a list, are two answers.
+  const html = values.html === true || values.out !== undefined;
+  if (html && (values.json === true || values.list === true)) {
+    process.stderr.write('--html and --out make a page; they do not go with --json or --list\n');
+    return 2;
+  }
 
   // A transcript is the agent's own recording, so this path works on sessions that
   // ran before Stroq was ever installed — the one question no live hook can answer
@@ -402,6 +433,7 @@ export async function runReplay(args: readonly string[]): Promise<number> {
     }
     const replayed = await replayTranscript(transcript);
     const model = buildReplay(replayed, transcript.sessionId);
+    if (html) return emitHtml(formatReplayHtml(model, 'replayed'), values.out);
     if (values.json === true) {
       process.stdout.write(`${JSON.stringify(model, null, 2)}\n`);
       return 0;
@@ -431,6 +463,7 @@ export async function runReplay(args: readonly string[]): Promise<number> {
     return 1;
   }
   const model = buildReplay(entries, sessionId);
+  if (html && model.total > 0) return emitHtml(formatReplayHtml(model, 'recorded'), values.out);
   if (values.json === true) {
     process.stdout.write(`${JSON.stringify(model, null, 2)}\n`);
     return 0;

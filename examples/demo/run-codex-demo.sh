@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Replays five recorded Codex hook events through the real CLI and asserts the
+# Replays five hand-written Codex hook events through the real CLI and asserts the
 # decision each one must produce. A demo that prints a convincing story while the
 # decision underneath it has changed is worse than no demo, so every event is
 # checked with grep over the captured streams and any mismatch exits 1.

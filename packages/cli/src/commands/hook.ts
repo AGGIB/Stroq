@@ -40,6 +40,7 @@ import { createEngine } from '../engine-factory.js';
 import { ANTIGRAVITY_HOOK_TIMEOUT_SECONDS } from './antigravity-hooks.js';
 import { COPILOT_HOOK_TIMEOUT_SECONDS } from './copilot-hooks.js';
 import { HOOK_TIMEOUT_SECONDS, hookDeadlineMs } from './config-file.js';
+import { stampHookFired } from '../hook-stamp.js';
 import { logError } from '../log.js';
 
 export async function readStdin(stream: NodeJS.ReadableStream = process.stdin): Promise<string> {
@@ -192,6 +193,12 @@ const lookup = (agent: string): HookAdapter | undefined =>
   // module actually registered.
   Object.hasOwn(ADAPTERS, agent) ? ADAPTERS[agent] : undefined;
 
+const BYTE_ORDER_MARK = 0xfeff;
+
+/** JSON.parse rejects a leading UTF-8 mark, which some Windows tools put on piped text. */
+const withoutByteOrderMark = (text: string): string =>
+  text.charCodeAt(0) === BYTE_ORDER_MARK ? text.slice(1) : text;
+
 export async function runHook(
   agent: string,
   rawJson: string,
@@ -210,9 +217,11 @@ export async function runHook(
     logError(context, new Error(`missing or unknown phase argument "${arg}"`));
     return badArg;
   }
+  // The host called Stroq, whatever it sent: `stroq doctor` says when (see `hook-stamp.ts`).
+  stampHookFired(agent);
   let raw: unknown;
   try {
-    raw = JSON.parse(rawJson);
+    raw = JSON.parse(withoutByteOrderMark(rawJson));
   } catch (err) {
     logError(context, err);
     return adapter.badJson(BAD_JSON, arg);

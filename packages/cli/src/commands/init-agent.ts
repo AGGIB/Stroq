@@ -1,5 +1,7 @@
 import { homedir } from 'node:os';
+import type { Terminal } from '../ui/terminal.js';
 import { agentHookStatus, detectedAgents } from './doctor.js';
+import { isAgentFlag, mayDraw } from './init-args.js';
 import { HOOK_AGENTS, runInit } from './init.js';
 
 /**
@@ -21,7 +23,6 @@ import { HOOK_AGENTS, runInit } from './init.js';
  * command for each: a machine with three agents and one guard should not look done.
  */
 const isHookAgent = (id: string): boolean => (HOOK_AGENTS as readonly string[]).includes(id);
-const isAgentFlag = (arg: string): boolean => arg === '--agent' || arg.startsWith('--agent=');
 const command = (id: string, user: boolean): string =>
   `stroq init --agent ${id}${user ? ' --user' : ''}`;
 const nameOf = (id: string, cwd: string): string => agentHookStatus(id, cwd)?.name ?? id;
@@ -29,19 +30,43 @@ const nameOf = (id: string, cwd: string): string => agentHookStatus(id, cwd)?.na
 export interface InitWhere {
   readonly cwd?: string;
   readonly home?: string;
+  /** A terminal to draw on, for a test. Without one, the process's own is used when a person is at it. */
+  readonly terminal?: Terminal;
+}
+
+/**
+ * The terminal to draw the first-run screen on, or null where none is wanted: a person has to be
+ * there (both streams are terminals, not CI, not `TERM=dumb`), and the arguments must be a first
+ * run (not a preview, not told `--no-input`, not the MCP proxy). The screen's code is loaded only
+ * then, so that nothing of it is read by the hook process, which starts for every tool call.
+ */
+async function screenFor(args: readonly string[], where: InitWhere): Promise<Terminal | null> {
+  if (!mayDraw(args)) return null;
+  if (where.terminal !== undefined) return where.terminal.interactive ? where.terminal : null;
+  if (process.stdout.isTTY !== true || process.stdin.isTTY !== true) return null;
+  const { currentTerminal } = await import('../ui/terminal.js');
+  const term = currentTerminal();
+  return term.interactive ? term : null;
 }
 
 export async function runInitCommand(
   args: readonly string[],
   where: InitWhere = {},
 ): Promise<number> {
-  if (args.some(isAgentFlag)) return runInit(args);
   const cwd = where.cwd ?? process.cwd();
+  const screen = await screenFor(args, where);
+  if (screen !== null) {
+    const { runInteractiveInit } = await import('./init-interactive.js');
+    return runInteractiveInit(args, screen, { cwd, home: where.home ?? homedir() });
+  }
+  if (args.some(isAgentFlag)) return runInit(args);
   // The advice below is a command to run, and `--user` is part of what was asked for.
   const user = args.includes('--user');
   // The home directory only: a `.agents` or `.cursor` folder that came with a repository
   // says what its authors use, and would otherwise decide which config gets written.
-  const found = detectedAgents(cwd, where.home ?? homedir(), 'user').filter(isHookAgent);
+  const home = where.home ?? homedir();
+  // A home that is not set is an empty string, and a path joined to it is the project's own.
+  const found = home === '' ? [] : detectedAgents(cwd, home, 'user').filter(isHookAgent);
 
   if (found.length === 0 || found.includes('claude-code')) {
     const code = await runInit(args);

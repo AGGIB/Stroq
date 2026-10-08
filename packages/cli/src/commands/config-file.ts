@@ -56,22 +56,45 @@ function parseFailure(err: unknown): string {
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 
 /**
- * Reads an agent's JSON config. A missing or empty file is an empty object.
- *
- * Only a regular file within `MAX_CONFIG_BYTES` is read. A repository can commit
- * `.claude/settings.json` as a symlink to `/dev/zero`, and `doctor`, `init` and
- * `exposure` then read an endless stream until the process ran out of memory; the
- * same check already guards `inspect` and the secret index. The check is made on the
- * handle that is then read, so re-pointing the path in between changes nothing.
+ * The text of an agent's config, or `null` when there is no file. Only a regular file within
+ * `MAX_CONFIG_BYTES` is read. A repository can commit `.claude/settings.json` as a symlink to
+ * `/dev/zero`, and `doctor`, `init` and `exposure` then read an endless stream until the
+ * process ran out of memory; the same check already guards `inspect` and the secret index.
+ * The check is made on the handle that is then read, so re-pointing the path in between
+ * changes nothing.
  */
-export function readJsonObject<T extends object>(file: string): T {
-  if (!existsSync(file)) return {} as T;
-  const read = readRegularFile(file, MAX_CONFIG_BYTES);
+export function readConfigText(
+  file: string,
+  options: { readonly strict?: boolean } = {},
+): string | null {
+  // `existsSync` reads a file behind a directory it cannot enter, or behind a link that
+  // loops, as no file at all; `strict` asks for only "there is no such file" to mean that.
+  if (options.strict !== true && !existsSync(file)) return null;
+  let read: ReturnType<typeof readRegularFile>;
+  try {
+    read = readRegularFile(file, MAX_CONFIG_BYTES);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (options.strict === true && (code === 'ENOENT' || code === 'ENOTDIR')) return null;
+    throw err;
+  }
   if (read.kind === 'not-regular') throw new Error(`cannot read ${file}: not a regular file`);
   if (read.kind === 'too-large')
     throw new Error(`cannot read ${file}: ${read.size} bytes is too large for an agent config`);
-  const text = read.text;
-  if (text.trim().length === 0) return {} as T;
+  return read.text;
+}
+
+/**
+ * Reads an agent's JSON config. A missing or empty file is an empty object.
+ */
+export function readJsonObject<T extends object>(file: string): T {
+  const text = readConfigText(file);
+  if (text === null || text.trim().length === 0) return {} as T;
+  return parseConfigJson<T>(file, text);
+}
+
+/** `text` as JSON, or an error that names `file` and where parsing failed, never what it said. */
+export function parseConfigJson<T>(file: string, text: string): T {
   try {
     return JSON.parse(text) as T;
   } catch (err) {

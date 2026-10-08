@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { FileSecretIndex, loadBundledRules, scanContent, type SecretIndexStats } from '@stroq/core';
+import { join, posix, win32 } from 'node:path';
+import {
+  canFire,
+  FileSecretIndex,
+  loadBundledRules,
+  scanContent,
+  type SecretIndexStats,
+} from '@stroq/core';
 import { secretsFile, stroqHome } from '../paths.js';
 import { CURSOR_BLOCKING_EVENTS, CURSOR_EVENTS } from '../adapters/cursor.js';
 import { cursorHooksPath, isStroqCursorHook, readCursorHooks } from './cursor-hooks.js';
@@ -14,7 +20,14 @@ import {
   readCodexHooks,
 } from './codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks, readCopilotHooks } from './copilot-hooks.js';
-import { isStroqWindsurfHooks, readWindsurfHooks, windsurfHooksPath } from './windsurf-hooks.js';
+import {
+  carriesRecordedEntries,
+  devinHooksPath,
+  isStroqWindsurfHooks,
+  readDevinWorkspaceHooks,
+  readWindsurfHooks,
+  windsurfHooksPath,
+} from './windsurf-hooks.js';
 import {
   antigravityHooksPath,
   isStroqAntigravityHooks,
@@ -35,8 +48,14 @@ import {
   missingOpenClawPluginFile,
   openclawPluginDir,
 } from './openclaw-plugin.js';
+import { withLiveness } from './doctor-liveness.js';
 import { stroqVersion } from '../version.js';
-import { installDrift, readInstallRecord, type InstallDrift } from './install-record.js';
+import {
+  installDrift,
+  installKey,
+  readInstallRecord,
+  type InstallDrift,
+} from './install-record.js';
 
 export interface DoctorCheck {
   readonly name: string;
@@ -229,6 +248,76 @@ function checkWindsurfHooks(file: string): {
   }
 }
 
+/**
+ * Devin Desktop, the renamed Windsurf, reads the workspace file `.devin/hooks.json` and
+ * falls back to `.windsurf/hooks.json` only "when `.devin/hooks.json` is absent or defines
+ * no hooks" (docs.devin.ai/desktop/cascade/hooks). `init` writes the second, so a repository
+ * that ships a `.devin/hooks.json` of its own, or an agent that writes one, switches a
+ * project install off without touching a byte of the file Stroq wrote. The user file has
+ * no such twin and the levels are merged, so only the project scope is looked at here.
+ *
+ * When Stroq's own entries are in the file Devin reads, that is the install that runs. The
+ * install record and the vanished-path check are made on `.windsurf/hooks.json` only; a
+ * copy made by hand into the other file is trusted as it stands.
+ */
+function underDevin(project: ScopeStatus, cwd: string): ScopeStatus {
+  const devin = readDevinWorkspaceHooks(cwd);
+  const devinFile = devinHooksPath(cwd);
+  switch (devin.state) {
+    case 'absent':
+    case 'empty':
+      return project;
+    case 'defined': {
+      // The file is the repository's, and ` hook windsurf` is what a hook command ends in,
+      // not who wrote it: its entries count as Stroq's only when they are the command `init`
+      // recorded and every path in it is still there, the checks the `.windsurf` file gets.
+      if (isRecordedCopy(devin.json, devin.text))
+        return { scope: 'project', file: devinFile, installed: true, error: null, drift: 'intact' };
+      if (!project.installed) return project;
+      const lookalike = devin.carriesStroq
+        ? ' Its entries that end like Stroq’s are not the command stroq init recorded, so they are not counted.'
+        : '';
+      return {
+        ...project,
+        installed: false,
+        shadowedBy: devinFile,
+        detail: `project: SHADOWED — Devin Desktop reads ${devinFile} first and uses ${project.file} only when that defines no hooks, so Stroq's hooks do not run.${lookalike} Run \`${SHADOWED_FIX}\` (the user-level file is merged with the project's, so a repository cannot replace it)`,
+      };
+    }
+    case 'unreadable':
+      // What Devin Desktop does with a file it cannot read is not documented, so this is
+      // "unknown", reported as a failure: a guard nobody can confirm is running is not one.
+      if (!project.installed) return project;
+      return {
+        ...project,
+        installed: false,
+        error: `${devin.message}; Devin Desktop reads it before ${project.file}, so whether the Stroq hooks there run is unknown`,
+      };
+  }
+}
+
+/** The command that puts Windsurf's hooks where a repository's own `.devin/hooks.json` cannot replace them. */
+const SHADOWED_FIX = 'stroq init --agent windsurf --user';
+
+/**
+ * Whether the file is a copy of the install `stroq init` recorded: each of the six events
+ * holds exactly the entry written for the recorded command, and every path in it is alive.
+ */
+function isRecordedCopy(json: unknown, text: string): boolean {
+  const recorded = readInstallRecord().entries[installKey('windsurf', 'project')];
+  return (
+    recorded !== undefined &&
+    carriesRecordedEntries(json, recorded.command) &&
+    vanishedPaths(text).length === 0
+  );
+}
+
+function windsurfScopes(cwd: string): ScopeStatus[] {
+  return agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf').map((scope) =>
+    scope.scope === 'project' ? underDevin(scope, cwd) : scope,
+  );
+}
+
 function checkAntigravityHooks(file: string): {
   readonly installed: boolean;
   readonly error: string | null;
@@ -283,8 +372,12 @@ interface ScopeStatus {
   readonly drift?: InstallDrift;
   /** Paths the installed hook command runs that no longer exist; see `vanishedPaths`. */
   readonly vanished?: readonly string[];
+  /** Installed, but the line cannot start on this machine, so the agent refuses every tool call (Antigravity on Windows). */
+  readonly unstartable?: boolean;
   /** Installed, but the agent has not approved the hook, so it does not run (Codex). */
   readonly unapproved?: boolean;
+  /** Installed, but this other file takes the agent's attention first, so it does not run (Windsurf). */
+  readonly shadowedBy?: string;
 }
 
 function agentScopes(
@@ -333,12 +426,55 @@ function agentScopes(
         vanished,
         detail: `${scope}: BROKEN — the hook runs ${vanished.join(' and ')}, which no longer exists, so the agent skips it (${file}) — run \`${init}\` again`,
       };
+    if (
+      agent === 'antigravity' &&
+      process.platform === 'win32' &&
+      quotedAntigravityLines(text).length > 0
+    )
+      return {
+        ...status,
+        installed: false,
+        unstartable: true,
+        detail: `${scope}: BROKEN — the hook line has a quote in it, which Antigravity on Windows hands to cmd.exe escaped, so it cannot start and Antigravity blocks every tool call (${file}) — from a terminal outside Antigravity run \`${init}\` again, or take the hook out with \`stroq uninstall --agent antigravity${scope === 'user' ? ' --user' : ''}\``,
+      };
     return { ...status, drift: installDrift(agent, scope, text, record) };
   });
 }
 
 /** `"<node>" [--import tsx] "<entry>" hook …`: the command `hookCommand` writes. */
 const STROQ_HOOK_COMMAND = /^"([^"]+)"(?: --import tsx)? "([^"]+)" hook /;
+/**
+ * The same with the paths bare, as `windowsHookCommands` writes it for a host that cannot take a quote. Not the
+ * `powershell` entry of Copilot and Windsurf, `& <line>`, whose `&` is a call operator and no program.
+ */
+const BARE_HOOK_COMMAND =
+  /^(?!&\s)(\S+)(?: --import tsx)? (\S+) hook (?:claude-code|cursor|codex|windsurf|copilot|antigravity|openclaw)(?: \S+)?$/;
+/**
+ * A word that names a place: an absolute path, as `init` writes it. Not `node`, which the search path finds, and not
+ * a relative word (`./guard.sh`, `@stroq/cli`, `%APPDATA%\\npm`), which is a hook of somebody else's or one that
+ * only the agent's own directory can resolve.
+ */
+const namesAPlace = (word: string): boolean => posix.isAbsolute(word) || win32.isAbsolute(word);
+
+/** Every string of a JSON text, with the depth capped: the values a hook command can be in. */
+function stringsOf(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 8) return;
+    if (typeof value === 'string') found.push(value);
+    else if (Array.isArray(value)) for (const item of value) walk(item, depth + 1);
+    else if (typeof value === 'object' && value !== null)
+      for (const item of Object.values(value)) walk(item, depth + 1);
+  };
+  walk(parsed, 0);
+  return found;
+}
 
 /**
  * The Node binary and CLI entry a Stroq hook command in `text` runs, where either no
@@ -349,27 +485,30 @@ const STROQ_HOOK_COMMAND = /^"([^"]+)"(?: --import tsx)? "([^"]+)" hook /;
  * cache that npm prunes.
  */
 function vanishedPaths(text: string): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [];
-  }
   const gone = new Set<string>();
-  const walk = (value: unknown, depth: number): void => {
-    if (depth > 8) return;
-    if (typeof value === 'string') {
-      const match = STROQ_HOOK_COMMAND.exec(value);
-      for (const path of match === null ? [] : [match[1], match[2]])
-        if (path !== undefined && !existsSync(path)) gone.add(path);
-    } else if (Array.isArray(value)) {
-      for (const item of value) walk(item, depth + 1);
-    } else if (typeof value === 'object' && value !== null) {
-      for (const item of Object.values(value)) walk(item, depth + 1);
-    }
-  };
-  walk(parsed, 0);
+  for (const value of stringsOf(text)) {
+    const quoted = STROQ_HOOK_COMMAND.exec(value);
+    const bare = quoted === null ? BARE_HOOK_COMMAND.exec(value) : null;
+    // A quoted path is always one; a bare word is one only when it names a place (`node` is found on the search path).
+    const paths =
+      quoted !== null
+        ? [quoted[1], quoted[2]]
+        : [bare?.[1], bare?.[2]].filter((word) => word !== undefined && namesAPlace(word));
+    for (const path of paths) if (path !== undefined && !existsSync(path)) gone.add(path);
+  }
   return [...gone];
+}
+
+/**
+ * Antigravity's hook lines that have a quote in them. On Windows Antigravity hands the line to `cmd.exe` with each
+ * quote escaped by a backslash, which `cmd.exe` reads as part of a name: the line cannot start, and Antigravity
+ * blocks every tool call while it cannot (`'\"C:\Program Files\nodejs\node.exe\"' is not recognized as an internal
+ * or external command`).
+ */
+function quotedAntigravityLines(text: string): string[] {
+  return stringsOf(text).filter(
+    (value) => / hook antigravity (?:pre|post|preinvocation)$/.test(value) && value.includes('"'),
+  );
 }
 
 /** Every known MCP client config, in the order `doctor` reports them. */
@@ -474,7 +613,7 @@ const HOOK_ROWS: readonly {
   {
     id: 'windsurf',
     name: 'windsurf hooks',
-    scopes: (cwd) => agentScopes(cwd, windsurfHooksPath, checkWindsurfHooks, 'windsurf'),
+    scopes: (cwd) => windsurfScopes(cwd),
   },
   {
     id: 'antigravity',
@@ -495,6 +634,8 @@ export interface AgentHookStatus {
   readonly changed: boolean;
   /** The same per-scope text the report shows, so a caller need not rebuild it. */
   readonly detail: string;
+  /** The command that fixes a missing install, or a shadowed one: `init` writes the file Devin skips. */
+  readonly fix: string;
 }
 
 /**
@@ -505,12 +646,15 @@ export function agentHookStatus(id: string, cwd: string = process.cwd()): AgentH
   const row = HOOK_ROWS.find((r) => r.id === id);
   if (row === undefined) return null;
   const scopes = row.scopes(cwd);
+  const installed = scopes.some((s) => s.installed);
+  const shadowed = !installed && scopes.some((s) => s.shadowedBy !== undefined);
   return {
     id,
     name: row.name,
-    installed: scopes.some((s) => s.installed),
+    installed,
     changed: scopes.some((s) => s.drift === 'changed'),
     detail: scopeDetail(scopes),
+    fix: shadowed ? SHADOWED_FIX : `stroq init --agent ${id}`,
   };
 }
 
@@ -558,7 +702,13 @@ function hooksCheck(
   // call. It fails the line on its own, whatever the other scopes say.
   const changed = scopes.some((s) => s.drift === 'changed');
   // The same holds for an entry that no longer exists: the agent skips the hook.
-  const dead = scopes.some((s) => s.vanished?.length || s.unapproved === true);
+  // And for one that another file has switched off: it reads as not installed, but the
+  // user did install it, so the line says so whatever other agents carry. A project
+  // entry shadowed beside a working user-level one is clutter, not a gap.
+  const shadowed = !installed && scopes.some((s) => s.shadowedBy !== undefined);
+  const dead =
+    scopes.some((s) => s.vanished?.length || s.unapproved === true || s.unstartable === true) ||
+    shadowed;
   const carrying = others.filter((o) => o.installed).map((o) => o.name);
   const perScope = scopeDetail(scopes);
   return {
@@ -599,9 +749,21 @@ async function checkSecrets(): Promise<DoctorCheck> {
   }
 }
 
+/**
+ * What the rules check says. A rule that needs a field Stroq does not fill in (what a person typed,
+ * the arguments of a call) can never match, so the count of rules that are loaded and the count
+ * that can fire are both said, and the difference with the reason.
+ */
+export function rulesDetail(loaded: number, canFireCount: number): string {
+  const waiting = loaded - canFireCount;
+  return waiting === 0
+    ? `${loaded} rules loaded, all can fire on what Stroq reads`
+    : `${loaded} rules loaded, ${canFireCount} can fire on what Stroq reads (${waiting} need what a person typed, the arguments of a call or a trace, which Stroq is not given)`;
+}
+
 export async function doctorReport(
   cwd: string = process.cwd(),
-  opts: { readonly all?: boolean } = {},
+  opts: { readonly all?: boolean; readonly now?: number } = {},
 ): Promise<DoctorReport> {
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
@@ -609,7 +771,7 @@ export async function doctorReport(
   // all" self-test, and SAMPLE is a synthetic payload that belongs to no surface in
   // particular. Scoping it would turn an unrelated scoping change into a doctor failure.
   const injectionDetected = scanContent(rules, SAMPLE).verdict === 'suspect';
-  const agents = HOOK_ROWS.map((row) => ({ name: row.name, scopes: row.scopes(cwd) }));
+  const agents = HOOK_ROWS.map((row) => ({ id: row.id, name: row.name, scopes: row.scopes(cwd) }));
   const statuses: AgentStatus[] = agents.map((a) => ({
     name: a.name,
     installed: a.scopes.some((s) => s.installed),
@@ -622,16 +784,24 @@ export async function doctorReport(
   // install it, and the line that says which path is gone is the one that helps.
   const anyBroken = agents.some((agent) =>
     agent.scopes.some(
-      (s) => s.error !== null || (s.vanished?.length ?? 0) > 0 || s.unapproved === true,
+      (s) =>
+        s.error !== null ||
+        (s.vanished?.length ?? 0) > 0 ||
+        s.unapproved === true ||
+        s.unstartable === true ||
+        s.shadowedBy !== undefined,
     ),
   );
-  const perAgentChecks = agents.map((agent, i) =>
-    hooksCheck(
+  const now = opts.now ?? Date.now();
+  const perAgentChecks = agents.map((agent, i) => {
+    const check = hooksCheck(
       agent.name,
       agent.scopes,
       statuses.filter((_, j) => j !== i),
-    ),
-  );
+    );
+    // A whole install also says when the host last called it (see `doctor-liveness.ts`).
+    return withLiveness(check, agent.id, statuses[i]?.installed === true, now);
+  });
   const detectedHere = detectedAgents(cwd);
   const collapsed: DoctorCheck = {
     name: 'hooks',
@@ -657,7 +827,11 @@ export async function doctorReport(
     checks: [
       { name: 'stroq', ok: true, detail: stroqVersion() },
       { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
-      { name: 'rules', ok: rules.length >= 12, detail: `${rules.length} rules loaded` },
+      {
+        name: 'rules',
+        ok: rules.length >= 12,
+        detail: rulesDetail(rules.length, rules.filter(canFire).length),
+      },
       {
         name: 'self-test',
         ok: injectionDetected,

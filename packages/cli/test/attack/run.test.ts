@@ -82,6 +82,7 @@ const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = 
   ['33-lftp-mirror-delete', 'asked', 'ask-destructive'],
   ['34-cmd-rmdir-quote-collapse', 'asked', 'ask-destructive'],
   ['35-force-push-open-pr', 'asked', 'ask-destructive'],
+  ['36-script-launders-taint-upload', 'blocked', 'deny-network-when-tainted'],
 ];
 
 const OPEN_POLICY: Policy = { ...DEFAULT_POLICY, rules: [] };
@@ -97,12 +98,12 @@ describe('substituteCwd', () => {
 });
 
 describe('runAttack with the default policy', () => {
-  it('stops all thirty-five scenarios and reports rule ids', async () => {
+  it('stops all thirty-six scenarios and reports rule ids', async () => {
     const report = await runAttack(SCENARIOS, DEFAULT_POLICY, 'default');
     expect(report.version).toBe(1);
     expect(report.policy).toBe('default');
     expect(report.ok).toBe(true);
-    expect(report.totals).toEqual({ blocked: 16, asked: 19, passed: 0 });
+    expect(report.totals).toEqual({ blocked: 17, asked: 19, passed: 0 });
     expect(report.scenarios.map((r) => [r.id, r.outcome, r.ruleId])).toEqual(EXPECTED);
     for (const r of report.scenarios)
       expect(r.steps.every((s) => s.actual === s.expect)).toBe(true);
@@ -123,7 +124,7 @@ describe('runAttack with an open policy', () => {
   it('lets every attack through and fails the suite', async () => {
     const report = await runAttack(SCENARIOS, OPEN_POLICY, 'test');
     expect(report.ok).toBe(false);
-    expect(report.totals).toEqual({ blocked: 0, asked: 0, passed: 35 });
+    expect(report.totals).toEqual({ blocked: 0, asked: 0, passed: 36 });
     expect(report.scenarios.every((r) => r.outcome === 'passed' && r.ruleId === null)).toBe(true);
   }, 60_000);
 });

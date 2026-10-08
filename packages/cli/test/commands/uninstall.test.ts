@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,8 +17,13 @@ import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hook
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { cursorHooksPath, installCursorHooks } from '../../src/commands/cursor-hooks.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
+import { recordInstall } from '../../src/commands/install-record.js';
 import { runUninstall, uninstallAgent } from '../../src/commands/uninstall.js';
-import { installWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+import {
+  devinHooksPath,
+  installWindsurfHooks,
+  windsurfHooksPath,
+} from '../../src/commands/windsurf-hooks.js';
 
 const STROQ = '"/n" "/e.js"';
 let cwd: string;
@@ -205,5 +217,142 @@ describe('stroq uninstall --agent codex, on the shapes Codex reads', () => {
     });
     uninstallAgent('codex', 'project', cwd, false);
     expect(json(file)).toEqual({});
+  });
+});
+
+// A project install copied by hand into `.devin/hooks.json` (which Devin Desktop reads first) is
+// an install `doctor` counts, so taking Stroq out has to take it out of there too.
+describe('stroq uninstall --agent windsurf beside a project .devin/hooks.json', () => {
+  const command = `${STROQ} hook windsurf`;
+  const foreign = { hooks: { pre_run_command: [{ command: 'echo mine' }] } };
+
+  it("removes Stroq's entries from both files and keeps the repository's own", () => {
+    seed(windsurfHooksPath('project', cwd), foreign);
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    seed(devinHooksPath(cwd), foreign);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(result.removed).toBe(true);
+    expect(result.message).toContain(devinHooksPath(cwd));
+    for (const file of [windsurfHooksPath('project', cwd), devinHooksPath(cwd)]) {
+      const hooks = json(file)['hooks'] as Record<string, { command: string }[]>;
+      expect(hooks['pre_run_command']?.map((e) => e.command)).toEqual(['echo mine']);
+      expect(JSON.stringify(hooks)).not.toContain('hook windsurf');
+    }
+  });
+
+  it('leaves a .devin/hooks.json that holds none of its own alone, and says nothing about it', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    seed(devinHooksPath(cwd), foreign);
+    const before = readFileSync(devinHooksPath(cwd), 'utf8');
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(result.message).not.toContain('.devin');
+    expect(readFileSync(devinHooksPath(cwd), 'utf8')).toBe(before);
+  });
+
+  it('prints what it would remove from .devin/hooks.json with --dry-run, and writes nothing', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const before = readFileSync(devinHooksPath(cwd), 'utf8');
+    const result = uninstallAgent('windsurf', 'project', cwd, true);
+    expect(result.removed).toBe(true);
+    expect(readFileSync(devinHooksPath(cwd), 'utf8')).toBe(before);
+  });
+
+  // The file is the repository's: an entry that merely ends ` hook windsurf` is somebody's, and
+  // taking it out would delete a hook the repository runs. Only a copy of what init recorded goes.
+  it('removes only the entries that are the command init recorded, not any that end like it', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    const theirs = { command: '/opt/tool/bin/tool hook windsurf' };
+    seed(devinHooksPath(cwd), { hooks: { pre_run_command: [theirs] } });
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const merged = json(devinHooksPath(cwd)) as { hooks: Record<string, unknown[]> };
+    merged.hooks['pre_run_command'] = [theirs, ...(merged.hooks['pre_run_command'] ?? [])];
+    seed(devinHooksPath(cwd), merged);
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(result.removed).toBe(true);
+    const left = json(devinHooksPath(cwd))['hooks'] as Record<string, { command: string }[]>;
+    expect(left['pre_run_command']?.map((e) => e.command)).toContain(theirs.command);
+    expect(JSON.stringify(left)).not.toContain(command);
+    // And it says what it left, so nobody takes a file that still has a hook for a clean one.
+    expect(result.message).toContain('left');
+  });
+
+  it('removes nothing from .devin/hooks.json when no record says Stroq wrote the entries', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const before = readFileSync(devinHooksPath(cwd), 'utf8');
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(readFileSync(devinHooksPath(cwd), 'utf8')).toBe(before);
+    expect(result.message).toContain('left');
+  });
+
+  it('reports a .devin/hooks.json that is not JSON, and still takes its own entries out', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    mkdirSync(dirname(devinHooksPath(cwd)), { recursive: true });
+    writeFileSync(devinHooksPath(cwd), '{ not json');
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(result.removed).toBe(true);
+    expect(result.message).toContain('could not be read');
+    expect(result.message).toContain('left alone');
+    expect(readFileSync(devinHooksPath(cwd), 'utf8')).toBe('{ not json');
+    expect(JSON.stringify(json(windsurfHooksPath('project', cwd)))).not.toContain(command);
+  });
+
+  it('does not write through a .devin/hooks.json that is a link, which may lead anywhere', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    const outside = join(cwd, 'outside.json');
+    installWindsurfHooks(outside, command);
+    const before = readFileSync(outside, 'utf8');
+    mkdirSync(dirname(devinHooksPath(cwd)), { recursive: true });
+    symlinkSync(outside, devinHooksPath(cwd));
+    const result = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(result.message).toContain('symbolic link');
+    expect(readFileSync(outside, 'utf8')).toBe(before);
+  });
+
+  it('says which file each preview is of when it previews two', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const { message } = uninstallAgent('windsurf', 'project', cwd, true);
+    expect(message).toContain(`# ${windsurfHooksPath('project', cwd)}`);
+    expect(message).toContain(`# ${devinHooksPath(cwd)}`);
+  });
+
+  it('keeps what the first file said when the second has something to add', () => {
+    seed(windsurfHooksPath('project', cwd), foreign);
+    recordInstall('windsurf', 'project', command);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const { message } = uninstallAgent('windsurf', 'project', cwd, false);
+    expect(message).toContain(`No Stroq hooks in ${windsurfHooksPath('project', cwd)}`);
+    expect(message).toContain(devinHooksPath(cwd));
+  });
+
+  it('calls a file that has the words only in a description clean, and one with an entry not', () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), command);
+    recordInstall('windsurf', 'project', command);
+    seed(devinHooksPath(cwd), {
+      description: 'runs the tool hook windsurf wrapper',
+      hooks: { pre_run_command: [{ command: 'echo mine' }] },
+    });
+    expect(uninstallAgent('windsurf', 'project', cwd, false).message).not.toContain('left');
+    seed(devinHooksPath(cwd), {
+      hooks: { pre_run_command: [{ command: '/opt/tool/bin/tool hook windsurf' }] },
+    });
+    expect(uninstallAgent('windsurf', 'project', cwd, false).message).toContain('left');
+  });
+
+  it('does not look for it when the user file is the target', () => {
+    seed(devinHooksPath(cwd), foreign);
+    installWindsurfHooks(devinHooksPath(cwd), command);
+    const before = readFileSync(devinHooksPath(cwd), 'utf8');
+    uninstallAgent('windsurf', 'user', cwd, false);
+    expect(readFileSync(devinHooksPath(cwd), 'utf8')).toBe(before);
   });
 });

@@ -26,7 +26,7 @@ function scenarioLine(result: ScenarioResult): string {
 function summaryLine(report: AttackReport): string {
   const { blocked, asked, passed } = report.totals;
   const head = `${plural(report.scenarios.length, 'scenario')}: ${blocked} blocked, ${asked} asked, ${passed} passed through`;
-  if (report.ok && passed === 0) return `${head} — every attack was stopped.`;
+  if (report.ok && passed === 0) return `${head} — each was blocked or put to you as a question.`;
   const wrong = report.scenarios.filter((r) => !r.ok).length;
   return `${head} — ${plural(wrong, 'scenario')} did not behave as expected; your policy is weaker than the default (compare it with policies/default.yaml).`;
 }
@@ -37,6 +37,6 @@ export function formatReport(report: AttackReport): string {
   // claimed more than the suite has.
   const documented = report.scenarios.filter((r) => r.incident !== null).length;
   const synthetic = report.scenarios.length - documented;
-  const header = `stroq attack: ${plural(report.scenarios.length, 'scenario')} against policy ${report.policy} (${plural(documented, 'recorded incident')}, ${synthetic} synthetic)`;
+  const header = `stroq attack: ${plural(report.scenarios.length, 'scenario')} against policy ${report.policy} (${documented} from public reports, ${synthetic} synthetic)`;
   return `${[header, ...report.scenarios.map(scenarioLine), summaryLine(report)].join('\n')}\n`;
 }

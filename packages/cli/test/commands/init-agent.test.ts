@@ -1,8 +1,15 @@
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runInitCommand } from '../../src/commands/init-agent.js';
+import { fakeTerminal } from '../helpers/fake-terminal.js';
+import { squash } from '../helpers/flow-deps.js';
+
+// These tests are not about Windows: `init` writes the usual quoted line on every machine they run on.
+vi.mock('../../src/commands/hook-command.js', async () =>
+  (await import('../helpers/plain-hook-line.js')).plainHookLine(),
+);
 
 /**
  * A bare `stroq init` is the command the front page and the site tell a newcomer to run.
@@ -181,5 +188,135 @@ describe('stroq init with no --agent', () => {
     const { stderr } = await bare();
     expect(stderr).toContain('stroq init --agent cursor');
     expect(stderr).not.toContain('--user');
+  });
+});
+
+/**
+ * On a terminal a person is looking at, `stroq init` draws the first-run screen; everywhere else,
+ * and whatever the arguments say not to draw for, it is the plain installer. These hand
+ * `runInitCommand` a terminal of their own. They name Copilot, which the self-check has no event
+ * for, so that nothing here starts a process.
+ */
+describe('stroq init on a terminal', () => {
+  beforeEach(() => {
+    // The spinner turns on a timer of its own where it animates; this clock never runs by itself.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const copilotHooks = (): string => join(cwd, '.github', 'hooks', 'stroq.json');
+
+  it('draws the first-run screen on an interactive terminal, and installs with --yes', async () => {
+    const screen = fakeTerminal({ interactive: true });
+    const cap = capture();
+
+    const code = await runInitCommand(['--yes', '--agent', 'copilot'], { terminal: screen.term });
+    cap.restore();
+
+    expect(code).toBe(0);
+    expect(screen.out()).toContain('Agents on this machine');
+    expect(screen.out()).toContain('Guard Copilot CLI in this project? yes (--yes)');
+    // Copilot reads its hooks when it starts, and its note says to restart it: not guarding yet.
+    expect(squash(screen.out())).toContain(
+      'Done. Stroq is not guarding Copilot CLI yet: do what its note above says first.',
+    );
+    expect(existsSync(copilotHooks())).toBe(true);
+  });
+
+  it('draws it on the terminal it was given, and prints none of it on the real streams', async () => {
+    const screen = fakeTerminal({ interactive: true });
+    const cap = capture();
+
+    await runInitCommand(['--yes', '--agent', 'copilot'], { terminal: screen.term });
+    cap.restore();
+
+    for (const text of ['Agents on this machine', 'Stroq hooks installed in', 'Done.']) {
+      expect(cap.out()).not.toContain(text);
+      expect(cap.err()).not.toContain(text);
+    }
+  });
+
+  it('asks first when it is not told --yes, and changes nothing on a no', async () => {
+    const screen = fakeTerminal({ interactive: true, answers: ['n'] });
+    const cap = capture();
+
+    const code = await runInitCommand(['--agent', 'copilot'], { terminal: screen.term });
+    cap.restore();
+
+    // Not a success: `stroq init && claude` must not go on as if Claude Code were guarded.
+    expect(code).toBe(1);
+    expect(screen.prompts).toHaveLength(1);
+    expect(screen.out()).toContain('Nothing was changed.');
+    expect(existsSync(copilotHooks())).toBe(false);
+  });
+
+  it('is the plain installer, with no first-run screen, on a terminal that is not interactive', async () => {
+    const screen = fakeTerminal({ interactive: false });
+    const cap = capture();
+
+    const code = await runInitCommand(['--yes', '--agent', 'copilot'], { terminal: screen.term });
+    cap.restore();
+
+    expect(code).toBe(0);
+    expect(screen.writes).toEqual([]);
+    expect(screen.read).not.toHaveBeenCalled();
+    expect(cap.out()).toContain('Stroq hooks installed in');
+    expect(cap.out()).not.toContain('Agents on this machine');
+    expect(existsSync(copilotHooks())).toBe(true);
+  });
+
+  // An interactive terminal in every row: the arguments are the only reason not to draw.
+  it.each([
+    ['--no-input', ['--no-input', '--agent', 'copilot'], 0, 'Stroq hooks installed in'],
+    ['--dry-run', ['--dry-run', '--agent', 'copilot'], 0, '"preToolUse"'],
+    ['a bare --dry-run', ['--dry-run'], 0, '"PreToolUse"'],
+    ['--agent mcp', ['--yes', '--agent', 'mcp'], 1, 'needs exactly one of --client'],
+    ['--agent nonsense', ['--yes', '--agent', 'nonsense'], 1, 'unknown agent "nonsense"'],
+  ] as const)(
+    'is the plain installer, with no first-run screen, for %s',
+    async (_name, args, exit, said) => {
+      const screen = fakeTerminal({ interactive: true, answers: ['y'] });
+      const cap = capture();
+
+      const code = await runInitCommand([...args], { terminal: screen.term });
+      cap.restore();
+
+      expect(code).toBe(exit);
+      expect(screen.writes).toEqual([]);
+      expect(screen.read).not.toHaveBeenCalled();
+      expect(cap.out()).toContain(said);
+    },
+  );
+
+  it('writes nothing for --dry-run, and prints the config it would write as JSON', async () => {
+    const screen = fakeTerminal({ interactive: true });
+    const cap = capture();
+
+    await runInitCommand(['--dry-run', '--agent', 'copilot'], { terminal: screen.term });
+    cap.restore();
+
+    expect(() => JSON.parse(cap.out())).not.toThrow();
+    expect(existsSync(copilotHooks())).toBe(false);
+  });
+});
+
+describe('stroq init with no --agent, where the home is not set', () => {
+  // `os.homedir()` is '' for a `HOME` that is set and empty, and a path joined to '' is the project's own:
+  // a folder that came with a repository must not choose the agent.
+  it('does not take the folders of the project for the agents of the user', async () => {
+    mkdirSync(join(cwd, '.cursor'), { recursive: true });
+    mkdirSync(join(cwd, '.codex'), { recursive: true });
+    const cap = capture();
+
+    const code = await runInitCommand(['--dry-run'], { home: '' });
+    cap.restore();
+
+    expect(code).toBe(0);
+    expect(cap.out()).toContain('"PreToolUse"');
+    expect(cap.out()).not.toContain('beforeShellExecution');
+    expect(cap.err()).not.toContain('was not found here');
   });
 });

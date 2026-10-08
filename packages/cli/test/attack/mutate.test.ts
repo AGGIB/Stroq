@@ -177,14 +177,14 @@ describe('mutateScenario', () => {
 
   it('mutates every scenario that has untrusted text', () => {
     const mutable = SCENARIOS.filter((s) => mutateScenario(s, MUTATIONS[1]!) !== null);
-    // 35 scenarios, 16 of which carry no injected content (origin: direct-user; see the
+    // 36 scenarios, 16 of which carry no injected content (origin: direct-user; see the
     // two tests below): 08, 09, 12 have no files and no PostToolUse text at all, 03, 05,
     // 13 carry only a planted secret in `files`, and 22, 23, 25, 26, 27 and 31 through 35
     // are a recorded action with no text around it (25 and 26 carry a script, which is code
-    // the scenario runs and not text to evade; see `isScriptFixture`). The other 19 carry a
+    // the scenario runs and not text to evade; see `isScriptFixture`). The other 20 carry a
     // real PostToolUse payload or a README in `files`, and the assertion right below
     // pins that count.
-    expect(mutable.length).toBe(19);
+    expect(mutable.length).toBe(20);
   });
 
   it('returns a scenario, not null, for the identity control on a PostToolUse step', () => {

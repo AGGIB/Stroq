@@ -196,14 +196,14 @@ describe('the two openclaw commands', () => {
     );
   });
 
-  it('runs both, so an already-linked plugin still gets enabled', () => {
+  it('runs both, so an already-linked plugin still gets enabled', async () => {
     const calls: string[][] = [];
     const run: RunCommand = (file, args) => {
       calls.push([file, ...args]);
       // The first command failing is the ordinary "already installed" case.
       return { status: args[1] === 'install' ? 1 : 0, output: `ran ${args[1]}\n` };
     };
-    const outcomes = runOpenClawInstall('/usr/bin/openclaw', '/w/plugin', run);
+    const outcomes = await runOpenClawInstall('/usr/bin/openclaw', '/w/plugin', run);
     expect(calls).toEqual([
       ['/usr/bin/openclaw', 'plugins', 'install', '--link', '/w/plugin'],
       ['/usr/bin/openclaw', 'plugins', 'enable', 'stroq'],

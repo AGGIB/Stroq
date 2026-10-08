@@ -41,12 +41,12 @@ describe('stroq attack', () => {
     expect(code).toBe(0);
     const text = out.lines.join('');
     expect(text).toContain(
-      'stroq attack: 35 scenarios against policy default (26 recorded incidents, 9 synthetic)',
+      'stroq attack: 36 scenarios against policy default (26 from public reports, 10 synthetic)',
     );
     expect(text).toContain(
-      '35 scenarios: 16 blocked, 19 asked, 0 passed through — every attack was stopped.',
+      '36 scenarios: 17 blocked, 19 asked, 0 passed through — each was blocked or put to you as a question.',
     );
-    expect(text.match(/^✔ /gm)).toHaveLength(35);
+    expect(text.match(/^✔ /gm)).toHaveLength(36);
   }, 60_000);
 
   it('prints a JSON document with --json', async () => {
@@ -62,8 +62,8 @@ describe('stroq attack', () => {
     };
     expect(report.version).toBe(1);
     expect(report.ok).toBe(true);
-    expect(report.scenarios).toHaveLength(35);
-    expect(report.totals).toEqual({ blocked: 16, asked: 19, passed: 0 });
+    expect(report.scenarios).toHaveLength(36);
+    expect(report.totals).toEqual({ blocked: 17, asked: 19, passed: 0 });
   }, 60_000);
 
   it('runs a single scenario with --only, by id or number', async () => {

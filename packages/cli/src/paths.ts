@@ -2,7 +2,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export function stroqHome(): string {
-  return process.env['STROQ_HOME'] ?? join(homedir(), '.stroq');
+  // An empty variable is not a directory: it would put what Stroq keeps in the folder it runs in.
+  const set = process.env['STROQ_HOME'];
+  return set !== undefined && set !== '' ? set : join(homedir(), '.stroq');
 }
 
 // Layout of a Stroq home directory. `stroqHome()` is the real one; `stroq attack`
@@ -16,6 +18,11 @@ export const trustFileIn = (home: string): string => join(home, 'trust.json');
 export const canaryFilesFileIn = (home: string): string => join(home, 'canary-files.json');
 /** What `stroq exposure` last saw of the instruction and skill files, by sha256. */
 export const inventoryFileIn = (home: string): string => join(home, 'inventory.json');
+/**
+ * When each host last called `stroq hook <agent>`: one file per agent holding that time, and nothing
+ * else. It is how `stroq doctor` can say a hook is run, and not only written down.
+ */
+export const lastHookDirIn = (home: string): string => join(home, 'last-hook');
 /**
  * The MCP cloak's dictionaries — the only thing Stroq writes that can turn a
  * placeholder back into the value it stood for. A directory of its own, never
@@ -34,3 +41,4 @@ export const trustFile = (): string => trustFileIn(stroqHome());
 export const inventoryFile = (): string => inventoryFileIn(stroqHome());
 export const canaryFilesFile = (): string => canaryFilesFileIn(stroqHome());
 export const cloakDir = (): string => cloakDirIn(stroqHome());
+export const lastHookDir = (): string => lastHookDirIn(stroqHome());

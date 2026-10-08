@@ -69,7 +69,7 @@ function hookRefusals(agent: string, status: AgentHookStatus | null): readonly P
     return [
       {
         reason: `${status.name}: Stroq has no hook in ${agent}, so nothing would judge this session's tool calls — ${status.detail}`,
-        fix: `stroq init --agent ${agent}`,
+        fix: status.fix,
       },
     ];
   }

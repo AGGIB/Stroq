@@ -107,6 +107,47 @@ describe('runHook agent routing', () => {
   });
 });
 
+describe('runHook input that starts with a byte-order mark', () => {
+  // Some Windows tools (a file saved by Notepad or by Out-File -Encoding utf8, then piped
+  // in) put a UTF-8 mark in front of the JSON. JSON.parse rejects it, so without this every
+  // call would fail closed and the agent would be blocked for a reason nobody can see.
+  const MARK = '\uFEFF';
+  const claude = JSON.stringify({
+    session_id: 'mark-1',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'ls -la' },
+    cwd: '/home/dev/p',
+  });
+  const cursor = JSON.stringify({
+    conversation_id: 'mark-2',
+    hook_event_name: 'beforeShellExecution',
+    workspace_roots: ['/home/dev/p'],
+    cwd: '/home/dev/p',
+    command: 'git reset --hard',
+  });
+
+  it('reads a Claude Code event as it reads the same event without the mark', async () => {
+    const plain = await runHook('claude-code', claude);
+    const marked = await runHook('claude-code', MARK + claude);
+    expect(marked).toEqual(plain);
+    expect(marked.stdout).not.toMatch(/not valid JSON/);
+  });
+
+  it('reads a Cursor event as it reads the same event without the mark', async () => {
+    const marked = await runHook('cursor', MARK + cursor);
+    expect(JSON.parse(marked.stdout)).toMatchObject({ permission: 'ask' });
+  });
+
+  it('still fails closed on input that is only a mark, or a mark in the middle', async () => {
+    for (const text of [MARK, `{"a":${MARK}1}`]) {
+      const out = await runHook('claude-code', text);
+      const parsed = JSON.parse(out.stdout) as { hookSpecificOutput: Record<string, unknown> };
+      expect(parsed.hookSpecificOutput['permissionDecision']).toBe('deny');
+    }
+  });
+});
+
 describe('runHook codex routing', () => {
   const reasonOf = (stdout: string) =>
     String(
