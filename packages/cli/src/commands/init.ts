@@ -151,7 +151,13 @@ export function stableEntry(entry: string, home: string, version: string, dryRun
     renameSync(partial, target);
     return moved;
   } catch {
-    rmSync(partial, { recursive: true, force: true });
+    // The copy failed, and so may the clean-up: `<home>/cli` that is a file, or a directory that cannot be written,
+    // makes Linux say ENOTDIR or EACCES where `force` only passes over ENOENT. The entry is kept as given either way.
+    try {
+      rmSync(partial, { recursive: true, force: true });
+    } catch {
+      // Nothing there that could be removed, or nothing that can be: a half-made copy is not mistaken for a copy.
+    }
     return entry;
   }
 }
