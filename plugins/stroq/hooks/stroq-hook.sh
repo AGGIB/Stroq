@@ -62,7 +62,7 @@
 #   acts as its firewall (Stroq takes the project's directory from the hook event, not
 #   from where it runs).
 set -u
-STROQ_PIN="@stroq/cli@0.22.0"
+STROQ_PIN="@stroq/cli@0.23.0"
 
 input="$(cat)"
 
