@@ -1,7 +1,7 @@
 name: Diagnostics (temporary)
 
-# Runs the tests the way ci.yml does and keeps the whole output, which the jobs of ci.yml lose on Linux and macOS
-# when they fail. Remove this file once the cause is found.
+# Runs the tests the way ci.yml does, in parts, and keeps their output as annotations, which survive when the log
+# of a job does not. Remove this file once the cause is found.
 on:
   pull_request:
     paths:
@@ -12,18 +12,32 @@ permissions:
 
 jobs:
   diag:
-    name: diag (${{ matrix.os }}, node ${{ matrix.node }})
-    runs-on: ${{ matrix.os }}
+    name: diag (${{ matrix.name }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            node: 24
-            command: pnpm test:coverage
-          - os: macos-latest
-            node: 24
-            command: pnpm test
+          - name: tiny
+            command: pnpm exec vitest run packages/cli/test/version.test.ts
+          - name: no-reporter
+            command: env GITHUB_ACTIONS= pnpm exec vitest run
+          - name: shard-1
+            command: pnpm exec vitest run --shard=1/8
+          - name: shard-2
+            command: pnpm exec vitest run --shard=2/8
+          - name: shard-3
+            command: pnpm exec vitest run --shard=3/8
+          - name: shard-4
+            command: pnpm exec vitest run --shard=4/8
+          - name: shard-5
+            command: pnpm exec vitest run --shard=5/8
+          - name: shard-6
+            command: pnpm exec vitest run --shard=6/8
+          - name: shard-7
+            command: pnpm exec vitest run --shard=7/8
+          - name: shard-8
+            command: pnpm exec vitest run --shard=8/8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -31,7 +45,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -47,10 +61,5 @@ jobs:
           python3 "$GITHUB_WORKSPACE/.github/scripts/diag-annotate.py"
           exit 0
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: vitest-out-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/vitest-out.txt
-            ${{ runner.temp }}/processes.txt
+      - name: Finished
+        run: echo finished

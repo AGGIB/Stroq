@@ -19,3 +19,8 @@ def escape(value: str) -> str:
 
 print('::error title=vitest key lines::' + escape('\n'.join(keys[:40])[:30000]))
 print('::error title=vitest tail::' + escape('\n'.join(lines[-60:])[:30000]))
+
+leftovers = os.path.join(os.environ['RUNNER_TEMP'], 'processes.txt')
+if os.path.exists(leftovers):
+    content = open(leftovers, encoding='utf-8', errors='replace').read()
+    print('::notice title=processes left after the tests::' + escape(content[:20000]))
