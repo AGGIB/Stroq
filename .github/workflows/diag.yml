@@ -18,26 +18,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: tiny
-            command: pnpm exec vitest run packages/cli/test/version.test.ts
-          - name: no-reporter
-            command: env GITHUB_ACTIONS= pnpm exec vitest run
-          - name: shard-1
-            command: pnpm exec vitest run --shard=1/8
-          - name: shard-2
-            command: pnpm exec vitest run --shard=2/8
-          - name: shard-3
-            command: pnpm exec vitest run --shard=3/8
-          - name: shard-4
-            command: pnpm exec vitest run --shard=4/8
-          - name: shard-5
+          - name: g1
+            command: pnpm exec vitest run packages/cli/test/commands/inspect.test.ts packages/cli/test/adapters/cursor-secret-egress.test.ts packages/cli/test/commands/init-selfcheck-probe.test.ts packages/cli/test/commands/sent-card.test.ts packages/cli/test/mcp/framing-split.test.ts packages/core/test/scan/scanner.test.ts
+          - name: g2
+            command: pnpm exec vitest run packages/core/test/actions/followed-by.test.ts packages/core/test/rules/compile.test.ts packages/cli/test/hook-stamp.test.ts packages/core/test/actions/shell-input.test.ts packages/core/test/taint/session-store.test.ts packages/cli/test/bench/actions.test.ts
+          - name: g3
+            command: pnpm exec vitest run packages/cli/test/commands/init-selfcheck-run.test.ts packages/cli/test/commands/init-openclaw.test.ts packages/cli/test/commands/copilot-hooks.test.ts packages/core/test/actions/reading-cost.test.ts packages/core/test/engine-instructions.test.ts packages/cli/test/exposure/inventory.test.ts
+          - name: g4
+            command: pnpm exec vitest run packages/cli/test/ui/cleanup.test.ts packages/core/test/actions/shell-escapes.test.ts packages/cli/test/adapters/claude-code-secrets.test.ts packages/cli/test/commands/hook-command-short-path.test.ts packages/core/test/provenance/describe-controls.test.ts packages/cli/test/commands/mcp.test.ts
+          - name: g5
+            command: pnpm exec vitest run packages/core/test/actions/git-aliases.test.ts packages/cli/test/commands/hook-stamp-run.test.ts packages/cli/test/commands/hook-copilot.e2e.test.ts packages/cli/test/mcp/proxy.test.ts packages/core/test/actions/text-into-shell.test.ts packages/cli/test/fuzz/session-readers.fuzz.test.ts
+          - name: g6
+            command: pnpm exec vitest run packages/core/test/actions/shell-input-printf.test.ts packages/cli/test/adapters/antigravity-shapes.test.ts packages/core/test/provenance/action-atoms.test.ts packages/cli/test/commands/hook-codex.e2e.test.ts packages/core/test/normalize/confusables.test.ts packages/core/test/secrets/extract.test.ts
+          - name: shard-5a
             command: pnpm exec vitest run --shard=5/8
-          - name: shard-6
-            command: pnpm exec vitest run --shard=6/8
-          - name: shard-7
-            command: pnpm exec vitest run --shard=7/8
-          - name: shard-8
-            command: pnpm exec vitest run --shard=8/8
+          - name: shard-5b
+            command: pnpm exec vitest run --shard=5/8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
