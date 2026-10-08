@@ -8,10 +8,10 @@ import { join, resolve } from 'node:path';
 import { parse } from 'yaml';
 
 const root = resolve(import.meta.dirname, '..');
-const sourceFile = join(root, 'vendor/atlas/ATLAS-2026.08.yaml');
+const sourceFile = join(root, 'vendor/atlas/ATLAS-2026.09.yaml');
 const outFile = join(root, 'packages/cli/src/coverage/atlas.json');
 const SOURCE_URL =
-  'https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.08.yaml';
+  'https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.09.yaml';
 
 const OUT_OF_DATE =
   'atlas.json is out of date: run "pnpm build:atlas" locally and commit packages/cli/src/coverage/atlas.json';

@@ -7,7 +7,7 @@
 
 # Stroq coverage
 
-Stroq's control mapping against MITRE ATLAS 2026.08 and OWASP ASI 2026: which in-scope techniques the attack corpus's scenarios evidence, and which do not.
+Stroq's control mapping against MITRE ATLAS 2026.09 and OWASP ASI 2026: which in-scope techniques the attack corpus's scenarios evidence, and which do not.
 
 This is a control mapping with evidence, not a compliance claim. `covered` means at least one scenario in `stroq attack` exercises the technique end to end with no stated limitation; `partial` means a scenario exercises it but a recorded limitation narrows what that evidence proves; `not covered` means no scenario tags it yet, whatever the scope declaration below says about the surface — a stated limitation on an untagged technique is a claim about the surface, not evidence the corpus proves it.
 
@@ -16,7 +16,7 @@ Which techniques are in scope for a local, hook-based action firewall at all, an
 Reproduce this table with `stroq coverage`, or load the same mapping into MITRE ATT&CK Navigator with `stroq coverage --format=navigator`.
 
 ```text
-stroq coverage — 35 scenarios (26 documented, 9 synthetic) · ATLAS 2026.08 · OWASP ASI 2026
+stroq coverage — 36 scenarios (26 documented, 10 synthetic) · ATLAS 2026.09 · OWASP ASI 2026
 
 AML.T0010        not covered AI Supply Chain Compromise (-)
     limitation: Stroq sees the agent’s own install or load of a supply-chain artifact (a package, model, container image, or tool); compromise introduced before the agent ever touches the artifact (e.g. at the origin registry) is addressed under supply-chain staging, not here.
@@ -42,7 +42,7 @@ AML.T0051        not covered LLM Prompt Injection (-)
     limitation: Covers injected instructions in content the agent reads back through a tool call; instructions injected purely in a user’s own conversational turn, never touching a tool, are not this surface.
 AML.T0051.000    not covered Direct (-)
     limitation: Direct injection happens in the user’s own prompt to the model, a channel Stroq’s hooks do not see; Stroq can only act once the injected instruction drives a subsequent tool call.
-AML.T0051.001    covered     Indirect (01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 10-skill-base64-installer, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 19-dependency-postinstall-persistence, 20-pdf-text-exec, 21-memory-persistence, 22-gitpwned-git-show-output, 23-worktree-escape-zshenv, 24-ghostapproval-symlink-authorized-keys, 28-kiro-mcp-json-shell-server, 29-memtry-mcp-onboarding-harvest, 30-clinejection-issue-title-install)
+AML.T0051.001    covered     Indirect (01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 10-skill-base64-installer, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 19-dependency-postinstall-persistence, 20-pdf-text-exec, 21-memory-persistence, 22-gitpwned-git-show-output, 23-worktree-escape-zshenv, 24-ghostapproval-symlink-authorized-keys, 28-kiro-mcp-json-shell-server, 29-memtry-mcp-onboarding-harvest, 30-clinejection-issue-title-install, 36-script-launders-taint-upload)
 AML.T0051.002    not covered Triggered (-)
     limitation: Covers the triggering event when it arrives as tool-call content (a file change, an incoming message ingested via a tool); an event source entirely outside any tool call is invisible.
 AML.T0068        partial     LLM Prompt Obfuscation (10-skill-base64-installer, 14-agents-md-invisible-hook-disable)
@@ -56,7 +56,7 @@ AML.T0094        not covered Delay Execution of LLM Instructions (-)
 AML.T0123        not covered Obfuscated Files or Information (-)
     limitation: Same limitation as prompt obfuscation: Stroq’s normalization and decode-and-rescan logic targets known encodings, and its own fuzzer has shown specific encodings that currently evade it.
 AML.T0053        not covered AI Agent Tool Invocation (-)
-AML.T0086        covered     Exfiltration via AI Agent Tool Invocation (03-token-in-mcp-comment, 05-roguepilot-schema-url, 06-env-dump-exfil, 11-fetched-page-ssh-key-upload, 13-padded-secret-exfil, 16-issue-body-html-comment-exfil, 29-memtry-mcp-onboarding-harvest)
+AML.T0086        covered     Exfiltration via AI Agent Tool Invocation (03-token-in-mcp-comment, 05-roguepilot-schema-url, 06-env-dump-exfil, 11-fetched-page-ssh-key-upload, 13-padded-secret-exfil, 16-issue-body-html-comment-exfil, 29-memtry-mcp-onboarding-harvest, 36-script-launders-taint-upload)
 AML.T0101        covered     Data Destruction via AI Agent Tool Invocation (08-rm-rf-home, 09-drizzle-force-push, 12-parent-dir-wipe, 25-script-trap-removes-home, 26-script-git-clean-workspace, 31-ssh-remote-docker-rmi, 32-firebase-hosting-disable, 33-lftp-mirror-delete, 34-cmd-rmdir-quote-collapse, 35-force-push-open-pr)
 AML.T0108        not covered AI Agent (-)
     limitation: Stroq evaluates each tool call the compromised agent makes on its own merits (a fetch, then a destructive or exfiltrating action); it does not itself recognize a fetch-and-execute loop as a C2 beacon pattern across a session.
@@ -130,13 +130,19 @@ AML.T0069.002    not covered System Prompt (-)
     limitation: Same limitation as the parent: visible only when the system prompt is read from a configuration file via a tool call, not when extracted through conversation with the model.
 AML.T0074        not covered Masquerading (-)
     limitation: Covers file-metadata and type-masquerading content a tool call returns, the same surface as prompt obfuscation; reclaiming a stale, previously-trusted package or model namespace after it is deleted or renamed is adversary-side registry activity outside the developer’s machine and is not covered.
+AML.T0129        not covered Triggers in Multimodal Inputs (-)
+    limitation: Stroq scans the text a tool returns and does not decode or recognise images, audio or video, so an instruction carried only in those channels is not seen; text extracted from a document or fetched page is scanned like any other content.
+AML.T0130        not covered AI Agent Response Biasing (-)
+    limitation: Covers an injected instruction that arrives in content a tool returns and matches a rule for text addressed to the assistant; the bias itself shows only in the model’s own conversational response, which no hook sees, and it triggers no action for a policy to block.
+AML.T0134        not covered AI Targeted Cloaking (-)
+    limitation: Covers the injected text when the agent’s fetch returns it and it matches a rule; the cloaking itself, a different response for a person or a crawler, happens on the server and cannot be observed or compared from a hook, and an injection that avoids every rule is not seen.
 
-in scope: 59 techniques — 3 covered, 8 partial, 48 not covered
+in scope: 62 techniques — 3 covered, 8 partial, 51 not covered
 
 OWASP ASI 2026:
-ASI01  Agent Goal Hijack — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec, 21-memory-persistence, 22-gitpwned-git-show-output, 23-worktree-escape-zshenv, 24-ghostapproval-symlink-authorized-keys, 28-kiro-mcp-json-shell-server, 29-memtry-mcp-onboarding-harvest, 30-clinejection-issue-title-install
+ASI01  Agent Goal Hijack — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 06-env-dump-exfil, 07-settings-hook-removal, 11-fetched-page-ssh-key-upload, 14-agents-md-invisible-hook-disable, 15-issue-title-pipe-to-shell, 16-issue-body-html-comment-exfil, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec, 21-memory-persistence, 22-gitpwned-git-show-output, 23-worktree-escape-zshenv, 24-ghostapproval-symlink-authorized-keys, 28-kiro-mcp-json-shell-server, 29-memtry-mcp-onboarding-harvest, 30-clinejection-issue-title-install, 36-script-launders-taint-upload
 ASI02  Tool Misuse — scenarios: 03-token-in-mcp-comment, 05-roguepilot-schema-url, 08-rm-rf-home, 09-drizzle-force-push, 12-parent-dir-wipe, 13-padded-secret-exfil, 25-script-trap-removes-home, 26-script-git-clean-workspace, 29-memtry-mcp-onboarding-harvest, 31-ssh-remote-docker-rmi, 32-firebase-hosting-disable, 33-lftp-mirror-delete, 34-cmd-rmdir-quote-collapse, 35-force-push-open-pr
-ASI03  Identity & Privilege Abuse — scenarios: 03-token-in-mcp-comment, 04-s1ngularity-public-repo, 05-roguepilot-schema-url, 06-env-dump-exfil, 11-fetched-page-ssh-key-upload, 13-padded-secret-exfil, 16-issue-body-html-comment-exfil, 24-ghostapproval-symlink-authorized-keys
+ASI03  Identity & Privilege Abuse — scenarios: 03-token-in-mcp-comment, 04-s1ngularity-public-repo, 05-roguepilot-schema-url, 06-env-dump-exfil, 11-fetched-page-ssh-key-upload, 13-padded-secret-exfil, 16-issue-body-html-comment-exfil, 24-ghostapproval-symlink-authorized-keys, 36-script-launders-taint-upload
 ASI04  Agentic Supply Chain Compromise — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 04-s1ngularity-public-repo, 10-skill-base64-installer, 19-dependency-postinstall-persistence, 28-kiro-mcp-json-shell-server, 30-clinejection-issue-title-install
 ASI05  Unexpected Code Execution — scenarios: 01-readme-pipe-to-shell, 02-sentry-agentjacking, 10-skill-base64-installer, 15-issue-title-pipe-to-shell, 17-ci-log-instruction, 18-filename-instruction, 20-pdf-text-exec, 22-gitpwned-git-show-output, 23-worktree-escape-zshenv, 27-vscode-task-folderopen
 ASI06  Memory & Context Poisoning — scenarios: 19-dependency-postinstall-persistence, 21-memory-persistence, 27-vscode-task-folderopen

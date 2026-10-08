@@ -20,6 +20,16 @@ import { commandWord } from './shell-segments.js';
  * and touching them is not self-tampering. `.stroq` stays a directory match
  * (`.stroq` or `.stroq/...`) since everything under it is Stroq's own state
  * (audit log, session data) and nothing else belongs there.
+ * Stroq's installed plugin is protected where Claude Code puts it. A plugin user has no hook in
+ * `settings.json`: Claude Code runs `hooks/stroq-hook.sh` from its plugin cache
+ * (`.claude/plugins/cache/<marketplace>/stroq/<version>`, or the clone the marketplace was added
+ * from under `.claude/plugins/marketplaces`) on every event, and a file the agent writes there
+ * turns the firewall off for good. The repository's own `plugins/stroq/hooks` is not matched: a
+ * developer edits that, and it is not what runs. The installed `@stroq/cli` is not matched
+ * either: running it by its path (`node node_modules/@stroq/cli/dist/index.js doctor 2>&1`) is
+ * ordinary work, and this gate cannot tell a run from a write that names the same file.
+ * Like every alternative here this is a spelling: a glob or a link that reaches the path goes
+ * round the gate.
  * `.codex/config.toml` is listed alongside `.codex/hooks.json` because that file
  * can both define inline `[hooks]` tables and turn the whole hooks feature off,
  * so editing it disables the firewall just as surely as deleting the hook file.
@@ -63,6 +73,17 @@ import { commandWord } from './shell-segments.js';
  * (`Application\ Support`), as a shell command line would need. `.windsurf/rules/` and
  * `.windsurf/workflows/` stay editable: the match is on `hooks.json`, not on the
  * directory, for exactly the reason the bare `.claude` match was narrowed.
+ * Windsurf's documentation now lives at docs.devin.ai under the name Devin Desktop, with
+ * `.devin/hooks.json` as the primary workspace file: `.windsurf/hooks.json` is read only
+ * when it is absent or defines no hooks, while the levels (system, user, workspace) are
+ * merged. A `.devin/hooks.json` an agent writes therefore silences a project-scope
+ * install without touching the file Stroq wrote, so it is protected on the same terms,
+ * together with the `etc/devin`, `Application Support/Devin` and `ProgramData` system
+ * files. `ProgramData` is not anchored to a drive: a standard user can create the
+ * directory, and a shell reaches it as `C:\ProgramData`, `%ProgramData%`, `$env:ProgramData`,
+ * `${env:ProgramData}` and `/c/ProgramData`, so it matches wherever the word stands alone
+ * (`MyProgramData` does not). A project directory of that name holding a `hooks.json` is
+ * the one thing this over-protects, and no such directory is known.
  * Antigravity is protected at the three files that can switch the firewall off: the
  * workspace hooks file (`.agents/hooks.json`), the global one
  * (`~/.gemini/config/hooks.json`) and `~/.gemini/antigravity-cli/settings.json`,
@@ -115,7 +136,7 @@ import { commandWord } from './shell-segments.js';
  * everywhere else.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]etc[/\\]+windsurf[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+Windsurf[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.stroq([/\\]+|\b))/i;
+  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.devin|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]etc[/\\]+(?:windsurf|devin)[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|(?<![\w-])ProgramData[%}]?[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.claude[/\\]+plugins[/\\]+(?:cache[/\\]+(?:stroq|[^/\\\s"']+[/\\]+stroq)|marketplaces[/\\]+(?:stroq|[^/\\\s"']+[/\\]+plugins[/\\]+stroq))(?![\w.-])|\.stroq([/\\]+|\b))/i;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own
@@ -156,10 +177,10 @@ export const SELF_CONFIG_FILE =
  * filesystems that resolve `claude.md` to the same file are.
  */
 export const INSTRUCTION_FILE =
-  /(?<![\w.-])(?:(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands|rules|output-styles|agent-memory(?:-local)?|routines|workflows)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:scheduled_tasks\.json|loop\.md)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf)[/\\]+rules(?![\w-]|\.+[\w-])|\.github[/\\]+(?:instructions|agents|prompts|chatmodes)(?![\w-]|\.+[\w-])|\.(?:agent|agents)[/\\]+(?:rules|workflows|skills)(?![\w-]|\.+[\w-])|\.kiro[/\\]+(?:steering|hooks)(?![\w-]|\.+[\w-])|(?<![\w.-])\.mcp\.json(?![\w-]|\.+[\w-])|\.(?:cursor|vscode|roo)[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.kiro[/\\]+settings[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.gemini[/\\]+settings\.json(?![\w-]|\.+[\w-])/i;
+  /(?<![\w.-])(?:(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md|\.cursorrules|\.windsurfrules)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:skills|agents|commands|rules|output-styles|agent-memory(?:-local)?|routines|workflows)(?![\w-]|\.+[\w-])|\.claude[/\\]+(?:scheduled_tasks\.json|loop\.md)(?![\w-]|\.+[\w-])|\.claude[/\\]+projects[/\\]+[^/\\\s]+[/\\]+memory(?![\w-]|\.+[\w-])|\.(?:cursor|windsurf|devin)[/\\]+rules(?![\w-]|\.+[\w-])|\.github[/\\]+(?:instructions|agents|prompts|chatmodes)(?![\w-]|\.+[\w-])|\.(?:agent|agents)[/\\]+(?:rules|workflows|skills)(?![\w-]|\.+[\w-])|\.kiro[/\\]+(?:steering|hooks)(?![\w-]|\.+[\w-])|(?<![\w.-])\.mcp\.json(?![\w-]|\.+[\w-])|\.(?:cursor|vscode|roo)[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.kiro[/\\]+settings[/\\]+mcp\.json(?![\w-]|\.+[\w-])|\.gemini[/\\]+settings\.json(?![\w-]|\.+[\w-])/i;
 
 export const PROTECTED_DIRS =
-  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
+  /\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|devin|codeium|agents|gemini|github[/\\]+(hooks|copilot))([/\\]|$|\s)/i;
 
 /**
  * A protected directory named as a whole, rather than a path into one.
@@ -185,7 +206,7 @@ export const PROTECTED_DIRS =
  * no class at all.
  */
 export const PROTECTED_DIR_BARE =
-  /(^|[\s"'=(])(?:[A-Za-z]:)?(?:[\w.~\\/-]*[/\\])?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|codeium|agents|gemini)|\.github[/\\](hooks|copilot))(?:[/\\]\*?|\*)?(?=$|[\s"';|&)])/i;
+  /(^|[\s"'=(])(?:[A-Za-z]:)?(?:[\w.~\\/-]*[/\\])?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|devin|codeium|agents|gemini)|\.github[/\\](hooks|copilot))(?:[/\\]\*?|\*)?(?=$|[\s"';|&)])/i;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',
@@ -410,13 +431,42 @@ export const GIT_OUTPUT_OPTION = anyOf(
   followedBy(/\bgit\s+(?:archive|format-patch)\b/, /\s-o\s/),
 );
 
+/** A redirect that copies one descriptor onto another (`2>&1`, `>&2`, `>&-`) names no file. */
+const DESCRIPTOR_COPY = /^\d*>&(?:\d+-?|-)$/;
+/** `>` and its kin, alone or glued to a device that takes what is written and keeps nothing: `2>/dev/null`. */
+const REDIRECT_TO_DEVICE = /^(?:\d*|&)>>?(\/dev\/(?:null|stderr|stdout|tty))?$/;
+const DEVICE = /^\/dev\/(?:null|stderr|stdout|tty)$/;
+
+/**
+ * Whether a segment redirects to something that may be a file: a `>` in it that is not a descriptor copied onto
+ * another (`2>&1`, `>&2`) or a write to the null device or a terminal. A `>` anywhere else counts, in quotes as
+ * well (`awk '{print > "f"}'`): a segment that names a protected file and redirects is a write to it as far as
+ * this reads, and a message that names the file and goes to `>&2` is not one.
+ */
+export function hasFileRedirect(segment: string): boolean {
+  if (!segment.includes('>')) return false;
+  const tokens = segment.split(/\s+/);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] as string;
+    if (!token.includes('>') || DESCRIPTOR_COPY.test(token)) continue;
+    const device = REDIRECT_TO_DEVICE.exec(token);
+    if (device !== null && device[1] !== undefined) continue;
+    if (device !== null && DEVICE.test(tokens[i + 1] ?? '')) {
+      i += 1;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function isSelfConfigWriteIntent(segment: string, word: string): boolean {
   if (SELF_CONFIG_WRITE_COMMANDS.has(word)) return true;
   if (word === 'git' && GIT_OUTPUT_OPTION.test(segment)) return true;
   if (isDownloadToFile(segment, word)) return true;
   if (WINDOWS_WRITE_COMMANDS.has(windowsVerb(word))) return true;
   if (SELF_CONFIG_INTERPRETERS.has(word) && hasInlineCode(segment)) return true;
-  if (segment.includes('>')) return true;
+  if (hasFileRedirect(segment)) return true;
   if (word === 'git' && GIT_WRITE_SUBCOMMAND.test(segment)) return true;
   if (word === 'find') return isFindWriteIntent(segment);
   return false;

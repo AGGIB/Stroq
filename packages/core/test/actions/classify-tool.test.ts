@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyTool, parseMcpToolName } from '../../src/actions/classify-tool.js';
+import { cpuNow } from '../cpu-time.js';
 
 const cwd = '/home/dev/project';
 
@@ -385,7 +386,7 @@ describe('an MCP call’s path cannot be hidden from the classifier', () => {
     ],
     ['a long list', () => ({ files: Array.from({ length: 5000 }, (_, i) => `/tmp/f${i}`) })],
   ])('asks when there are too many %s to read', (_name, build) => {
-    const started = performance.now();
+    const started = cpuNow();
     const r = classifyTool(
       'mcp__fs__write_file',
       { ...build(), path: '.claude/settings.json' },
@@ -393,7 +394,7 @@ describe('an MCP call’s path cannot be hidden from the classifier', () => {
     );
     expect(r.classes).toContain('shell.unparsed');
     expect(r.signals).toContain('mcp-args-unreadable');
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(cpuNow() - started).toBeLessThan(1000);
   });
 
   it('asks when the paths are longer in total than it will read', () => {
@@ -410,21 +411,21 @@ describe('an MCP call’s path cannot be hidden from the classifier', () => {
     const wide = Object.fromEntries(
       Array.from({ length: 5000 }, (_, i) => [`path${i}`, '/tmp/same']),
     );
-    const started = performance.now();
+    const started = cpuNow();
     const r = classifyTool('mcp__fs__get_file', { ...wide, options: wide }, cwd);
     expect(r.classes).not.toContain('shell.unparsed');
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(cpuNow() - started).toBeLessThan(500);
   });
 
   it('reads one long path in full without taking long about it', () => {
-    const started = performance.now();
+    const started = cpuNow();
     const r = classifyTool(
       'mcp__fs__write_file',
       { path: `/proj/${'./'.repeat(900_000)}.claude/settings.json` },
       cwd,
     );
     expect(r.classes).toContain('config.self');
-    expect(performance.now() - started).toBeLessThan(2000);
+    expect(cpuNow() - started).toBeLessThan(2000);
   });
 });
 
@@ -528,7 +529,7 @@ describe('the shapes an MCP call carries its paths in', () => {
 
 // Round two of review: the code written to close the padding hole had holes of its own.
 describe('the scan of an MCP call’s arguments is bounded and hard to slip past', () => {
-  const started = (): number => performance.now();
+  const started = (): number => cpuNow();
 
   // The split of an acronym from the word after it was quadratic on a long run of capitals,
   // and it ran on key names, which the agent chooses: past the host's hook timeout the
@@ -537,7 +538,7 @@ describe('the scan of an MCP call’s arguments is bounded and hard to slip past
     const t = started();
     const key = `${'A'.repeat(200_000)}PATH`;
     const r = classifyTool('mcp__fs__write_file', { [key]: '.claude/settings.json' }, cwd);
-    expect(performance.now() - t).toBeLessThan(500);
+    expect(cpuNow() - t).toBeLessThan(500);
     expect(r.classes).toContain('shell.unparsed');
   });
 
@@ -547,13 +548,13 @@ describe('the scan of an MCP call’s arguments is bounded and hard to slip past
       Array.from({ length: 500 }, (_, i) => [`${'A'.repeat(5000)}${i}_path`, 'x']),
     );
     classifyTool('mcp__fs__write_file', input, cwd);
-    expect(performance.now() - t).toBeLessThan(1000);
+    expect(cpuNow() - t).toBeLessThan(1000);
   });
 
   it('does not take long over a tool name made of capitals', () => {
     const t = started();
     classifyTool(`mcp__fs__${'A'.repeat(200_000)}`, { path: 'x' }, cwd);
-    expect(performance.now() - t).toBeLessThan(500);
+    expect(cpuNow() - t).toBeLessThan(500);
   });
 
   // Arrays did not count as a level, so a deep enough one overflowed the stack, and a
@@ -570,7 +571,7 @@ describe('the scan of an MCP call’s arguments is bounded and hard to slip past
     const t = started();
     const r = classifyTool(tool, { ...input, junk: nested(20_000) }, cwd);
     expect(r.classes).toContain('fs.secrets');
-    expect(performance.now() - t).toBeLessThan(500);
+    expect(cpuNow() - t).toBeLessThan(500);
   });
 
   it('does not throw on a deep array under a path-like key either', () => {
@@ -745,14 +746,14 @@ describe('what the path scan reads, third pass', () => {
   it('does not overflow the stack on a 200,000-deep array, and still reads the path beside it', () => {
     let inner: unknown = 'x';
     for (let i = 0; i < 200_000; i += 1) inner = [inner];
-    const t = performance.now();
+    const t = cpuNow();
     const r = classifyTool(
       'mcp__fs__write_file',
       { junk: inner, path: '.claude/settings.json' },
       cwd,
     );
     expect(r.classes).toContain('config.self');
-    expect(performance.now() - t).toBeLessThan(2000);
+    expect(cpuNow() - t).toBeLessThan(2000);
   });
 
   // A link is not a file the tool opens, and a key that only ends in the letters `file`
@@ -877,10 +878,10 @@ describe('the weak reading of unnamed keys cannot displace the strong one', () =
 
   // An undecodable escape threw an error per run, and thousands of them took seconds.
   it('does not take long over a file URI made of undecodable escapes', () => {
-    const t = performance.now();
+    const t = cpuNow();
     const uri = `file:///p/${'%E0'.repeat(600_000)}/.claude/settings.json`;
     const r = classifyTool('mcp__fs__write_file', { uri }, cwd);
-    expect(performance.now() - t).toBeLessThan(1500);
+    expect(cpuNow() - t).toBeLessThan(1500);
     expect(r.classes).toContain('config.self');
   });
 });

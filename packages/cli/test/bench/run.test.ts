@@ -154,6 +154,36 @@ describe('runBench', () => {
     expect(report.flaggedFiles.some((f) => f.endsWith('pos.md'))).toBe(true);
     expect(report.flaggedFiles.some((f) => f.endsWith('neg.md'))).toBe(false);
   });
+
+  // Documentation is read as a page that was fetched, which the engine reads as a tool's response
+  // as well: a rule on `tool_response` is measured against it, and one on `tool_description` or
+  // `user_input`, which nothing supplies on a fetched page, is not.
+  it('reads the documentation as a tool response, and as no other field', () => {
+    const onField = (id: string, field: string, phrase: string): AtrRule =>
+      ({
+        id,
+        title: `probe ${id}`,
+        severity: 'critical',
+        detection: {
+          condition: 'any',
+          conditions: [{ field, operator: 'contains', value: phrase }],
+        },
+      }) as unknown as AtrRule;
+
+    probeRuleState.rules = compileRules([
+      onField('PROBE-BENCH-00003', 'tool_response', 'STROQ_PROBE_RESPONSE_44ad'),
+      onField('PROBE-BENCH-00004', 'tool_description', 'STROQ_PROBE_DESCRIPTION_71be'),
+      onField('PROBE-BENCH-00005', 'user_input', 'STROQ_PROBE_USER_INPUT_9a03'),
+    ]).compiled;
+
+    const dir = fixture();
+    writeFileSync(join(dir, 'response.md'), 'See STROQ_PROBE_RESPONSE_44ad for details.');
+    writeFileSync(join(dir, 'description.md'), 'See STROQ_PROBE_DESCRIPTION_71be for details.');
+    writeFileSync(join(dir, 'user.md'), 'See STROQ_PROBE_USER_INPUT_9a03 for details.');
+    const flagged = runBench(dir).flaggedFiles.map((f) => f.split(/[\\/]/).pop() ?? f);
+
+    expect(flagged).toEqual(['response.md']);
+  });
 });
 
 afterEach(() => {

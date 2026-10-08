@@ -20,18 +20,29 @@ interface CommandHelp {
 const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'init',
-    synopsis: 'init [--agent <name>] [--user] [--dry-run]',
+    synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
     about: [
       'install hooks for an agent, in this project by default,',
-      "or wrap an MCP client's stdio servers in Stroq's proxy (--agent mcp)",
+      "or wrap an MCP client's stdio servers in Stroq's proxy (--agent mcp).",
+      'On a terminal it shows what it will change, asks first and, for Claude',
+      'Code, Codex, Cursor and Antigravity, checks that the hook it wrote starts',
+      'and judges. On Windows it writes the hook line of Antigravity, Cursor and',
+      'Codex without quotes (a host that escapes each quote cannot start a line',
+      'that has one) and starts it through cmd.exe, as such a host does, before',
+      'it keeps it.',
     ],
     flags: [
       [
         '--agent <name>',
-        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
+        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none, on a terminal: every agent it found (claude-code when none), after it has asked. In a script, in CI or with --no-input: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
       ],
       ['--user', "install into the user's config instead of this project's"],
       ['--dry-run', 'print the change and write nothing'],
+      [
+        '--yes',
+        'on a terminal, init shows what it will change and asks first; --yes answers for you (with no --agent, it guards every agent it found)',
+      ],
+      ['--no-input', 'never ask, and print the plain installer output (what scripts and CI get)'],
       ['--client <name>', 'with --agent mcp: claude-desktop, windsurf, cursor or claude-code'],
       ['--config <path>', 'with --agent mcp: any file with an "mcpServers" object'],
       ['--unwrap', 'with --agent mcp: put every wrapped server back the way it was'],
@@ -108,7 +119,10 @@ const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'doctor',
     synopsis: 'doctor [--all]',
-    about: ['check the installation: Node, rules, the hooks of every agent, a self-test'],
+    about: [
+      'check the installation: Node, rules, the hooks of every agent',
+      'and when each was last called, a self-test',
+    ],
     flags: [['--all', 'list every agent and scope, installed or not']],
   },
   {
@@ -146,7 +160,8 @@ const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'replay',
-    synopsis: 'replay [<session>] [--last] [--transcript <path>] [--json] [--list]',
+    synopsis:
+      'replay [<session>] [--last] [--transcript <path>] [--json] [--list] [--html] [--out <file>]',
     about: [
       'rebuild the recorded sequence: which content the agent read, and which later',
       "actions matched it. --last reads the agent's own transcript, so it works on",
@@ -160,11 +175,14 @@ const COMMANDS: readonly CommandHelp[] = [
       ['--transcript <path>', 'a specific transcript'],
       ['--json', 'machine-readable output'],
       ['--list', 'list the sessions in the audit log'],
+      ['--html', 'one HTML file with the chain drawn (no script, no link, no external resource)'],
+      ['--out <file>', 'write the page to a file that does not exist yet'],
     ],
   },
   {
     name: 'sent',
-    synopsis: 'sent [<session>] [--last] [--transcript <path>] [--json] [--fail-on-finding]',
+    synopsis:
+      'sent [<session>] [--last] [--transcript <path>] [--json] [--card [--html] [--out <file>]] [--fail-on-finding]',
     about: [
       'which credentials appear in a recorded agent session, and in which tool result',
       'or call. Reads names and sources only, never a value',
@@ -176,6 +194,12 @@ const COMMANDS: readonly CommandHelp[] = [
       ],
       ['--transcript <path>', 'a specific transcript or rollout'],
       ['--json', 'machine-readable output'],
+      [
+        '--card',
+        'a card to share instead of the report: counts, providers and the limits of the check, no value, name, path, command or hash',
+      ],
+      ['--html', 'with --card: one HTML file with no script and no external resource'],
+      ['--out <file>', 'with --card: write it to a file that does not exist yet'],
       ['--fail-on-finding', 'exit 1 when a credential is found'],
     ],
   },
@@ -237,10 +261,14 @@ const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'bench',
-    synopsis: 'bench [--corpus <dir>] [--json] [--verbose]',
-    about: ['measure how much benign developer text the rule set flags'],
+    synopsis: 'bench [--corpus <dir> | --actions] [--json] [--verbose]',
+    about: [
+      'measure how much benign developer text the rule set flags,',
+      'or (--actions) how much ordinary agent work your policy interrupts',
+    ],
     flags: [
       ['--corpus <dir>', 'measure your own files instead of the shipped corpus'],
+      ['--actions', 'replay 75 scenarios of ordinary agent work against your policy'],
       ['--json', 'machine-readable output'],
       ['--verbose', 'list the flagged files'],
     ],
@@ -259,6 +287,15 @@ const COMMANDS: readonly CommandHelp[] = [
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
 const INDENT = 37;
 
+const START_INDENT = 22;
+
+/** What a newcomer runs, in order: the rest of the list is for later. */
+const START_HERE: readonly (readonly [string, string])[] = [
+  ['stroq init', 'guard the agents on this machine (it asks first)'],
+  ['stroq sent --last', 'which of your keys did your agent already see?'],
+  ['stroq doctor', 'are the hooks in place, and was Stroq called?'],
+];
+
 /** `stroq --help`: every command, one block each. */
 export function usage(): string {
   const blocks = COMMANDS.map((c) => {
@@ -272,6 +309,9 @@ export function usage(): string {
   });
   return [
     'stroq <command>',
+    '',
+    'Start here:',
+    ...START_HERE.map(([command, meaning]) => `${`  ${command}`.padEnd(START_INDENT)}${meaning}`),
     '',
     'Commands:',
     ...blocks,

@@ -20,6 +20,18 @@ export { neutralizeControls };
 
 type Write = typeof process.stdout.write;
 
+/**
+ * Standard output as it was when this module was loaded, which is before `withSafeOutput` has wrapped
+ * it. The one writer that is not filtered, for the code that draws (`src/ui/`): its colour and cursor
+ * sequences are escapes, and the filter above would write them out as text. Every piece of text from
+ * outside that such code puts into a line is neutralized by it first, so these are the only escapes
+ * in what it writes.
+ */
+const originalStdoutWrite: Write = process.stdout.write.bind(process.stdout);
+export function writeUnfiltered(text: string): void {
+  originalStdoutWrite(text);
+}
+
 function safeWrite(original: Write, stream: NodeJS.WriteStream): Write {
   return function write(this: unknown, chunk: unknown, ...rest: unknown[]): boolean {
     const text =

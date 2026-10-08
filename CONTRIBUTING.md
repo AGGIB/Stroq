@@ -17,7 +17,7 @@ Requires Node >= 22 and pnpm (the pinned version is in the root `package.json`'s
 Useful scripts:
 
 ```bash
-pnpm test:coverage   # vitest with the 80% coverage gate
+pnpm test:coverage   # vitest with the coverage gate (lines 96, functions 97, statements 94, branches 86)
 pnpm typecheck
 pnpm format:check    # prettier --check
 pnpm build:rules     # rebuild packages/core/src/rules.bundle.json from rules/ (run this locally)
@@ -27,7 +27,7 @@ pnpm check:rules     # verify the committed bundle deterministically, the same w
 
 ## Test-Driven Development
 
-Write the failing test first, then the minimal implementation that makes it pass, then refactor. Every new behavior needs a test; every bug fix needs a regression test that fails before the fix and passes after. We aim for 80%+ coverage (enforced by `pnpm test:coverage`); a pull request that drops coverage below the threshold will fail CI.
+Write the failing test first, then the minimal implementation that makes it pass, then refactor. Every new behavior needs a test; every bug fix needs a regression test that fails before the fix and passes after. Coverage is enforced by `pnpm test:coverage` at lines 96, functions 97, statements 94 and branches 86 (`vitest.config.ts`); a pull request that drops coverage below those thresholds will fail CI.
 
 ## Coding Conventions
 

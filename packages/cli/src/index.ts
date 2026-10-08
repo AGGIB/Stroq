@@ -10,6 +10,7 @@ import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
+import { handleStdoutError } from './stdout-errors.js';
 import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
 import { runSent } from './commands/sent.js';
@@ -161,12 +162,7 @@ async function exitNow(code: number): Promise<never> {
   process.exit(code);
 }
 
-// `stroq log --json | head -1` closes the pipe after one line. That is the reader
-// being done, not a failure, and must not end in a stack trace.
-process.stdout.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EPIPE') process.exit(process.exitCode ?? 0);
-  throw err;
-});
+process.stdout.on('error', (err: NodeJS.ErrnoException) => handleStdoutError(err));
 
 main(process.argv.slice(2)).then(
   (code) => {

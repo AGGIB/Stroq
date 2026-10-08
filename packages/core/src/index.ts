@@ -4,6 +4,7 @@ export * from './rules/atr-types.js';
 export * from './rules/atr-loader.js';
 export * from './rules/compile.js';
 export * from './rules/bundle.js';
+export * from './rules/supplied-fields.js';
 export * from './scan/matcher.js';
 export * from './scan/scanner.js';
 export * from './actions/classify-bash.js';

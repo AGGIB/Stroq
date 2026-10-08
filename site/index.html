@@ -282,8 +282,8 @@
       <dl class="stats">
         <div class="stat">
           <dt class="stat-label">Gated rules</dt>
-          <dd class="stat-num">640</dd>
-          <dd class="stat-sub">13 ours, 627 vendored. 9 of 649 failed the false-positive and regex-cost gates.</dd>
+          <dd class="stat-num">621</dd>
+          <dd class="stat-sub">13 ours, 608 vendored. 28 of 649 failed a gate. 450 can fire on what Stroq reads; the rest wait for data it is not given.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Agents</dt>
@@ -293,7 +293,7 @@
         <div class="stat">
           <dt class="stat-label">Checks</dt>
           <dd class="stat-num">CI</dd>
-          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, thirty-five replayed attacks.</dd>
+          <dd class="stat-sub">Engine, CLI, seven adapters, the proxy, the rules pipeline, thirty-six replayed attacks.</dd>
         </div>
         <div class="stat">
           <dt class="stat-label">Cloud calls in the hot path</dt>
@@ -418,7 +418,7 @@
 
           <rect class="fl-node" x="438" y="48" width="140" height="80" rx="10"/>
           <text class="fl-t" x="454" y="80">Scan</text>
-          <text class="fl-s" x="454" y="100">640 rules</text>
+          <text class="fl-s" x="454" y="100">621 rules</text>
           <text class="fl-s" x="454" y="116">highest score</text>
           <path class="fl-arrow" d="M578 88H602" marker-end="url(#arr)"/>
 
@@ -484,16 +484,16 @@
   <section class="score" id="attacks" aria-labelledby="score-title">
     <div class="container">
       <div class="section-head reveal">
-        <h2 id="score-title">35 attacks replayed. <span class="hi-deny">16 blocked</span>, <span class="hi-ask">19 asked</span>, none through.</h2>
-        <p class="section-lead">Published incidents and synthetic cases are replayed as hook events through <em>your</em> policy on every commit. This tests the policy, not a live agent. <code>stroq attack</code> exits 1 if a scenario gets through.</p>
+        <h2 id="score-title">36 attacks replayed. <span class="hi-deny">17 blocked</span>, <span class="hi-ask">19 asked</span>, none through.</h2>
+        <p class="section-lead">Hook events written from published incident reports, and synthetic cases, are replayed through <em>your</em> policy on every commit. This tests the policy, not a live agent, and six of the reports are modelled rather than reproduced. <code>stroq attack</code> exits 1 if a scenario gets through.</p>
       </div>
 
       <div class="sc-board reveal">
-        <div class="sc-bar" role="img" aria-label="Of 35 replayed attacks, 16 were blocked outright, 19 were turned into a prompt, and none passed through.">
-          <span class="sc-seg sc-seg-deny"><b>16</b> blocked</span>
+        <div class="sc-bar" role="img" aria-label="Of 36 replayed attacks, 17 were blocked outright, 19 were turned into a prompt, and none passed through.">
+          <span class="sc-seg sc-seg-deny"><b>17</b> blocked</span>
           <span class="sc-seg sc-seg-ask"><b>19</b> asked</span>
         </div>
-        <p class="sc-zero">Every scenario that carries untrusted text (19 of the 35) is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 475 mutated variants escaped.</p>
+        <p class="sc-zero">Every scenario that carries untrusted text (20 of the 36) is then re-run through 25 evasions — zero-width padding, Cyrillic homoglyphs, base64, bidi overrides. <span class="sc-zero-n">0</span> of 500 mutated variants escaped.</p>
       </div>
 
       <ol class="sc-list reveal">
@@ -508,7 +508,7 @@
           <span class="sc-n">01</span>
           <span class="sc-what">A dependency README hides an instruction to run curl | sh</span>
           <span class="sc-effect">code execution</span>
-          <a class="sc-src" href="https://nesbitt.io/2026/05/28/protestware-for-coding-agents.html">Protestware for coding agents (jqwik)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://nesbitt.io/2026/05/28/protestware-for-coding-agents.html">Protestware for coding agents (jqwik) (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-ask">
@@ -522,7 +522,7 @@
           <span class="sc-n">03</span>
           <span class="sc-what">The agent posts a .env token into a GitHub issue comment through MCP</span>
           <span class="sc-effect">credential theft</span>
-          <a class="sc-src" href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment-and-Control<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment-and-Control (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-deny">
@@ -536,21 +536,21 @@
           <span class="sc-n">05</span>
           <span class="sc-what">A config file points at a $schema URL that carries the repository token</span>
           <span class="sc-effect">credential theft</span>
-          <a class="sc-src" href="https://orca.security/resources/blog/roguepilot-github-copilot-vulnerability/">Orca Security<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://orca.security/resources/blog/roguepilot-github-copilot-vulnerability/">Orca Security (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-deny">
           <span class="sc-n">06</span>
           <span class="sc-what">A poisoned note makes the agent pipe its environment to an external host</span>
           <span class="sc-effect">credential theft</span>
-          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/44868">claude-code #44868<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/44868">claude-code #44868 (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-deny">
           <span class="sc-n">07</span>
           <span class="sc-what">A fetched guide tells the agent to remove the hooks from .claude/settings.json</span>
           <span class="sc-effect">guard removal</span>
-          <a class="sc-src" href="https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/">Check Point<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://research.checkpoint.com/2026/rce-and-api-token-exfiltration-through-claude-code-project-files-cve-2025-59536/">Check Point (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-ask">
@@ -578,7 +578,7 @@
           <span class="sc-n">11</span>
           <span class="sc-what">A fetched setup page instructs the agent to upload ~/.ssh/id_rsa</span>
           <span class="sc-effect">credential theft</span>
-          <a class="sc-src" href="https://embracethered.com/blog/posts/2026/breaking-claude-code-opus-5-and-automode/">Rehberger<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
+          <a class="sc-src" href="https://embracethered.com/blog/posts/2026/breaking-claude-code-opus-5-and-automode/">Rehberger (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
         <li class="sc-row sc-ask">
@@ -748,6 +748,13 @@
           <span class="sc-effect">data loss</span>
           <a class="sc-src" href="https://github.com/anthropics/claude-code/issues/85450">claude-code #85450<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
           <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
+        </li>
+        <li class="sc-row sc-deny">
+          <span class="sc-n">36</span>
+          <span class="sc-what">A script written after reading a hostile README sends a .env file out</span>
+          <span class="sc-effect">credential theft</span>
+          <span class="sc-src sc-src-own">Stroq-authored</span>
+          <span class="sc-verdict"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
         </li>
       </ol>
 
@@ -936,7 +943,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</pre>
           <p class="plan-tag">Free forever · Apache-2.0</p>
           <ul>
             <li>The whole engine, all seven agent integrations and the MCP proxy</li>
-            <li>All 640 gated rules and the gates that built them</li>
+            <li>All 621 gated rules and the gates that built them</li>
             <li>Hash-chained audit, <code>stroq verify</code>, and the full CLI</li>
           </ul>
           <a class="btn btn-primary" href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>

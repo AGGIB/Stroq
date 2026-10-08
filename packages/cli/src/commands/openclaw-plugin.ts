@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   accessSync,
   constants,
@@ -11,6 +11,8 @@ import {
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { onInterrupt } from '../ui/cleanup.js';
+import { killTree } from './process-tree.js';
 import { isPlainObject, writeJsonObject } from './config-file.js';
 
 /**
@@ -200,12 +202,72 @@ export interface CommandRun {
   readonly output: string;
 }
 /** How `init` runs an external command; injectable so tests never spawn a real one. */
-export type RunCommand = (file: string, args: readonly string[]) => CommandRun;
+export type RunCommand = (
+  file: string,
+  args: readonly string[],
+) => CommandRun | Promise<CommandRun>;
 
-export const spawnCommand: RunCommand = (file, args) => {
-  const result = spawnSync(file, [...args], { encoding: 'utf8' });
-  return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` };
-};
+/** How long one command of the Gateway's CLI may run: one that has not answered in two minutes will not. */
+const COMMAND_TIMEOUT_MS = 120_000;
+/** How long what a command printed is waited for after it has exited: a process it left behind may hold the pipes. */
+const DRAIN_MS = 1_000;
+/** The most of what a command prints that is kept. */
+const MAX_OUTPUT_CHARS = 1 << 20;
+
+/**
+ * Runs the command and waits for it without holding the process: the event loop turns while it runs, so
+ * that a signal reaches the handlers of a screen that is drawn, and a command that does not answer is
+ * ended after `COMMAND_TIMEOUT_MS`, not waited for. It runs in a group of its own, which the process
+ * ends with it (so that what the command started does not outlive it), asking it to stop where the
+ * process is interrupted and not to be killed in the middle of what it writes.
+ */
+export const spawnCommand = (file: string, args: readonly string[]): Promise<CommandRun> =>
+  new Promise((resolve) => {
+    let output = '';
+    let finished = false;
+    let timedOut = false;
+    let drain: NodeJS.Timeout | undefined;
+    const child = spawn(file, [...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+    });
+    const forget = onInterrupt(() => killTree(child, 'SIGTERM'));
+    const done = (status: number | null): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      clearTimeout(drain);
+      forget();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolve({
+        status,
+        output: timedOut ? `${output}(stopped after ${COMMAND_TIMEOUT_MS / 1000} s)\n` : output,
+      });
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child, 'SIGKILL');
+      done(null);
+    }, COMMAND_TIMEOUT_MS);
+    const keep = (chunk: Buffer): void => {
+      if (output.length < MAX_OUTPUT_CHARS)
+        output += chunk.toString().slice(0, MAX_OUTPUT_CHARS - output.length);
+    };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    child.on('error', (err) => {
+      output += `${err.message}\n`;
+      done(null);
+    });
+    // The command has exited: its output is read for a moment, and not for as long as a process that
+    // it left holding the pipes lives.
+    child.on('exit', (code) => {
+      drain = setTimeout(() => done(code), DRAIN_MS);
+    });
+    child.on('close', (code) => done(code));
+  });
 
 export interface CommandOutcome {
   readonly line: string;
@@ -214,18 +276,20 @@ export interface CommandOutcome {
 }
 
 /**
- * Runs both commands and reports both, even when the first fails: `install --link` on
- * a plugin the Gateway already has linked is expected to fail, and `enable` still has
+ * Runs both commands, one after the other, and reports both, even when the first fails: `install
+ * --link` on a plugin the Gateway already has linked is expected to fail, and `enable` still has
  * to run for the install to take effect.
  */
-export function runOpenClawInstall(
+export async function runOpenClawInstall(
   bin: string,
   dir: string,
   run: RunCommand = spawnCommand,
-): readonly CommandOutcome[] {
+): Promise<readonly CommandOutcome[]> {
   const lines = openclawInstallCommands(dir);
-  return openclawInstallArgv(dir).map((argv, index) => {
-    const { status, output } = run(bin, argv);
-    return { line: lines[index] ?? '', ok: status === 0, output };
-  });
+  const outcomes: CommandOutcome[] = [];
+  for (const [index, argv] of openclawInstallArgv(dir).entries()) {
+    const { status, output } = await run(bin, argv);
+    outcomes.push({ line: lines[index] ?? '', ok: status === 0, output });
+  }
+  return outcomes;
 }

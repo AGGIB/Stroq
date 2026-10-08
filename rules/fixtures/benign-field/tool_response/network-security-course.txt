@@ -1,0 +1,7 @@
+Network security course, week 6: detecting attacker traffic
+
+This week we work with a labelled command and control HTTP traffic dataset collected in a lab:
+about thirty million benign flows and a smaller set of beacon traffic produced by a red team.
+Exercises: write a detector for periodic beaconing, then discuss why a reverse shell over port 443
+is harder to spot than one on an unusual port. Students must not run any of the sample tooling
+outside the course environment.

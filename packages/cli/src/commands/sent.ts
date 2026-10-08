@@ -22,11 +22,20 @@
 // good its reason. Nothing is written or printed but names and sources — matching
 // goes through the same salted-hash lookup the live guard uses.
 import { homedir, tmpdir } from 'node:os';
-import { copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AuditLog, FileSecretIndex } from '@stroq/core';
 import { auditFile, secretsFile } from '../paths.js';
+import { buildCard, cardHtml, cardMarkdown } from '../sent/card.js';
 import { formatSent } from '../sent/format.js';
 import {
   newestTranscript,
@@ -38,11 +47,18 @@ import {
 import type { Transcript } from '../replay/transcript.js';
 import type { SentReport } from '../sent/report.js';
 import { scanAuditLog, scanTranscript, type SentIndexScope } from '../sent/scan.js';
+import { stroqVersion } from '../version.js';
 import { sessionsIn } from './replay.js';
 
 interface Output {
   readonly json: boolean;
   readonly failOnFinding: boolean;
+  /** Print the card (`--card`): counts and providers, nothing the report names. */
+  readonly card: boolean;
+  /** The card as HTML, not Markdown. */
+  readonly html: boolean;
+  /** Write the card to this file instead of printing it, if it does not exist. */
+  readonly path: string | null;
 }
 
 /**
@@ -62,9 +78,33 @@ interface Output {
  * the first time a new credential turns up in a session.
  */
 function emit(report: SentReport, out: Output): number {
-  process.stdout.write(out.json ? `${JSON.stringify(report, null, 2)}\n` : formatSent(report));
   const found = report.credentials.length > 0 || report.files.length > 0;
-  return out.failOnFinding && found ? 1 : 0;
+  const gate = out.failOnFinding && found ? 1 : 0;
+  if (!out.card) {
+    process.stdout.write(out.json ? `${JSON.stringify(report, null, 2)}\n` : formatSent(report));
+    return gate;
+  }
+  const card = buildCard(report, stroqVersion());
+  const text = out.json
+    ? `${JSON.stringify(card, null, 2)}\n`
+    : out.html
+      ? cardHtml(card)
+      : cardMarkdown(card);
+  if (out.path === null) {
+    process.stdout.write(text);
+    return gate;
+  }
+  try {
+    // `wx`: an existing file, or a link where it would go, is refused and not written through.
+    writeFileSync(out.path, text, { flag: 'wx', mode: 0o644 });
+  } catch (err) {
+    const why =
+      (err as NodeJS.ErrnoException).code === 'EEXIST' ? 'it exists' : (err as Error).message;
+    process.stderr.write(`not written: ${out.path} (${why})\n`);
+    return 2;
+  }
+  process.stdout.write(`wrote ${out.path}\n`);
+  return gate;
 }
 
 const USAGE = `stroq sent — credential evidence in recorded agent sessions
@@ -75,6 +115,11 @@ const USAGE = `stroq sent — credential evidence in recorded agent sessions
 
 Flags:
   --json               emit the report as JSON
+  --card               print a card instead of the report: counts, providers and the
+                       limits of the check, and no value, name, path, command or hash,
+                       so it can be shared; --json prints it as JSON
+  --html               with --card: one HTML file (no script, no external resource)
+  --out <file>         with --card: write it to <file> (never over an existing file)
   --fail-on-finding    exit 1 when a credential is found (for a scheduled job)
   -h, --help           show this
 
@@ -220,6 +265,9 @@ export async function runSent(args: readonly string[]): Promise<number> {
       args: [...args],
       options: {
         json: { type: 'boolean' },
+        card: { type: 'boolean' },
+        html: { type: 'boolean' },
+        out: { type: 'string' },
         last: { type: 'boolean' },
         transcript: { type: 'string' },
         'fail-on-finding': { type: 'boolean' },
@@ -240,9 +288,16 @@ export async function runSent(args: readonly string[]): Promise<number> {
     process.stdout.write(USAGE);
     return 0;
   }
+  if (values.card !== true && (values.html === true || values.out !== undefined)) {
+    process.stderr.write(`--html and --out go with --card\n\n${USAGE}`);
+    return 2;
+  }
   const out: Output = {
     json: values.json === true,
     failOnFinding: values['fail-on-finding'] === true,
+    card: values.card === true,
+    html: values.html === true || (values.out?.toLowerCase().endsWith('.html') ?? false),
+    path: values.out ?? null,
   };
 
   const cwd = process.cwd();

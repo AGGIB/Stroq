@@ -2,11 +2,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { agentHookStatus, doctorReport, runDoctor } from '../../src/commands/doctor.js';
+import { canFire, loadBundledRules } from '@stroq/core';
+import {
+  agentHookStatus,
+  doctorReport,
+  rulesDetail,
+  runDoctor,
+} from '../../src/commands/doctor.js';
 import { installCursorHooks, cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
-import { installWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+import {
+  devinHooksPath,
+  installWindsurfHooks,
+  windsurfHooksPath,
+} from '../../src/commands/windsurf-hooks.js';
 import {
   antigravityHooksPath,
   installAntigravityHooks,
@@ -20,6 +30,7 @@ import {
 import { secretsFile } from '../../src/paths.js';
 import { mcpConfigPath, wrapMcpConfig } from '../../src/commands/mcp-config.js';
 import { writeJsonObject } from '../../src/commands/config-file.js';
+import { recordInstall } from '../../src/commands/install-record.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 /** A hook command whose Node and entry exist: `doctor` checks that they do. */
@@ -43,6 +54,8 @@ beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), 'stroq-doctor-'));
   process.env['STROQ_HOME'] = join(cwd, 'home');
   process.env['HOME'] = join(cwd, 'fakehome');
+  // Where Windows looks for the home directory: without it the user scope is the machine's own.
+  process.env['USERPROFILE'] = join(cwd, 'fakehome');
   codexHome(true);
 });
 
@@ -78,6 +91,21 @@ describe('doctorReport', () => {
     writeFileSync(file, JSON.stringify({ permissions: { allow: ['Bash(ls)'] } }));
     const check = (await doctorReport(cwd, { all: true })).checks.find((c) => c.name === 'hooks');
     expect(check?.detail).not.toContain('incomplete');
+  });
+
+  it('says how many of the rules can fire, and why the others cannot', async () => {
+    const check = (await doctorReport(cwd)).checks.find((c) => c.name === 'rules')!;
+    const loaded = loadBundledRules();
+    const can = loaded.filter(canFire).length;
+    expect(check.detail).toBe(rulesDetail(loaded.length, can));
+    expect(check.detail).toContain(`${loaded.length} rules loaded, ${can} can fire`);
+    expect(can).toBeLessThan(loaded.length);
+    expect(check.detail).toContain('what a person typed');
+  });
+
+  it('says so plainly when every rule can fire, and names no reason', () => {
+    expect(rulesDetail(10, 10)).toBe('10 rules loaded, all can fire on what Stroq reads');
+    expect(rulesDetail(10, 7)).toContain('3 need');
   });
 
   it('reports missing hooks, then installed hooks', async () => {
@@ -618,12 +646,244 @@ describe('doctorReport windsurf hooks', () => {
   });
 });
 
+// Devin Desktop, the renamed Windsurf, reads `.devin/hooks.json` first and uses
+// `.windsurf/hooks.json` only "when `.devin/hooks.json` is absent or defines no hooks"
+// (docs.devin.ai/desktop/cascade/hooks). `init` writes the second one, so a repository's
+// own first one switches a project install off without touching a byte of Stroq's file.
+describe('doctorReport windsurf hooks beside a project .devin/hooks.json', () => {
+  const cmd = `${STROQ} hook windsurf`;
+  const foreign = { hooks: { pre_run_command: [{ command: 'echo hi' }] } };
+  const put = (file: string, value: unknown): void => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+  };
+  const windsurf = async (opts: { all?: boolean } = { all: true }) =>
+    (await doctorReport(cwd, opts)).checks.find((c) => c.name === 'windsurf hooks');
+  const detailOf = (
+    report: { checks: readonly { name: string; detail: string }[] },
+    name: string,
+  ) => report.checks.find((c) => c.name === name)?.detail ?? '';
+
+  it('says SHADOWED, and how to fix it, when .devin/hooks.json defines hooks of its own', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    put(devinHooksPath(cwd), foreign);
+    const check = await windsurf();
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('project: SHADOWED');
+    expect(check?.detail).toContain(devinHooksPath(cwd));
+    expect(check?.detail).toContain('stroq init --agent windsurf --user');
+    // What `stroq run` asks, so it does not start an agent it believes is guarded.
+    expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+  });
+
+  it('is not hidden by another agent that is installed', async () => {
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    put(devinHooksPath(cwd), foreign);
+    const check = await windsurf({});
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('SHADOWED');
+  });
+
+  it('is not folded into the not-installed-anywhere line when nothing else is installed', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    put(devinHooksPath(cwd), foreign);
+    const check = await windsurf({});
+    expect(check).toBeDefined();
+    expect(check?.detail).toContain('SHADOWED');
+  });
+
+  it('is fine, and still says so, when the user-level file carries Stroq as well', async () => {
+    // The user file has no Devin twin and the levels are merged, so it cannot be replaced
+    // from the repository. Windows reads USERPROFILE, not HOME.
+    const profile = process.env['USERPROFILE'];
+    process.env['USERPROFILE'] = process.env['HOME'];
+    try {
+      installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+      installWindsurfHooks(windsurfHooksPath('user', cwd), cmd);
+      put(devinHooksPath(cwd), foreign);
+      const check = await windsurf();
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain('project: SHADOWED');
+      expect(check?.detail).toContain('user: installed');
+    } finally {
+      if (profile === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = profile;
+    }
+  });
+
+  it('does not call it shadowed when .devin/hooks.json defines no hook', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    for (const text of ['', '{}', '{ "hooks": {} }', '{ "hooks": { "pre_run_command": [] } }']) {
+      put(devinHooksPath(cwd), text);
+      const check = await windsurf();
+      expect(check?.ok, text).toBe(true);
+      expect(check?.detail, text).toContain('project: installed');
+      expect(check?.detail, text).not.toContain('SHADOWED');
+    }
+  });
+
+  it('says nothing about it when Stroq is not installed in the project at all', async () => {
+    put(devinHooksPath(cwd), foreign);
+    const check = await windsurf();
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('project: missing');
+    expect(check?.detail).not.toContain('SHADOWED');
+  });
+
+  // The suffix ` hook windsurf` is what a hook command ends in, not who wrote it, and the
+  // file is the repository's: its entries count as Stroq's only when they are the command
+  // `stroq init` recorded, and the paths in it are still there.
+  describe("entries in .devin/hooks.json that only look like Stroq's", () => {
+    const forged = (n = 6) => {
+      const events = [
+        'pre_read_code',
+        'post_read_code',
+        'pre_write_code',
+        'pre_run_command',
+        'pre_mcp_tool_use',
+        'post_mcp_tool_use',
+      ];
+      return {
+        hooks: Object.fromEntries(
+          events.slice(0, n).map((e) => [e, [{ command: '/tmp/evil hook windsurf' }]]),
+        ),
+      };
+    };
+
+    it('are shadowing hooks, not the install, when the command is not the recorded one', async () => {
+      installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+      recordInstall('windsurf', 'project', cmd);
+      put(devinHooksPath(cwd), forged());
+      const check = await windsurf();
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain('SHADOWED');
+      expect(check?.detail).toContain('not the command stroq init recorded');
+      expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+    });
+
+    it('do not make a project with no install look installed', async () => {
+      put(devinHooksPath(cwd), forged());
+      const check = await windsurf();
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain('project: missing');
+      expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+    });
+
+    it("do not make another agent's line say Windsurf is carrying the load", async () => {
+      installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
+      put(devinHooksPath(cwd), forged());
+      const report = await doctorReport(cwd);
+      expect(detailOf(report, 'hooks')).not.toContain('windsurf');
+    });
+
+    it('are not the install when they are the recorded command but its paths are gone', async () => {
+      const gone = '"/nonexistent/node" "/nonexistent/stroq.js" hook windsurf';
+      installWindsurfHooks(windsurfHooksPath('project', cwd), gone);
+      recordInstall('windsurf', 'project', gone);
+      installWindsurfHooks(devinHooksPath(cwd), gone);
+      const check = await windsurf();
+      expect(check?.ok).toBe(false);
+      expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+    });
+  });
+
+  // A check that the recorded command appears somewhere in the text, and another that six
+  // commands end in ` hook windsurf`, are two answers about two different things: neither says
+  // that each of the six events runs the entry Stroq wrote. The file is the repository's.
+  describe('a .devin/hooks.json built to pass the checks it can see', () => {
+    const events = [
+      'pre_read_code',
+      'post_read_code',
+      'pre_write_code',
+      'pre_run_command',
+      'pre_mcp_tool_use',
+      'post_mcp_tool_use',
+    ];
+    const everyEvent = (entry: unknown, extra: Record<string, unknown> = {}) => ({
+      ...extra,
+      hooks: Object.fromEntries(events.map((e) => [e, [entry]])),
+    });
+    const real = (): { command: string; powershell: string; show_output: boolean } => ({
+      command: cmd,
+      powershell: `& ${cmd}`,
+      show_output: true,
+    });
+    const shadowed = async (devinFile: unknown): Promise<void> => {
+      installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+      recordInstall('windsurf', 'project', cmd);
+      put(devinHooksPath(cwd), devinFile);
+      const check = await windsurf();
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toContain('SHADOWED');
+      expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+    };
+
+    it('with the recorded command in a note and no-ops in the six events', async () => {
+      await shadowed(everyEvent({ command: '/usr/bin/true hook windsurf' }, { note: cmd }));
+    });
+
+    it('with the real entry on one event and no-ops on the other five', async () => {
+      const file = everyEvent({ command: '/usr/bin/true hook windsurf' });
+      (file.hooks as Record<string, unknown[]>)['pre_run_command'] = [real()];
+      await shadowed(file);
+    });
+
+    it('with the recorded command only in the PowerShell field', async () => {
+      await shadowed(
+        everyEvent({ command: '/usr/bin/true hook windsurf', powershell: `& ${cmd}` }),
+      );
+    });
+
+    it("with the real command and a working directory of the repository's choosing", async () => {
+      await shadowed(everyEvent({ ...real(), working_directory: '/tmp' }));
+    });
+
+    it('with the real command and a key Stroq never writes', async () => {
+      await shadowed(everyEvent({ ...real(), env: { PATH: '/tmp/bin' } }));
+    });
+  });
+
+  it('counts a faithful copy of the recorded entries in .devin/hooks.json as the install that runs', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    recordInstall('windsurf', 'project', cmd);
+    installWindsurfHooks(devinHooksPath(cwd), cmd);
+    const check = await windsurf();
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain(devinHooksPath(cwd));
+    expect(agentHookStatus('windsurf', cwd)?.installed).toBe(true);
+  });
+
+  it('names the command that fixes a shadowed install, so no caller suggests the one that does not', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    put(devinHooksPath(cwd), foreign);
+    expect(agentHookStatus('windsurf', cwd)?.fix).toBe('stroq init --agent windsurf --user');
+    expect(agentHookStatus('cursor', cwd)?.fix).toBe('stroq init --agent cursor');
+    expect(agentHookStatus('claude-code', cwd)?.fix).toBe('stroq init --agent claude-code');
+  });
+
+  it('fails with the reason when .devin/hooks.json cannot be read, since whether Stroq runs is unknown', async () => {
+    installWindsurfHooks(windsurfHooksPath('project', cwd), cmd);
+    put(devinHooksPath(cwd), '{ "hooks": the-secret-token-value');
+    const check = await windsurf();
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain('cannot parse');
+    expect(check?.detail).toContain(devinHooksPath(cwd));
+    expect(check?.detail).not.toContain('the-secret-token-value');
+    expect(agentHookStatus('windsurf', cwd)?.installed).toBe(false);
+  });
+});
+
 describe('doctorReport antigravity hooks', () => {
   const detailOf = (
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
-  const cmd = `${STROQ} hook antigravity`;
+  // A line with a quote in it cannot start under Antigravity on Windows, and `init` writes none there.
+  const cmd =
+    process.platform === 'win32'
+      ? `${process.execPath} ${CLI_ENTRY} hook antigravity`
+      : `${STROQ} hook antigravity`;
 
   it('names the file it looked for when nothing is installed', async () => {
     const antigravity = (await doctorReport(cwd, { all: true })).checks.find(
@@ -803,4 +1063,205 @@ describe('doctorReport mcp proxy', () => {
     expect(check?.detail).toContain('wrapped 1/1 stdio servers');
     expect(check?.detail).toContain('1 inherits the full environment');
   });
+});
+
+// The hook line without a quote, which `init` writes for the hosts that hand it to cmd.exe, and the one with
+// quotes that Antigravity on Windows cannot start. Its paths are files made for the test: the node and the build
+// that run it can stand where a bare word cannot name them (a blank in `Program Files`), and a test that read them
+// would pass for the wrong reason there. A temporary directory with a blank in it cannot hold them either.
+describe.skipIf(/\s/.test(tmpdir()))('doctorReport, a hook line written without quotes', () => {
+  /** An empty file of this name in a directory of the test, which exists for `doctor` to find. */
+  const place = (name: string): string => {
+    const file = join(cwd, 'bare', name);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, '');
+    return file;
+  };
+  const bare = (agent: string, entry: string = place('index.js'), node: string = place('node')) =>
+    `${node} ${entry} hook ${agent}`;
+  const hooksCheck = async () => (await doctorReport(cwd)).checks.find((c) => c.name === 'hooks');
+
+  it('is installed, when the node and the entry it names exist', async () => {
+    installHooks(settingsPath('project', cwd), bare('claude-code'));
+
+    const check = await hooksCheck();
+
+    expect(check?.ok).toBe(true);
+    expect(agentHookStatus('claude-code', cwd)?.installed).toBe(true);
+  });
+
+  it('is broken, and names the entry, when the entry has gone', async () => {
+    const gone = join(cwd, 'gone', 'dist', 'index.js');
+    installHooks(settingsPath('project', cwd), bare('claude-code', gone));
+
+    const check = await hooksCheck();
+
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(gone);
+    expect(check?.detail).toMatch(/no longer exists/);
+  });
+
+  it('is broken, and names the node, when the node has gone', async () => {
+    const node = join(cwd, 'gone', 'node');
+    installHooks(settingsPath('project', cwd), bare('claude-code', undefined, node));
+
+    const check = await hooksCheck();
+
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(node);
+  });
+
+  it('does not look for a bare `node`, which the search path finds', async () => {
+    installHooks(settingsPath('project', cwd), `node ${place('index.js')} hook claude-code`);
+
+    expect((await hooksCheck())?.ok).toBe(true);
+  });
+
+  it.each([
+    'npx @stroq/cli hook claude-code',
+    'bash ./scripts/guard.sh hook claude-code',
+    'node ./node_modules/@stroq/cli/dist/index.js hook claude-code',
+    'node %APPDATA%\\npm\\node_modules\\@stroq\\cli\\dist\\index.js hook claude-code',
+    'node ~/stroq/dist/index.js hook claude-code',
+  ])(
+    'does not call a hook broken for a relative word that is no place `doctor` can look for: %s',
+    async (line) => {
+      // Somebody else's hook or one resolved from the agent's own directory; a path `init` wrote is absolute.
+      installHooks(settingsPath('project', cwd), line);
+
+      const check = await hooksCheck();
+
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).not.toMatch(/no longer exists/);
+    },
+  );
+
+  it('does not read the `&` of a PowerShell entry as the node, nor what follows as the entry', async () => {
+    installCopilotHooks(
+      copilotHooksPath('project', cwd),
+      `/tmp/evil hook copilot pre`,
+      `/tmp/evil hook copilot post`,
+    );
+
+    const status = agentHookStatus('copilot', cwd);
+
+    // Read as the entry of a hook that someone has rewritten (which `drift` is for, and the exposure tests
+    // look at), not as a place that has gone: `/tmp/evil` is no node and no entry here.
+    expect(status?.installed).toBe(true);
+    expect(status?.detail).not.toMatch(/no longer exists/);
+  });
+
+  it('does not take a hook of the same words in some other program for broken', async () => {
+    // `python3 lint.py hook antigravity pre` names no place, and so none that has gone.
+    installAntigravityHooks(antigravityHooksPath('project', cwd), bare('antigravity'));
+    const file = antigravityHooksPath('project', cwd);
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    parsed['my-linter'] = {
+      PostToolUse: [
+        {
+          matcher: '',
+          hooks: [{ type: 'command', command: 'python3 lint.py hook antigravity pre' }],
+        },
+      ],
+    };
+    writeFileSync(file, JSON.stringify(parsed));
+
+    const report = await doctorReport(cwd, { all: true });
+
+    expect(report.checks.find((c) => c.name === 'antigravity hooks')?.ok).toBe(true);
+  });
+});
+
+describe('doctorReport, Antigravity on Windows', () => {
+  const quoted = `"${process.execPath}" "${CLI_ENTRY}" hook antigravity`;
+  const bare = `${process.execPath} ${CLI_ENTRY} hook antigravity`;
+
+  async function onPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { ...original, value: platform });
+    try {
+      return await fn();
+    } finally {
+      if (original !== undefined) Object.defineProperty(process, 'platform', original);
+    }
+  }
+
+  /** What the Antigravity line of the report says, with `--all` as the plain report has it. */
+  async function antigravityLine(platform: NodeJS.Platform, all = true): Promise<string> {
+    const report = await onPlatform(platform, () => doctorReport(cwd, { all }));
+    const check = report.checks.find((c) => c.name === 'antigravity hooks');
+    return `${check?.ok ? 'ok' : 'fail'}: ${check?.detail ?? ''}`;
+  }
+
+  it('calls a line with a quote in it broken, and says what to do from outside Antigravity', async () => {
+    installAntigravityHooks(antigravityHooksPath('project', cwd), quoted);
+
+    const said = await antigravityLine('win32');
+
+    expect(said).toMatch(/^fail: /);
+    expect(said).toContain('has a quote in it');
+    expect(said).toContain('cmd.exe');
+    expect(said).toContain('blocks every tool call');
+    expect(said).toContain('stroq init --agent antigravity');
+    expect(said).toContain('stroq uninstall --agent antigravity');
+    expect(said).toContain('outside Antigravity');
+  });
+
+  it('says it in the plain report too, where nothing else is installed, and not "not installed in any agent"', async () => {
+    installAntigravityHooks(antigravityHooksPath('project', cwd), quoted);
+
+    const report = await onPlatform('win32', () => doctorReport(cwd));
+
+    // The collapsed line is a single `hooks` row that says "not installed in any agent"; the rows of the agents are
+    // what a broken install keeps in the report.
+    expect(report.checks.map((c) => c.detail).join('\n')).not.toContain(
+      'not installed in any agent',
+    );
+    expect(report.checks.find((c) => c.name === 'antigravity hooks')?.detail).toContain(
+      'has a quote in it',
+    );
+  });
+
+  it('does not let another agent that is installed make it green', async () => {
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
+    installAntigravityHooks(antigravityHooksPath('project', cwd), quoted);
+
+    const said = await antigravityLine('win32', false);
+
+    // "not installed (ok: hooks are)" is what a missing agent says beside a working one; this one is not missing.
+    expect(said).toMatch(/^fail: /);
+    expect(said).toContain('has a quote in it');
+  });
+
+  it('names the command that takes the hook out for the user scope too', async () => {
+    installAntigravityHooks(antigravityHooksPath('user', cwd), quoted);
+
+    const said = await antigravityLine('win32');
+
+    expect(said).toContain('stroq uninstall --agent antigravity --user');
+  });
+
+  it('is not installed for a caller that asks about the agent alone, as `stroq run` does', async () => {
+    installAntigravityHooks(antigravityHooksPath('project', cwd), quoted);
+
+    const status = await onPlatform('win32', async () => agentHookStatus('antigravity', cwd));
+
+    expect(status?.installed).toBe(false);
+    expect(status?.detail).toContain('has a quote in it');
+  });
+
+  it('calls a line without a quote installed', async () => {
+    installAntigravityHooks(antigravityHooksPath('project', cwd), bare);
+
+    expect(await antigravityLine('win32')).toMatch(/^ok: .*project: installed/);
+  });
+
+  it.each(['linux', 'darwin'] as const)(
+    'leaves the line with a quote alone on %s',
+    async (platform) => {
+      installAntigravityHooks(antigravityHooksPath('project', cwd), quoted);
+
+      expect(await antigravityLine(platform)).toMatch(/^ok: .*project: installed/);
+    },
+  );
 });

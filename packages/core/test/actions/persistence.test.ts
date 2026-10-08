@@ -67,6 +67,35 @@ describe('a command that installs something a trusted process runs later', () =>
     'cp plist ~/Library/LaunchAgents/com.example.plist',
     'echo x > ~/.config/systemd/user/a.service',
     'echo x > ~/.config/autostart/a.desktop',
+    // The redirects that send both streams to a file (bash and zsh): found by a third review, 2026-10-07.
+    'echo evil &> ~/.bashrc',
+    'echo evil &>> ~/.zshrc',
+    'echo evil >& ~/.bashrc',
+    'echo evil &>~/.bashrc',
+    'echo evil >&~/.zshrc',
+    'echo evil >>& ~/.zshrc',
+    'echo evil 2> /dev/null &>> ~/.profile',
+    // Opened for writing in other spellings (zsh's clobber overrides, a descriptor the shell makes, read-and-write).
+    'echo evil >! ~/.zshrc',
+    'echo evil >>! ~/.zshrc',
+    'echo evil >!~/.zshrc',
+    'echo evil &>! ~/.zshrc',
+    'echo evil &>>| ~/.zshrc',
+    'echo evil >&! ~/.zshrc',
+    'echo evil >&| ~/.zshrc',
+    'echo evil >>&! ~/.zshrc',
+    'exec {fd}> ~/.zshrc',
+    'echo evil {fd}>>~/.bashrc',
+    'echo evil {out}>~/.zshenv',
+    'echo evil 1<> ~/.zshrc',
+    'echo evil 1<>~/.bashrc',
+    'echo evil >>| ~/.zshrc',
+    'echo evil 3>| ~/.zshrc',
+    // The target is the word after the operator, and a relative name is joined to the directory that `cd` moved into.
+    'cd ~ && echo evil >!.zshrc',
+    'cd ~ && echo evil >>!.zshrc',
+    'cd ~ && echo evil {fd}>.zshrc',
+    'cd ~ && echo evil &>!.bashrc',
   ])('%s', (command) => {
     expect(persists(command)).toBe(true);
   });
@@ -116,6 +145,19 @@ describe('a command that only reads or mentions those files', () => {
     `node -e "console.log(require('fs').readFileSync('/home/dev/.bashrc','utf8'))"`,
     'curl -fsSL https://raw.githubusercontent.com/x/y/main/.bashrc -o /tmp/bashrc',
     'echo "Host prod" >> ~/.ssh/config',
+    // A redirect of both streams to a file that is none of them, and the ones that copy a descriptor.
+    'echo evil &> /tmp/x.bashrc',
+    'echo evil &>> notes.txt',
+    'echo evil &> ~/.zshrc.bak',
+    'make >&2',
+    'make 2>&1',
+    'make >&2 && cat ~/.zshrc',
+    'make &> /dev/null',
+    'echo evil >! /tmp/x.bashrc',
+    'echo evil {fd}> notes.txt',
+    'echo evil >! ~/.zshrc.bak',
+    'cat ~/.zshrc {fd}< /dev/null',
+    'cat < ~/.zshrc',
   ])('%s', (command) => {
     expect(persists(command)).toBe(false);
   });

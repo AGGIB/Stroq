@@ -1,5 +1,5 @@
 import { writtenText } from './actions/written-text.js';
-import { classifyTool } from './actions/classify-tool.js';
+import { classifyTool, type ToolClassification } from './actions/classify-tool.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
@@ -18,7 +18,12 @@ import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import { candidateTokens, candidatesFromText, exceedsSecretScan } from './secrets/candidates.js';
+import {
+  MAX_SCAN_CHARS,
+  candidateTokens,
+  candidatesFromText,
+  exceedsSecretScan,
+} from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
@@ -146,6 +151,27 @@ export function scanTargetForTool(
   }
   return 'any';
 }
+
+/**
+ * The fields of the rule format that the result of a tool fills in, beside `content`. The text of
+ * what an MCP server returns, or a web fetch or search, is a tool's response, and the text of
+ * `tools/list` is what a server says its tools are: about three hundred rules read those fields and
+ * matched nothing while nobody supplied them (see `supplied-fields.ts`). A local result (a file, a
+ * listing, a command's output) fills neither: those rules were written for what another party
+ * answers, and on one's own work they fire as often as the rules on `content` do.
+ *
+ * A field that is the scanned text is read in each form the scanner makes of it.
+ */
+export function scanFieldsForTool(
+  toolName: string,
+  text: string,
+): Readonly<Record<string, string>> {
+  if (toolName.startsWith('mcp__')) {
+    return toolName.endsWith('__tools_list') ? { tool_description: text } : { tool_response: text };
+  }
+  if (toolName === 'WebFetch' || toolName === 'WebSearch') return { tool_response: text };
+  return {};
+}
 /**
  * The score at which text written into an instruction file counts as a payload: a
  * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
@@ -182,6 +208,24 @@ interface SecretCheck {
   readonly unscannable: boolean;
 }
 const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
+
+/**
+ * Script texts cut to what one command's own text may be (`MAX_SCAN_CHARS`), together, and
+ * whether anything was left out: a value past the window is one the guard did not look for,
+ * which the policy is told, as it is for a command that runs past it.
+ */
+function withinScanWindow(texts: readonly string[]): { texts: string[]; cut: boolean } {
+  let room = MAX_SCAN_CHARS;
+  const kept: string[] = [];
+  let cut = false;
+  for (const text of texts) {
+    if (text.length > room) cut = true;
+    const part = text.length > room ? text.slice(0, room) : text;
+    kept.push(part);
+    room -= part.length;
+  }
+  return { texts: kept, cut };
+}
 
 /**
  * Redacts every match from `summary`. A match's `token` is the candidate that hashed
@@ -299,13 +343,24 @@ export class StroqEngine {
    */
   private async checkSecrets(
     event: PreToolEvent,
-    classes: readonly ActionClass[],
+    classification: ToolClassification,
   ): Promise<SecretCheck> {
     const index = this.opts.secrets;
-    if (!index || !classes.some((c) => EGRESS_CLASSES.includes(c))) return NO_SECRET_CHECK;
-    const candidates = candidateTokens(event.toolName, event.toolInput);
+    if (!index || !classification.classes.some((c) => EGRESS_CLASSES.includes(c)))
+      return NO_SECRET_CHECK;
+    // A command that runs a script carries the script: `bash send.sh` names a file, and the
+    // known value is in it. The scripts share the window one command's own text gets, so a
+    // few large ones cannot cost more than a large command would.
+    const scripts = withinScanWindow(classification.scripts ?? []);
+    const candidates = [
+      ...candidateTokens(event.toolName, event.toolInput),
+      ...scripts.texts.flatMap(candidatesFromText),
+    ];
     const matches = await index.lookup(candidates, event.cwd);
-    return { matches, unscannable: exceedsSecretScan(event.toolName, event.toolInput) };
+    return {
+      matches,
+      unscannable: exceedsSecretScan(event.toolName, event.toolInput) || scripts.cut,
+    };
   }
 
   /** Audit summaries must be safe even when the action itself is not outbound. */
@@ -418,7 +473,7 @@ export class StroqEngine {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
-    const { matches, unscannable } = await this.checkSecrets(event, classification.classes);
+    const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
     const savesInjection =
       classification.classes.includes('config.instructions') && this.writesInjection(event);
@@ -511,7 +566,10 @@ export class StroqEngine {
       this.opts.rules,
       event.toolResultText,
       { threshold: this.opts.policy.threshold },
-      { target: scanTargetForTool(event.toolName, event.toolInput) },
+      {
+        target: scanTargetForTool(event.toolName, event.toolInput),
+        ...scanFieldsForTool(event.toolName, event.toolResultText),
+      },
     );
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
     // Same derivation as a provenance record's `source` (see recordProvenance):

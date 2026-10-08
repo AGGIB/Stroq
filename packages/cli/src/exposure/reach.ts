@@ -31,7 +31,7 @@ export function reachFindings(reach: Reach): readonly Finding[] {
       {
         class: 'incident-reaches-you',
         severity: 'critical',
-        detail: `all ${reach.total} recorded incidents reach you: Stroq is not installed for any agent on this machine, so no policy is enforced`,
+        detail: `all ${reach.total} public incidents reach you: Stroq is not installed for any agent on this machine, so no policy is enforced`,
         fix: 'stroq init',
       },
     ];
@@ -40,7 +40,7 @@ export function reachFindings(reach: Reach): readonly Finding[] {
       {
         class: 'incident-reaches-you',
         severity: 'high',
-        detail: `${reach.passedPolicy} of ${reach.total} recorded incidents pass through your policy; run "stroq attack" to see which`,
+        detail: `${reach.passedPolicy} of ${reach.total} public incidents pass through your policy; run "stroq attack" to see which`,
         fix: 'stroq attack',
       },
     ];

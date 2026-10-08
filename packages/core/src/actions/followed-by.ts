@@ -12,12 +12,13 @@ export interface PatternTest extends TextTest {
   readonly source: string;
 }
 
-/** What the gap between `head` and `tail` may not contain. */
-export type Gap = 'line' | 'word';
+/** What the gap between `head` and `tail` may not contain: a line break, a blank, or the end of a command. */
+export type Gap = 'line' | 'word' | 'command';
 
 const GAP: Readonly<Record<Gap, { readonly stop: string; readonly source: string }>> = {
   line: { stop: '\\n', source: '[^\\n]*' },
   word: { stop: '\\s', source: '[^\\s]*' },
+  command: { stop: '[;|&\\n]', source: '[^;|&\\n]*' },
 };
 
 const global = (re: RegExp): RegExp =>

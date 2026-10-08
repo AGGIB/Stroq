@@ -1,14 +1,14 @@
 # MITRE ATLAS — vendored denominator
 
-`ATLAS-2026.08.yaml` is the unmodified `dist/v6/ATLAS-2026.08.yaml` from
-<https://github.com/mitre-atlas/atlas-data>, fetched 2026-09-14.
+`ATLAS-2026.09.yaml` is the unmodified `dist/v6/ATLAS-2026.09.yaml` from
+<https://github.com/mitre-atlas/atlas-data>, fetched 2026-10-04.
 
 |                |                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------ |
-| Source         | `https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.08.yaml` |
-| sha256         | `a8d32f676854cc57721c217ec5b39f07db518076dee4a6c1335df0a7bc8271a2`                         |
-| Size           | 808,834 bytes                                                                              |
-| Release        | `2026.08`                                                                                  |
+| Source         | `https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.09.yaml` |
+| sha256         | `935efa93e28294432d3e2f537eb94991ef8d1f8c58341cd360ea3321ddb66688`                         |
+| Size           | 841,482 bytes                                                                              |
+| Release        | `2026.09`                                                                                  |
 | Format version | `6.0.0`                                                                                    |
 | License        | Apache-2.0 (`LICENSE` in this directory), ©2021-2026 The MITRE Corporation                 |
 

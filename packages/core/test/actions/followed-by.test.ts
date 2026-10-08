@@ -13,6 +13,7 @@ import { PS_ENCODED_COMMAND, PS_LOLBIN_FETCH } from '../../src/actions/classify-
 import { followedBy, type TextTest } from '../../src/actions/followed-by.js';
 import { GIT_CONFIG_READ, GIT_CONFIG_WRITE, GIT_DASH_C } from '../../src/actions/git-exec.js';
 import { SELF_CONFIG_FILE } from '../../src/actions/self-config.js';
+import { FLOCK_SHELL, SUDO_SHELL } from '../../src/actions/shell-names.js';
 
 /**
  * Each linear test next to the pattern it replaced, copied here verbatim as the
@@ -20,7 +21,14 @@ import { SELF_CONFIG_FILE } from '../../src/actions/self-config.js';
  * examples that motivated it.
  */
 const ORACLES: ReadonlyArray<readonly [string, TextTest, RegExp]> = [
-  ['EVAL_DYNAMIC', EVAL_DYNAMIC, /\beval\b[^\n]*(\$\(|`|\$\{?\w)/],
+  ['EVAL_DYNAMIC', EVAL_DYNAMIC, /(?<![\w./-])eval\b[^\n]*(\$\(|`|\$\{?\w)/],
+  [
+    'SUDO_SHELL',
+    SUDO_SHELL,
+    // The name is read in capitals too (a Mac and Windows run `SUDO`); its options are not.
+    /\b[Ss][Uu][Dd][Oo]\b[^;|&\n]*\s(?:-[A-Za-z]*[si][A-Za-z]*|--shell|--login)(?=[\s;|&)<>]|$)/,
+  ],
+  ['FLOCK_SHELL', FLOCK_SHELL, /\b[Ff][Ll][Oo][Cc][Kk]\b[^;|&\n]*\s(?:-[A-Za-z]*c|--command)/],
   [
     'SHELL_PROC_SUB_REMOTE',
     SHELL_PROC_SUB_REMOTE,
@@ -95,6 +103,19 @@ const FRAGMENTS = [
   '${',
   '$x',
   'eval',
+  'sudo',
+  'SUDO',
+  'flock',
+  'FLOCK',
+  '-s',
+  '-i',
+  '-si',
+  '--shell',
+  '--login',
+  '--command',
+  '&',
+  '<',
+  '>',
   'bash',
   'sh',
   'source',

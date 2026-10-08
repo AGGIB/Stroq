@@ -44,8 +44,11 @@ import {
   runOpenClawInstall,
 } from './openclaw-plugin.js';
 import {
+  carriesRecordedEntries,
+  devinHooksPath,
   installWindsurfHooks,
   mergeWindsurfHooks,
+  readDevinWorkspaceHooks,
   readWindsurfHooks,
   windsurfHooksPath,
 } from './windsurf-hooks.js';
@@ -57,6 +60,14 @@ import {
   readAntigravityHooks,
 } from './antigravity-hooks.js';
 import { initMcp } from './init-mcp.js';
+import {
+  chooseHookCommand,
+  hookCommand,
+  needsTsxLoader,
+  type Started,
+  type WindowsTools,
+} from './hook-command.js';
+import { selfCheck, runHookAsCmd } from './init-selfcheck.js';
 
 export const PRE_MATCHER =
   'Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|WebFetch|mcp__.*';
@@ -98,18 +109,7 @@ export type SettingsJson = {
   readonly hooks?: Readonly<Record<string, readonly HookGroup[]>>;
 } & Record<string, unknown>;
 
-/** The tsx loader is needed only for a TypeScript entry, i.e. in development and tests. */
-const needsTsxLoader = (entry: string): boolean => entry.endsWith('.ts');
-
-/**
- * The command an agent runs for every hook event. The trailing agent name is
- * also how `init` recognises its own entries when re-installing, so it must stay
- * at the end of the string (see `isStroqHandler` / `isStroqCursorHook`).
- */
-export function hookCommand(node: string, entry: string, agent: HookAgent = 'claude-code'): string {
-  const loader = needsTsxLoader(entry) ? ' --import tsx' : '';
-  return `"${node}"${loader} "${entry}" hook ${agent}`;
-}
+export { hookCommand };
 
 /**
  * The same command as argv. The OpenClaw plugin spawns Stroq rather than shelling
@@ -151,7 +151,13 @@ export function stableEntry(entry: string, home: string, version: string, dryRun
     renameSync(partial, target);
     return moved;
   } catch {
-    rmSync(partial, { recursive: true, force: true });
+    // The copy failed, and so may the clean-up: `<home>/cli` that is a file, or a directory that cannot be written,
+    // makes Linux say ENOTDIR or EACCES where `force` only passes over ENOENT. The entry is kept as given either way.
+    try {
+      rmSync(partial, { recursive: true, force: true });
+    } catch {
+      // Nothing there that could be removed, or nothing that can be: a half-made copy is not mistaken for a copy.
+    }
     return entry;
   }
 }
@@ -316,16 +322,26 @@ const OPENCLAW_NOTE =
   'OpenClaw plugins are per Gateway host, not per project: --user and the default scope write the same directory.\n' +
   'If you set STROQ_HOME, set it for the Gateway process too — the plugin spawns a Stroq that reads it at run time.\n';
 
+/** The text with each of its lines indented four spaces, and ended by a line break; nothing for no text. */
+const indented = (text: string): string =>
+  text === ''
+    ? ''
+    : `${text
+        .replace(/\n$/, '')
+        .split('\n')
+        .map((line) => `    ${line}`)
+        .join('\n')}\n`;
+
 /**
  * Unlike the other four agents this writes a directory rather than a config file, and
  * then asks OpenClaw to link it. `scope` is ignored on purpose (see the note above);
  * the parameter stays for the shared installer signature.
  */
-function initOpenClaw(
+async function initOpenClaw(
   _scope: 'project' | 'user',
   argv: readonly string[],
   dryRun: boolean,
-): number {
+): Promise<number> {
   const dir = openclawPluginDir();
   const commands = openclawInstallCommands(dir);
   if (dryRun) {
@@ -358,11 +374,14 @@ function initOpenClaw(
       `OpenClaw is at ${bin}; on Windows Stroq does not run it for you. Run these two commands:\n  ${commands.join('\n  ')}\n`,
     );
   } else {
-    for (const outcome of runOpenClawInstall(bin, dir)) {
-      process.stdout.write(`$ ${outcome.line}\n${outcome.output}`);
+    for (const outcome of await runOpenClawInstall(bin, dir)) {
+      // What the CLI printed is indented under the command, so that it is read as what it is (the
+      // CLI's words) and not as a note of Stroq's, or as a line to copy.
+      process.stdout.write(`$ ${outcome.line}\n${indented(outcome.output)}`);
       // `install --link` on an already-linked plugin is expected to fail; `enable`
       // still has to run, so a failure is reported rather than aborting the install.
-      if (!outcome.ok) process.stderr.write(`"${outcome.line}" did not succeed; run it yourself\n`);
+      if (!outcome.ok)
+        process.stderr.write(`Warning: "${outcome.line}" did not succeed; run it yourself\n`);
     }
   }
   process.stdout.write(`${OPENCLAW_NOTE}Run "stroq doctor" to verify.\n`);
@@ -382,6 +401,23 @@ const WINDSURF_NOTE =
   '"stroq init --agent windsurf --user" writes ~/.codeium/windsurf/hooks.json instead.\n' +
   'The JetBrains plugin reads ~/.codeium/hooks.json, which init does not write — copy the entries there if you use it.\n';
 
+/**
+ * Devin Desktop, the renamed Windsurf, reads the project's `.devin/hooks.json` first and
+ * uses `.windsurf/hooks.json` (the file written here) only when that defines no hooks. The
+ * install is still written, since a Windsurf that predates Devin reads it, but a user whose
+ * project has hooks of its own in the first file has to be told it does nothing for them.
+ * Stroq's own entries count only when they are the command being written: the file is the
+ * repository's, and a suffix is not an identity.
+ */
+function devinShadowWarning(file: string, command: string): string {
+  const devin = readDevinWorkspaceHooks();
+  if (devin.state === 'defined' && !carriesRecordedEntries(devin.json, command))
+    return `Warning: ${devinHooksPath()} defines hooks, and Devin Desktop then ignores ${file}, so the hooks above will not run there. Run "stroq init --agent windsurf --user" instead: the user-level file is merged with the project's, so a repository cannot replace it.\n`;
+  if (devin.state === 'unreadable')
+    return `Warning: ${devin.message}; Devin Desktop reads that file before ${file}, so whether the hooks above run there is unknown.\n`;
+  return '';
+}
+
 function initWindsurf(scope: 'project' | 'user', command: string, dryRun: boolean): number {
   const file = windsurfHooksPath(scope);
   if (dryRun) {
@@ -391,8 +427,11 @@ function initWindsurf(scope: 'project' | 'user', command: string, dryRun: boolea
     return 0;
   }
   installWindsurfHooks(file, command);
+  // The user file has no Devin twin, so only a project install can be shadowed. The warning
+  // sits in the output that says "installed", where a caller reading that output sees it.
+  const warning = scope === 'project' ? devinShadowWarning(file, command) : '';
   process.stdout.write(
-    `Stroq hooks installed in ${file}\n  ${WINDSURF_EVENTS.join('\n  ')}\n${WINDSURF_NOTE}Run "stroq doctor" to verify.\n`,
+    `Stroq hooks installed in ${file}\n  ${WINDSURF_EVENTS.join('\n  ')}\n${warning}${WINDSURF_NOTE}Run "stroq doctor" to verify.\n`,
   );
   return 0;
 }
@@ -427,19 +466,42 @@ function initAntigravity(scope: 'project' | 'user', command: string, dryRun: boo
   return 0;
 }
 
-export async function runInit(args: readonly string[]): Promise<number> {
-  const { values } = parseArgs({
-    args: [...args],
-    options: {
-      user: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
-      agent: { type: 'string', default: 'claude-code' },
-      client: { type: 'string' },
-      config: { type: 'string' },
-      unwrap: { type: 'boolean', default: false },
-      cloak: { type: 'boolean', default: false },
-    },
-  });
+/** The options `init` takes: what the installer reads, and what `init-args.ts` checks before it draws a screen. */
+export const INIT_OPTIONS = {
+  user: { type: 'boolean', default: false },
+  'dry-run': { type: 'boolean', default: false },
+  agent: { type: 'string', default: 'claude-code' },
+  client: { type: 'string' },
+  config: { type: 'string' },
+  unwrap: { type: 'boolean', default: false },
+  cloak: { type: 'boolean', default: false },
+  // The first-run screen's, which the installer has no use for: `--yes` answers its question
+  // and `--no-input` keeps it from being asked.
+  yes: { type: 'boolean', default: false },
+  'no-input': { type: 'boolean', default: false },
+} as const;
+
+/** Whether an entry is in npm's npx cache, which `stableEntry` copies out of. */
+export const runsFromNpxCache = (entry: string): boolean => NPX_CACHE_ROOT.test(entry);
+
+/** What a test says about the machine `init` runs on; the real one is the default. */
+export interface InitMachine {
+  readonly platform?: NodeJS.Platform;
+  readonly tools?: WindowsTools;
+  /** Starts a hook line the way the agent's host does, with the self-check's two events. */
+  readonly probe?: (agent: HookAgent, command: string) => Promise<Started>;
+}
+
+/** The way Windows hosts are seen to run a line: through `cmd.exe`, each quote escaped. */
+export async function startsAsHost(agent: HookAgent, command: string): Promise<Started> {
+  const checked = await selfCheck(agent, command, runHookAsCmd);
+  if (checked === null) return { ok: false, detail: 'there is no check for this agent' };
+  const detail = [checked.allowed.detail, checked.denied.detail].filter((d) => d !== '').join('; ');
+  return { ok: checked.ok, detail };
+}
+
+export async function runInit(args: readonly string[], machine: InitMachine = {}): Promise<number> {
+  const { values } = parseArgs({ args: [...args], options: INIT_OPTIONS });
   const agent = values.agent ?? 'claude-code';
   if (!isInitAgent(agent)) {
     process.stdout.write(`unknown agent "${agent}" (supported: ${INIT_AGENTS.join(', ')})\n`);
@@ -454,6 +516,10 @@ export async function runInit(args: readonly string[]): Promise<number> {
     process.stdout.write(
       `Stroq ran from the npx cache, which npm prunes; the hooks run a copy at ${entry}\n`,
     );
+  else if (!dryRun && runsFromNpxCache(launched))
+    process.stdout.write(
+      `Warning: Stroq ran from the npx cache, which npm prunes, and could not copy itself to ${join(stroqHome(), 'cli')}: the hooks run it from the cache, and will not start once npm has pruned it. Install @stroq/cli globally (npm install -g @stroq/cli) and run "stroq init" again.\n`,
+    );
   // Checked and delegated before `hookCommand` is ever computed: `mcp` is an
   // `InitAgent` but not a `HookAgent`, so narrowing it away here — rather than
   // casting it into `hookCommand` and never using the result — is what lets every
@@ -465,8 +531,23 @@ export async function runInit(args: readonly string[]): Promise<number> {
       unwrap: values.unwrap === true,
       cloak: values.cloak === true,
     });
-  const command = hookCommand(node, entry, agent);
-  const install: Readonly<Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number>> = {
+  // On Windows a line the host cannot start is a hook that blocks every tool (Antigravity) or never runs, so the
+  // line is shown to start, the way that host starts it, before it is written.
+  const chosen = await chooseHookCommand(node, entry, agent, {
+    dryRun,
+    ...(machine.platform === undefined ? {} : { platform: machine.platform }),
+    ...(machine.tools === undefined ? {} : { tools: machine.tools }),
+    probe: (line) => (machine.probe ?? startsAsHost)(agent, line),
+  });
+  if (chosen.refused !== null) {
+    process.stdout.write(chosen.refused);
+    return 1;
+  }
+  if (chosen.warning !== null) process.stdout.write(chosen.warning);
+  const command = chosen.command;
+  const install: Readonly<
+    Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number | Promise<number>>
+  > = {
     'claude-code': initClaudeCode,
     cursor: initCursor,
     codex: initCodex,
@@ -477,7 +558,7 @@ export async function runInit(args: readonly string[]): Promise<number> {
     windsurf: initWindsurf,
     antigravity: initAntigravity,
   };
-  const code = install[agent](scope, command, dryRun);
+  const code = await install[agent](scope, command, dryRun);
   // Recorded only on a real install that succeeded, so `--dry-run` leaves no trace
   // and a failed install does not claim a hook that is not there. `doctor` compares
   // the agent's config against this later; see install-record.ts for why matching the

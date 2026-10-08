@@ -68,7 +68,10 @@ function containedPath(dir: string, rel: string): string {
   return file;
 }
 
-async function writeFixtures(dir: string, files: Readonly<Record<string, string>>): Promise<void> {
+export async function writeFixtures(
+  dir: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
   for (const [rel, body] of Object.entries(files)) {
     const file = containedPath(dir, rel);
     await mkdir(dirname(file), { recursive: true });

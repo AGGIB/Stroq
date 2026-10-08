@@ -21,6 +21,23 @@ describe('usage', () => {
     expect(text).toContain('help [<command>]');
     expect(text).toContain('--version');
   });
+
+  it('starts a newcomer with three commands, before the list', () => {
+    const text = usage();
+    const start = text.indexOf('Start here:');
+    expect(start).toBeGreaterThan(0);
+    expect(start).toBeLessThan(text.indexOf('Commands:'));
+    const block = text.slice(start, text.indexOf('Commands:'));
+    expect(block).toMatch(/^ {2}stroq init\s+guard the agents on this machine/m);
+    expect(block).toMatch(/^ {2}stroq sent --last\s+which of your keys/m);
+    expect(block).toMatch(/^ {2}stroq doctor\s+are the hooks in place/m);
+  });
+
+  it('keeps the newcomer block within 80 columns', () => {
+    const text = usage();
+    const block = text.slice(text.indexOf('Start here:'), text.indexOf('Commands:'));
+    for (const line of block.split('\n')) expect(line.length).toBeLessThanOrEqual(80);
+  });
 });
 
 describe('commandHelp', () => {

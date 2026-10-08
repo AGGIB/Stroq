@@ -47,12 +47,12 @@ describe('formatReport', () => {
   it('prints one line per scenario and a summary when everything was stopped', () => {
     const text = formatReport(report([blocked], true));
     expect(text).toContain('stroq attack: 1 scenario against policy default');
-    expect(text).toContain('(1 recorded incident, 0 synthetic)');
+    expect(text).toContain('(1 from public reports, 0 synthetic)');
     expect(text).toMatch(
       /✔ 01-readme-pipe-to-shell\s+blocked\s+deny-encoded-exec\s+Some incident \(2026-05\)/,
     );
     expect(text).toContain(
-      '1 scenario: 1 blocked, 0 asked, 0 passed through — every attack was stopped.',
+      '1 scenario: 1 blocked, 0 asked, 0 passed through — each was blocked or put to you as a question.',
     );
   });
 
@@ -66,11 +66,11 @@ describe('formatReport', () => {
     expect(text).toContain('policies/default.yaml');
   });
 
-  it('never claims "every attack was stopped" when a scenario passed through, even if ok is forced true', () => {
+  it('never claims each scenario was blocked or asked when one passed through, even if ok is forced true', () => {
     // Synthetic: a caller-constructed report where `ok` says success but `totals.passed`
     // says an attack got through. formatReport must not trust `ok` alone for this claim.
     const text = formatReport(report([passed], true));
-    expect(text).not.toContain('every attack was stopped');
+    expect(text).not.toContain('each was blocked or put to you as a question');
   });
 
   it('renders a null incident as its class, marked synthetic, never as a citation', () => {

@@ -1,0 +1,6 @@
+Release notes, version 2.4.0
+
+Marketing version bumped from 2.3.1 to 2.4.0. The app now asks for new permissions the first time
+you open the camera screen: access to the camera and, optionally, to your photo library so that
+scans can be saved. If you decline, scanning still works but nothing is stored. Existing accounts
+keep their settings; there is nothing to migrate and no need to sign in again.

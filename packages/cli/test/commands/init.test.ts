@@ -18,18 +18,35 @@ import {
   isStroqHandler,
   mergeHooks,
   readSettings,
-  runInit,
+  runInit as runInitOn,
   settingsPath,
   stableEntry,
+  type InitMachine,
 } from '../../src/commands/init.js';
+import { installKey, readInstallRecord } from '../../src/commands/install-record.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
-import { isStroqWindsurfHooks, windsurfHooksPath } from '../../src/commands/windsurf-hooks.js';
+import {
+  devinHooksPath,
+  installWindsurfHooks,
+  isStroqWindsurfHooks,
+  windsurfHooksPath,
+} from '../../src/commands/windsurf-hooks.js';
 import {
   antigravityHooksPath,
   isStroqAntigravityHooks,
 } from '../../src/commands/antigravity-hooks.js';
+
+/**
+ * `init` as it runs on every machine but a Windows one, whichever machine these tests run on: on a Windows runner
+ * the line for Antigravity, Cursor and Codex would be started the way their hosts start it, and the entry of a
+ * test run is the test runner's worker. The Windows cases below say their machine.
+ */
+const runInit = (
+  args: readonly string[],
+  machine: InitMachine = { platform: 'linux' },
+): Promise<number> => runInitOn(args, machine);
 
 // Pinned before every test, like `doctor.test.ts` does: several `--client` targets
 // (claude-desktop, windsurf, cursor --user) resolve under the real home directory
@@ -476,6 +493,134 @@ describe('runInit --agent windsurf', () => {
     expect(commands[1]).toMatch(/ hook windsurf$/);
   });
 
+  describe('when the project has a .devin/hooks.json', () => {
+    // Devin Desktop reads it first and uses .windsurf/hooks.json only when it defines no
+    // hooks, so the install this command writes would silently never run.
+    const project = (): string => {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-init-devin-')));
+      mkdirSync(join(dir, '.devin'), { recursive: true });
+      return dir;
+    };
+    const run = async (
+      dir: string,
+      args: readonly string[] = [],
+    ): Promise<{ code: number; out: string; err: string }> => {
+      const cap = captureBoth();
+      try {
+        const code = await inDir(dir, () => runInit(['--agent', 'windsurf', ...args]));
+        return { code, out: cap.out.join(''), err: cap.err.join('') };
+      } finally {
+        cap.restore();
+      }
+    };
+    const foreign = '{ "hooks": { "pre_run_command": [{ "command": "echo hi" }] } }';
+
+    it('warns, in the output a caller reads, with the way out, that its own hooks switch the install off', async () => {
+      const dir = project();
+      writeFileSync(devinHooksPath(dir), foreign);
+      const { code, out } = await run(dir);
+      expect(code).toBe(0);
+      expect(out).toContain(`Warning: ${devinHooksPath(dir)} defines hooks`);
+      expect(out).toContain('stroq init --agent windsurf --user');
+      // The install itself is still written: it works for a Windsurf that predates Devin.
+      expect(
+        isStroqWindsurfHooks(JSON.parse(readFileSync(windsurfHooksPath('project', dir), 'utf8'))),
+      ).toBe(true);
+    });
+
+    it('warns that whether the install runs is unknown when the file cannot be read', async () => {
+      const dir = project();
+      writeFileSync(devinHooksPath(dir), '{ "hooks": the-secret-token-value');
+      const { code, out } = await run(dir);
+      expect(code).toBe(0);
+      expect(out).toContain('cannot parse');
+      expect(out).toContain('unknown');
+      expect(out).not.toContain('the-secret-token-value');
+    });
+
+    it('stays quiet when it defines no hook, or does not exist', async () => {
+      const empty = project();
+      writeFileSync(devinHooksPath(empty), '{ "hooks": {} }');
+      expect((await run(empty)).out).not.toContain('Warning');
+      const none = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-init-devin-')));
+      expect((await run(none)).out).not.toContain('Warning');
+    });
+
+    it('stays quiet when the command it writes is already among the hooks .devin defines', async () => {
+      const dir = project();
+      await run(dir);
+      const written = JSON.parse(readFileSync(windsurfHooksPath('project', dir), 'utf8')) as {
+        hooks: Record<string, { command: string }[]>;
+      };
+      const command = written.hooks['pre_run_command']?.[0]?.command as string;
+      writeFileSync(devinHooksPath(dir), '{}');
+      installWindsurfHooks(devinHooksPath(dir), command);
+      expect((await run(dir)).out).not.toContain('Warning');
+    });
+
+    it("warns about entries that only end like its own: the file is the repository's", async () => {
+      const dir = project();
+      const events = [
+        'pre_read_code',
+        'post_read_code',
+        'pre_write_code',
+        'pre_run_command',
+        'pre_mcp_tool_use',
+        'post_mcp_tool_use',
+      ];
+      writeFileSync(
+        devinHooksPath(dir),
+        JSON.stringify({
+          hooks: Object.fromEntries(
+            events.map((e) => [e, [{ command: '/tmp/evil hook windsurf' }]]),
+          ),
+        }),
+      );
+      expect((await run(dir)).out).toContain('Warning');
+    });
+
+    it('warns when the command it writes is only mentioned, and the six events run something else', async () => {
+      const dir = project();
+      await run(dir);
+      const written = JSON.parse(readFileSync(windsurfHooksPath('project', dir), 'utf8')) as {
+        hooks: Record<string, { command: string }[]>;
+      };
+      const command = written.hooks['pre_run_command']?.[0]?.command as string;
+      const events = [
+        'pre_read_code',
+        'post_read_code',
+        'pre_write_code',
+        'pre_run_command',
+        'pre_mcp_tool_use',
+        'post_mcp_tool_use',
+      ];
+      writeFileSync(
+        devinHooksPath(dir),
+        JSON.stringify({
+          note: command,
+          hooks: Object.fromEntries(
+            events.map((e) => [e, [{ command: '/usr/bin/true hook windsurf' }]]),
+          ),
+        }),
+      );
+      expect((await run(dir)).out).toContain('Warning');
+    });
+
+    it('stays quiet for --user, whose file has no .devin twin', async () => {
+      // Windows reads USERPROFILE, not HOME.
+      const profile = process.env['USERPROFILE'];
+      process.env['USERPROFILE'] = process.env['HOME'];
+      try {
+        const dir = project();
+        writeFileSync(devinHooksPath(dir), foreign);
+        expect((await run(dir, ['--user'])).out).not.toContain('Warning');
+      } finally {
+        if (profile === undefined) delete process.env['USERPROFILE'];
+        else process.env['USERPROFILE'] = profile;
+      }
+    });
+  });
+
   it('does not touch the other agents', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windsurf-'));
     const out = capture();
@@ -787,6 +932,75 @@ describe('stableEntry', () => {
     expect(stableEntry(global, home, '9.9.9')).toBe(global);
     expect(existsSync(join(home, 'cli'))).toBe(false);
   });
+
+  // A fifth review: the copy that the hooks run is said, and where it was not made nothing said so,
+  // and the hooks ran from a cache that npm prunes.
+  describe('says so where the copy was not made', () => {
+    const project = (): string => mkdtempSync(join(tmpdir(), 'stroq-init-warn-'));
+
+    async function initFrom(entry: string, home: string, args: readonly string[]): Promise<string> {
+      const dir = project();
+      const original = process.argv[1];
+      const savedHome = process.env['STROQ_HOME'];
+      process.argv[1] = entry;
+      process.env['STROQ_HOME'] = home;
+      const out = capture();
+      try {
+        await inDir(dir, () => runInit(['--agent', 'claude-code', ...args]));
+      } finally {
+        out.restore();
+        if (original === undefined) process.argv.splice(1, 1);
+        else process.argv[1] = original;
+        if (savedHome === undefined) delete process.env['STROQ_HOME'];
+        else process.env['STROQ_HOME'] = savedHome;
+      }
+      return out.lines.join('');
+    }
+
+    it('warns, with what to do, when the copy fails', async () => {
+      const { entry } = npxTree();
+      const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+      // `cli` is a file, so that no directory can be made under it.
+      writeFileSync(join(home, 'cli'), 'in the way');
+
+      const printed = await initFrom(entry, home, []);
+
+      expect(printed).toContain(
+        'Warning: Stroq ran from the npx cache, which npm prunes, and could not copy itself to',
+      );
+      expect(printed).toContain(join(home, 'cli'));
+      expect(printed).toContain('npm install -g @stroq/cli');
+      expect(printed).not.toContain('the hooks run a copy at');
+    });
+
+    it('says where the copy is when it was made, and warns of nothing', async () => {
+      const { entry } = npxTree();
+      const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+
+      const printed = await initFrom(entry, home, []);
+
+      expect(printed).toContain('the hooks run a copy at');
+      expect(printed).not.toContain('Warning:');
+    });
+
+    it('says nothing of it for a CLI that was not run from the cache', async () => {
+      const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+
+      const printed = await initFrom('/opt/stroq/dist/index.js', home, []);
+
+      expect(printed).not.toContain('npx cache');
+    });
+
+    it('says nothing of it for a dry run, which copies nothing', async () => {
+      const { entry } = npxTree();
+      const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+      writeFileSync(join(home, 'cli'), 'in the way');
+
+      const printed = await initFrom(entry, home, ['--dry-run']);
+
+      expect(printed).not.toContain('Warning:');
+    });
+  });
 });
 
 describe('the Claude Code failure event', () => {
@@ -849,5 +1063,142 @@ describe('the Claude Code matchers name every tool the classifier judges', () =>
 
   it('does not name a tool nothing judges', () => {
     expect(anchored(PRE_MATCHER).test('TodoWrite')).toBe(false);
+  });
+});
+
+// Antigravity on Windows hands the hook line to `cmd.exe` with each quote escaped, and a hook that cannot start
+// there blocks every tool call. `init` therefore writes a line with no quote in it, and only after the line has
+// been started the way the host starts it. The machine is said by the test: the real one is not Windows.
+describe('runInit on Windows, for the agents whose host goes through cmd.exe', () => {
+  // A short name for any path, whatever the machine these tests run on has in its paths (a blank in
+  // `Program Files` or in a profile), so that the lines they are about are the same on every machine.
+  const tools = {
+    shortPath: (path: string) => path.replace(/[^\p{L}\p{N}_.:\\/~+@-]/gu, '_'),
+    sameFile: () => true,
+  };
+  const fails = async () => ({ ok: false, detail: 'did not start' });
+
+  async function install(
+    agent: string,
+    extra: readonly string[],
+    machine: Parameters<typeof runInit>[1],
+  ): Promise<{ readonly code: number; readonly dir: string; readonly printed: string }> {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-init-windows-'));
+    const out = capture();
+    const code = await inDir(dir, () => runInit(['--agent', agent, ...extra], machine));
+    out.restore();
+    return { code, dir, printed: out.lines.join('') };
+  }
+
+  it('writes the line that started, with no quote in it, and tries it without the phase argument', async () => {
+    const probed: string[] = [];
+
+    const { code, dir } = await install('antigravity', [], {
+      platform: 'win32',
+      tools,
+      probe: async (_agent, line) => {
+        probed.push(line);
+        return { ok: true, detail: '' };
+      },
+    });
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(readFileSync(antigravityHooksPath('project', dir), 'utf8')) as {
+      stroq: { PreToolUse: { hooks: { command: string }[] }[] };
+    };
+    const written = parsed.stroq.PreToolUse[0]?.hooks[0]?.command ?? '';
+    expect(probed).toHaveLength(1);
+    expect(probed[0]).toMatch(/ hook antigravity$/);
+    expect(written).toBe(`${probed[0]} pre`);
+    expect(written).not.toContain('"');
+    expect(readInstallRecord().entries[installKey('antigravity', 'project')]?.command).toBe(
+      probed[0],
+    );
+  });
+
+  it('writes the next line when the first does not start', async () => {
+    const probed: string[] = [];
+
+    const { code, dir } = await install('antigravity', [], {
+      platform: 'win32',
+      tools,
+      probe: async (_agent, line) => {
+        probed.push(line);
+        return probed.length === 1
+          ? { ok: false, detail: 'did not start' }
+          : { ok: true, detail: '' };
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(probed.length).toBeGreaterThanOrEqual(2);
+    expect(readFileSync(antigravityHooksPath('project', dir), 'utf8')).toContain(
+      `${probed[1] ?? 'missing'} pre`.replaceAll('\\', '\\\\'),
+    );
+  });
+
+  it('writes nothing for Antigravity, and says why, when no line starts', async () => {
+    const { code, dir, printed } = await install('antigravity', [], {
+      platform: 'win32',
+      tools,
+      probe: fails,
+    });
+
+    expect(code).toBe(1);
+    expect(existsSync(antigravityHooksPath('project', dir))).toBe(false);
+    expect(printed).toContain('No hook was written for Antigravity');
+    expect(printed).toContain('blocks every tool call');
+    expect(printed).toContain('did not start');
+    expect(readInstallRecord().entries[installKey('antigravity', 'project')]).toBeUndefined();
+  });
+
+  it('keeps the quoted line for Cursor, with a warning, when no line starts', async () => {
+    const { code, dir, printed } = await install('cursor', [], {
+      platform: 'win32',
+      tools,
+      probe: fails,
+    });
+
+    expect(code).toBe(0);
+    expect(printed).toContain('Warning: no line for cursor');
+    expect(readFileSync(cursorHooksPath('project', dir), 'utf8')).toContain('\\"');
+  });
+
+  it.each(['linux', 'darwin'] as const)(
+    'writes the quoted line and starts nothing on %s',
+    async (platform) => {
+      const probe = vi.fn(fails);
+
+      const { code, dir } = await install('antigravity', [], { platform, tools, probe });
+
+      expect(code).toBe(0);
+      expect(probe).not.toHaveBeenCalled();
+      expect(readFileSync(antigravityHooksPath('project', dir), 'utf8')).toContain('\\"');
+    },
+  );
+
+  it('prints the first line and starts nothing with --dry-run', async () => {
+    const probe = vi.fn(fails);
+
+    const { code, dir, printed } = await install('antigravity', ['--dry-run'], {
+      platform: 'win32',
+      tools,
+      probe,
+    });
+
+    expect(code).toBe(0);
+    expect(probe).not.toHaveBeenCalled();
+    expect(existsSync(antigravityHooksPath('project', dir))).toBe(false);
+    expect(printed).not.toContain('\\"');
+  });
+
+  it('leaves Claude Code its quoted line', async () => {
+    const probe = vi.fn(fails);
+
+    const { code, dir } = await install('claude-code', [], { platform: 'win32', tools, probe });
+
+    expect(code).toBe(0);
+    expect(probe).not.toHaveBeenCalled();
+    expect(readFileSync(settingsPath('project', dir), 'utf8')).toContain('\\"');
   });
 });

@@ -6,6 +6,7 @@ import {
   isDangerousRmTarget,
   splitSegments,
 } from '../../src/actions/classify-bash.js';
+import { cpuNow } from '../cpu-time.js';
 
 const cwd = '/home/dev/project';
 const classesOf = (cmd: string) => classifyCommand(cmd, cwd).classes;
@@ -80,9 +81,9 @@ describe('isDangerousRmTarget', () => {
     // An `rm -rf` target is a word of a command the agent wrote, with no length cap.
     // Stripped with `/\/+$/`, a run of slashes and then one more character restarted
     // the pattern at every slash: 65,536 of them took 1.7 s.
-    const started = performance.now();
+    const started = cpuNow();
     expect(isDangerousRmTarget(`${'/'.repeat(131_072)}x`, cwd)).toBe(true);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(cpuNow() - started).toBeLessThan(500);
   });
 });
 
@@ -226,8 +227,11 @@ describe('inline interpreter payload', () => {
     // took 2.1 s, in a command the agent wrote. The trailing `<(curl` is there only
     // so `SHELL_PROC_SUB_REMOTE` matches at once instead of failing from every `.`,
     // which is super-linear on this shape in its own right and a separate issue.
-    const started = performance.now();
+    // Linear takes about a tenth of a second (a little more since a `curl` in the line is read for
+    // what it may run: one more pass over the text), quadratic two, and coverage multiplies the
+    // time by about ten: the bound is between linear under coverage and quadratic without it.
+    const started = cpuNow();
     expect(flagged(`python -c ${'Buffer.from('.repeat(21_845)} <(curl`)).toBe(false);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(cpuNow() - started).toBeLessThan(2000);
   });
 });

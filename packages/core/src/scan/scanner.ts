@@ -101,6 +101,18 @@ function timedOutResult(matches: readonly RuleMatch[]): ScanResult {
   return { verdict: 'suspect', score: 1, matches: [...matches, BUDGET_MATCH], timedOut: true };
 }
 
+/** The fields of the context whose value is the text being scanned (a tool's response is the text). */
+function fieldsThatAreTheText(text: string, context: MatchContext): readonly string[] {
+  return Object.keys(context).filter((field) => field !== 'target' && context[field] === text);
+}
+
+/** The context with each of the fields given the text of the variant that is being read. */
+function withText(context: MatchContext, fields: readonly string[], text: string): MatchContext {
+  const replaced: Record<string, string | undefined> = { ...context };
+  for (const field of fields) replaced[field] = text;
+  return replaced;
+}
+
 // Defence in depth against catastrophic regex backtracking (see the
 // ATR-2026-00220 finding). The budget is checked *between* rule/variant
 // checks, so a single pathological regex still cannot be interrupted once
@@ -124,11 +136,15 @@ export function scanContent(
   // match any encoding of the text either. `ruleMatches` re-checks, so a caller
   // reaching it by another path is scoped too; this only saves the work.
   const applicable = rules.filter((rule) => appliesTo(rule, context.target));
+  const mirrored = fieldsThatAreTheText(text, context);
   for (const variant of expandVariants(input)) {
+    // A field that is the scanned text is read in each form the scanner makes of it, as `content`
+    // is: a response that hides a payload in base64 is no safer than a file that does.
+    const read = mirrored.length === 0 ? context : withText(context, mirrored, variant.text);
     for (const rule of applicable) {
       if (performance.now() - startedAt > budgetMs) return timedOutResult(matches);
       const key = `${rule.id}@${variant.kind}`;
-      if (seen.has(key) || !ruleMatches(rule, variant.text, context)) continue;
+      if (seen.has(key) || !ruleMatches(rule, variant.text, read)) continue;
       seen.add(key);
       matches.push({
         ruleId: rule.id,
