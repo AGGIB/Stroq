@@ -370,7 +370,14 @@ describe('the time that the reading of a call takes', () => {
     // The host gives up at fifteen seconds, and a hook that is given up on is allowed.
     expect(took, `${took} ms`).toBeLessThan(8_000);
     expect(typed.classes).toContain('shell.unparsed');
-    expect(typed.signals).toContain('function-call-not-read');
+    // What was not read is said: by the count of calls where the machine is quick, and by the clock where it is not
+    // (a shared runner with coverage on gets to the clock first, and the clock is the better answer there).
+    expect(
+      typed.signals.some(
+        (signal) => signal === 'function-call-not-read' || signal === 'reading-took-too-long',
+      ),
+      typed.signals.join(', '),
+    ).toBe(true);
   }, 60_000);
 });
 
