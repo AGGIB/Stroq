@@ -13,12 +13,14 @@ import { DATA_PROGRAMS, EXEC_PROGRAMS } from './inline-python-corpus.js';
  * inputs, and the hook refuses and records every event that runs code, starts a process, touches
  * a file, or opens a socket. The lists of names are followed from the modules and values a program
  * can make, along every attribute a program may name, to see whether any path reaches something
- * that runs code. The tests skip where there is no Python 3.8 or later.
+ * that runs code. The tests skip where there is no Python 3.8 or later, and on Windows.
  */
 
 const HARNESS = fileURLToPath(new URL('./inline-python-oracle.py', import.meta.url));
 
 function findPython(): string | null {
+  // The harness runs the interpreter under audit hooks in a POSIX directory of its own.
+  if (process.platform === 'win32') return null;
   for (const name of ['python3', 'python']) {
     const probe = spawnSync(name, ['-c', 'import sys; print(int(sys.version_info >= (3, 8)))'], {
       encoding: 'utf8',

@@ -21,6 +21,9 @@ import { classifyCommand } from '../../src/actions/classify-bash.js';
 const RAN = 'STROQ-PIPED-PROGRAM-RAN';
 
 function which(name: string): string | null {
+  // The commands are run by a POSIX shell with a stub `curl` first on the path; a Windows runner has
+  // Git's `sh` and none of that, and nothing would run, which is a test that proves nothing.
+  if (process.platform === 'win32') return null;
   const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
   return found.status === 0 ? found.stdout.trim() : null;
 }

@@ -115,7 +115,8 @@ describe('filesNamedBy: the files a name stands for', () => {
     expect(named('*')).toContain('x.sh');
   });
 
-  it('is given absolute patterns as it is given them', () => {
+  // An absolute pattern is a POSIX path; a Windows drive letter and its backslashes are not read as one.
+  it.skipIf(process.platform === 'win32')('is given absolute patterns as it is given them', () => {
     expect(named(`${dir}/x.s?`)).toEqual([`${dir}/x.sh`]);
     expect(named(`${dir}/*/z.sh`)).toEqual([`${dir}/d/z.sh`, `${dir}/e/z.sh`]);
   });

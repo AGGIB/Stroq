@@ -369,7 +369,13 @@ function afterOpeners(ws: readonly string[]): string[] {
 }
 
 /** A word of the arguments of a command that ends a group or a subshell: `untaint)`, `--all}`. */
-const withoutClosers = (word: string): string => word.replace(/[)}]+$/, '');
+function withoutClosers(word: string): string {
+  // Not `word.replace(/[)}]+$/, '')`: for a word of many closers that ends in something else, that takes time
+  // quadratic in its length (3 s at 64 KiB), and the hook runs it on whatever a command holds.
+  let end = word.length;
+  while (end > 0 && (word[end - 1] === ')' || word[end - 1] === '}')) end -= 1;
+  return word.slice(0, end);
+}
 
 /**
  * Whether a segment runs a command of Stroq that changes what it enforces. Read by its own words, past what

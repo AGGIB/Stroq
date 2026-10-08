@@ -54,6 +54,8 @@ beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), 'stroq-doctor-'));
   process.env['STROQ_HOME'] = join(cwd, 'home');
   process.env['HOME'] = join(cwd, 'fakehome');
+  // Where Windows looks for the home directory: without it the user scope is the machine's own.
+  process.env['USERPROFILE'] = join(cwd, 'fakehome');
   codexHome(true);
 });
 
@@ -877,7 +879,11 @@ describe('doctorReport antigravity hooks', () => {
     report: { checks: readonly { name: string; detail: string }[] },
     name: string,
   ) => report.checks.find((c) => c.name === name)?.detail ?? '';
-  const cmd = `${STROQ} hook antigravity`;
+  // A line with a quote in it cannot start under Antigravity on Windows, and `init` writes none there.
+  const cmd =
+    process.platform === 'win32'
+      ? `${process.execPath} ${CLI_ENTRY} hook antigravity`
+      : `${STROQ} hook antigravity`;
 
   it('names the file it looked for when nothing is installed', async () => {
     const antigravity = (await doctorReport(cwd, { all: true })).checks.find(

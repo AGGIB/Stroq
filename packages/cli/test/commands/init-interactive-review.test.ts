@@ -170,7 +170,11 @@ describe('runInteractiveInit, a project folder with a line break in its name', (
         lines.filter((line) => line.trimStart().startsWith('Done. Stroq is guarding Claude Code')),
       ).toHaveLength(1);
       expect(fake.out()).toContain('hooks installed in');
-      expect(readFileSync(join(folder, '.claude', 'settings.json'), 'utf8')).toContain('stroq');
+      // The command Stroq wrote ends in the agent's name; the name of the checkout, which a runner spells
+      // `Stroq`, is not what is looked for.
+      expect(readFileSync(join(folder, '.claude', 'settings.json'), 'utf8')).toContain(
+        ' hook claude-code',
+      );
     },
   );
 

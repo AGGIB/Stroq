@@ -53,7 +53,8 @@ describe('a script named by a pattern or a brace expansion is the files it stand
     'bash ./?/x.sh',
     'bash */x.sh',
     'bash d/*.sh',
-    'bash $PWD/x.s?',
+    // `$PWD` is a Windows path with backslashes in a POSIX shell's words.
+    ...(process.platform === 'win32' ? [] : ['bash $PWD/x.s?']),
     'bash --rcfile x.s? -i',
     'BASH_ENV=x.s? bash -c true',
     "f='x.s?'; bash $f",
@@ -200,7 +201,9 @@ describe('what a pattern lists, and where a command is', () => {
     },
   );
 
-  it.each(['bash c?d.sh', 'bash e?f.sh', 'bash g?h.sh', 'bash i?j.sh'])(
+  // A backtick, an angle bracket and a bar cannot be in the name of a file on Windows.
+  const posixNames = process.platform === 'win32' ? it.skip : it;
+  posixNames.each(['bash c?d.sh', 'bash e?f.sh', 'bash g?h.sh', 'bash i?j.sh'])(
     'reads a file whose name holds a backtick, an angle bracket or a bar: %s',
     (command) => {
       const where = room({

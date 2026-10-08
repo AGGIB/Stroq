@@ -180,7 +180,7 @@ describe('runBench', () => {
     writeFileSync(join(dir, 'response.md'), 'See STROQ_PROBE_RESPONSE_44ad for details.');
     writeFileSync(join(dir, 'description.md'), 'See STROQ_PROBE_DESCRIPTION_71be for details.');
     writeFileSync(join(dir, 'user.md'), 'See STROQ_PROBE_USER_INPUT_9a03 for details.');
-    const flagged = runBench(dir).flaggedFiles.map((f) => f.slice(f.lastIndexOf('/') + 1));
+    const flagged = runBench(dir).flaggedFiles.map((f) => f.split(/[\\/]/).pop() ?? f);
 
     expect(flagged).toEqual(['response.md']);
   });

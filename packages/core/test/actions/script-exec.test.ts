@@ -39,7 +39,10 @@ describe('a command that runs a script on disk is the commands the script contai
     expect(classesOfBash('bash helper.sh')).toContain('shell.destructive');
     expect(classesOfBash('./helper.sh')).toContain('shell.destructive');
     expect(classesOfBash('source helper.sh')).toContain('shell.destructive');
-    expect(classesOfBash(`sh ${join(dir, 'helper.sh')}`)).toContain('shell.destructive');
+    // A shell reads a backslash as an escape, so on Windows the path is given to it the way Git Bash takes it.
+    expect(classesOfBash(`sh ${join(dir, 'helper.sh').replaceAll('\\', '/')}`)).toContain(
+      'shell.destructive',
+    );
   });
 
   it('reads a PowerShell script run with the call operator, -File, or by name (#87360)', () => {

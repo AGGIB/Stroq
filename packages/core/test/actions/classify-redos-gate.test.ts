@@ -52,6 +52,9 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['git config', (r) => r('git config ')],
   ['config reads', (r) => r('config ')],
   ['git submodule foreach', (r) => r('git submodule foreach x ')],
+  // A word of closers that ends in something else, in the arguments of a command of Stroq's own.
+  ['stroq state command, parentheses', (r) => `stroq untaint ${r(')')}x`],
+  ['stroq state command, braces', (r) => `stroq untaint ${r('}')}x`],
   ['dd', (r) => r('dd ')],
   ['terraform apply', (r) => r('terraform apply ')],
   ['drizzle-kit push', (r) => r('drizzle-kit push ')],

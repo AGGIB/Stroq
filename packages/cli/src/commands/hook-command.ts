@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * The line an agent runs for every hook event, and how it is spelled where a host cannot take the usual one.
@@ -77,21 +78,30 @@ export interface WindowsTools {
 
 const canonical = (path: string): string => realpathSync.native(path).toLowerCase();
 
+/**
+ * What a path may be made of to be asked about: letters and digits of any alphabet, blanks, and `_ . : \ / ( ) ~ + @ ' -`.
+ * Not a quote, which would end the string the name is read from, nor `% ^ & | < > ! , ; =` and the like, which `cmd.exe`
+ * expands or reads as more than a name. A path with one of them is not asked about, and has no short name here.
+ */
+const QUERYABLE = /^[\p{L}\p{N} _.:\\/()~+@'-]+$/u;
+
+/**
+ * Where `cmd.exe` is. The program is started from there and named without a path, so that the folder searched first
+ * is the system's, and not the project's, in which a cloned repository could put a `cmd.exe` of its own.
+ */
+const systemDirectory = (): string => join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32');
+
 /** The 8.3 name `cmd.exe` gives a path (`%~s`), or null where it gives none or cannot be asked. */
 function shortPathOf(path: string): string | null {
-  // A quote cannot be in a Windows path, and one in this line would end the string the name is read from.
-  if (path.includes('"')) return null;
-  const asked = spawnSync(
-    process.env['ComSpec'] ?? 'cmd.exe',
-    ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`],
-    {
-      encoding: 'utf8',
-      windowsVerbatimArguments: true,
-      windowsHide: true,
-      timeout: 5_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    },
-  );
+  if (!QUERYABLE.test(path)) return null;
+  const asked = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], {
+    cwd: systemDirectory(),
+    encoding: 'utf8',
+    windowsVerbatimArguments: true,
+    windowsHide: true,
+    timeout: 5_000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
   if (asked.error !== undefined || asked.status !== 0) return null;
   const line = asked.stdout.split(/\r?\n/)[0]?.trim() ?? '';
   return line === '' ? null : line;
