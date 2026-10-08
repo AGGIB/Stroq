@@ -27,7 +27,14 @@ import { cpuNow } from '../cpu-time.js';
 const SIZE = 256 * 1024;
 const SIZES = [SIZE / 16, SIZE / 4, SIZE] as const;
 const BOUND_MS = 1_000;
-const MAX_GROWTH = 8;
+/**
+ * What a quadruple of the size may cost in times: linear work takes about four, quadratic work sixteen. The limit
+ * was eight, the middle between them, and shapes that are linear failed it on a runner: from 64 KiB to 256 KiB
+ * the reading of `git rebase -x 'x' ` repeated takes seven times as long (eight and a half on a shared runner with
+ * coverage on) and from 128 KiB on it doubles with the size, so the step is a cost that arrives once (the string
+ * and its pieces stop fitting in the caches), not a growth. A quadratic pattern is at fifteen or more every time.
+ */
+const MAX_GROWTH = 11;
 
 type Build = (repeat: (unit: string) => string) => string;
 
