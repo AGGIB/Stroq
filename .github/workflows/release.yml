@@ -140,3 +140,56 @@ jobs:
         if: steps.mode.outputs.mode == 'none'
         run: |
           echo "::warning::Nothing published: set the NPM_TOKEN secret or configure npm trusted publishing and set the NPM_TRUSTED_PUBLISHING repository variable to true, then re-run this workflow."
+
+  # The page of the release on GitHub, made from the changelog (`scripts/release-notes.ts`) once the version can be
+  # installed. The job above only STAGES the version on npm, and a maintainer approves it there, so this one waits
+  # for npm to show it. If npm does not show it within the wait, the page is made as a draft: nothing is announced
+  # before it can be installed, and a maintainer publishes the page when the version is out. A page that exists
+  # already (made by hand) is left as it is.
+  github-release:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # The only job that may write to the repository, and it has no token for npm and no OIDC.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Node 22.18 and later run the TypeScript of the script as it is; nothing is installed.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Make the release page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "The release $TAG exists already; nothing to make."
+            exit 0
+          fi
+          node scripts/release-notes.ts "$VERSION" > "$RUNNER_TEMP/notes.md"
+          published=no
+          for _ in $(seq 1 90); do
+            if npm view "@stroq/cli@${VERSION}" version > /dev/null 2>&1; then
+              published=yes
+              break
+            fi
+            sleep 60
+          done
+          flags=(--verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md")
+          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          if [ "$published" = yes ]; then
+            case "$VERSION" in *-*) ;; *) flags+=(--latest) ;; esac
+          else
+            flags+=(--draft)
+            echo "::warning::npm does not show @stroq/cli@${VERSION} after 90 minutes. Approve the staged version on npmjs.com; the release page is a draft until a maintainer publishes it."
+          fi
+          gh release create "$TAG" "${flags[@]}"
