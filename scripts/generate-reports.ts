@@ -7,6 +7,7 @@
 // byte-compares against the committed copies without writing anything.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { formatActionsBench, runDefaultActionsBench } from '../packages/cli/src/bench/actions.js';
 import { formatBench, runBench } from '../packages/cli/src/bench/run.js';
 import { buildCoverage, formatCoverage } from '../packages/cli/src/coverage/report.js';
 
@@ -69,10 +70,11 @@ function deriveCoverage(): string {
   ].join('\n');
 }
 
-function deriveBench(): string {
+async function deriveBench(): Promise<string> {
   const report = runBench(BENCH_CORPUS);
+  const actions = await runDefaultActionsBench();
   return [
-    banner(`stroq bench --corpus ${BENCH_CORPUS}`),
+    banner(`stroq bench --corpus ${BENCH_CORPUS}\` and \`stroq bench --actions`),
     '# Stroq bench',
     '',
     "Stroq's false-positive rate against real, benign developer documentation. This " +
@@ -192,13 +194,53 @@ function deriveBench(): string {
       'installed CLI and, not finding it there, tells you to pass `--corpus` yourself, ' +
       'which is always the case for an installed CLI.',
     '',
+    '## Ordinary agent work, held out',
+    '',
+    'The documentation corpus above measures one thing: how often a rule fires on text an ' +
+      'agent reads. It cannot say what Stroq does to the work itself, and rules were fitted ' +
+      'to it (the history above), so it flatters. This is the other half: seventy-five ' +
+      'scenarios of ordinary agent work, tool calls and what the tools print, replayed ' +
+      'against the default policy in a clean session, counting the scenarios Stroq interrupts.',
+    '',
+    '```text',
+    formatActionsBench(actions).trimEnd(),
+    '```',
+    '',
+    'An interruption is a tool call the policy asks about or denies, or a tool result the scan ' +
+      'flags. Every session is clean, so the rules that wait for something hostile to have ' +
+      'been read (the taint rules) do not appear here; a rule that does is firing on the work ' +
+      'itself.',
+    '',
+    'The first fifty scenarios were written before they were measured, from the tools and ' +
+      'commands an agent uses day to day (the shell first: git, builds and tests, searching ' +
+      'and editing files, a little network; then reads, edits, web fetches and MCP calls), ' +
+      'and not from the rules. They included, on purpose, shapes known to be hard, and five ' +
+      'of them were interrupted: a JSON response piped to `python3 -m json.tool` (twice), ' +
+      '`eval "$(ssh-agent -s)"`, a commit message that talks about `curl | sh`, and a git log ' +
+      'whose messages say "do not skip the previous step". Those five are why the release ' +
+      'that adds this report also changed how pipes into an interpreter, here-documents ' +
+      'that are text, `eval` of a tool that prints its own setup, and one pattern of ' +
+      '`ATR-2026-00032` are read; they stay in the set, now allowed. The last twenty-five ' +
+      'were written after that, from the shapes real agent work took in a Claude Code and ' +
+      'Codex history, and are not fitted to a rule either. They keep four that Stroq still ' +
+      'asks about on purpose: an inline Python program that reads the environment or writes ' +
+      'a file, and an inline Node program, each reading what `curl` printed, which Stroq ' +
+      'cannot tell from one that runs it. Read the rate as which scenarios Stroq interrupts ' +
+      'and why, not as a share of commands: the set holds more hard shapes than ordinary ' +
+      'work does. A scenario that is interrupted stays in the set: removing it would be ' +
+      'fitting the set to the rules.',
+    '',
+    '`stroq bench --actions` reproduces this on any machine, with the policy that machine ' +
+      'runs, so it also says how often yours interrupts them. The scenarios are in ' +
+      '[`packages/cli/src/bench/actions-corpus.ts`](../packages/cli/src/bench/actions-corpus.ts).',
+    '',
   ].join('\n');
 }
 
 interface Target {
   readonly label: string;
   readonly file: string;
-  readonly derive: () => string;
+  readonly derive: () => string | Promise<string>;
 }
 
 const targets: readonly Target[] = [
@@ -210,7 +252,7 @@ const checkMode = process.argv.includes('--check');
 let outOfDate = false;
 
 for (const { label, file, derive } of targets) {
-  const derived = derive();
+  const derived = await derive();
   if (!checkMode) {
     writeFileSync(file, derived);
     process.stdout.write(`${label}: written\n`);

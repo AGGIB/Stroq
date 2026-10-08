@@ -106,3 +106,25 @@ ATR-2026-00030:
         (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+[a-zA-Z0-9_-]+\s*(?:agent)?
       to: |-
         (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+(?:the\s+)?(?:[a-zA-Z0-9_-]+\s+)?(?:agent|orchestrator|supervisor|coordinator|controller|assistant)\b
+
+ATR-2026-00032:
+  reason: >-
+    The "skip the <adjective> step" alternation of the skip-directive condition names
+    `first`, `required`, `previous` and `remaining` as markers of the assigned work, and they
+    are ordinary words. A `git log` of a repository whose commit says "revert: do not skip the
+    previous step in the pipeline" matched it, and so does any changelog, runbook or
+    migration note that talks about its own steps. A prohibition is not a directive to skip,
+    and the bare "skip the previous step" is how a guide describes an optional one. Two changes:
+    the bare form needs one of the two words that mark the work as the one that was assigned
+    (`original`, `assigned`), and the same adjectives are kept for the form that pairs the skip
+    with a substitution ("skip the previous step and just …"), which is the hijacking shape
+    and was not matched with an adjective in it before, nor with a plural noun ("skip the
+    steps and just …"). Neither is matched after "not", "never", "cannot" or a contraction
+    ("don't skip …"). The rule's own true_positives are matched by other conditions, and are
+    unaffected.
+  conditions:
+    - index: 8
+      from: |-
+        (?i)(?:skip\s+(?:the|that|this)\s+(?:original|assigned|first|required|previous|remaining)\s+(?:step|part|task|analysis|work)|skip\s+(?:the|that|this)\s+(?:step|part|task|analysis)\s+(?:and\s+(?:just|instead|directly)|entirely\s+and)|don'?t\s+(?:bother|worry)\s+(?:about|with)\s+(?:the|that|this)\s+(?:original|first|assigned))
+      to: |-
+        (?i)(?:(?<!(?:\b(?:not|never|cannot)|n't)\s)skip\s+(?:the|that|this)\s+(?:original|assigned)\s+(?:step|part|task|analysis|work)|(?<!(?:\b(?:not|never|cannot)|n't)\s)skip\s+(?:the|that|this)\s+(?:(?:original|assigned|first|required|previous|remaining)\s+)?(?:step|part|task|analysis|work)s?\s+(?:and\s+(?:just|instead|directly)|entirely\s+and)|don'?t\s+(?:bother|worry)\s+(?:about|with)\s+(?:the|that|this)\s+(?:original|first|assigned))

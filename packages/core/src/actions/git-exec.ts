@@ -1,6 +1,8 @@
 import { followedBy, type TextTest } from './followed-by.js';
-import { GIT_OUTPUT_OPTION, SELF_CONFIG_WRITE_COMMANDS } from './self-config.js';
+import { GIT_OUTPUT_OPTION, SELF_CONFIG_WRITE_COMMANDS, hasFileRedirect } from './self-config.js';
+import { flattened } from './shell-names.js';
 import { commandWord } from './shell-segments.js';
+import { resolve, type Word } from './shell-words.js';
 
 /**
  * Git configuration keys whose value git executes as a command.
@@ -21,7 +23,7 @@ import { commandWord } from './shell-segments.js';
  * because they are how a repository points git at a config file that does.
  */
 export const GIT_EXEC_KEY =
-  /\b(core\.(fsmonitor|hookspath|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor|diff\.external|diff\.[\w-]+\.(textconv|command)|filter\.[\w-]+\.(clean|smudge|process)|merge\.[\w-]+\.driver|(mergetool|difftool)\.[\w-]+\.cmd|credential\.helper|(uploadpack|receivepack)\.[\w.-]+|protocol\.ext\.allow|alias\.[\w-]+|include\.path|includeif\.[^\s=]+\.path)\b/i;
+  /\b(core\.(fsmonitor|hookspath|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor|diff\.external|diff\.[\w-]+\.(textconv|command)|filter\.[\w-]+\.(clean|smudge|process)|merge\.[\w-]+\.driver|(mergetool|difftool)\.[\w-]+\.cmd|credential\.helper|(uploadpack|receivepack)\.[\w.-]+|remote\.[\w.-]+\.(uploadpack|receivepack|vcs)|protocol\.ext\.allow|alias\.[\w-]+|include\.path|includeif\.[^\s=]+\.path)\b/i;
 
 /**
  * A `git config` invocation that is not one of its read verbs, or a `git -c key=…`
@@ -77,6 +79,8 @@ export const GIT_DASH_C: TextTest = {
 export const GIT_EXEC_FILE =
   /(?<![\w.-])(\.git[/\\]+(config|hooks)|\.gitattributes|\.gitmodules|\.husky|\.devcontainer|\.envrc)(?![\w.-])/;
 
+const EXEC_KEY_WHOLE = new RegExp(`^(?:${GIT_EXEC_KEY.source.replace(/^\\b|\\b$/g, '')})$`, 'i');
+
 /**
  * True for a dotted git configuration key whose value git executes.
  *
@@ -85,7 +89,7 @@ export const GIT_EXEC_FILE =
  * `filter.lfs.clean`, not about a segment that happens to mention it.
  */
 export function isGitExecKey(dottedKey: string): boolean {
-  return new RegExp(`^(?:${GIT_EXEC_KEY.source.replace(/^\\b|\\b$/g, '')})$`, 'i').test(dottedKey);
+  return EXEC_KEY_WHOLE.test(dottedKey);
 }
 
 /** True for a path a repository can use to make git, or an editor, run a command. */
@@ -93,8 +97,158 @@ export function isGitExecPath(path: string): boolean {
   return GIT_EXEC_FILE.test(path);
 }
 
+/**
+ * The options of `git` whose value is a command that it runs through a shell: `git fetch --upload-pack=…`
+ * and `git push --receive-pack=…` run it on whichever side serves the pack (a local path is enough),
+ * `git archive --remote=… --exec=…` runs it too, and `git --exec-path=…` is where git looks for the
+ * program of every subcommand. `git` takes the start of a long option for it when it is not ambiguous
+ * (`--upload=`), so any start of one of these is read as it.
+ */
+const GIT_PROGRAM_OPTIONS = ['upload-pack', 'receive-pack', 'exec'];
+
+/**
+ * `ext::` where a URL is: at the start of a word (`git fetch 'ext::sh -c …'`), as the base that a configuration
+ * rewrites a name to (`url.ext::sh -c '…'.insteadOf=zz:`), as the value of a URL (`remote.o.url=ext::…`), and
+ * as the value of an option that takes one (`git archive --remote='ext::…'`, `git push --repo=…`). Not in the
+ * middle of a word, where it is a message or a pattern (`-m 'support ext:: transport'`, `--grep=ext::`,
+ * `text::x`). The value of a configuration key is read where its pairs are (`gitConfigPairs`).
+ */
+const EXT_URL = /(?:^|(?<=url\.)|(?<=url=)|(?<=--(?:remote|repo)=))ext::/i;
+
+/**
+ * `git rebase --exec` and `-x` give git a command line to run after each commit, which is the command
+ * it is, and is read as one (`git-commands.ts`): it is a program option only for the other commands.
+ */
+const COMMAND_LINE_EXEC: ReadonlySet<string> = new Set(['rebase']);
+
+/**
+ * The subcommand of `git` or `gh`, or null where there is none to find: the first word that is not an
+ * option, past the options of `git` that take the next word for their value.
+ */
+const GIT_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--config-env',
+  '--attr-source',
+]);
+export function subcommandOf(command: string, args: readonly Word[]): string | null {
+  for (let i = 0; i < args.length; i += 1) {
+    const value = (args[i] as Word).value;
+    if (GIT_VALUE_OPTIONS.has(value) && command === 'git') i += 1;
+    else if (!value.startsWith('-')) return value;
+  }
+  return null;
+}
+
+/**
+ * Whether a word is one of those options, or the start of one. `subcommand` is the one the word is an
+ * argument of, where it is known: `clone` has `-u` for `--upload-pack`, and `rebase` reads `--exec` as a command.
+ */
+export function isGitProgramOption(word: string, subcommand: string | null = null): boolean {
+  // The `ext::` transport is a URL that is a command: `ext::sh -c '…'` runs it, wherever a URL is given,
+  // and in what a configuration rewrites a name to (`url.ext::sh -c '…'.insteadOf=zz:`).
+  if (EXT_URL.test(word)) return true;
+  if (subcommand === 'clone' && /^-[A-Za-z]*u/.test(word) && !word.startsWith('--')) return true;
+  if (!word.startsWith('--')) return false;
+  const name = word.slice(2).split('=')[0] ?? '';
+  // The directory that git looks for the program of each subcommand in: only where it is given one.
+  if (name === 'exec-path' && word.includes('=')) return true;
+  if (name === 'exec' && subcommand !== null && COMMAND_LINE_EXEC.has(subcommand)) return false;
+  return (
+    name.length >= 2 &&
+    GIT_PROGRAM_OPTIONS.some(
+      (option) =>
+        option.startsWith(name) &&
+        !(option === 'exec' && subcommand !== null && COMMAND_LINE_EXEC.has(subcommand)),
+    )
+  );
+}
+
+/**
+ * Whether a segment may run `git`, spelled however a shell reads it (`g'i't`, `g\it`): the word is in it once
+ * its quotes and escapes are off. Resolving a segment costs what its words do, and most segments are not git.
+ */
+const mayRunGit = (segment: string): boolean =>
+  /git/i.test(segment) || (/['"\\]/.test(segment) && /git/i.test(flattened(segment)));
+
+/**
+ * Whether a segment is a `git` command that is given one of them: read by its words, as a shell does
+ * (`'--upload-pack=touch x'` is one word with a space in it, and the message of `git commit -m "…
+ * --exec"` is a word that does not start with a dash), and the environment variable that is the
+ * directory of its programs.
+ */
+function runsAProgramOption(segment: string): boolean {
+  if (!mayRunGit(segment)) return false;
+  const found = resolve(segment);
+  if (found === null || found.name !== 'git') return false;
+  const subcommand = subcommandOf('git', found.args);
+  return found.args.some((word) => !word.redirect && isGitProgramOption(word.value, subcommand));
+}
+
+export interface GitConfigPair {
+  /** The key, or null for one that is made as the command runs (`-c "=v"`), which is not known. */
+  readonly key: string | null;
+  /** What it is set to: for `--config-env=key=VARIABLE`, the name of the variable. */
+  readonly value: string;
+  /** The value is the name of a variable that holds it (`--config-env`). */
+  readonly byVariable: boolean;
+}
+
+/**
+ * The configuration that a `git` command sets for its own run (`-c key=value`, `-ckey=value`,
+ * `--config-env=key=VARIABLE`), read from its words as a shell reads them: a quote may hold the key and
+ * its value together (`-c "core.fsmonitor=curl … | sh"`), which a pattern over the text cannot tell
+ * from a pipe.
+ */
+export function gitConfigPairs(segment: string): GitConfigPair[] {
+  if (!mayRunGit(segment)) return [];
+  const found = resolve(segment);
+  if (found === null || found.name !== 'git') return [];
+  const pairs: GitConfigPair[] = [];
+  const add = (word: Word | undefined, text: string, byVariable: boolean): void => {
+    const eq = text.indexOf('=');
+    const key = eq === -1 ? text : text.slice(0, eq);
+    pairs.push({
+      key: word?.expands === true && /[$`]/.test(key) ? null : key,
+      value: eq === -1 ? '' : text.slice(eq + 1),
+      byVariable,
+    });
+  };
+  found.args.forEach((word, i) => {
+    if (word.redirect) return;
+    const value = word.value;
+    if (value === '-c' || value === '--config-env') {
+      const next = found.args[i + 1];
+      if (next !== undefined) add(next, next.value, value === '--config-env');
+    } else if (value.startsWith('-c') && !value.startsWith('--')) add(word, value.slice(2), false);
+    else if (value.startsWith('--config-env='))
+      add(word, value.slice('--config-env='.length), true);
+  });
+  return pairs;
+}
+
+/** The keys of those pairs: `null` for a key that is made as the command runs, which is not known. */
+export function gitConfigKeys(segment: string): (string | null)[] {
+  return gitConfigPairs(segment).map((pair) => pair.key);
+}
+
+/** `GIT_EXEC_PATH=dir git …` is `--exec-path=dir`; `GIT_CONFIG_COUNT`, `…_KEY_n`, `…_PARAMETERS` set configuration by environment. */
+const GIT_EXEC_PATH_SET = /(?<![\w.-])GIT_EXEC_PATH=(?!\s|$|''|"")/;
+const GIT_CONFIG_BY_ENVIRONMENT = /(?<![\w.-])GIT_CONFIG_(?:COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)=/;
+/**
+ * A URL given by the environment that is a command: `GIT_CONFIG_VALUE_0='ext::sh -c …'` with a key that
+ * names a URL, `GIT_CONFIG_KEY_0='url.ext::sh -c …'` (the base that a configuration rewrites a name to),
+ * and `GIT_CONFIG_PARAMETERS="'remote.o.url=ext::…'"`. Read on the text with its quotes taken off, so that
+ * `e'x't::` is `ext::`.
+ */
+const GIT_CONFIG_EXT_VALUE =
+  /(?<![\w.-])(?:GIT_CONFIG_VALUE_\d+=ext::|GIT_CONFIG_KEY_\d+=url\.ext::|GIT_CONFIG_PARAMETERS=[^\s]{0,300}?(?:url\.|url=|=)ext::)/i;
+
 function isWriteIntent(segment: string): boolean {
-  if (segment.includes('>')) return true;
+  if (hasFileRedirect(segment)) return true;
   const word = commandWord(segment);
   // `git show --output=.git/config`: a read verb that writes where it is told to.
   if (word === 'git' && GIT_OUTPUT_OPTION.test(segment)) return true;
@@ -110,11 +264,48 @@ export function gitExecSignals(segments: readonly string[]): string[] {
   const out = new Set<string>();
   for (const seg of segments) {
     const setsKey =
-      (GIT_CONFIG_WRITE.test(seg) && !GIT_CONFIG_READ.test(seg)) || GIT_DASH_C.test(seg);
+      (GIT_CONFIG_WRITE.test(seg) && !GIT_CONFIG_READ.test(seg)) ||
+      GIT_DASH_C.test(seg) ||
+      GIT_CONFIG_BY_ENVIRONMENT.test(seg);
     if (setsKey && GIT_EXEC_KEY.test(seg)) out.add('git-exec-key');
+    if (gitConfigKeys(seg).some((key) => key !== null && isGitExecKey(key)))
+      out.add('git-exec-key');
     if (isWriteIntent(seg) && GIT_EXEC_FILE.test(seg)) out.add('git-exec-file');
+    if (
+      GIT_EXEC_PATH_SET.test(seg) ||
+      GIT_CONFIG_EXT_VALUE.test(flattened(seg)) ||
+      runsAProgramOption(seg) ||
+      // What a configuration key is set to, whatever the key: a URL that is a command (`-c branch.main.remote=ext::…`).
+      gitConfigPairs(seg).some((pair) => !pair.byVariable && /^ext::/i.test(pair.value))
+    )
+      out.add('git-exec-option');
   }
   return [...out];
+}
+
+/** A configuration key whose value is a URL (or the name of a remote, which is one), or what rewrites one. */
+const URL_KEY =
+  /^(?:remote\..+\.(?:url|pushurl)|remote\.pushdefault|branch\..+\.(?:remote|pushremote)|url\..+\.(?:insteadof|pushinsteadof)|submodule\..+\.url)$/i;
+
+/**
+ * What `git` is given that may be a program and is made as the command runs: a configuration key that a
+ * substitution or a variable spells (`-c "$(echo core.fsmonitor)=…"`). Asked about, as a command word that
+ * a substitution makes is.
+ */
+export function gitUnparsedSignals(segments: readonly string[]): string[] {
+  const out: string[] = [];
+  if (segments.some((segment) => gitConfigKeys(segment).includes(null)))
+    out.push('git-config-key-made-at-run-time');
+  // A URL that a variable holds (`--config-env=remote.o.url=U`) is a command where `U` holds `ext::…`.
+  if (
+    segments.some((segment) =>
+      gitConfigPairs(segment).some(
+        (pair) => pair.byVariable && pair.key !== null && URL_KEY.test(pair.key),
+      ),
+    )
+  )
+    out.push('git-config-url-from-variable');
+  return out;
 }
 
 /**
@@ -171,6 +362,8 @@ export type GitConfigRisk = 'exec' | 'program' | 'unread' | null;
 function keyRisk(dotted: string, value: string): GitConfigRisk {
   if (dotted.length > MAX_DOTTED_KEY_CHARS || value === '' || BOOLEAN_VALUE.test(value))
     return null;
+  // A URL that is a command, whatever the key it is the value of, and the base that a name is rewritten to.
+  if (/^ext::/i.test(value) || /^url\.ext::/i.test(dotted)) return 'exec';
   if (EXEC_TEXT_KEY.test(dotted)) {
     return /^filter\./i.test(dotted) && GIT_LFS_VALUE.test(value) ? null : 'exec';
   }

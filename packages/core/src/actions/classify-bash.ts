@@ -1,16 +1,28 @@
 import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
-import { stroqStateSignals } from './stroq-state.js';
+import { stroqStateReading } from './stroq-state.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
-import { normalizePathForMatch } from './normalize-path.js';
+import { remoteClassification, remoteTextClassification } from './classify-remote.js';
+import { isTooCostly } from './reading-cost.js';
 import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
 import {
   commandWord,
   firstArgAfter,
-  commandSegments,
   splitCommand,
   tokenize,
+  type SplitCommand,
 } from './shell-segments.js';
+import { commandSegments } from './shell-top-level.js';
+import {
+  isLineProcessor,
+  isReadInterpreter,
+  pipeConsumer,
+  type ConsumerContext,
+  type PipeConsumer,
+} from './pipe-consumer.js';
+import { lex, type Stage } from './shell-lex.js';
+import { isInitSubstitution } from './init-tools.js';
+import { resolve } from './shell-words.js';
 import {
   SELF_CONFIG_READ_COMMANDS,
   SELF_CONFIG_WRITE_COMMANDS,
@@ -22,11 +34,30 @@ export interface CommandClassification {
   readonly classes: readonly ActionClass[];
   readonly hosts: readonly string[];
   readonly signals: readonly string[];
+  /**
+   * The text of each script the command runs, as it was read: what the command carries
+   * besides its own words, which the secret guard has to look through for a known value.
+   */
+  readonly scripts?: readonly string[];
 }
 
 export { commandWord, splitSegments } from './shell-segments.js';
-import { gitExecSignals } from './git-exec.js';
-import { persistenceSignals } from './persistence.js';
+import { codeInValue } from './code-in-values.js';
+import { COMMAND_ENVIRONMENT } from './command-environment.js';
+import { fetchedExecSignals } from './fetched-exec.js';
+import { gitExecSignals, gitUnparsedSignals } from './git-exec.js';
+import type { FunctionRoom } from './function-readings.js';
+import { functionKey, inheritedFunctions, type FunctionDefinition } from './inlined-functions.js';
+import { flattened } from './shell-names.js';
+import {
+  NO_INPUT,
+  decodePrograms,
+  newBudget,
+  type Budget,
+  type ShellInput,
+} from './shell-input.js';
+import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
+import { jobStages, persistenceSignals } from './persistence.js';
 
 const SHELLS = new Set([
   'sh',
@@ -107,7 +138,8 @@ export const SSH_TARGET = /(?<![\w.-])(?=[.-]*\w)[\w.-]+@([\w-]+(?:\.[\w-]+)+)/g
 const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-r)\b/;
 // The `[^\n]*` patterns in this file are `followedBy`: the same question, answered
 // in linear time. 16 KiB of `eval ` took 28 s as a pattern; see `followed-by.ts`.
-export const EVAL_DYNAMIC = followedBy(/\beval\b/, /(\$\(|`|\$\{?\w)/);
+// Not the tail of a longer name (`spynex-eval run`, `node --eval`, `lib/eval`): that is not `eval`.
+export const EVAL_DYNAMIC = followedBy(/(?<![\w./-])eval\b/, /(\$\(|`|\$\{?\w)/);
 const INLINE_INTERP = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
 // `Buffer.from(x, 'base64')` needs no alternative of its own: it contains `base64`,
 // which is matched anywhere in the segment already. A `Buffer\.from\([^)]*base64`
@@ -115,7 +147,11 @@ const INLINE_INTERP = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
 // `Buffer.from(` with no `)` or `base64` after it, `[^)]*` rescanned the rest of the
 // segment, so 262,144 characters of them took 2.1 s in this pattern alone.
 const INLINE_PAYLOAD = /(exec\(|base64|__import__|atob\(|child_process|subprocess|os\.system)/;
-const INLINE_NETWORK = /(urllib|requests|socket|http\.client|fetch\(|http\.request|net\.connect)/;
+// Not at the end of a snake-case name, where it is a word of it and not the library: a table
+// `organization_join_requests` in the SQL that an inline program is given is not `requests`. A name that
+// begins with an underscore is the library under another name (`_socket`, `_http.request`).
+const INLINE_NETWORK =
+  /(?<![A-Za-z0-9]_)(?:urllib|requests|socket|http\.client|fetch\(|http\.request|net\.connect)/;
 const SHELL_C_REMOTE = /\b(ba|z|da)?sh\s+-c\s+["']?\$\((curl|wget)\b/;
 // `bash|sh|zsh|source|.` piping a process substitution straight into the
 // shell — `bash <(curl ...)` / `source <(curl ...)`. The substitution's
@@ -256,7 +292,7 @@ export { isDangerousRmTarget } from './dangerous-target.js';
 
 function rmIsDangerous(segment: string, cwd: string): boolean {
   const tokens = tokenize(segment);
-  const rmIndex = tokens.findIndex((t) => t.replace(/^.*\//, '') === 'rm');
+  const rmIndex = tokens.findIndex((t) => t.replace(/^.*\//, '').toLowerCase() === 'rm');
   if (rmIndex < 0) return false;
   const args = tokens.slice(rmIndex + 1);
   const recursive = args.some(
@@ -264,6 +300,57 @@ function rmIsDangerous(segment: string, cwd: string): boolean {
   );
   if (!recursive) return false;
   return args.filter((a) => !a.startsWith('-')).some((a) => isDangerousRmTarget(a, cwd));
+}
+
+/** What `find` tests that limits what it removes: a name, a time, a size, an owner. `-type` does not. */
+const FIND_FILTER =
+  /^-(?:i?name|i?path|i?wholename|i?regex|i?lname|newer\w*|[mac](?:time|min)|size|user|group|nouser|nogroup|perm|empty|samefile|inum|links|readable|writable|executable)$/;
+
+/**
+ * `find ~ -delete` and `find / -exec rm -rf {} +` remove everything under the roots they name, as
+ * `rm -rf` on that root would, unless a test on the name, the age or the size picks what goes. They
+ * are judged by the same list of roots (see `isDangerousRmTarget`).
+ */
+function findDeletesDangerousRoot(segment: string, cwd: string): boolean {
+  const tokens = tokenize(segment);
+  const at = tokens.findIndex((t) => t.replace(/^.*\//, '').toLowerCase() === 'find');
+  if (at < 0) return false;
+  const args = tokens.slice(at + 1);
+  if (args.some((a) => FIND_FILTER.test(a))) return false;
+  const firstExpression = args.findIndex((a) => a.startsWith('-') || a === '(' || a === '!');
+  const roots = firstExpression < 0 ? args : args.slice(0, firstExpression);
+  const removes = args.some(
+    (a, i) =>
+      a === '-delete' ||
+      (/^-exec(?:dir)?$/.test(a) && /^(?:.*\/)?(?:rm|shred|unlink)$/i.test(args[i + 1] ?? '')),
+  );
+  return removes && roots.some((root) => isDangerousRmTarget(root, cwd));
+}
+
+/**
+ * `echo ~ | xargs rm -rf` and `find ~ -type f | xargs rm`: what is piped into `xargs rm -r…` is the
+ * list of what goes. A pipeline that names a root `rm -rf` is asked about, with nothing in front
+ * of `xargs` that limits it to some names, removes that root.
+ */
+function xargsRemovesDangerousRoot(pipelines: readonly string[][], cwd: string): boolean {
+  return pipelines.some((stages) =>
+    stages.some((stage, i) => {
+      if (i === 0) return false;
+      const rest = tokenize(stage);
+      const xargs = rest.findIndex((t) => t.replace(/^.*\//, '').toLowerCase() === 'xargs');
+      const rm = rest.findIndex((t, at) => at > xargs && /^(?:.*\/)?rm$/i.test(t));
+      if (xargs < 0 || rm < 0) return false;
+      const recursive = rest
+        .slice(rm + 1)
+        .some((a) => a === '--recursive' || /^-[A-Za-z]*[rR]/.test(a));
+      const before = stages.slice(0, i).flatMap(tokenize);
+      return (
+        recursive &&
+        before.some((t) => isDangerousRmTarget(t, cwd)) &&
+        !before.some((t) => FIND_FILTER.test(t))
+      );
+    }),
+  );
 }
 
 const isShell = (seg: string): boolean => SHELLS.has(commandWord(seg));
@@ -395,37 +482,223 @@ function isNetwork(seg: string): boolean {
 function encodedExecSignals(
   segments: readonly string[],
   pipelines: readonly (readonly string[])[],
-): string[] {
-  const piped = pipelines.flatMap((stages) => {
-    // Whether a shell runs downstream of each stage, from one pass back from the end.
-    // `stages.slice(i + 1).some(isShell)` per stage is the square of the pipeline: 256 KiB
-    // of `x | x | …` took 1.3 s, and a hook has no length cap on what it is handed.
-    const shellAfter: boolean[] = new Array<boolean>(stages.length).fill(false);
-    let seen = false;
-    for (let i = stages.length - 1; i >= 0; i -= 1) {
-      shellAfter[i] = seen;
-      if (isShell(stages[i] as string)) seen = true;
-    }
-    return stages.flatMap((stage, i) => {
-      if (!shellAfter[i]) return [];
-      const signals: string[] = [];
-      if (DECODE.test(stage)) signals.push('decode-pipe-shell');
-      if (isNetwork(stage)) signals.push('remote-pipe-shell');
-      return signals;
+  texts: readonly string[],
+): { readonly encoded: string[]; readonly unparsed: string[] } {
+  const encoded: string[] = [];
+  const unparsed: string[] = [];
+  // What the plain cut cannot say is read from the pipelines as the shell cuts them: a quoted
+  // program (`python3 -c "import json; print(1)"`) is cut at its `;`, and what is left of it says
+  // nothing. Where those are not sure of themselves, an interpreter is as it always was, a shell,
+  // and a command that is not known to read is a question.
+  const wantsRead = texts.some((text) => READ_PIPELINES_FOR.test(text) || carriesPipedData(text));
+  // Read once, for whoever asks first: it costs a pass over the text.
+  let lexed: ReturnType<typeof readEachText> | undefined;
+  const lexedTexts = (): ReturnType<typeof readEachText> => (lexed ??= readEachText(texts));
+  const read = wantsRead ? (lexedTexts()?.flat() ?? null) : null;
+  const context = wantsRead ? consumerContext(texts, segments, read ?? []) : {};
+  const consumerOf = (stage: string): PipeConsumer => {
+    const word = commandWord(stage);
+    if (isReadInterpreter(word) || isLineProcessor(word)) return read === null ? 'program' : 'none';
+    const found = pipeConsumer(stage, word, isShell(stage), context);
+    // Whole stages say whether a command reads; where there are none (the lexer was not sure), the
+    // plain cut's stage is what there is, and a command that is not known to read is a question.
+    return found === 'unknown' && read !== null ? 'none' : found;
+  };
+  for (const stages of pipelines)
+    signalsOf(
+      stages,
+      consumerOf,
+      encoded,
+      unparsed,
+      'decode-into-unknown-program',
+      'fetch-into-unknown-program',
+    );
+  for (const stages of read ?? [])
+    signalsOf(
+      stages.map((stage) => stage.text),
+      (stage) => pipeConsumer(stage, commandWord(stage), isShell(stage), context),
+      encoded,
+      unparsed,
+      'decode-into-unknown-program',
+      'fetch-into-unknown-program',
+    );
+  if (texts.some(codeInValue)) unparsed.push('code-in-value');
+  // A command that fetches or decodes is read for what its text may run. Without one, text that the
+  // command makes as it runs (a substitution or a variable) is read where it is a command or the
+  // program of an interpreter: it needs an expansion to be there to be looked for.
+  const fetchLine = segments.some(isFetchSource);
+  if (fetchLine || texts.some((text) => text.includes('$') || text.includes('`'))) {
+    const each = lexedTexts();
+    const stageTexts = (found: readonly (readonly Stage[])[]): readonly (readonly string[])[] =>
+      found.map((stages) => stages.map((stage) => stage.text));
+    // The command as it was written is `texts[0]`; the others are what was read from it, and one that
+    // is `( … )` from the first character is what `$(( … ))` held: an expression.
+    const fetched = fetchedExecSignals({
+      texts:
+        each === null
+          ? [{ pipelines, arithmetic: false }]
+          : each.map((found, i) => ({
+              pipelines: stageTexts(found),
+              arithmetic: i > 0 && (texts[i] ?? '').startsWith('('),
+            })),
+      lineFetches: fetchLine,
+      fetches: (text) => splitCommand(text, null).segments.some(isFetchSource),
     });
+    encoded.push(...fetched.encoded);
+    unparsed.push(...fetched.unparsed);
+  }
+  for (const seg of segments) {
+    if (EVAL_DYNAMIC.test(seg) && !evalsInitTool(seg)) encoded.push('eval-dynamic');
+    if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
+      encoded.push('inline-interpreter-payload');
+    if (SHELL_C_REMOTE.test(seg)) encoded.push('shell-c-remote');
+    if (SHELL_PROC_SUB_REMOTE.test(seg)) encoded.push('shell-proc-sub-remote');
+  }
+  return { encoded, unparsed };
+}
+
+/** `eval "$(ssh-agent -s)"`: a tool that prints its own setup, which is what `eval` is for. */
+function evalsInitTool(segment: string): boolean {
+  const program = resolve(segment)?.evalProgram;
+  return program !== null && program !== undefined && isInitSubstitution(program.text);
+}
+
+/** A Python or a Node, or a line processor, anywhere in a text: where an interpreter's command line is read. */
+const READ_PIPELINES_FOR =
+  /(?:python|pypy|node|awk|sed|make|\bat\b|batch|parallel|m4|\bed\b|\bex\b)/i;
+
+/**
+ * A superset of what `isNetwork` says, cheap to ask: a word that fetches or a tool that has a
+ * subcommand that does, a `/dev/tcp`, a server, an inline program of an interpreter.
+ */
+const MAYBE_NETWORK = new RegExp(
+  `\\b(?:${[...NETWORK_COMMANDS, ...Object.keys(NETWORK_SUBCOMMANDS)].join('|')})\\b|/dev/tcp/|http\\.server|\\b(?:python3?|node|perl|ruby)\\s+(?:-c|-e)\\b`,
+);
+
+/** Whether a stage may fetch or decode: a superset of what `isNetwork` and `DECODE` say. */
+const maySource = (stage: string): boolean => DECODE.test(stage) || MAYBE_NETWORK.test(stage);
+
+/** Whether a text may pipe a fetch or a decode into something: a `|`, and a stage that may fetch or decode. */
+const carriesPipedData = (text: string): boolean => text.includes('|') && maySource(text);
+
+/**
+ * The pipelines of each text (the command, and each text nested in it), cut as the shell cuts them,
+ * or null when any of them is not sure of what it read (an open quote, a substitution that does not
+ * end).
+ */
+function readEachText(texts: readonly string[]): (readonly (readonly Stage[])[])[] | null {
+  const out: (readonly (readonly Stage[])[])[] = [];
+  for (const text of texts) {
+    const lexed = lex(text);
+    if (lexed.uncertain) return null;
+    out.push(lexed.pipelines);
+  }
+  return out;
+}
+
+/**
+ * What the whole command says about how its stages are read: the functions it defines (a stage that
+ * calls one runs its body, not the program of that name), and whether the environment of a Python or
+ * a Node is set anywhere in it (`export PYTHONINSPECT=1; curl … | python3 -c …` reads the input at a
+ * prompt, and `NODE_OPTIONS=--require=/dev/stdin` loads it), with the quotes taken off the words so
+ * that a name written in pieces is found.
+ */
+function consumerContext(
+  texts: readonly string[],
+  segments: readonly string[],
+  read: readonly (readonly Stage[])[],
+): ConsumerContext {
+  const defined = new Set<string>();
+  const note = (stage: string): void => {
+    const found = resolve(stage);
+    for (const name of found?.defined ?? []) defined.add(name);
+    // `alias head=sh` and `hash -p ./evil head` make a name mean another program.
+    if (found?.name === 'alias' || found?.name === 'hash')
+      for (const word of found.args) {
+        const eq = word.value.indexOf('=');
+        if (found.name === 'alias' && eq > 0) defined.add(word.value.slice(0, eq));
+        if (found.name === 'hash' && !word.value.startsWith('-')) defined.add(word.value);
+      }
+  };
+  // What the lexer cut, where it was sure; what the plain cut made of the rest, where it was not.
+  for (const stages of read) for (const stage of stages) note(stage.text);
+  if (read.length === 0) segments.forEach(note);
+  // As the shell reads the words: `export $'\x50ATH'=…` is `export PATH=…`.
+  const flat = texts.map(flattened);
+  return {
+    defined,
+    pythonPrompt: flat.some((text) => /PYTHON(?:INSPECT|STARTUP)/.test(text)),
+    nodeOptions: flat.some((text) => /NODE_OPTIONS/.test(text)),
+    untrusted: flat.some((text) => COMMAND_ENVIRONMENT.test(text)),
+  };
+}
+
+/** Whether the stage is a decoder (`base64 -d`, `openssl base64 -d`, `xxd -r`) and not text that says so. */
+function decodesAsCommand(stage: string): boolean {
+  const found = resolve(stage);
+  if (found === null || !/^(?:base64|openssl|xxd)$/.test(found.name)) return false;
+  return DECODE.test([found.name, ...found.args.map((word) => word.value)].join(' '));
+}
+
+/** Whether a segment fetches (`curl`, `ssh`) or is a decoder: what prints text that something may run. */
+const isFetchSource = (segment: string): boolean => isNetwork(segment) || decodesAsCommand(segment);
+
+/** What the stages after one say about it: it is run, may be run by a program it cannot be read to be, or by one not known to read. */
+interface After {
+  readonly program: boolean;
+  readonly unread: boolean;
+  readonly unknown: boolean;
+}
+
+/**
+ * Where a fetch or a decode is piped into something that runs, or into something that is not known to
+ * only read: a program that takes it for its program, or runs code, is `exec_encoded`; one that could
+ * not be read, or is not known to only read, is a question; one that only reads is nothing. Read from
+ * the end of the pipeline back, once, so that the length of a pipeline costs no more than its stages.
+ */
+function signalsOf(
+  stages: readonly string[],
+  consumerOf: (stage: string) => PipeConsumer,
+  encoded: string[],
+  unparsed: string[],
+  decodeUnknown: string,
+  fetchUnknown: string,
+): void {
+  const first = stages.findIndex(maySource);
+  // Nothing is run from what no stage fetches or decodes, and nothing follows the last stage.
+  if (first === -1 || first === stages.length - 1) return;
+  let program = false;
+  let unread = false;
+  let unknown = false;
+  const after: (After | null)[] = new Array<After | null>(stages.length).fill(null);
+  for (let i = stages.length - 1; i >= first; i -= 1) {
+    const stage = stages[i] as string;
+    if (maySource(stage)) after[i] = { program, unread, unknown };
+    const consumer = consumerOf(stage);
+    if (consumer === 'program' || consumer === 'inline-exec') program = true;
+    else if (consumer === 'inline-unknown') unread = true;
+    else if (consumer === 'unknown') unknown = true;
+  }
+  stages.forEach((stage, i) => {
+    const here = after[i];
+    if (here === null || here === undefined || (!here.program && !here.unread && !here.unknown))
+      return;
+    const decodes = DECODE.test(stage);
+    const fetches = isNetwork(stage);
+    if (here.program) {
+      if (decodes) encoded.push('decode-pipe-shell');
+      if (fetches) encoded.push('remote-pipe-shell');
+    } else if (here.unread) {
+      // A program of its own that cannot be read is a question: it may only read what it is given.
+      if (decodes) unparsed.push('decode-into-inline-program');
+      if (fetches) unparsed.push('fetch-into-inline-program');
+    } else {
+      // A command that is not known to only read what it is given may run it. The decode has to be
+      // the command: `echo '… base64 -d …' | npx stroq hook` prints a string that says it.
+      if (decodes && decodesAsCommand(stage)) unparsed.push(decodeUnknown);
+      if (fetches) unparsed.push(fetchUnknown);
+    }
   });
-  return [
-    ...piped,
-    ...segments.flatMap((seg) => {
-      const signals: string[] = [];
-      if (EVAL_DYNAMIC.test(seg)) signals.push('eval-dynamic');
-      if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
-        signals.push('inline-interpreter-payload');
-      if (SHELL_C_REMOTE.test(seg)) signals.push('shell-c-remote');
-      if (SHELL_PROC_SUB_REMOTE.test(seg)) signals.push('shell-proc-sub-remote');
-      return signals;
-    }),
-  ];
 }
 
 /**
@@ -438,6 +711,7 @@ function destructiveSignals(segments: readonly string[], cwd: string, depth: num
   return segments.flatMap((seg) => {
     if (depth < 2 && /^ssh(?:pass)?$/.test(commandWord(seg))) return [];
     const found = DESTRUCTIVE.filter(([re]) => re.test(seg)).map(([, name]) => name);
+    if (findDeletesDangerousRoot(seg, cwd)) found.push('find-delete-dangerous-root');
     return rmIsDangerous(seg, cwd) ? [...found, 'rm-dangerous-target'] : found;
   });
 }
@@ -465,214 +739,39 @@ function hostsOf(command: string): string[] {
   return [...new Set(hosts.filter((h) => h.length > 0))];
 }
 
-/**
- * The letters of the `ssh` options that take a value. In a cluster (`-tp 22`) the first
- * one ends it: what follows in the same word is its value (`-p22`), and when nothing does
- * the value is the next word.
- */
-const SSH_VALUE_LETTERS: ReadonlySet<string> = new Set('pilFJLRDbcEeImOQSWwBo');
-
-/** Most `ssh` invocations in one command that are read, and the most text of each. */
-const MAX_SSH_INVOCATIONS = 16;
-const MAX_REMOTE_CHARS = 32 * 1024;
-/** A word, with a quoted span kept whole: `-o "A b"` is one option and one value. */
-const SHELL_WORD = /(?:"[^"]*"|'[^']*'|\S)+/g;
-const REMOTE_COMMAND_END = /[;\n|&]/;
-
-/**
- * The command a remote shell is given by the `ssh` that starts at `from` in `text`: what
- * follows the host, in the quotes it was given in when it was quoted (`ssh prod "a | b"`
- * is one command to the remote side, though its `|` is no pipe to the local shell) and
- * up to the next local operator when it was not. The second value is whether the text
- * went on past what is read.
- */
-function remoteAfterHost(text: string, from: number): readonly [string | null, boolean] {
-  SHELL_WORD.lastIndex = from;
-  let sawSsh = false;
-  let skipValue = false;
-  let optionsEnded = false;
-  for (let word = SHELL_WORD.exec(text); word !== null; word = SHELL_WORD.exec(text)) {
-    const token = word[0];
-    if (!sawSsh) {
-      sawSsh = token.replace(/^.*\//, '') === 'ssh';
-      continue;
-    }
-    if (skipValue) {
-      skipValue = false;
-      continue;
-    }
-    if (!optionsEnded && token === '--') {
-      optionsEnded = true;
-      continue;
-    }
-    if (!optionsEnded && token.startsWith('-')) {
-      const letters = token.slice(1);
-      for (let i = 0; i < letters.length; i += 1) {
-        if (SSH_VALUE_LETTERS.has(letters.charAt(i))) {
-          skipValue = i === letters.length - 1;
-          break;
-        }
-      }
-      continue;
-    }
-    const after = word.index + token.length;
-    const window = text.slice(after, after + MAX_REMOTE_CHARS + 1);
-    const rest = window.trimStart();
-    const quote = rest.charAt(0);
-    if (quote === '"' || quote === "'") {
-      let close = 1;
-      while (close < rest.length && rest.charAt(close) !== quote) {
-        close += quote === '"' && rest.charAt(close) === '\\' ? 2 : 1;
-      }
-      return [rest.slice(1, close), close >= MAX_REMOTE_CHARS];
-    }
-    const stop = rest.search(REMOTE_COMMAND_END);
-    const remote = (stop === -1 ? rest : rest.slice(0, stop)).trim();
-    return [remote === '' ? null : remote, stop === -1 && rest.length > MAX_REMOTE_CHARS];
-  }
-  return [null, false];
-}
-
-interface RemoteCommands {
-  readonly commands: readonly string[];
-  /** True when an `ssh` was left unread: past the invocation limit, or a command past the text limit. */
-  readonly truncated: boolean;
-}
-
-/**
- * What a remote shell is told to run: the words after the host of an `ssh` invocation, as
- * one command. A command sent over `ssh` runs on someone else's machine, usually a
- * production one, and its text is written in the same shell syntax as a local one — so it
- * is read as one (claude-code #94579: `ssh prod docker rmi <image>` removed the
- * production image). Read from the command itself where the segment is a part of it,
- * because the segments are cut at every `|`, quoted or not.
- */
-function remoteCommands(command: string, segments: readonly string[]): RemoteCommands {
-  const commands: string[] = [];
-  let searchFrom = 0;
-  let seen = 0;
-  let truncated = false;
-  for (const segment of segments) {
-    const word = commandWord(segment);
-    if (word !== 'ssh' && word !== 'sshpass') continue;
-    seen += 1;
-    if (seen > MAX_SSH_INVOCATIONS) {
-      truncated = true;
-      break;
-    }
-    const at = command.indexOf(segment, searchFrom);
-    if (at !== -1) searchFrom = at + segment.length;
-    const [remote, cut] = at === -1 ? remoteAfterHost(segment, 0) : remoteAfterHost(command, at);
-    if (cut) truncated = true;
-    if (remote !== null && remote !== '') commands.push(remote);
-  }
-  return { commands, truncated };
-}
-
-/**
- * What is routine to run locally and not on a production server: removing an image,
- * pruning, and a recursive delete of anything but a scratch directory. (A volume's data is
- * asked about wherever it is removed; see `DESTRUCTIVE`.) Stopping a service, rebooting
- * and removing one file are an administrator's day, and a question for each would be the
- * check people switch off.
- */
-const REMOTE_DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
-  [
-    /\bdocker(?:-compose)?\s+(?:rmi|system\s+prune|volume\s+(?:rm|prune)|(?:container|image)\s+(?:rm|prune)|compose\s+down\s+(?:\S+\s+)*-v)\b/,
-    'remote-destructive',
-  ],
-];
-
-const REMOTE_CLASSES: ReadonlySet<ActionClass> = new Set<ActionClass>([
-  'shell.exec_encoded',
-  'shell.destructive',
-]);
-
-const REMOTE_SCRATCH = /^(?:\/var)?\/tmp\//;
-
-/**
- * A recursive `rm` on a server, aimed anywhere but `/tmp`. A name that is not absolute is
- * relative to the directory an earlier `cd` of the same command moved into, so the
- * question is where that is; with no `cd` it is the login directory, as a local relative
- * name is the project, and passes. The path is collapsed first: `/tmp/../var/www` is not
- * in `/tmp`.
- */
-function remoteRmIsDangerous(segment: string, directory: string | null): boolean {
-  const tokens = tokenize(segment);
-  const at = tokens.findIndex((t) => t.replace(/^.*\//, '') === 'rm');
-  if (at < 0) return false;
-  const args = tokens.slice(at + 1);
-  const recursive = args.some(
-    (a) => a === '--recursive' || (/^-[A-Za-z]+$/.test(a) && /[rR]/.test(a)),
-  );
-  if (!recursive) return false;
-  return args
-    .filter((a) => !a.startsWith('-'))
-    .some((a) => {
-      const target = a.replace(/["']/g, '');
-      const relative = !/^[/~$]/.test(target);
-      const full = relative && directory !== null ? `${directory}/${target}` : target;
-      const dangerous =
-        isDangerousRmTarget(target, '/__remote__') ||
-        (relative && directory !== null && isDangerousRmTarget(full, '/__remote__'));
-      return dangerous && !REMOTE_SCRATCH.test(normalizePathForMatch(full));
-    });
-}
-
-/** The directory a remote `cd` leaves the command in; a relative one only extends a known directory. */
-function remoteDirectoryAfter(segment: string, directory: string | null): string | null {
-  if (commandWord(segment) !== 'cd') return directory;
-  const target = segment
-    .split(/\s+/)
-    .slice(1)
-    .find((w) => w !== '' && !w.startsWith('-'))
-    ?.replace(/["']/g, '');
-  if (target === undefined) return directory;
-  if (/^[/~$]/.test(target)) return target;
-  return directory === null ? null : `${directory}/${target}`;
-}
-
-function remoteClassification(
-  command: string,
-  segments: readonly string[],
-  cwd: string,
-  depth: number,
-): ReadonlyArray<readonly [ActionClass, readonly string[]]> {
-  if (depth >= 2) return [];
-  const found = new Map<ActionClass, string[]>();
-  const add = (cls: ActionClass, signal: string): void => {
-    found.set(cls, [...(found.get(cls) ?? []), `ssh-remote:${signal}`]);
-  };
-  const remote = remoteCommands(command, segments);
-  // A command that could not be read to its end is not a command that is safe.
-  if (remote.truncated) add('shell.unparsed', 'too-large');
-  for (const text of remote.commands) {
-    for (const [cls, signals] of classifyCommandGroups(text, cwd, depth + 1).groups) {
-      if (!REMOTE_CLASSES.has(cls)) continue;
-      // Whether an `rm` target is outside the project is a question about THIS machine's
-      // checkout; the remote's own is asked below, with `/tmp` allowed.
-      const own = signals.filter((signal) => signal !== 'rm-dangerous-target');
-      if (own.length > 0) add(cls, own[0] as string);
-    }
-    let directory: string | null = null;
-    for (const seg of splitCommand(text).segments) {
-      directory = remoteDirectoryAfter(seg, directory);
-      for (const [test, name] of REMOTE_DESTRUCTIVE)
-        if (test.test(seg)) add('shell.destructive', name);
-      if (remoteRmIsDangerous(seg, directory)) add('shell.destructive', 'remote-rm-recursive');
-    }
-  }
-  return [...found.entries()];
-}
-
 /** A classification with each class's own signals kept apart, for callers that remap classes. */
 export interface CommandGroups {
   readonly groups: ReadonlyArray<readonly [ActionClass, readonly string[]]>;
   readonly hosts: readonly string[];
 }
 
-export function classifyCommand(command: string, cwd: string, depth = 0): CommandClassification {
-  const { groups, hosts } = classifyCommandGroups(command, cwd, depth);
+/** What a caller that has already done part of the reading hands on, so that it is not done twice. */
+export interface ClassifyOptions {
+  /** The programs the shells in the command are handed, when they have been read. */
+  readonly decoded?: ShellInput;
+  /** The meter that bounds the decoded text of this command and of the commands nested in it. */
+  readonly budget?: Budget;
+  /** The command cut into segments, when the caller has done it: it is not cut again. */
+  readonly split?: SplitCommand;
+  /**
+   * The functions of the command that this one is a program of: it calls them as it calls its own. Null
+   * for a text that is an approximation of a program and not one (a script read with its variables
+   * replaced), which is not read for the functions it calls.
+   */
+  readonly functions?: readonly FunctionDefinition[] | null;
+  /** What is left to spend on reading the functions of the command that this one is a program of. */
+  readonly room?: FunctionRoom;
+  /** How long the reading may take, in milliseconds: for a caller that waits less than the host does, and for the tests. */
+  readonly deadlineMs?: number;
+}
+
+export function classifyCommand(
+  command: string,
+  cwd: string,
+  depth = 0,
+  options: ClassifyOptions = {},
+): CommandClassification {
+  const { groups, hosts } = classifyCommandGroups(command, cwd, depth, options);
   return {
     classes: groups.map(([cls]) => cls),
     hosts,
@@ -680,33 +779,164 @@ export function classifyCommand(command: string, cwd: string, depth = 0): Comman
   };
 }
 
-export function classifyCommandGroups(command: string, cwd: string, depth = 0): CommandGroups {
-  const split = splitCommand(command);
+/**
+ * The classes of the programs a shell is handed on its standard input, each read as the
+ * command it is, and `shell.unparsed` for one that cannot be read: a shell running something
+ * nobody could see is asked about, so an evasion of the decoding ends in a question. The
+ * programs of every level of nesting arrive together (see `decodePrograms`), so none is decoded
+ * again here.
+ */
+function programClassification(
+  input: ShellInput,
+  cwd: string,
+  depth: number,
+  budget: Budget,
+  functions: readonly FunctionDefinition[] | null,
+  room: FunctionRoom,
+): Array<readonly [ActionClass, string[]]> {
+  const found = new Map<ActionClass, string[]>();
+  const add = (cls: ActionClass, signal: string): void => {
+    found.set(cls, [...(found.get(cls) ?? []), signal]);
+  };
+  const addRemote = (cls: ActionClass, signal: string): void => add(cls, `ssh-remote:${signal}`);
+  input.texts.forEach((text, n) => {
+    // What a shell `ssh` started is handed runs on the server: it is judged as a command sent
+    // over `ssh` is, and not as one run here.
+    if (input.remote[n] === true) {
+      if (depth < 2)
+        remoteTextClassification(
+          text,
+          cwd,
+          depth,
+          budget,
+          addRemote,
+          classifyCommandGroups,
+          NO_INPUT,
+          room,
+        );
+      return;
+    }
+    for (const [cls, signals] of classifyCommandGroups(text, cwd, depth + 1, {
+      decoded: NO_INPUT,
+      functions,
+      room,
+    }).groups)
+      for (const signal of signals) add(cls, `shell-input:${signal}`);
+  });
+  if (input.opaque) add('shell.unparsed', 'opaque-shell-input');
+  return [...found.entries()];
+}
+
+/** The command cut again where the programs it hands to shells define functions that it does not know. */
+function withProgramFunctions(
+  command: string,
+  split: SplitCommand,
+  decoded: ShellInput,
+  given: readonly FunctionDefinition[] | null | undefined,
+): SplitCommand {
+  if (given === null) return split;
+  const known = new Set(split.functions.map(functionKey));
+  const extra = inheritedFunctions(decoded.texts).definitions.filter(
+    (definition) => !known.has(functionKey(definition)),
+  );
+  if (extra.length === 0) return split;
+  return splitCommand(command, [...(given ?? []), ...extra], split.room);
+}
+
+export function classifyCommandGroups(
+  command: string,
+  cwd: string,
+  depth = 0,
+  options: ClassifyOptions = {},
+): CommandGroups {
+  // A command too costly to read is not read (see `readingCost`): a caller that reaches here
+  // without `classifyTool` is held to the same bound.
+  if (depth === 0 && isTooCostly(command))
+    return { groups: [['shell.unparsed', ['command-too-large']]], hosts: [] };
+  // And one that takes longer than the clock allows is stopped, and asked about (see `deadline.ts`).
+  if (depth === 0)
+    return withDeadline(
+      options.deadlineMs ?? READING_DEADLINE_MS,
+      () => readCommandGroups(command, cwd, depth, options),
+      () => ({ groups: [['shell.unparsed', ['reading-took-too-long']]], hosts: [] }),
+    );
+  return readCommandGroups(command, cwd, depth, options);
+}
+
+function readCommandGroups(
+  command: string,
+  cwd: string,
+  depth: number,
+  options: ClassifyOptions,
+): CommandGroups {
+  const budget = options.budget ?? newBudget(command.length);
+  const first = options.split ?? splitCommand(command, options.functions, options.room);
+  // What the programs that a shell is handed define is in force where the command calls it, when that shell
+  // is the one that runs the command (`source <(echo 'f() { …; }'); f -rf ~`): the command is read once
+  // more with them.
+  const decoded = options.decoded ?? decodePrograms(command, budget, first);
+  const split = withProgramFunctions(command, first, decoded, options.functions);
   const { segments, pipelines, truncated } = split;
   // Cut where the shell cuts, not inside a quoted string (see `splitTopQuoted`).
   const shellSegments = commandSegments(command, split);
   const selfConfig = selfTamperSignals(segments);
+  const stroqState = stroqStateReading(command, split, options.functions);
   // The PowerShell and cmd forms of the same four dangers, merged into the same
   // classes rather than given their own. A dangerous command is dangerous whichever
   // shell wrote it, and a policy rule naming `shell.exec_encoded` must not have to
   // name a Windows twin of it as well. `shell.unparsed` is the one class that IS
   // new, because "I could not read what this runs" is not any of the four.
   const ps = powershellSignals(segments, pipelines, cwd);
+  const exec = encodedExecSignals(segments, pipelines, split.texts);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
-    ['shell.exec_encoded', [...encodedExecSignals(segments, pipelines), ...ps.encoded]],
+    ['shell.exec_encoded', [...exec.encoded, ...ps.encoded]],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
-    ['shell.destructive', [...destructiveSignals(segments, cwd, depth), ...ps.destructive]],
+    [
+      'shell.destructive',
+      [
+        ...destructiveSignals(segments, cwd, depth),
+        ...(xargsRemovesDangerousRoot(pipelines, cwd) ? ['xargs-rm-dangerous-root'] : []),
+        ...ps.destructive,
+      ],
+    ],
     ['fs.secrets', [...secretSignals(segments), ...ps.secrets]],
     ['git.push_external', pushExternalSignals(segments)],
-    ['config.self', [...selfConfig.deny, ...stroqStateSignals(command)]],
+    ['config.self', [...selfConfig.deny, ...stroqState.signals]],
     ['config.self_touch', selfConfig.ask],
     ['config.git_exec', gitExecSignals(segments)],
     ['config.instructions', instructionWriteSignals(segments)],
-    ['config.persistence', persistenceSignals(shellSegments, command, cwd)],
+    ['config.persistence', persistenceSignals(shellSegments, command, cwd, jobStages(split.texts))],
     // Too much nesting to read is not reading it: see `nestedBudget`.
-    ['shell.unparsed', truncated ? [...ps.unparsed, 'nested-commands-too-large'] : ps.unparsed],
+    [
+      'shell.unparsed',
+      [
+        ...exec.unparsed,
+        ...ps.unparsed,
+        ...gitUnparsedSignals(segments),
+        ...(truncated ? ['nested-commands-too-large'] : []),
+        ...(split.functionsUnread || stroqState.unread ? ['function-call-not-read'] : []),
+      ],
+    ],
   ];
-  const remote = remoteClassification(command, segments, cwd, depth);
+  const remote = [
+    ...remoteClassification(
+      command,
+      segments,
+      cwd,
+      depth,
+      budget,
+      classifyCommandGroups,
+      split.room,
+    ),
+    ...programClassification(
+      decoded,
+      cwd,
+      depth,
+      budget,
+      options.functions === null ? null : split.functions,
+      split.room,
+    ),
+  ];
   const merged = groups.map(([cls, signals]) => {
     const extra = remote.filter(([c]) => c === cls).flatMap(([, more]) => more);
     return [cls, [...signals, ...extra]] as const;

@@ -1,14 +1,21 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  loadBenignFixtures,
+  loadFieldFixtures,
+  runBenignGate,
+} from '../../../../scripts/lib/rules-pipeline.js';
 import bundleJson from '../../src/rules.bundle.json' with { type: 'json' };
 import { compileRules } from '../../src/rules/compile.js';
 import { loadBundledRules, parseBundle } from '../../src/rules/bundle.js';
+import { canFire, readsContent } from '../../src/rules/supplied-fields.js';
 import { scanContent } from '../../src/scan/scanner.js';
 
 const root = join(import.meta.dirname, '../../../..');
 const atrDir = join(root, 'rules/atr');
 const benignDir = join(root, 'rules/fixtures/benign');
+const fieldFixturesDir = join(root, 'rules/fixtures/benign-field');
 const disabledReport = join(root, 'rules/atr-disabled.json');
 
 describe.skipIf(!existsSync(atrDir))('imported ATR rules', () => {
@@ -40,15 +47,30 @@ describe.skipIf(!existsSync(atrDir))('imported ATR rules', () => {
         .map(([id]) => id),
     );
     expect(slow.size).toBeGreaterThan(0);
+    // The rules that read only a tool's response or description are held back unless they match one
+    // of their own examples through it (the own-example gate), and say so in their reason.
+    const byExample = new Set(
+      Object.entries(reasons)
+        .filter(([, reason]) => reason.startsWith('reads '))
+        .map(([id]) => id),
+    );
+    const fixtures = [...loadBenignFixtures(benignDir), ...loadFieldFixtures(fieldFixturesDir)];
     const { compiled, errors } = compileRules(bundle.rules);
     for (const e of errors) expect(disabled.has(e.id), `${e.id} should be disabled`).toBe(true);
     for (const rule of compiled) {
       // Rules disabled by the build-time performance gate are covered by the
       // gate itself; scanning them here would reintroduce the blow-up.
       if (rule.id.startsWith('STROQ-') || slow.has(rule.id)) continue;
-      const fires = benign.some(
-        (text) => scanContent([rule], text, { threshold: 0 }).matches.length > 0,
-      );
+      if (byExample.has(rule.id)) {
+        expect(
+          canFire(rule) && !readsContent(rule),
+          `${rule.id} is held for its examples, so it must wait on a field that is supplied`,
+        ).toBe(true);
+        continue;
+      }
+      // Measured as the gate measures it: the fixture is the text and also the response and the
+      // description, and a fixture of a field is that field alone.
+      const fires = runBenignGate([rule], fixtures).disabled.has(rule.id);
       expect(disabled.has(rule.id), `${rule.id} fires=${fires}`).toBe(fires);
     }
   });

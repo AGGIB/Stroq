@@ -9,6 +9,11 @@ import { parse as parseYaml } from 'yaml';
 import { loadRulesFromDir, type SkippedRule } from '../../packages/core/src/rules/atr-loader.js';
 import { compileRules, type CompiledRule } from '../../packages/core/src/rules/compile.js';
 import type { AtrRule } from '../../packages/core/src/rules/atr-types.js';
+import {
+  canFire,
+  readsContent,
+  suppliedFieldsOf,
+} from '../../packages/core/src/rules/supplied-fields.js';
 import { matchRules } from '../../packages/core/src/scan/matcher.js';
 import { scanContent } from '../../packages/core/src/scan/scanner.js';
 
@@ -181,15 +186,51 @@ export function applyRuleOverrides(
   return { rules: out, applied };
 }
 
+/** The fields a fixture can be delivered in, besides being the text that is scanned. */
+export type FixtureField = 'tool_response' | 'tool_description';
+const FIXTURE_FIELDS: readonly FixtureField[] = ['tool_response', 'tool_description'];
+
 export interface BenignFixture {
   readonly name: string;
   readonly text: string;
+  /**
+   * Absent: the text is scanned, and is also what a tool returned and what a tool is described as
+   * (every field Stroq supplies is the text, as it is in production). Present: the text is that
+   * field and nothing else, and what is scanned is empty, so only a rule that reads the field can
+   * fire on it. A page that quotes `ignore all previous instructions` as an example is a benign
+   * tool response; as a content fixture it would also disable every rule on `content` that is right
+   * to match it.
+   */
+  readonly field?: FixtureField;
 }
 
 /** Reads every file in `dir` as a benign fixture; `[]` if it doesn't exist. */
 export function loadBenignFixtures(dir: string): readonly BenignFixture[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).map((name) => ({ name, text: readFileSync(join(dir, name), 'utf8') }));
+}
+
+/**
+ * Reads `<root>/<field>/*` as fixtures for that field alone, named `<field>/<file>`; `[]` where
+ * there are none. A directory that names no field the engine supplies is an error: a fixture in it
+ * would be read by nothing, and a gate that silently skips its fixtures is the failure it exists
+ * to prevent.
+ */
+export function loadFieldFixtures(root: string): readonly BenignFixture[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root).flatMap((field) => {
+    if (!(FIXTURE_FIELDS as readonly string[]).includes(field)) {
+      throw new RulesBuildError(
+        `${root}/${field}: no field of that name is supplied (expected one of ${FIXTURE_FIELDS.join(', ')})`,
+      );
+    }
+    const dir = join(root, field);
+    return readdirSync(dir).map((name) => ({
+      name: `${field}/${name}`,
+      text: readFileSync(join(dir, name), 'utf8'),
+      field: field as FixtureField,
+    }));
+  });
 }
 
 // --- Timing gate -------------------------------------------------------------
@@ -423,6 +464,20 @@ export interface BenignGateResult {
   readonly disabled: ReadonlyMap<string, string>;
 }
 
+/** Whether `rule` fires on `fixture`, delivered the way the fixture says it is. */
+function firesOn(rule: CompiledRule, fixture: BenignFixture): boolean {
+  const options = { threshold: 0, budgetMs: 5_000 };
+  const scan =
+    fixture.field === undefined
+      ? // The text is the content, and a tool's response and a tool's description are the text too.
+        scanContent([rule], fixture.text, options, {
+          tool_response: fixture.text,
+          tool_description: fixture.text,
+        })
+      : scanContent([rule], '', options, { [fixture.field]: fixture.text });
+  return scan.matches.length > 0;
+}
+
 /**
  * Scans `rules` against every benign fixture. A vendored rule that fires is
  * disabled with the fixture's name as the reason; a Stroq rule that fires
@@ -437,6 +492,10 @@ export interface BenignGateResult {
  * measured against every fixture whatever surface it reads. A rule must be benign
  * everywhere to ship enabled — otherwise declaring a surface would become a way to
  * get a rule that fires on benign text past the gate, which is the gate inverted.
+ *
+ * Field-aware: the rules that read `tool_response` and `tool_description` are measured the way
+ * they will run. A fixture without a `field` is the scanned text and also the response and the
+ * description; one with a `field` is that field alone (see `BenignFixture`).
  */
 export function runBenignGate(
   rules: readonly CompiledRule[],
@@ -444,13 +503,79 @@ export function runBenignGate(
 ): BenignGateResult {
   const disabled = new Map<string, string>();
   for (const rule of rules) {
-    const hit = fixtures.find(
-      (f) => scanContent([rule], f.text, { threshold: 0, budgetMs: 5_000 }).matches.length > 0,
-    );
+    const hit = fixtures.find((f) => firesOn(rule, f));
     if (!hit) continue;
     if (rule.id.startsWith(STROQ_PREFIX))
       throw new RulesBuildError(`${rule.id} — fires on ${hit.name}`);
     disabled.set(rule.id, hit.name);
+  }
+  return { disabled };
+}
+
+// --- Own-example gate ----------------------------------------------------
+
+/** The keys under which the vendored corpus writes the payload of a test case. */
+const EXAMPLE_KEYS = [
+  'input',
+  'content',
+  'tool_response',
+  'tool_description',
+  'tool_args',
+  'agent_output',
+  'user_input',
+] as const;
+
+/** The texts of the documented true positives of a rule. */
+function trueExamples(source: AtrRule | undefined): readonly string[] {
+  const cases = source?.test_cases?.true_positives ?? [];
+  return cases.flatMap((example) =>
+    EXAMPLE_KEYS.flatMap((key) => {
+      const value = (example as Record<string, unknown>)[key];
+      return typeof value === 'string' ? [value] : [];
+    }),
+  );
+}
+
+/**
+ * A rule that can fire only through a field that Stroq supplies (`tool_response`,
+ * `tool_description`) has never matched anything in production, so nothing says its patterns mean
+ * what they were written for. It has to show it: the rule must match at least one of its own
+ * documented true positives, delivered through the field. A rule that does not (its patterns were
+ * written for a text of another shape, or it has no example at all) is disabled, with the reason, as
+ * a rule that fires on benign text is. The rules that read `content` were never gated this way:
+ * they have been matching real text all along.
+ *
+ * A Stroq-authored rule in that state fails the build, like one that fires on benign text.
+ */
+export function runOwnExampleGate(
+  rules: readonly CompiledRule[],
+  sources: readonly AtrRule[],
+): BenignGateResult {
+  const byId = new Map(sources.map((rule) => [rule.id, rule]));
+  const disabled = new Map<string, string>();
+  for (const rule of rules) {
+    if (!canFire(rule) || readsContent(rule)) continue;
+    const examples = trueExamples(byId.get(rule.id));
+    const shows = examples.some(
+      (text) =>
+        scanContent(
+          [rule],
+          text,
+          { threshold: 0, budgetMs: 5_000 },
+          {
+            tool_response: text,
+            tool_description: text,
+          },
+        ).matches.length > 0,
+    );
+    if (shows) continue;
+    const reads = suppliedFieldsOf(rule).join(' and ');
+    const reason =
+      examples.length === 0
+        ? `reads ${reads} and has no example of its own to show it matches`
+        : `reads ${reads} and matches none of its ${examples.length} own examples`;
+    if (rule.id.startsWith(STROQ_PREFIX)) throw new RulesBuildError(`${rule.id} — ${reason}`);
+    disabled.set(rule.id, reason);
   }
   return { disabled };
 }
