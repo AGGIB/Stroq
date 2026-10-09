@@ -171,23 +171,28 @@ async function buildSandbox(
   cwd: string,
   userHome: string,
   refresh: boolean,
+  plat: NodeJS.Platform,
 ): Promise<GeneratedSandbox> {
   const index = new FileSecretIndex(secretsFile(), userHome);
   if (refresh) await index.refresh(cwd);
   const state = (agent === null ? [] : (AGENT_STATE_DIRS[agent] ?? [])).map((d) =>
     join(userHome, d),
   );
-  return generateSandbox({
-    workspace: cwd,
-    stroqHome: stroqHome(),
-    userHome,
-    // `/tmp` as well as `os.tmpdir()`: on macOS the latter is a per-user directory
-    // under `/var/folders`, and plenty of tooling writes to `/tmp` regardless.
-    tmp: [tmpdir(), '/tmp'],
-    agentState: state,
-    secretPaths: index.sourcePaths(cwd),
-    allowedDomains: invocation.allowedDomains,
-  });
+  return generateSandbox(
+    {
+      workspace: cwd,
+      stroqHome: stroqHome(),
+      userHome,
+      // `/tmp` as well as `os.tmpdir()`: on macOS the latter is a per-user directory
+      // under `/var/folders`, and plenty of tooling writes to `/tmp` regardless.
+      tmp: [tmpdir(), '/tmp'],
+      agentState: state,
+      secretPaths: index.sourcePaths(cwd),
+      allowedDomains: invocation.allowedDomains,
+    },
+    // The platform the run is for decides which of Stroq's own state is listed (see `protectedState`).
+    { platform: plat },
+  );
 }
 
 /** Writes the generated config where `srt` can read it, and hands back the path. */
@@ -271,17 +276,13 @@ export async function runRun(
   const findSrt = deps.srt ?? ((e: NodeJS.ProcessEnv) => binOnPath(SRT_BIN, e));
   const srtPath = invocation.sandbox ? findSrt(env) : null;
   if (invocation.sandbox && srtPath === null) process.stderr.write(`${SRT_MISSING}\n`);
+  const plat = deps.plat ?? process.platform;
   const sandbox =
     srtPath === null
       ? null
-      : await buildSandbox(invocation, agent, workspace, userHome, !invocation.dryRun);
+      : await buildSandbox(invocation, agent, workspace, userHome, !invocation.dryRun, plat);
   if (sandbox !== null)
-    reportSandbox(
-      sandbox,
-      agent,
-      deps.plat ?? process.platform,
-      deps.isTTY ?? process.stdin.isTTY === true,
-    );
+    reportSandbox(sandbox, agent, plat, deps.isTTY ?? process.stdin.isTTY === true);
 
   const childEnvironment: NodeJS.ProcessEnv = {
     ...env,

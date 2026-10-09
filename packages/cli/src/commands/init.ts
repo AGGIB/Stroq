@@ -4,7 +4,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
 import { recordInstall } from './install-record.js';
-import { stroqHome } from '../paths.js';
+import { cliDirIn, stroqHome } from '../paths.js';
 import { stroqVersion } from '../version.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
@@ -136,7 +136,7 @@ const NPX_CACHE_ROOT = /^(.*[/\\]_npx[/\\][^/\\]+)[/\\]node_modules[/\\]/;
 export function stableEntry(entry: string, home: string, version: string, dryRun = false): string {
   const root = NPX_CACHE_ROOT.exec(entry)?.[1];
   if (root === undefined || !existsSync(entry)) return entry;
-  const target = join(home, 'cli', version);
+  const target = join(cliDirIn(home), version);
   const moved = join(target, relative(realpathSync(root), realpathSync(entry)));
   if (dryRun || existsSync(moved)) return moved;
   const partial = `${target}.${process.pid}.tmp`;
@@ -518,7 +518,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
     );
   else if (!dryRun && runsFromNpxCache(launched))
     process.stdout.write(
-      `Warning: Stroq ran from the npx cache, which npm prunes, and could not copy itself to ${join(stroqHome(), 'cli')}: the hooks run it from the cache, and will not start once npm has pruned it. Install @stroq/cli globally (npm install -g @stroq/cli) and run "stroq init" again.\n`,
+      `Warning: Stroq ran from the npx cache, which npm prunes, and could not copy itself to ${cliDirIn(stroqHome())}: the hooks run it from the cache, and will not start once npm has pruned it. Install @stroq/cli globally (npm install -g @stroq/cli) and run "stroq init" again.\n`,
     );
   // Checked and delegated before `hookCommand` is ever computed: `mcp` is an
   // `InitAgent` but not a `HookAgent`, so narrowing it away here — rather than

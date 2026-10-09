@@ -1,5 +1,23 @@
-import { join, resolve } from 'node:path';
-import { canaryFilesFileIn, installRecordFileIn, secretsFileIn, trustFileIn } from '../paths.js';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import {
+  backupsDirIn,
+  bindingsFileIn,
+  canaryFilesFileIn,
+  cliDirIn,
+  hardenDirIn,
+  installRecordFileIn,
+  keysDirIn,
+  liveDirIn,
+  openclawPluginDirIn,
+  passportsFileIn,
+  pluginCliDirIn,
+  policyFileIn,
+  secretsFileIn,
+  storeDirIn,
+  tasksDirIn,
+  trustFileIn,
+} from '../paths.js';
 
 /**
  * The srt configuration `stroq run --sandbox` generates, and why it is generated
@@ -69,6 +87,51 @@ export interface GeneratedSandbox {
   readonly refused: readonly string[];
 }
 
+/**
+ * What the config is made for: the platform it will be enforced on, a way to ask whether a path
+ * exists and a way to resolve the symlinks of one that does. All default to the real ones, and a
+ * test names them to cover the platforms it is not on.
+ */
+export interface SandboxHost {
+  readonly platform?: NodeJS.Platform;
+  readonly exists?: (path: string) => boolean;
+  /** The path with its symlinks resolved; throws for a path that is not there. */
+  readonly realpath?: (path: string) => string;
+}
+
+/**
+ * Whether anything is at `path`, a link that points nowhere included: it is there, whatever it points
+ * to, which `existsSync` would not say.
+ */
+function somethingAt(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `path` with the symlinks of the part that exists resolved: the longest prefix `real` can resolve,
+ * and the rest as written. A path that is not there cannot be resolved whole.
+ */
+function withLinksResolved(path: string, real: (path: string) => string): string {
+  let head = path;
+  let rest = '';
+  for (;;) {
+    try {
+      const found = real(head);
+      return rest === '' ? found : join(found, rest);
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return path;
+      rest = rest === '' ? basename(head) : join(basename(head), rest);
+      head = parent;
+    }
+  }
+}
+
 const dedupe = (paths: readonly string[]): readonly string[] => [
   ...new Set(paths.filter((p) => p !== '').map((p) => resolve(p))),
 ];
@@ -88,51 +151,77 @@ const tooBroadToSandbox = (path: string, userHome: string): boolean =>
  *
  * The home is a write root because the hooks run INSIDE the sandbox and write the
  * sessions, the audit chain, the last-hook stamps, the log and the cloak dictionary
- * there. That also leaves the agent able to rewrite the files the NEXT call is judged
- * by: the policy, the secret index, the trust and canary records, the install record.
- * Those go into `denyWrite`, and so do the places features still to come keep their
- * own state (keys, live, harden, backups, store, passports, tasks, bindings). A name
- * that does not exist yet is listed anyway, so that the feature creating it is
- * covered from its first file and not from the release that remembers to add it.
+ * there. That also leaves the agent able to rewrite what the NEXT call is judged by (the
+ * policy, the secret index, the trust and canary records, the install record) and the code
+ * the hooks run (the copy of the CLI that `init` makes, the Claude Code plugin's pinned copy,
+ * the OpenClaw plugin): a hook that points at a file the agent replaced runs the agent's code
+ * as the firewall. Those go into `denyWrite`, and so do the places that features still to
+ * come keep their own state (keys, live, harden, backups, store, passports, tasks, bindings),
+ * so that the feature creating one is covered from its first file and not from the release
+ * that remembers to add it. Every name comes from `paths.ts`, as the code that writes it gets
+ * it, so that a rename there cannot leave one unprotected. The order is the order they are
+ * written in, and it is pinned by a test.
  *
- * The order is the order they are written in, and it is pinned by a test.
+ * Measured against srt 0.0.77 on macOS (Seatbelt), 2026-10-10, with `allowWrite` naming a
+ * directory and `denyWrite` naming paths inside it (`sandbox.live.test.ts` repeats it, opt-in):
+ * `denyWrite` wins over `allowWrite`; a write to a denied file that does not exist yet fails with
+ * "Operation not permitted" and creates nothing; a file cannot be created inside a denied
+ * directory that exists; `mkdir` of a denied directory that does not exist yet fails, and so does
+ * `mkdir -p` below it; every other path in the allowed directory stays writable. So on macOS every
+ * name is listed, whether or not it exists, and a name listed ahead of its feature costs nothing.
  *
- * NOT VERIFIED: srt's README says a `denyWrite` entry takes precedence over an
- * `allowWrite` root that contains it (0.0.77), but nothing in this repository has run
- * srt to see that hold for a path inside the Stroq home. The tests check the file
- * this generates, not what srt does with it; a live test against the real srt has to
- * show enforcement before anything describes it as enforced. Also unmeasured: on Linux
- * srt denies a path by mounting over it, and for one that does not exist yet it makes
- * an empty read-only placeholder in the home while a sandbox is alive (its README,
- * "Write denies on paths that do not exist yet"), so a name listed ahead of its
- * feature shows up on the host as a file for as long as the run lasts.
+ * Also measured: a denied path that exists is matched however it is written, but one that does not
+ * exist yet is matched only by its real path. Written through a symlink (`/tmp/…` for
+ * `/private/tmp/…`, as a `STROQ_HOME` under `/tmp` or `/var` is) it was not denied, and the write
+ * created the file. So the home is resolved through its links first, as far as it exists, and
+ * every name is built from that.
+ *
+ * Not measured, only read from srt's README ("Write denies on paths that do not exist yet
+ * (Linux)"): bubblewrap can only deny a path by mounting over it, so for a `denyWrite` path that is
+ * absent under a writable directory srt first makes an empty read-only file there (or an empty
+ * directory for a missing intermediate one), visible on the host while the sandbox lives. Stroq
+ * reads the existence of `policy.yaml` as "a custom policy", and an empty file is not a policy, so
+ * on any platform but macOS a name is listed only if it exists when the config is made. The cost
+ * is stated and not hidden: a name that is absent then can be created by the agent during the run
+ * (the self-tamper gate still refuses a write that names it, which is a check of spelling and not a
+ * boundary). The Windows model (ACLs, an alpha) was not looked at either.
  */
 const protectedState = (home: string): readonly string[] => [
-  // `paths.ts` has no helper that takes a home for the policy, only `policyFile()`
-  // for the real one, and a sandbox config is built for the home it is given.
-  join(home, 'policy.yaml'),
+  policyFileIn(home),
   secretsFileIn(home),
   trustFileIn(home),
   canaryFilesFileIn(home),
   installRecordFileIn(home),
-  // No trailing separator: srt's README says it rejects a deny entry that ends in one.
-  join(home, 'keys'),
-  join(home, 'live'),
-  join(home, 'harden'),
-  join(home, 'backups'),
-  join(home, 'store'),
-  join(home, 'passports.json'),
-  join(home, 'tasks'),
-  join(home, 'bindings.yaml'),
+  // The code the hooks run. No trailing separator on any of these: srt's README says it rejects a
+  // deny entry that ends in one.
+  cliDirIn(home),
+  pluginCliDirIn(home),
+  openclawPluginDirIn(home),
+  keysDirIn(home),
+  liveDirIn(home),
+  hardenDirIn(home),
+  backupsDirIn(home),
+  storeDirIn(home),
+  passportsFileIn(home),
+  tasksDirIn(home),
+  bindingsFileIn(home),
 ];
 
-export function generateSandbox(inputs: SandboxInputs): GeneratedSandbox {
+export function generateSandbox(inputs: SandboxInputs, host: SandboxHost = {}): GeneratedSandbox {
   const wanted = dedupe([inputs.workspace, ...inputs.tmp, inputs.stroqHome, ...inputs.agentState]);
   const refused = wanted.filter((p) => tooBroadToSandbox(p, inputs.userHome));
   const secrets = dedupe(inputs.secretPaths);
-  // An empty home names no state: `join('', 'policy.yaml')` would be a path relative to
-  // wherever the launcher happens to run.
-  const state = inputs.stroqHome === '' ? [] : protectedState(resolve(inputs.stroqHome));
+  const real = host.realpath ?? realpathSync;
+  // An empty home names no state: a path joined to '' would be relative to wherever the launcher
+  // happens to run.
+  const named =
+    inputs.stroqHome === ''
+      ? []
+      : protectedState(withLinksResolved(resolve(inputs.stroqHome), real));
+  // See `protectedState`: macOS lists every name; elsewhere srt would make a placeholder for the
+  // ones that are absent, so only those that are there are listed.
+  const exists = host.exists ?? somethingAt;
+  const state = (host.platform ?? process.platform) === 'darwin' ? named : named.filter(exists);
   return {
     refused,
     settings: {
@@ -141,8 +230,9 @@ export function generateSandbox(inputs: SandboxInputs): GeneratedSandbox {
         // The same files again. A credential file the agent cannot read but can
         // truncate is still one it can destroy, and the project's `.env` sits inside
         // the workspace, which has to stay writable for the agent to work at all.
-        // srt applies `denyWrite` over `allowWrite`, so the narrower entry wins.
-        // After them, Stroq's own state inside the writable home (see `protectedState`).
+        // srt gives `denyWrite` precedence over `allowWrite` (measured, for paths inside the
+        // allowed one: see `protectedState`), so the narrower entry is not needed to win.
+        // After them, Stroq's own state and code inside the writable home.
         denyWrite: dedupe([...secrets, ...state]),
         allowWrite: wanted.filter((p) => !refused.includes(p)),
       },
