@@ -13,6 +13,16 @@ import { resolve, withoutRedirects } from './shell-words.js';
  * run, outside the agent. Asking how one works (`--help`, `-h`), `--dry-run`, `trust`
  * with no file and every reading command stay open.
  *
+ * The commands that are still to come are listed ahead of their code, so that there is
+ * no release in which an agent can run one: `harden apply|undo|forget` edit an agent's
+ * settings, `prove` runs the live check, `add` and `remove` change what is installed,
+ * `vet --online` goes to the network for a package, `task` starts a run under a permit,
+ * and `permit extend|revoke` widen or end one. Their reading forms stay open (`harden`
+ * alone or with `status`, `permit list`, `permit show`, `vet` without `--online`), and
+ * so does any subcommand not named here: this is a list of what is denied, not of what
+ * is allowed. It reads the text of a command line, so it is one guard among others and
+ * can be spelled around; `run/sandbox.ts` lists the state in its `denyWrite` as another.
+ *
  * Judged on the whole command rather than on the segments the self-tamper gate reads,
  * because those are cut at every newline: a commit message or a heredoc body with a
  * line that starts `stroq init` was a "command" there, and denied. `joinText` first
@@ -393,6 +403,42 @@ function runsStateCommand(segment: string, assigned: ReadonlyMap<string, string>
   return changesState([found.word, ...rest], assigned);
 }
 
+/** Subcommands that change state whatever follows them. */
+const STATE_COMMANDS: ReadonlySet<string> = new Set([
+  'untaint',
+  'init',
+  'uninstall',
+  'prove',
+  'add',
+  'remove',
+  'task',
+]);
+
+/**
+ * Subcommands that change state only with one of these words after them: `harden status` reads and
+ * `harden apply` writes, `permit list` and `permit show` read and `permit extend` and `permit revoke` do
+ * not. Any word after the subcommand counts and not only the first, so that an option with a value in front
+ * of the verb (`harden --scope user apply`) cannot hide it.
+ */
+const STATE_VERBS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['harden', new Set(['apply', 'undo', 'forget'])],
+  ['permit', new Set(['extend', 'revoke'])],
+]);
+
+/** `vet` reads a directory; `vet --online` also goes to the network, and is the form that is denied. */
+const isOnlineFlag = (word: string): boolean => word === '--online' || word.startsWith('--online=');
+
+/** Whether the subcommand `sub`, with the words of the command (`args`, `sub` among them), changes state. */
+function subcommandChangesState(sub: string, args: readonly string[]): boolean {
+  if (STATE_COMMANDS.has(sub)) return true;
+  const after = args.slice(args.indexOf(sub) + 1);
+  const verbs = STATE_VERBS.get(sub);
+  if (verbs !== undefined) return after.some((word) => verbs.has(word));
+  if (sub === 'vet') return args.some(isOnlineFlag);
+  if (sub !== 'trust') return false;
+  return after.includes('--remove') || after.some((word) => !word.startsWith('-'));
+}
+
 function changesState(ws: readonly string[], assigned: ReadonlyMap<string, string>): boolean {
   const at = stroqAt(ws, assigned);
   if (at === -1) return false;
@@ -402,8 +448,5 @@ function changesState(ws: readonly string[], assigned: ReadonlyMap<string, strin
     .filter((word) => word !== '--' && word !== '');
   if (args.some((word) => word === '--dry-run' || word === '--help' || word === '-h')) return false;
   const sub = args.find((word) => !word.startsWith('-'));
-  if (sub === 'untaint' || sub === 'init' || sub === 'uninstall') return true;
-  if (sub !== 'trust') return false;
-  const after = args.slice(args.indexOf('trust') + 1);
-  return after.includes('--remove') || after.some((word) => !word.startsWith('-'));
+  return sub !== undefined && subcommandChangesState(sub, args);
 }
