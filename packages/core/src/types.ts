@@ -137,6 +137,13 @@ export interface PreToolEvent {
    * the model sent: the cloak promises that `audit.jsonl` never holds the value.
    */
   readonly auditInput?: Readonly<Record<string, unknown>>;
+  /**
+   * The host's own id for this tool call (Claude Code's `tool_use_id`, Copilot's
+   * `toolCallId`), when its event carries one. Not set by any adapter yet. It will be
+   * filled when the audit pairs a call's `pre` entry with its `post` entry, and when a
+   * task permit names the call it was widened for.
+   */
+  readonly callId?: string;
 }
 
 export interface PostToolEvent extends PreToolEvent {
