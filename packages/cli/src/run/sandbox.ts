@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { canaryFilesFileIn, installRecordFileIn, secretsFileIn, trustFileIn } from '../paths.js';
 
 /**
  * The srt configuration `stroq run --sandbox` generates, and why it is generated
@@ -82,10 +83,56 @@ const dedupe = (paths: readonly string[]): readonly string[] => [
 const tooBroadToSandbox = (path: string, userHome: string): boolean =>
   path === resolve('/') || path === resolve(userHome);
 
+/**
+ * What under the Stroq home the agent must not rewrite, although the home is writable.
+ *
+ * The home is a write root because the hooks run INSIDE the sandbox and write the
+ * sessions, the audit chain, the last-hook stamps, the log and the cloak dictionary
+ * there. That also leaves the agent able to rewrite the files the NEXT call is judged
+ * by: the policy, the secret index, the trust and canary records, the install record.
+ * Those go into `denyWrite`, and so do the places features still to come keep their
+ * own state (keys, live, harden, backups, store, passports, tasks, bindings). A name
+ * that does not exist yet is listed anyway, so that the feature creating it is
+ * covered from its first file and not from the release that remembers to add it.
+ *
+ * The order is the order they are written in, and it is pinned by a test.
+ *
+ * NOT VERIFIED: srt's README says a `denyWrite` entry takes precedence over an
+ * `allowWrite` root that contains it (0.0.77), but nothing in this repository has run
+ * srt to see that hold for a path inside the Stroq home. The tests check the file
+ * this generates, not what srt does with it; a live test against the real srt has to
+ * show enforcement before anything describes it as enforced. Also unmeasured: on Linux
+ * srt denies a path by mounting over it, and for one that does not exist yet it makes
+ * an empty read-only placeholder in the home while a sandbox is alive (its README,
+ * "Write denies on paths that do not exist yet"), so a name listed ahead of its
+ * feature shows up on the host as a file for as long as the run lasts.
+ */
+const protectedState = (home: string): readonly string[] => [
+  // `paths.ts` has no helper that takes a home for the policy, only `policyFile()`
+  // for the real one, and a sandbox config is built for the home it is given.
+  join(home, 'policy.yaml'),
+  secretsFileIn(home),
+  trustFileIn(home),
+  canaryFilesFileIn(home),
+  installRecordFileIn(home),
+  // No trailing separator: srt's README says it rejects a deny entry that ends in one.
+  join(home, 'keys'),
+  join(home, 'live'),
+  join(home, 'harden'),
+  join(home, 'backups'),
+  join(home, 'store'),
+  join(home, 'passports.json'),
+  join(home, 'tasks'),
+  join(home, 'bindings.yaml'),
+];
+
 export function generateSandbox(inputs: SandboxInputs): GeneratedSandbox {
   const wanted = dedupe([inputs.workspace, ...inputs.tmp, inputs.stroqHome, ...inputs.agentState]);
   const refused = wanted.filter((p) => tooBroadToSandbox(p, inputs.userHome));
   const secrets = dedupe(inputs.secretPaths);
+  // An empty home names no state: `join('', 'policy.yaml')` would be a path relative to
+  // wherever the launcher happens to run.
+  const state = inputs.stroqHome === '' ? [] : protectedState(resolve(inputs.stroqHome));
   return {
     refused,
     settings: {
@@ -95,7 +142,8 @@ export function generateSandbox(inputs: SandboxInputs): GeneratedSandbox {
         // truncate is still one it can destroy, and the project's `.env` sits inside
         // the workspace, which has to stay writable for the agent to work at all.
         // srt applies `denyWrite` over `allowWrite`, so the narrower entry wins.
-        denyWrite: secrets,
+        // After them, Stroq's own state inside the writable home (see `protectedState`).
+        denyWrite: dedupe([...secrets, ...state]),
         allowWrite: wanted.filter((p) => !refused.includes(p)),
       },
       network: {
