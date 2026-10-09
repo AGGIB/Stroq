@@ -134,7 +134,7 @@ function realTarget(file: string): string {
  * still written, and a path in neither, named explicitly with `--config`, is not
  * second-guessed.
  */
-function assertStaysInside(file: string): void {
+export function assertStaysInside(file: string): void {
   const requested = resolve(file);
   const roots = [process.cwd(), homedir()]
     .map((root) => resolve(root))

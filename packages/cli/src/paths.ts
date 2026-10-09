@@ -30,6 +30,19 @@ export const lastHookDirIn = (home: string): string => join(home, 'last-hook');
  * `rm -rf ~/.stroq/cloak` and so the one-way stores cannot be confused with it.
  */
 export const cloakDirIn = (home: string): string => join(home, 'cloak');
+/**
+ * What `stroq harden` remembers about the files it edited: the manifest, and the lock that
+ * serialises its writers. A directory of its own so that "forget everything harden did" is one
+ * path and the lock never sits among files that are read as data.
+ */
+export const hardenDirIn = (home: string): string => join(home, 'harden');
+export const hardenManifestFileIn = (home: string): string =>
+  join(hardenDirIn(home), 'manifest.json');
+/**
+ * Byte copies of the files `stroq harden` replaced, one directory per apply. Kept apart from
+ * everything else Stroq writes because a copy of someone's config is theirs to delete.
+ */
+export const backupsDirIn = (home: string): string => join(home, 'backups');
 
 export const sessionsDir = (): string => sessionsDirIn(stroqHome());
 export const auditFile = (): string => auditFileIn(stroqHome());
