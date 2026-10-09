@@ -1,0 +1,248 @@
+import { resolveRealPath } from './atomic.js';
+import { planBackup } from './backup.js';
+import { unifiedDiff } from './diff.js';
+import {
+  DEFAULT_LAYOUT,
+  deepEqual,
+  dotted,
+  isArray,
+  isObject,
+  parseJsonDocument,
+  serializeJson,
+  setAt,
+  type Parsed,
+} from './json-doc.js';
+import {
+  HardenError,
+  type JsonEdit,
+  type JsonObject,
+  type JsonPlan,
+  type JsonValue,
+  type PlanOptions,
+  type PlanRefusal,
+  type RecordedJsonEdit,
+} from './types.js';
+
+/**
+ * Planning an edit to a JSON config the way a careful person would make it: parse the file,
+ * change what has to change, write it back in the layout it had, and show the difference first.
+ * Nothing is written here. A file the engine will not rewrite (comments, a trailing comma, a
+ * value of the wrong type where an edit has to go) gives a plan that is `refused`; applying that
+ * is an error, and the file is untouched.
+ *
+ * The parts live next to this file: `json-doc.ts` reads and lays out a document, `json-undo.ts`
+ * takes an edit back out.
+ */
+
+export { deepEqual, findJsoncSyntax } from './json-doc.js';
+export { undoJsonEdits, type JsonUndo } from './json-undo.js';
+
+const DEFAULT_RECIPE = 'custom';
+/** Deeper than any value a recipe has a reason to write. */
+const MAX_VALUE_DEPTH = 64;
+
+const invalid = (message: string): HardenError => new HardenError('invalid-edit', message);
+
+/** A copy of `value` that is certainly JSON, or the typed error a recipe's mistake deserves. */
+function cloneJson(value: unknown, depth = 0): JsonValue {
+  if (depth > MAX_VALUE_DEPTH) throw invalid('an edit value is nested too deeply');
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw invalid('an edit value holds a number that is not finite');
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => cloneJson(item, depth + 1));
+  if (typeof value === 'object') {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw invalid('an edit value holds an object that is not plain JSON');
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneJson(item, depth + 1)]),
+    );
+  }
+  throw invalid(`an edit value holds a ${typeof value}, which is not JSON`);
+}
+
+function validateEdit(edit: JsonEdit): JsonEdit {
+  const kind: string = edit.kind;
+  if (kind !== 'json-array-add' && kind !== 'json-set') throw invalid(`unknown edit kind ${kind}`);
+  const { path } = edit;
+  if (!Array.isArray(path) || path.length === 0) throw invalid('an edit needs a path');
+  if (path.some((part) => typeof part !== 'string' || part === '')) {
+    throw invalid('every part of an edit path has to be a non-empty string');
+  }
+  return { kind: edit.kind, path: [...path], value: cloneJson(edit.value) };
+}
+
+type Probe =
+  | { readonly ok: true; readonly createdFrom: number; readonly leaf: JsonValue | undefined }
+  | { readonly ok: false; readonly conflict: string };
+
+/**
+ * Walks `path` through `doc` without changing it: where the first key that is not there is
+ * (`createdFrom`), the value at the end if there is one, or the place where the way runs
+ * through something that is not an object.
+ */
+function probe(doc: JsonObject, path: readonly string[]): Probe {
+  let node: JsonValue = doc;
+  for (const [i, key] of path.entries()) {
+    if (!isObject(node)) {
+      return { ok: false, conflict: `${dotted(path.slice(0, i))} is not an object` };
+    }
+    if (!Object.hasOwn(node, key)) return { ok: true, createdFrom: i, leaf: undefined };
+    node = node[key] as JsonValue;
+  }
+  return { ok: true, createdFrom: path.length, leaf: node };
+}
+
+type Applied =
+  | {
+      readonly ok: true;
+      readonly doc: JsonObject;
+      readonly changed: boolean;
+      readonly record: RecordedJsonEdit;
+    }
+  | { readonly ok: false; readonly conflict: string };
+
+function applyArrayAdd(doc: JsonObject, edit: JsonEdit): Applied {
+  const found = probe(doc, edit.path);
+  if (!found.ok) return found;
+  if (found.leaf !== undefined && !isArray(found.leaf)) {
+    return { ok: false, conflict: `${dotted(edit.path)} is not an array` };
+  }
+  const existing = found.leaf ?? [];
+  const base = { kind: 'json-array-add', path: edit.path, value: edit.value } as const;
+  if (existing.some((element) => deepEqual(element, edit.value))) {
+    const record = { ...base, preexisting: true, createdFrom: edit.path.length };
+    return { ok: true, doc, changed: false, record };
+  }
+  const record = { ...base, preexisting: false, createdFrom: found.createdFrom };
+  return { ok: true, doc: setAt(doc, edit.path, [...existing, edit.value]), changed: true, record };
+}
+
+function applySet(doc: JsonObject, edit: JsonEdit): Applied {
+  const found = probe(doc, edit.path);
+  if (!found.ok) return found;
+  const previous =
+    found.leaf === undefined
+      ? ({ present: false } as const)
+      : ({ present: true, value: found.leaf } as const);
+  const base = { kind: 'json-set', path: edit.path, value: edit.value, previous } as const;
+  if (found.leaf !== undefined && deepEqual(found.leaf, edit.value)) {
+    return { ok: true, doc, changed: false, record: { ...base, createdFrom: edit.path.length } };
+  }
+  const record = { ...base, createdFrom: found.createdFrom };
+  return { ok: true, doc: setAt(doc, edit.path, edit.value), changed: true, record };
+}
+
+const applyEdit = (doc: JsonObject, edit: JsonEdit): Applied =>
+  edit.kind === 'json-array-add' ? applyArrayAdd(doc, edit) : applySet(doc, edit);
+
+interface Frame {
+  readonly file: string;
+  readonly real: string;
+  /** The file's text, or `null` when there is no file. */
+  readonly text: string | null;
+  readonly options: PlanOptions;
+}
+
+interface Outcome {
+  readonly after: string;
+  readonly edits: readonly RecordedJsonEdit[];
+  readonly roundTrips: boolean;
+  readonly refusal?: { readonly refused: PlanRefusal; readonly detail: string };
+}
+
+function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
+  const { file, real, text, options } = frame;
+  const before = text ?? '';
+  const changed = outcome.after !== before;
+  const backup = planBackup(text);
+  return {
+    kind: 'json',
+    recipe: options.recipe ?? DEFAULT_RECIPE,
+    file,
+    real,
+    existed: text !== null,
+    before,
+    after: outcome.after,
+    diff: changed
+      ? unifiedDiff(before, outcome.after, {
+          path: file,
+          ...(text === null ? { oldMissing: true } : {}),
+        })
+      : '',
+    changed,
+    ...(outcome.refusal === undefined
+      ? {}
+      : { refused: outcome.refusal.refused, refusedDetail: outcome.refusal.detail }),
+    backup: backup.backup,
+    notices: backup.notices,
+    edits: outcome.edits,
+    roundTrips: outcome.roundTrips,
+    formatting: outcome.roundTrips || outcome.refusal !== undefined ? 'preserved' : 'will-change',
+    ...(options.root === undefined ? {} : { root: options.root }),
+    ...(options.newFileMode === undefined ? {} : { newFileMode: options.newFileMode }),
+  };
+}
+
+const refusedPlan = (frame: Frame, refused: PlanRefusal, detail: string): JsonPlan =>
+  buildPlan(frame, {
+    after: frame.text ?? '',
+    edits: [],
+    roundTrips: false,
+    refusal: { refused, detail },
+  });
+
+/**
+ * What would change in `file` if `edits` were made. It reads the file (through `options.read`,
+ * with the real path) and writes nothing.
+ *
+ * The plan carries the text before and after, the diff, the real path and every edit as it was
+ * made: whether an array element was there already (`preexisting`), what a set value replaced
+ * (`previous`). If the file cannot be edited safely the plan is `refused`, with `after` equal to
+ * `before`, and applying it is an error. If it can be edited only by laying it out again, the
+ * plan says `formatting: 'will-change'`.
+ */
+export function planJsonEdits(
+  file: string,
+  edits: readonly JsonEdit[],
+  options: PlanOptions,
+): JsonPlan {
+  const requested = edits.map(validateEdit);
+  const real = resolveRealPath(file);
+  const frame: Frame = { file, real, text: options.read(real), options };
+
+  const parsed: Parsed =
+    frame.text === null
+      ? { ok: true, doc: {}, layout: DEFAULT_LAYOUT, roundTrips: true }
+      : parseJsonDocument(frame.text);
+  if (!parsed.ok) return refusedPlan(frame, parsed.refused, parsed.detail);
+
+  let doc = parsed.doc;
+  let changed = false;
+  const recorded: RecordedJsonEdit[] = [];
+  for (const edit of requested) {
+    const applied = applyEdit(doc, edit);
+    if (!applied.ok) return refusedPlan(frame, 'type-conflict', applied.conflict);
+    doc = applied.doc;
+    changed ||= applied.changed;
+    recorded.push(applied.record);
+  }
+
+  // Nothing to change is nothing to write: the file is not even laid out again.
+  if (!changed) {
+    return buildPlan(frame, {
+      after: frame.text ?? '',
+      edits: recorded,
+      roundTrips: parsed.roundTrips,
+    });
+  }
+  try {
+    const after = serializeJson(doc, parsed.layout);
+    return buildPlan(frame, { after, edits: recorded, roundTrips: parsed.roundTrips });
+  } catch {
+    return refusedPlan(frame, 'invalid-json', 'the file is nested too deeply to rewrite');
+  }
+}
