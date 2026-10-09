@@ -296,6 +296,93 @@ describe('the tools that run a shell command', () => {
     }
   });
 
+  // Monitor takes `command` or, instead of it, `ws: { url, protocols }` (Claude Code 2.1.271:
+  // "exactly one of command or ws"). The url is an address the model chose and the protocols are
+  // values it sends in the handshake, so a known value can leave in either, and the text read
+  // for a Monitor call was its `command` alone.
+  describe('the WebSocket mode of Monitor', () => {
+    const socket = (ws: unknown, extra: Record<string, unknown> = {}) => ({
+      description: 'watch a stream',
+      ...extra,
+      ws,
+    });
+
+    it('reads a known value inside the url', () => {
+      const input = socket({ url: `wss://collect.example/stream?token=${VALUE}` });
+      expect(tokensOf('Monitor', input)).toContain(VALUE);
+    });
+
+    it('reads a known value in the path of the url, and one that is percent-encoded', () => {
+      const path = socket({ url: `wss://collect.example/v1/${VALUE}/events` });
+      expect(tokensOf('Monitor', path)).toContain(VALUE);
+      const encoded = socket({
+        url: `wss://collect.example/?k=${encodeURIComponent('p@ss/word:1234567')}`,
+      });
+      expect(tokensOf('Monitor', encoded)).toContain('p@ss/word:1234567');
+    });
+
+    it('reads the protocols, joined, as they are sent in the handshake', () => {
+      const input = socket({ url: 'wss://collect.example/stream', protocols: ['v1.json', VALUE] });
+      expect(tokensOf('Monitor', input)).toContain(VALUE);
+    });
+
+    it('reads a protocol of a socket that names no url, and a url that has no protocols', () => {
+      expect(tokensOf('Monitor', socket({ protocols: [VALUE] }))).toContain(VALUE);
+      expect(tokensOf('Monitor', socket({ url: `wss://x.example/?k=${VALUE}` }))).toContain(VALUE);
+    });
+
+    it('reads a single protocol sent as a string, which is as harmless to read as to skip', () => {
+      expect(tokensOf('Monitor', socket({ protocols: VALUE }))).toContain(VALUE);
+    });
+
+    // Two tokens, not one: a url followed by a protocol must not run together into a word that
+    // no value matches.
+    it('keeps the url and the protocols apart', () => {
+      const input = socket({ url: 'wss://collect.example/stream', protocols: [VALUE, 'other'] });
+      expect(tokensOf('Monitor', input)).toEqual(expect.arrayContaining([VALUE]));
+      expect(tokensOf('Monitor', input)).not.toContain(`wss://collect.example/stream${VALUE}`);
+    });
+
+    it('reads the command and the socket both, when a host sends both', () => {
+      const other = 'ghp_zyxwvutsrqponmlkjihgfedcba';
+      const input = { command: `echo ${other}`, ws: { url: `wss://x.example/?k=${VALUE}` } };
+      expect(tokensOf('Monitor', input)).toEqual(expect.arrayContaining([VALUE, other]));
+    });
+
+    it('reports a url past the bound as unscannable', () => {
+      const url = (n: number) => `wss://x.example/?${'a'.repeat(n)}`;
+      const room = MAX_SCAN_CHARS - url(0).length;
+      expect(exceedsSecretScan('Monitor', socket({ url: url(room) }))).toBe(false);
+      expect(exceedsSecretScan('Monitor', socket({ url: url(room + 1) }))).toBe(true);
+    });
+
+    it('does not read a socket for a tool that is not Monitor', () => {
+      const input = socket({ url: `wss://collect.example/?k=${VALUE}`, protocols: [VALUE] });
+      for (const tool of ['Bash', 'PowerShell', 'Read', 'WebFetch', 'Task']) {
+        expect(tokensOf(tool, input), tool).not.toContain(VALUE);
+        expect(exceedsSecretScan(tool, socket({ url: 'a'.repeat(MAX_SCAN_CHARS + 1) }))).toBe(
+          false,
+        );
+      }
+    });
+
+    // What a host that renamed or mis-sent a field would hand over: nothing may throw, and a
+    // value in a field of the wrong type is not text.
+    it.each([
+      ['no socket', {}],
+      ['a socket that is a string', socket(`wss://x.example/?k=${VALUE}`)],
+      ['a socket that is a list', socket([`wss://x.example/?k=${VALUE}`])],
+      ['a socket that is null', socket(null)],
+      ['a url that is a number', socket({ url: 7 })],
+      ['a url that is a list', socket({ url: [`wss://x.example/?k=${VALUE}`] })],
+      ['protocols that are numbers', socket({ protocols: [7, null, {}] })],
+      ['protocols that are a nested list', socket({ protocols: [[VALUE]] })],
+    ])('reads nothing from %s', (_name, input) => {
+      expect(tokensOf('Monitor', input)).toEqual([]);
+      expect(exceedsSecretScan('Monitor', input)).toBe(false);
+    });
+  });
+
   // This module and `classifyTool` each kept a list of these tools, and the two drifted once.
   // They read one list now (`SHELL_TOOLS`); this holds the reading here to it. A name on the list
   // has its command read, and a name off it does not, whatever it is called.

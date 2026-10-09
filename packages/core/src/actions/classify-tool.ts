@@ -1,6 +1,7 @@
 import type { ActionClass } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
 import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
+import { monitorSocket, monitorSocketHost, type MonitorSocket } from './monitor-socket.js';
 import { isTooCostly } from './reading-cost.js';
 import { splitCommand } from './shell-segments.js';
 import { isShellTool } from './shell-tools.js';
@@ -777,6 +778,22 @@ const COMMAND_TOO_LARGE: ToolClassification = {
   signals: ['command-too-large'],
 };
 
+/**
+ * Monitor's WebSocket mode (see `monitor-socket.ts`) has no command to read, but it is not
+ * nothing: it is an outbound connection to an address the model chose. It is network-shaped
+ * so that the secret guard, which runs on those alone, looks inside it, and a tainted
+ * session is denied it. It keeps the class of a command Stroq could not read, so it is still
+ * asked about as it was: this only adds, and no session is allowed more than it was.
+ */
+function classifySocket(socket: MonitorSocket): ToolClassification {
+  const host = monitorSocketHost(socket.url);
+  return {
+    classes: ['shell.network', ...UNREADABLE_COMMAND.classes],
+    hosts: host === null ? [] : [host],
+    signals: [...UNREADABLE_COMMAND.signals, 'monitor-websocket'],
+  };
+}
+
 /** The reading of the command went on past the clock (see `deadline.ts`): it is asked about, not read. */
 const READING_TOOK_TOO_LONG: ToolClassification = {
   classes: ['shell.unparsed'],
@@ -793,7 +810,10 @@ export function classifyTool(
     const command = toolInput['command'];
     // A shell tool whose command Stroq cannot read is not an empty command: a host
     // that renamed the field would otherwise have every call allowed without a word.
-    if (typeof command !== 'string') return UNREADABLE_COMMAND;
+    if (typeof command !== 'string') {
+      const socket = toolName === 'Monitor' ? monitorSocket(toolInput) : null;
+      return socket === null ? UNREADABLE_COMMAND : classifySocket(socket);
+    }
     if (isTooCostly(command)) return COMMAND_TOO_LARGE;
     // All of what follows is one reading, and the clock runs from its first step: the split and the decoding
     // of the programs are made here, before `classifyCommand` begins its own, and are most of the work.

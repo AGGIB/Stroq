@@ -248,6 +248,66 @@ describe('the other tools that run a shell command', () => {
   });
 });
 
+// Monitor takes `command` or, instead of it, `ws: { url, protocols }`: a WebSocket to a model-chosen
+// address, each text frame an event the model reads. It carries no command, so it used to be
+// judged as a command Stroq could not read (asked, correctly), but it was not an outbound action
+// either, so the secret guard, which runs on those alone, never looked inside it.
+describe('the WebSocket mode of Monitor', () => {
+  const ws = (url: unknown, extra: Record<string, unknown> = {}) => ({
+    description: 'watch a stream',
+    ws: { url, ...extra },
+  });
+
+  it('is an outbound connection that is still asked about, to the host it names', () => {
+    const r = classifyTool('Monitor', ws('wss://collect.example:8443/stream?k=1'), '/w');
+    expect(r.classes).toEqual(['shell.network', 'shell.unparsed']);
+    expect(r.hosts).toEqual(['collect.example']);
+    expect(r.signals).toContain('monitor-websocket');
+  });
+
+  it.each(['ws://localhost:9000/events', 'WSS://Collect.Example/x', 'wss://[::1]:9000/x'])(
+    'names the host of %s, whatever its case or port',
+    (url) => {
+      const r = classifyTool('Monitor', ws(url), '/w');
+      expect(r.classes).toContain('shell.network');
+      expect(r.hosts).toHaveLength(1);
+    },
+  );
+
+  it('is outbound even when the url is not one it can read', () => {
+    for (const url of ['not a url', '', 7, null, ['wss://x.example']]) {
+      const r = classifyTool('Monitor', ws(url), '/w');
+      expect(r.classes, JSON.stringify(url)).toEqual(['shell.network', 'shell.unparsed']);
+      expect(r.hosts).toEqual([]);
+    }
+  });
+
+  it('is judged by its command when it has one, as before', () => {
+    const r = classifyTool(
+      'Monitor',
+      { command: 'tail -f app.log', ws: { url: 'wss://x.example' } },
+      '/w',
+    );
+    expect(r.classes).toEqual([]);
+  });
+
+  it.each([{}, { ws: null }, { ws: 'wss://x.example' }, { ws: ['wss://x.example'] }, { ws: 7 }])(
+    'is nothing but a command Stroq could not read without a socket object: %j',
+    (input) => {
+      expect(classifyTool('Monitor', input, '/w').classes).toEqual(['shell.unparsed']);
+    },
+  );
+
+  it('is Monitor’s alone: another tool with a ws field has no command to read', () => {
+    for (const tool of ['Bash', 'PowerShell'])
+      expect(classifyTool(tool, ws('wss://x.example/'), '/w').classes, tool).toEqual([
+        'shell.unparsed',
+      ]);
+    for (const tool of ['Read', 'Task'])
+      expect(classifyTool(tool, ws('wss://x.example/'), '/w').classes, tool).toEqual([]);
+  });
+});
+
 // The path checks for an MCP call ran only when the tool's NAME matched a short list of
 // verbs and only read a short list of KEY names, so a file tool called `copy_file`,
 // `str_replace` or `get_file_contents`, or one that names its path `source_path` or
