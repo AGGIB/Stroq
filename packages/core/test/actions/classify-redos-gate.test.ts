@@ -96,6 +96,16 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['open quotes before sh -c', (r) => `${r('bash -c "x')}`],
   ['heredoc body lines', (r) => `cat <<EOF\n${r('stroq init\n')}`],
   ['stroq runner flags', (r) => `npx ${r('-y ')}stroq untaint`],
+  // `stroq run -- …` starts the program after its `--`, and that program is read again as a command
+  // line of its own, to a depth (`stroq-state.ts`).
+  ['stroq launchers', (r) => r('stroq run -- ')],
+  ['stroq launchers, then a command of Stroq', (r) => `${r('stroq run -- ')}stroq prove`],
+  ['stroq mcp launchers', (r) => r('stroq mcp --server x -- ')],
+  ['stroq launcher options', (r) => `stroq run ${r('--agent x ')}-- claude`],
+  ['stroq launcher dashes', (r) => `stroq run ${r('-- ')}stroq prove`],
+  ['stroq launchers under wrappers', (r) => r('sudo stroq run -- env -i ')],
+  ['stroq launchers and shell strings', (r) => r("stroq run -- sh -c 'stroq run -- ")],
+  ['stroq task prompts', (r) => `stroq task -- ${r('fix --help ')}`],
   ['many heredocs closed in turn', (r) => `cat ${r('<<a ')}\n${r('a\n')}`],
   // The 2026-Q3 detectors: persistence files, remote commands, trap and Windows bodies.
   ['redirects to startup files', (r) => r('echo x >> ~/.zshrc; ')],

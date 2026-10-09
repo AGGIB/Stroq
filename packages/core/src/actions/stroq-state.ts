@@ -2,6 +2,18 @@ import { optionTakesValue } from './shell-wrappers.js';
 import type { FunctionDefinition } from './inlined-functions.js';
 import { flattened } from './shell-names.js';
 import { splitCommand, splitSegments, type SplitCommand } from './shell-segments.js';
+import {
+  LAUNCHERS,
+  PASS_THROUGH,
+  RUNNER_VALUE_FLAGS,
+  RUNNER_VERBS,
+  RUNNERS,
+  STROQ_ENTRY,
+  STROQ_PACKAGE,
+  WRAPPERS,
+  isExemptionFlag,
+  subcommandChangesState,
+} from './stroq-commands.js';
 import { resolve, withoutRedirects } from './shell-words.js';
 
 /**
@@ -200,64 +212,6 @@ function readHeredoc(
   return { heredoc: { delim, stripTabs, script: SHELL_WORDS.has(word) }, end: j };
 }
 
-const RUNNERS: ReadonlySet<string> = new Set([
-  'npx',
-  'pnpx',
-  'pnpm',
-  'bunx',
-  'bun',
-  'yarn',
-  'npm',
-  'node',
-]);
-/** Words a runner takes before the program it runs. */
-const RUNNER_VERBS: ReadonlySet<string> = new Set([
-  'exec',
-  'dlx',
-  'x',
-  'run',
-  'recursive',
-  'multi',
-  'm',
-  '--',
-]);
-/**
- * The options of `npx`, `npm exec`, `pnpm` and `yarn` that are known to take a value: a package, a directory, a
- * cache, a registry. An option that is not here may take one as well, and the word after it is read for that.
- */
-const RUNNER_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  '-p',
-  '--package',
-  '--filter',
-  '-F',
-  '-C',
-  '--dir',
-  '--prefix',
-  '--cache',
-  '--cache-folder',
-  '--userconfig',
-  '--globalconfig',
-  '--registry',
-  '--cwd',
-  '--workspace',
-  '--config',
-  '--loglevel',
-]);
-const WRAPPERS: ReadonlySet<string> = new Set([
-  'sudo',
-  'doas',
-  'env',
-  'command',
-  'exec',
-  'nohup',
-  'nice',
-  'time',
-  'timeout',
-]);
-const STROQ_PACKAGE = /^@stroq\/cli(?:@\S*)?$/;
-/** The published entry, and the one in a checkout of this repository. */
-const STROQ_ENTRY =
-  /(?:[\\/]@stroq[\\/]cli[\\/]dist[\\/]index\.js|(?:^|[\\/])packages[\\/]cli[\\/]dist[\\/]index\.js)$/;
 const ASSIGNMENT = /^([A-Za-z_]\w*)=(\S*)$/;
 const VARIABLE = /^\$\{?([A-Za-z_]\w*)\}?$/;
 
@@ -388,65 +342,80 @@ function withoutClosers(word: string): string {
 }
 
 /**
+ * `resolve` looks past `stroq run --` as it does past any launcher, to the program it starts. Here the launcher
+ * is the command, read by `changesState` with its own flags and its operand, so it is not looked past.
+ */
+const LAUNCHED_BY_STROQ: ReadonlySet<string> = new Set(['stroq']);
+
+/**
+ * How many launchers are followed one behind another (`stroq run -- stroq run -- …`). Nobody
+ * writes a chain of more than one or two, and one built to be too long to follow is the one to
+ * stop: past this many the command is denied rather than let through unread.
+ */
+const MAX_LAUNCHER_DEPTH = 4;
+
+/**
  * Whether a segment runs a command of Stroq that changes what it enforces. Read by its own words, past what
  * stands before a command (see `afterOpeners`), and by what the shell reads of it (`resolve`): past a
  * wrapper that this list does not know (`xargs`, `watch`, `stdbuf`, `builtin exec`), a redirect that stands
  * before the command (`> /dev/null stroq untaint`) and a function head. A segment that has no `stroq` in
- * it and no expansion that could make one is not read that way.
+ * it and no expansion that could make one is not read that way. `depth` is how many launchers it stands
+ * behind (see `changesState`).
  */
-function runsStateCommand(segment: string, assigned: ReadonlyMap<string, string>): boolean {
-  if (changesState(afterOpeners(words(segment)), assigned)) return true;
+function runsStateCommand(
+  segment: string,
+  assigned: ReadonlyMap<string, string>,
+  depth = 0,
+): boolean {
+  if (changesState(afterOpeners(words(segment)), assigned, depth)) return true;
   if (!namesStroq(segment) && !/[$`]/.test(segment)) return false;
-  const found = resolve(segment);
+  const found = resolve(segment, LAUNCHED_BY_STROQ);
   if (found === null || found.word === '') return false;
   const rest = withoutRedirects(found.args).map((word) => word.value);
-  return changesState([found.word, ...rest], assigned);
+  return changesState([found.word, ...rest], assigned, depth);
 }
-
-/** Subcommands that change state whatever follows them. */
-const STATE_COMMANDS: ReadonlySet<string> = new Set([
-  'untaint',
-  'init',
-  'uninstall',
-  'prove',
-  'add',
-  'remove',
-  'task',
-]);
 
 /**
- * Subcommands that change state only with one of these words after them: `harden status` reads and
- * `harden apply` writes, `permit list` and `permit show` read and `permit extend` and `permit revoke` do
- * not. Any word after the subcommand counts and not only the first, so that an option with a value in front
- * of the verb (`harden --scope user apply`) cannot hide it.
+ * Whether the command whose words are `ws` is a command of Stroq that changes state.
+ *
+ * A command that hands its words on (`PASS_THROUGH`) has only the words before its `--` for its own, and the
+ * exemption flags count among those alone: the CLI reads them so (`ownArgs` in `help.ts`), and `stroq task --
+ * "fix --help"` starts a task. A launcher (`run`, `mcp`) starts the program after its `--`, which is judged as
+ * it would be alone: `stroq run -- stroq prove` changes state, `stroq run -- claude` does not. The operand is
+ * read again as a command line of its own, so every wrapper, runner and spelling known for a command is known
+ * behind a launcher, and launchers behind launchers are followed to `MAX_LAUNCHER_DEPTH`. A string handed to a
+ * shell (`stroq run -- sh -c '…'`) is read with the segments of the command, as it is without a launcher.
+ *
+ * What is not followed: a program that an expansion makes into Stroq, where the command does not set it
+ * (`stroq run -- $PROGRAM prove`, with `PROGRAM` from the environment), as for any command; and the body of a
+ * script run behind a launcher spelled any way but the bare name (`/usr/local/bin/stroq run -- bash x.sh`,
+ * `npx @stroq/cli run -- bash x.sh`), because the readers of scripts find the command through the table of
+ * `shell-wrappers.ts`, where `stroq` is known by that name alone. The state commands in such a script are
+ * not read there as they are behind `uv run` or the bare `stroq run`.
  */
-const STATE_VERBS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['harden', new Set(['apply', 'undo', 'forget'])],
-  ['permit', new Set(['extend', 'revoke'])],
-]);
-
-/** `vet` reads a directory; `vet --online` also goes to the network, and is the form that is denied. */
-const isOnlineFlag = (word: string): boolean => word === '--online' || word.startsWith('--online=');
-
-/** Whether the subcommand `sub`, with the words of the command (`args`, `sub` among them), changes state. */
-function subcommandChangesState(sub: string, args: readonly string[]): boolean {
-  if (STATE_COMMANDS.has(sub)) return true;
-  const after = args.slice(args.indexOf(sub) + 1);
-  const verbs = STATE_VERBS.get(sub);
-  if (verbs !== undefined) return after.some((word) => verbs.has(word));
-  if (sub === 'vet') return args.some(isOnlineFlag);
-  if (sub !== 'trust') return false;
-  return after.includes('--remove') || after.some((word) => !word.startsWith('-'));
-}
-
-function changesState(ws: readonly string[], assigned: ReadonlyMap<string, string>): boolean {
+function changesState(
+  ws: readonly string[],
+  assigned: ReadonlyMap<string, string>,
+  depth = 0,
+): boolean {
   const at = stroqAt(ws, assigned);
   if (at === -1) return false;
-  const args = ws
-    .slice(at + 1)
-    .map(withoutClosers)
-    .filter((word) => word !== '--' && word !== '');
-  if (args.some((word) => word === '--dry-run' || word === '--help' || word === '-h')) return false;
-  const sub = args.find((word) => !word.startsWith('-'));
-  return sub !== undefined && subcommandChangesState(sub, args);
+  const after = ws.slice(at + 1);
+  // The words as the subcommand sees them, with the closers of a group or a substitution that ends the
+  // command taken off the last (`untaint)`); `after` keeps them, for an operand that is read as a command.
+  const words = after.map(withoutClosers);
+  const subAt = words.findIndex((word) => word !== '' && !word.startsWith('-'));
+  const sub = words[subAt];
+  const dashes = sub !== undefined && PASS_THROUGH.has(sub) ? words.indexOf('--', subAt + 1) : -1;
+  const own = (dashes === -1 ? words : words.slice(0, dashes)).filter(
+    (word) => word !== '--' && word !== '',
+  );
+  if (own.some(isExemptionFlag)) return false;
+  if (sub === undefined) return false;
+  if (LAUNCHERS.has(sub)) {
+    const operand = dashes === -1 ? [] : after.slice(dashes + 1);
+    if (operand.length === 0) return false;
+    return depth >= MAX_LAUNCHER_DEPTH || runsStateCommand(operand.join(' '), assigned, depth + 1);
+  }
+  return subcommandChangesState(sub, own);
 }

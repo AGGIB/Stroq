@@ -426,6 +426,8 @@ export const PLAIN_WRAPPERS: ReadonlySet<string> = new Set([
 
 /** How many times `eval` and `env -S` may split their argument again: each copies the words. */
 const MAX_SPLITS = 8;
+/** The programs of the verb table that `locate` is told to stop at: none. */
+const NOT_KEPT: ReadonlySet<string> = new Set();
 
 export interface Resolved {
   /** What the stage runs, by its base name; `$` when the word is an expansion. */
@@ -654,9 +656,16 @@ interface Located {
 /**
  * Finds the command word: past redirects, assignments, keywords, groups, function heads, wrappers.
  * `eval` and `env -S` split their arguments into words again, a copy of them each time: `resplits`
- * is how many times they may; with none, the word after them stands where the command is.
+ * is how many times they may; with none, the word after them stands where the command is. `keep`
+ * names the programs of the verb table that are not looked past, for a reader that judges that
+ * program itself (`stroq run -- …` is a launcher to most, and a command of Stroq's to the one
+ * that asks what it changes).
  */
-export function locate(start: readonly Word[], resplits = MAX_SPLITS): Located {
+export function locate(
+  start: readonly Word[],
+  resplits = MAX_SPLITS,
+  keep: ReadonlySet<string> = NOT_KEPT,
+): Located {
   let words = start;
   const wrappers: string[] = [];
   // Redirects may come before the command word: `< x.sh bash`. They stay with its words.
@@ -693,7 +702,9 @@ export function locate(start: readonly Word[], resplits = MAX_SPLITS): Located {
     // `direnv exec DIR cmd`, `mise exec -- cmd`, `uv run cmd`: a program that runs another after a verb.
     const verbWrapper = verbWrapperNamed(word.value);
     const verbLength =
-      verbWrapper === null ? null : verbWrapperLength(verbWrapper, valuesAfter(words, i));
+      verbWrapper === null || keep.has(verbWrapper)
+        ? null
+        : verbWrapperLength(verbWrapper, valuesAfter(words, i));
     if (verbWrapper !== null && verbLength !== null) {
       wrappers.push(verbWrapper);
       i += 1 + verbLength;
@@ -772,8 +783,8 @@ export function locate(start: readonly Word[], resplits = MAX_SPLITS): Located {
  * `!`, a group or a wrapper (with the options a wrapper takes), written however it is written. A
  * command word that is an expansion (`$SHELL`) is a command nobody can name, which is said as `$`.
  */
-export function resolve(text: string): Resolved | null {
-  const found = locate(argv(text));
+export function resolve(text: string, keep: ReadonlySet<string> = NOT_KEPT): Resolved | null {
+  const found = locate(argv(text), MAX_SPLITS, keep);
   const first = found.words[found.at];
   const common = {
     evalProgram: found.evalProgram,
