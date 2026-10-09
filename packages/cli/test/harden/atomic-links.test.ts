@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_TARGET_BYTES,
+  assertWriteAllowed,
   nodeFs,
   readTargetText,
   removeFile,
@@ -185,8 +186,72 @@ describe.skipIf(onWindows)(
 
       expect(readFileSync(real, 'utf8')).toBe('new\n');
     });
+
+    // Stroq's own files (its manifest, its copies) live in a home that may be a link on purpose.
+    // `init`'s rule is about agent configs a repository can point somewhere; for these the only rule
+    // is the root the caller names.
+    it('can leave `init`’s rule out, and then the root the caller names is the only rule', async () => {
+      const dir = tempDir();
+      const home = join(dir, 'home');
+      const project = join(home, 'code', 'repo');
+      const target = join(home, '.config', 'tool.json');
+      mkdirSync(project, { recursive: true });
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, 'old\n');
+      symlinkSync(target, join(project, 'state.json'));
+      vi.spyOn(process, 'cwd').mockReturnValue(project);
+      vi.stubEnv('HOME', home);
+
+      await expect(writeFileAtomic(join(project, 'state.json'), 'x')).rejects.toMatchObject({
+        code: 'path-escapes-root',
+      });
+      await writeFileAtomic(join(project, 'state.json'), 'new\n', { initRule: false, root: home });
+      expect(readFileSync(target, 'utf8')).toBe('new\n');
+      await expect(
+        writeFileAtomic(join(project, 'state.json'), 'x', { initRule: false, root: project }),
+      ).rejects.toMatchObject({ code: 'path-escapes-root' });
+    });
   },
 );
+
+describe('a failure that is not a path leading out of its tree', () => {
+  // `init`'s rule asks the working directory, which a test run, a shell or a build can have
+  // deleted. That is a failure of the machine, and it should read as one.
+  it('is not reported as a path that leaves the root', async () => {
+    const dir = tempDir();
+    const gone = Object.assign(new Error('ENOENT: no current directory'), { code: 'ENOENT' });
+    vi.spyOn(process, 'cwd').mockImplementation(() => {
+      throw gone;
+    });
+
+    const error = await writeFileAtomic(join(dir, 'a.json'), 'x').catch((err: unknown) => err);
+
+    expect(error).toBe(gone);
+    expect(error).not.toBeInstanceOf(HardenError);
+  });
+});
+
+describe('assertWriteAllowed', () => {
+  it('returns the real path of an allowed target and touches nothing', () => {
+    const dir = tempDir();
+
+    expect(assertWriteAllowed(join(dir, 'new', 'a.json'), { root: dir })).toBe(
+      join(dir, 'new', 'a.json'),
+    );
+    expect(names(dir)).toEqual([]);
+  });
+
+  it.skipIf(onWindows)('refuses a target a link carries out of the root', () => {
+    const dir = tempDir();
+    const project = join(dir, 'project');
+    mkdirSync(project);
+    symlinkSync(dir, join(project, 'out'));
+
+    expect(
+      thrownBy(() => assertWriteAllowed(join(project, 'out', 'a.json'), { root: project })),
+    ).toMatchObject({ code: 'path-escapes-root' });
+  });
+});
 
 describe('removeFile', () => {
   it('removes a file and says so', async () => {

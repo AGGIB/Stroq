@@ -18,7 +18,8 @@ import {
 
 const DEFAULT_RECIPE = 'custom';
 const REPLACEMENT_CHARACTER = '\u{FFFD}';
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** What a block id may be: a plain name, so that it cannot end its own marker line early. */
+export const BLOCK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const BEGIN_PREFIX = '# >>> stroq harden:';
 const END_PREFIX = '# <<< stroq harden:';
 
@@ -30,7 +31,7 @@ export function blockMarkers(id: string): { readonly begin: string; readonly end
 const invalid = (message: string): HardenError => new HardenError('invalid-edit', message);
 
 function validateBlock(block: { readonly id: string; readonly lines: readonly string[] }): void {
-  if (typeof block.id !== 'string' || !ID_PATTERN.test(block.id)) {
+  if (typeof block.id !== 'string' || !BLOCK_ID_PATTERN.test(block.id)) {
     throw invalid('a block id is letters, digits, dots, hyphens and underscores, 64 at most');
   }
   for (const line of block.lines) {

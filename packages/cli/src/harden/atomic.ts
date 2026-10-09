@@ -35,13 +35,20 @@ export const nodeFs: Fs = {
   rmdir: (path) => fsp.rmdir(path),
 };
 
-export interface AtomicWriteOptions {
-  /**
-   * The directory the file's REAL path must stay inside. Without one, the rule `stroq init`
-   * applies to the agent configs it writes holds: the file may resolve anywhere inside the
-   * deepest of the working directory and the home directory that contains it.
-   */
+/** What a path has to pass before the engine writes to it or removes it. */
+export interface WriteRules {
+  /** The directory the file's REAL path must stay inside, a link in the path or not. */
   readonly root?: string;
+  /**
+   * Also apply the rule `stroq init` applies to the agent configs it writes: the file may resolve
+   * anywhere inside the deepest of the working directory and the home directory that contains
+   * it. On by default. Stroq's own files (its manifest, its copies) turn it off and name their
+   * home as the root: that home may be a link on purpose, and nothing else points into it.
+   */
+  readonly initRule?: boolean;
+}
+
+export interface AtomicWriteOptions extends WriteRules {
   /** The mode of a file that does not exist yet. An existing file keeps its own. */
   readonly mode?: number;
   readonly fs?: Fs;
@@ -112,24 +119,32 @@ export function readTargetText(path: string): string | null {
 }
 
 /**
- * Refuses a path that a link carries out of the tree it belongs to. Both rules apply: the root
- * the caller named, which is the narrower and says more, and `init`'s, so that every writer in
- * Stroq answers the same way about the same path.
+ * Refuses a path that a link carries out of the tree it belongs to, and returns the real path it
+ * resolves to. Two rules can apply: the root the caller named, which is the narrower and says
+ * more, and `init`'s, so that every writer of an agent config in Stroq answers the same way about
+ * the same path. Touches nothing, so it can be asked before anything else is done.
  */
-function assertAllowed(target: string, real: string, root: string | undefined): void {
-  if (root !== undefined && !within(real, resolveRealPath(root))) {
+export function assertWriteAllowed(target: string, rules: WriteRules = {}): string {
+  const real = resolveRealPath(target);
+  if (rules.root !== undefined && !within(real, resolveRealPath(rules.root))) {
     throw new HardenError(
       'path-escapes-root',
-      `refusing to touch ${target}: it resolves to ${real}, outside ${root}. A symlink in the path leads out of it; replace it with a regular file first.`,
+      `refusing to touch ${target}: it resolves to ${real}, outside ${rules.root}. A symlink in the path leads out of it; replace it with a regular file first.`,
     );
   }
-  try {
-    assertStaysInside(target);
-  } catch (err) {
-    throw new HardenError('path-escapes-root', err instanceof Error ? err.message : String(err), {
-      cause: err,
-    });
+  if (rules.initRule !== false) {
+    try {
+      assertStaysInside(target);
+    } catch (err) {
+      // The rule's own refusal has no `code`; a system error (a working directory that is gone)
+      // has one, and is not a path leading anywhere.
+      if (typeof (err as NodeJS.ErrnoException).code === 'string') throw err;
+      throw new HardenError('path-escapes-root', err instanceof Error ? err.message : String(err), {
+        cause: err,
+      });
+    }
   }
+  return real;
 }
 
 async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined> {
@@ -163,8 +178,7 @@ export async function writeFileAtomic(
   options: AtomicWriteOptions = {},
 ): Promise<AtomicWriteResult> {
   const fs = options.fs ?? nodeFs;
-  const real = resolveRealPath(target);
-  assertAllowed(target, real, options.root);
+  const real = assertWriteAllowed(target, options);
 
   const existing = await statIfPresent(fs, real);
   if (existing !== undefined) {
@@ -208,17 +222,29 @@ export async function writeFileAtomic(
   return { real, created: existing === undefined };
 }
 
+/** The mode of a directory the engine keeps for itself: the owner's alone. */
+export const PRIVATE_DIR_MODE = 0o700;
+
+/**
+ * Makes `dir` (and what is above it) and sets it to 0700, whatever the umask made of the mode given
+ * to `mkdir` and whatever an older directory was left as. For Stroq's own directories only: ask
+ * `assertWriteAllowed` first, because `mkdir` and `chmod` follow a link.
+ */
+export async function makePrivateDir(fs: Fs, dir: string): Promise<void> {
+  await fs.mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+  await fs.chmod(dir, PRIVATE_DIR_MODE).catch(() => undefined);
+}
+
 /**
  * Removes a file the engine made, under the same rules as a write. Returns whether there was
  * a file to remove.
  */
 export async function removeFile(
   target: string,
-  options: { readonly root?: string; readonly fs?: Fs } = {},
+  options: WriteRules & { readonly fs?: Fs } = {},
 ): Promise<boolean> {
   const fs = options.fs ?? nodeFs;
-  const real = resolveRealPath(target);
-  assertAllowed(target, real, options.root);
+  const real = assertWriteAllowed(target, options);
   const existing = await statIfPresent(fs, real);
   if (existing === undefined) return false;
   if (!existing.isFile()) {

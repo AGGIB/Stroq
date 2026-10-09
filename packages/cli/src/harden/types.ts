@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * What `stroq harden`'s edit engine shares between its parts: the typed error, the small file
  * system seam, the environment every operation takes, and the shape of a plan and of the edits
@@ -25,7 +27,18 @@ export type HardenErrorCode =
   /** The inputs of a diff are bigger than the preview is willing to compute. */
   | 'diff-too-large'
   /** A recipe asked for something the engine cannot do: an empty path, a value that is not JSON. */
-  | 'invalid-edit';
+  | 'invalid-edit'
+  /** A backup id that is not one the engine makes: it would name a place outside its directory. */
+  | 'invalid-backup-id'
+  /** The manifest is a link, or not a regular file: whatever it points at is not trusted. */
+  | 'manifest-unsafe'
+  | 'manifest-too-large'
+  /** The manifest is not valid JSON, or not what the engine writes. Never read in part. */
+  | 'manifest-invalid'
+  /** A plan that was refused cannot be applied. */
+  | 'plan-refused'
+  /** The file is not what the plan was made from: the owner changed it, or the path now leads elsewhere. */
+  | 'stale-plan';
 
 export class HardenError extends Error {
   readonly code: HardenErrorCode;
@@ -165,7 +178,12 @@ export type PlanRefusal =
  * A file that holds credential-shaped text is not copied: the copy would be one more place the
  * credential lives. Undo of such a file takes its own entries out and leaves the rest.
  */
-export type BackupPlan = 'copy' | 'none-new-file' | 'none-credential-text';
+export type BackupPlan =
+  | 'copy'
+  | 'none-new-file'
+  | 'none-credential-text'
+  /** Too large to look at in full, which is not the same as clean. */
+  | 'none-unchecked';
 
 export interface PlanOptions {
   /**
@@ -221,3 +239,14 @@ export interface TextBlockPlan extends PlanBase {
 }
 
 export type Plan = JsonPlan | TextBlockPlan;
+
+/**
+ * What a backup id may be: the name of one directory, so no separator, no dot at the front and
+ * nothing that is not a plain character. Backups and the manifest both check it, because an id is
+ * joined into a path and the manifest is a file someone else could have written.
+ */
+export const BACKUP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** The SHA-256 of `text` as UTF-8, in lower-case hex: how the engine tells one version of a file from another. */
+export const sha256Text = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');

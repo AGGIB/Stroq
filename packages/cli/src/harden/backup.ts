@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { dirname, join } from 'node:path';
 import {
   MAX_SCAN_CHARS,
   MAX_TEXT_CHARS,
@@ -7,7 +9,22 @@ import {
   extractKeyValues,
   looksLikeToken,
 } from '@stroq/core';
-import type { BackupPlan } from './types.js';
+import { backupsDirIn } from '../paths.js';
+import {
+  assertWriteAllowed,
+  makePrivateDir,
+  nodeFs,
+  readTargetText,
+  writeFileAtomic,
+} from './atomic.js';
+import {
+  BACKUP_ID_PATTERN,
+  HardenError,
+  sha256Text,
+  type BackupPlan,
+  type Fs,
+  type HardenEnv,
+} from './types.js';
 
 /**
  * Deciding whether a file may be copied.
@@ -34,8 +51,6 @@ export type CredentialShape =
   | 'personal-data'
   /** Too large to be checked all the way through, which is not the same as clean. */
   | 'unchecked';
-
-export const NO_BYTE_BACKUP_NOTICE = 'no byte backup: the file holds credential-shaped text';
 
 /**
  * `extractKeyValues` reads at most this many lines and `MAX_TEXT_CHARS` characters of what it is
@@ -124,6 +139,130 @@ export function planBackup(before: string | null): {
   readonly notices: readonly string[];
 } {
   if (before === null) return { backup: 'none-new-file', notices: [] };
-  if (findCredentialShape(before) === null) return { backup: 'copy', notices: [] };
-  return { backup: 'none-credential-text', notices: [NO_BYTE_BACKUP_NOTICE] };
+  const shape = findCredentialShape(before);
+  if (shape === null) return { backup: 'copy', notices: [] };
+  return {
+    backup: shape === 'unchecked' ? 'none-unchecked' : 'none-credential-text',
+    notices: [`no byte backup: ${whyNoCopy(shape)}`],
+  };
+}
+
+/**
+ * Why no copy is kept, in words that are true of that case: a file that was found to hold a
+ * credential and a file that was too large to be looked at in full are not the same thing.
+ */
+const whyNoCopy = (shape: CredentialShape): string =>
+  shape === 'unchecked'
+    ? 'the file is too large to check for credential-shaped text'
+    : 'the file holds credential-shaped text';
+
+// ---------------------------------------------------------------------------------------------
+// Storing the copy.
+
+/** How many copies of one file are kept: this one and the four before it. */
+export const BACKUPS_KEPT_PER_FILE = 5;
+
+const PRIVATE_FILE_MODE = 0o600;
+
+export interface BackupResult {
+  readonly id: string;
+  /** Whether a copy was written. */
+  readonly stored: boolean;
+  /** Why not, when it was not. */
+  readonly reason?: string;
+}
+
+const isBackupId = (id: string): boolean => BACKUP_ID_PATTERN.test(id);
+
+/**
+ * A new id for one apply: the UTC time to the millisecond, so that ids sort in the order they were
+ * made, and a random part, so that two made in the same millisecond are not one.
+ */
+export function newBackupId(now: Date): string {
+  const stamp = now.toISOString().replace(/[-:.]/g, '');
+  return `${stamp}-${randomBytes(3).toString('hex')}`;
+}
+
+/** Where the copy of `real` made under `id` lives: `<home>/backups/<id>/<sha256 of the path>.bak`. */
+export const backupPath = (home: string, id: string, real: string): string =>
+  join(backupsDirIn(home), id, `${sha256Text(real)}.bak`);
+
+/** What `backupFile` stored for `real` under `id`, or `null` when there is nothing usable there. */
+export function readBackup(env: HardenEnv, real: string, id: string): string | null {
+  if (!isBackupId(id)) return null;
+  try {
+    return readTargetText(backupPath(env.home, id, real));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes the oldest copies of `real` until `BACKUPS_KEPT_PER_FILE` are left, counting the one
+ * just written (`keepId`), which is never removed whatever its id sorts like. Other files' copies
+ * are not looked at, and a directory is removed only when this leaves it empty.
+ */
+async function prune(fs: Fs, home: string, real: string, keepId: string): Promise<void> {
+  const root = backupsDirIn(home);
+  const name = `${sha256Text(real)}.bak`;
+  const holders: string[] = [];
+  for (const id of await fs.readdir(root)) {
+    if (id === keepId || !isBackupId(id)) continue;
+    const holds = await fs.stat(join(root, id, name)).then(
+      (stat) => stat.isFile(),
+      () => false,
+    );
+    if (holds) holders.push(id);
+  }
+  const old = [...holders]
+    .sort()
+    .reverse()
+    .slice(BACKUPS_KEPT_PER_FILE - 1);
+  for (const id of old) {
+    await fs.unlink(join(root, id, name)).catch(() => undefined);
+    await fs.rmdir(join(root, id)).catch(() => undefined);
+  }
+}
+
+/**
+ * Keeps a byte copy of `real`, whose text is `bytes`, as `<home>/backups/<id>/<sha256 of the
+ * path>.bak` (directories 0700, the file 0600), and drops the oldest copies of the same file
+ * beyond five.
+ *
+ * Returns `stored: false`, with the reason, and writes nothing when the bytes hold
+ * credential-shaped text. Throws for an id that is not a plain name, and when the place it
+ * would write to leads out of the Stroq home by a link.
+ */
+export async function backupFile(
+  env: HardenEnv,
+  real: string,
+  bytes: Uint8Array,
+  id: string,
+): Promise<BackupResult> {
+  if (!isBackupId(id)) {
+    throw new HardenError(
+      'invalid-backup-id',
+      'a backup id is a plain name: letters, digits, dots, hyphens and underscores',
+    );
+  }
+  const shape = findCredentialShape(new TextDecoder().decode(bytes));
+  if (shape !== null) return { id, stored: false, reason: whyNoCopy(shape) };
+  const fs = env.fs ?? nodeFs;
+  const file = backupPath(env.home, id, real);
+  // The home is Stroq's own and may be a link on purpose; the only rule is that nothing in it
+  // leads out. Asked first, so that no directory is made or changed through such a link.
+  const rules = { root: env.home, initRule: false } as const;
+  assertWriteAllowed(file, rules);
+
+  await makePrivateDir(fs, backupsDirIn(env.home));
+  await makePrivateDir(fs, dirname(file));
+  try {
+    await writeFileAtomic(file, bytes, { ...rules, mode: PRIVATE_FILE_MODE, fs });
+  } catch (err) {
+    await fs.rmdir(dirname(file)).catch(() => undefined);
+    throw err;
+  }
+  // A copy that cannot be pruned is still a copy; the next one tries again.
+  await prune(fs, env.home, real, id).catch(() => undefined);
+  return { id, stored: true };
 }

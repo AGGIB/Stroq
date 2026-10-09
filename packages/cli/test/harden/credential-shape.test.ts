@@ -197,4 +197,13 @@ describe('planBackup: what the plan tells the owner about the copy', () => {
   it('needs no copy of a file that does not exist yet, and says nothing alarming', () => {
     expect(planBackup(null)).toEqual({ backup: 'none-new-file', notices: [] });
   });
+
+  // Not the same thing, and not to be said as if it were: nothing was found, because nothing could
+  // be looked at in full.
+  it('says so when the file was too large to be checked, rather than that it holds a credential', () => {
+    expect(planBackup('x'.repeat(MAX_SCAN_CHARS + 1))).toEqual({
+      backup: 'none-unchecked',
+      notices: ['no byte backup: the file is too large to check for credential-shaped text'],
+    });
+  });
 });
