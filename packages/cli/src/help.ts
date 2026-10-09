@@ -17,7 +17,7 @@ interface CommandHelp {
   readonly passThrough?: boolean;
 }
 
-const COMMANDS: readonly CommandHelp[] = [
+export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'init',
     synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
