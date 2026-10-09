@@ -1,4 +1,4 @@
-import type { ActionClass } from '../types.js';
+import type { ActionClass, ToolResources } from '../types.js';
 import { classifyCommand, type CommandClassification } from './classify-bash.js';
 import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
 import { monitorSocket, monitorSocketHost, type MonitorSocket } from './monitor-socket.js';
@@ -35,33 +35,6 @@ import { normalizePathForMatch } from './normalize-path.js';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
 
 export { normalizePathForMatch } from './normalize-path.js';
-
-/**
- * What a tool call reaches, read from its arguments, for a task's scope to be held against.
- * Nothing builds one yet: it will be filled when the task lock reads the paths, URLs and
- * shell use of each call.
- */
-export interface ToolResources {
-  /** The files the call reads or writes, as written, with the path once symlinks are resolved. */
-  readonly paths: readonly {
-    readonly path: string;
-    readonly real?: string;
-    readonly op: 'read' | 'write';
-  }[];
-  /**
-   * False when the call may touch paths that `paths` does not list: a glob, a variable, a
-   * command too complex to read.
-   */
-  readonly pathsComplete: boolean;
-  /** The network addresses the call reaches, with their hosts. */
-  readonly urls: readonly {
-    readonly url: string;
-    readonly host: string;
-    readonly method?: string;
-  }[];
-  /** Whether the call runs a shell command. */
-  readonly shell: boolean;
-}
 
 export interface ToolClassification extends CommandClassification {
   readonly mcp?: { readonly server: string; readonly tool: string };

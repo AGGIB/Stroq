@@ -1,9 +1,9 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { ToolClassification, ToolResources } from '../src/actions/classify-tool.js';
+import type { ToolClassification } from '../src/actions/classify-tool.js';
 import type { AuditEntry, AuditEntryInput } from '../src/audit/audit-log.js';
 import type { PreResult } from '../src/engine.js';
 import type { ToolResources as ExportedToolResources } from '../src/index.js';
-import type { PostToolEvent, PreToolEvent } from '../src/types.js';
+import type { PostToolEvent, PreToolEvent, ToolResources } from '../src/types.js';
 
 /**
  * Fields that features still to come will fill, added now so that those changes can be made one
