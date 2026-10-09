@@ -282,6 +282,14 @@ describe('the WebSocket mode of Monitor', () => {
     }
   });
 
+  // Nobody types an address that long; it is still an outbound connection, and not a reason to read
+  // it all for a host to show.
+  it('names no host for a url past what a person writes, and is still outbound', () => {
+    const r = classifyTool('Monitor', ws(`wss://collect.example/${'a'.repeat(5_000)}`), '/w');
+    expect(r.classes).toEqual(['shell.network', 'shell.unparsed']);
+    expect(r.hosts).toEqual([]);
+  });
+
   it('is judged by its command when it has one, as before', () => {
     const r = classifyTool(
       'Monitor',

@@ -92,7 +92,9 @@ const LAUNCHERS: ReadonlyArray<readonly [string, (operand: string) => string]> =
 ];
 
 describe('a command of Stroq that changes state is one behind a launcher', () => {
-  it('denies the two forms that went through', () => {
+  // The first went through. The second did not: a string handed to `sh -c` is read as a command
+  // wherever it stands, so it was caught before launchers were read, and stays so.
+  it('denies the two forms the review named', () => {
     expect(stroqStateSignals('stroq run -- stroq prove')).toEqual(STATE);
     expect(stroqStateSignals("stroq run --sandbox -- sh -c 'stroq add x'")).toEqual(STATE);
   });
@@ -227,9 +229,10 @@ describe('the words after "--" are the other program’s, not the ones that open
     expect(stroqStateSignals(command), command).toEqual([]);
   });
 
-  // The flag after the `--` of `stroq run` is the operand's: here it is a request for help from
-  // `stroq prove`, which is open, and the same flag on a `stroq prove` alone is open too. What
-  // `stroq run` does not do is let the flag open the operand for it: that is judged on its words.
+  // A flag after the `--` of `stroq run` is not `stroq run`'s, so it does not open the launcher for
+  // whatever it starts. It is read where it belongs, among the words of the operand, which is
+  // judged as it would be alone: a request for help from `stroq prove` is open there, as it is
+  // without a launcher, and a change of state next to it is not.
   it('judges the operand by its own flags: help for it is open, a change of state is not', () => {
     expect(stroqStateSignals('stroq run -- stroq prove --help')).toEqual([]);
     expect(stroqStateSignals('stroq run -- stroq prove -h')).toEqual([]);
