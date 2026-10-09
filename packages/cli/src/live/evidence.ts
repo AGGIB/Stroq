@@ -169,7 +169,11 @@ const describeDecision = (effect: string, ruleId: string | null): string =>
  */
 function auditFinding(input: EvidenceInput): AuditFinding {
   const entry = input.audit.find(
-    (e) => e.sessionId === input.sessionId && e.phase === 'pre' && e.summary.includes(input.nonce),
+    (e) =>
+      e.sessionId === input.sessionId &&
+      e.phase === 'pre' &&
+      typeof e.summary === 'string' &&
+      e.summary.includes(input.nonce),
   );
   if (entry === undefined) return { state: 'absent' };
   const saw = {

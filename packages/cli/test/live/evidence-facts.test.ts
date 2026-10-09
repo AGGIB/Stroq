@@ -39,6 +39,28 @@ describe('E1: the model issued the command', () => {
     expect(e1([toolUse('echo stroq-live-ffffffffffffffff > stroq-live-allow.txt')])).toBe(false);
   });
 
+  // A host may report a call's input as the command itself and not as an object around it.
+  it('holds when the input of the call is the command as a bare string', () => {
+    expect(e1([{ type: 'tool_use', name: 'Bash', input: `echo ${NONCE} > x` }])).toBe(true);
+  });
+
+  it.each([
+    'echo stroq-live-ffffffffffffffff > x',
+    'echo stroq-live- > x',
+    `echo ${NONCE.slice(0, -1)} > x`,
+  ])(
+    'does not hold for a bare string with another nonce, or the start of this one, in it (%s)',
+    (input) => {
+      expect(e1([{ type: 'tool_use', name: 'Bash', input }])).toBe(false);
+    },
+  );
+
+  it('does not hold for the start of the nonce in a structured input either', () => {
+    expect(
+      e1([{ type: 'tool_use', name: 'Bash', input: { command: 'echo stroq-live- > x' } }]),
+    ).toBe(false);
+  });
+
   // Anything a model says is cheap. A line of text, or the result of a call, with the nonce in it
   // shows that the model can read its prompt.
   it.each<[string, StreamEvent]>([
@@ -85,6 +107,18 @@ describe('E2: the hook judged the command, and as the policy said it would', () 
     const facts = audit(entries);
     expect(facts.E2).toBe(false);
     expect(facts.audit).toEqual({ state: 'absent' });
+  });
+
+  // The log is a file; one that was edited by hand, or written by something else, can hold an entry of
+  // any shape, and reading it must not take the check down.
+  it('passes over an entry that has no summary to look in', () => {
+    const { summary: _dropped, ...withoutSummary } = denied();
+    const odd = { ...withoutSummary, summary: 42 } as unknown as EvidenceInput['audit'][number];
+    for (const entry of [withoutSummary as EvidenceInput['audit'][number], odd]) {
+      const facts = audit([entry]);
+      expect(facts.E2).toBe(false);
+      expect(facts.audit).toEqual({ state: 'absent' });
+    }
   });
 
   it('does not hold when the effect is not the one expected, and says what was seen', () => {

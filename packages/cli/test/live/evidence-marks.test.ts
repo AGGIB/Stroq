@@ -365,6 +365,17 @@ describe('markControl', () => {
     });
   });
 
+  it('will not say a control command was never issued when part of the stream could not be read', () => {
+    const outcome = control('deny', {
+      run: { ...finished([]), unparsedLines: 3 },
+      sentinel: ABSENT,
+    });
+    expect({ mark: outcome.mark, reason: outcome.reason }).toEqual({
+      mark: 'inconclusive',
+      reason: 'unparsable-stream',
+    });
+  });
+
   it('works the same for the egress probe', () => {
     expect(control('secret-egress').mark).toBe('passed');
     expect(control('secret-egress', { sentinel: ABSENT }).reason).toBe('probe-not-armed');

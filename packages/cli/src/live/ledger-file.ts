@@ -9,6 +9,8 @@ import { readSmallRegularFile, writePrivateFileAtomic } from './private-file.js'
 
 /** A ledger holds thirty requests and a short list of why; nothing like this size is a ledger. */
 export const MAX_LEDGER_BYTES = 64 * 1024;
+/** The largest cap a ledger file can hold, and so the largest one a ledger is opened with. */
+export const MAX_LEDGER_LIMIT = 100_000;
 /** The newest entries are kept; `used` keeps counting. 200 of them are far below the byte cap. */
 export const MAX_LEDGER_ENTRIES = 200;
 
@@ -21,7 +23,7 @@ const isRealTime = (text: string): boolean => {
 const LedgerFileSchema = z
   .strictObject({
     version: z.literal(1),
-    limit: z.number().int().min(1).max(100_000),
+    limit: z.number().int().min(1).max(MAX_LEDGER_LIMIT),
     used: z.number().int().min(0).max(1_000_000_000),
     entries: z
       .array(

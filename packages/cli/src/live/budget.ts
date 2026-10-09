@@ -9,6 +9,7 @@ import { dirname } from 'node:path';
 import { withLock } from '@stroq/core';
 import {
   MAX_LEDGER_ENTRIES,
+  MAX_LEDGER_LIMIT,
   readLedgerFile,
   writeLedgerFile,
   type LedgerFile,
@@ -162,10 +163,11 @@ function fileLedger(path: string, wanted: number, options: LedgerOptions): Ledge
 
 /**
  * The ledger at `options.path` (the caller passes `process.env.STROQ_LIVE_LEDGER`), or one in memory
- * when there is no path. Throws for a cap that is not a whole number of at least one.
+ * when there is no path. Throws for a cap that is not a whole number a ledger file can hold.
  */
 export function openLedger(options: LedgerOptions): Ledger {
-  if (!isCount(options.limit)) throw new Error('the cap must be a whole number of at least 1');
+  if (!isCount(options.limit) || options.limit > MAX_LEDGER_LIMIT)
+    throw new Error(`the cap must be a whole number from 1 to ${MAX_LEDGER_LIMIT}`);
   const path = options.path;
   return path === undefined || path === ''
     ? memoryLedger(options.limit)

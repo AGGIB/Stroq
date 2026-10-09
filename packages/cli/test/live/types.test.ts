@@ -164,6 +164,13 @@ describe('parseHostResult', () => {
     expect(parseHostResult(raw).ok).toBe(false);
   });
 
+  it('says the whole file is wrong when it is not even the shape of a result', () => {
+    expect(parseHostResult(null)).toEqual({
+      ok: false,
+      problem: 'does not match the result format (whole file)',
+    });
+  });
+
   it('says where the result is wrong, and never repeats what the file said', () => {
     const hostileKey = '\u001b]52;c;ZXZpbA==\u0007';
     const parsed = parseHostResult(

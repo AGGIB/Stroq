@@ -83,7 +83,7 @@ describe('a ledger in memory', () => {
     expect(await ledger.take(1, 'b')).toMatchObject({ ok: false, why: 'limit-reached' });
   });
 
-  it.each([0, -3, 2.5, Number.NaN])('will not open with a cap of %s', (limit) => {
+  it.each([0, -3, 2.5, Number.NaN, 100_001])('will not open with a cap of %s', (limit) => {
     expect(() => openLedger({ limit })).toThrow(/cap/);
   });
 });

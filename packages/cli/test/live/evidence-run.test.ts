@@ -101,6 +101,12 @@ describe('runProblem', () => {
     ).toBe('host-error');
   });
 
+  it('finds a run whose last word was an error with no words in it', () => {
+    expect(problem({ stream: [{ type: 'init' }, { type: 'result', isError: true }] })).toBe(
+      'host-error',
+    );
+  });
+
   const unreadable: ReadonlyArray<readonly [string, Partial<HostRun>]> = [
     ['no stream at all', { stream: [] }],
     ['no final result', { stream: [{ type: 'init' }, toolUse('x')] }],
