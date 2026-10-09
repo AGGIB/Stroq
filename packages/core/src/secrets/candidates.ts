@@ -1,3 +1,4 @@
+import { isShellTool } from '../actions/shell-tools.js';
 import { MIN_SECRET_LENGTH } from './extract.js';
 
 /** One substring of a tool input that might be the value of a known secret. */
@@ -62,19 +63,9 @@ const WORD_BOUNDARY = /[\s"'`]+/;
 // alternative is one bounded `[^X]*` run between a matching pair of `X`.
 const QUOTED = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
-/**
- * The tools that run a shell command from `command`: Claude Code's `Bash`, `PowerShell`
- * and `Monitor`. `SHELL_TOOLS` in `actions/classify-tool.ts` judges the same three by the
- * same field, and a tool listed there but not here is an outbound action whose arguments
- * the guard never reads (`PowerShell` and `Monitor` were exactly that until they were
- * added here). The list is not imported because nothing in `secrets/` depends on
- * `actions/`; `candidates.test.ts` holds the two lists to the same answer.
- */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell', 'Monitor']);
-
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-  if (SHELL_TOOLS.has(toolName)) return str(toolInput['command']);
+  if (isShellTool(toolName)) return str(toolInput['command']);
   if (toolName === 'WebFetch') return `${str(toolInput['url'])} ${str(toolInput['prompt'])}`;
   if (toolName.startsWith('mcp__')) return JSON.stringify(toolInput);
   return '';

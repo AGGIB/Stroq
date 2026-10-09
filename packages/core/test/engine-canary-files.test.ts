@@ -42,6 +42,16 @@ describe('a decoy file planted with stroq canary --file', () => {
     expect(next.decision.ruleId).toBe('deny-network-when-tainted');
   });
 
+  // The decoy check read the command of `Bash` only, so a command run by Claude Code's other two
+  // shell tools opened the decoy without a word.
+  it.each(['PowerShell', 'Monitor'])('is denied when a %s command names it', async (tool) => {
+    const e = engine();
+    const r = await e.pre(pre(tool, { command: 'Get-Content ~/.aws/credentials.bak' }));
+    expect(r.classes).toContain('fs.canary');
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-canary-file' });
+    expect(r.taint?.level).toBe('suspect');
+  });
+
   it('changes nothing for any other file', async () => {
     const r = await engine().pre(pre('Read', { file_path: '/home/u/.aws/config' }));
     expect(r.classes).not.toContain('fs.canary');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTool } from '../../src/actions/classify-tool.js';
+import { isShellTool } from '../../src/actions/shell-tools.js';
 import {
   MAX_CANDIDATES,
   MAX_INPUT_CHARS,
@@ -296,10 +296,10 @@ describe('the tools that run a shell command', () => {
     }
   });
 
-  // This module and `classifyTool` each keep a list of these tools, and the two drifted once
-  // already. Every name the classifier judges by its command has to be one whose command is
-  // read here, and the three Claude Code ships are pinned so that the probe cannot go empty.
-  it('reads the command of every tool the classifier judges by its command', () => {
+  // This module and `classifyTool` each kept a list of these tools, and the two drifted once.
+  // They read one list now (`SHELL_TOOLS`); this holds the reading here to it. A name on the list
+  // has its command read, and a name off it does not, whatever it is called.
+  it('reads the command of every tool on the one list, and of no tool off it', () => {
     const probes = [
       'Bash',
       'PowerShell',
@@ -324,12 +324,8 @@ describe('the tools that run a shell command', () => {
       'Agent',
       'TodoWrite',
     ];
-    const judgedByCommand = probes.filter((tool) =>
-      classifyTool(tool, { command: 'curl -s https://x.example/p' }, '/w').classes.includes(
-        'shell.network',
-      ),
-    );
-    expect(judgedByCommand).toEqual(expect.arrayContaining(['Bash', 'PowerShell', 'Monitor']));
-    for (const tool of judgedByCommand) expect(tokensOf(tool, send), tool).toContain(VALUE);
+    for (const tool of probes)
+      expect(tokensOf(tool, send).includes(VALUE), tool).toBe(isShellTool(tool));
+    expect(probes.filter(isShellTool)).toEqual(['Bash', 'PowerShell', 'Monitor']);
   });
 });

@@ -1,5 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { isShellTool } from '../actions/shell-tools.js';
 
 /**
  * Decoy files: a credentials-shaped file that no task the user asked for needs, planted
@@ -34,7 +35,7 @@ const SHELL_WORD_BREAK = /[\s;|&<>()`]+/;
 
 function namedPaths(toolName: string, toolInput: Readonly<Record<string, unknown>>): string[] {
   if (toolName === 'WebFetch' || toolName === 'WebSearch') return [];
-  if (toolName === 'Bash') {
+  if (isShellTool(toolName)) {
     const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
     return command
       .split(SHELL_WORD_BREAK)

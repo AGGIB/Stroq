@@ -45,6 +45,41 @@ describe('canaryFileTouched', () => {
   it('never fires with no decoys registered', () => {
     expect(canaryFileTouched(new Set(), 'Read', { file_path: decoy }, '/w', home)).toBeNull();
   });
+
+  // Claude Code runs a command through `PowerShell` and `Monitor` as well as `Bash`, and the
+  // check read the command of `Bash` only: the same decoy, named in the same words, was
+  // denied from one tool and opened from the other two.
+  describe.each(['PowerShell', 'Monitor'])('a command run by %s', (tool) => {
+    it.each([
+      'cat ~/.aws/credentials.bak',
+      'Get-Content ~/.aws/credentials.bak',
+      'Get-Content "$HOME/.aws/credentials.bak" | Select-Object -First 3',
+      'type /home/u/.aws/credentials.bak',
+      'tail -f ${HOME}/.aws/credentials.bak',
+    ])('sees the decoy named in it: %s', (command) => {
+      const hit = touched(tool, { command });
+      expect(hit === null ? null : canaryKey(hit, '/', home)).toBe(canaryKey(decoy, '/', home));
+    });
+
+    it('resolves a relative name against the directory it runs in', () => {
+      const hit = touched(tool, { command: 'Get-Content credentials.bak' }, '/home/u/.aws');
+      expect(hit === null ? null : canaryKey(hit, '/', home)).toBe(canaryKey(decoy, '/', home));
+    });
+
+    it.each([
+      'Get-ChildItem ~/.aws',
+      'Get-Content ~/.aws/credentials',
+      'Get-Content ~/.aws/credentials.bak.old',
+      'Write-Output "nothing to see"',
+    ])('leaves a command that does not name the decoy alone: %s', (command) => {
+      expect(touched(tool, { command })).toBeNull();
+    });
+
+    it('reads nothing from a call without a command string', () => {
+      for (const input of [{}, { command: 7 }, { command: [decoy] }, { script: decoy }])
+        expect(touched(tool, input), JSON.stringify(input)).toBeNull();
+    });
+  });
 });
 
 describe('the registry of decoy files', () => {
