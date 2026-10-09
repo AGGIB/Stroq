@@ -30,6 +30,13 @@ export const lastHookDirIn = (home: string): string => join(home, 'last-hook');
  * `rm -rf ~/.stroq/cloak` and so the one-way stores cannot be confused with it.
  */
 export const cloakDirIn = (home: string): string => join(home, 'cloak');
+/**
+ * What `stroq prove` last found out about each host: one file per agent, `<agent>.json`, in a
+ * directory of its own. The caller checks the agent's name; this only joins.
+ */
+export const liveDirIn = (home: string): string => join(home, 'live');
+export const liveResultFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.json`);
 
 export const sessionsDir = (): string => sessionsDirIn(stroqHome());
 export const auditFile = (): string => auditFileIn(stroqHome());
@@ -42,3 +49,5 @@ export const inventoryFile = (): string => inventoryFileIn(stroqHome());
 export const canaryFilesFile = (): string => canaryFilesFileIn(stroqHome());
 export const cloakDir = (): string => cloakDirIn(stroqHome());
 export const lastHookDir = (): string => lastHookDirIn(stroqHome());
+export const liveDir = (): string => liveDirIn(stroqHome());
+export const liveResultFile = (agent: string): string => liveResultFileIn(stroqHome(), agent);
