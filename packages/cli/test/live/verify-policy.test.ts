@@ -36,7 +36,7 @@ const without = (id: string): Policy => ({
 describe('a probe the policy does not deny', () => {
   it('is skipped and not failed, and costs no request', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
-    const ledger = openLedger({ limit: 30 });
+    const ledger = openLedger({ memory: true, limit: 30 });
     const result = await verify(rig, driver, { policy: without('deny-git-exec'), ledger });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',

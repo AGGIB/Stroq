@@ -28,7 +28,7 @@ const args = (
   over: { ledger?: Ledger; probe?: Probe; ctx?: ProbeContext } = {},
 ) => ({
   driver,
-  ledger: over.ledger ?? openLedger({ limit: 30 }),
+  ledger: over.ledger ?? openLedger({ memory: true, limit: 30 }),
   label: 'claude-code: allow',
   probe: over.probe ?? probe('allow'),
   ctx: over.ctx ?? rig.ctx(),
@@ -57,7 +57,7 @@ describe('makeRequest', () => {
   });
 
   it('does not make the request when the ledger refuses it, and says the budget is why', async () => {
-    const ledger = openLedger({ limit: 1 });
+    const ledger = openLedger({ memory: true, limit: 1 });
     await ledger.take(1, 'earlier');
     const driver = new FakeHostDriver({ fault: 'honest' });
     const requested = await makeRequest(args(driver, { ledger }));

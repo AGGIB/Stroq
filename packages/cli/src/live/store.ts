@@ -2,8 +2,8 @@
 //
 // `stroq doctor` reads this on every run, so the reader never throws and never returns part of a
 // result: a file that is anything but exactly a result reads as "no result", with a few words on what
-// is wrong that repeat nothing the file said. Nothing here imports from `@stroq/core`, so that a test
-// can run the reader in a child process.
+// is wrong that repeat nothing the file said. A test runs the reader in a child process, where a path
+// that blocks costs a time limit and not a hung suite.
 import { liveResultFileIn } from '../paths.js';
 import { readSmallRegularFile, writePrivateFileAtomic } from './private-file.js';
 import { AGENT_NAME, parseHostResult, type HostResult } from './types.js';

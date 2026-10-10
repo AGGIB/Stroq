@@ -23,7 +23,7 @@ export function verifyOptions(over: Partial<VerifyOptions> = {}): VerifyOptions 
     agent: 'claude-code',
     policy: DEFAULT_POLICY,
     stroqVersion: '0.23.0',
-    ledger: openLedger({ limit: 30 }),
+    ledger: openLedger({ memory: true, limit: 30 }),
     now: () => NOW,
     ids: sequentialIds(),
     graceMs: 50,

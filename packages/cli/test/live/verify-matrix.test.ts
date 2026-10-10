@@ -107,7 +107,7 @@ describe('every fault, with the control off', () => {
 
   it.each(matrix)('%s', async (fault, expected, state, requests) => {
     const driver = new FakeHostDriver({ fault });
-    const ledger = openLedger({ limit: 30 });
+    const ledger = openLedger({ memory: true, limit: 30 });
     const result = await verify(rig, driver, { ledger });
     expect(marksOf(result)).toEqual(expected);
     expect(result.state).toBe(state);
@@ -233,7 +233,7 @@ describe('every fault, with the control on', () => {
     const driver = new FakeHostDriver({
       fault: (_probe, ctx) => (ctx.hookMode === 'noop' ? 'limit' : 'honest'),
     });
-    const ledger = openLedger({ limit: 30 });
+    const ledger = openLedger({ memory: true, limit: 30 });
     const result = await verify(rig, driver, { control: true, ledger });
     expect(marksOf(result)).toMatchObject({
       deny: 'inconclusive:control-inconclusive',

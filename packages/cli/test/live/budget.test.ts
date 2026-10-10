@@ -41,7 +41,7 @@ describe('the cap', () => {
 
 describe('a ledger in memory', () => {
   it('gives out requests up to the cap and not one more', async () => {
-    const ledger = openLedger({ limit: 3 });
+    const ledger = openLedger({ memory: true, limit: 3 });
     expect(await ledger.take(1, 'allow')).toEqual({ ok: true, used: 1, limit: 3 });
     expect(await ledger.take(1, 'deny')).toEqual({ ok: true, used: 2, limit: 3 });
     expect(await ledger.take(1, 'egress')).toEqual({ ok: true, used: 3, limit: 3 });
@@ -55,7 +55,7 @@ describe('a ledger in memory', () => {
   });
 
   it('takes nothing of a request that would go over, so that a smaller one can still be made', async () => {
-    const ledger = openLedger({ limit: 3 });
+    const ledger = openLedger({ memory: true, limit: 3 });
     await ledger.take(2, 'two');
     expect(await ledger.take(2, 'two more')).toMatchObject({ ok: false, why: 'limit-reached' });
     expect(await ledger.take(1, 'one')).toEqual({ ok: true, used: 3, limit: 3 });
@@ -64,26 +64,21 @@ describe('a ledger in memory', () => {
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     'will not take %s requests',
     async (n) => {
-      const ledger = openLedger({ limit: 3 });
+      const ledger = openLedger({ memory: true, limit: 3 });
       expect(await ledger.take(n, 'bad')).toMatchObject({ ok: false, why: 'invalid-request' });
       expect(await ledger.peek()).toEqual({ ok: true, used: 0, limit: 3 });
     },
   );
 
   it('does not share its count with another ledger', async () => {
-    const one = openLedger({ limit: 1 });
-    const other = openLedger({ limit: 1 });
+    const one = openLedger({ memory: true, limit: 1 });
+    const other = openLedger({ memory: true, limit: 1 });
     await one.take(1, 'a');
     expect(await other.take(1, 'b')).toMatchObject({ ok: true });
   });
 
-  it('treats an empty path as no path, as an empty STROQ_HOME is no home', async () => {
-    const ledger = openLedger({ path: '', limit: 1 });
-    await ledger.take(1, 'a');
-    expect(await ledger.take(1, 'b')).toMatchObject({ ok: false, why: 'limit-reached' });
-  });
-
   it.each([0, -3, 2.5, Number.NaN, 100_001])('will not open with a cap of %s', (limit) => {
+    expect(() => openLedger({ memory: true, limit })).toThrow(/cap/);
     expect(() => openLedger({ limit })).toThrow(/cap/);
   });
 });
@@ -148,7 +143,11 @@ describe('a ledger in a file', () => {
     });
   });
 
-  it('never gives out more than the cap when many ask at once, from several ledgers', async () => {
+  // One process. A take reads the file and writes it in a single synchronous step, so inside one process
+  // nothing can come between the two whether the lock is there or not: this shows that every ask is
+  // counted and that the cap is kept to, not that the lock holds. `budget-processes.test.ts` does that,
+  // with processes of their own.
+  it('counts every one of many asks made at once from several ledgers in one process, and stops at the cap', async () => {
     const ledgers = [1, 2, 3].map(() =>
       openLedger({ path: file, limit: 30, lockTimeoutMs: 30_000 }),
     );

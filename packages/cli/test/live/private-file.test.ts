@@ -14,9 +14,16 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readRegularFile } from '@stroq/core';
 import { readSmallRegularFile, writePrivateFileAtomic } from '../../src/live/private-file.js';
 import { inChild } from './child.js';
+
+// The real reader, counted: what these tests are about is which reader is asked.
+vi.mock('@stroq/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@stroq/core')>();
+  return { ...actual, readRegularFile: vi.fn(actual.readRegularFile) };
+});
 
 /**
  * The two things the stored result and the ledger both do with a file: read it when it may have been
@@ -31,6 +38,30 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe('the one reader', () => {
+  // `readRegularFile` of @stroq/core is where a path somebody else chose is opened without waiting,
+  // looked at through the handle that is read, and sized from it. A second copy of that here would be
+  // a second chance to get it wrong, so this module asks core and keeps only what core does not do.
+  it('reads through the reader of @stroq/core', () => {
+    writeFileSync(join(dir, 'a'), 'hello');
+    vi.mocked(readRegularFile).mockClear();
+    expect(readSmallRegularFile(join(dir, 'a'), 100)).toEqual({ kind: 'text', text: 'hello' });
+    expect(readRegularFile).toHaveBeenCalledTimes(1);
+    expect(readRegularFile).toHaveBeenCalledWith(join(dir, 'a'), 100);
+  });
+
+  it('opens and reads nothing itself', () => {
+    const source = readFileSync(SOURCE, 'utf8');
+    expect(source).not.toMatch(/\b(openSync|fstatSync|readSync|createReadStream|readFileSync)\b/);
+  });
+
+  it('does not ask core about a path that is not there', () => {
+    vi.mocked(readRegularFile).mockClear();
+    expect(readSmallRegularFile(join(dir, 'missing'), 100)).toEqual({ kind: 'absent' });
+    expect(readRegularFile).not.toHaveBeenCalled();
+  });
 });
 
 describe('readSmallRegularFile', () => {

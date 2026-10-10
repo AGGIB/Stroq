@@ -2,8 +2,9 @@
 //
 // The reader is strict because the file is a cap. A reader that took a damaged file for an empty one
 // would hand the cap back to whoever damaged it, so a file that is not exactly a ledger is a problem
-// to report and never a ledger to mend. Nothing here imports from `@stroq/core`, so that a test can
-// run the reader in a child process.
+// to report and never a ledger to mend. The file is read by `readSmallRegularFile`, so a FIFO or a
+// device in its place is refused without waiting; the tests run the reader in a child process, where a
+// path that blocks costs a time limit and not a hung suite.
 import { z } from 'zod';
 import { readSmallRegularFile, writePrivateFileAtomic } from './private-file.js';
 

@@ -3,10 +3,12 @@
 // A live check spends requests on the owner's own account, from a usage limit their real work needs.
 // So the cap is not a promise: it is a file that every request is taken from, under a lock, before the
 // request is made. The file holds across runs and across processes, and nothing the model or the host
-// says can raise it. A file that is not a ledger gives no requests at all.
+// says can raise it. A file that is not a ledger gives no requests at all, and neither does a ledger
+// that was never told where to keep its count: a cap that every run starts over from zero is no cap.
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import { withLock } from '@stroq/core';
+import { LiveCheckError } from './errors.js';
 import {
   MAX_LEDGER_ENTRIES,
   MAX_LEDGER_LIMIT,
@@ -19,6 +21,9 @@ export { authTextOf, limitTextOf } from './limit-text.js';
 
 /** What the owner has set aside for live checks, in all, on this machine. */
 export const LIVE_REQUEST_LIMIT = 30;
+
+/** The variable that names the ledger file of a live check. */
+export const LEDGER_ENV = 'STROQ_LIVE_LEDGER';
 
 /** A request is a few milliseconds under the lock, so a wait of this long means the lock is stuck. */
 const DEFAULT_LOCK_TIMEOUT_MS = 15_000;
@@ -50,8 +55,13 @@ export interface Ledger {
 }
 
 export interface LedgerOptions {
-  /** The file. Absent or empty: the ledger lives in memory and ends with the process. */
+  /** The file the count is kept in: an absolute path, so that it does not depend on where we are. */
   readonly path?: string | undefined;
+  /**
+   * Keep the count in memory, where it ends with the process. Has to be said: no path does not mean
+   * this. It is for a test or a dry run, and never for a run that spends the owner's requests.
+   */
+  readonly memory?: boolean | undefined;
   /** The cap this caller wants. The file's own cap is honoured when it is lower. */
   readonly limit: number;
   readonly lockTimeoutMs?: number;
@@ -161,15 +171,43 @@ function fileLedger(path: string, wanted: number, options: LedgerOptions): Ledge
   };
 }
 
+const unusable = (problem: string): LiveCheckError => new LiveCheckError('invalid-ledger', problem);
+
 /**
- * The ledger at `options.path` (the caller passes `process.env.STROQ_LIVE_LEDGER`), or one in memory
- * when there is no path. Throws for a cap that is not a whole number a ledger file can hold.
+ * The ledger at `options.path`, or, when `memory: true` is said, one in memory. Throws, and does not
+ * fall back on anything, for a cap that is not a whole number a ledger file can hold, for no path
+ * without `memory: true`, for an empty or relative path, and for a path and `memory: true` together.
  */
 export function openLedger(options: LedgerOptions): Ledger {
   if (!isCount(options.limit) || options.limit > MAX_LEDGER_LIMIT)
-    throw new Error(`the cap must be a whole number from 1 to ${MAX_LEDGER_LIMIT}`);
+    throw unusable(`the cap must be a whole number from 1 to ${MAX_LEDGER_LIMIT}`);
   const path = options.path;
-  return path === undefined || path === ''
-    ? memoryLedger(options.limit)
-    : fileLedger(path, options.limit, options);
+  if (options.memory === true) {
+    if (path !== undefined) throw unusable('a ledger is kept in memory or in a file, and not both');
+    return memoryLedger(options.limit);
+  }
+  if (path === undefined)
+    throw unusable(
+      'a ledger needs the absolute path of its file, or {memory: true} said out loud: a count that nothing keeps is no cap',
+    );
+  if (path === '' || path.includes('\u0000') || !isAbsolute(path))
+    throw unusable('the path of a ledger has to be absolute and not empty');
+  return fileLedger(path, options.limit, options);
+}
+
+/**
+ * The ledger of the owner, from the environment: the file `STROQ_LIVE_LEDGER` names, with the cap of
+ * `LIVE_REQUEST_LIMIT`. Throws when it is not set, is empty, or does not name a usable place, because a
+ * live check that cannot count its requests must not make them.
+ */
+export function ledgerFromEnv(env: Readonly<Record<string, string | undefined>>): Ledger {
+  const path = env[LEDGER_ENV];
+  if (path === undefined || path === '')
+    throw unusable(`${LEDGER_ENV} is not set: there is no ledger file to count the requests in`);
+  try {
+    return openLedger({ path, limit: LIVE_REQUEST_LIMIT });
+  } catch (err) {
+    if (err instanceof LiveCheckError) throw unusable(`${LEDGER_ENV}: ${err.message}`);
+    throw err;
+  }
 }

@@ -1,25 +1,16 @@
 // Two things the stored result and the ledger both do with a file under the Stroq home.
 //
-// Reading one that may have been put there by someone else: it is opened without following a
-// link and without waiting for a writer, looked at through the handle that is then read (a path can
-// be swapped between a check and a read), and refused unless it is a regular file of a bounded size.
+// Reading one that may have been put there by someone else: it is read only if it is a regular file of a
+// bounded size, by the reader of `@stroq/core` (`readRegularFile`), which is the one place that opens a
+// path somebody else chose without waiting for a writer, looks at the handle it then reads, and sizes
+// the buffer from it. This module used to carry a copy of that, and a second copy of a reader like that
+// is a second chance to get it wrong, so what is left here is only what core does not do: a link is
+// refused and not followed, and what core reports is put in the words the callers use.
 // Writing one so that it is whole or not there: a temporary file next to it, and a rename.
-//
-// Nothing here imports from `@stroq/core`, so a test can run it in a child process.
 import { randomBytes } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  constants,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { readRegularFile } from '@stroq/core';
 
 export type SafeRead =
   | { readonly kind: 'text'; readonly text: string }
@@ -29,44 +20,41 @@ export type SafeRead =
       readonly why: 'not a regular file' | 'too large' | 'unreadable';
     };
 
+const NOT_REGULAR: SafeRead = { kind: 'refused', why: 'not a regular file' };
+const TOO_LARGE: SafeRead = { kind: 'refused', why: 'too large' };
+
+/** What an open says to a path that does not lead to a file, and what it says to a link that loops. */
+const ABSENT: ReadonlySet<string | undefined> = new Set(['ENOENT', 'ENOTDIR']);
+const NOT_A_FILE: ReadonlySet<string | undefined> = new Set(['EISDIR', 'ELOOP', 'EMLINK']);
+
+/** What a call that failed means for a read: no file, not a file, or a file that cannot be had. */
+function unreadable(err: unknown): SafeRead {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (ABSENT.has(code)) return { kind: 'absent' };
+  return NOT_A_FILE.has(code) ? NOT_REGULAR : { kind: 'refused', why: 'unreadable' };
+}
+
 /**
- * `O_NOFOLLOW` so that a link planted where the file goes is refused and not read through;
- * `O_NONBLOCK` so that a FIFO fails the open at once, where a plain open waits for a writer that may
- * never come. Windows defines neither, and 0 leaves the open as it was (`hook-stamp.ts` does the same).
+ * The text of the regular file at `path`, if it is one of at most `maxBytes`; that there is no file; or
+ * why what is there is not read. Never throws.
+ *
+ * A link is refused, even to a file that would do: what sits where Stroq keeps its own file is read, or
+ * it is not. The look at the path and the open that follows are two steps, so a link swapped in between
+ * is followed by the open; what then comes back is still a regular file of a bounded size, read through
+ * the handle that was checked, and the callers parse it strictly.
  */
-const READ_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
-
-/** What an open with `O_NOFOLLOW` says to a link, which differs by system. */
-const LINK_ERRORS: ReadonlySet<string | undefined> = new Set(['ELOOP', 'EMLINK']);
-
 export function readSmallRegularFile(path: string, maxBytes: number): SafeRead {
-  let fd: number;
   try {
-    fd = openSync(path, READ_FLAGS);
+    if (lstatSync(path).isSymbolicLink()) return NOT_REGULAR;
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'absent' };
-    if (LINK_ERRORS.has(code) || code === 'EISDIR')
-      return { kind: 'refused', why: 'not a regular file' };
-    return { kind: 'refused', why: 'unreadable' };
+    return unreadable(err);
   }
   try {
-    const stats = fstatSync(fd);
-    if (!stats.isFile()) return { kind: 'refused', why: 'not a regular file' };
-    if (stats.size > maxBytes) return { kind: 'refused', why: 'too large' };
-    // Sized from the `fstat`, so that a file that grows afterwards cannot make the read longer.
-    const buffer = Buffer.alloc(stats.size);
-    let filled = 0;
-    while (filled < buffer.length) {
-      const read = readSync(fd, buffer, filled, buffer.length - filled, filled);
-      if (read === 0) break;
-      filled += read;
-    }
-    return { kind: 'text', text: buffer.toString('utf8', 0, filled) };
-  } catch {
-    return { kind: 'refused', why: 'unreadable' };
-  } finally {
-    closeSync(fd);
+    const read = readRegularFile(path, maxBytes);
+    if (read.kind === 'text') return { kind: 'text', text: read.text };
+    return read.kind === 'too-large' ? TOO_LARGE : NOT_REGULAR;
+  } catch (err) {
+    return unreadable(err);
   }
 }
 

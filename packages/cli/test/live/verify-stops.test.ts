@@ -34,7 +34,7 @@ const driverOf = (
 /** A ledger that writes down what is taken, and when, beside what the driver is asked. */
 function recording(limit = 30): { ledger: Ledger; events: string[] } {
   const events: string[] = [];
-  const inner = openLedger({ limit });
+  const inner = openLedger({ memory: true, limit });
   return {
     events,
     ledger: {
@@ -143,7 +143,7 @@ describe('the budget', () => {
   });
 
   it('makes the requests it can pay for and says the rest were not attempted', async () => {
-    const ledger = openLedger({ limit: 1 });
+    const ledger = openLedger({ memory: true, limit: 1 });
     const driver = new FakeHostDriver({ fault: 'honest' });
     const result = await verify(rig, driver, { ledger });
     expect(marksOf(result)).toEqual({

@@ -47,7 +47,7 @@ describe('what comes before the first request', () => {
       .mockImplementationOnce(real)
       .mockImplementationOnce(() => Promise.reject(new Error('the engine broke')));
     const driver = new FakeHostDriver({ fault: 'honest' });
-    const ledger = openLedger({ limit: 30 });
+    const ledger = openLedger({ memory: true, limit: 30 });
     await expect(verify(rig, driver, { ledger })).rejects.toThrow('the engine broke');
     expect(driver.calls).toEqual([]);
     expect(await ledger.peek()).toEqual({ ok: true, used: 0, limit: 30 });
