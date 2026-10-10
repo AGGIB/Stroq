@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { checkEntryPath } from '../../src/install/safe-path.js';
 import { escapeHtml, safe } from '../../src/replay/html.js';
 
-// safe-path.ts keeps its own copy of the characters a path may not contain, because the two helpers
-// that define them (`neutralizeControls` in core, `showInvisible` in replay/html.ts) are not
-// exported to share. A copy can drift: the day one of those learns a new character, a path with it
-// would be written to a disk and then shown to a person unescaped. This sweep asks the helpers
-// themselves, for every code point there is, so that the day comes up as a failure here.
+// safe-path.ts decides what a path may not contain by Unicode property (see safe-path-characters.test.ts
+// for that), and shows a refused path with its own escapes. The two helpers that write characters out
+// for display (`neutralizeControls` in core, `showInvisible` in replay/html.ts) are not exported to
+// share, so they are asked here, for every code point there is: a path that passes the check is also
+// shown by them as it is. If one of them learns a character that the check does not refuse, a path
+// with it would be written to a disk and then shown to a person unescaped, and the day comes up as a
+// failure here.
 
 const SURROGATES = { first: 0xd800, last: 0xdfff } as const;
 const LAST_CODE_POINT = 0x10ffff;
@@ -31,12 +33,14 @@ describe('the characters an entry path may not contain', () => {
     expect(writtenOut).toBeGreaterThan(300);
   });
 
-  it('do not refuse ordinary printable ASCII, apart from the backslash and the colon', () => {
+  it('do not refuse ordinary printable ASCII, apart from what a path may not hold', () => {
     const refused: string[] = [];
+    // The backslash, the colon, and the six characters Windows does not allow in a name.
+    const notAllowed = new Set(['\\', ':', '<', '>', '"', '|', '?', '*']);
 
     for (let code = 0x20; code <= 0x7e; code += 1) {
       const ch = String.fromCharCode(code);
-      if (ch === '\\' || ch === ':') continue;
+      if (notAllowed.has(ch)) continue;
       if (!checkEntryPath(`a${ch}b`).ok) refused.push(JSON.stringify(ch));
     }
 

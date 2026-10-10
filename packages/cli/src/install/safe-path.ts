@@ -22,9 +22,28 @@ export type PathCheck =
 type Ranges = readonly (readonly [number, number])[];
 
 /**
- * The C0 controls (NUL, the escape that starts a terminal sequence), DEL, and the C1 block (0x9b is
- * the 8-bit form of CSI). This is what `neutralizeControls` in core writes out, and more: it leaves
- * the tab and the newline for text that has several lines, and the name of a file never has.
+ * What is refused is decided by the properties Unicode gives a character, and not by a list: a list
+ * copied from two display helpers was found to miss the soft hyphen, the Hangul fillers, the Arabic
+ * letter mark, the Mongolian free variation selectors, the grapheme joiner and more, every one of
+ * which shows nothing or reorders what is shown. A `\p{}` class follows the Unicode tables of the
+ * Node that runs this, so it can only grow when Node does: a newer Node may refuse a character that
+ * an older one lets through, never the reverse. The explicit ranges below stay beside the classes as
+ * the floor that does not depend on those tables.
+ *
+ * - control: `Cc`, the C0 and C1 blocks (NUL, the escape that starts a terminal sequence, DEL, and
+ *   0x9b, the 8-bit form of CSI);
+ * - hidden: `Cf` (format characters, the direction marks among them), `Cs` (a surrogate that stands
+ *   alone), `Zl` and `Zp` (the line and paragraph separators) and `Default_Ignorable_Code_Point`,
+ *   which is Unicode's own list of what a renderer is told to leave out: fillers, joiners, variation
+ *   selectors, the tag block, and code points reserved for characters of this kind.
+ */
+const CONTROL_PROPERTIES = '\\p{Cc}';
+const HIDDEN_PROPERTIES = '\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}';
+
+/**
+ * The C0 controls, DEL, and the C1 block. This is what `neutralizeControls` in core writes out, and
+ * more: it leaves the tab and the newline for text that has several lines, and the name of a file
+ * never has.
  */
 const CONTROLS: Ranges = [
   [0x00, 0x1f],
@@ -32,12 +51,11 @@ const CONTROLS: Ranges = [
 ];
 
 /**
- * Characters that show nothing or change what is shown. The direction overrides and isolates are
- * what `neutralizeControls` covers (they write a name backwards); the rest is what the replay page
- * writes out (`INVISIBLE` in replay/html.ts): zero-width and formatting characters, the line and
- * paragraph separators, variation selectors, and the tag characters that smuggle text past a reader.
- * This is the union of the two. `safe-path-parity.test.ts` asks both helpers about every code point
- * and fails if either has learned one that this does not hold.
+ * The first version's list of what shows nothing or changes what is shown: the union of what
+ * `neutralizeControls` covers (the direction overrides and isolates, which write a name backwards)
+ * and what the replay page writes out (`INVISIBLE` in replay/html.ts). The properties above hold all
+ * of it and more; `safe-path-parity.test.ts` asks both helpers about every code point and fails if
+ * either has learned one that the check does not refuse.
  */
 const HIDDEN: Ranges = [
   [0x180e, 0x180e], // Mongolian vowel separator
@@ -56,10 +74,19 @@ const HIDDEN: Ranges = [
 const classOf = (ranges: Ranges): string =>
   ranges.map(([first, last]) => `\\u{${first.toString(16)}}-\\u{${last.toString(16)}}`).join('');
 
-const CONTROL = new RegExp(`[${classOf(CONTROLS)}]`, 'u');
-const HIDDEN_CHAR = new RegExp(`[${classOf(HIDDEN)}]`, 'u');
+const CONTROL = new RegExp(`[${CONTROL_PROPERTIES}${classOf(CONTROLS)}]`, 'u');
+const HIDDEN_CHAR = new RegExp(`[${HIDDEN_PROPERTIES}${classOf(HIDDEN)}]`, 'u');
 /** Every character above, each to be found one at a time. */
-const UNSAFE_EACH = new RegExp(`[${classOf(CONTROLS)}${classOf(HIDDEN)}]`, 'gu');
+const UNSAFE_EACH = new RegExp(
+  `[${CONTROL_PROPERTIES}${classOf(CONTROLS)}${HIDDEN_PROPERTIES}${classOf(HIDDEN)}]`,
+  'gu',
+);
+/**
+ * `< > " | ? *`: Windows does not allow them in the name of a file, and a shell or a command line
+ * reads some of them as a pattern or a redirection. A path is promised to be a name on any filesystem.
+ * Only these exact characters: the full-width forms CJK names use in their place are other characters.
+ */
+const WINDOWS_FORBIDDEN = /["*<>?|]/;
 /** A surrogate that is not half of a pair: under the `u` flag a pair is one character, and is not matched. */
 const LONE_SURROGATE = /[\u{d800}-\u{dfff}]/u;
 
@@ -131,10 +158,12 @@ function componentProblem(component: string): string | null {
  * any filesystem, and showable. It is not rewritten; a path that passes is returned as it was.
  *
  * Refused: an empty path or component; `.` and `..`; an absolute path; any backslash; a drive letter;
- * a colon (an NTFS alternate data stream, which hides data behind a visible name); controls and the
- * invisible and direction-changing characters; text that is not valid Unicode; a component named
- * `.git` in any case, or by its NTFS short name; a component that ends in a dot or a space (Windows
- * drops it, so `a.` and `a` are one file); a Windows device name; and a path over the limits.
+ * a colon (an NTFS alternate data stream, which hides data behind a visible name); the six
+ * characters Windows does not allow in a name (`< > " | ? *`); controls and every character that shows
+ * nothing or changes what is shown (by Unicode property, see above); text that is not valid Unicode;
+ * a component named `.git`, in any case, or by its NTFS short name; a component that ends in a dot or
+ * a space (Windows drops it, so `a.` and `a` are one file); a Windows device name; and a path over
+ * the limits.
  *
  * The reason is a fixed phrase and never quotes the path, so that it can be printed as it is.
  */
@@ -155,6 +184,8 @@ export function checkEntryPath(path: unknown): PathCheck {
   if (path.includes('\\')) return refuse('backslash');
   if (DRIVE_LETTER.test(path)) return refuse('drive letter');
   if (path.includes(':')) return refuse("':' (a Windows alternate data stream)");
+  if (WINDOWS_FORBIDDEN.test(path))
+    return refuse('character Windows does not allow in a file name');
   const components = path.split('/');
   if (components.length > LIMITS.maxDepth) return refuse(TOO_DEEP);
   for (const component of components) {

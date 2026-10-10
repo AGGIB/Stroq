@@ -44,12 +44,23 @@ describe('treeDigest refuses', () => {
     expect(codeOf([fileEntry('a', 'x'), symlinkEntry('a', 't')])).toBe('duplicate-path');
   });
 
-  // A quote is a legal character in a name, and the message must still be one line of text.
   it('and says which path appears twice, in quotes', () => {
-    const error = refusal(() => digestOf([fileEntry('a"b', 'x'), fileEntry('a"b', 'y')]));
+    const error = refusal(() => digestOf([fileEntry("it's a", 'x'), fileEntry("it's a", 'y')]));
 
+    expect(error.path).toBe("it's a");
+    expect(error.message).toBe('path "it\'s a" appears twice');
+  });
+
+  // A double quote is not a legal character in a name (Windows does not allow it), but it can still be
+  // in a path that is refused, and the message must still be one line of text.
+  it('and quotes a refused path so that it stays one line', () => {
+    const error = refusal(() => digestOf([fileEntry('a"b', 'x')]));
+
+    expect(error.code).toBe('bad-path');
     expect(error.path).toBe('a"b');
-    expect(error.message).toBe('path "a\\"b" appears twice');
+    expect(error.message).toBe(
+      'entry "a\\"b": path refused: character Windows does not allow in a file name',
+    );
   });
 
   it.each(['../x', '/abs', 'a\\b', '.git/config', 'a//b', '', 'C:/x', 'a\u0000b', 'CON.txt'])(
@@ -159,10 +170,10 @@ describe('treeDigest refuses', () => {
     });
 
     it('and names the entry that is under the file, in quotes', () => {
-      const error = refusal(() => digestOf([fileEntry('a"b', 'x'), fileEntry('a"b/c', 'x')]));
+      const error = refusal(() => digestOf([fileEntry("it's", 'x'), fileEntry("it's/c", 'x')]));
 
-      expect(error.path).toBe('a"b/c');
-      expect(error.message).toBe('entry "a\\"b/c": a folder of this path is also an entry');
+      expect(error.path).toBe("it's/c");
+      expect(error.message).toBe('entry "it\'s/c": a folder of this path is also an entry');
     });
 
     it('a symlink or a gitlink that has something under it', () => {
