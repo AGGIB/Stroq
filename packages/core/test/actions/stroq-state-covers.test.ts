@@ -161,6 +161,24 @@ describe('a request for help that the shell gives to the command still opens it'
     expect(stroqStateSignals(command), command).toEqual(STATE);
   });
 
+  // The operator is enough, wherever the flag stands and whether or not a body follows: the command line that holds
+  // a heredoc is one whose words are not all arguments, and a reader that cannot tell which are does not tell.
+  it.each([
+    'stroq prove --help <<EOF',
+    'stroq prove <<EOF --help',
+    'stroq prove <<-EOF -h',
+    'stroq untaint --all 3<<EOF --dry-run',
+    "stroq init <<'EOF' --dry-run",
+    'stroq.exe uninstall --help <<EOF',
+  ])('counts no flag at all where the segment holds a heredoc operator: %j', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+  });
+
+  it('does not take a here-string for a heredoc: the flag before it is a flag', () => {
+    expect(stroqStateSignals('stroq prove --help <<< x')).toEqual([]);
+    expect(stroqStateSignals('stroq init -h <<<x')).toEqual([]);
+  });
+
   it('opens a command whose flag is a word of its own after a quoted argument', () => {
     expect(stroqStateSignals('stroq untaint "--all" --help')).toEqual([]);
     expect(stroqStateSignals("stroq prove 'x y' -h")).toEqual([]);

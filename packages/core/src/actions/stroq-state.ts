@@ -379,8 +379,16 @@ function changesState(
   return subcommandChangesState(sub, own);
 }
 
+/** Whether a word is the operator of a heredoc (`<<EOF`, `<<-EOF`, `3<<EOF`), and not of a here-string (`<<<`). */
+const opensHeredoc = (word: string): boolean => {
+  const operator = REDIRECT.exec(word)?.[2];
+  return operator === '<<' || operator === '<<-';
+};
+
 /**
  * Whether the arguments of a command ask for help or for a dry run. Not every word of a line is an argument.
+ * Where the line holds the operator of a heredoc none of them does: the text it is given on its input is one that
+ * no reading of the line tells from its arguments (`Folded.body` is the same for a body that was folded away).
  * What follows a word that begins with `#` is a comment, which the shell drops, and so is what follows `<#`,
  * which opens a block comment to PowerShell (`<# … #>`) and is a redirect from a file to the shells of POSIX, where
  * what it makes of the flag that follows is only a command that is asked about. The target of a redirect is a
@@ -390,6 +398,7 @@ function changesState(
  * no longer known.
  */
 function asksForHelp(own: readonly string[]): boolean {
+  if (own.some(opensHeredoc)) return false;
   for (let i = 0; i < own.length; i += 1) {
     const word = own[i] as string;
     if (word.startsWith('#') || word.includes('<#')) return false;
