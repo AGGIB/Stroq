@@ -28,6 +28,12 @@ const MAX_ENTRIES_PER_FILE = 1_000;
 const MAX_EDIT_PATH = 64;
 const MAX_PREFIX_CHARS = 8;
 const MAX_SUFFIX_CHARS = 2;
+/**
+ * Deeper than any manifest the engine writes: its own structure is six levels, and a value a
+ * recipe asked to have recorded is at most 64 more. The schema that checks a recorded value
+ * recurses, so a document nested far deeper than this is refused before it is handed to it.
+ */
+const MAX_MANIFEST_DEPTH = 96;
 
 export interface ManifestEntry {
   /** The recipe that asked for the change. */
@@ -142,6 +148,26 @@ const manifestSchema = z.strictObject({
 const invalid = (message: string): HardenError => new HardenError('manifest-invalid', message);
 
 /**
+ * Whether `root` is nested more than `limit` levels deep. Walked with a stack of its own, so that
+ * the answer for a document nested a hundred thousand deep is "yes" and not a stack overflow, and
+ * stopped as soon as it is yes, so that a structure that contains itself is no trouble either.
+ */
+function nestedDeeperThan(root: unknown, limit: number): boolean {
+  const pending: [unknown, number][] = [[root, 1]];
+  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+    const [value, depth] = item;
+    if (typeof value !== 'object' || value === null) continue;
+    if (depth > limit) return true;
+    for (const child of Array.isArray(value) ? (value as unknown[]) : Object.values(value)) {
+      pending.push([child, depth + 1]);
+    }
+  }
+  return false;
+}
+
+const TOO_DEEP = 'the manifest is nested deeper than Stroq writes it';
+
+/**
  * Where the schema was not satisfied, as paths and never values: the manifest is a file that
  * could have been written by anything, and its contents do not belong in an error.
  */
@@ -157,6 +183,7 @@ function parseManifest(text: string): Manifest {
   } catch {
     throw invalid('the manifest is not valid JSON');
   }
+  if (nestedDeeperThan(raw, MAX_MANIFEST_DEPTH)) throw invalid(TOO_DEEP);
   const result = manifestSchema.safeParse(raw);
   if (!result.success) throw invalid(describeIssues(result.error));
   // A record quietly leaves out a key called `__proto__`. A manifest that names a file must not
@@ -240,14 +267,13 @@ const byPath = (a: [string, unknown], b: [string, unknown]): number =>
  * out of the Stroq home.
  */
 export async function writeManifest(env: HardenEnv, manifest: Manifest): Promise<void> {
-  const text = `${JSON.stringify(
-    {
-      version: manifest.version,
-      files: Object.fromEntries(Object.entries(manifest.files).sort(byPath)),
-    },
-    null,
-    2,
-  )}\n`;
+  const written = {
+    version: manifest.version,
+    files: Object.fromEntries(Object.entries(manifest.files).sort(byPath)),
+  };
+  // Before anything walks it: `JSON.stringify` recurses too.
+  if (nestedDeeperThan(written, MAX_MANIFEST_DEPTH)) throw invalid(TOO_DEEP);
+  const text = `${JSON.stringify(written, null, 2)}\n`;
   if (Buffer.byteLength(text, 'utf8') > MAX_MANIFEST_BYTES) {
     throw new HardenError('manifest-too-large', 'the manifest has grown past what it can be');
   }
