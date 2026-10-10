@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { buildTree } from '../../src/install/tree.js';
+import { buildTree, TreeError, treeDigest, type TreeErrorCode } from '../../src/install/tree.js';
 import type { Tree, TreeEntry } from '../../src/install/types.js';
 
 /**
@@ -71,3 +71,30 @@ export function entriesOf(files: Readonly<Record<string, EntrySpec>>): TreeEntry
 export function treeOf(files: Readonly<Record<string, EntrySpec>>): Tree {
   return buildTree(entriesOf(files));
 }
+
+/** The digest of entries that may not be a valid tree: it throws the `TreeError` that says why not. */
+export const digestOf = (entries: readonly TreeEntry[]): string => treeDigest({ entries });
+
+/** The TreeError a call throws; any other outcome fails the test. */
+export function refusal(run: () => unknown): TreeError {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof TreeError) return error;
+    throw error;
+  }
+  throw new Error('expected a TreeError, and nothing was thrown');
+}
+
+/** The code of the refusal that hashing `entries` meets. */
+export const codeOf = (entries: readonly TreeEntry[]): TreeErrorCode =>
+  refusal(() => digestOf(entries)).code;
+
+/** A file of a declared size, with no bytes behind it: a tree read back from a manifest looks like this. */
+export const declared = (path: string, size: number): TreeEntry => ({
+  path,
+  kind: 'file',
+  exec: false,
+  size,
+  sha256: 'ab'.repeat(32),
+});

@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { buildTree, treeDigest, treeManifest } from '../../src/install/tree.js';
 import type { Tree, TreeEntry } from '../../src/install/types.js';
-import { entriesOf, treeOf } from './helpers.js';
+import { entriesOf, treeOf } from '../helpers/install-tree.js';
 
 // The digest is a promise to people who are not here yet: an author quotes it in a README, a lock
 // file pins it, and each of them must get the same answer on any machine, today and in two years.
