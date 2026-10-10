@@ -190,9 +190,8 @@ export interface RecordedTextBlockEdit {
   /**
    * The lines of a block with the same id that this replaced, or `null` when it was appended. They
    * are the lines the owner left between Stroq's markers, recorded as they were so that undo can put
-   * them back. Unlike the value a `json-set` replaced (see `PreviousValue`) they are not read for
-   * credential-shaped text: a credential the owner pasted inside Stroq's own block would be in the
-   * manifest, which is private (0600, in a 0700 directory) like the rest of Stroq's home.
+   * them back. The record is a file, so a block whose lines look like a credential is not replaced
+   * at all (the plan is refused with `credential-in-block`), and none is ever recorded.
    */
   readonly previous: readonly string[] | null;
   /**
@@ -225,6 +224,8 @@ export type PlanRefusal =
   | 'type-conflict'
   /** A text block's markers are not a matched pair, or appear twice. */
   | 'markers-damaged'
+  /** The lines between a text block's markers look like a credential, and replacing them would record them. */
+  | 'credential-in-block'
   /** A link carries the path out of the tree it belongs to. The file was never opened. */
   | 'path-escapes-root'
   /** A link in the path points nowhere. The file was never opened. */

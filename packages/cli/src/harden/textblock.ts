@@ -1,8 +1,17 @@
 import { resolveRealPath } from './atomic.js';
-import { planBackup } from './backup.js';
+import { findCredentialShape, planBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import { linkNotices, pathRefusal } from './plan-support.js';
 import { REPLACEMENT_CHARACTER } from './read.js';
+import {
+  BEGIN_PREFIX,
+  END_PREFIX,
+  blockMarkers,
+  findBlock,
+  lineBreakOf,
+  type Found,
+  type Row,
+} from './textblock-find.js';
 import {
   HardenError,
   ID_PATTERN,
@@ -24,18 +33,20 @@ import {
  * Undo takes away those bytes and no others.
  */
 
-const DEFAULT_RECIPE = 'custom';
-const BEGIN_PREFIX = '# >>> stroq harden:';
-const END_PREFIX = '# <<< stroq harden:';
+// The markers are where a block is found (`textblock-find.ts`), and are known to callers from here.
+export { blockMarkers };
 
-/** The two lines that bound the block called `id`. */
-export function blockMarkers(id: string): { readonly begin: string; readonly end: string } {
-  return { begin: `${BEGIN_PREFIX} ${id} >>>`, end: `${END_PREFIX} ${id} <<<` };
-}
+const DEFAULT_RECIPE = 'custom';
 
 const invalid = (message: string): HardenError => new HardenError('invalid-edit', message);
 
-function validateBlock(block: { readonly id: string; readonly lines: readonly string[] }): void {
+/** A block as a recipe asks for it: an id, and the lines between its markers. */
+interface Block {
+  readonly id: string;
+  readonly lines: readonly string[];
+}
+
+function validateBlock(block: Block): void {
   if (typeof block.id !== 'string' || !ID_PATTERN.test(block.id)) {
     throw invalid('a block id is letters, digits, dots, hyphens and underscores, 64 at most');
   }
@@ -48,70 +59,6 @@ function validateBlock(block: { readonly id: string; readonly lines: readonly st
       throw invalid('a line of a block cannot be a Stroq marker');
     }
   }
-}
-
-interface Row {
-  /** Where the line starts, where its text ends (before the line break), where the next starts. */
-  readonly start: number;
-  readonly end: number;
-  readonly next: number;
-  readonly content: string;
-}
-
-/** The lines of `text`, each with its place in it. A line break is `\n` or `\r\n`. */
-function rowsOf(text: string): Row[] {
-  const out: Row[] = [];
-  for (let start = 0; start < text.length;) {
-    const newline = text.indexOf('\n', start);
-    const next = newline === -1 ? text.length : newline + 1;
-    let end = newline === -1 ? text.length : newline;
-    if (newline !== -1 && end > start && text[end - 1] === '\r') end -= 1;
-    out.push({ start, end, next, content: text.slice(start, end) });
-    start = next;
-  }
-  return out;
-}
-
-type Found =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'damaged'; readonly detail: string }
-  | { readonly kind: 'found'; readonly begin: Row; readonly end: Row; readonly body: string[] };
-
-/**
- * The block called `id` in `text`. A marker line is one that equals the marker once its trailing
- * white space is gone, which editors add and remove. A block that is not a clean pair is
- * `damaged`: removing or replacing it would be a guess about what the owner meant.
- */
-function findBlock(text: string, id: string): Found {
-  const { begin, end } = blockMarkers(id);
-  const rows = rowsOf(text);
-  const begins = rows.flatMap((row, i) => (row.content.trimEnd() === begin ? [i] : []));
-  const first = begins[0];
-  if (first === undefined) return { kind: 'none' };
-  if (begins.length > 1) {
-    return { kind: 'damaged', detail: `the block ${id} appears more than once in the file` };
-  }
-  const last = rows.findIndex((row, i) => i > first && row.content.trimEnd() === end);
-  const beginRow = rows[first];
-  const endRow = rows[last];
-  if (beginRow === undefined || endRow === undefined) {
-    return {
-      kind: 'damaged',
-      detail: `the block ${id} has a begin marker but no end marker after it`,
-    };
-  }
-  return {
-    kind: 'found',
-    begin: beginRow,
-    end: endRow,
-    body: rows.slice(first + 1, last).map((row) => row.content),
-  };
-}
-
-/** The line break the file uses: that of its first line. */
-function lineBreakOf(text: string): '\n' | '\r\n' {
-  const newline = text.indexOf('\n');
-  return newline > 0 && text[newline - 1] === '\r' ? '\r\n' : '\n';
 }
 
 /** Whether the last line of `terminated` (a text ending in a line break) is empty or only blank. */
@@ -190,15 +137,68 @@ function buildPlan(
   };
 }
 
+type FoundBlock = Extract<Found, { readonly kind: 'found' }>;
+
+/**
+ * The plan for a block that is in the file already: its lines are replaced where it stands.
+ *
+ * The lines being replaced are recorded so that undo can put them back, and the record is a file:
+ * not if they look like a credential, or are too long to tell. Nothing is replaced then, and so
+ * nothing is recorded.
+ */
+function replaceBlock(frame: Frame, block: Block, found: FoundBlock, eol: string): TextBlockPlan {
+  const text = frame.text ?? '';
+  const lines = [...block.lines];
+  const same = sameLines(found.body, lines);
+  if (!same && findCredentialShape(found.body.join('\n')) !== null) {
+    return buildPlan(frame, text, [], {
+      refused: 'credential-in-block',
+      detail: `the block ${block.id} holds text that looks like a credential, or is too long to check, and Stroq does not put either in its record; take it out of the block first`,
+    });
+  }
+  const edit: RecordedTextBlockEdit = {
+    kind: 'text-block',
+    id: block.id,
+    lines,
+    previous: found.body,
+    prefix: '',
+    closesLastLine: false,
+    suffix: '',
+  };
+  if (same) return buildPlan(frame, text, [edit]);
+  // The block keeps the line break after its end marker, or the lack of one at the end of the file.
+  const tail = found.end.next > found.end.end ? eol : '';
+  const replaced = blockText(block.id, lines, eol) + tail;
+  return buildPlan(
+    frame,
+    text.slice(0, found.begin.start) + replaced + text.slice(found.end.next),
+    [edit],
+  );
+}
+
+/** The plan for a block that is not in the file: it is appended, a blank line after the rest. */
+function appendBlock(frame: Frame, block: Block, eol: string): TextBlockPlan {
+  const text = frame.text ?? '';
+  const { lineEnd, gap } = separatorFor(text, eol);
+  const edit: RecordedTextBlockEdit = {
+    kind: 'text-block',
+    id: block.id,
+    lines: [...block.lines],
+    previous: null,
+    prefix: `${lineEnd}${gap}`,
+    closesLastLine: lineEnd !== '',
+    suffix: eol,
+  };
+  const added = `${edit.prefix}${blockText(block.id, edit.lines, eol)}${edit.suffix}`;
+  return buildPlan(frame, `${text}${added}`, [edit]);
+}
+
 /**
  * What the block `block` makes of the text in `frame`, with nothing read and nothing written: the
  * part of planning that is a function of the text. `planTextBlock` is this after the path has been
  * judged and the file read, and `replayTextBlockPlan` is this on a plan's own text.
  */
-function planBlockText(
-  frame: Frame,
-  block: { readonly id: string; readonly lines: readonly string[] },
-): TextBlockPlan {
+function planBlockText(frame: Frame, block: Block): TextBlockPlan {
   validateBlock(block);
   const text = frame.text ?? '';
   const unchanged = (refused: PlanRefusal, detail: string): TextBlockPlan =>
@@ -210,45 +210,12 @@ function planBlockText(
       'the file is not valid UTF-8, so it cannot be rewritten as it was',
     );
   }
-  const lines = [...block.lines];
   const eol = lineBreakOf(text);
   const found = findBlock(text, block.id);
   if (found.kind === 'damaged') return unchanged('markers-damaged', found.detail);
-
-  if (found.kind === 'found') {
-    const edit: RecordedTextBlockEdit = {
-      kind: 'text-block',
-      id: block.id,
-      lines,
-      previous: found.body,
-      prefix: '',
-      closesLastLine: false,
-      suffix: '',
-    };
-    if (sameLines(found.body, lines)) return buildPlan(frame, text, [edit]);
-    // The block keeps the line break after its end marker, or the lack of one at the end of the file.
-    const tail = found.end.next > found.end.end ? eol : '';
-    const replaced = blockText(block.id, lines, eol) + tail;
-    return buildPlan(
-      frame,
-      text.slice(0, found.begin.start) + replaced + text.slice(found.end.next),
-      [edit],
-    );
-  }
-
-  const { lineEnd, gap } = separatorFor(text, eol);
-  const edit: RecordedTextBlockEdit = {
-    kind: 'text-block',
-    id: block.id,
-    lines,
-    previous: null,
-    prefix: `${lineEnd}${gap}`,
-    closesLastLine: lineEnd !== '',
-    suffix: eol,
-  };
-  return buildPlan(frame, `${text}${edit.prefix}${blockText(block.id, lines, eol)}${edit.suffix}`, [
-    edit,
-  ]);
+  return found.kind === 'found'
+    ? replaceBlock(frame, block, found, eol)
+    : appendBlock(frame, block, eol);
 }
 
 /**
@@ -264,11 +231,7 @@ function planBlockText(
  * A block with that id is replaced in place; otherwise one is appended, a blank line after the
  * rest. If the markers are not a clean pair the plan is `refused`.
  */
-export function planTextBlock(
-  file: string,
-  block: { readonly id: string; readonly lines: readonly string[] },
-  options: PlanOptions,
-): TextBlockPlan {
+export function planTextBlock(file: string, block: Block, options: PlanOptions): TextBlockPlan {
   validateBlock(block);
   const real = resolveRealPath(file);
   const refusal = pathRefusal(file, options.root);
