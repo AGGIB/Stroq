@@ -27,6 +27,7 @@ const LOCK_TIMEOUT_MS = 30_000;
 const MAX_ENTRIES_PER_FILE = 1_000;
 const MAX_EDIT_PATH = 64;
 const MAX_PREFIX_CHARS = 8;
+const MAX_SUFFIX_CHARS = 2;
 
 export interface ManifestEntry {
   /** The recipe that asked for the change. */
@@ -85,22 +86,38 @@ const editSchema = z.discriminatedUnion('kind', [
       value: z.json(),
       previous: z.discriminatedUnion('present', [
         z.strictObject({ present: z.literal(false) }),
-        z.strictObject({ present: z.literal(true), value: z.json() }),
+        // `masked` is there only when the value was credential-shaped and was not written down.
+        z.strictObject({
+          present: z.literal(true),
+          value: z.json(),
+          masked: z.literal(true).optional(),
+        }),
       ]),
       createdFrom,
     })
     .refine(pathFits, 'createdFrom is past the end of the path'),
-  z.strictObject({
-    kind: z.literal('text-block'),
-    id: z.string().regex(ID_PATTERN),
-    lines: z.array(z.string()),
-    previous: z.array(z.string()).nullable(),
-    // Nothing but the one or two line breaks that Stroq writes before an appended block.
-    prefix: z
-      .string()
-      .max(MAX_PREFIX_CHARS)
-      .regex(/^(?:\r?\n){0,2}$/),
-  }),
+  z
+    .strictObject({
+      kind: z.literal('text-block'),
+      id: z.string().regex(ID_PATTERN),
+      lines: z.array(z.string()),
+      previous: z.array(z.string()).nullable(),
+      // Nothing but the one or two line breaks that Stroq writes before an appended block.
+      prefix: z
+        .string()
+        .max(MAX_PREFIX_CHARS)
+        .regex(/^(?:\r?\n){0,2}$/),
+      closesLastLine: z.boolean(),
+      // Nothing but the one line break that Stroq writes after the end marker.
+      suffix: z
+        .string()
+        .max(MAX_SUFFIX_CHARS)
+        .regex(/^(?:\r?\n)?$/),
+    })
+    .refine(
+      (edit) => !edit.closesLastLine || edit.prefix !== '',
+      'a prefix that ends the last line cannot be empty',
+    ),
 ]);
 
 const entrySchema = z.strictObject({

@@ -131,9 +131,14 @@ export type JsonEdit =
     }
   | { readonly kind: 'json-set'; readonly path: readonly string[]; readonly value: JsonValue };
 
-/** What a `json-set` found where it wrote: a value, or nothing. */
+/**
+ * What a `json-set` found where it wrote: nothing, or a value. A value that is credential-shaped
+ * is not kept (the record is a file too, and would be one more place the credential lives): it is
+ * recorded as a placeholder with `masked: true`, and undo cannot put it back.
+ */
 export type PreviousValue =
-  { readonly present: false } | { readonly present: true; readonly value: JsonValue };
+  | { readonly present: false }
+  | { readonly present: true; readonly value: JsonValue; readonly masked?: true };
 
 /**
  * An edit as it was made: everything undo needs to take back exactly that and nothing else.
@@ -159,7 +164,14 @@ export type RecordedJsonEdit =
       readonly createdFrom: number;
     };
 
-/** A block of lines between Stroq's markers in a line-oriented file. */
+/**
+ * A block of lines between Stroq's markers in a line-oriented file, with the exact bytes that were
+ * written around it when it was appended, so that undo takes away those and nothing else.
+ *
+ * Appending a block to `text` writes `prefix`, the block (begin marker, lines, end marker) and
+ * `suffix`. For a block that replaced one where it stood, all three of `prefix`, `closesLastLine`
+ * and `suffix` say that nothing was written around it.
+ */
 export interface RecordedTextBlockEdit {
   readonly kind: 'text-block';
   readonly id: string;
@@ -167,8 +179,15 @@ export interface RecordedTextBlockEdit {
   readonly lines: readonly string[];
   /** The lines of a block with the same id that this replaced, or `null` when it was appended. */
   readonly previous: readonly string[] | null;
-  /** The separator written before an appended block, so that undo can take it away too. */
+  /**
+   * The bytes written before the begin marker: a line break to end the owner's last line if it
+   * had none, then a blank line to set the block off unless there was one already.
+   */
   readonly prefix: string;
+  /** The first line break of `prefix` ended the owner's last line, which had none. */
+  readonly closesLastLine: boolean;
+  /** The line break written after the end marker. */
+  readonly suffix: string;
 }
 
 export type RecordedEdit = RecordedJsonEdit | RecordedTextBlockEdit;

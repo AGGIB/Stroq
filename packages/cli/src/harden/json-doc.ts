@@ -1,3 +1,4 @@
+import { findLossyJson } from './json-lossy.js';
 import type { JsonObject, JsonValue, PlanRefusal } from './types.js';
 
 /**
@@ -7,9 +8,11 @@ import type { JsonObject, JsonValue, PlanRefusal } from './types.js';
  *
  * What the engine will not do is rewrite a file it cannot reproduce. JSON with comments or
  * trailing commas (JSONC) cannot be parsed back into the text it came from, so such a file is
- * REFUSED, never edited. A file that is plain JSON but laid out in a way `JSON.stringify` does
- * not produce (minified, a duplicated key, a number too big for a double) can be edited, but only
- * by laying it out again, and the caller is told so.
+ * REFUSED, never edited. So is plain JSON that loses something in the trip through an object (a
+ * number a double cannot hold, a key that appears twice, number-like keys that would be
+ * reordered): see `json-lossy.ts`. A file that is plain JSON but laid out in a way
+ * `JSON.stringify` does not produce (minified, an escaped letter, a number written `1.0`) can be
+ * edited, but only by laying it out again, and the caller is told so.
  */
 
 const DEFAULT_INDENT = '  ';
@@ -188,6 +191,8 @@ export function parseJsonDocument(text: string): Parsed {
   try {
     const value: unknown = JSON.parse(body);
     if (!isObject(value)) return refuse('not-object', 'the top level of the file is not an object');
+    const lossy = findLossyJson(body);
+    if (lossy !== null) return refuse('lossy-json', lossy);
     const layout = sniffLayout(body, bom);
     return { ok: true, doc: value, layout, roundTrips: serializeJson(value, layout) === text };
   } catch {

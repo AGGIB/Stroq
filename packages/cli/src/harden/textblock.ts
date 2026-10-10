@@ -1,6 +1,7 @@
 import { resolveRealPath } from './atomic.js';
 import { planBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
+import { pathRefusal } from './plan-support.js';
 import {
   HardenError,
   ID_PATTERN,
@@ -15,6 +16,11 @@ import {
  * marker lines that carry an id. The block is appended when it is not there and replaced where it
  * stands when it is, and nothing outside the markers is ever read as ours, so what the owner wrote
  * above and below it stays exactly as they wrote it.
+ *
+ * When a block is appended the engine writes up to three things around it, and records each of
+ * them as the exact bytes it wrote: the line break that ends the owner's last line if it had none,
+ * a blank line to set the block off unless one was there, and a line break after the end marker.
+ * Undo takes away those bytes and no others.
  */
 
 const DEFAULT_RECIPE = 'custom';
@@ -119,12 +125,19 @@ function endsWithBlankLine(terminated: string): boolean {
 /**
  * What goes between the file as it is and a block appended to it: the line break that ends a last
  * line which had none, and one blank line to set the block off, unless one is there already.
+ * The two are kept apart because undo treats them differently.
  */
-function separatorFor(text: string, eol: string): string {
-  if (text === '') return '';
+function separatorFor(
+  text: string,
+  eol: string,
+): { readonly lineEnd: string; readonly gap: string } {
+  if (text === '') return { lineEnd: '', gap: '' };
   const unterminated = !text.endsWith('\n');
   const terminated = unterminated ? `${text}${eol}` : text;
-  return `${unterminated ? eol : ''}${endsWithBlankLine(terminated) ? '' : eol}`;
+  return {
+    lineEnd: unterminated ? eol : '',
+    gap: endsWithBlankLine(terminated) ? '' : eol,
+  };
 }
 
 const sameLines = (a: readonly string[], b: readonly string[]): boolean =>
@@ -138,8 +151,9 @@ function blockText(id: string, lines: readonly string[], eol: string): string {
 interface Frame {
   readonly file: string;
   readonly real: string;
+  /** The file's text, or `null` when there is no file (or it was never opened). */
   readonly text: string | null;
-  readonly options: PlanOptions;
+  readonly options: Pick<PlanOptions, 'recipe' | 'root' | 'newFileMode'>;
 }
 
 function buildPlan(
@@ -173,20 +187,15 @@ function buildPlan(
 }
 
 /**
- * What would change in `file` if the block `id` held `lines`. It reads the file (through
- * `options.read`, with the real path) and writes nothing.
- *
- * A block with that id is replaced in place; otherwise one is appended, a blank line after the
- * rest. If the markers are not a clean pair the plan is `refused`.
+ * What the block `block` makes of the text in `frame`, with nothing read and nothing written: the
+ * part of planning that is a function of the text. `planTextBlock` is this after the path has been
+ * judged and the file read, and `replayTextBlockPlan` is this on a plan's own text.
  */
-export function planTextBlock(
-  file: string,
+function planBlockText(
+  frame: Frame,
   block: { readonly id: string; readonly lines: readonly string[] },
-  options: PlanOptions,
 ): TextBlockPlan {
   validateBlock(block);
-  const real = resolveRealPath(file);
-  const frame: Frame = { file, real, text: options.read(real), options };
   const text = frame.text ?? '';
   const unchanged = (refused: PlanRefusal, detail: string): TextBlockPlan =>
     buildPlan(frame, text, [], { refused, detail });
@@ -209,6 +218,8 @@ export function planTextBlock(
       lines,
       previous: found.body,
       prefix: '',
+      closesLastLine: false,
+      suffix: '',
     };
     if (sameLines(found.body, lines)) return buildPlan(frame, text, [edit]);
     // The block keeps the line break after its end marker, or the lack of one at the end of the file.
@@ -221,15 +232,71 @@ export function planTextBlock(
     );
   }
 
-  const prefix = separatorFor(text, eol);
+  const { lineEnd, gap } = separatorFor(text, eol);
   const edit: RecordedTextBlockEdit = {
     kind: 'text-block',
     id: block.id,
     lines,
     previous: null,
-    prefix,
+    prefix: `${lineEnd}${gap}`,
+    closesLastLine: lineEnd !== '',
+    suffix: eol,
   };
-  return buildPlan(frame, `${text}${prefix}${blockText(block.id, lines, eol)}${eol}`, [edit]);
+  return buildPlan(frame, `${text}${edit.prefix}${blockText(block.id, lines, eol)}${edit.suffix}`, [
+    edit,
+  ]);
+}
+
+/**
+ * What would change in `file` if the block `id` held `lines`. It reads the file (through
+ * `options.read`, with the real path) and writes nothing.
+ *
+ * The path is judged before the file is read, by the rules the write will apply (the root the
+ * caller named, `init`'s rule, a link that points nowhere). A path that fails gives a plan that is
+ * `refused` (`path-escapes-root` or `dangling-link`) and `read` is never called, so that no diff
+ * can carry the content of a file the path only leads to. Such a plan has `existed: false` and no
+ * text: it never looked.
+ *
+ * A block with that id is replaced in place; otherwise one is appended, a blank line after the
+ * rest. If the markers are not a clean pair the plan is `refused`.
+ */
+export function planTextBlock(
+  file: string,
+  block: { readonly id: string; readonly lines: readonly string[] },
+  options: PlanOptions,
+): TextBlockPlan {
+  validateBlock(block);
+  const real = resolveRealPath(file);
+  const refusal = pathRefusal(file, options.root);
+  const frame: Frame = {
+    file,
+    real,
+    text: refusal === null ? options.read(real) : null,
+    options,
+  };
+  if (refusal !== null) return buildPlan(frame, '', [], refusal);
+  return planBlockText(frame, block);
+}
+
+/**
+ * The plan that `plan`'s own edit makes of `plan`'s own text, by the same code that made it, and
+ * without touching the file system; `null` when the plan does not hold exactly one edit, which no
+ * planner makes.
+ */
+export function replayTextBlockPlan(plan: TextBlockPlan): TextBlockPlan | null {
+  const [edit, ...rest] = plan.edits;
+  if (edit === undefined || rest.length > 0) return null;
+  const frame: Frame = {
+    file: plan.file,
+    real: plan.real,
+    text: plan.existed ? plan.before : null,
+    options: {
+      ...(plan.recipe === undefined ? {} : { recipe: plan.recipe }),
+      ...(plan.root === undefined ? {} : { root: plan.root }),
+      ...(plan.newFileMode === undefined ? {} : { newFileMode: plan.newFileMode }),
+    },
+  };
+  return planBlockText(frame, { id: edit.id, lines: edit.lines });
 }
 
 export type TextUndo =
@@ -245,17 +312,47 @@ export type TextUndo =
 
 const isBlank = (text: string): boolean => /^\s*$/.test(text);
 
+/** The line break `prefix` begins with: the one that ended the owner's last line, when it did. */
+const leadingBreak = (prefix: string): string =>
+  prefix.startsWith('\r\n') ? '\r\n' : prefix.startsWith('\n') ? '\n' : '';
+
 /**
- * Whether the `prefix` Stroq wrote before a block is still the text right before it, and safe to
- * take away with the block. What would be left must still end with a line break, so that this
- * never eats the end of a line that is the owner's; the one exception is when Stroq itself ended
- * the owner's last line (a prefix of two line breaks), and then both are Stroq's.
+ * The text before the block, with the bytes Stroq wrote in front of it taken away, or `null` when
+ * they are not there to take.
+ *
+ * What was written is `edit.prefix`. It is taken only if it is exactly what is in front of the
+ * block, and only if what is left in front of it is what the owner's file ended with when Stroq
+ * wrote it: a file that ended in a line break still ends in one, a file that did not still does
+ * not. If the owner has changed that, the bytes are no longer provably Stroq's, and none of them
+ * is taken.
  */
-function prefixIsOurs(before: string, prefix: string): boolean {
-  if (prefix === '' || !before.endsWith(prefix)) return false;
-  const eol = prefix.startsWith('\r\n') ? '\r\n' : '\n';
-  const remaining = before.slice(0, before.length - prefix.length);
-  return prefix === eol + eol || remaining === '' || remaining.endsWith('\n');
+function withoutPrefix(head: string, edit: RecordedTextBlockEdit): string | null {
+  if (edit.prefix === '' || !head.endsWith(edit.prefix)) return null;
+  const owners = head.slice(0, head.length - edit.prefix.length);
+  const endsInBreak = owners.endsWith('\n');
+  const asWritten = edit.closesLastLine
+    ? owners !== '' && !endsInBreak
+    : owners === '' || endsInBreak;
+  return asWritten ? owners : null;
+}
+
+/**
+ * The text with an appended block taken out, and exactly the bytes Stroq wrote around it with it:
+ *
+ * - the blank line in front of the block always goes;
+ * - the line break that ended the owner's last line (when the file had none) goes only if nothing
+ *   follows the block. If the owner has written something after it, that line break is what keeps
+ *   the owner's last line and the owner's new text apart, and it stays: it is no longer only
+ *   Stroq's;
+ * - the line break after the end marker goes with the block's last line.
+ */
+function withoutAppended(text: string, begin: Row, end: Row, edit: RecordedTextBlockEdit): string {
+  const head = text.slice(0, begin.start);
+  const tail = text.slice(end.next);
+  const owners = withoutPrefix(head, edit);
+  if (owners === null) return head + tail;
+  const lineEnd = edit.closesLastLine ? leadingBreak(edit.prefix) : '';
+  return owners + (tail === '' ? '' : lineEnd) + tail;
 }
 
 /**
@@ -281,10 +378,6 @@ export function undoTextBlock(text: string, edit: RecordedTextBlockEdit): TextUn
     const out = text.slice(0, found.begin.start) + restored + text.slice(found.end.next);
     return { outcome: 'edited', text: out, kept: [], empty: isBlank(out) };
   }
-  const before = text.slice(0, found.begin.start);
-  const keep = prefixIsOurs(before, edit.prefix)
-    ? before.slice(0, before.length - edit.prefix.length)
-    : before;
-  const out = keep + text.slice(found.end.next);
+  const out = withoutAppended(text, found.begin, found.end, edit);
   return { outcome: 'edited', text: out, kept: [], empty: isBlank(out) };
 }

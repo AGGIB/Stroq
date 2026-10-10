@@ -50,7 +50,15 @@ describe('planTextBlock: adding a block', () => {
     expect(result.kind).toBe('text-block');
     expect(result.diff).toBe(unifiedDiff(before, result.after, { path: result.file }));
     expect(result.edits).toEqual([
-      { kind: 'text-block', id: ID, lines: LINES, previous: null, prefix: '\n' },
+      {
+        kind: 'text-block',
+        id: ID,
+        lines: LINES,
+        previous: null,
+        prefix: '\n',
+        closesLastLine: false,
+        suffix: '\n',
+      },
     ]);
   });
 
@@ -124,7 +132,15 @@ describe('planTextBlock: a block that is already there', () => {
 
     expect(result.after).toBe(`top\n\n${block(['.env', 'secrets/'])}bottom\n`);
     expect(result.edits).toEqual([
-      { kind: 'text-block', id: ID, lines: ['.env', 'secrets/'], previous: LINES, prefix: '' },
+      {
+        kind: 'text-block',
+        id: ID,
+        lines: ['.env', 'secrets/'],
+        previous: LINES,
+        prefix: '',
+        closesLastLine: false,
+        suffix: '',
+      },
     ]);
   });
 

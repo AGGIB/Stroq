@@ -54,6 +54,21 @@ describe('readManifest: what it refuses', () => {
       'a block prefix that is not a separator',
       withEdit({ ...entry().edits[2], prefix: 'x'.repeat(40) }),
     ],
+    ['a block suffix that is not a line break', withEdit({ ...entry().edits[2], suffix: 'x' })],
+    ['a block suffix of two line breaks', withEdit({ ...entry().edits[2], suffix: '\n\n' })],
+    ['a block with no suffix', withEdit({ ...entry().edits[2], suffix: undefined })],
+    [
+      'a closes-last-line that is not a boolean',
+      withEdit({ ...entry().edits[2], closesLastLine: 'yes' }),
+    ],
+    [
+      'a block with no closes-last-line',
+      withEdit({ ...entry().edits[2], closesLastLine: undefined }),
+    ],
+    [
+      'a prefix that ends the last line, with nothing in it',
+      withEdit({ ...entry().edits[2], prefix: '', closesLastLine: true }),
+    ],
   ];
 
   it.each(bad)('rejects %s, with a typed error', (_name, content) => {

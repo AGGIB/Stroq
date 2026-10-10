@@ -78,6 +78,12 @@ function undoSet(doc: JsonObject, edit: RecordedJsonEdit): Undone {
     return { doc, changed: false, kept };
   }
   if (edit.previous.present) {
+    // The value was credential-shaped and was not written down: there is nothing to put back, and
+    // the placeholder in the record must never become the file's value.
+    if (edit.previous.masked === true) {
+      const kept = `${dotted(edit.path)}: Stroq replaced a value that looked like a credential and kept no copy of it, so it cannot be put back; the value Stroq set was left as it is`;
+      return { doc, changed: false, kept };
+    }
     return deepEqual(current, edit.previous.value)
       ? { doc, changed: false }
       : { doc: setAt(doc, edit.path, edit.previous.value), changed: true };

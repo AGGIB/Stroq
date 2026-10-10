@@ -1,5 +1,5 @@
 import { resolveRealPath } from './atomic.js';
-import { planBackup } from './backup.js';
+import { findCredentialShape, planBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import {
   DEFAULT_LAYOUT,
@@ -12,6 +12,7 @@ import {
   setAt,
   type Parsed,
 } from './json-doc.js';
+import { pathRefusal } from './plan-support.js';
 import {
   HardenError,
   type JsonEdit,
@@ -20,6 +21,7 @@ import {
   type JsonValue,
   type PlanOptions,
   type PlanRefusal,
+  type PreviousValue,
   type RecordedJsonEdit,
 } from './types.js';
 
@@ -40,6 +42,12 @@ export { undoJsonEdits, type JsonUndo } from './json-undo.js';
 const DEFAULT_RECIPE = 'custom';
 /** Deeper than any value a recipe has a reason to write. */
 const MAX_VALUE_DEPTH = 64;
+
+/** Stands in the record for a replaced value that was not kept because it looked like a credential. */
+export const MASKED_PREVIOUS_VALUE = '[credential-shaped value not kept]';
+/** Said before the owner agrees to an edit that replaces such a value. */
+export const REPLACED_CREDENTIAL_NOTICE =
+  'a value that looks like a credential will be replaced, and no copy of it is kept';
 
 const invalid = (message: string): HardenError => new HardenError('invalid-edit', message);
 
@@ -121,13 +129,32 @@ function applyArrayAdd(doc: JsonObject, edit: JsonEdit): Applied {
   return { ok: true, doc: setAt(doc, edit.path, [...existing, edit.value]), changed: true, record };
 }
 
+/**
+ * Whether `value`, found under the last key of a path, is credential-shaped: asked the way the
+ * rest of the engine asks about a file, with the key as the name above the value. A value too
+ * deep to be looked at is not clean.
+ */
+function holdsCredential(name: string, value: JsonValue): boolean {
+  try {
+    return findCredentialShape(JSON.stringify({ [name]: value })) !== null;
+  } catch {
+    return true;
+  }
+}
+
+/** What to record of the value a set found: the value, unless it must not be written down. */
+function previousOf(path: readonly string[], leaf: JsonValue | undefined): PreviousValue {
+  if (leaf === undefined) return { present: false };
+  const name = path[path.length - 1] ?? '';
+  return holdsCredential(name, leaf)
+    ? { present: true, value: MASKED_PREVIOUS_VALUE, masked: true }
+    : { present: true, value: leaf };
+}
+
 function applySet(doc: JsonObject, edit: JsonEdit): Applied {
   const found = probe(doc, edit.path);
   if (!found.ok) return found;
-  const previous =
-    found.leaf === undefined
-      ? ({ present: false } as const)
-      : ({ present: true, value: found.leaf } as const);
+  const previous = previousOf(edit.path, found.leaf);
   const base = { kind: 'json-set', path: edit.path, value: edit.value, previous } as const;
   if (found.leaf !== undefined && deepEqual(found.leaf, edit.value)) {
     return { ok: true, doc, changed: false, record: { ...base, createdFrom: edit.path.length } };
@@ -142,9 +169,9 @@ const applyEdit = (doc: JsonObject, edit: JsonEdit): Applied =>
 interface Frame {
   readonly file: string;
   readonly real: string;
-  /** The file's text, or `null` when there is no file. */
+  /** The file's text, or `null` when there is no file (or it was never opened). */
   readonly text: string | null;
-  readonly options: PlanOptions;
+  readonly options: Pick<PlanOptions, 'recipe' | 'root' | 'newFileMode'>;
 }
 
 interface Outcome {
@@ -160,6 +187,9 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   const changed = outcome.after !== before;
   const backup = planBackup(text);
   const shown = changed ? maskedDiff(text, outcome.after, file) : { diff: '', hidden: false };
+  const replacesCredential = outcome.edits.some(
+    (edit) => edit.kind === 'json-set' && edit.previous.present && edit.previous.masked === true,
+  );
   return {
     kind: 'json',
     recipe: options.recipe ?? DEFAULT_RECIPE,
@@ -174,7 +204,11 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
       ? {}
       : { refused: outcome.refusal.refused, refusedDetail: outcome.refusal.detail }),
     backup: backup.backup,
-    notices: [...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
+    notices: [
+      ...backup.notices,
+      ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
+      ...(replacesCredential ? [REPLACED_CREDENTIAL_NOTICE] : []),
+    ],
     edits: outcome.edits,
     roundTrips: outcome.roundTrips,
     formatting: outcome.roundTrips || outcome.refusal !== undefined ? 'preserved' : 'will-change',
@@ -192,24 +226,11 @@ const refusedPlan = (frame: Frame, refused: PlanRefusal, detail: string): JsonPl
   });
 
 /**
- * What would change in `file` if `edits` were made. It reads the file (through `options.read`,
- * with the real path) and writes nothing.
- *
- * The plan carries the text before and after, the diff, the real path and every edit as it was
- * made: whether an array element was there already (`preexisting`), what a set value replaced
- * (`previous`). If the file cannot be edited safely the plan is `refused`, with `after` equal to
- * `before`, and applying it is an error. If it can be edited only by laying it out again, the
- * plan says `formatting: 'will-change'`.
+ * What `edits` make of the text in `frame`, with nothing read and nothing written: the part of
+ * planning that is a function of the text. `planJsonEdits` is this after the path has been judged
+ * and the file read, and `replayJsonPlan` is this on a plan's own text.
  */
-export function planJsonEdits(
-  file: string,
-  edits: readonly JsonEdit[],
-  options: PlanOptions,
-): JsonPlan {
-  const requested = edits.map(validateEdit);
-  const real = resolveRealPath(file);
-  const frame: Frame = { file, real, text: options.read(real), options };
-
+function planJsonText(frame: Frame, requested: readonly JsonEdit[]): JsonPlan {
   const parsed: Parsed =
     frame.text === null
       ? { ok: true, doc: {}, layout: DEFAULT_LAYOUT, roundTrips: true }
@@ -241,4 +262,60 @@ export function planJsonEdits(
   } catch {
     return refusedPlan(frame, 'invalid-json', 'the file is nested too deeply to rewrite');
   }
+}
+
+/**
+ * What would change in `file` if `edits` were made. It reads the file (through `options.read`,
+ * with the real path) and writes nothing.
+ *
+ * The path is judged before the file is read, by the rules the write will apply (the root the
+ * caller named, `init`'s rule, a link that points nowhere). A path that fails gives a plan that
+ * is `refused` (`path-escapes-root` or `dangling-link`) and `read` is never called, so that no
+ * diff can carry the content of a file the path only leads to. Such a plan has `existed: false`
+ * and no text: it never looked.
+ *
+ * The plan carries the text before and after, the diff, the real path and every edit as it was
+ * made: whether an array element was there already (`preexisting`), what a set value replaced
+ * (`previous`). If the file cannot be edited safely the plan is `refused`, with `after` equal to
+ * `before`, and applying it is an error. If it can be edited only by laying it out again, the
+ * plan says `formatting: 'will-change'`.
+ */
+export function planJsonEdits(
+  file: string,
+  edits: readonly JsonEdit[],
+  options: PlanOptions,
+): JsonPlan {
+  const requested = edits.map(validateEdit);
+  const real = resolveRealPath(file);
+  const refusal = pathRefusal(file, options.root);
+  const frame: Frame = {
+    file,
+    real,
+    text: refusal === null ? options.read(real) : null,
+    options,
+  };
+  if (refusal !== null) return refusedPlan(frame, refusal.refused, refusal.detail);
+  return planJsonText(frame, requested);
+}
+
+/**
+ * The plan that `plan`'s own edits make of `plan`'s own text, by the same code that made it, and
+ * without touching the file system. A plan is plain data and can be anything; this is what a plan
+ * made from that text and those edits actually says.
+ */
+export function replayJsonPlan(plan: JsonPlan): JsonPlan {
+  const requested = plan.edits.map((edit) =>
+    validateEdit({ kind: edit.kind, path: edit.path, value: edit.value }),
+  );
+  const frame: Frame = {
+    file: plan.file,
+    real: plan.real,
+    text: plan.existed ? plan.before : null,
+    options: {
+      ...(plan.recipe === undefined ? {} : { recipe: plan.recipe }),
+      ...(plan.root === undefined ? {} : { root: plan.root }),
+      ...(plan.newFileMode === undefined ? {} : { newFileMode: plan.newFileMode }),
+    },
+  };
+  return planJsonText(frame, requested);
 }

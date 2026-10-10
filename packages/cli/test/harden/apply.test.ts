@@ -266,14 +266,35 @@ describe('applyPlan: a plan it will not apply', () => {
   });
 
   describe.skipIf(onWindows)('because of where the path leads', () => {
+    // The plan is made while the file is an ordinary one; the link is put there afterwards, which
+    // is what a plan that has waited for a person to say yes can meet.
     it('refuses a link out of the root before it keeps a copy or records anything', async () => {
+      const { env, file, home, project, planJson } = engine();
+      const victim = join(tempDir('outside'), 'victim.json');
+      writeFileSync(victim, '{}\n');
+      writeFileSync(file('settings.json'), '{}\n');
+      const plan = planJson('settings.json', [addDeny('x')], { root: project });
+      unlinkSync(file('settings.json'));
+      symlinkSync(victim, file('settings.json'));
+
+      await expect(applyPlan(plan, env)).rejects.toMatchObject({ code: 'path-escapes-root' });
+
+      expect(readFileSync(victim, 'utf8')).toBe('{}\n');
+      expect(existsSync(join(home, 'harden'))).toBe(false);
+      expect(existsSync(join(home, 'backups'))).toBe(false);
+    });
+
+    // A plan made from a link that already leaves the root is a refused plan: the planner did not
+    // even read it.
+    it('refuses a plan that was made from a link out of the root, as a plan that was refused', async () => {
       const { env, file, home, project, planJson } = engine();
       const victim = join(tempDir('outside'), 'victim.json');
       writeFileSync(victim, '{}\n');
       symlinkSync(victim, file('settings.json'));
       const plan = planJson('settings.json', [addDeny('x')], { root: project });
+      expect(plan.refused).toBe('path-escapes-root');
 
-      await expect(applyPlan(plan, env)).rejects.toMatchObject({ code: 'path-escapes-root' });
+      await expect(applyPlan(plan, env)).rejects.toMatchObject({ code: 'plan-refused' });
 
       expect(readFileSync(victim, 'utf8')).toBe('{}\n');
       expect(existsSync(join(home, 'harden'))).toBe(false);

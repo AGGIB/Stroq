@@ -333,13 +333,12 @@ describe('planJsonEdits: whether the file survives being written back', () => {
     expect(result.formatting).toBe('preserved');
   });
 
+  // A duplicated key, a number a double cannot hold and keys that an object would reorder are not
+  // a change of layout but a loss of what the file says: they are refused (see json-lossy.test.ts).
   it.each([
     ['a minified file', '{"permissions":{"deny":["a"]}}\n'],
-    ['a duplicated key', '{\n  "a": 1,\n  "a": 2\n}\n'],
-    ['a number too large to keep', '{\n  "big": 12345678901234567890\n}\n'],
     ['a number written 1.0', '{\n  "n": 1.0\n}\n'],
     ['an escaped letter', '{\n  "a": "\\u00e9"\n}\n'],
-    ['keys that look like numbers', '{\n  "b": 1,\n  "2": 2\n}\n'],
     ['two newlines at the end', '{\n  "a": 1\n}\n\n'],
     ['mixed indentation', '{\n  "a": {\n      "b": 1\n  }\n}\n'],
   ])('says the layout will change for %s', (_name, before) => {
