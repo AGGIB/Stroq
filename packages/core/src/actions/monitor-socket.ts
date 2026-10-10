@@ -6,10 +6,15 @@
  * url is an address the model chose, and the protocols are values it sends in the
  * handshake.
  *
- * Read by the classifier (it is an outbound connection) and by the secret guard (it is
- * text a known value can be in). Both take what is there and nothing more: a field of
- * the wrong type is not text, and a host that sends one will have Claude Code reject it.
+ * Read by the classifier (it is an outbound connection, whether or not a command comes with
+ * it) and by the secret guard (it is text a known value can be in, all of it). `ws` is a
+ * socket when it is an object; a string, a list or `null` there is no socket, and a host that
+ * sends one will have Claude Code reject it.
  */
+
+/** A socket is an object: a string, a list, `null` and a number are not one. */
+const isSocketObject = (ws: unknown): ws is Readonly<Record<string, unknown>> =>
+  typeof ws === 'object' && ws !== null && !Array.isArray(ws);
 
 /** What a Monitor call's `ws` field holds, or `null` when it has none. */
 export interface MonitorSocket {
@@ -19,10 +24,9 @@ export interface MonitorSocket {
 
 export function monitorSocket(toolInput: Readonly<Record<string, unknown>>): MonitorSocket | null {
   const ws = toolInput['ws'];
-  if (typeof ws !== 'object' || ws === null || Array.isArray(ws)) return null;
-  const fields = ws as Readonly<Record<string, unknown>>;
-  const url = fields['url'];
-  const protocols = fields['protocols'];
+  if (!isSocketObject(ws)) return null;
+  const url = ws['url'];
+  const protocols = ws['protocols'];
   return {
     url: typeof url === 'string' ? url : '',
     // One protocol sent as a string is not what the schema says, and is as harmless to read as to skip.
@@ -35,13 +39,14 @@ export function monitorSocket(toolInput: Readonly<Record<string, unknown>>): Mon
 }
 
 /**
- * The text of the socket the guard looks for a known value in: the url, then the protocols,
- * a space between each (run together they would make a word that no value matches). Empty
- * for a call with no socket.
+ * The text of the socket the guard looks for a known value in: all of it, as the MCP path reads its
+ * input, as JSON. The url and the protocols are the fields of the schema, and a host that sends more
+ * (headers, an auth field of its own) sends it to the same address: every string at any depth is text a
+ * known value can be in, and so is a key or a number. Empty for a call with no socket.
  */
 export function monitorSocketText(toolInput: Readonly<Record<string, unknown>>): string {
-  const socket = monitorSocket(toolInput);
-  return socket === null ? '' : [socket.url, ...socket.protocols].filter((p) => p !== '').join(' ');
+  const ws = toolInput['ws'];
+  return isSocketObject(ws) ? JSON.stringify(ws) : '';
 }
 
 /** A url longer than this names a host that Stroq does not go looking for: it is not an address anyone types. */

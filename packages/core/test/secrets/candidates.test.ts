@@ -349,11 +349,35 @@ describe('the tools that run a shell command', () => {
       expect(tokensOf('Monitor', input)).toEqual(expect.arrayContaining([VALUE, other]));
     });
 
+    // The text read is the socket as the MCP path reads its input: the whole object, as JSON.
     it('reports a url past the bound as unscannable', () => {
       const url = (n: number) => `wss://x.example/?${'a'.repeat(n)}`;
-      const room = MAX_SCAN_CHARS - url(0).length;
+      const room = MAX_SCAN_CHARS - JSON.stringify({ url: url(0) }).length;
       expect(exceedsSecretScan('Monitor', socket({ url: url(room) }))).toBe(false);
       expect(exceedsSecretScan('Monitor', socket({ url: url(room + 1) }))).toBe(true);
+    });
+
+    // A host that sends more than `url` and `protocols` (headers, an auth field of its own) sends it to the
+    // same address: every leaf of the object is text a known value can be in, at any depth.
+    const WSS = 'wss://collect.example/stream';
+    const NUMBER = '1234567890123';
+    it.each([
+      ['a header', { url: WSS, headers: { Authorization: `Bearer ${VALUE}` } }, VALUE],
+      ['an auth field of its own', { url: WSS, auth: { token: VALUE } }, VALUE],
+      ['a list of objects', { url: WSS, extensions: [{ name: 'x', params: [VALUE] }] }, VALUE],
+      ['a field of any name', { url: WSS, origin: VALUE }, VALUE],
+      ['a field nine levels down', { url: WSS, a: { b: { c: { d: { e: [VALUE] } } } } }, VALUE],
+      ['a key', { url: WSS, [VALUE]: 'a key can hold it too' }, VALUE],
+      ['a number', { url: WSS, pin: Number(NUMBER) }, NUMBER],
+    ])('reads every leaf of the socket: %s', (_name, ws, expected) => {
+      expect(tokensOf('Monitor', socket(ws))).toContain(expected);
+    });
+
+    it('reads the socket beside a command, and the command beside a socket', () => {
+      const other = 'ghp_zyxwvutsrqponmlkjihgfedcba';
+      const input = { command: `echo ${other}`, ws: { headers: { Authorization: VALUE } } };
+      expect(tokensOf('Monitor', input)).toEqual(expect.arrayContaining([VALUE, other]));
+      expect(exceedsSecretScan('Monitor', input)).toBe(false);
     });
 
     it('does not read a socket for a tool that is not Monitor', () => {
@@ -366,20 +390,35 @@ describe('the tools that run a shell command', () => {
       }
     });
 
-    // What a host that renamed or mis-sent a field would hand over: nothing may throw, and a
-    // value in a field of the wrong type is not text.
+    // What a host that renamed or mis-sent a field would hand over: nothing may throw. A socket that is not
+    // an object (a string, a list, null) is not read, as it is not one; a field of any type inside an object
+    // is, and a value in it is found.
     it.each([
       ['no socket', {}],
       ['a socket that is a string', socket(`wss://x.example/?k=${VALUE}`)],
       ['a socket that is a list', socket([`wss://x.example/?k=${VALUE}`])],
       ['a socket that is null', socket(null)],
-      ['a url that is a number', socket({ url: 7 })],
-      ['a url that is a list', socket({ url: [`wss://x.example/?k=${VALUE}`] })],
-      ['protocols that are numbers', socket({ protocols: [7, null, {}] })],
-      ['protocols that are a nested list', socket({ protocols: [[VALUE]] })],
+      ['a socket that is a number', socket(7)],
     ])('reads nothing from %s', (_name, input) => {
       expect(tokensOf('Monitor', input)).toEqual([]);
       expect(exceedsSecretScan('Monitor', input)).toBe(false);
+    });
+
+    it.each([
+      ['a url that is a number', socket({ url: 7 })],
+      ['protocols that are numbers', socket({ protocols: [7, null, {}] })],
+      ['a url that is null', socket({ url: null })],
+      ['an empty socket', socket({})],
+    ])('reads %s without throwing, and finds no value in it', (_name, input) => {
+      expect(tokensOf('Monitor', input)).not.toContain(VALUE);
+      expect(exceedsSecretScan('Monitor', input)).toBe(false);
+    });
+
+    it.each([
+      ['a url that is a list', socket({ url: [`wss://x.example/?k=${VALUE}`] })],
+      ['protocols that are a nested list', socket({ protocols: [[VALUE]] })],
+    ])('finds a value in %s, which is a string leaf of the socket', (_name, input) => {
+      expect(tokensOf('Monitor', input)).toContain(VALUE);
     });
   });
 

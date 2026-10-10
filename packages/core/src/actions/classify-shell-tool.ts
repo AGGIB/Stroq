@@ -29,7 +29,9 @@ const COMMAND_TOO_LARGE: ToolClassification = {
  * nothing: it is an outbound connection to an address the model chose. It is network-shaped
  * so that the secret guard, which runs on those alone, looks inside it, and a tainted
  * session is denied it. It keeps the class of a command Stroq could not read, so it is still
- * asked about as it was: this only adds, and no session is allowed more than it was.
+ * asked about as it was: this only adds classes. For the default policy that allows nothing
+ * that was asked about; a policy of the user's that allows `shell.network` to some host
+ * would allow a socket to it, where the socket was asked about before.
  */
 function classifySocket(socket: MonitorSocket): ToolClassification {
   const host = monitorSocketHost(socket.url);
@@ -56,20 +58,23 @@ export function classifyShellTool(
   cwd: string,
 ): ToolClassification {
   const command = toolInput['command'];
+  // Monitor takes a command or a socket, and a call that has both is judged by both: the socket is an outbound
+  // connection whatever the command beside it is, and the secret guard looks inside what is network-shaped.
+  const socket = toolName === 'Monitor' ? monitorSocket(toolInput) : null;
   // A shell tool whose command Stroq cannot read is not an empty command: a host
   // that renamed the field would otherwise have every call allowed without a word.
-  if (typeof command !== 'string') {
-    const socket = toolName === 'Monitor' ? monitorSocket(toolInput) : null;
+  if (typeof command !== 'string')
     return socket === null ? UNREADABLE_COMMAND : classifySocket(socket);
-  }
-  if (isTooCostly(command)) return COMMAND_TOO_LARGE;
   // All of what follows is one reading, and the clock runs from its first step: the split and the decoding
   // of the programs are made here, before `classifyCommand` begins its own, and are most of the work.
-  return withDeadline(
-    READING_DEADLINE_MS,
-    () => classifyShellCommand(command, cwd),
-    () => READING_TOOK_TOO_LONG,
-  );
+  const read = isTooCostly(command)
+    ? COMMAND_TOO_LARGE
+    : withDeadline(
+        READING_DEADLINE_MS,
+        () => classifyShellCommand(command, cwd),
+        () => READING_TOOK_TOO_LONG,
+      );
+  return socket === null ? read : mergeClassifications(read, classifySocket(socket));
 }
 
 function classifyShellCommand(command: string, cwd: string): ToolClassification {
