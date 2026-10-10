@@ -142,10 +142,14 @@ const refuse = (reason: string): PathCheck => ({ ok: false, reason });
 function componentProblem(component: string): string | null {
   if (component === '') return 'empty component';
   if (component === '.' || component === '..') return "'.' or '..' component";
-  if (component.endsWith('.') || component.endsWith(' ')) {
+  // From here on the component is judged as a program that narrows names to a smaller character set
+  // would see it (see `nameKey`). The end of the name is part of that: Windows drops a trailing dot or
+  // space, and a full-width full stop or an ideographic space is one once narrowed, so `.git` followed
+  // by either opens `.git`. The structural characters (`/`, `\`, `:`) are still judged as spelled.
+  const name = nameKey(component);
+  if (name.endsWith('.') || name.endsWith(' ')) {
     return 'component ending in a dot or a space';
   }
-  const name = nameKey(component);
   if (name === '.git' || GIT_SHORT_NAME.test(name)) {
     return 'component named .git (or its Windows short name)';
   }
@@ -168,7 +172,8 @@ function componentProblem(component: string): string | null {
  * a component named `.git`, or by its NTFS short name `git~N`, or a Windows device name, in any case
  * and in any compatibility spelling (see `nameKey`: full-width letters, superscript digits, the
  * dotless i); a component that ends in a dot or a space (Windows drops it, so `a.` and `a` are one
- * file); and a path over the limits.
+ * file), also when it only ends in one once made plain (a full-width full stop, an ideographic space,
+ * a no-break space, an ellipsis); and a path over the limits.
  *
  * The reason is a fixed phrase and never quotes the path, so that it can be printed as it is.
  */

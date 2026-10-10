@@ -10,6 +10,7 @@ import { checkEntryPath } from '../../src/install/safe-path.js';
 
 const hex = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
 const LAST_CODE_POINT = 0x10ffff;
+const TRAILING = /ending in a dot or a space/;
 const SURROGATES = { first: 0xd800, last: 0xdfff } as const;
 
 /** The code points named by the review of the first version, which a list of two helpers did not hold. */
@@ -91,6 +92,59 @@ describe('invisible and direction-changing characters, by property', () => {
     }
 
     expect(wrong).toEqual([]);
+  });
+});
+
+// The end of a name is a place of its own: Windows drops a trailing dot or space, and a program that
+// narrows a name to a smaller character set makes a full-width full stop a dot and an ideographic space a
+// space (the plain form of a character is its NFKC form). So at the end of a name a code point is also
+// refused when its plain form ends in a dot or a space, and for no other reason than the classes above.
+describe('the last character of a name', () => {
+  it('is refused if and only if its class says so or it ends a name once made plain', () => {
+    const wrong: string[] = [];
+    let endsName = 0;
+
+    for (let code = 0; code <= LAST_CODE_POINT; code += 1) {
+      const char = String.fromCodePoint(code);
+      const plain = char.normalize('NFKC');
+      const isDotOrSpace = plain.endsWith('.') || plain.endsWith(' ');
+      if (isDotOrSpace) endsName += 1;
+      const verdict = checkEntryPath(`a${char}`);
+      const isSurrogate = code >= SURROGATES.first && code <= SURROGATES.last;
+      // A slash at the end leaves an empty component after it.
+      const expected =
+        char === '/'
+          ? /empty component/
+          : (expectedReason(char, isSurrogate) ?? (isDotOrSpace ? TRAILING : null));
+      if (expected === null) {
+        if (!verdict.ok) wrong.push(`${hex(code)}: refused for "${verdict.reason}"`);
+      } else if (verdict.ok) {
+        wrong.push(`${hex(code)}: accepted`);
+      } else if (!expected.test(verdict.reason)) {
+        wrong.push(`${hex(code)}: refused for "${verdict.reason}"`);
+      }
+    }
+
+    expect(wrong).toEqual([]);
+    // The ASCII dot and space, and a few dozen others (the spaces of Unicode, the dot leaders, the
+    // ellipsis, the digits with a full stop): a sweep that found none has proved nothing.
+    expect(endsName).toBeGreaterThan(40);
+  });
+
+  // Each of them after `.git`, its short name and a device: refused, whatever the reason.
+  it('is refused after .git, its short name and a device name', () => {
+    const missed: string[] = [];
+
+    for (let code = 0; code <= LAST_CODE_POINT; code += 1) {
+      const char = String.fromCodePoint(code);
+      const plain = char.normalize('NFKC');
+      if (!plain.endsWith('.') && !plain.endsWith(' ')) continue;
+      for (const name of ['.git', 'git~1', 'GIT~12', 'con', 'NUL']) {
+        if (checkEntryPath(`${name}${char}`).ok) missed.push(`${name} + ${hex(code)}`);
+      }
+    }
+
+    expect(missed).toEqual([]);
   });
 });
 

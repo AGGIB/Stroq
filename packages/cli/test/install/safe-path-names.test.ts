@@ -10,6 +10,7 @@ import { checkEntryPath } from '../../src/install/safe-path.js';
 
 const GIT = /\.git/;
 const DEVICE = /Windows device name/;
+const TRAILING = /ending in a dot or a space/;
 
 const REFUSED: readonly (readonly [what: string, path: string, reason: RegExp])[] = [
   // The dotless i is "i" to the collision rule (upper case I, lower case i), and so it is here.
@@ -33,6 +34,24 @@ const REFUSED: readonly (readonly [what: string, path: string, reason: RegExp])[
     '\uff27\uff29\uff34\uff5e\uff11',
     GIT,
   ],
+  // The end of a name is judged on the narrowed name too: Windows drops a trailing dot or space, and a
+  // program that narrows a name makes a full-width full stop a dot and an ideographic space a space.
+  // `.git` followed by one is `.git.` or `.git `, which opens `.git`.
+  ['.git followed by a full-width full stop', '.git\uff0e', TRAILING],
+  ['.git followed by a one dot leader', '.git\u2024', TRAILING],
+  ['.git followed by an ellipsis', '.git\u2026', TRAILING],
+  ['.git followed by an ideographic space', '.git\u3000', TRAILING],
+  ['.git followed by a no-break space', '.git\u00a0', TRAILING],
+  ['.git followed by an en space', '.git\u2002', TRAILING],
+  ['the folder .git followed by a no-break space', '.git\u00a0/hooks/pre-commit', TRAILING],
+  ['the short name followed by a full-width full stop', 'git~1\uff0e', TRAILING],
+  ['the short name in capitals followed by a one dot leader', 'GIT~1\u2024', TRAILING],
+  ['the short name followed by a digit with a full stop', 'git~\u2488', TRAILING],
+  ['a device name followed by an ideographic space', 'con\u3000', TRAILING],
+  ['a name that ends in an ellipsis', 'notes\u2026', TRAILING],
+  // Two full-width full stops are `..` once made plain.
+  ['two full-width full stops', '\uff0e\uff0e', TRAILING],
+  ['a two dot leader', '\u2025', TRAILING],
   // And still the plain ones, any case.
   ['.GIT', '.GIT', GIT],
   ['GIT~1', 'GIT~1', GIT],
@@ -56,6 +75,13 @@ const ACCEPTED: readonly (readonly [what: string, path: string])[] = [
   ['a dotted I is not an i', '.G\u0130T/x'],
   // A full-width z is a name of its own on every disk that matters; only fixed names are widened.
   ['a full-width letter in an ordinary name', '\uff5a.txt'],
+  // Only the end of a name matters to Windows: a character that is a dot or a space once made plain is
+  // an ordinary character anywhere else in it, and CJK names use them on purpose.
+  ['a full-width full stop inside a name', 'a\uff0eb.md'],
+  ['an ideographic space inside a name', 'a\u3000b'],
+  ['an ideographic space at the start of a name', '\u3000a'],
+  ['an ellipsis inside a name', 'wait\u2026what.md'],
+  ['.git with something after the wide dot', '.git\uff0ex'],
 ];
 
 describe('a name for a fixed name is folded as the collision rule folds', () => {

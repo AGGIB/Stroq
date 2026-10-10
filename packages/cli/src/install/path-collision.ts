@@ -63,10 +63,11 @@ const collisionName = (name: string): string =>
  * One component as it is matched against a fixed name (`.git`, `git~1`, a device). It is folded as
  * `collisionName` folds, after one more step in front: the compatibility forms are made plain (NFKC),
  * so that full-width letters and dots, superscript digits and the circled and mathematical letters
- * are the ordinary ones. A program that converts a name to a narrower character set does the same,
- * and `CON` written wide opens the console. Because it is the same folding with that step added, a
- * name cannot pass the rules for fixed names and be taken for the same name by the collision rule, or
- * the other way round (the dotless i is `i` to both).
+ * are the ordinary ones. A program that converts a name to a narrower character set does the same:
+ * `CON` written wide opens the console, and `.git` followed by a full-width full stop ends in a dot
+ * that Windows drops, so the end of a name is judged on this key too. Because it is the same folding
+ * with that step added, a name cannot pass the rules for fixed names and be taken for the same name by
+ * the collision rule, or the other way round (the dotless i is `i` to both).
  *
  * The collision rule itself stops at NFC: no filesystem treats a full-width `z` and `z` as one name,
  * and CJK names use the full-width forms on purpose.
