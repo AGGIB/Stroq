@@ -6,6 +6,7 @@ import {
   removeBackup,
   type BackupResult,
 } from './backup.js';
+import { replacesCredential } from './json-edit.js';
 import {
   entriesFor,
   readManifest,
@@ -14,7 +15,6 @@ import {
   type Manifest,
   type ManifestEntry,
 } from './manifest.js';
-import { replacesCredential } from './json-edit.js';
 import { linkNotice, linkTarget } from './plan-support.js';
 import { readTargetBytes, sameBytes } from './read.js';
 import { assertUnchanged } from './recheck.js';

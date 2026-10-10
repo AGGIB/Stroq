@@ -55,7 +55,8 @@ export function pathRefusal(file: string, root: string | undefined): PathRefusal
 export function linkTarget(file: string, real: string, root: string | undefined): string | null {
   const asked = resolve(file);
   const top = root === undefined ? null : resolve(root);
-  // The root itself is not "below" itself: a file named as its own root has no way to be unlinked.
+  // A file named as its own root is not measured from itself: its own link would be followed first
+  // and then read as no link at all.
   const below = top !== null && asked !== top && within(asked, top);
   const expected = below ? resolve(resolveRealPath(top), relative(top, asked)) : asked;
   return real === expected ? null : real;
@@ -75,9 +76,9 @@ export function linkNotices(
   return linkTarget(file, real, root) === null ? [] : [linkNotice(file, real)];
 }
 
-/** Paths come from a repository, so their control characters are made visible. */
-const shown = (path: string): string => neutralizeControls(path);
-
-/** The words for a path that is a link: the link, the file it leads to, and where the change goes. */
+/**
+ * The words for a path that is a link: the link, the file it leads to, and where the change goes.
+ * A repository chooses both names, so a control character in either is made visible.
+ */
 export const linkNotice = (file: string, real: string): string =>
-  `this path is a link: ${shown(file)} leads to ${shown(real)}; the change lands there`;
+  `this path is a link: ${neutralizeControls(file)} leads to ${neutralizeControls(real)}; the change lands there`;
