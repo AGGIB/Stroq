@@ -44,9 +44,15 @@ export function isCanonicalIso(value: string): boolean {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 
-/** A glob the scope can anchor: a POSIX root, a drive letter, or a UNC share. */
+/**
+ * A glob the scope can anchor: a POSIX root, a drive letter, or a UNC share, with no `.` or `..`
+ * segment. A glob is matched as it is written; resolving a `..` in one would mean guessing what
+ * a globstar followed by `..` is, and a deny glob that quietly matches less than its author
+ * wrote is the worst kind.
+ */
 export function isAbsoluteGlob(glob: string): boolean {
-  return /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(glob) && !glob.includes('\0');
+  if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(glob) || glob.includes('\0')) return false;
+  return !glob.split(/[\\/]/).some((segment) => segment === '.' || segment === '..');
 }
 
 /**

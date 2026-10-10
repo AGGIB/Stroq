@@ -100,6 +100,20 @@ describe('TaskScopeSchema', () => {
     expect(scopeParses(sampleScope({ write: { allow: [], deny: ['**/.env'] } }))).toBe(false);
   });
 
+  it.each(['/p/../x/**', '/p/./x', '/p/x/..', 'C:/p/../x', 'C:\\p\\..\\x', '/..'])(
+    'rejects the glob %j, which climbs or loops: a glob is matched as written, not resolved',
+    (glob) => {
+      expect(scopeParses(sampleScope({ read: { allow: [], deny: [glob] } }))).toBe(false);
+      expect(scopeParses(sampleScope({ write: { allow: [glob], deny: [] } }))).toBe(false);
+    },
+  );
+
+  it('accepts a glob with dots inside names, which are ordinary', () => {
+    expect(
+      scopeParses(sampleScope({ read: { allow: ['/p/.env*', '/p/a..b/**', '/p/...'], deny: [] } })),
+    ).toBe(true);
+  });
+
   it('accepts absolute globs in both flavours', () => {
     expect(
       scopeParses(sampleScope({ read: { allow: ['C:/proj/**', 'D:\\proj\\**'], deny: [] } })),
