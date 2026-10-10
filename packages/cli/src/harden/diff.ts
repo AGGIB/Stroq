@@ -1,3 +1,4 @@
+import { neutralizeControls } from '@stroq/core';
 import { HardenError } from './types.js';
 
 /**
@@ -49,6 +50,12 @@ export interface DiffOptions {
    * line is hidden if either side asks for it. The hunk headers are the same with or without.
    */
   readonly hide?: { readonly old?: HideLine; readonly new?: HideLine };
+  /**
+   * How the text of a line is put in the diff, for a diff that is going to be printed: given a line
+   * without its line break, the text to show. The default shows it as it is, which is what a diff
+   * of the two texts says; the engine passes a function that makes control characters visible.
+   */
+  readonly show?: (content: string) => string;
 }
 
 /** A diff and how many of its lines were hidden. */
@@ -195,7 +202,12 @@ interface Hunks {
 const bare = (content: string): string => (content.endsWith('\r') ? content.slice(0, -1) : content);
 
 /** The hunks of an edit script: changes with `context` lines around them, close ones joined. */
-function hunks(script: readonly Op[], context: number, hide: DiffOptions['hide']): Hunks {
+function hunks(
+  script: readonly Op[],
+  context: number,
+  hide: DiffOptions['hide'],
+  show: (content: string) => string = (content) => content,
+): Hunks {
   const made: Hunks = { rows: [], hidden: 0 };
   const changed: number[] = [];
   script.forEach((entry, i) => {
@@ -244,19 +256,25 @@ function hunks(script: readonly Op[], context: number, hide: DiffOptions['hide']
         (entry.tag !== '+' && hide?.old?.(oldIndex, seen) === true) ||
         (entry.tag !== '-' && hide?.new?.(newIndex, seen) === true);
       if (hidden) made.hidden += 1;
-      made.rows.push(`${entry.tag}${hidden ? HIDDEN_LINE : content}`);
+      made.rows.push(`${entry.tag}${hidden ? HIDDEN_LINE : show(content)}`);
       if (!terminated) made.rows.push(NO_NEWLINE);
     });
   }
   return made;
 }
 
-/** A path as a label: no control character that could end the line, `/` for `\`, no root. */
+/**
+ * A path as a label: no control character that could end the line, `/` for `\`, no root. A
+ * character that is not a line break but that a terminal would obey (a C1 control, a direction
+ * override) is written out as a visible escape.
+ */
 const labelOf = (path: string): string =>
-  path
-    .replace(/[\u0000-\u001f\u007f]/g, '?')
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '');
+  neutralizeControls(
+    path
+      .replace(/[\u0000-\u001f\u007f]/g, '?')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, ''),
+  );
 
 /**
  * The unified diff from `a` to `b` (`text` is `''` when they are the same text), and how many of
@@ -275,6 +293,7 @@ export function diffText(a: string, b: string, options: DiffOptions): DiffResult
     editScript(splitLines(a), splitLines(b)),
     options.context ?? DEFAULT_CONTEXT,
     options.hide,
+    options.show,
   );
   const rows = [
     options.oldMissing === true ? '--- /dev/null' : `--- a/${label}`,
