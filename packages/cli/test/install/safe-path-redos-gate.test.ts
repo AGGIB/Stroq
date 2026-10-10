@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { cpuNow } from '../../../core/test/cpu-time.js';
+import { findCollisions, findFolderConflicts } from '../../src/install/path-collision.js';
 import {
   checkEntryPath,
-  findCollisions,
-  findFolderConflicts,
   isWellFormed,
   quotePath,
   stripTopComponent,

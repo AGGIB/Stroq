@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { checkEntryPath, findCollisions } from '../../src/install/safe-path.js';
+import { findCollisions } from '../../src/install/path-collision.js';
+import { checkEntryPath } from '../../src/install/safe-path.js';
 
 // There are two questions about a name that a disk answers by folding it: is it a name that opens
 // something dangerous (`.git`, its short name, a device), and is it the same name as another in the

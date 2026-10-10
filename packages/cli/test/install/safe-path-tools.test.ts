@@ -1,11 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import {
-  findCollisions,
-  findFolderConflicts,
-  quotePath,
-  stripTopComponent,
-} from '../../src/install/safe-path.js';
+import { findCollisions, findFolderConflicts } from '../../src/install/path-collision.js';
+import { quotePath, stripTopComponent } from '../../src/install/safe-path.js';
 import { LIMITS } from '../../src/install/types.js';
 import { escapeHtml, safe } from '../../src/replay/html.js';
 import { neutralizeControls } from '../../src/terminal-safe.js';

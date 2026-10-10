@@ -23,13 +23,8 @@
 // of bytes that changed since. The check includes that the tree can be written to every kind of disk,
 // so a reader that makes entries (a directory, a tarball) does not have to remember to ask.
 import { createHash } from 'node:crypto';
-import {
-  checkEntryPath,
-  findCollisions,
-  findFolderConflicts,
-  isWellFormed,
-  quotePath,
-} from './safe-path.js';
+import { findCollisions, findFolderConflicts } from './path-collision.js';
+import { checkEntryPath, isWellFormed, quotePath } from './safe-path.js';
 import { LIMITS, type EntryKind, type Tree, type TreeEntry } from './types.js';
 
 /** The first line of the text that is hashed. A change to the format is a new name, never a quiet edit. */
