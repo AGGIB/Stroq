@@ -1,3 +1,17 @@
+/**
+ * Known gaps, written down and left as they are. This reads the text of a command line, and an agent that can
+ * run arbitrary code can write that text so that it is not read: the sandbox of `stroq run --sandbox`
+ * (`run/sandbox.ts`) is the boundary, and this is one guard in front of it. Not read: the PowerShell call
+ * operator (`& stroq untaint`, `& 'C:\npm\stroq.cmd' untaint`) and `cmd /c stroq …`; a subcommand that is not
+ * in the command line, supplied on the input of `xargs` or `parallel` (`echo untaint | xargs stroq`); the
+ * commands in a script run behind a launcher that is spelled with a path, `npx @stroq/cli` or `node …/index.js`
+ * (`/usr/local/bin/stroq run -- bash x.sh`), because the readers of scripts know `stroq` as a launcher by its
+ * bare name alone (`shell-wrappers.ts`); and arithmetic that shifts (`echo $((1<<3))`), whose `<<` `joinText`
+ * takes for a heredoc, so that the lines after it are folded into the line of the command that stands there.
+ * And outside this file: the hook entries in the host's own configuration (`settings.json`, `hooks.json`, the
+ * plugin cache) are writable in the sandbox, so a program that none of this reads can switch the firewall off
+ * from inside it.
+ */
 import { optionTakesValue } from './shell-wrappers.js';
 import type { FunctionDefinition } from './inlined-functions.js';
 import { joinText } from './join-text.js';
@@ -16,7 +30,7 @@ import {
   isExemptionFlag,
   subcommandChangesState,
 } from './stroq-commands.js';
-import { resolve, withoutRedirects } from './shell-words.js';
+import { REDIRECT, resolve, withoutRedirects } from './shell-words.js';
 
 /**
  * Stroq's own commands that change what it enforces: `untaint` clears a session's
@@ -25,7 +39,9 @@ import { resolve, withoutRedirects } from './shell-words.js';
  * `~/.stroq` — so without this an agent could run them through Bash, in a tainted
  * session, and undo the decision that was about to stop it. They are the user's to
  * run, outside the agent. Asking how one works (`--help`, `-h`), `--dry-run`, `trust`
- * with no file and every reading command stay open.
+ * with no file and every reading command stay open. A flag asks only where it is an
+ * argument of the command the agent typed: not behind a launcher, not in a comment, not
+ * in the target of a redirect, not in a command line that holds the body of a heredoc.
  *
  * The commands that are still to come are listed ahead of their code, so that there is
  * no release in which an agent can run one: `harden apply|undo|forget` edit an agent's
@@ -45,7 +61,8 @@ import { resolve, withoutRedirects } from './shell-words.js';
  * `sh -c` or `eval`, and a heredoc fed to a shell, keep theirs.
  */
 export function stroqStateSignals(command: string): string[] {
-  return stateSignalsOf(splitSegments(joinText(command)));
+  const folded = joinText(command);
+  return stateSignalsOf(splitSegments(folded.text), !folded.body);
 }
 
 /**
@@ -56,9 +73,15 @@ const NAMES_STROQ = /stroq|packages[\\/]cli[\\/]dist[\\/]index\.js/i;
 const namesStroq = (text: string): boolean =>
   NAMES_STROQ.test(text) || (/['"\\$`]/.test(text) && NAMES_STROQ.test(flattened(text)));
 
-function stateSignalsOf(segments: readonly string[]): string[] {
+/**
+ * `exempting`: whether a flag that asks for help may open a command at all. It may not where the body of a
+ * heredoc was folded into the lines (`Folded.body`): its words stand beside the words of the commands there,
+ * and a flag among them can be either's.
+ */
+function stateSignalsOf(segments: readonly string[], exempting: boolean): string[] {
   const assigned = assignments(segments);
-  return segments.some((segment) => runsStateCommand(segment, assigned))
+  const reading: Reading = { depth: 0, exempting };
+  return segments.some((segment) => runsStateCommand(segment, assigned, reading))
     ? ['stroq-state-change']
     : [];
 }
@@ -78,17 +101,18 @@ export function stroqStateReading(
   // A text that none of the texts read from the command names is no command of Stroq: a name that a variable
   // is given by a substitution that prints it is written out in the text that the variable is replaced in.
   if (!namesStroq(command) && !split.texts.some(namesStroq)) return { signals: [], unread: false };
-  const folded = joinText(command);
+  const { text: folded, body } = joinText(command);
   // A text that is an approximation of a program (a script, read with its variables replaced) was not read for
   // its functions, and is for this: a function that wraps `stroq` is a way to run it, and it asks nothing.
-  if (functions === null) return { signals: stateSignalsOf(splitSegments(folded)), unread: false };
-  if (folded === command) return { signals: stateSignalsOf(split.segments), unread: false };
+  if (functions === null)
+    return { signals: stateSignalsOf(splitSegments(folded), !body), unread: false };
+  if (folded === command) return { signals: stateSignalsOf(split.segments, !body), unread: false };
   // What the folding changes is text: a string, a document that is written to a file. A function that stands in
   // it is no function of the shell (a plan of a few hundred lines has dozens), so the folded text is read for
   // functions only where the command has some of its own, as the command was read for them.
   const has = split.functions.length > 0 || (functions ?? []).length > 0;
   const own = splitCommand(folded, has ? functions : null, split.room);
-  return { signals: stateSignalsOf(own.segments), unread: own.functionsUnread };
+  return { signals: stateSignalsOf(own.segments, !body), unread: own.functionsUnread };
 }
 
 const ASSIGNMENT = /^([A-Za-z_]\w*)=(\S*)$/;
@@ -105,13 +129,32 @@ function assignments(segments: readonly string[]): ReadonlyMap<string, string> {
   return found;
 }
 
-/** The segment's words with quotes removed and backslashes kept: Windows paths survive. */
-const words = (segment: string): string[] =>
-  segment
-    .trim()
-    .split(/\s+/)
-    .map((word) => word.replace(/["']/g, ''))
-    .filter((word) => word !== '');
+const BLANK = /\s/;
+
+/**
+ * The segment's words, split at the blanks that stand outside a quote, with the quotes taken off and the
+ * backslashes kept: Windows paths survive (`C:\npm\stroq.cmd`), which the reader of the shell cannot say, as it
+ * takes a backslash for an escape. A quoted string is one word whatever it holds, so `"x -h"` is no `-h`. A quote
+ * that is not closed holds the rest of the segment, as the shell has it.
+ */
+function words(segment: string): string[] {
+  const found: string[] = [];
+  let word = '';
+  let quote = '';
+  for (let i = 0; i < segment.length; i += 1) {
+    const c = segment.charAt(i);
+    if (quote !== '') {
+      if (c === quote) quote = '';
+      else word += c;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (BLANK.test(c)) {
+      if (word !== '') found.push(word);
+      word = '';
+    } else word += c;
+  }
+  if (word !== '') found.push(word);
+  return found;
+}
 
 const isStroq = (word: string): boolean =>
   baseName(word) === 'stroq' || STROQ_PACKAGE.test(word) || STROQ_ENTRY.test(word);
@@ -226,25 +269,36 @@ const LAUNCHED_BY_STROQ: ReadonlySet<string> = new Set(['stroq']);
  */
 const MAX_LAUNCHER_DEPTH = 4;
 
+/** How a segment is read: behind how many launchers it stands, and whether a flag may open the command. */
+interface Reading {
+  readonly depth: number;
+  /**
+   * A flag that asks for help (`--help`, `-h`, `--dry-run`) keeps a command open only in the command the agent
+   * typed, so not behind a launcher, and not where the lines hold a heredoc body that was folded
+   * (`Folded.body`).
+   */
+  readonly exempting: boolean;
+}
+
 /**
  * Whether a segment runs a command of Stroq that changes what it enforces. Read by its own words, past what
  * stands before a command (see `afterOpeners`), and by what the shell reads of it (`resolve`): past a
  * wrapper that this list does not know (`xargs`, `watch`, `stdbuf`, `builtin exec`), a redirect that stands
  * before the command (`> /dev/null stroq untaint`) and a function head. A segment that has no `stroq` in
- * it and no expansion that could make one is not read that way. `depth` is how many launchers it stands
- * behind (see `changesState`).
+ * it and no expansion that could make one is not read that way. `reading` says how many launchers it stands
+ * behind and whether a flag may open it (see `changesState`).
  */
 function runsStateCommand(
   segment: string,
   assigned: ReadonlyMap<string, string>,
-  depth = 0,
+  reading: Reading,
 ): boolean {
-  if (changesState(afterOpeners(words(segment)), assigned, depth)) return true;
+  if (changesState(afterOpeners(words(segment)), assigned, reading)) return true;
   if (!namesStroq(segment) && !/[$`]/.test(segment)) return false;
   const found = resolve(segment, LAUNCHED_BY_STROQ);
   if (found === null || found.word === '') return false;
   const rest = withoutRedirects(found.args).map((word) => word.value);
-  return changesState([found.word, ...rest], assigned, depth);
+  return changesState([found.word, ...rest], assigned, reading);
 }
 
 /**
@@ -258,11 +312,15 @@ function runsStateCommand(
  * behind a launcher, and launchers behind launchers are followed to `MAX_LAUNCHER_DEPTH`. A string handed to a
  * shell (`stroq run -- sh -c '…'`) is read with the segments of the command, as it is without a launcher.
  *
- * No exemption flag counts behind a launcher (`depth` above 0), whoever wrote it where. The operand is put
+ * No exemption flag counts behind a launcher (`Reading.exempting`), whoever wrote it where. The operand is put
  * together again from words that were split on blanks with their quotes taken off, so an argument that holds a
  * flag among other words (`stroq run -- stroq uninstall --client "x -h"`) comes back as a flag that the program
  * is never given, and a command that runs would be read as a request for help. A request for help is made to
  * the command the agent typed, and `stroq prove --help` is open without the launcher.
+ *
+ * And a flag counts only among the arguments of the command, which the words of a line are not all: what a
+ * comment holds (`stroq untaint --all # --help`) is dropped by the shell, and the body of a heredoc is text
+ * that is given to a command on its input (`Folded.body`). In both the command runs.
  *
  * What is not followed: a program that an expansion makes into Stroq, where the command does not set it
  * (`stroq run -- $PROGRAM prove`, with `PROGRAM` from the environment), as for any command; and the body of a
@@ -274,7 +332,7 @@ function runsStateCommand(
 function changesState(
   ws: readonly string[],
   assigned: ReadonlyMap<string, string>,
-  depth = 0,
+  reading: Reading,
 ): boolean {
   const at = stroqAt(ws, assigned);
   if (at === -1) return false;
@@ -288,12 +346,35 @@ function changesState(
   const own = (dashes === -1 ? words : words.slice(0, dashes)).filter(
     (word) => word !== '--' && word !== '',
   );
-  if (depth === 0 && own.some(isExemptionFlag)) return false;
+  if (reading.exempting && asksForHelp(own)) return false;
   if (sub === undefined) return false;
   if (LAUNCHERS.has(sub)) {
     const operand = dashes === -1 ? [] : after.slice(dashes + 1);
     if (operand.length === 0) return false;
-    return depth >= MAX_LAUNCHER_DEPTH || runsStateCommand(operand.join(' '), assigned, depth + 1);
+    return (
+      reading.depth >= MAX_LAUNCHER_DEPTH ||
+      runsStateCommand(operand.join(' '), assigned, { depth: reading.depth + 1, exempting: false })
+    );
   }
   return subcommandChangesState(sub, own);
+}
+
+/**
+ * Whether the arguments of a command ask for help or for a dry run. Not every word of a line is an argument.
+ * What follows a word that begins with `#` is a comment, which the shell drops. The target of a redirect is a
+ * file, not an argument (`stroq untaint --all > --help` writes one): where a word is the operator alone, the
+ * word after it is the target. A quoted `"#x"` or `">"` is taken for either as well, which can only keep a
+ * command that is asked about asked about: the quotes are off the words, and which of them were quoted is
+ * no longer known.
+ */
+function asksForHelp(own: readonly string[]): boolean {
+  for (let i = 0; i < own.length; i += 1) {
+    const word = own[i] as string;
+    if (word.startsWith('#')) return false;
+    const redirect = REDIRECT.exec(word);
+    if (redirect !== null) {
+      if (redirect[0].length === word.length) i += 1;
+    } else if (isExemptionFlag(word)) return true;
+  }
+  return false;
 }

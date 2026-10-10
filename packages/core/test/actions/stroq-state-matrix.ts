@@ -63,3 +63,52 @@ export const QUOTED_BEHIND_LAUNCHERS: readonly string[] = [
   'npx @stroq/cli run -- npx @stroq/cli trust "x -h"',
   'stroq run -- stroq run --agent "x -h" -- stroq uninstall',
 ];
+
+/**
+ * Text put after a command line that a reader taking every blank-separated word of the line for
+ * an argument would read as a request for help (`--help`, `-h`, `--dry-run`), and that is none:
+ * a comment, the body of a heredoc, the target of a redirect, a quoted argument that holds the
+ * flag among other words. After a command that changes state, none of them turns it into a
+ * request for help, whatever the spelling of the command is.
+ */
+export type Cover = readonly [name: string, cover: (line: string) => string];
+
+export const COVERS: readonly Cover[] = [
+  ['a comment holding --help', (l) => `${l} # --help`],
+  ['a comment holding -h', (l) => `${l} # -h`],
+  ['a comment holding --dry-run', (l) => `${l} # --dry-run`],
+  ['a comment glued to its flag', (l) => `${l} #--help`],
+  ['a comment after a tab', (l) => `${l}\t# -h`],
+  ['a comment with words before the flag', (l) => `${l} # to see how it works, add --help`],
+  ['a heredoc whose body is --help', (l) => `${l} <<EOF\n--help\nEOF`],
+  ['a quoted heredoc whose body is -h', (l) => `${l} <<'EOF'\n-h\nEOF`],
+  ['a heredoc of stripped tabs whose body is --dry-run', (l) => `${l} <<-EOF\n\t--dry-run\n\tEOF`],
+  ['a heredoc whose body has the flag among words', (l) => `${l} <<EOF\nsee --help or -h\nEOF`],
+  ['a here-string of the flag', (l) => `${l} <<< --help`],
+  ['a redirect to a file called like the flag', (l) => `${l} > --help`],
+  ['a redirect of errors to a file called like the flag', (l) => `${l} 2> -h`],
+  ['a double-quoted argument that holds the flag', (l) => `${l} "x --help"`],
+  ['a single-quoted argument that holds the flag', (l) => `${l} 'x -h'`],
+];
+
+/**
+ * Commands that run and change state, and that were let through as a request for help (the review of
+ * 2026-10-10) because a flag was read in text that is no argument of the command: a comment, the body of a
+ * heredoc.
+ */
+export const FLAG_IN_NO_ARGUMENT: readonly string[] = [
+  'stroq untaint --all # --help',
+  'stroq untaint --all # -h',
+  'stroq untaint --all # --dry-run',
+  'stroq init # --dry-run',
+  'stroq uninstall # -h',
+  'stroq prove # --help',
+  'stroq run -- stroq untaint --all # --help',
+  'stroq untaint --all <<EOF\n--help\nEOF',
+];
+
+/** Every command that the reviews ran past the gate by letting it read a flag where there is no argument. */
+export const COVERED_BY_TEXT: readonly string[] = [
+  ...QUOTED_BEHIND_LAUNCHERS,
+  ...FLAG_IN_NO_ARGUMENT,
+];

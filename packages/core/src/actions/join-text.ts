@@ -1,3 +1,4 @@
+import { startsComment } from './shell-skip.js';
 import { baseName } from './stroq-commands.js';
 
 /**
@@ -24,12 +25,28 @@ interface Heredoc {
   readonly script: boolean;
 }
 
+export interface Folded {
+  /** The command, with those line breaks folded to spaces. */
+  readonly text: string;
+  /**
+   * The body of a heredoc that no shell is given was folded into a line. Its words now stand beside the
+   * words of the commands on that line, which may be commands that are cut away from the operator by a `;`,
+   * a `&&` or a pipe, and they are the arguments of none of them.
+   */
+  readonly body: boolean;
+}
+
 /**
  * The command with the newlines of its text folded to spaces: inside a quoted string
  * that is not a script, and inside a heredoc whose command is not a shell. One pass,
  * no pattern that can backtrack: the classifier's ReDoS gate runs over this too.
+ *
+ * A comment is skipped whole, as a shell skips it: an apostrophe or a quote in it opens nothing, and a
+ * `<<` in it opens no heredoc. Taken for the start of a quote, the apostrophe of `# it's` folded the
+ * lines after it into the comment, and the command on the next line was never read as one. A here-string
+ * (`<<<`) is no heredoc either, and its words are no delimiter that swallows the lines after them.
  */
-export function joinText(command: string): string {
+export function joinText(command: string): Folded {
   let out = '';
   let quote: { readonly char: string; readonly script: boolean } | null = null;
   const pending: Heredoc[] = [];
@@ -37,12 +54,14 @@ export function joinText(command: string): string {
   let body: Heredoc | null = null;
   let bodyLine = '';
   let lineStart = 0;
+  let folded = false;
   for (let i = 0; i < command.length; i += 1) {
     const c = command.charAt(i);
     if (body !== null) {
       if (c !== '\n') {
         bodyLine += c;
         out += c;
+        folded ||= !body.script;
         continue;
       }
       const line = body.stripTabs ? bodyLine.replace(/^\t+/, '') : bodyLine;
@@ -71,12 +90,24 @@ export function joinText(command: string): string {
       i += 1;
       continue;
     }
+    if (c === '#' && startsComment(command, i, 0)) {
+      const end = command.indexOf('\n', i);
+      const stop = end === -1 ? command.length : end;
+      out += command.slice(i, stop);
+      i = stop - 1;
+      continue;
+    }
     if (c === '"' || c === "'") {
       quote = { char: c, script: RUNS_STRING.test(command.slice(Math.max(lineStart, i - 40), i)) };
       out += c;
       continue;
     }
-    if (c === '<' && command.charAt(i + 1) === '<' && command.charAt(i + 2) !== '<') {
+    if (
+      c === '<' &&
+      command.charAt(i + 1) === '<' &&
+      command.charAt(i + 2) !== '<' &&
+      command.charAt(i - 1) !== '<'
+    ) {
       // Only the start of the line is needed, for its command word: slicing the whole
       // line for each of many operators on it was quadratic (47 s on 256 KiB).
       const lineHead = command.slice(lineStart, Math.min(i, lineStart + 256));
@@ -96,7 +127,7 @@ export function joinText(command: string): string {
     }
     out += c;
   }
-  return out;
+  return { text: out, body: folded };
 }
 
 /** The heredoc whose operator ends at `from`, and where its delimiter word ends. */
