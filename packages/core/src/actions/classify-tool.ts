@@ -1,35 +1,13 @@
 import type { ActionClass, ToolResources } from '../types.js';
-import { classifyCommand, type CommandClassification } from './classify-bash.js';
-import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
-import { monitorSocket, monitorSocketHost, type MonitorSocket } from './monitor-socket.js';
-import { isTooCostly } from './reading-cost.js';
-import { splitCommand } from './shell-segments.js';
+import type { CommandClassification } from './classify-bash.js';
+import { classifyShellTool } from './classify-shell-tool.js';
+import { classifyWrittenText, writtenTextFacts } from './classify-written.js';
+import { NONE, mergeClassifications } from './merge-classifications.js';
 import { isShellTool } from './shell-tools.js';
-import { commandSegments } from './shell-top-level.js';
-import {
-  agentDefinitionHasHooks,
-  isAgentDefinitionPath,
-  isMcpConfigPath,
-  mcpConfigRunsCode,
-} from './agent-config.js';
-import {
-  editorAutorunText,
-  iniRisk,
-  isEditorAutorunPath,
-  isGitConfigPath,
-  isGitExecPath,
-  type GitConfigRisk,
-} from './git-exec.js';
-import {
-  commandWrittenFiles,
-  isPersistencePath,
-  isSshConfigPath,
-  sshConfigRunsCommand,
-} from './persistence.js';
-import { decodePrograms, newBudget } from './shell-input.js';
-import { classifyReferencedScripts } from './script-exec.js';
+import { isGitExecPath } from './git-exec.js';
+import { isPersistencePath } from './persistence.js';
 import { resolveThroughLinks } from './symlink.js';
-import { commandTexts, writtenTexts } from './written-text.js';
+import { writtenTexts } from './written-text.js';
 import { decodePercentRuns } from '../normalize/percent-runs.js';
 import { normalizePathForMatch } from './normalize-path.js';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
@@ -503,87 +481,6 @@ function addOne(value: string, dest: boolean, state: ScanState): void {
   state.entries.push({ path: value, dest, weak: false });
 }
 
-const NONE: ToolClassification = { classes: [], hosts: [], signals: [] };
-
-function mergeClassifications(...items: readonly ToolClassification[]): ToolClassification {
-  const mcp = items.find((item) => item.mcp !== undefined)?.mcp;
-  const scripts = items.flatMap((item) => item.scripts ?? []);
-  return {
-    classes: [...new Set(items.flatMap((item) => item.classes))],
-    hosts: [...new Set(items.flatMap((item) => item.hosts))],
-    signals: [...new Set(items.flatMap((item) => item.signals))],
-    ...(mcp === undefined ? {} : { mcp }),
-    ...(scripts.length === 0 ? {} : { scripts }),
-  };
-}
-
-/**
- * What the TEXT written to `path` is, beyond where it goes: git configuration that runs a
- * command, an editor task that runs on opening the folder, an SSH client configuration
- * that runs a program, an MCP server that starts a shell, an agent definition with hooks.
- * The path rules cannot see these, and the pages that steer an agent into writing them
- * are the ones the scan calls clean.
- *
- * Each string a write carries is read on its own: joined, a harmless `description` beside
- * the content diluted a config that was otherwise recognised.
- */
-function classifyWrittenText(path: string, facts: WrittenTextFacts | null): ToolClassification {
-  if (facts === null) return NONE;
-  const { bodies } = facts;
-  const classes: ActionClass[] = [];
-  const signals: string[] = [];
-  const found = (test: (body: string) => boolean): boolean => bodies.some(test);
-  if (facts.gitConfig !== null && isGitConfigPath(path)) {
-    if (facts.gitConfig === 'exec') {
-      classes.push('config.git_exec');
-      signals.push('git-exec-config-text');
-    } else {
-      classes.push('config.persistence');
-      signals.push(
-        facts.gitConfig === 'unread' ? 'git-config-text-unread' : 'git-config-runs-program',
-      );
-    }
-  }
-  // The path is asked first: a call can name thousands of paths and carry thousands of
-  // strings, and only a file of one of these kinds is read for its text.
-  if (isEditorAutorunPath(path) && found((body) => editorAutorunText(path, body))) {
-    classes.push('config.persistence');
-    signals.push('editor-autorun-task');
-  }
-  if (isSshConfigPath(path) && found((body) => sshConfigRunsCommand(path, body))) {
-    classes.push('config.persistence');
-    signals.push('ssh-config-command');
-  }
-  if (isMcpConfigPath(path) && found((body) => mcpConfigRunsCode(path, body))) {
-    classes.push('config.instructions_payload');
-    signals.push('mcp-config-runs-code');
-  }
-  if (isAgentDefinitionPath(path) && found((body) => agentDefinitionHasHooks(path, body))) {
-    classes.push('config.instructions_payload');
-    signals.push('agent-definition-hooks');
-  }
-  return { classes, hosts: [], signals };
-}
-
-/**
- * What about the written texts does not depend on where they are written, worked out once:
- * a call can name thousands of paths, and the text is the same for each. Null for no text.
- */
-interface WrittenTextFacts {
-  readonly bodies: readonly string[];
-  readonly gitConfig: GitConfigRisk;
-}
-
-const GIT_RISK_ORDER: readonly GitConfigRisk[] = ['exec', 'program', 'unread'];
-
-function writtenTextFacts(texts: readonly string[]): WrittenTextFacts | null {
-  const bodies = texts.filter((text) => text !== '');
-  if (bodies.length === 0) return null;
-  const risks = new Set(bodies.map(iniRisk));
-  const gitConfig = GIT_RISK_ORDER.find((risk) => risks.has(risk)) ?? null;
-  return { bodies, gitConfig };
-}
-
 /**
  * A file tool's path judged as written, as read through any symlink on the way, and by
  * what is being written to it. The literal spelling and the real target are both
@@ -608,23 +505,6 @@ function classifyFilePath(
     through,
     added.length > 0 ? { classes: [], hosts: [], signals: ['via-symlink'] } : NONE,
   );
-}
-
-/**
- * What a shell command writes into a file whose contents are the point: the command is
- * its own text (a heredoc body is its lines) and so is each quoted string in it, so
- * `cat > .mcp.json <<EOF …` and `echo '[core] fsmonitor = x' > .alt/config` are read as
- * the `Write` of the same text would be.
- */
-function classifyCommandWrites(
-  command: string,
-  segments: readonly string[],
-  cwd: string,
-): ToolClassification {
-  const files = commandWrittenFiles(segments, cwd);
-  if (files.length === 0) return NONE;
-  const facts = writtenTextFacts(commandTexts(command));
-  return mergeClassifications(...files.map((file) => classifyWrittenText(file, facts)));
 }
 
 function classifyPaths(entries: readonly PathEntry[], write: boolean): ToolClassification {
@@ -737,97 +617,16 @@ function classifyFetch(toolInput: Readonly<Record<string, unknown>>): ToolClassi
   return { classes: ['network.fetch'], hosts: host ? [host] : [], signals: ['web-fetch'] };
 }
 
-// A tool that runs a shell command (see `shell-tools.ts`) is judged by what the command
-// does; `classifyCommand` reads PowerShell syntax as well as POSIX.
-const UNREADABLE_COMMAND: ToolClassification = {
-  classes: ['shell.unparsed'],
-  hosts: [],
-  signals: ['shell-command-unreadable'],
-};
-
-const COMMAND_TOO_LARGE: ToolClassification = {
-  classes: ['shell.unparsed'],
-  hosts: [],
-  signals: ['command-too-large'],
-};
-
-/**
- * Monitor's WebSocket mode (see `monitor-socket.ts`) has no command to read, but it is not
- * nothing: it is an outbound connection to an address the model chose. It is network-shaped
- * so that the secret guard, which runs on those alone, looks inside it, and a tainted
- * session is denied it. It keeps the class of a command Stroq could not read, so it is still
- * asked about as it was: this only adds, and no session is allowed more than it was.
- */
-function classifySocket(socket: MonitorSocket): ToolClassification {
-  const host = monitorSocketHost(socket.url);
-  return {
-    classes: ['shell.network', ...UNREADABLE_COMMAND.classes],
-    hosts: host === null ? [] : [host],
-    signals: [...UNREADABLE_COMMAND.signals, 'monitor-websocket'],
-  };
-}
-
-/** The reading of the command went on past the clock (see `deadline.ts`): it is asked about, not read. */
-const READING_TOOK_TOO_LONG: ToolClassification = {
-  classes: ['shell.unparsed'],
-  hosts: [],
-  signals: ['reading-took-too-long'],
-};
-
 export function classifyTool(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): ToolClassification {
-  if (isShellTool(toolName)) {
-    const command = toolInput['command'];
-    // A shell tool whose command Stroq cannot read is not an empty command: a host
-    // that renamed the field would otherwise have every call allowed without a word.
-    if (typeof command !== 'string') {
-      const socket = toolName === 'Monitor' ? monitorSocket(toolInput) : null;
-      return socket === null ? UNREADABLE_COMMAND : classifySocket(socket);
-    }
-    if (isTooCostly(command)) return COMMAND_TOO_LARGE;
-    // All of what follows is one reading, and the clock runs from its first step: the split and the decoding
-    // of the programs are made here, before `classifyCommand` begins its own, and are most of the work.
-    return withDeadline(
-      READING_DEADLINE_MS,
-      () => classifyShellCommand(command, cwd),
-      () => READING_TOOK_TOO_LONG,
-    );
-  }
+  if (isShellTool(toolName)) return classifyShellTool(toolName, toolInput, cwd);
   if (WRITE_TOOLS.has(toolName)) return classifyFilePath(toolInput, cwd, true);
   if (toolName === 'Read') return classifyFilePath(toolInput, cwd, false);
   if (toolName === 'Grep') return classifyGrep(toolInput);
   if (toolName === 'WebFetch') return classifyFetch(toolInput);
   if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput, cwd);
   return EMPTY;
-}
-
-function classifyShellCommand(command: string, cwd: string): ToolClassification {
-  // The programs the shells in it are handed on standard input (`echo X | bash`), at every
-  // level of nesting and within one budget: read once, for the classes and for the scripts.
-  const split = splitCommand(command);
-  const budget = newBudget(command.length);
-  const decoded = decodePrograms(command, budget, split);
-  const typed = classifyCommand(command, cwd, 0, { decoded, budget, split });
-  // Cut where the shell cuts: a segment cut out of a quoted string runs nothing
-  // (`grep "x\|PIN=" deploy.sh`), and a quoted `|` does not take a file from its command.
-  // The programs decoded from it run commands too, and one of them may name a script.
-  const segments = [
-    ...commandSegments(command, split),
-    ...decoded.texts.flatMap((text) => commandSegments(text, splitCommand(text, null))),
-  ];
-  // A script the command runs is read as the commands it contains: the hook sees
-  // `bash cleanup.sh`, and what that deletes is in the file (see `script-exec.ts`).
-  const scriptTexts: string[] = [];
-  const scripts = classifyReferencedScripts(segments, cwd, scriptTexts, decoded.files);
-  return mergeClassifications(
-    typed,
-    ...(scripts === null ? [] : [scripts]),
-    classifyCommandWrites(command, segments, cwd),
-    ...(scriptTexts.length === 0
-      ? []
-      : [{ classes: [], hosts: [], signals: [], scripts: scriptTexts }]),
-  );
 }
