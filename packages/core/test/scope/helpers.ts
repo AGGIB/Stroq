@@ -70,3 +70,6 @@ export function testKeys(): KeyPair {
   shared ??= generateKeyPair();
   return shared;
 }
+
+/** The bytes of a signed permit as the store would hold them. */
+export const rawOf = (signed: unknown): string => JSON.stringify(signed);
