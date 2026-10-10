@@ -38,6 +38,9 @@ describe('two names that are one name on some disks', () => {
     ['Unicode composition', 'caf\u00e9.txt', 'cafe\u0301.txt'],
     ['letter case and composition', '\u00c9.txt', 'e\u0301.txt'],
     ['a sharp s and ss', 'stra\u00dfe.md', 'STRASSE.md'],
+    ['a capital sharp s and a sharp s', '\u1e9e.md', '\u00df.md'],
+    ['a capital sharp s and ss', '\u1e9e.md', 'ss.md'],
+    ['a capital sharp s in a word and ss', 'proce\u1e9e.md', 'process.md'],
     ['the two sigmas', '\u03b1\u03c3', '\u03b1\u03c2'],
     ['a dotless i and i', 'i.md', '\u0131.md'],
   ])('%s', (_what, one, other) => {

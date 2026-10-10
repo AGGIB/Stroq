@@ -69,6 +69,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['Hangul jamo, which compose', repeat('\u1100\u1161\u11a8')],
   // Characters that change length when they are folded.
   ['sharp s', repeat('\u00df')],
+  // The one letter that the fold needs a second round for.
+  ['capital sharp s', repeat('\u1e9e')],
   ['final sigma', repeat('\u03a3')],
   ['capital I with a dot', repeat('\u0130')],
   ['n with a preceding apostrophe', repeat('\u0149')],
@@ -161,6 +163,7 @@ describe('a tree of hostile names stays linear in the number of entries', () => 
     ['marks of alternating classes', (i) => `${name(i)}e${'\u0301\u0316'.repeat(50)}`],
     ['marks between letters', (i) => `${name(i)}${'a\u0301\u0316'.repeat(30)}`],
     ['names that change length when folded', (i) => `${name(i)}${'\u00df\u03a3\u0130'.repeat(20)}`],
+    ['names that need a second round of the fold', (i) => `${name(i)}${'\u1e9e'.repeat(60)}`],
     ['the deepest folders', (i) => `${'d/'.repeat(LIMITS.maxDepth - 2)}${name(i)}`],
     ['a folder to each entry', (i) => `${name(i)}/${name(i)}`],
   ];

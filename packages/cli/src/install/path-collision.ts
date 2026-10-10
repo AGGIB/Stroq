@@ -21,15 +21,39 @@ import { LIMITS } from './types.js';
  */
 const FOLDED_UNITS = LIMITS.maxPathBytes;
 
+/** One round of the fold: NFC, upper case, lower case, NFC. */
+const foldOnce = (text: string): string =>
+  text.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+
+/**
+ * The most rounds of the fold a name is given. A name needs two at most: the capital sharp s (U+1E9E)
+ * becomes the sharp s (U+00DF) in the first and "ss" in the second, and every other code point settles
+ * in one (`path-collision.test.ts` asks about all of them). The third round is the one that shows the
+ * second changed nothing.
+ */
+const FOLD_ROUNDS = 3;
+
 /**
  * A name as a filesystem that ignores letter case and Unicode form would see it (NTFS, the default
  * APFS, HFS+). Composed and decomposed letters are one (NFC). Case is folded through upper case and
  * back, which joins more than lower-casing alone does (the sharp s with "ss", the two sigmas, the
  * dotless i with "i"): a tree that would lose a file on a filesystem that folds that far is refused
  * on all of them.
+ *
+ * The fold is repeated until a round changes nothing. A key that can be folded again is not a key: the
+ * capital sharp s folds to the sharp s in one round and to "ss" in two, so with one round it would be
+ * kept apart from both the sharp s and "ss", which a disk that folds case joins with it, and a tree
+ * that holds the two would lose a file there.
  */
-const foldCase = (text: string): string =>
-  text.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+export function foldCase(text: string): string {
+  let folded = text;
+  for (let round = 0; round < FOLD_ROUNDS; round += 1) {
+    const next = foldOnce(folded);
+    if (next === folded) break;
+    folded = next;
+  }
+  return folded;
+}
 
 /** One component as the collision rule sees it. */
 const collisionName = (name: string): string =>

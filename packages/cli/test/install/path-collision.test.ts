@@ -1,6 +1,74 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { findCollisions, findFolderConflicts } from '../../src/install/path-collision.js';
+import { findCollisions, findFolderConflicts, foldCase } from '../../src/install/path-collision.js';
 import { LIMITS } from '../../src/install/types.js';
+
+const LAST_CODE_POINT = 0x10ffff;
+const hex = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+
+// A disk compares names by a key, and a key is only a key if folding it again changes nothing: if
+// `fold(fold(x))` is not `fold(x)`, two names that a disk joins can be given two keys, and the tree
+// holds both. Upper-casing and lower-casing in turn is not such a key for one letter: the capital sharp
+// s (U+1E9E) becomes the sharp s (U+00DF) the first time and "ss" only the second time.
+describe('foldCase', () => {
+  const CAPITAL_SHARP_S = '\u1e9e';
+  const SHARP_S = '\u00df';
+
+  it('makes the capital sharp s, the sharp s and ss one key, in any case', () => {
+    const keys = new Set(
+      [CAPITAL_SHARP_S, SHARP_S, 'ss', 'SS', 'Ss', 'sS'].map((text) => foldCase(text)),
+    );
+
+    expect([...keys]).toEqual(['ss']);
+  });
+
+  it('keeps the letters of a word that holds the capital sharp s joined to the word with ss', () => {
+    expect(foldCase(`proce${CAPITAL_SHARP_S}`)).toBe(foldCase('process'));
+    expect(foldCase(`STRA${CAPITAL_SHARP_S}E`)).toBe(foldCase('strasse'));
+  });
+
+  // Every code point, once. The fold is asked for its own answer again, and for the key of the lower
+  // case and of the upper case of the letter: a key that keeps a letter apart from its own lower case
+  // joins less than lower-casing does, and a disk that lower-cases would then join what it keeps apart.
+  it('is its own fixed point, and joins a letter with its lower and upper case, for every code point', () => {
+    const notFixed: string[] = [];
+    const apartFromLower: string[] = [];
+    const apartFromUpper: string[] = [];
+    let changed = 0;
+
+    for (let code = 0; code <= LAST_CODE_POINT; code += 1) {
+      const char = String.fromCodePoint(code);
+      const key = foldCase(char);
+      if (key !== char) changed += 1;
+      if (foldCase(key) !== key) notFixed.push(hex(code));
+      if (foldCase(char.toLowerCase()) !== key) apartFromLower.push(hex(code));
+      if (foldCase(char.toUpperCase()) !== key) apartFromUpper.push(hex(code));
+    }
+
+    expect(notFixed).toEqual([]);
+    expect(apartFromLower).toEqual([]);
+    expect(apartFromUpper).toEqual([]);
+    // The fold changes a few thousand code points; a sweep that found none has proved nothing.
+    expect(changed).toBeGreaterThan(1_000);
+  });
+
+  // The characters that the fold does something unusual to (they change length, change class, or
+  // compose with what comes before), in the combinations that could make one pass not enough.
+  it('is its own fixed point on strings made of the characters it treats unusually', () => {
+    const unusual = fc.constantFrom(
+      ...['\u1e9e', '\u00df', 's', 'S', '\u03a3', '\u03c3', '\u03c2', '\u0130', '\u0131', 'i', 'I'],
+      ...['\u0149', '\ufb03', '\u01c5', '\u1f88', '\u0301', '\u0307', '\u0345', 'e', 'E', '.', '/'],
+    );
+    const text = fc.array(unusual, { maxLength: 8 }).map((parts) => parts.join(''));
+
+    fc.assert(
+      fc.property(text, (name) => {
+        expect(foldCase(foldCase(name))).toBe(foldCase(name));
+      }),
+      { numRuns: 3_000 },
+    );
+  });
+});
 
 describe('findCollisions', () => {
   it('pairs two paths that differ only in case', () => {
@@ -26,6 +94,16 @@ describe('findCollisions', () => {
   it('pairs paths that a filesystem with fuller case rules would also join', () => {
     expect(findCollisions(['stra\u00dfe.md', 'STRASSE.md'])).toHaveLength(1);
     expect(findCollisions(['\u03b1\u03c3', '\u03b1\u03c2'])).toHaveLength(1);
+  });
+
+  // U+1E9E is the capital of the sharp s, and a disk that folds case joins it with both the sharp s
+  // and (as full case folding does) with ss. All three pairs are collisions, whichever way round.
+  it('pairs the capital sharp s with the sharp s and with ss', () => {
+    expect(findCollisions(['\u1e9e.md', '\u00df.md'])).toHaveLength(1);
+    expect(findCollisions(['\u00df.md', '\u1e9e.md'])).toHaveLength(1);
+    expect(findCollisions(['\u1e9e.md', 'ss.md'])).toHaveLength(1);
+    expect(findCollisions(['\u00df.md', 'ss.md'])).toHaveLength(1);
+    expect(findCollisions(['proce\u1e9e.md', 'process.md'])).toHaveLength(1);
   });
 
   it('says nothing of paths that are different', () => {
