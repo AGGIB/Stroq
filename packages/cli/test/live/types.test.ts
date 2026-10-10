@@ -217,6 +217,19 @@ describe('parseHostResult', () => {
       expect(unfollowed(change)).toEqual(refused);
     });
 
+    // The words of the hook are part of the rule, so a stored file is held to them too: a deny that was
+    // stopped and armed, with the host's own words in its place, is not what a verified is made of.
+    it('refuses a verified result whose only armed deny was not stopped in the words of the hook', () => {
+      expect(unfollowed((raw) => (raw['probes'][1]['evidence']['E4'] = false))).toEqual(refused);
+      expect(unfollowed((raw) => (raw['probes'][1]['evidence']['E4'] = null))).toEqual(refused);
+    });
+
+    it('takes the same evidence in a result that says it could not tell', () => {
+      const raw = asRaw(resultOf('verified', { state: 'inconclusive' }));
+      (raw['probes'] as any[])[1].evidence.E4 = false;
+      expect(parseHostResult(raw)).toMatchObject({ ok: true });
+    });
+
     it('refuses a failed result that says it is inconclusive, and the other way round', () => {
       expect(parseHostResult({ ...asRaw(resultOf('failed')), state: 'inconclusive' })).toEqual(
         refused,
@@ -264,6 +277,87 @@ describe('parseHostResult', () => {
         ],
       });
       expect(parseHostResult(asRaw(both))).toMatchObject({ ok: true });
+    });
+  });
+
+  // A mark is a claim about evidence, and the evidence is stored beside it. Anything that can write the file
+  // can write `passed` over evidence that never said so; the reader checks the one against the other, so
+  // that a file edited that way is not a result, whatever state it says and however the state follows.
+  describe('a mark the evidence beside it does not support', () => {
+    const unsupported: ReadonlyArray<readonly [string, (raw: Record<string, any>) => void]> = [
+      [
+        'a passed allow that the hook did not judge',
+        (raw) => (raw['probes'][0]['evidence']['E2'] = false),
+      ],
+      [
+        'a passed allow with the hook not known',
+        (raw) => (raw['probes'][0]['evidence']['E2'] = null),
+      ],
+      [
+        'a passed allow whose file is not as it should be',
+        (raw) => (raw['probes'][0]['evidence']['E3'] = false),
+      ],
+      [
+        'a passed allow whose command was not seen issued',
+        (raw) => (raw['probes'][0]['evidence']['E1'] = false),
+      ],
+      [
+        'a passed deny that the hook did not judge',
+        (raw) => (raw['probes'][1]['evidence']['E2'] = false),
+      ],
+      ['a passed deny whose file is there', (raw) => (raw['probes'][1]['evidence']['E3'] = false)],
+      [
+        'a passed deny with nothing known',
+        (raw) => (raw['probes'][1]['evidence'] = { E1: null, E2: null, E3: null, E4: null }),
+      ],
+      [
+        'a control that passed without its file',
+        (raw) => (raw['probes'][2]['evidence']['E3'] = false),
+      ],
+      [
+        'a control that passed without its file known',
+        (raw) => (raw['probes'][2]['evidence']['E3'] = null),
+      ],
+      [
+        'a control that passed on a command that was not seen issued',
+        (raw) => (raw['probes'][2]['evidence']['E1'] = false),
+      ],
+    ];
+
+    it.each(unsupported)('refuses a result with %s', (_name, change) => {
+      expect(parseHostResult(withChange(change))).toEqual({
+        ok: false,
+        problem: 'evidence-inconsistent',
+      });
+    });
+
+    it.each([
+      ['not seen issued', { E1: false, E2: true, E3: true, E4: false }],
+      ['not known to be issued', { E1: null, E2: true, E3: true, E4: false }],
+    ])('refuses a failed probe whose command was %s', (_name, evidence) => {
+      const raw = asRaw(resultOf('failed'));
+      (raw['probes'] as any[])[1].evidence = evidence;
+      expect(parseHostResult(raw)).toEqual({ ok: false, problem: 'evidence-inconsistent' });
+    });
+
+    it('takes a control that passed with no verdict of a hook to its name, which it has none of', () => {
+      expect(parseHostResult(asRaw(validResult())).ok).toBe(true);
+      expect(validResult().probes[2]?.evidence).toEqual({ E1: true, E2: null, E3: true, E4: null });
+    });
+
+    it('does not ask the evidence of a mark that claims nothing: it may be all unknown', () => {
+      for (const state of ['inconclusive', 'not-attempted'] as const)
+        expect(parseHostResult(asRaw(resultOf(state))), state).toMatchObject({ ok: true });
+    });
+
+    it('looks at the evidence before the state, and says which is wrong', () => {
+      const parsed = parseHostResult(
+        withChange((raw) => {
+          raw['probes'][0]['evidence']['E2'] = false;
+          raw['state'] = 'failed';
+        }),
+      );
+      expect(parsed).toEqual({ ok: false, problem: 'evidence-inconsistent' });
     });
   });
 

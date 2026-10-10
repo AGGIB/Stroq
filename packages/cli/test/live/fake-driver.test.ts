@@ -66,7 +66,7 @@ describe('what the double is', () => {
       probe('deny'),
       rig.ctx({ sessionId: 'second', nonce: 'stroq-live-aaaaaaaaaaaaaaaa' }),
     );
-    expect(driver.calls).toEqual([
+    expect(driver.calls).toMatchObject([
       { probeId: 'allow', hookMode: 'real', sessionId: SESSION, nonce: NONCE, fault: 'honest' },
       {
         probeId: 'deny',

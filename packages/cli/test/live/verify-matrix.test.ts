@@ -125,6 +125,37 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'inconclusive',
       1,
     ],
+    // The deny probes are stopped by the host's own rules, in the host's own words, whatever the hook says.
+    // The control keeps the contract (the same host, the hook out of the way), so the host's rules stop it
+    // too and nothing is armed: such a host looks like one that honours the hook and is not shown to.
+    [
+      'host-ignores-hook-but-blocks',
+      {
+        allow: PASSED_ALLOW,
+        deny: UNARMED,
+        'secret-egress': UNARMED,
+        'deny:control': UNARMED,
+        'secret-egress:control': UNARMED,
+      },
+      'inconclusive',
+      5,
+    ],
+    // A driver that breaks the contract of a control: its no-op hook says "allow", the host's own permission
+    // step is skipped, and the command the host's rules stopped in the real run is run in the control. The
+    // pair looks like a deny stopped by a hook and shown armed. What tells it apart is that the host passed
+    // on none of the hook's words for the stop (E4), and a verified needs them.
+    [
+      'noop-explicit-allow',
+      {
+        allow: PASSED_ALLOW,
+        deny: STOPPED,
+        'secret-egress': STOPPED,
+        'deny:control': ARMED,
+        'secret-egress:control': ARMED,
+      },
+      'inconclusive',
+      5,
+    ],
     // The host does not say where it runs, or says it is not the project: what the hook judged was judged
     // in another directory (the made-up key is looked for there), so nothing of it can be held against
     // the host, and nothing more is asked of it.

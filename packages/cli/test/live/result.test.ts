@@ -13,7 +13,9 @@ import type { ProbeEvidence, ProbeKind, ProbeMark } from '../../src/live/types.j
 /**
  * How the marks of the probes become the one state of a host. The rule is the one the check stands
  * on: a verified needs the allow to have passed and at least one deny to have been stopped, nothing to
- * have failed, and (when a control was asked for) the probe to have been shown to be armed.
+ * have failed, that deny to have been shown to be armed by its control run (the same command, hook out of
+ * the way, ran and left its file), and its stop to have been shown to be the hook's (the host passed on
+ * Stroq's own words for it).
  */
 const SEEN: ProbeEvidence = { E1: true, E2: true, E3: true, E4: true };
 const NONE: ProbeEvidence = { E1: null, E2: null, E3: null, E4: null };
@@ -164,6 +166,66 @@ describe('overallState', () => {
       ];
       // A probe whose own id ends in :control is a control and not a deny.
       expect(overallState(rows)).toBe('inconclusive');
+    });
+
+    // A deny that is stopped, with a control that shows the host would have run the command, is still not
+    // known to have been stopped by the hook: a host that ignores the deny of a hook and has permission rules
+    // of its own that refuse the command looks the same, unless the control skips those rules too. The words
+    // the host passed on for the call are what tell the two apart.
+    describe("and its stop to have come from the hook, in the hook's own words", () => {
+      const without = (kind: ProbeKind, id: string, e4: boolean | null): Row => ({
+        id,
+        kind,
+        outcome: outcome('passed', 'blocked', { ...SEEN, E4: e4 }),
+      });
+
+      it.each([false, null] as const)(
+        'is not verified by a deny that was stopped and armed but whose words were not seen (%s)',
+        (e4) => {
+          const rows = [row('allow', 'passed'), without('deny', 'deny', e4)];
+          expect(overallState([...rows, controlRow(rows[1]!)])).toBe('inconclusive');
+        },
+      );
+
+      it('is verified by the other deny when this one has the words', () => {
+        const rows = [
+          row('allow', 'passed'),
+          without('deny', 'deny', false),
+          row('secret-egress', 'passed', 'blocked'),
+        ];
+        expect(overallState([...rows, controlRow(rows[1]!), controlRow(rows[2]!)])).toBe(
+          'verified',
+        );
+      });
+
+      it('is not verified when the deny with the words is not the one that was armed', () => {
+        const rows = [
+          row('allow', 'passed'),
+          without('deny', 'deny', false),
+          row('secret-egress', 'passed', 'blocked'),
+        ];
+        // Only the one without the words has a control that passed.
+        expect(overallState([...rows, controlRow(rows[1]!)])).toBe('inconclusive');
+      });
+
+      it('is still failed when a probe failed, whatever the words say', () => {
+        const rows = [
+          row('allow', 'passed'),
+          without('deny', 'deny', false),
+          row('secret-egress', 'failed'),
+        ];
+        expect(overallState([...rows, controlRow(rows[1]!)])).toBe('failed');
+      });
+
+      it('does not ask the words of an allow, which has none to pass on', () => {
+        const allow: Row = {
+          id: 'allow',
+          kind: 'allow',
+          outcome: outcome('passed', 'ran', { ...SEEN, E4: null }),
+        };
+        const rows = [allow, row('deny', 'passed')];
+        expect(overallState([...rows, controlRow(rows[1]!)])).toBe('verified');
+      });
     });
 
     it('is failed whatever a control says, once a probe has failed', () => {

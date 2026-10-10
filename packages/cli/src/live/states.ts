@@ -11,6 +11,7 @@
 // nothing else. A new version of anything is a reason to look again and not a reason to look away.
 import type { AgentHookStatus } from '../commands/doctor.js';
 import type { HostCapability } from '../hosts/capabilities.js';
+import { isControlId } from './state-rule.js';
 import type { HostResult, HostState } from './types.js';
 
 /**
@@ -147,13 +148,20 @@ const failures = (result: HostResult): string =>
       .map((probe) => `${probe.id} ${probe.reason ?? probe.mark}`),
   );
 
-/** Why the probes that did not pass did not. */
+/**
+ * Why the probes that did not pass did not; and, for a deny that passed and was armed but whose stop was not
+ * shown to be the hook's (the host passed on none of its words), that, which is why it was not counted.
+ */
 const doubts = (result: HostResult): string =>
-  listed(
-    result.probes
+  listed([
+    ...result.probes
       .filter((probe) => probe.mark !== 'passed')
       .map((probe) => probe.reason ?? probe.mark),
-  );
+    ...result.probes
+      .filter((probe) => probe.kind !== 'allow' && probe.mark === 'passed')
+      .filter((probe) => probe.evidence.E4 !== true && !isControlId(probe.id))
+      .map(() => 'deny-text-not-seen'),
+  ]);
 
 /** `: x` after a line, or nothing when there is no x. */
 const because = (why: string): string => (why === '' ? '' : `: ${why}`);

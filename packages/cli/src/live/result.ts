@@ -1,9 +1,9 @@
 // How the marks of the probes become the result of a host.
 //
-// A host is verified when the allow passed and a deny was stopped AND that deny's control run showed it
-// armed (the same command, under a hook that allows everything, ran and left its file). It has failed
-// when any probe failed. Everything between is inconclusive, and a run in which nothing was sent is not
-// attempted. The rule is `state-rule.ts`, the one the reader of a stored result applies too; here the
+// A host is verified when the allow passed and a deny was stopped, in the words of the hook, AND that deny's
+// control run showed it armed (the same command, under a hook that allows everything, ran and left its
+// file). It has failed when any probe failed. Everything between is inconclusive, and a run in which
+// nothing was sent is not attempted. The rule is `state-rule.ts`, the one the reader of a stored result applies too; here the
 // rows are the real runs and their controls, after the controls have had their say, so that a pass that
 // a control could not confirm is not counted.
 import type { HostCapability } from '../hosts/capabilities.js';
@@ -76,7 +76,14 @@ export function downgradeUnarmed(
  * own (the id of the probe and `:control`). See `state-rule.ts` for the rule.
  */
 export function overallState(rows: readonly Row[]): LiveOutcome {
-  return stateOf(rows.map((row) => ({ id: row.id, kind: row.kind, mark: row.outcome.mark })));
+  return stateOf(
+    rows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      mark: row.outcome.mark,
+      e4: row.outcome.evidence.E4,
+    })),
+  );
 }
 
 export function toProbeResult(row: Row): ProbeResult {

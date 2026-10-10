@@ -9,6 +9,11 @@
 // with `node:fs` inside the project. Nothing is shelled out, so nothing the model-less double does can
 // reach anything but the temporary directories it is given.
 //
+// THE CONTRACT OF A CONTROL. A control run is the real run with the hook taken out and nothing else changed
+// (`types.ts`, on `HostDriver`). The double records, for every request, what a real driver would have
+// started its host with (`invocationFor`), so that `driver-contract.test.ts` can hold the real run and the
+// control to it; `noop-explicit-allow` is the driver that breaks it, and `verifyHost` has to see through it.
+//
 // WHAT THIS DOES NOT PROVE. Anything about a real host. Whether Claude Code stops a command when a
 // hook says deny, what its stream looks like, how it words a limit, whether its exit code or its
 // permission layer behave as the faults below assume: all of that is what the double is told, and what
@@ -19,7 +24,7 @@ import { join } from 'node:path';
 import { DEFAULT_POLICY, loadPolicyFile, type Policy } from '@stroq/core';
 import { handleClaudeHook } from '../../src/adapters/claude-code.js';
 import { createEngineAt } from '../../src/engine-factory.js';
-import { ALLOW_FILE, DENY_FILE, EGRESS_FILE } from '../../src/live/probes.js';
+import { ALLOW_FILE, DENY_FILE, EGRESS_FILE, promptFor } from '../../src/live/probes.js';
 import type {
   HostDriver,
   HostRun,
@@ -27,6 +32,7 @@ import type {
   ProbeContext,
   StreamEvent,
 } from '../../src/live/types.js';
+import type { Invocation } from './driver-contract.js';
 
 /**
  * How the double misbehaves.
@@ -48,6 +54,14 @@ import type {
  * - `host-error`        the host exits with an error and no explanation.
  * - `api-billing`       the host says it is billed to an API key.
  * - `wrong-cwd`         the host runs as an honest one would, in a directory that is not the project.
+ * - `host-ignores-hook-but-blocks`
+ *                       the allow runs; the deny and egress probes are stopped by the host's own permission
+ *                       rules, in the host's own words, whatever the hook says: a host that does not honour a
+ *                       hook's deny, which only looks like one that does.
+ * - `noop-explicit-allow`
+ *                       a driver that breaks the contract of a control: its no-op hook says "allow", which
+ *                       skips the host's own permission step. The real run of a deny probe is stopped by the
+ *                       host's own rules, and the control, with that step skipped, runs the command.
  */
 export type Fault =
   | 'honest'
@@ -65,7 +79,9 @@ export type Fault =
   | 'timeout'
   | 'host-error'
   | 'api-billing'
-  | 'wrong-cwd';
+  | 'wrong-cwd'
+  | 'host-ignores-hook-but-blocks'
+  | 'noop-explicit-allow';
 
 export interface FakeCall {
   readonly probeId: string;
@@ -73,6 +89,8 @@ export interface FakeCall {
   readonly sessionId: string;
   readonly nonce: string;
   readonly fault: Fault;
+  /** What a real driver would have started its host with for this request. */
+  readonly invocation: Invocation;
 }
 
 export interface FakeOptions {
@@ -141,6 +159,65 @@ function perform(probe: Probe, ctx: ProbeContext): void {
   }
 }
 
+/** The hook of a control run: it exits 0 and says nothing, so the host goes on as if no hook were there. */
+const NOOP_HOOK = 'true';
+
+/**
+ * What a real driver would start its host with for this request (the argv and settings the plan gives for
+ * Claude Code, in the parts `driver-contract.ts` holds a control to). The real run and the control are
+ * started alike but for the hook, which is the one thing that is not alike; `noop-explicit-allow` is the
+ * driver that lets the hook of its control say "allow", and so breaks the contract.
+ */
+export function invocationFor(
+  probe: Probe,
+  ctx: ProbeContext,
+  decides: 'nothing' | 'allow' = 'nothing',
+): Invocation {
+  return {
+    nonce: ctx.nonce,
+    prompt: promptFor(probe),
+    model: 'haiku',
+    sessionId: ctx.sessionId,
+    flags: [
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--no-session-persistence',
+      '--setting-sources',
+      'project',
+      '--strict-mcp-config',
+      '--tools',
+      'Bash',
+    ],
+    settings: {},
+    permissions: { mode: 'dontAsk', allow: ['Bash(echo:*)', 'Bash(mkdir:*)', 'Bash(curl:*)'] },
+    hook:
+      ctx.hookMode === 'real'
+        ? {
+            command: `env HOME=${ctx.home} STROQ_HOME=${ctx.stroqHome} stroq hook claude-code`,
+            decides: 'nothing',
+          }
+        : { command: NOOP_HOOK, decides },
+    cwd: ctx.project,
+    env: ctx.env,
+  };
+}
+
+/** The faults that are a way of behaving per kind of probe and hook, and not a way of behaving of their own. */
+type Composite = 'host-ignores-hook-but-blocks' | 'noop-explicit-allow';
+type BaseFault = Exclude<Fault, Composite>;
+
+/** What a fault comes to for a probe of this kind, run with the hook the context says. */
+function effectiveFault(chosen: Fault, kind: Probe['kind'], mode: 'real' | 'noop'): BaseFault {
+  if (chosen === 'host-ignores-hook-but-blocks')
+    return kind === 'allow' ? 'honest' : 'host-blocks-all';
+  if (chosen === 'noop-explicit-allow') {
+    if (kind === 'allow') return 'honest';
+    return mode === 'noop' ? 'noop-hook' : 'host-blocks-all';
+  }
+  return mode === 'noop' && HOOK_SIDE.has(chosen) ? 'noop-hook' : chosen;
+}
+
 export class FakeHostDriver implements HostDriver {
   readonly mode = 'stand-in' as const;
   /** Every request made of the double, in order. */
@@ -158,12 +235,10 @@ export class FakeHostDriver implements HostDriver {
     });
   }
 
-  private faultFor(probe: Probe, ctx: ProbeContext): Fault {
-    const chosen =
-      typeof this.options.fault === 'function'
-        ? this.options.fault(probe, ctx)
-        : this.options.fault;
-    return ctx.hookMode === 'noop' && HOOK_SIDE.has(chosen) ? 'noop-hook' : chosen;
+  private chosenFault(probe: Probe, ctx: ProbeContext): Fault {
+    return typeof this.options.fault === 'function'
+      ? this.options.fault(probe, ctx)
+      : this.options.fault;
   }
 
   /** What the hook says, by the real engine and the real adapter. Writes the audit entry as the hook does. */
@@ -194,13 +269,19 @@ export class FakeHostDriver implements HostDriver {
   }
 
   async run(probe: Probe, ctx: ProbeContext): Promise<HostRun> {
-    const fault = this.faultFor(probe, ctx);
+    const chosen = this.chosenFault(probe, ctx);
+    const fault = effectiveFault(chosen, probe.kind, ctx.hookMode);
     this.calls.push({
       probeId: probe.id,
       hookMode: ctx.hookMode,
       sessionId: ctx.sessionId,
       nonce: ctx.nonce,
       fault,
+      invocation: invocationFor(
+        probe,
+        ctx,
+        chosen === 'noop-explicit-allow' && ctx.hookMode === 'noop' ? 'allow' : 'nothing',
+      ),
     });
     const call: StreamEvent = { type: 'tool_use', name: 'Bash', input: { command: probe.command } };
     const ran: StreamEvent = { type: 'tool_result', isError: false, text: '' };

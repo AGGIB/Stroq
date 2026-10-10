@@ -4,7 +4,7 @@
 // does, until this: drive the REAL host on inert probes, then show from evidence that does not come
 // from the model that a denied action did not happen. These are the words that check is made of.
 import { z } from 'zod';
-import { overallState } from './state-rule.js';
+import { isControlId, overallState } from './state-rule.js';
 
 /**
  * Where a host stands. The first two are read off the machine (`installed`: the config is there;
@@ -155,7 +155,11 @@ export interface HostRun {
   readonly exitCode: number | null;
   readonly timedOut: boolean;
   readonly stderrTail: string;
-  /** The host's own words, when it stopped on a usage or rate limit. */
+  /**
+   * The host's own words, when it stopped on a usage or rate limit, or when it says it is moving the
+   * subscription on to extra usage or an overage. The words of an overage are not looked for in the text of
+   * a stream (they are not known to be worded one way), so a driver maps the host's signal for it here.
+   */
   readonly limitHit?: string;
   /**
    * How the host says it is paid for, from its first message. Both are needed: a host that says only one of
@@ -184,7 +188,12 @@ export interface ProbeContext {
   readonly home: string;
   readonly sessionId: string;
   readonly nonce: string;
-  /** `real`: the user's hook command. `noop`: a hook that always allows (the control run). */
+  /**
+   * `real`: the user's hook command. `noop`: the control run, whose hook exits 0 and writes nothing at all
+   * (to stdout or to stderr), so that the host goes on as if no hook were there. It never says "allow": an
+   * explicit allow skips the host's own permission step in some hosts, and the control would then run a
+   * command the host's own rules had stopped, which is what the control is there to tell apart.
+   */
   readonly hookMode: 'real' | 'noop';
   readonly deadlineMs: number;
   /**
@@ -195,7 +204,25 @@ export interface ProbeContext {
   readonly env: Record<string, string>;
 }
 
-/** What a real host driver implements. Spending a request is the driver's `run`, and nothing else. */
+/**
+ * What a real host driver implements. Spending a request is the driver's `run`, and nothing else.
+ *
+ * THE CONTROL. For each deny that was stopped, `run` is called again with `hookMode: 'noop'` for the same
+ * command. The control shows that the host would have run the command had the hook let it, and that is worth
+ * something only if it is the same host: the real run and the control run must be started with IDENTICAL
+ * settings, permission rules, allowed tools, argv, environment and working directory, but for the hook
+ * command (and the session and nonce, which are each request's own). A driver that lets them differ in
+ * anything else (a looser permission mode, an allow rule only the control has) makes a control that arms
+ * what the real run's host would never have run, and a stop by the host's own rules then looks like a stop
+ * by the hook. `test/live/driver-contract.ts` holds the check a driver's own tests run to show it keeps this.
+ *
+ * THE FIRST MESSAGE. A driver reports, from the first message of the host, how it is paid for (both
+ * `apiProvider` and `apiKeySource`) and the directory it runs in (`cwd`). It aborts the host on that message
+ * when either billing value is not a subscription login, so that no paid request is made at all; `verifyHost`
+ * stops the run after a request that did not say both (or said another directory), but a request already
+ * made is already paid for. It also reports as `limitHit` what the host says when it moves a subscription
+ * on to extra usage or an overage, in the host's own words: that is billing the owner did not set aside.
+ */
 export interface HostDriver {
   detect(): Promise<{ available: boolean; version: string | null; note?: string }>;
   run(probe: Probe, ctx: ProbeContext): Promise<HostRun>;
@@ -235,7 +262,10 @@ export interface HostResult {
   readonly hostVersion: string | null;
   readonly stroqVersion: string;
   readonly policySha256: string;
-  /** `Date#toISOString`. */
+  /**
+   * `Date#toISOString`, of the moment the check began. An install that finished while it ran is then later
+   * than the result, and the result is read as made against a hook line that has since been replaced.
+   */
   readonly at: string;
   /** `stand-in`: a double of a host answered, so this says nothing about the real one. */
   readonly mode: 'live' | 'stand-in';
@@ -353,9 +383,34 @@ export function parseHostResult(raw: unknown): ParsedHostResult {
     };
   }
   const result = toHostResult(parsed.data);
+  // A mark is a claim about the evidence stored beside it, and a file that claims a pass over evidence
+  // that does not say so was not made by a check.
+  if (!result.probes.every(isSupportedByItsEvidence))
+    return { ok: false, problem: 'evidence-inconsistent' };
   // The state is what the probes come to. A stored state that says more or less than that was not made
   // by a check, but by an edit, an older Stroq with another rule, or a bug; none of them is a result.
-  if (overallState(result.probes) !== result.state)
-    return { ok: false, problem: 'state-inconsistent' };
+  const marked = result.probes.map((probe) => ({
+    id: probe.id,
+    kind: probe.kind,
+    mark: probe.mark,
+    e4: probe.evidence.E4,
+  }));
+  if (overallState(marked) !== result.state) return { ok: false, problem: 'state-inconsistent' };
   return { ok: true, result };
+}
+
+/**
+ * Whether the evidence stored with a mark says what the mark claims, as a check that made the mark would
+ * have left it: a pass of a real probe is the command issued (E1), the hook's one entry as expected (E2)
+ * and the file as the decision says (E3); a pass of a control has no hook to ask, and is the command
+ * issued and its file there; a failure is at least a command that was issued. The other marks claim
+ * nothing, and their evidence may be all unknown.
+ */
+function isSupportedByItsEvidence(probe: ProbeResult): boolean {
+  const { E1, E2, E3 } = probe.evidence;
+  if (probe.mark === 'failed') return E1 === true;
+  if (probe.mark !== 'passed') return true;
+  return isControlId(probe.id)
+    ? E1 === true && E3 === true
+    : E1 === true && E2 === true && E3 === true;
 }

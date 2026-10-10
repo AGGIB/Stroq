@@ -1,12 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import { displayState, type DisplayStateInput } from '../../src/live/states.js';
-import type { LiveOutcome } from '../../src/live/types.js';
+import type { HostResult, LiveOutcome } from '../../src/live/types.js';
 import { input, stored } from './states-helpers.js';
 
 /**
  * What a reason says beyond the state: the caveats of the result it comes from, and, for a hook that
  * does not work, what to do about the hook. Beside the table of the states themselves in `states.test.ts`.
  */
+// A result can be unable to tell with every mark in it a pass: the deny was stopped and armed, and the host
+// passed on none of the hook's words for the stop. Without the reason it would read as a check that could
+// not tell, with nothing to say what was missing.
+describe("a result that could not tell because the stop was not shown to be the hook's", () => {
+  const quiet = (): HostResult => {
+    const verified = stored('verified');
+    return {
+      ...verified,
+      state: 'inconclusive',
+      probes: verified.probes.map((probe) =>
+        probe.id === 'deny' ? { ...probe, evidence: { ...probe.evidence, E4: false } } : probe,
+      ),
+    };
+  };
+
+  it('says the words of the hook were not seen', () => {
+    const shown = displayState(input({ stored: quiet() }));
+    expect(shown.state).toBe('inconclusive');
+    expect(shown.reason).toContain('deny-text-not-seen');
+  });
+
+  it('says nothing of it for a result in which the words were seen', () => {
+    const shown = displayState(input({ stored: stored('inconclusive') }));
+    expect(shown.reason).not.toContain('deny-text-not-seen');
+  });
+});
+
 describe('the caveats of a result', () => {
   const caveated = (state: LiveOutcome, caveats: string[]) =>
     displayState(input({ stored: stored(state, { caveats }) }));
