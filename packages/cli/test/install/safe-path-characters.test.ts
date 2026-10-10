@@ -97,7 +97,7 @@ describe('invisible and direction-changing characters, by property', () => {
 /** What an independent reading of the classes says about one character in a name, or null for "fine". */
 function expectedReason(char: string, isSurrogate: boolean): RegExp | null {
   if (isSurrogate) return /valid Unicode/;
-  if (char === '�') return /replacement character/;
+  if (char === '\ufffd') return /replacement character/;
   if (CONTROL.test(char)) return /control character/;
   if (HIDDEN.test(char)) return /invisible or direction-changing character/;
   if (STRUCTURAL.has(char)) return /./;
@@ -132,14 +132,14 @@ describe('characters Windows does not allow in a file name', () => {
   // CJK names use the full-width forms on purpose, because the ASCII ones are not allowed; they are
   // different characters, and they are names on every filesystem.
   it.each([
-    ['full-width less-than', '＜a.md'],
-    ['full-width greater-than', 'a＞.md'],
-    ['full-width quotation mark', 'a＂b.md'],
-    ['full-width vertical line', 'a｜b.md'],
-    ['full-width question mark', 'what？.md'],
-    ['full-width asterisk', 'a＊b.md'],
-    ['full-width colon', 'chapter：1.md'],
-    ['full-width solidus', 'a／b.md'],
+    ['full-width less-than', '\uff1ca.md'],
+    ['full-width greater-than', 'a\uff1e.md'],
+    ['full-width quotation mark', 'a\uff02b.md'],
+    ['full-width vertical line', 'a\uff5cb.md'],
+    ['full-width question mark', 'what\uff1f.md'],
+    ['full-width asterisk', 'a\uff0ab.md'],
+    ['full-width colon', 'chapter\uff1a1.md'],
+    ['full-width solidus', 'a\uff0fb.md'],
   ])('accepts %s, which is a different character', (_what, path) => {
     expect(checkEntryPath(path)).toEqual({ ok: true, path });
   });

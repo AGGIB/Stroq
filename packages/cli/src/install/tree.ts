@@ -6,17 +6,30 @@
 // docs/superpowers/specs/2026-10-10-safe-install.md. In short, the hash is of this text:
 //
 //     stroq-tree/1\n
-//     <k> <x> <size> <sha256> <path>\n        one line per entry, in the order of the UTF-8 bytes of the path
+//     <k> <x> <size> <sha256> <path>\n        one line per entry, in the order of the UTF-8 bytes of the whole path
 //
 // with k `f`, `l` or `g` (file, symlink, gitlink), x `1` for an executable file and `0` for anything
 // else, size and sha256 those of the raw bytes (of the target text for a symlink; 0 and 64 zeros for a
 // gitlink), and the path last, so that a space in it is not a separator.
 //
+// Two rules that the digest depends on, and that a reader written in another language must keep: the
+// entries are ordered by the bytes of the whole path string (so `lib-x` and `lib.js` come before
+// `lib/a.js`, which a sort that went folder by folder would put first), and a path is hashed exactly
+// as it is spelled, with no Unicode normalisation (a composed and a decomposed `e` with an acute are
+// two names and two digests).
+//
 // A tree is checked every time it is hashed, not once when it is made: the bytes of a tree are the
 // ones that get analysed and then written, and a digest that was true when it was taken says nothing
-// of bytes that changed since.
+// of bytes that changed since. The check includes that the tree can be written to every kind of disk,
+// so a reader that makes entries (a directory, a tarball) does not have to remember to ask.
 import { createHash } from 'node:crypto';
-import { checkEntryPath, isWellFormed, quotePath } from './safe-path.js';
+import {
+  checkEntryPath,
+  findCollisions,
+  findFolderConflicts,
+  isWellFormed,
+  quotePath,
+} from './safe-path.js';
 import { LIMITS, type EntryKind, type Tree, type TreeEntry } from './types.js';
 
 /** The first line of the text that is hashed. A change to the format is a new name, never a quiet edit. */
@@ -31,6 +44,13 @@ export type TreeErrorCode =
   | 'duplicate-path'
   /** A path that is a file and also the folder of another entry. */
   | 'path-conflict'
+  /**
+   * Two entries that are one name on a filesystem that ignores letter case or Unicode form (`README`
+   * and `readme`; a composed and a decomposed letter), or a file and the folder of another entry that
+   * are. A Linux tree can hold both, no other disk can, so a tree like this is not a tree. The message
+   * is a fixed phrase that names no path; `path` is the later of the two in the order of the digest.
+   */
+  | 'path-collision'
   /** An entry that is not shaped like one: an unknown kind, a size that is not a size, bytes on a link. */
   | 'bad-entry'
   | 'size-mismatch'
@@ -39,9 +59,10 @@ export type TreeErrorCode =
   | 'limit';
 
 /**
- * Why a tree is refused. `message` is a fixed phrase and the path in quotes with everything that could
- * act on a terminal written out, so it is safe to print. `path` is the offending path exactly as
- * it was given: text from outside, and not to be shown without the same care.
+ * Why a tree is refused. `message` is a fixed phrase, usually with the path in quotes and everything
+ * that could act on a terminal written out, so it is safe to print (for a collision it is a fixed
+ * phrase and no path). `path` is the offending path exactly as it was given: text from outside, and
+ * not to be shown without the same care.
  */
 export class TreeError extends Error {
   readonly code: TreeErrorCode;
@@ -225,6 +246,30 @@ function hasEntryAsFolder(path: string, paths: ReadonlySet<string>): boolean {
   return false;
 }
 
+// A Linux tree can hold `README` and `readme`; NTFS, the default APFS and HFS+ cannot, and one of the
+// two would overwrite the other when the files are written. The refusal belongs to the tree and not to
+// a reader, so that every way of making a tree (a directory, a tarball, a manifest read back) meets
+// it, and a tree is refused when it is looked at and not when it is installed. The phrases name no
+// path: the names are text from outside, and are in `path` for whoever shows them with care.
+const COLLISION_MESSAGE =
+  'two entries have names that are one name on a filesystem that ignores letter case or Unicode form, so this tree cannot be written to every disk';
+const FOLDER_COLLISION_MESSAGE =
+  'an entry and the folder of another entry have names that are one name on a filesystem that ignores letter case or Unicode form, so this tree cannot be written to every disk';
+
+/**
+ * Throws if the tree cannot be written to a filesystem that ignores letter case and Unicode form:
+ * two paths that are one name there, or a file and the folder of another entry that are. `paths` are
+ * in the order of the digest, which makes the path that is reported the same for the same tree.
+ */
+function refuseUnwritable(paths: readonly string[]): void {
+  const [pair] = findCollisions(paths);
+  if (pair !== undefined) throw new TreeError('path-collision', COLLISION_MESSAGE, pair[1]);
+  const [clash] = findFolderConflicts(paths);
+  if (clash !== undefined) {
+    throw new TreeError('path-collision', FOLDER_COLLISION_MESSAGE, clash[1]);
+  }
+}
+
 /**
  * The entries of a tree, checked and in the order of the UTF-8 bytes of their paths. Throws a
  * TreeError. The list is read the way its entries are: its length once, and each place in it once,
@@ -263,6 +308,7 @@ function checkedEntries(tree: unknown, ownBytes: boolean): readonly Checked[] {
       throw new TreeError('path-conflict', message, entry.path);
     }
   }
+  refuseUnwritable(checked.map(({ entry }) => entry.path));
   return checked;
 }
 
@@ -285,8 +331,9 @@ export function treeManifest(tree: Tree): string {
 /**
  * The `stroq-tree/1` digest of a tree: 64 lower-case hex characters. It does not depend on the order
  * the entries are in, nor on whether their bytes are there, only on what they record. Throws a
- * TreeError for a tree with a path that is unsafe or appears twice, an entry whose size or hash is not
- * that of its bytes, or one that is over a limit.
+ * TreeError for a tree with a path that is unsafe or appears twice, two names that are one name on a
+ * filesystem that ignores letter case or Unicode form, an entry whose size or hash is not that of its
+ * bytes, or one that is over a limit.
  */
 export function treeDigest(tree: Tree): string {
   return createHash('sha256').update(treeManifest(tree), 'utf8').digest('hex');

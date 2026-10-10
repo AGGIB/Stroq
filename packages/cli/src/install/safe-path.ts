@@ -26,9 +26,10 @@ type Ranges = readonly (readonly [number, number])[];
  * copied from two display helpers was found to miss the soft hyphen, the Hangul fillers, the Arabic
  * letter mark, the Mongolian free variation selectors, the grapheme joiner and more, every one of
  * which shows nothing or reorders what is shown. A `\p{}` class follows the Unicode tables of the
- * Node that runs this, so it can only grow when Node does: a newer Node may refuse a character that
- * an older one lets through, never the reverse. The explicit ranges below stay beside the classes as
- * the floor that does not depend on those tables.
+ * Node that runs this, so a newer Node may refuse a character that an older one lets through (Unicode
+ * keeps these properties stable, so in practice they only grow, and Node 22 and 24 agree on every one
+ * of them today). The explicit ranges below stay beside the classes as the floor that does not depend
+ * on those tables.
  *
  * - control: `Cc`, the C0 and C1 blocks (NUL, the escape that starts a terminal sequence, DEL, and
  *   0x9b, the 8-bit form of CSI);
@@ -101,17 +102,65 @@ const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
 const ELLIPSIS = String.fromCodePoint(0x2026);
 
 // ---------------------------------------------------------------------------------------------
+// Folding: when two spellings are one name
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A name longer than this is not the name of an entry (`checkEntryPath` refuses it), and is not
+ * folded. Normalisation is quadratic on a long run of combining marks of mixed classes (65,536 of
+ * them take three seconds), so a hostile name of any length would otherwise hold the process for as
+ * long as it likes. A longer name is kept as it is, which is the same as saying its spellings are
+ * different names.
+ */
+const FOLDED_UNITS = LIMITS.maxPathBytes;
+
+/**
+ * A name as a filesystem that ignores letter case and Unicode form would see it (NTFS, the default
+ * APFS, HFS+). Composed and decomposed letters are one (NFC). Case is folded through upper case and
+ * back, which joins more than lower-casing alone does (the sharp s with "ss", the two sigmas, the
+ * dotless i with "i"): a tree that would lose a file on a filesystem that folds that far is refused
+ * on all of them.
+ */
+const foldCase = (text: string): string =>
+  text.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+
+/** One component as the collision rule sees it. */
+const collisionName = (name: string): string =>
+  name.length > FOLDED_UNITS ? name : foldCase(name);
+
+/**
+ * One component as it is matched against a fixed name (`.git`, `git~1`, a device). It is folded as
+ * `collisionName` folds, after one more step in front: the compatibility forms are made plain (NFKC),
+ * so that full-width letters and dots, superscript digits and the circled and mathematical letters
+ * are the ordinary ones. A program that converts a name to a narrower character set does the same,
+ * and `CON` written wide opens the console. Because it is the same folding with that step added, a
+ * name cannot pass the rules for fixed names and be taken for the same name by the collision rule, or
+ * the other way round (the dotless i is `i` to both).
+ *
+ * The collision rule itself stops at NFC: no filesystem treats a full-width `z` and `z` as one name,
+ * and CJK names use the full-width forms on purpose.
+ */
+const nameKey = (name: string): string =>
+  name.length > FOLDED_UNITS ? name : foldCase(name.normalize('NFKC'));
+
+// ---------------------------------------------------------------------------------------------
 // Names Windows treats as something else
 // ---------------------------------------------------------------------------------------------
 
 const DRIVE_LETTER = /^[A-Za-z]:/;
-/** `GIT~1`: the short name NTFS gives `.git`, which opens the same directory. */
+/**
+ * `GIT~1`: the short name NTFS gives `.git`, which opens the same directory. This is the only 8.3
+ * alias that is covered. NTFS gives every long name a short one (`GITMOD~1` for `.gitmodules`,
+ * `GITATT~1` for `.gitattributes`), and a name that is not itself dangerous is not refused for what it
+ * could be called: `.gitmodules` and `.gitattributes` are ordinary files in a tree, and their aliases
+ * are not looked for.
+ */
 const GIT_SHORT_NAME = /^git~\d+$/;
 /**
  * Names that Windows opens as a device whatever folder they are in and whatever follows a dot:
  * `NUL.txt` is NUL. `COM0` and `LPT0` are included, and so are the console handles, because the cost
  * of refusing a file of that name is nothing. (`COM` with a superscript digit is a device too; it is
- * found through `fold` below, which turns the superscript into the plain digit.)
+ * found through `nameKey`, which turns the superscript into the plain digit.)
  */
 const DEVICE_NAMES: ReadonlySet<string> = new Set([
   'con',
@@ -123,12 +172,6 @@ const DEVICE_NAMES: ReadonlySet<string> = new Set([
   ...Array.from({ length: 10 }, (_, n) => `com${n}`),
   ...Array.from({ length: 10 }, (_, n) => `lpt${n}`),
 ]);
-
-/**
- * A name as a filesystem that folds case and compatibility forms would see it: full-width letters
- * and superscript digits become the plain ones, so `CON` written wide is found with `CON`.
- */
-const fold = (name: string): string => name.normalize('NFKC').toLowerCase();
 
 const TOO_LONG = `longer than ${LIMITS.maxPathBytes} bytes`;
 const TOO_DEEP = `deeper than ${LIMITS.maxDepth} components`;
@@ -142,14 +185,15 @@ function componentProblem(component: string): string | null {
   if (component.endsWith('.') || component.endsWith(' ')) {
     return 'component ending in a dot or a space';
   }
-  const folded = fold(component);
-  if (folded === '.git' || GIT_SHORT_NAME.test(folded)) {
+  const name = nameKey(component);
+  if (name === '.git' || GIT_SHORT_NAME.test(name)) {
     return 'component named .git (or its Windows short name)';
   }
   // The device is what comes before the first dot, and Windows ignores spaces left before that dot.
-  const dot = component.indexOf('.');
-  const base = fold(dot === -1 ? component : component.slice(0, dot)).trimEnd();
-  if (DEVICE_NAMES.has(base)) return 'Windows device name';
+  // The dot is looked for in the folded name, so that a full-width dot is one too.
+  const dot = name.indexOf('.');
+  const device = (dot === -1 ? name : name.slice(0, dot)).trimEnd();
+  if (DEVICE_NAMES.has(device)) return 'Windows device name';
   return null;
 }
 
@@ -161,9 +205,10 @@ function componentProblem(component: string): string | null {
  * a colon (an NTFS alternate data stream, which hides data behind a visible name); the six
  * characters Windows does not allow in a name (`< > " | ? *`); controls and every character that shows
  * nothing or changes what is shown (by Unicode property, see above); text that is not valid Unicode;
- * a component named `.git`, in any case, or by its NTFS short name; a component that ends in a dot or
- * a space (Windows drops it, so `a.` and `a` are one file); a Windows device name; and a path over
- * the limits.
+ * a component named `.git`, or by its NTFS short name `git~N`, or a Windows device name, in any case
+ * and in any compatibility spelling (see `nameKey`: full-width letters, superscript digits, the
+ * dotless i); a component that ends in a dot or a space (Windows drops it, so `a.` and `a` are one
+ * file); and a path over the limits.
  *
  * The reason is a fixed phrase and never quotes the path, so that it can be printed as it is.
  */
@@ -184,8 +229,9 @@ export function checkEntryPath(path: unknown): PathCheck {
   if (path.includes('\\')) return refuse('backslash');
   if (DRIVE_LETTER.test(path)) return refuse('drive letter');
   if (path.includes(':')) return refuse("':' (a Windows alternate data stream)");
-  if (WINDOWS_FORBIDDEN.test(path))
+  if (WINDOWS_FORBIDDEN.test(path)) {
     return refuse('character Windows does not allow in a file name');
+  }
   const components = path.split('/');
   if (components.length > LIMITS.maxDepth) return refuse(TOO_DEEP);
   for (const component of components) {
@@ -200,31 +246,75 @@ export function checkEntryPath(path: unknown): PathCheck {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * A path as a case-insensitive, normalisation-insensitive filesystem (NTFS, the default APFS, HFS+)
- * would see it. Composed and decomposed letters are one (NFC). Case is folded through upper case and
- * back, which joins more than lower-casing alone does (the sharp s with "ss", the two sigmas): a
- * tree that would lose a file on a filesystem that folds that far is refused on all of them.
+ * The components of a path as a filesystem that ignores letter case and Unicode form compares them,
+ * one name at a time (see `foldCase`). A path is the same as another when all of these are. Folding
+ * one name at a time and not the whole path changes nothing, since no folding step reaches across a
+ * `/`, but it gives the folders of a path for free.
  */
-const collisionKey = (path: string): string =>
-  path.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+const foldedParts = (path: string): string[] => path.split('/').map(collisionName);
 
 /**
- * The pairs of paths that cannot both be written to such a filesystem: `a/README` and `a/readme`, or
- * a composed and a decomposed "e acute". Each path after the first of a group is paired with that
- * first one, so the answer is as long as the input at most however many collide. A path given twice
- * is a collision with itself: the second overwrites the first.
+ * The pairs of paths that cannot both be written to a filesystem that ignores letter case and Unicode
+ * form: `a/README` and `a/readme`, or a composed and a decomposed "e acute". Each path after the first
+ * of a group is paired with that first one, so the answer is as long as the input at most however
+ * many collide. A path given twice is a collision with itself: the second overwrites the first.
  *
- * It looks at names only. A file and a folder of one name (`a` and `a/b`) is a different fault,
- * found when the tree is built.
+ * It compares whole paths. Two folders that differ only in case are one folder there, and the files in
+ * them collide only when their whole paths do. A file and a folder of one name (`a` and `a/b`, or
+ * `Docs` and `docs/x`) is a different fault, found by `findFolderConflicts`. A name longer than a path
+ * may be is not folded (see `FOLDED_UNITS`), so two spellings of it are two names here: it is refused
+ * by `checkEntryPath` before it could be an entry.
  */
 export function findCollisions(paths: readonly string[]): readonly (readonly [string, string])[] {
   const firstOfKey = new Map<string, string>();
   const pairs: (readonly [string, string])[] = [];
   for (const path of paths) {
-    const key = collisionKey(path);
+    const key = foldedParts(path).join('/');
     const first = firstOfKey.get(key);
     if (first === undefined) firstOfKey.set(key, path);
     else pairs.push([first, path]);
+  }
+  return pairs;
+}
+
+/**
+ * The pairs `[file, below]` where a folder of `below` is one name with `file` on a filesystem that
+ * ignores letter case and Unicode form: `Docs` with `docs/x`, `a/B` with `A/b/c`, or (the same
+ * spelling included) `a` with `a/b`. Such a tree cannot be written to that disk, whichever of the two
+ * is written first. There is one pair for each folder of `below` that matches, and `file` is the first
+ * of the paths given with that name. A path is never paired with itself.
+ */
+export function findFolderConflicts(
+  paths: readonly string[],
+): readonly (readonly [string, string])[] {
+  // A tree of folded names, so that the folder of a path is a step down it and not a string made of
+  // all the names above (which is quadratic in how deep a path goes). `owner` is the first path
+  // whose folded name ends at that step.
+  interface Step {
+    owner: string | null;
+    readonly below: Map<string, Step>;
+  }
+  const root: Step = { owner: null, below: new Map() };
+  const folded = paths.map((path) => ({ path, parts: foldedParts(path) }));
+
+  for (const { path, parts } of folded) {
+    let step = root;
+    for (const part of parts) {
+      const next: Step = step.below.get(part) ?? { owner: null, below: new Map() };
+      step.below.set(part, next);
+      step = next;
+    }
+    step.owner ??= path;
+  }
+
+  const pairs: (readonly [string, string])[] = [];
+  for (const { path, parts } of folded) {
+    let step: Step | undefined = root;
+    for (const part of parts.slice(0, -1)) {
+      step = step.below.get(part);
+      if (step === undefined) break;
+      if (step.owner !== null) pairs.push([step.owner, path]);
+    }
   }
   return pairs;
 }

@@ -11,17 +11,18 @@ import {
 } from '../helpers/install-tree.js';
 
 describe('buildTree', () => {
+  // (`B` and `b` together would be a collision on a disk that ignores case, and are not a tree.)
   it('puts the entries in the order of the UTF-8 bytes of their paths', () => {
     const tree = buildTree([
       fileEntry('b', 'x'),
       fileEntry('\u00e9', 'x'),
-      fileEntry('B', 'x'),
+      fileEntry('C', 'x'),
       fileEntry('z', 'x'),
       fileEntry('a b', 'x'),
       fileEntry('a.b', 'x'),
     ]);
 
-    expect(tree.entries.map((e) => e.path)).toEqual(['B', 'a b', 'a.b', 'b', 'z', '\u00e9']);
+    expect(tree.entries.map((e) => e.path)).toEqual(['C', 'a b', 'a.b', 'b', 'z', '\u00e9']);
   });
 
   it('refuses what treeDigest refuses', () => {

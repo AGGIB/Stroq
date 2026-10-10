@@ -1,6 +1,11 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { findCollisions, quotePath, stripTopComponent } from '../../src/install/safe-path.js';
+import {
+  findCollisions,
+  findFolderConflicts,
+  quotePath,
+  stripTopComponent,
+} from '../../src/install/safe-path.js';
 import { LIMITS } from '../../src/install/types.js';
 import { escapeHtml, safe } from '../../src/replay/html.js';
 import { neutralizeControls } from '../../src/terminal-safe.js';
@@ -108,6 +113,97 @@ describe('findCollisions', () => {
     findCollisions(paths);
 
     expect(paths).toEqual(['b', 'B', 'a']);
+  });
+
+  // Folders are not entries: two that differ only in case are one folder on a disk that ignores case,
+  // and the files in them collide only if their whole paths do.
+  it('compares whole paths: two folders that differ in case are not a collision of files', () => {
+    expect(findCollisions(['Docs/a.md', 'docs/b.md'])).toEqual([]);
+    expect(findCollisions(['Docs/a.md', 'docs/A.md'])).toEqual([['Docs/a.md', 'docs/A.md']]);
+  });
+
+  // Normalising is quadratic on a long run of combining marks of mixed classes, so a name that no
+  // entry could have is not normalised at all. It is refused by checkEntryPath before it could be one.
+  describe('on a name longer than a path may be', () => {
+    const tooLong = 'A'.repeat(LIMITS.maxPathBytes + 1);
+
+    it('keeps it as it is: the spellings of it are different names', () => {
+      expect(findCollisions([tooLong, tooLong.toLowerCase()])).toEqual([]);
+    });
+
+    it('still pairs two that are the same', () => {
+      expect(findCollisions([tooLong, tooLong])).toEqual([[tooLong, tooLong]]);
+    });
+
+    it('folds a name of exactly the limit', () => {
+      const atLimit = 'A'.repeat(LIMITS.maxPathBytes);
+
+      expect(findCollisions([atLimit, atLimit.toLowerCase()])).toHaveLength(1);
+    });
+
+    it('folds the other names of the path all the same', () => {
+      expect(findCollisions([`${tooLong}/README`, `${tooLong}/readme`])).toHaveLength(1);
+    });
+  });
+});
+
+describe('findFolderConflicts', () => {
+  it('pairs a file with a folder whose name differs only in case', () => {
+    expect(findFolderConflicts(['Docs', 'docs/x'])).toEqual([['Docs', 'docs/x']]);
+  });
+
+  it('pairs a file with a folder of the same spelling, too', () => {
+    expect(findFolderConflicts(['a', 'a/b'])).toEqual([['a', 'a/b']]);
+  });
+
+  it('finds it at any depth', () => {
+    expect(findFolderConflicts(['a/B', 'A/b/c'])).toEqual([['a/B', 'A/b/c']]);
+  });
+
+  it('pairs a composed and a decomposed letter', () => {
+    expect(findFolderConflicts(['caf\u00e9', 'cafe\u0301/x'])).toEqual([
+      ['caf\u00e9', 'cafe\u0301/x'],
+    ]);
+  });
+
+  it('pairs a path once for each of its folders that matches, nearest the root first', () => {
+    expect(findFolderConflicts(['A', 'a/B', 'a/b/c'])).toEqual([
+      ['A', 'a/B'],
+      ['A', 'a/b/c'],
+      ['a/B', 'a/b/c'],
+    ]);
+  });
+
+  it('names the first of the paths that share a name as the file', () => {
+    expect(findFolderConflicts(['x', 'X', 'x/y'])).toEqual([['x', 'x/y']]);
+  });
+
+  it('says nothing of names that merely begin alike', () => {
+    expect(findFolderConflicts(['a', 'ab/c', 'a.b/c', 'x/a/b', 'a-b', 'b/a'])).toEqual([]);
+  });
+
+  it('never pairs a path with itself, or a path given twice (that is a collision)', () => {
+    expect(findFolderConflicts(['a/b'])).toEqual([]);
+    expect(findFolderConflicts(['a', 'a'])).toEqual([]);
+    expect(findCollisions(['a', 'a'])).toHaveLength(1);
+  });
+
+  it('says nothing of nothing', () => {
+    expect(findFolderConflicts([])).toEqual([]);
+    expect(findFolderConflicts(['only'])).toEqual([]);
+  });
+
+  it('does not change what it is given', () => {
+    const paths = ['b/c', 'B', 'a'];
+    findFolderConflicts(paths);
+
+    expect(paths).toEqual(['b/c', 'B', 'a']);
+  });
+
+  it('keeps the answer as long as the work when every path is below one file', () => {
+    const paths = ['A', ...Array.from({ length: LIMITS.maxEntries }, (_, i) => `a/${i}`)];
+
+    expect(findFolderConflicts(paths)).toHaveLength(LIMITS.maxEntries);
   });
 });
 
