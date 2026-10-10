@@ -50,7 +50,11 @@ import { REDIRECT, resolve, withoutRedirects } from './shell-words.js';
  * and `permit extend|revoke` widen or end one. Their reading forms stay open (`harden`
  * alone or with `status`, `permit list`, `permit show`, `vet` without `--online`), and
  * so does any subcommand not named here: this is a list of what is denied, not of what
- * is allowed. It reads the text of a command line, so it is one guard among others and
+ * is allowed. Two that exist are listed with them, for what they do and not for what
+ * they change in Stroq: `canary` creates the file it is given, with a first line it
+ * chooses, wherever it chooses, and `exposure --probe` starts every server that the
+ * project's `.mcp.json` names, which an agent can have written (plain `exposure` reads).
+ * It reads the text of a command line, so it is one guard among others and
  * can be spelled around; `run/sandbox.ts` lists the state in its `denyWrite` as another.
  *
  * Judged on the whole command rather than on the segments the self-tamper gate reads,

@@ -33,6 +33,9 @@ const CALLS: ReadonlyArray<readonly string[]> = [
   ['vet', '--online', './some-package'],
   ['task', '--', 'fix the failing test'],
   ['task'],
+  ['exposure', '--probe'],
+  ['canary'],
+  ['canary', '--file', '/tmp/decoy', '--name', 'DECOY'],
 ];
 
 const cases = (

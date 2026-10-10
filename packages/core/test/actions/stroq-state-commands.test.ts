@@ -8,9 +8,12 @@ import { SPELLINGS, joined } from './stroq-state-matrix.js';
  * `trust <file>`) are listed in `stroq-state.ts`, and `self-config.test.ts` holds that list to a
  * long run of spellings. The commands that are still to come (`harden apply|undo|forget`,
  * `prove`, `add`, `remove`, `vet --online`, `task`, `permit extend|revoke`) are listed ahead of
- * their code, and each has to be judged exactly as `untaint` is, in the same spellings. The
- * list is a denylist: the reading forms of the same commands, and any subcommand it does not
- * name, stay open.
+ * their code, and each has to be judged exactly as `untaint` is, in the same spellings. So are
+ * two that exist: `exposure --probe` starts every stdio server that the project's `.mcp.json`
+ * names, which an agent can have written, and `canary` plants a file with a first line it
+ * chooses, anywhere it chooses (`--file ~/.zprofile`), and adds a canary to the secret index.
+ * The list is a denylist: the reading forms of the same commands, and any subcommand it does
+ * not name, stay open.
  */
 
 const UNTAINT = ['untaint', '--all'] as const;
@@ -44,6 +47,15 @@ const CHANGING: ReadonlyArray<readonly string[]> = [
   ['permit', 'extend', 'task-1', 'abc123', '--ttl', '5m'],
   ['permit', 'revoke', 'task-1'],
   ['permit', 'revoke', '--all'],
+  ['exposure', '--probe'],
+  ['exposure', '--json', '--probe'],
+  ['exposure', '--probe', '--share', '--json'],
+  ['exposure', '--verbose', '--probe'],
+  ['exposure', '--probe=true'],
+  ['canary'],
+  ['canary', '--name', 'STROQ_CANARY_KEY'],
+  ['canary', '--file', '~/.zprofile', '--name', 'x'],
+  ['canary', '--file=/tmp/decoy'],
 ];
 
 /** What follows `stroq` in a call that only reads, or only asks how it works. */
@@ -69,6 +81,14 @@ const READING: ReadonlyArray<readonly string[]> = [
   ['permit', 'revoke', '--help'],
   ['vet', '--online', '--help'],
   ['doctor'],
+  ['exposure'],
+  ['exposure', '--json'],
+  ['exposure', '--share'],
+  ['exposure', '--verbose'],
+  ['exposure', '--help'],
+  ['exposure', '--probe', '--help'],
+  ['canary', '--help'],
+  ['canary', '-h'],
 ];
 
 describe('the matrix of spellings', () => {
@@ -161,6 +181,10 @@ describe('what the classifier does with them', () => {
     ['Monitor', 'stroq task -- "refactor the parser"'],
     ['Bash', 'npx @stroq/cli permit revoke --all'],
     ['Bash', 'stroq vet --online ./pkg'],
+    ['Bash', 'stroq exposure --probe'],
+    ['PowerShell', 'stroq.exe exposure --json --probe'],
+    ['Bash', 'stroq canary --file ~/.zprofile --name x'],
+    ['Monitor', 'stroq canary'],
   ])('%s: %s is config.self', (tool, command) => {
     expect(classifyTool(tool, { command }, '/work').classes).toContain('config.self');
   });
@@ -170,6 +194,9 @@ describe('what the classifier does with them', () => {
     ['Bash', 'stroq harden status'],
     ['PowerShell', 'stroq.exe permit list'],
     ['Monitor', 'stroq permit show task-1'],
+    ['Bash', 'stroq exposure --json'],
+    ['PowerShell', 'stroq.exe exposure'],
+    ['Bash', 'stroq canary --help'],
   ])('%s: %s is not', (tool, command) => {
     expect(classifyTool(tool, { command }, '/work').classes).not.toContain('config.self');
   });

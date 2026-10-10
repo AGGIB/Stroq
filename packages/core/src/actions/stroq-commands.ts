@@ -77,7 +77,11 @@ export const STROQ_ENTRY =
 // Which subcommands change state
 // -------------------------------------------------------------------------------------------
 
-/** Subcommands that change state whatever follows them. */
+/**
+ * Subcommands that change state whatever follows them. `canary` is not one that is still to come: with a
+ * `--file` it creates the file it is given, with a first line it chooses, wherever it chooses (an arbitrary
+ * write, into `~/.zprofile` for one), and with none it adds a canary to the secret index.
+ */
 export const STATE_COMMANDS: ReadonlySet<string> = new Set([
   'untaint',
   'init',
@@ -86,6 +90,7 @@ export const STATE_COMMANDS: ReadonlySet<string> = new Set([
   'add',
   'remove',
   'task',
+  'canary',
 ]);
 
 /**
@@ -102,6 +107,13 @@ export const STATE_VERBS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 /** `vet` reads a directory; `vet --online` also goes to the network, and is the form that is denied. */
 const isOnlineFlag = (word: string): boolean => word === '--online' || word.startsWith('--online=');
 
+/**
+ * `exposure` reads this machine's agent configuration; `exposure --probe` also starts every stdio server that
+ * the project's `.mcp.json` and `.cursor/mcp.json` name, with the handshake of the protocol, and an agent
+ * can have written either file. So the command line of a server can be `stroq uninstall`, run by Stroq for it.
+ */
+const isProbeFlag = (word: string): boolean => word === '--probe' || word.startsWith('--probe=');
+
 /** Whether the subcommand `sub`, with the words of the command (`args`, `sub` among them), changes state. */
 export function subcommandChangesState(sub: string, args: readonly string[]): boolean {
   if (STATE_COMMANDS.has(sub)) return true;
@@ -109,6 +121,7 @@ export function subcommandChangesState(sub: string, args: readonly string[]): bo
   const verbs = STATE_VERBS.get(sub);
   if (verbs !== undefined) return after.some((word) => verbs.has(word));
   if (sub === 'vet') return args.some(isOnlineFlag);
+  if (sub === 'exposure') return args.some(isProbeFlag);
   if (sub !== 'trust') return false;
   return after.includes('--remove') || after.some((word) => !word.startsWith('-'));
 }
