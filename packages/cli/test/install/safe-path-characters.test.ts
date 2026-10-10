@@ -13,7 +13,7 @@ const LAST_CODE_POINT = 0x10ffff;
 const TRAILING = /ending in a dot or a space/;
 const SURROGATES = { first: 0xd800, last: 0xdfff } as const;
 
-/** The code points named by the review of the first version, which a list of two helpers did not hold. */
+/** Code points that a list copied from two display helpers does not hold, though each shows nothing or reorders what is shown. */
 const NAMED: readonly (readonly [what: string, first: number, last: number])[] = [
   ['ARABIC LETTER MARK', 0x061c, 0x061c],
   ['SOFT HYPHEN', 0x00ad, 0x00ad],

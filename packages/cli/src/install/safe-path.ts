@@ -54,7 +54,7 @@ const CONTROLS: Ranges = [
 ];
 
 /**
- * The first version's list of what shows nothing or changes what is shown: the union of what
+ * A list, kept as a floor, of what shows nothing or changes what is shown: the union of what
  * `neutralizeControls` covers (the direction overrides and isolates, which write a name backwards)
  * and what the replay page writes out (`INVISIBLE` in replay/html.ts). The properties above hold all
  * of it and more; `safe-path-parity.test.ts` asks both helpers about every code point and fails if
