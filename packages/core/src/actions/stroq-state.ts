@@ -380,11 +380,17 @@ function runsStateCommand(
  *
  * A command that hands its words on (`PASS_THROUGH`) has only the words before its `--` for its own, and the
  * exemption flags count among those alone: the CLI reads them so (`ownArgs` in `help.ts`), and `stroq task --
- * "fix --help"` starts a task. A launcher (`run`, `mcp`) starts the program after its `--`, which is judged as
- * it would be alone: `stroq run -- stroq prove` changes state, `stroq run -- claude` does not. The operand is
+ * "fix --help"` starts a task. A launcher (`run`, `mcp`) starts the program after its `--`, which is judged by
+ * the command it names: `stroq run -- stroq prove` changes state, `stroq run -- claude` does not. The operand is
  * read again as a command line of its own, so every wrapper, runner and spelling known for a command is known
  * behind a launcher, and launchers behind launchers are followed to `MAX_LAUNCHER_DEPTH`. A string handed to a
  * shell (`stroq run -- sh -c '…'`) is read with the segments of the command, as it is without a launcher.
+ *
+ * No exemption flag counts behind a launcher (`depth` above 0), whoever wrote it where. The operand is put
+ * together again from words that were split on blanks with their quotes taken off, so an argument that holds a
+ * flag among other words (`stroq run -- stroq uninstall --client "x -h"`) comes back as a flag that the program
+ * is never given, and a command that runs would be read as a request for help. A request for help is made to
+ * the command the agent typed, and `stroq prove --help` is open without the launcher.
  *
  * What is not followed: a program that an expansion makes into Stroq, where the command does not set it
  * (`stroq run -- $PROGRAM prove`, with `PROGRAM` from the environment), as for any command; and the body of a
@@ -410,7 +416,7 @@ function changesState(
   const own = (dashes === -1 ? words : words.slice(0, dashes)).filter(
     (word) => word !== '--' && word !== '',
   );
-  if (own.some(isExemptionFlag)) return false;
+  if (depth === 0 && own.some(isExemptionFlag)) return false;
   if (sub === undefined) return false;
   if (LAUNCHERS.has(sub)) {
     const operand = dashes === -1 ? [] : after.slice(dashes + 1);

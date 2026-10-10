@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyTool } from '../../src/actions/classify-tool.js';
 import { stroqStateSignals } from '../../src/actions/stroq-state.js';
 import { cpuNow } from '../cpu-time.js';
-import { SPELLINGS, joined, type Spelling } from './stroq-state-matrix.js';
+import { QUOTED_BEHIND_LAUNCHERS, SPELLINGS, joined, type Spelling } from './stroq-state-matrix.js';
 
 /**
  * `stroq run -- <command>` and `stroq mcp -- <command>` start whatever program follows the
@@ -12,7 +12,11 @@ import { SPELLINGS, joined, type Spelling } from './stroq-state-matrix.js';
  *
  * The words after that `--` belong to that program and not to `stroq run`, which is how the
  * CLI reads them (`help.ts`: `ownArgs`). So `--help`, `-h` and `--dry-run`, which keep a
- * command open, count only when they stand before it.
+ * command open, count only when they stand before it, in the command the agent typed. Behind a
+ * launcher none of them opens anything: the operand is read again from words that were split on
+ * blanks with their quotes taken off, so a quoted argument such as `"x -h"` would show a flag
+ * that the program is never given, and `stroq run -- stroq uninstall --client "x -h"` would
+ * be let through as a request for help while it runs.
  */
 
 const STATE = ['stroq-state-change'];
@@ -38,8 +42,6 @@ const READING: ReadonlyArray<readonly string[]> = [
   ['harden', 'status'],
   ['permit', 'list'],
   ['trust'],
-  ['prove', '--help'],
-  ['init', '--dry-run'],
 ];
 
 /**
@@ -230,15 +232,24 @@ describe('the words after "--" are the other program’s, not the ones that open
   });
 
   // A flag after the `--` of `stroq run` is not `stroq run`'s, so it does not open the launcher for
-  // whatever it starts. It is read where it belongs, among the words of the operand, which is
-  // judged as it would be alone: a request for help from `stroq prove` is open there, as it is
-  // without a launcher, and a change of state next to it is not.
-  it('judges the operand by its own flags: help for it is open, a change of state is not', () => {
-    expect(stroqStateSignals('stroq run -- stroq prove --help')).toEqual([]);
-    expect(stroqStateSignals('stroq run -- stroq prove -h')).toEqual([]);
-    expect(stroqStateSignals('stroq run -- stroq add x --dry-run')).toEqual([]);
-    expect(stroqStateSignals('stroq run --sandbox -- stroq harden apply --help')).toEqual([]);
-    expect(stroqStateSignals('stroq mcp --server s -- stroq untaint -h')).toEqual([]);
+  // whatever it starts, and `stroq run` cannot vouch for what the program behind it does with the
+  // flag either: `stroq run -- stroq prove --help` is denied as `stroq run -- stroq prove` is. A
+  // request for help is made without a launcher.
+  it.each([
+    'stroq run -- stroq prove --help',
+    'stroq run -- stroq prove -h',
+    'stroq run -- stroq add x --dry-run',
+    'stroq run -- stroq init --dry-run',
+    'stroq run -- stroq task --help',
+    'stroq run --sandbox -- stroq harden apply --help',
+    'stroq mcp --server s -- stroq untaint -h',
+    'stroq run -- stroq run -- stroq prove --help',
+    'stroq run -- env -i stroq prove --help',
+    'stroq run -- xargs stroq prove --dry-run',
+    'npx @stroq/cli run -- npx @stroq/cli add x --help',
+    'sudo stroq run --sandbox -- sudo stroq remove x -h',
+  ])('does not take the flag behind the launcher in %s for a request for help', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
   });
 
   it('still denies what stands next to a flag of the operand, and what the string of a shell holds', () => {
@@ -256,10 +267,24 @@ describe('the words after "--" are the other program’s, not the ones that open
     expect(stroqStateSignals('stroq run -- sh -c "stroq prove --help"')).toEqual([]);
   });
 
-  // A request for help made to the launcher itself stops before the `--`; a flag of the operand does
-  // not cover a change of state that stands next to it.
-  it('does not let a flag of the launcher or of its operand cover a change of state next to it', () => {
+  // The operand is read again from the words of the line, which were split on blanks with their quotes
+  // taken off: a quoted argument that holds a flag became a word that is one. Verified by the review of
+  // 2026-10-10, each of these ran the command it names.
+  it.each(QUOTED_BEHIND_LAUNCHERS.map((command) => [command]))(
+    'does not read the flag inside a quoted argument of the operand: %s',
+    (command) => {
+      expect(stroqStateSignals(command), command).toEqual(STATE);
+    },
+  );
+
+  // A launcher that is not started by anyone is the one case where a flag of the operand is a flag
+  // of a command that is not run: a request for help for `stroq run` stops before the `--`.
+  it('keeps a flag of the operand out of the exemption even when the launcher is asked for help', () => {
     expect(stroqStateSignals('stroq run --help -- stroq prove --help')).toEqual([]);
+    expect(stroqStateSignals('stroq run -- stroq prove --help --dry-run')).toEqual(STATE);
+  });
+
+  it('does not let a flag of the operand cover a change of state next to it', () => {
     expect(stroqStateSignals('stroq run -- stroq prove --help && stroq prove')).toEqual(STATE);
     expect(stroqStateSignals('stroq run -- stroq prove --help; stroq add x')).toEqual(STATE);
   });

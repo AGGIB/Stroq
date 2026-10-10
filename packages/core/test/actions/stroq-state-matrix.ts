@@ -48,3 +48,18 @@ export const SPELLINGS: readonly Spelling[] = [
   ['an if', (w) => `if true; then stroq ${joined(w)}; fi`],
   ['a function', (w) => `f() { stroq ${joined(w)}; }; f`],
 ];
+
+/**
+ * Commands that run and change state behind a launcher, and that were let through as a request for
+ * help (the review of 2026-10-10): the operand of a launcher is read again from words that were split on
+ * blanks with their quotes taken off, so a quoted argument that holds a flag (`"x -h"`) showed a flag
+ * that the program is never given.
+ */
+export const QUOTED_BEHIND_LAUNCHERS: readonly string[] = [
+  'stroq run --no-inspect --force -- stroq uninstall --client "x -h"',
+  'stroq run -- stroq trust "evil.md -h"',
+  'stroq mcp --server s -- stroq uninstall --config "x --help"',
+  'sudo stroq run -- sudo stroq trust "x -h"',
+  'npx @stroq/cli run -- npx @stroq/cli trust "x -h"',
+  'stroq run -- stroq run --agent "x -h" -- stroq uninstall',
+];
