@@ -232,7 +232,7 @@ function writeSandboxConfig(sandbox: GeneratedSandbox): {
  * configuration, and the agent's state directory has to be writable for the agent to start.
  */
 const NOT_COVERED =
-  "  sandbox: not covered: the hook entries in the host's own config (settings.json, hooks.json, the plugin cache) stay writable, because the agent's own directory has to be, so an agent that runs code outside what the gate of Stroq's commands reads can still switch the firewall off from inside the sandbox. A later task mode, with a home of its own for the agent, is meant to close that.";
+  "  sandbox: not covered: the hook entries in the host's own config (settings.json, hooks.json, the plugin cache) stay writable, because the agent's own directory has to be, and so do the session files (taint), the audit chain and the last-hook stamps under ~/.stroq, because the hooks write them: an agent that runs code outside what the gate of Stroq's commands reads can still switch the firewall off, or clear its own taint, from inside the sandbox. A later task mode, with a home of its own for the agent, is meant to close that.";
 
 /**
  * Said on macOS when the copy of the CLI that the Claude Code plugin's hook wrapper runs

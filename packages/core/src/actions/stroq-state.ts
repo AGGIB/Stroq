@@ -9,7 +9,11 @@
  * bare name alone (`shell-wrappers.ts`); and arithmetic that shifts (`echo $((1<<3))`), whose `<<` `joinText`
  * takes for a heredoc, so that the lines after it are folded into the line of the command that stands there;
  * and a PowerShell block comment before the command (`<# note #> stroq untaint`), which hides the command from
- * the words of the line. And outside this file: the hook entries in the host's own configuration (`settings.json`, `hooks.json`, the
+ * the words of the line. Found in review of the folding of the text (`join-text.ts`), also left: a heredoc
+ * delimiter that the shell reads differently from `[\w.-]+` (`<<EOF+`, `<<E"O"F`, a CRLF line end), a newline
+ * inside `$(…)` or backticks within double quotes, `$'…'` read as a plain quote, and a `#` comment right after
+ * `)` (`case x in x)# it's`), each of which can fold the next command into the line before it. And outside
+ * this file: the hook entries in the host's own configuration (`settings.json`, `hooks.json`, the
  * plugin cache) are writable in the sandbox, so a program that none of this reads can switch the firewall off
  * from inside it.
  */

@@ -185,6 +185,11 @@ const tooBroadToSandbox = (path: string, userHome: string): boolean =>
  * it, so that a rename there cannot leave one unprotected. The order is the order they are
  * written in, and it is pinned by a test.
  *
+ * What stays writable, because the hooks write it: the session files (the taint and the
+ * provenance), the audit chain and the last-hook stamps. `stroq untaint` is a plain removal of the
+ * session files, so a program that none of the gate on Stroq's commands reads can do the same
+ * from inside the sandbox; only that gate guards them.
+ *
  * Measured against srt 0.0.77 on macOS (Seatbelt, an APFS volume that does not tell upper case from
  * lower), 2026-10-10, with `allowWrite` naming a directory and `denyWrite` naming paths inside it
  * (`sandbox.live.test.ts` repeats it, opt-in): `denyWrite` wins over `allowWrite`; a write to a denied
