@@ -186,7 +186,11 @@ export interface RecordedTextBlockEdit {
   readonly prefix: string;
   /** The first line break of `prefix` ended the owner's last line, which had none. */
   readonly closesLastLine: boolean;
-  /** The line break written after the end marker. */
+  /**
+   * The line break written after the end marker. Undo takes away the end marker's line together
+   * with whatever line break it has by then, so this is not what it matches on; it is kept so that
+   * the record says everything that was written around the block.
+   */
   readonly suffix: string;
 }
 

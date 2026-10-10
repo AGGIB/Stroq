@@ -18,6 +18,7 @@ import {
   backupPath,
   newBackupId,
   readBackup,
+  removeBackup,
 } from '../../src/harden/backup.js';
 import { HardenError, type Fs } from '../../src/harden/types.js';
 import { fakeEnv, removeTempDirs, steppingClock, tempDir } from './helpers.js';
@@ -364,5 +365,45 @@ describe('readBackup', () => {
     writeFileSync(backupPath(home, 'b1', real), Buffer.alloc(5 * 1024 * 1024, 0x20));
 
     expect(readBackup(env, real, 'b1')).toBeNull();
+  });
+});
+
+describe('removeBackup', () => {
+  it('removes the copy and the directory it leaves empty', async () => {
+    const { home, real, env } = setup();
+    await backupFile(env, real, bytes('x'), 'b1');
+
+    await removeBackup(env, real, 'b1');
+
+    expect(existsSync(join(home, 'backups', 'b1'))).toBe(false);
+  });
+
+  it('leaves the copies of other files, and the directory they share', async () => {
+    const { home, real, env } = setup();
+    const other = join(tempDir('other'), 'settings.json');
+    await backupFile(env, real, bytes('this'), 'b1');
+    await backupFile(env, other, bytes('other'), 'b1');
+
+    await removeBackup(env, real, 'b1');
+
+    expect(copiesOf(home, real)).toEqual([]);
+    expect(readFileSync(backupPath(home, 'b1', other), 'utf8')).toBe('other');
+  });
+
+  it('is quiet about a copy that is not there, and about an id it would not have written', async () => {
+    const { real, env } = setup();
+
+    await expect(removeBackup(env, real, 'nope')).resolves.toBeUndefined();
+    await expect(removeBackup(env, real, '../escape')).resolves.toBeUndefined();
+  });
+
+  it('does not touch what an id that climbs out of the directory would name', async () => {
+    const { home, real, env } = setup();
+    const victim = join(home, 'victim.txt');
+    writeFileSync(victim, 'precious');
+
+    await removeBackup(env, real, '../victim.txt');
+
+    expect(readFileSync(victim, 'utf8')).toBe('precious');
   });
 });

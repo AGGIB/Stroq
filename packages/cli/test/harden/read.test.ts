@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -52,6 +52,26 @@ describe('readTargetBytes', () => {
       code: 'not-regular-file',
     });
   });
+
+  // Not a missing file and not one of the refusals: the failure is the system's, and is passed on.
+  it.skipIf(process.platform === 'win32')(
+    'passes on the system’s own error for a file it may not read',
+    () => {
+      const dir = tempDir();
+      writeFileSync(join(dir, 'sealed'), 'x');
+      chmodSync(join(dir, 'sealed'), 0o000);
+      try {
+        const error = thrownBy(() => readTargetBytes(join(dir, 'sealed')));
+        // Root can read anything, so there is nothing to refuse for root.
+        if (process.getuid?.() !== 0) {
+          expect(error).toMatchObject({ code: 'EACCES' });
+          expect(error).not.toBeInstanceOf(HardenError);
+        }
+      } finally {
+        chmodSync(join(dir, 'sealed'), 0o600);
+      }
+    },
+  );
 
   it('refuses a file larger than any agent config is', () => {
     const dir = tempDir();

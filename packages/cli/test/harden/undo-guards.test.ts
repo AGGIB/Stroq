@@ -172,6 +172,39 @@ describe('undoFile: a record that is not about the path it is under', () => {
   });
 });
 
+describe('undoFile: a record that mixes JSON edits and text edits', () => {
+  it('is blocked and untouched, since no file is both', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'settings.json', jsonText({ model: 'm' }), [
+      addDeny('a'),
+    ]);
+    const after = readFileSync(path, 'utf8');
+    const manifestFile = join(e.home, 'harden', 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as {
+      files: Record<string, { edits: unknown[] }[]>;
+    };
+    manifest.files[real]?.[0]?.edits.push({
+      kind: 'text-block',
+      id: 'cursor-ignore',
+      lines: ['.env'],
+      previous: null,
+      prefix: '',
+      closesLastLine: false,
+      suffix: '\n',
+    });
+    writeFileSync(manifestFile, JSON.stringify(manifest));
+    // Not what Stroq left, so that the copy is not simply put back.
+    owner(path, (doc) => ({ ...doc, theirs: 1 }));
+
+    const result = await undo(e, real);
+
+    expect(result).toMatchObject({ status: 'blocked', blocked: { refused: 'type-conflict' } });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ theirs: 1 });
+    expect(after).toContain('"deny"');
+    expect(readManifest(e.env).files[real]).toHaveLength(1);
+  });
+});
+
 describe('apply: a link that points nowhere at the target', () => {
   it.skipIf(onWindows)('is refused before anything is made or kept', async () => {
     const e = engine();

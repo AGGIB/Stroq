@@ -225,6 +225,27 @@ describe('applyPlan: a plan is plain data, and its text after has to be what its
     expectUntouched(e, 'settings.json', before);
   });
 
+  it('refuses a plan whose text before cannot be edited at all, though the plan says it can', async () => {
+    const e = engine();
+    const commented = '{\n  // my note\n  "model": "m"\n}\n';
+    writeFileSync(e.file('settings.json'), commented);
+    const fine = (() => {
+      writeFileSync(e.file('other.json'), jsonText({ model: 'm' }));
+      return e.planJson('other.json', [addDeny('x')]);
+    })();
+    // The text before is the commented file, which no planner edits; the rest is a good plan's.
+    const doctored: JsonPlan = {
+      ...fine,
+      file: e.file('settings.json'),
+      real: e.file('settings.json'),
+      before: commented,
+    };
+
+    await expect(applyPlan(doctored, e.env)).rejects.toMatchObject({ code: 'plan-inconsistent' });
+
+    expect(readFileSync(e.file('settings.json'), 'utf8')).toBe(commented);
+  });
+
   it('refuses a diff that does not show the change', async () => {
     const e = engine();
     const before = jsonText({ model: 'm' });

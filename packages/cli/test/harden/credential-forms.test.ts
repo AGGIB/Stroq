@@ -235,6 +235,18 @@ describe('findCredentialShape: a line it cannot read', () => {
   });
 });
 
+describe('findCredentialShape: a string with several lines in a JSON document', () => {
+  it('reads each line of it as a line of an env file', () => {
+    const doc = json({ envFile: `PORT=3000\nAPI_TOKEN=${SECRET}\n` });
+
+    expect(findCredentialShape(doc)).toBe('named-secret');
+  });
+
+  it('finds nothing in one that has nothing', () => {
+    expect(findCredentialShape(json({ envFile: 'PORT=3000\nHOST=localhost\n' }))).toBeNull();
+  });
+});
+
 describe('findCredentialShape: JSON documents, as before', () => {
   it('hands the name of a key down to the items of its list, and to nothing else', () => {
     expect(findCredentialShape(json({ tokens: [SECRET] }))).toBe('named-secret');

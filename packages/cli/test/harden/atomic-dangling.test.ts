@@ -1,6 +1,15 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { danglingLinkIn } from '../../src/harden/atomic-support.js';
 import { assertWriteAllowed, removeFile, writeFileAtomic } from '../../src/harden/atomic.js';
 import { HardenError } from '../../src/harden/types.js';
 import { removeTempDirs, tempDir } from './helpers.js';
@@ -64,6 +73,29 @@ describe.skipIf(process.platform === 'win32')('a link that points nowhere', () =
     await expect(writeFileAtomic(join(dir, 'a'), 'x')).rejects.toMatchObject({
       code: 'dangling-link',
     });
+  });
+
+  it('is refused when it is a loop of links in a directory the file would go in', async () => {
+    const dir = tempDir();
+    symlinkSync(join(dir, 'b'), join(dir, 'a'));
+    symlinkSync(join(dir, 'a'), join(dir, 'b'));
+
+    await expect(writeFileAtomic(join(dir, 'a', 'settings.json'), 'x')).rejects.toMatchObject({
+      code: 'dangling-link',
+    });
+  });
+
+  // A directory that cannot be searched (or, for root, an ordinary one) has no link in it that
+  // points nowhere, and not being able to look is not a reason to refuse.
+  it('is not judged a link when the path cannot be looked at', () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, 'sealed'));
+    chmodSync(join(dir, 'sealed'), 0o000);
+    try {
+      expect(danglingLinkIn(join(dir, 'sealed', 'settings.json'))).toBeNull();
+    } finally {
+      chmodSync(join(dir, 'sealed'), 0o700);
+    }
   });
 
   it('is refused for a removal as well', async () => {

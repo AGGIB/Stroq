@@ -56,6 +56,17 @@ describe('writeFileAtomic: a rename that is refused for a moment', () => {
     expect(calls.sleeps[1]).toBeGreaterThan(calls.sleeps[0] ?? Infinity);
   });
 
+  it('waits with the real clock when it is not given a sleep of its own', async () => {
+    const dir = tempDir();
+    const file = join(dir, 'settings.json');
+    writeFileSync(file, 'old');
+    const { fs } = flaky('EBUSY', 1);
+
+    await writeFileAtomic(file, 'new', { fs });
+
+    expect(readFileSync(file, 'utf8')).toBe('new');
+  });
+
   it('does not wait at all when the first try works', async () => {
     const dir = tempDir();
     const { fs, sleep, calls } = flaky('EBUSY', 0);

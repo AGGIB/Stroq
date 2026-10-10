@@ -49,6 +49,20 @@ describe.each(planners)('$name: where the path leads, before it reads', (p) => {
     expect(plan.existed).toBe(false);
   });
 
+  // `init`'s rule asks the working directory, which a test run or a build can have deleted. That is
+  // a failure of the machine and reads as one: it is not a plan that was refused.
+  it('does not turn a failure of the machine into a refused plan', () => {
+    const project = tempDir('project');
+    const gone = Object.assign(new Error('ENOENT: no current directory'), { code: 'ENOENT' });
+    vi.spyOn(process, 'cwd').mockImplementation(() => {
+      throw gone;
+    });
+    const read = vi.fn(readTargetText);
+
+    expect(() => p.plan(join(project, 'settings.json'), { read })).toThrow(gone);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   describe.skipIf(onWindows)('with links', () => {
     links(p);
   });
