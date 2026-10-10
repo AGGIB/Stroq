@@ -1,6 +1,6 @@
 import { resolveRealPath } from './atomic.js';
 import { planBackup } from './backup.js';
-import { unifiedDiff } from './diff.js';
+import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import {
   DEFAULT_LAYOUT,
   deepEqual,
@@ -159,6 +159,7 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   const before = text ?? '';
   const changed = outcome.after !== before;
   const backup = planBackup(text);
+  const shown = changed ? maskedDiff(text, outcome.after, file) : { diff: '', hidden: false };
   return {
     kind: 'json',
     recipe: options.recipe ?? DEFAULT_RECIPE,
@@ -167,18 +168,13 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
     existed: text !== null,
     before,
     after: outcome.after,
-    diff: changed
-      ? unifiedDiff(before, outcome.after, {
-          path: file,
-          ...(text === null ? { oldMissing: true } : {}),
-        })
-      : '',
+    diff: shown.diff,
     changed,
     ...(outcome.refusal === undefined
       ? {}
       : { refused: outcome.refusal.refused, refusedDetail: outcome.refusal.detail }),
     backup: backup.backup,
-    notices: backup.notices,
+    notices: [...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
     edits: outcome.edits,
     roundTrips: outcome.roundTrips,
     formatting: outcome.roundTrips || outcome.refusal !== undefined ? 'preserved' : 'will-change',

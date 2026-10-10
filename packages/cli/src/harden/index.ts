@@ -7,7 +7,7 @@ import {
   type WriteRules,
 } from './atomic.js';
 import { backupFile, newBackupId, readBackup, type BackupResult } from './backup.js';
-import { unifiedDiff } from './diff.js';
+import { maskedDiff, DIFF_HIDDEN_NOTICE } from './diff-mask.js';
 import { undoJsonEdits } from './json-edit.js';
 import {
   entriesFor,
@@ -207,6 +207,8 @@ export interface UndoResult {
   readonly reformatted: boolean;
   /** How many recorded applies were undone. */
   readonly applications: number;
+  /** Things the owner should know about what was done or shown. */
+  readonly notices: readonly string[];
   readonly blocked?: { readonly refused: PlanRefusal; readonly detail: string };
 }
 
@@ -289,6 +291,7 @@ async function undoLocked(env: HardenEnv, asked: string, rules: WriteRules): Pro
     kept: [],
     reformatted: false,
     applications: 0,
+    notices: [],
   };
   if (entries.length === 0) return nothing;
 
@@ -312,13 +315,7 @@ async function undoLocked(env: HardenEnv, asked: string, rules: WriteRules): Pro
 
   // The diff first: it is the one thing that can still refuse, and nothing has been touched yet.
   const changed = text !== current;
-  const diff = changed
-    ? unifiedDiff(current ?? '', text ?? '', {
-        path: real,
-        oldMissing: current === null,
-        newMissing: text === null,
-      })
-    : '';
+  const shown = changed ? maskedDiff(current, text, real) : { diff: '', hidden: false };
   const fs = env.fs === undefined ? {} : { fs: env.fs };
   if (changed) {
     if (text === null) await removeFile(real, { ...rules, ...fs });
@@ -337,10 +334,11 @@ async function undoLocked(env: HardenEnv, asked: string, rules: WriteRules): Pro
   return {
     status,
     real,
-    diff,
+    diff: shown.diff,
     kept,
     reformatted: reformatted && changed,
     applications: entries.length,
+    notices: shown.hidden ? [DIFF_HIDDEN_NOTICE] : [],
   };
 }
 

@@ -1,6 +1,6 @@
 import { resolveRealPath } from './atomic.js';
 import { planBackup } from './backup.js';
-import { unifiedDiff } from './diff.js';
+import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import {
   HardenError,
   ID_PATTERN,
@@ -152,6 +152,7 @@ function buildPlan(
   const before = text ?? '';
   const changed = after !== before;
   const backup = planBackup(text);
+  const shown = changed ? maskedDiff(text, after, file) : { diff: '', hidden: false };
   return {
     kind: 'text-block',
     recipe: options.recipe ?? DEFAULT_RECIPE,
@@ -160,13 +161,11 @@ function buildPlan(
     existed: text !== null,
     before,
     after,
-    diff: changed
-      ? unifiedDiff(before, after, { path: file, ...(text === null ? { oldMissing: true } : {}) })
-      : '',
+    diff: shown.diff,
     changed,
     ...(refusal === undefined ? {} : { refused: refusal.refused, refusedDetail: refusal.detail }),
     backup: backup.backup,
-    notices: backup.notices,
+    notices: [...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
     edits,
     ...(options.root === undefined ? {} : { root: options.root }),
     ...(options.newFileMode === undefined ? {} : { newFileMode: options.newFileMode }),

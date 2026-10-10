@@ -256,7 +256,11 @@ describe('planTextBlock: the plan', () => {
     expect(plan('node_modules/\n').backup).toBe('copy');
     const holding = plan('API_TOKEN=stroq_attack_fixture_value_0123456789\n');
     expect(holding.backup).toBe('none-credential-text');
-    expect(holding.notices).toEqual(['no byte backup: the file holds credential-shaped text']);
+    // The credential's line is context in the diff, so the diff hides it and says so.
+    expect(holding.notices).toEqual([
+      'no byte backup: the file holds credential-shaped text',
+      'the diff hides lines that hold credential-shaped text',
+    ]);
   });
 
   it('carries the recipe, the root and the mode for a new file that it was given', () => {

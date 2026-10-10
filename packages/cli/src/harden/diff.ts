@@ -26,6 +26,15 @@ export const MAX_EDIT_DISTANCE = 3_000;
 const DEFAULT_CONTEXT = 3;
 const NO_NEWLINE = '\\ No newline at end of file';
 
+/**
+ * Whether the line at `index` (counting from 0 in the text it belongs to) must not be shown. It
+ * is asked only of lines that appear in the diff, `line` being the line without its line break.
+ */
+export type HideLine = (index: number, line: string) => boolean;
+
+/** What a hidden line is shown as, whatever it said: the diff keeps its shape and loses the text. */
+export const HIDDEN_LINE = '[credential-shaped text hidden]';
+
 export interface DiffOptions {
   /** Shown in the headers. It is a label, not a place to open: control characters are replaced. */
   readonly path: string;
@@ -35,6 +44,17 @@ export interface DiffOptions {
   readonly oldMissing?: boolean;
   /** The new side is a file that is gone. */
   readonly newMissing?: boolean;
+  /**
+   * Lines to show as `HIDDEN_LINE` instead of their text, for the old and the new text. A context
+   * line is hidden if either side asks for it. The hunk headers are the same with or without.
+   */
+  readonly hide?: { readonly old?: HideLine; readonly new?: HideLine };
+}
+
+/** A diff and how many of its lines were hidden. */
+export interface DiffResult {
+  readonly text: string;
+  readonly hidden: number;
 }
 
 type Tag = ' ' | '-' | '+';
@@ -50,7 +70,8 @@ const op = (tag: Tag, line: string): Op => ({ tag, line });
 /** The lines of a text with their terminators kept; an empty text has none. */
 const splitLines = (text: string): string[] => text.split(/(?<=\n)/).filter((line) => line !== '');
 
-function assertDiffable(text: string): void {
+/** Throws `diff-too-large` for a text the preview is not willing to compute a diff of. */
+export function assertDiffable(text: string): void {
   let lines = 0;
   for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) lines += 1;
   if (text.length > 0 && !text.endsWith('\n')) lines += 1;
@@ -164,14 +185,24 @@ function range(before: number, count: number): string {
   return count === 1 ? String(before + 1) : `${before + 1},${count}`;
 }
 
+/** What the hunks of a diff came to: their rows, and how many lines were hidden. */
+interface Hunks {
+  readonly rows: string[];
+  hidden: number;
+}
+
+/** The text of a line as the predicate sees it: no line break, no carriage return. */
+const bare = (content: string): string => (content.endsWith('\r') ? content.slice(0, -1) : content);
+
 /** The hunks of an edit script: changes with `context` lines around them, close ones joined. */
-function hunks(script: readonly Op[], context: number): string[] {
+function hunks(script: readonly Op[], context: number, hide: DiffOptions['hide']): Hunks {
+  const made: Hunks = { rows: [], hidden: 0 };
   const changed: number[] = [];
   script.forEach((entry, i) => {
     if (entry.tag !== ' ') changed.push(i);
   });
   const first = changed[0];
-  if (first === undefined) return [];
+  if (first === undefined) return made;
 
   // Changes belong to one hunk while no more than twice the context lies between them.
   const groups: [number, number][] = [];
@@ -193,22 +224,31 @@ function hunks(script: readonly Op[], context: number): string[] {
     consumedB.push((consumedB[consumedB.length - 1] ?? 0) + (entry.tag === '-' ? 0 : 1));
   }
 
-  return groups.flatMap(([firstChange, lastChange]) => {
+  for (const [firstChange, lastChange] of groups) {
     const start = Math.max(0, firstChange - context);
     const end = Math.min(script.length, lastChange + context + 1);
     const part = script.slice(start, end);
     const oldCount = part.filter((entry) => entry.tag !== '+').length;
     const newCount = part.filter((entry) => entry.tag !== '-').length;
-    const header = `@@ -${range(consumedA[start] ?? 0, oldCount)} +${range(consumedB[start] ?? 0, newCount)} @@`;
-    return [
-      header,
-      ...part.flatMap((entry) => {
-        const terminated = entry.line.endsWith('\n');
-        const row = `${entry.tag}${terminated ? entry.line.slice(0, -1) : entry.line}`;
-        return terminated ? [row] : [row, NO_NEWLINE];
-      }),
-    ];
-  });
+    made.rows.push(
+      `@@ -${range(consumedA[start] ?? 0, oldCount)} +${range(consumedB[start] ?? 0, newCount)} @@`,
+    );
+    part.forEach((entry, offset) => {
+      const terminated = entry.line.endsWith('\n');
+      const content = terminated ? entry.line.slice(0, -1) : entry.line;
+      // How many lines of each text came before this one: its own index in the text it is from.
+      const oldIndex = consumedA[start + offset] ?? 0;
+      const newIndex = consumedB[start + offset] ?? 0;
+      const seen = bare(content);
+      const hidden =
+        (entry.tag !== '+' && hide?.old?.(oldIndex, seen) === true) ||
+        (entry.tag !== '-' && hide?.new?.(newIndex, seen) === true);
+      if (hidden) made.hidden += 1;
+      made.rows.push(`${entry.tag}${hidden ? HIDDEN_LINE : content}`);
+      if (!terminated) made.rows.push(NO_NEWLINE);
+    });
+  }
+  return made;
 }
 
 /** A path as a label: no control character that could end the line, `/` for `\`, no root. */
@@ -219,21 +259,31 @@ const labelOf = (path: string): string =>
     .replace(/^\/+/, '');
 
 /**
- * The unified diff from `a` to `b`, or `''` when they are the same text.
+ * The unified diff from `a` to `b` (`text` is `''` when they are the same text), and how many of
+ * its lines were hidden by `options.hide`.
  *
  * Throws `HardenError('diff-too-large')` for an input above `MAX_DIFF_BYTES` or `MAX_DIFF_LINES`.
  */
-export function unifiedDiff(a: string, b: string, options: DiffOptions): string {
+export function diffText(a: string, b: string, options: DiffOptions): DiffResult {
   assertDiffable(a);
   assertDiffable(b);
   const flagged = options.oldMissing === true || options.newMissing === true;
-  if (a === b && !flagged) return '';
+  if (a === b && !flagged) return { text: '', hidden: 0 };
 
   const label = labelOf(options.path);
+  const made = hunks(
+    editScript(splitLines(a), splitLines(b)),
+    options.context ?? DEFAULT_CONTEXT,
+    options.hide,
+  );
   const rows = [
     options.oldMissing === true ? '--- /dev/null' : `--- a/${label}`,
     options.newMissing === true ? '+++ /dev/null' : `+++ b/${label}`,
-    ...hunks(editScript(splitLines(a), splitLines(b)), options.context ?? DEFAULT_CONTEXT),
+    ...made.rows,
   ];
-  return `${rows.join('\n')}\n`;
+  return { text: `${rows.join('\n')}\n`, hidden: made.hidden };
 }
+
+/** The unified diff from `a` to `b`, or `''` when they are the same text. See `diffText`. */
+export const unifiedDiff = (a: string, b: string, options: DiffOptions): string =>
+  diffText(a, b, options).text;
