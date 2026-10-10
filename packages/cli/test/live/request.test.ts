@@ -2,10 +2,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openLedger, type Ledger } from '../../src/live/budget.js';
-import { makeRequest, readSessionAudit } from '../../src/live/request.js';
+import { auditPosition, makeRequest, readAuditAfter } from '../../src/live/request.js';
 import type { HostDriver, HostRun, Probe, ProbeContext } from '../../src/live/types.js';
 import { FakeHostDriver } from './fake-driver.js';
-import { NONCE, SESSION, auditEntry, finished } from './helpers.js';
+import { NONCE, auditEntry, finished } from './helpers.js';
 import { probe } from './probe-helpers.js';
 import { makeRig, type Rig } from './rig.js';
 
@@ -162,19 +162,38 @@ describe('makeRequest', () => {
   });
 });
 
-describe('readSessionAudit', () => {
-  it('reads nothing from a home with no audit log', async () => {
-    expect(await readSessionAudit(rig.stroqHome, SESSION)).toEqual({ kind: 'read', entries: [] });
+describe('the audit log of a request', () => {
+  const unreadable = { kind: 'unreadable', problem: 'the audit log cannot be read' } as const;
+
+  it('starts at nothing in a home with no audit log, and has nothing added to it', async () => {
+    const position = await auditPosition(rig.stroqHome);
+    expect(position).toEqual({ kind: 'at', seq: 0 });
+    expect(await readAuditAfter(rig.stroqHome, position)).toEqual({ kind: 'read', entries: [] });
   });
 
-  it('reads only the entries of the session it is asked about', async () => {
+  it('reads the entries added after the position it was given, and only those', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
     await driver.run(probe('allow'), rig.ctx({ sessionId: 'session-one' }));
+    const position = await auditPosition(rig.stroqHome);
+    expect(position).toMatchObject({ kind: 'at', seq: expect.any(Number) });
     await driver.run(probe('deny'), rig.ctx({ sessionId: 'session-two' }));
-    const read = await readSessionAudit(rig.stroqHome, 'session-two');
+    const read = await readAuditAfter(rig.stroqHome, position);
     expect(read.kind).toBe('read');
     if (read.kind !== 'read') return;
     expect(read.entries.map((e) => e.sessionId)).toEqual(['session-two']);
+  });
+
+  // The session is the host's to choose: it may not be the one the check gave it, and the nonce is what
+  // ties an entry to a request.
+  it('does not pick entries by session', async () => {
+    const position = await auditPosition(rig.stroqHome);
+    await new FakeHostDriver({ fault: 'honest' }).run(
+      probe('allow'),
+      rig.ctx({ sessionId: 'a-session-the-host-made-up' }),
+    );
+    const read = await readAuditAfter(rig.stroqHome, position);
+    expect(read).toMatchObject({ kind: 'read' });
+    expect(read.kind === 'read' ? read.entries.length : 0).toBeGreaterThan(0);
   });
 
   it('says the log cannot be read, and does not throw, when a line of it is damaged', async () => {
@@ -183,9 +202,45 @@ describe('readSessionAudit', () => {
       join(rig.stroqHome, 'audit.jsonl'),
       `${JSON.stringify(auditEntry())}\n{"truncated":\n`,
     );
-    expect(await readSessionAudit(rig.stroqHome, SESSION)).toEqual({
-      kind: 'unreadable',
-      problem: 'the audit log cannot be read',
-    });
+    expect(await auditPosition(rig.stroqHome)).toEqual(unreadable);
+    expect(await readAuditAfter(rig.stroqHome, { kind: 'at', seq: 0 })).toEqual(unreadable);
+  });
+
+  it('says the log cannot be read when what is in it is not an entry', async () => {
+    mkdirSync(rig.stroqHome, { recursive: true });
+    for (const line of ['null', '[]', '{"seq":"1"}', '{"phase":"pre"}', '7']) {
+      writeFileSync(join(rig.stroqHome, 'audit.jsonl'), `${line}\n`);
+      expect(await auditPosition(rig.stroqHome)).toEqual(unreadable);
+    }
+  });
+
+  it('cannot say what was added after a position it could not have', async () => {
+    mkdirSync(rig.stroqHome, { recursive: true });
+    const read = await readAuditAfter(rig.stroqHome, unreadable);
+    expect(read).toEqual(unreadable);
+  });
+
+  it('is what a request observes: the entries of that request and not the ones before it', async () => {
+    const driver = new FakeHostDriver({ fault: 'honest' });
+    const first = await makeRequest(args(driver, { probe: probe('allow') }));
+    const second = await makeRequest(
+      args(driver, { probe: probe('deny'), ctx: rig.ctx({ sessionId: 'two' }) }),
+    );
+    if (!first.sent || !second.sent) throw new Error('expected both requests to be sent');
+    expect(first.observation.audit).toMatchObject({ kind: 'read' });
+    const seen = (r: typeof first): readonly string[] =>
+      r.observation.audit.kind === 'read'
+        ? r.observation.audit.entries.map((e) => e.sessionId)
+        : [];
+    expect(seen(first)).toHaveLength(1);
+    expect(seen(second)).toEqual(['two']);
+  });
+
+  it('is unreadable for a request when the log was damaged before the request began', async () => {
+    mkdirSync(rig.stroqHome, { recursive: true });
+    writeFileSync(join(rig.stroqHome, 'audit.jsonl'), '{"truncated":\n');
+    const requested = await makeRequest(args(new FakeHostDriver({ fault: 'refusal' })));
+    if (!requested.sent) throw new Error('expected the request to be sent');
+    expect(requested.observation.audit).toEqual(unreadable);
   });
 });

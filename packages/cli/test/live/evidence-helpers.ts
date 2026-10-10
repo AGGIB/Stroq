@@ -1,6 +1,6 @@
 import type { EvidenceInput } from '../../src/live/evidence.js';
 import type { ProbeKind, SentinelState, StreamEvent } from '../../src/live/types.js';
-import { NONCE, SESSION, auditEntry, expectationOf, finished, toolUse } from './helpers.js';
+import { NONCE, auditFor, expectationOf, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
 export const THERE: SentinelState = { exists: true, content: `${NONCE}\n` };
@@ -18,15 +18,12 @@ export function happy(kind: ProbeKind, over: Partial<EvidenceInput> = {}): Evide
   return {
     probe: p,
     nonce: NONCE,
-    sessionId: SESSION,
     run: finished(
       kind === 'allow'
         ? [toolUse(p.command)]
         : [toolUse(p.command), DENY_TEXT(expectation.ruleId ?? '')],
     ),
-    audit: [
-      auditEntry({ summary: p.command, effect: expectation.effect, ruleId: expectation.ruleId }),
-    ],
+    audit: [auditFor(p)],
     sentinel: kind === 'allow' ? THERE : ABSENT,
     expectation,
     ...over,

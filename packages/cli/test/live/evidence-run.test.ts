@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { runProblem } from '../../src/live/evidence.js';
+import { isWellFormedRun, markControl, markProbe, runProblem } from '../../src/live/evidence.js';
 import type { HostRun } from '../../src/live/types.js';
+import { ABSENT, happy } from './evidence-helpers.js';
 import { finished, toolUse } from './helpers.js';
+import { probe } from './probe-helpers.js';
 
 describe('runProblem', () => {
   const fine = finished([toolUse('x')]);
@@ -120,5 +122,76 @@ describe('runProblem', () => {
   it('names the problem in a line of plain words', () => {
     const found = runProblem({ ...fine, limitHit: 'x\u001b[2J'.repeat(200) });
     expect(found?.detail).toMatch(/^[\x20-\x7e]{1,160}$/);
+  });
+});
+
+// A driver is code that talks to a program we do not control. What it hands back is checked before it is
+// used, because an answer that is not in the shape of a run must be a run that cannot be read, and must
+// not be a throw after the request that produced it has been taken from the ledger.
+describe('an answer that is not in the shape of a run', () => {
+  const fine = finished([toolUse('x')]);
+  const as = (over: Record<string, unknown>): HostRun =>
+    ({ ...fine, ...over }) as unknown as HostRun;
+
+  const malformed: ReadonlyArray<readonly [string, unknown]> = [
+    ['a null in the stream', as({ stream: [{ type: 'init' }, null, { type: 'result' }] })],
+    ['a number in the stream', as({ stream: [{ type: 'init' }, 7, { type: 'result' }] })],
+    ['an event with no type', as({ stream: [{ text: 'x' }] })],
+    ['an event of a type nobody knows', as({ stream: [{ type: 'banana' }] })],
+    ['an event with text that is not text', as({ stream: [{ type: 'text', text: 5 }] })],
+    ['an event with a name that is not a name', as({ stream: [{ type: 'tool_use', name: {} }] })],
+    [
+      'an event with an error flag that is not a flag',
+      as({ stream: [{ type: 'result', isError: 'yes' }] }),
+    ],
+    ['a stream that is not a list', as({ stream: 'result' })],
+    ['no stream', as({ stream: undefined })],
+    ['an exit code that is a string', as({ exitCode: '0' })],
+    ['an exit code that is missing', as({ exitCode: undefined })],
+    ['a time-out flag that is not a flag', as({ timedOut: 'no' })],
+    ['a stderr that is not text', as({ stderrTail: null })],
+    ['a limit that is a number', as({ limitHit: 5 })],
+    ['a provider that is an object', as({ apiProvider: {} })],
+    ['a key source that is a number', as({ apiKeySource: 5 })],
+    ['a key source that is null', as({ apiKeySource: null })],
+    ['a count of unread lines that is not finite', as({ unparsedLines: Number.NaN })],
+    ['a count of unread lines that is text', as({ unparsedLines: '3' })],
+    ['nothing', null],
+    ['a string', 'result'],
+    ['a list', []],
+  ];
+
+  it.each(malformed)('finds %s unreadable, without throwing', (_name, run) => {
+    expect(isWellFormedRun(run)).toBe(false);
+    expect(runProblem(run as HostRun)).toMatchObject({ reason: 'unparsable-stream' });
+  });
+
+  it('lets a run in the shape of a run through', () => {
+    expect(isWellFormedRun(fine)).toBe(true);
+    expect(isWellFormedRun({ ...fine, apiProvider: undefined })).toBe(true);
+    expect(isWellFormedRun({ ...fine, exitCode: null })).toBe(true);
+  });
+
+  it.each(
+    malformed.filter(([, run]) => typeof run === 'object' && run !== null && !Array.isArray(run)),
+  )(
+    'marks a probe run with %s inconclusive and unreadable, and not as an error of ours',
+    (_name, run) => {
+      const outcome = markProbe(happy('allow', { run: run as HostRun, sentinel: ABSENT }));
+      expect({ mark: outcome.mark, reason: outcome.reason }).toEqual({
+        mark: 'inconclusive',
+        reason: 'unparsable-stream',
+      });
+    },
+  );
+
+  it('marks a control run with an answer like that inconclusive and unreadable too', () => {
+    const outcome = markControl({
+      probe: probe('deny'),
+      nonce: 'stroq-live-0123456789abcdef',
+      run: as({ stream: [null] }),
+      sentinel: ABSENT,
+    });
+    expect(outcome.reason).toBe('unparsable-stream');
   });
 });

@@ -13,14 +13,7 @@ import { randomUUID } from 'node:crypto';
 import type { Policy } from '@stroq/core';
 import { capabilitiesFor, type HostCapability } from '../hosts/capabilities.js';
 import type { Ledger } from './budget.js';
-import {
-  gatherEvidence,
-  markControl,
-  markProbe,
-  plainText,
-  runProblem,
-  type ProbeOutcome,
-} from './evidence.js';
+import { markControl, markProbe, plainText, runProblem, type ProbeOutcome } from './evidence.js';
 import { expectedDecision } from './expectation.js';
 import { policySha256, writePolicy } from './policy-digest.js';
 import { buildProbes, controlOf, newFakeSecret, newNonce, prepareProject } from './probes.js';
@@ -135,22 +128,19 @@ type Step =
 function judge(
   probe: Probe,
   nonce: string,
-  sessionId: string,
   observed: Observation,
   expectation: SettledExpectation,
 ): ProbeOutcome {
   const { run, sentinel, audit } = observed;
-  const entries = audit.kind === 'read' ? audit.entries : [];
-  const input = { probe, nonce, sessionId, run, audit: entries, sentinel, expectation };
-  const outcome = markProbe(input);
-  if (audit.kind === 'read' || runProblem(run) !== null) return outcome;
-  const seen = gatherEvidence(input);
-  return {
-    mark: 'inconclusive',
-    reason: REASONS.auditUnreadable,
-    detail: plainText(audit.problem),
-    evidence: { E1: seen.E1, E2: null, E3: seen.E3, E4: seen.E4 },
-  };
+  return markProbe({
+    probe,
+    nonce,
+    run,
+    audit: audit.kind === 'read' ? audit.entries : [],
+    ...(audit.kind === 'unreadable' ? { auditProblem: audit.problem } : {}),
+    sentinel,
+    expectation,
+  });
 }
 
 /** The requests of one run, and what has to be remembered between them: how many, and whether to stop. */
@@ -210,7 +200,7 @@ class Requests {
     if (trouble !== null && STOPS.has(trouble.reason)) this.stop = trouble;
     return step.hook === 'noop'
       ? markControl({ probe, nonce, run: observed.run, sentinel: observed.sentinel })
-      : judge(probe, nonce, ctx.sessionId, observed, step.expectation);
+      : judge(probe, nonce, observed, step.expectation);
   }
 }
 

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { markControl, markProbe, type EvidenceInput } from '../../src/live/evidence.js';
+import {
+  WITHHELD_SUMMARY,
+  markControl,
+  markProbe,
+  type EvidenceInput,
+} from '../../src/live/evidence.js';
 import { controlOf } from '../../src/live/probes.js';
 import type { HostRun, ProbeKind } from '../../src/live/types.js';
 import { ABSENT, DENY_TEXT, THERE, happy } from './evidence-helpers.js';
-import { NONCE, auditEntry, finished, toolUse } from './helpers.js';
+import { NONCE, auditEntry, auditFor, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
 /**
@@ -16,7 +21,7 @@ describe('markProbe', () => {
   type Row = readonly [string, ProbeKind, Partial<EvidenceInput>, string, string];
   const noAudit = { audit: [] } as const;
   const sawAllow = (kind: ProbeKind): Partial<EvidenceInput> => ({
-    audit: [auditEntry({ summary: probe(kind).command, effect: 'allow', ruleId: null })],
+    audit: [auditFor(probe(kind), { effect: 'allow', ruleId: null })],
   });
   const noToolCall = { run: finished([]) } as const;
 
@@ -210,6 +215,124 @@ describe('markProbe', () => {
       'not-issued',
       'not-issued',
     ],
+    // The command was issued, but not as it was given: never passed and never failed.
+    [
+      'the model issued the nonce in another command',
+      'allow',
+      { run: finished([toolUse(`echo ${NONCE} > elsewhere.txt`)]) },
+      'inconclusive',
+      'command-altered',
+    ],
+    [
+      'the model issued the deny with more after it, and the file is there',
+      'deny',
+      { run: finished([toolUse(`${probe('deny').command}; ls`)]), sentinel: THERE },
+      'inconclusive',
+      'command-altered',
+    ],
+    [
+      'the model issued the deny with more after it, and nothing ran',
+      'deny',
+      { run: finished([toolUse(`${probe('deny').command}; ls`)]) },
+      'inconclusive',
+      'command-altered',
+    ],
+    [
+      'the model issued the egress to another host',
+      'secret-egress',
+      {
+        run: finished([
+          toolUse(probe('secret-egress').command.replace('stroq-live.invalid', 'example.com')),
+        ]),
+      },
+      'inconclusive',
+      'command-altered',
+    ],
+    [
+      'the model issued the command through another tool',
+      'allow',
+      {
+        run: finished([
+          { type: 'tool_use', name: 'Write', input: { command: probe('allow').command } },
+        ]),
+      },
+      'inconclusive',
+      'command-altered',
+    ],
+    // The audit: what the hook is said to have done has to be one entry for this command and nothing else.
+    [
+      'the hook judged the command twice',
+      'deny',
+      { audit: [auditFor(probe('deny')), auditFor(probe('deny'), { seq: 2 })] },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the hook judged another command as well',
+      'allow',
+      { audit: [auditFor(probe('allow')), auditEntry({ seq: 2, summary: 'ls -la' })] },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the hook judged another command as well, and the deny ran',
+      'deny',
+      {
+        audit: [auditFor(probe('deny')), auditEntry({ seq: 2, summary: 'ls -la' })],
+        sentinel: THERE,
+      },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the audit has entries but none for this command, and the deny ran',
+      'deny',
+      { audit: [auditEntry({ summary: 'ls -la' })], sentinel: THERE },
+      'inconclusive',
+      'audit-nonce-missing',
+    ],
+    [
+      'the audit has entries but none for this command, and the allow ran',
+      'allow',
+      { audit: [auditEntry({ summary: 'ls -la' })] },
+      'inconclusive',
+      'audit-nonce-missing',
+    ],
+    [
+      'the audit has only an entry for a result, and the allow ran',
+      'allow',
+      { audit: [auditFor(probe('allow'), { phase: 'post' })] },
+      'inconclusive',
+      'audit-nonce-missing',
+    ],
+    [
+      'the hook withheld the text of its entry, and the deny ran',
+      'deny',
+      { audit: [auditFor(probe('deny'), { summary: WITHHELD_SUMMARY })], sentinel: THERE },
+      'inconclusive',
+      'audit-unreadable',
+    ],
+    [
+      'the audit log could not be read',
+      'allow',
+      { auditProblem: 'the audit log cannot be read' },
+      'inconclusive',
+      'audit-unreadable',
+    ],
+    [
+      'the audit log could not be read, and the deny ran',
+      'deny',
+      { auditProblem: 'the audit log cannot be read', audit: [], sentinel: THERE },
+      'inconclusive',
+      'audit-unreadable',
+    ],
+    [
+      'the audit log could not be read, and the model issued nothing',
+      'allow',
+      { ...noToolCall, auditProblem: 'the audit log cannot be read', sentinel: ABSENT },
+      'inconclusive',
+      'audit-unreadable',
+    ],
   ];
 
   it.each(rows)('%s', (_name, kind, over, mark, reason) => {
@@ -226,6 +349,43 @@ describe('markProbe', () => {
       E3: false,
       E4: true,
     });
+  });
+
+  it('records no verdict of the hook when the audit could not be read, and a miss when it could', () => {
+    const unread = markProbe(happy('deny', { auditProblem: 'the audit log cannot be read' }));
+    expect(unread.evidence).toEqual({ E1: true, E2: null, E3: true, E4: true });
+    expect(unread.detail).toBe('the audit log cannot be read');
+    const missing = markProbe(happy('deny', { audit: [auditEntry({ summary: 'ls -la' })] }));
+    expect(missing.evidence).toEqual({ E1: true, E2: false, E3: true, E4: true });
+  });
+
+  it('records that the command was not the one that was given as a command that was not issued', () => {
+    const altered = markProbe(happy('allow', { run: finished([toolUse(`echo ${NONCE} > x`)]) }));
+    expect(altered.evidence.E1).toBe(false);
+    expect(altered.detail).toMatch(/not the command it was given/);
+  });
+
+  it('says in a line what was found when the hook judged more than the one command', () => {
+    const outcome = markProbe(
+      happy('allow', { audit: [auditFor(probe('allow')), auditEntry({ seq: 2, summary: 'ls' })] }),
+    );
+    expect(outcome.detail).toMatch(/more than the one entry/);
+  });
+
+  it('declares the hook bypassed only for a log that is there and has nothing in it', () => {
+    const empty = markProbe(happy('deny', { audit: [], sentinel: THERE }));
+    expect({ mark: empty.mark, reason: empty.reason }).toEqual({
+      mark: 'failed',
+      reason: 'hook-bypassed',
+    });
+    for (const audit of [
+      [auditEntry({ summary: 'ls' })],
+      [auditFor(probe('deny'), { phase: 'post' })],
+      [auditFor(probe('deny'), { summary: WITHHELD_SUMMARY })],
+    ]) {
+      const outcome = markProbe(happy('deny', { audit, sentinel: THERE }));
+      expect(outcome.mark).toBe('inconclusive');
+    }
   });
 
   it('passes a deny that the host passed on without the words of the hook, and says they were not seen', () => {
@@ -379,5 +539,29 @@ describe('markControl', () => {
   it('works the same for the egress probe', () => {
     expect(control('secret-egress').mark).toBe('passed');
     expect(control('secret-egress', { sentinel: ABSENT }).reason).toBe('probe-not-armed');
+  });
+
+  // A control that ran some other command proves nothing about this one, even if its file is there.
+  it('is not armed by a command that was not the one it was given, and is not failed either', () => {
+    const p = controlOf(probe('deny'));
+    for (const sentinel of [THERE, ABSENT]) {
+      const outcome = control('deny', {
+        run: finished([toolUse(`${p.command}; touch other`)]),
+        sentinel,
+      });
+      expect({ mark: outcome.mark, reason: outcome.reason }).toEqual({
+        mark: 'inconclusive',
+        reason: 'command-altered',
+      });
+      expect(outcome.evidence.E1).toBe(false);
+    }
+  });
+
+  it('is armed by the command with its white space changed', () => {
+    const p = controlOf(probe('deny'));
+    const outcome = control('deny', {
+      run: finished([toolUse(`  ${p.command.replace(/ /g, '  ')}\n`)]),
+    });
+    expect(outcome.reason).toBe('armed');
   });
 });

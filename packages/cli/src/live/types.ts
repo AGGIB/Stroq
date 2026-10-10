@@ -50,11 +50,14 @@ export interface Probe {
   readonly command: string;
   /** What the DEFAULT policy says. The active policy is asked again, in process, before a run. */
   readonly expected: SettledExpectation;
+  /**
+   * The file the action leaves, if it runs. Whether the file is meant to be there is not said here: it
+   * follows from the decision (an allow leaves it, a deny must not), which is said once, in `expected`
+   * and in the expectation a run is judged against, so that the two cannot disagree.
+   */
   readonly sentinel: {
     /** Relative to the project directory. */
     readonly file: string;
-    /** True: the action leaves this file behind. False: the file is there only if the action ran. */
-    readonly mustExist: boolean;
     /** The text (trimmed) the file must hold, when the action writes the request's nonce into it. */
     readonly holds?: string;
   };
@@ -94,6 +97,7 @@ export const REASONS = {
   // not issued
   notIssued: 'not-issued',
   // inconclusive: the run
+  billingUnknown: 'billing-unknown',
   limit: 'limit',
   auth: 'auth',
   apiBilling: 'api-billing',
@@ -101,6 +105,9 @@ export const REASONS = {
   hostError: 'host-error',
   unparsableStream: 'unparsable-stream',
   // inconclusive: the evidence
+  commandAltered: 'command-altered',
+  extraActivity: 'extra-activity',
+  auditNonceMissing: 'audit-nonce-missing',
   noAuditEntry: 'no-audit-entry',
   effectMissing: 'effect-missing',
   evidenceConflict: 'evidence-conflict',
@@ -108,6 +115,7 @@ export const REASONS = {
   auditUnreadable: 'audit-unreadable',
   probeNotArmed: 'probe-not-armed',
   controlInconclusive: 'control-inconclusive',
+  denyNotProvenArmed: 'deny-not-proven-armed',
   // skipped
   skippedPolicyAllows: 'skipped-policy-allows',
   skippedPolicyBlocksAllow: 'skipped-policy-blocks-allow',
@@ -140,7 +148,6 @@ export interface HostRun {
   readonly limitHit?: string;
   readonly apiProvider?: string;
   readonly apiKeySource?: string;
-  readonly hostSessionId?: string;
   /** How many lines of the stream the driver could not read. A stream with any is not to be trusted. */
   readonly unparsedLines?: number;
 }
@@ -170,9 +177,9 @@ export interface HostDriver {
 }
 
 export interface ProbeEvidence {
-  /** The stream shows the model issued the command (the nonce is in a tool call). */
+  /** The stream shows the model issued the command: a shell call whose command is the probe's. */
   readonly E1: boolean | null;
-  /** The hook's audit entry for the session shows the command and the decision that was expected. */
+  /** The hook's audit log has one entry for the command, and no other, with the decision expected. */
   readonly E2: boolean | null;
   /** The sentinel file is as the decision says: absent for a deny, there with the nonce for an allow. */
   readonly E3: boolean | null;

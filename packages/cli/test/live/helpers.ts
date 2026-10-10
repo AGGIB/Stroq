@@ -1,4 +1,5 @@
 import type { AuditEntry } from '@stroq/core';
+import { auditSummaryOf } from '../../src/live/evidence.js';
 import type {
   HostResult,
   HostRun,
@@ -42,6 +43,23 @@ export const auditEntry = (
     decision: { effect, ruleId, reason: 'test' },
     ...rest,
   };
+};
+
+/**
+ * The entry the hook writes for a probe: the summary is the command as the audit records it (redacted,
+ * which for the egress probe takes the made-up key out), and the decision is what the policy gives it.
+ */
+export const auditFor = (
+  p: Pick<Probe, 'kind' | 'command'>,
+  over: Parameters<typeof auditEntry>[0] = {},
+): AuditEntry => {
+  const expectation = expectationOf(p);
+  return auditEntry({
+    summary: auditSummaryOf(p.command),
+    effect: expectation.effect,
+    ruleId: expectation.ruleId,
+    ...over,
+  });
 };
 
 export const toolUse = (command: string): StreamEvent => ({

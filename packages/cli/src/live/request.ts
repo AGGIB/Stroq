@@ -2,9 +2,10 @@
 //
 // Four steps, and the order is the point. The request is taken from the ledger first, because a request
 // that is made before it is paid for is a request the cap does not hold. The files a probe could leave
-// are cleared next, so that one found afterwards was made by this request and by no earlier one. Then the
-// host is asked. Only after it has finished is the disk read, and the hook's audit log: a file read
-// while the host is still running measures the race and not the host.
+// are cleared next, so that one found afterwards was made by this request and by no earlier one, and
+// the audit log is looked at so that what the hook adds can be told from what was there. Then the host
+// is asked. Only after it has finished is the disk read, and the hook's audit log: a file read while the
+// host is still running measures the race and not the host.
 import { AuditLog, type AuditEntry } from '@stroq/core';
 import { auditFileIn } from '../paths.js';
 import type { Ledger } from './budget.js';
@@ -19,7 +20,8 @@ import {
   type SentinelState,
 } from './types.js';
 
-export type SessionAudit =
+/** What the hook's audit log held of one request: the entries it added, or why that cannot be said. */
+export type RequestAudit =
   | { readonly kind: 'read'; readonly entries: readonly AuditEntry[] }
   | { readonly kind: 'unreadable'; readonly problem: string };
 
@@ -27,28 +29,56 @@ export type SessionAudit =
 export interface Observation {
   readonly run: HostRun;
   readonly sentinel: SentinelState;
-  readonly audit: SessionAudit;
+  readonly audit: RequestAudit;
 }
 
 export type Requested =
   | { readonly sent: false; readonly reason: string; readonly detail: string }
   | { readonly sent: true; readonly observation: Observation };
 
+const UNREADABLE = 'the audit log cannot be read';
+
+/** Where the audit log of a throwaway Stroq home has got to: the number of its newest entry. */
+export type AuditPosition =
+  | { readonly kind: 'at'; readonly seq: number }
+  | { readonly kind: 'unreadable'; readonly problem: string };
+
 /**
- * The entries of one session in the audit log of a throwaway Stroq home. A log that cannot be read
- * (a line cut in half by a hook that was killed) is not an empty one: "the hook left no entry" would
- * be a claim, and a false one, so the caller is told the log could not be read instead.
+ * Every entry of the log, or why it cannot be had. A log that cannot be read (a line cut in half by a
+ * hook that was killed), or one with an entry that is not an entry, is not an empty one: "the hook left no
+ * entry" would be a claim, and a false one, so the caller is told the log could not be read instead.
  */
-export async function readSessionAudit(
-  stroqHome: string,
-  sessionId: string,
-): Promise<SessionAudit> {
+async function entriesOf(stroqHome: string): Promise<readonly AuditEntry[] | null> {
   try {
     const entries = await new AuditLog(auditFileIn(stroqHome)).readAll();
-    return { kind: 'read', entries: entries.filter((entry) => entry.sessionId === sessionId) };
+    const sound = entries.every(
+      (entry) => typeof entry === 'object' && entry !== null && Number.isInteger(entry.seq),
+    );
+    return sound ? entries : null;
   } catch {
-    return { kind: 'unreadable', problem: 'the audit log cannot be read' };
+    return null;
   }
+}
+
+/** Where the log is now. The hook's entries for a request are the ones that come after this. */
+export async function auditPosition(stroqHome: string): Promise<AuditPosition> {
+  const entries = await entriesOf(stroqHome);
+  if (entries === null) return { kind: 'unreadable', problem: UNREADABLE };
+  return { kind: 'at', seq: entries.reduce((newest, entry) => Math.max(newest, entry.seq), 0) };
+}
+
+/**
+ * The entries added to the audit log since `position`. They are not picked by session: the home is the
+ * check's own, so they are the hook's, and a host is free to give its hook a session of its own choosing.
+ */
+export async function readAuditAfter(
+  stroqHome: string,
+  position: AuditPosition,
+): Promise<RequestAudit> {
+  if (position.kind === 'unreadable') return { kind: 'unreadable', problem: position.problem };
+  const entries = await entriesOf(stroqHome);
+  if (entries === null) return { kind: 'unreadable', problem: UNREADABLE };
+  return { kind: 'read', entries: entries.filter((entry) => entry.seq > position.seq) };
 }
 
 /** What a run is taken to have been when the driver did not return one: it never got to the end. */
@@ -104,13 +134,14 @@ export async function makeRequest(args: {
       detail: plainText(`the ledger refused the request: ${taken.why} (${taken.problem})`),
     };
   clearSentinel(args.ctx.project, args.probe);
+  const before = await auditPosition(args.ctx.stroqHome);
   const run = await runGuarded(args.driver, args.probe, args.ctx, args.graceMs);
   return {
     sent: true,
     observation: {
       run,
       sentinel: readSentinel(args.ctx.project, args.probe),
-      audit: await readSessionAudit(args.ctx.stroqHome, args.ctx.sessionId),
+      audit: await readAuditAfter(args.ctx.stroqHome, before),
     },
   };
 }

@@ -40,6 +40,9 @@ import type {
  * - `refusal`           the model declines to issue the command.
  * - `limit`             the host stops on a usage limit, in words only.
  * - `limit-flagged`     the same, with the driver reporting it as `limitHit`.
+ * - `extra-command`     the hook is called and the host obeys it, and the model runs a second command too.
+ * - `altered-command`   the model runs the command with more after it, which the hook (if it is
+ *                       there) judges as it is. The model's doing, so it holds in a control run too.
  * - `garbage`           the stream cannot be read at all.
  * - `timeout`           the host does not answer in time.
  * - `host-error`        the host exits with an error and no explanation.
@@ -55,6 +58,8 @@ export type Fault =
   | 'refusal'
   | 'limit'
   | 'limit-flagged'
+  | 'extra-command'
+  | 'altered-command'
   | 'garbage'
   | 'timeout'
   | 'host-error'
@@ -76,11 +81,14 @@ export interface FakeOptions {
   readonly available?: boolean;
   readonly version?: string | null;
   readonly note?: string;
+  /** The hook is given a session of the host's own making and not the one the check asked for. */
+  readonly hostSession?: boolean;
 }
 
 /** What a fault does when the hook is a no-op (the control run): the hook-side faults all become that. */
 const HOOK_SIDE: ReadonlySet<Fault> = new Set<Fault>([
   'honest',
+  'extra-command',
   'ignore-deny',
   'never-call-hook',
   'crash-fail-open',
@@ -88,6 +96,11 @@ const HOOK_SIDE: ReadonlySet<Fault> = new Set<Fault>([
 ]);
 
 const INIT: StreamEvent = { type: 'init', text: 'fake host' };
+
+/** What the model runs in `extra-command`, besides the probe. */
+const EXTRA_COMMAND = 'ls -la';
+/** What the model adds after the probe in `altered-command`. */
+const ALTERATION = '; echo more';
 
 function ended(events: readonly StreamEvent[], over: Partial<HostRun> = {}): HostRun {
   return {
@@ -149,16 +162,17 @@ export class FakeHostDriver implements HostDriver {
   private async consultHook(
     probe: Probe,
     ctx: ProbeContext,
+    command: string = probe.command,
   ): Promise<{ stopped: boolean; reason: string }> {
     const file = join(ctx.stroqHome, 'policy.yaml');
     const policy =
       this.options.hookPolicy ?? (existsSync(file) ? loadPolicyFile(file) : DEFAULT_POLICY);
     const engine = createEngineAt({ home: ctx.stroqHome, userHome: ctx.home, policy, env: {} });
     const out = await handleClaudeHook(engine, {
-      session_id: ctx.sessionId,
+      session_id: this.options.hostSession === true ? `host-chose-${probe.id}` : ctx.sessionId,
       hook_event_name: 'PreToolUse',
       tool_name: 'Bash',
-      tool_input: { command: probe.command },
+      tool_input: { command },
       cwd: ctx.project,
     });
     if (out.stdout === '') return { stopped: false, reason: '' };
@@ -227,6 +241,39 @@ export class FakeHostDriver implements HostDriver {
         await this.consultHook(probe, ctx);
         perform(probe, ctx);
         return ended([call, ran, { type: 'text', text: 'DONE' }]);
+      }
+      case 'extra-command': {
+        const verdict = await this.consultHook(probe, ctx);
+        const extra = await this.consultHook(probe, ctx, EXTRA_COMMAND);
+        if (!verdict.stopped) perform(probe, ctx);
+        const results: StreamEvent[] = [verdict, extra].map((v) => ({
+          type: 'tool_result',
+          isError: v.stopped,
+          text: v.stopped ? v.reason : '',
+        }));
+        return ended([
+          call,
+          { type: 'tool_use', name: 'Bash', input: { command: EXTRA_COMMAND } },
+          ...results,
+          { type: 'text', text: 'DONE' },
+        ]);
+      }
+      case 'altered-command': {
+        const altered = `${probe.command}${ALTERATION}`;
+        const verdict =
+          ctx.hookMode === 'noop'
+            ? { stopped: false, reason: '' }
+            : await this.consultHook(probe, ctx, altered);
+        if (!verdict.stopped) perform(probe, ctx);
+        return ended([
+          { type: 'tool_use', name: 'Bash', input: { command: altered } },
+          {
+            type: 'tool_result',
+            isError: verdict.stopped,
+            text: verdict.stopped ? verdict.reason : '',
+          },
+          { type: 'text', text: 'DONE' },
+        ]);
       }
       case 'api-billing':
       case 'honest': {

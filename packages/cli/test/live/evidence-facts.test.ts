@@ -4,6 +4,8 @@ import { handleClaudeHook } from '../../src/adapters/claude-code.js';
 import { createEngineAt } from '../../src/engine-factory.js';
 import {
   DENY_WORDING,
+  WITHHELD_SUMMARY,
+  auditSummaryOf,
   gatherEvidence,
   plainText,
   type EvidenceInput,
@@ -25,12 +27,14 @@ describe('E1: the model issued the command', () => {
   const e1 = (events: StreamEvent[]): boolean =>
     gatherEvidence(happy('allow', { run: finished(events) })).E1;
 
-  it('holds when a tool call carries the nonce', () => {
+  it('holds when a tool call carries the command, with the nonce in it', () => {
     expect(e1([toolUse(`echo ${NONCE} > stroq-live-allow.txt`)])).toBe(true);
   });
 
-  it('holds when the nonce is deeper in what the call was given', () => {
-    expect(e1([{ type: 'tool_use', name: 'Bash', input: { a: { b: ['x', NONCE] } } }])).toBe(true);
+  // The nonce somewhere in a call shows that the model can read its prompt. The command has to be the
+  // command it was given (`evidence-command.test.ts` has the whole table of what that is).
+  it('does not hold when the nonce is only deeper in what the call was given', () => {
+    expect(e1([{ type: 'tool_use', name: 'Bash', input: { a: { b: ['x', NONCE] } } }])).toBe(false);
   });
 
   it('does not hold for the nonce of another request', () => {
@@ -39,7 +43,13 @@ describe('E1: the model issued the command', () => {
 
   // A host may report a call's input as the command itself and not as an object around it.
   it('holds when the input of the call is the command as a bare string', () => {
-    expect(e1([{ type: 'tool_use', name: 'Bash', input: `echo ${NONCE} > x` }])).toBe(true);
+    expect(
+      e1([{ type: 'tool_use', name: 'Bash', input: `echo ${NONCE} > stroq-live-allow.txt` }]),
+    ).toBe(true);
+  });
+
+  it('does not hold when the input of the call is a bare string that is not the command', () => {
+    expect(e1([{ type: 'tool_use', name: 'Bash', input: `echo ${NONCE} > x` }])).toBe(false);
   });
 
   it.each([
@@ -89,22 +99,37 @@ describe('E2: the hook judged the command, and as the policy said it would', () 
   const denied = (over = {}): ReturnType<typeof auditEntry> =>
     auditEntry({ summary: command, effect: 'deny', ruleId: 'deny-git-exec', ...over });
 
-  it('holds for an entry of the session with the nonce, the effect and the rule that were expected', () => {
+  it('holds for the one entry of the hook, with the command, the effect and the rule that were expected', () => {
     const facts = audit([denied()]);
     expect(facts.E2).toBe(true);
     expect(facts.audit).toEqual({ state: 'agrees' });
   });
 
+  it('does not hold, and says the hook never ran, when the log of the hook has nothing in it', () => {
+    const facts = audit([]);
+    expect(facts.E2).toBe(false);
+    expect(facts.audit).toEqual({ state: 'empty' });
+  });
+
+  // Entries are there, so the hook ran; none of them is for this command, so nothing is known of what it
+  // made of it. That is not the same as the hook never having run.
   it.each<[string, EvidenceInput['audit']]>([
-    ['no entries', []],
-    ['an entry of another session', [denied({ sessionId: 'someone-else' })]],
     ['an entry that is not for a PreToolUse', [denied({ phase: 'post' })]],
     ['an entry for another command', [denied({ summary: 'ls -la' })]],
     ['an entry in which the nonce was redacted', [denied({ summary: 'echo [REDACTED]' })]],
-  ])('does not hold with %s: the hook is not seen', (_name, entries) => {
+    ['an entry for this command made for another tool', [denied({ tool: 'Read' })]],
+    ['an entry for this command and something after it', [denied({ summary: `${command} && ls` })]],
+    ['an entry that is the start of this command', [denied({ summary: command.slice(0, -5) })]],
+  ])('does not hold with %s: no entry of the hook is for this command', (_name, entries) => {
     const facts = audit(entries);
     expect(facts.E2).toBe(false);
-    expect(facts.audit).toEqual({ state: 'absent' });
+    expect(facts.audit).toEqual({ state: 'nonce-missing' });
+  });
+
+  it('holds for an entry of any session: the home is made for this check and the nonce is unique', () => {
+    const facts = audit([denied({ sessionId: 'a-session-the-host-chose' })]);
+    expect(facts.E2).toBe(true);
+    expect(facts.audit).toEqual({ state: 'agrees' });
   });
 
   // The log is a file; one that was edited by hand, or written by something else, can hold an entry of
@@ -115,7 +140,7 @@ describe('E2: the hook judged the command, and as the policy said it would', () 
     for (const entry of [withoutSummary as EvidenceInput['audit'][number], odd]) {
       const facts = audit([entry]);
       expect(facts.E2).toBe(false);
-      expect(facts.audit).toEqual({ state: 'absent' });
+      expect(facts.audit).toEqual({ state: 'nonce-missing' });
     }
   });
 
@@ -144,21 +169,74 @@ describe('E2: the hook judged the command, and as the policy said it would', () 
     expect(facts.audit).toMatchObject({ state: 'differs' });
   });
 
-  // The first time the hook saw the command is the cleanest. A second try (the model was asked not
-  // to, and may) can meet a session that the first has already tainted, and a different rule.
-  it('goes by the first entry for the command, when the model tried more than once', () => {
-    const agrees = audit([denied({ seq: 1 }), denied({ seq: 2, ruleId: 'deny-origin-suspect' })]);
-    expect(agrees.E2).toBe(true);
-    const differs = audit([denied({ seq: 1, effect: 'allow', ruleId: null }), denied({ seq: 2 })]);
-    expect(differs.E2).toBe(false);
+  // Exactly one. A command judged twice (the model was asked not to try again, and may) meets a session
+  // the first try has tainted and a rule of its own, and a hook that judged something else as well was
+  // asked about more than the one command.
+  describe('exactly one entry for the command, and no other entry of the hook', () => {
+    it('does not hold when the command was judged twice, whatever each time said', () => {
+      for (const second of [
+        denied({ seq: 2 }),
+        denied({ seq: 2, ruleId: 'deny-origin-suspect' }),
+      ]) {
+        const facts = audit([denied({ seq: 1 }), second]);
+        expect(facts.E2).toBe(false);
+        expect(facts.audit).toEqual({ state: 'extra' });
+      }
+      expect(
+        audit([denied({ seq: 1, effect: 'allow', ruleId: null }), denied({ seq: 2 })]).audit,
+      ).toEqual({ state: 'extra' });
+    });
+
+    it('does not hold when the command was judged and so was another', () => {
+      const facts = audit([denied({ seq: 1 }), denied({ seq: 2, summary: 'ls -la' })]);
+      expect(facts.E2).toBe(false);
+      expect(facts.audit).toEqual({ state: 'extra' });
+    });
+
+    it('counts an entry of another session that carries the same nonce', () => {
+      const facts = audit([
+        denied({ sessionId: 'other', effect: 'allow', ruleId: null }),
+        denied({ seq: 2 }),
+      ]);
+      expect(facts.audit).toEqual({ state: 'extra' });
+    });
+
+    it('does not count what the hook wrote after the call: its entry for the result is not a second judgement', () => {
+      const facts = audit([denied({ seq: 1 }), denied({ seq: 2, phase: 'post' })]);
+      expect(facts.E2).toBe(true);
+    });
   });
 
-  it('is not moved by entries of other sessions that carry the same nonce', () => {
-    const facts = audit([
-      denied({ sessionId: 'other', effect: 'allow', ruleId: null }),
-      denied({ seq: 2 }),
-    ]);
+  describe('when the text of the entry cannot be had', () => {
+    it('does not hold, and does not blame the hook, when the audit log could not be read', () => {
+      const facts = gatherEvidence(
+        happy('deny', { audit: [denied()], auditProblem: 'the audit log cannot be read' }),
+      );
+      expect(facts.E2).toBeNull();
+      expect(facts.audit).toEqual({ state: 'unread', why: 'the audit log cannot be read' });
+    });
+
+    it('does not hold when the hook wrote the placeholder it writes when it cannot check for secrets', () => {
+      const facts = audit([denied({ summary: WITHHELD_SUMMARY })]);
+      expect(facts.E2).toBeNull();
+      expect(facts.audit).toMatchObject({ state: 'unread' });
+    });
+
+    it('prefers the entry that is there to the placeholder of another', () => {
+      const facts = audit([denied({ seq: 1, summary: WITHHELD_SUMMARY }), denied({ seq: 2 })]);
+      expect(facts.audit).toEqual({ state: 'extra' });
+    });
+  });
+
+  // The egress probe carries a made-up key, and the log keeps the command without it. The expected
+  // summary is made the way the log makes it, so the two are compared as the log has them.
+  it('holds for the egress probe whose key the log has taken out', () => {
+    const egress = probe('secret-egress');
+    const facts = gatherEvidence(happy('secret-egress'));
     expect(facts.E2).toBe(true);
+    expect(facts.audit).toEqual({ state: 'agrees' });
+    expect(egress.command).toContain(FAKE);
+    expect(auditSummaryOf(egress.command)).not.toContain(FAKE);
   });
 });
 
@@ -198,6 +276,19 @@ describe('E3: the file on the disk is as the decision says', () => {
 
   it.each<ProbeKind>(KINDS)('says nothing when the path could not be looked at (%s)', (kind) => {
     expect(e3(kind, { exists: null, content: null })).toBeNull();
+  });
+
+  // The decision is the one source: whether the file is meant to be there follows from what the policy
+  // said, and from nothing the probe carries beside it.
+  it('follows the decision that was expected and not anything else the probe says', () => {
+    const asDeny = gatherEvidence(
+      happy('allow', { expectation: { effect: 'deny', ruleId: 'deny-git-exec' }, sentinel: THERE }),
+    );
+    expect(asDeny.E3).toBe(false);
+    const asAllow = gatherEvidence(
+      happy('deny', { expectation: { effect: 'allow', ruleId: null }, sentinel: THERE }),
+    );
+    expect(asAllow.E3).toBe(true);
   });
 });
 
