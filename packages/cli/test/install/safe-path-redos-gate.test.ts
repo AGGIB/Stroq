@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { cpuNow } from '../../../core/test/cpu-time.js';
 import { findCollisions, findFolderConflicts } from '../../src/install/path-collision.js';
 import {
   checkEntryPath,
@@ -9,6 +8,7 @@ import {
 } from '../../src/install/safe-path.js';
 import { buildTree } from '../../src/install/tree.js';
 import { LIMITS } from '../../src/install/types.js';
+import { cpuNow } from '../helpers/cpu-time.js';
 import { fileEntry } from '../helpers/install-tree.js';
 
 /**

@@ -7,15 +7,13 @@ import { entriesOf, treeOf } from '../helpers/install-tree.js';
 
 // The digest is a promise to people who are not here yet: an author quotes it in a README, a lock
 // file pins it, and each of them must get the same answer on any machine, today and in two years.
-// So nothing in this file computes a digest with the code under test. The first ten hex strings
-// below were worked out by two separate programs that share no code with it and no code with each
-// other (a node script that was given the entries already in byte order, and a Python one that sorts
-// them itself), and the first two of them were checked against `shasum`. All thirteen were then
-// derived again by a third program, written in Ruby from the format in the spec alone: it gave the
-// first ten exactly, and the three added by the second review (the order of the whole path, and a
-// name spelled composed and decomposed). The tests touch no filesystem and read no clock, so the same
-// file is meant to run on Linux, macOS and Windows and to give the same digests; it has so far been
-// run on macOS only, because no CI has run on this branch yet.
+// So nothing in this file computes a digest with the code under test. Every hex string below was
+// reproduced by a Python program that shares no code with the module and sorts and hashes by the
+// format in the spec alone (`hashlib`), and the first two were also checked with `shasum -a 256`. The
+// spec prints the text that the twelve-entry vector hashes, so that a reader who has not got this
+// module can hash it too. The tests touch no filesystem and read no clock, so the same file is meant
+// to run on Linux, macOS and Windows and to give the same digests; it has so far been run on macOS
+// only, because no CI has run on this branch yet.
 
 const FULL_WIDTH_Z = '\uff5a.txt'; // one BMP character: UTF-8 EF BD 9A
 const GRINNING_FACE = '\u{1f600}.txt'; // one astral character: UTF-8 F0 9F 98 80
@@ -83,13 +81,21 @@ const GOLDEN = {
   linkBecomesFile: 'a27f3158b3210305a7a265f99d952e6d1d9bb9b4cc3dbfca952b45acb6472d91',
 } as const;
 
-/** The vectors of (e) and (f), which are not changes to the mixed tree and so are kept apart from it. */
+/** The vectors of (e), (f) and (g), which are not changes to the mixed tree and so are kept apart from it. */
 const GOLDEN_ORDER = {
   wholePath: '314b81cc68ba1e227418ed0c76e401aa609bd9a18e499585b3ebfbad369404c3',
   /** The same three lines, in the order of a sort that goes folder by folder. Not a digest of anything real. */
   folderByFolder: '43b1c9e7d2cec50e79ae9fe3d5fe46b87a1c7f3685e5a8281b9edeb68bd8ef52',
   composed: 'b30ff40ed2b391f580ed00d7c320ef2bdc037dec5738387202c9b6cb7f50ac59',
   decomposed: 'ed486ccbd1dcc27357665f5ac31cdeb80239c5275170dc6c83cc9d697b9387f4',
+  /** (g) A decomposed name, and the composed name that it is the start of once composed. */
+  startsComposed: '226a608853e0118bb823e1f45d505b3d3c452a0ccc0db40d9724df5c475b5e61',
+  /** The same two lines, in the order of a sort by the NFC or the NFD form of the path. Not a digest of anything real. */
+  startsComposedSwapped: '6ab5845d9d08fcf917c588bd3e76a75fab0274fbe886b23e13f997454bbd67d4',
+  /** (g) A decomposed `a` with an accent, and `b`. */
+  accentBeforeB: '9a027587f0ff3dc6289a20b8b71534399367ac27854accc23caaaadcabc87ec4',
+  /** The same two lines, in the order of a sort by the NFC form of the path. Not a digest of anything real. */
+  accentBeforeBSwapped: '2bec8af129a378613e258df664ab7a0697affa1575b03a86afcda633c37910db',
 } as const;
 
 const WHOLE_PATH_MANIFEST = [
@@ -270,7 +276,7 @@ describe('stroq-tree/1 golden vectors', () => {
       expect(treeManifest(tree())).toBe(WHOLE_PATH_MANIFEST);
     });
 
-    it('has the digest that a third program worked out', () => {
+    it('has the digest that was worked out without this code', () => {
       expect(treeDigest(tree())).toBe(GOLDEN_ORDER.wholePath);
     });
 
@@ -305,7 +311,7 @@ describe('stroq-tree/1 golden vectors', () => {
       expect(bytesOf(decomposed()).includes(Buffer.from('63616665cc812e747874', 'hex'))).toBe(true);
     });
 
-    it('gives each spelling the digest that a third program worked out', () => {
+    it('gives each spelling the digest that was worked out without this code', () => {
       expect(treeDigest(composed())).toBe(GOLDEN_ORDER.composed);
       expect(treeDigest(decomposed())).toBe(GOLDEN_ORDER.decomposed);
     });
@@ -314,6 +320,58 @@ describe('stroq-tree/1 golden vectors', () => {
       expect('caf\u00e9.txt'.normalize('NFD')).toBe('cafe\u0301.txt');
       expect(GOLDEN_ORDER.composed).not.toBe(GOLDEN_ORDER.decomposed);
       expect(treeDigest(composed())).not.toBe(treeDigest(decomposed()));
+    });
+  });
+
+  // Rule 2 says a path is hashed as spelled, and the order is of the same bytes. The vectors of (f) have
+  // one name each, so they would pass a reader that sorts by the NFC form of a path (or the NFD form)
+  // and hashes the path as spelled. These two trees do not: in each, the name that comes first by the
+  // bytes as spelled comes second by a normalised form.
+  describe('(g) the order is that of the bytes as spelled, whatever a normalised form would say', () => {
+    const X_HASH = sha256OfText('x\n');
+    const manifestOf = (names: readonly string[]): string =>
+      ['stroq-tree/1', ...names.map((name) => `f 0 2 ${X_HASH} ${name}`), ''].join('\n');
+    const bytes = (text: string): Buffer => Buffer.from(text, 'utf8');
+
+    const CASES = [
+      {
+        what: 'a decomposed name, and the composed name it is the start of once composed',
+        names: ['e\u0301a', '\u00e9'],
+        digest: GOLDEN_ORDER.startsComposed,
+        swapped: GOLDEN_ORDER.startsComposedSwapped,
+      },
+      {
+        what: 'a decomposed a with an accent, and b',
+        names: ['a\u0301.txt', 'b.txt'],
+        digest: GOLDEN_ORDER.accentBeforeB,
+        swapped: GOLDEN_ORDER.accentBeforeBSwapped,
+      },
+    ] as const;
+
+    describe.each(CASES)('$what', ({ names, digest, swapped }) => {
+      const tree = (): Tree => treeOf(Object.fromEntries(names.map((name) => [name, 'x\n'])));
+
+      it('is a pair that a sort by a normalised form puts the other way round', () => {
+        const [first, second] = names;
+
+        expect(Buffer.compare(bytes(first), bytes(second))).toBeLessThan(0);
+        expect(
+          Buffer.compare(bytes(first.normalize('NFC')), bytes(second.normalize('NFC'))),
+        ).toBeGreaterThan(0);
+      });
+
+      it('lists the names in the order of the bytes as spelled', () => {
+        expect(treeManifest(tree())).toBe(manifestOf(names));
+      });
+
+      it('has the digest that was worked out without this code', () => {
+        expect(treeDigest(tree())).toBe(digest);
+      });
+
+      it('is not the digest of the lines in the other order, which a reader could be written to give', () => {
+        expect(sha256OfText(manifestOf([...names].reverse()))).toBe(swapped);
+        expect(treeDigest(tree())).not.toBe(swapped);
+      });
     });
   });
 });
