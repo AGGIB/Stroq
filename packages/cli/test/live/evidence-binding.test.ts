@@ -1,15 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import {
-  WITHHELD_SUMMARY,
-  markControl,
-  markProbe,
-  type EvidenceInput,
-} from '../../src/live/evidence.js';
-import { controlOf } from '../../src/live/probes.js';
+import { WITHHELD_SUMMARY, markProbe, type EvidenceInput } from '../../src/live/evidence.js';
 import type { ProbeKind } from '../../src/live/types.js';
-import { ABSENT, THERE, happy } from './evidence-helpers.js';
+import { ABSENT, DENY_TEXT, THERE, happy } from './evidence-helpers.js';
 import { NONCE, auditEntry, auditFor, finished, toolUse } from './helpers.js';
-import { probe } from './probe-helpers.js';
+import { PROJECT, probe } from './probe-helpers.js';
 
 /**
  * A probe is tied to its command and not only to its nonce, and what the hook is said to have done is
@@ -65,6 +59,54 @@ describe('markProbe, the command and the audit log', () => {
       },
       'inconclusive',
       'command-altered',
+    ],
+    // The stream is the host's account of its calls, and the hook's log counts only the calls it saw. A call
+    // the hook never saw (it failed open for it, or it went through another tool) leaves the effect of the
+    // command in doubt: whichever of them made the file, it is not known to be this one.
+    [
+      'the model made a second call besides the command',
+      'allow',
+      { run: finished([toolUse(probe('allow').command), toolUse('ls -la')]) },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the model made a second call that makes the file the deny must not leave',
+      'deny',
+      {
+        run: finished([
+          toolUse(probe('deny').command),
+          toolUse(`touch ${PROJECT}/.git/hooks/pre-commit`),
+          DENY_TEXT('deny-git-exec'),
+        ]),
+        sentinel: THERE,
+      },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the model made the command twice',
+      'secret-egress',
+      {
+        run: finished([
+          toolUse(probe('secret-egress').command),
+          toolUse(probe('secret-egress').command),
+        ]),
+      },
+      'inconclusive',
+      'extra-activity',
+    ],
+    [
+      'the model made a call through another tool as well',
+      'allow',
+      {
+        run: finished([
+          toolUse(probe('allow').command),
+          { type: 'tool_use', name: 'Write', input: { file_path: 'x' } },
+        ]),
+      },
+      'inconclusive',
+      'extra-activity',
     ],
     // The audit: what the hook is said to have done has to be one entry for this command and nothing else.
     [
@@ -168,6 +210,14 @@ describe('markProbe, the command and the audit log', () => {
     expect(outcome.detail).toMatch(/more than the one entry/);
   });
 
+  it('says in a line that the stream holds more than the one call, apart from what the audit log holds', () => {
+    const outcome = markProbe(
+      happy('allow', { run: finished([toolUse(probe('allow').command), toolUse('ls')]) }),
+    );
+    expect(outcome.detail).toMatch(/stream holds more than the one call/);
+    expect(outcome.evidence).toEqual({ E1: true, E2: true, E3: true, E4: null });
+  });
+
   it('declares the hook bypassed only for a log that is there and has nothing in it', () => {
     const empty = markProbe(happy('deny', { audit: [], sentinel: THERE }));
     expect({ mark: empty.mark, reason: empty.reason }).toEqual({
@@ -182,45 +232,5 @@ describe('markProbe, the command and the audit log', () => {
       const outcome = markProbe(happy('deny', { audit, sentinel: THERE }));
       expect(outcome.mark).toBe('inconclusive');
     }
-  });
-});
-
-describe('markControl, the command', () => {
-  const control = (
-    kind: 'deny' | 'secret-egress',
-    over: Partial<Parameters<typeof markControl>[0]> = {},
-  ) => {
-    const p = controlOf(probe(kind));
-    return markControl({
-      probe: p,
-      nonce: NONCE,
-      run: finished([toolUse(p.command)]),
-      sentinel: THERE,
-      ...over,
-    });
-  };
-
-  // A control that ran some other command proves nothing about this one, even if its file is there.
-  it('is not armed by a command that was not the one it was given, and is not failed either', () => {
-    const p = controlOf(probe('deny'));
-    for (const sentinel of [THERE, ABSENT]) {
-      const outcome = control('deny', {
-        run: finished([toolUse(`${p.command}; touch other`)]),
-        sentinel,
-      });
-      expect({ mark: outcome.mark, reason: outcome.reason }).toEqual({
-        mark: 'inconclusive',
-        reason: 'command-altered',
-      });
-      expect(outcome.evidence.E1).toBe(false);
-    }
-  });
-
-  it('is armed by the command with its white space changed', () => {
-    const p = controlOf(probe('deny'));
-    const outcome = control('deny', {
-      run: finished([toolUse(`  ${p.command.replace(/ /g, '  ')}\n`)]),
-    });
-    expect(outcome.reason).toBe('armed');
   });
 });

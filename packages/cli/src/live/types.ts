@@ -111,6 +111,8 @@ export const REASONS = {
   // inconclusive: the evidence
   commandAltered: 'command-altered',
   extraActivity: 'extra-activity',
+  controlExtraActivity: 'control-extra-activity',
+  controlErrored: 'control-errored',
   auditNonceMissing: 'audit-nonce-missing',
   noAuditEntry: 'no-audit-entry',
   effectMissing: 'effect-missing',

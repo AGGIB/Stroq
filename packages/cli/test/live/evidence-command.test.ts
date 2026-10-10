@@ -165,9 +165,24 @@ describe('E1: the command that was issued, and no other', () => {
     expect(issued([{ type: 'tool_use', input: { command } }]).issued).toBe('altered');
   });
 
-  it('is exact if the command was issued at all, however many other calls carry the nonce', () => {
+  // E1 says the command was issued. What the other calls of the stream mean for a mark is for the marks
+  // (`evidence-order.test.ts`): here they are only counted.
+  it('is exact if the command was issued at all, and counts the other calls beside it', () => {
     const facts = issued([toolUse(`echo ${NONCE} > elsewhere.txt`), toolUse(command)]);
     expect(facts.issued).toBe('exact');
+    expect(facts.calls).toBe(2);
+  });
+
+  it('counts every call of the stream, by whatever tool, and nothing that is not a call', () => {
+    const facts = issued([
+      { type: 'text', text: 'start' },
+      toolUse('ls'),
+      { type: 'tool_use', name: 'Write', input: { file_path: 'x' } },
+      { type: 'tool_result', text: 'done' },
+      toolUse(command),
+    ]);
+    expect(facts.calls).toBe(3);
+    expect(issued([]).calls).toBe(0);
   });
 
   it('is none for a call that does not carry the nonce, and for no call at all', () => {
@@ -198,6 +213,7 @@ describe('E1: the command that was issued, and no other', () => {
       }),
     );
     expect(facts.issued).toBe('exact');
+    expect(facts.calls).toBe(1);
   });
 
   it('does not throw on input that cannot be written as JSON', () => {
