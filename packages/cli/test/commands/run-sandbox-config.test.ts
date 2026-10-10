@@ -1,6 +1,9 @@
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -31,8 +34,14 @@ describe.skipIf(process.platform === 'win32')('the config file srt is given', ()
           const dir = dirname(file);
           expect(dirname(dir)).toBe(join(w.home, 'run'));
           expect(statSync(dir).mode & 0o777).toBe(0o700);
-          expect(statSync(file).mode & 0o777).toBe(0o600);
-          expect(JSON.parse(readFileSync(file, 'utf8'))).toHaveProperty('filesystem');
+          // One descriptor for the mode and the content: the file is not looked at twice by name.
+          const fd = openSync(file, 'r');
+          try {
+            expect(fstatSync(fd).mode & 0o777).toBe(0o600);
+            expect(JSON.parse(readFileSync(fd, 'utf8'))).toHaveProperty('filesystem');
+          } finally {
+            closeSync(fd);
+          }
           return 0;
         },
       },
