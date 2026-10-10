@@ -143,6 +143,8 @@ describe('a request for help that the shell gives to the command still opens it'
     'stroq uninstall --dry-run # --help',
     'stroq run --help -- stroq prove # --help',
     'stroq mcp -h # how it is used',
+    'stroq.exe untaint --help <# why #>',
+    'stroq prove -h <#x#>',
   ])('leaves %j open where the flag comes before the comment', (command) => {
     expect(stroqStateSignals(command), command).toEqual([]);
   });

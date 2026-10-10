@@ -7,8 +7,9 @@
  * commands in a script run behind a launcher that is spelled with a path, `npx @stroq/cli` or `node …/index.js`
  * (`/usr/local/bin/stroq run -- bash x.sh`), because the readers of scripts know `stroq` as a launcher by its
  * bare name alone (`shell-wrappers.ts`); and arithmetic that shifts (`echo $((1<<3))`), whose `<<` `joinText`
- * takes for a heredoc, so that the lines after it are folded into the line of the command that stands there.
- * And outside this file: the hook entries in the host's own configuration (`settings.json`, `hooks.json`, the
+ * takes for a heredoc, so that the lines after it are folded into the line of the command that stands there;
+ * and a PowerShell block comment before the command (`<# note #> stroq untaint`), which hides the command from
+ * the words of the line. And outside this file: the hook entries in the host's own configuration (`settings.json`, `hooks.json`, the
  * plugin cache) are writable in the sandbox, so a program that none of this reads can switch the firewall off
  * from inside it.
  */
@@ -30,7 +31,7 @@ import {
   isExemptionFlag,
   subcommandChangesState,
 } from './stroq-commands.js';
-import { REDIRECT, resolve, withoutRedirects } from './shell-words.js';
+import { REDIRECT, resolve, type Word } from './shell-words.js';
 
 /**
  * Stroq's own commands that change what it enforces: `untaint` clears a session's
@@ -301,8 +302,23 @@ function runsStateCommand(
   if (!namesStroq(segment) && !/[$`]/.test(segment)) return false;
   const found = resolve(segment, LAUNCHED_BY_STROQ);
   if (found === null || found.word === '') return false;
-  const rest = withoutRedirects(found.args).map((word) => word.value);
-  return changesState([found.word, ...rest], assigned, reading);
+  return changesState([found.word, ...argumentValues(found.args)], assigned, reading);
+}
+
+/**
+ * The values of the words of a command that are its arguments: its redirects are off, as `withoutRedirects`
+ * takes them, except `<#`. That opens a block comment to PowerShell, and is kept as the word that begins one,
+ * so that `asksForHelp` does not read a flag in the comment.
+ */
+function argumentValues(args: readonly Word[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const word = args[i] as Word;
+    const redirect = word.redirect ? REDIRECT.exec(word.value) : null;
+    if (redirect === null || word.value.startsWith('<#')) kept.push(word.value);
+    else if (word.value.length === redirect[0].length) i += 1;
+  }
+  return kept;
 }
 
 /**
@@ -365,7 +381,9 @@ function changesState(
 
 /**
  * Whether the arguments of a command ask for help or for a dry run. Not every word of a line is an argument.
- * What follows a word that begins with `#` is a comment, which the shell drops. The target of a redirect is a
+ * What follows a word that begins with `#` is a comment, which the shell drops, and so is what follows `<#`,
+ * which opens a block comment to PowerShell (`<# … #>`) and is a redirect from a file to the shells of POSIX, where
+ * what it makes of the flag that follows is only a command that is asked about. The target of a redirect is a
  * file, not an argument (`stroq untaint --all > --help` writes one): where a word is the operator alone, the
  * word after it is the target. A quoted `"#x"` or `">"` is taken for either as well, which can only keep a
  * command that is asked about asked about: the quotes are off the words, and which of them were quoted is
@@ -374,7 +392,7 @@ function changesState(
 function asksForHelp(own: readonly string[]): boolean {
   for (let i = 0; i < own.length; i += 1) {
     const word = own[i] as string;
-    if (word.startsWith('#')) return false;
+    if (word.startsWith('#') || word.includes('<#')) return false;
     const redirect = REDIRECT.exec(word);
     if (redirect !== null) {
       if (redirect[0].length === word.length) i += 1;
