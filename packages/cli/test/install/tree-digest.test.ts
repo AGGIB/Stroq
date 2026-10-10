@@ -191,6 +191,13 @@ describe('stroq-tree/1 golden vectors', () => {
       expect(treeDigest({ entries: stripped })).toBe(GOLDEN.mixed);
     });
 
+    it('nor on whether the target text of a symlink is there', () => {
+      const stripped = mixedEntries().map(({ bytes: _bytes, target: _target, ...rest }) => rest);
+
+      expect(stripped.some((entry) => entry.kind === 'symlink')).toBe(true);
+      expect(treeDigest({ entries: stripped })).toBe(GOLDEN.mixed);
+    });
+
     it('changes when one byte of one file changes', () => {
       const entries = entriesOf({ 'a.txt': 'b' });
       const digest = mixedWith((all) => [...without(all, 'a.txt'), ...entries]);
