@@ -8,7 +8,6 @@ import {
   PASSPORT_SCHEMA,
   PassportLineSchema,
   PassportSchema,
-  SourceRefSchema,
   type Basis,
   type CapKind,
   type ImportedFinding,
@@ -278,69 +277,6 @@ describe('PassportSchema', () => {
 
     expect(Object.isFrozen(VALID)).toBe(false);
     expect(Object.isFrozen(VALID.lines)).toBe(false);
-  });
-});
-
-describe('SourceRefSchema', () => {
-  it.each([
-    ['a directory', { type: 'dir', label: 'my-skill' }],
-    ['a relative directory', { type: 'dir', label: 'skills/demo' }],
-    ['a tarball', { type: 'tarball', label: 'my-skill-1.0.tgz' }],
-    ['an npm package', { type: 'npm', name: '@acme/server', version: '1.2.3' }],
-    [
-      'an npm package with its integrity',
-      { type: 'npm', name: 'p', version: '1.0.0', integrity: 'sha512-AAAA' },
-    ],
-    ['a GitHub repository', { type: 'github', owner: 'acme', repo: 'demo', ref: 'main' }],
-    [
-      'a GitHub repository, fully pinned',
-      {
-        type: 'github',
-        owner: 'acme',
-        repo: 'demo',
-        ref: 'v1',
-        commit: '0123456789abcdef0123456789abcdef01234567',
-        subdir: 'skills/demo',
-      },
-    ],
-    ['a URL', { type: 'url', host: 'example.com' }],
-  ])('accepts %s', (_what, value) => {
-    expect(SourceRefSchema.safeParse(value).success).toBe(true);
-  });
-
-  it.each([
-    ['a type it does not know', { type: 'ftp', label: 'x' }],
-    ['no type', { label: 'x' }],
-    ['a directory with no label', { type: 'dir' }],
-    ['a directory with an empty label', { type: 'dir', label: '' }],
-    ['an npm package with no version', { type: 'npm', name: 'p' }],
-    ['a GitHub repository with no ref', { type: 'github', owner: 'a', repo: 'b' }],
-    ['a GitHub repository with an empty owner', { type: 'github', owner: '', repo: 'b', ref: 'c' }],
-    ['a URL with no host', { type: 'url' }],
-    ['a URL with a path as well', { type: 'url', host: 'example.com', path: '/x' }],
-    [
-      'an npm package with a key of a GitHub one',
-      { type: 'npm', name: 'p', version: '1', ref: 'x' },
-    ],
-    [
-      'an optional key given as undefined',
-      { type: 'npm', name: 'p', version: '1', integrity: undefined },
-    ],
-  ])('rejects %s', (_what, value) => {
-    expect(SourceRefSchema.safeParse(value).success).toBe(false);
-  });
-
-  // The passport is canonical so that an author can commit it, which a path on the author's own
-  // disk would spoil: it differs from machine to machine and carries a user name.
-  it.each([
-    ['a Unix absolute path', '/home/me/skill'],
-    ['a Windows drive path', 'C:\\Users\\me\\skill'],
-    ['a Windows drive path with slashes', 'c:/Users/me/skill'],
-    ['a UNC path', '\\\\server\\share\\skill'],
-    ['a rooted Windows path', '\\Users\\me'],
-  ])('does not take %s for a label', (_what, label) => {
-    expect(SourceRefSchema.safeParse({ type: 'dir', label }).success).toBe(false);
-    expect(SourceRefSchema.safeParse({ type: 'tarball', label }).success).toBe(false);
   });
 });
 

@@ -120,14 +120,47 @@ const nonEmpty = z.string().min(1);
 /**
  * A label for something on this machine says which skill it was, not where it lives. A passport is
  * canonical, so that an author can commit one and a reader can compare it: a path from the root of
- * a disk would differ from machine to machine and would carry a user name.
+ * a disk would differ from machine to machine and would carry a user name. So a label is a short
+ * relative name: not absolute (a leading slash or backslash, a drive letter `C:`, or `~`, which a
+ * shell reads as the home directory), with no `..` component to climb out of where it is read, and at
+ * most `LABEL_MAX` characters.
  */
-const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:)/;
-const label = nonEmpty.refine((text) => !ABSOLUTE_PATH.test(text), {
-  message: 'a label is never an absolute path',
+const LABEL_MAX = 80;
+const ABSOLUTE_PATH = /^(?:[\\/~]|[A-Za-z]:)/;
+const hasParentComponent = (text: string): boolean => text.split(/[\\/]/).includes('..');
+const label = nonEmpty
+  .max(LABEL_MAX, { message: `a label is at most ${LABEL_MAX} characters` })
+  .refine((text) => !ABSOLUTE_PATH.test(text), { message: 'a label is never an absolute path' })
+  .refine((text) => !hasParentComponent(text), { message: "a label has no '..' component" });
+
+/**
+ * A host name, and nothing else: no scheme, user information, port, path, query or fragment. It is
+ * written as a URL parser writes it, lower case and ASCII (punycode for anything else), so that the
+ * same host is the same text. Labels of 1 to 63 letters, digits and hyphens (not at either end),
+ * 253 characters in all, and a last label that is not a number, which keeps an IPv4 address out.
+ * Checked a label at a time, with the length first, so that it is linear in a hostile string.
+ */
+const HOST_MAX = 253;
+const HOST_LABEL_MAX = 63;
+const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const NUMBER = /^[0-9]+$/;
+function isHostName(text: string): boolean {
+  if (text.length > HOST_MAX) return false;
+  const labels = text.split('.');
+  const last = labels[labels.length - 1] ?? '';
+  if (NUMBER.test(last)) return false;
+  return labels.every((part) => part.length <= HOST_LABEL_MAX && HOST_LABEL.test(part));
+}
+const hostName = nonEmpty.refine(isHostName, {
+  message: 'a host is a bare lower-case host name: no scheme, user, port or path',
 });
 
-/** Where an artifact came from, as much as is needed to fetch it again and to tell it from another. */
+/**
+ * Where an artifact came from, as much as a passport may say: enough to tell one source from another
+ * and to show a person where it came from. It is NOT enough to fetch the artifact again, and is never
+ * used to: a `url` keeps only its host, and a `dir` or `tarball` only a label. The lock file keeps a
+ * separate, full source spec (the whole URL, the resolved commit, the integrity) for that.
+ */
 export const SourceRefSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('dir'), label }).readonly(),
   z.strictObject({ type: z.literal('tarball'), label }).readonly(),
@@ -150,7 +183,7 @@ export const SourceRefSchema = z.discriminatedUnion('type', [
     })
     .readonly(),
   // The host only: the address is the host the bytes came from, and a path or a token has no place in a record.
-  z.strictObject({ type: z.literal('url'), host: nonEmpty }).readonly(),
+  z.strictObject({ type: z.literal('url'), host: hostName }).readonly(),
 ]);
 export type SourceRef = z.infer<typeof SourceRefSchema>;
 
@@ -197,7 +230,9 @@ const count = z.number().int().nonnegative();
 
 /**
  * What `stroq vet` says about an artifact, and what a lock file keeps of what was confirmed. It holds
- * no time and no path of this machine, so that the same artifact gives the same passport anywhere.
+ * no time and no path of this machine, so that the same artifact, read by the same version of Stroq
+ * with the same rules, gives the same passport on any machine. Which Stroq and which rules is part of
+ * it (`analysis`): another version may read the same files differently, and then the passport differs.
  *
  * An absent line means nothing was seen, and `blindSpots` is what was not looked at: a passport is a
  * list of what was found, never a promise of what is not there.
