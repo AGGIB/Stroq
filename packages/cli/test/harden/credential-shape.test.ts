@@ -126,8 +126,11 @@ describe('findCredentialShape: text that does not', () => {
     expect(findCredentialShape(doc)).toBeNull();
   });
 
-  it('leaves a short value under a credential-looking name alone', () => {
-    expect(findCredentialShape(json({ password: 'hunter2', token: 'short' }))).toBeNull();
+  // Not "short" as it was: a value of four characters or more under a name that says password,
+  // token or api key is a credential (a development password is not twelve characters long); see
+  // credential-short-forms.test.ts. Under four characters it is still an ordinary word.
+  it('leaves a value of under four characters under a credential-looking name alone', () => {
+    expect(findCredentialShape(json({ password: 'abc', token: 'xy' }))).toBeNull();
   });
 
   it('leaves placeholders alone', () => {

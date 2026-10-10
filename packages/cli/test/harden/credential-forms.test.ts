@@ -260,3 +260,29 @@ describe('findCredentialShape: JSON documents, as before', () => {
     expect(findCredentialShape(deep)).toBeNull();
   });
 });
+
+// The header of credential-shape.ts lists what the reader does not read. A limit that is not
+// pinned drifts: it is either closed by accident or forgotten, and "clean" means more or less
+// than it said.
+describe('findCredentialShape: what it says it does not read', () => {
+  it.each([
+    ['a value on a different line from its name', '- name: DB_PASSWORD\n  value: devpass1\n'],
+    ['a secret under a name that says nothing', json({ sauce: 'abcd1234' })],
+    ['a value of three characters under a name that says password', json({ password: 'abc' })],
+    ['a PowerShell assignment', '$env:API_TOKEN="abcd1234"\n'],
+    ['a pass that is part of a longer word', 'bypass=abcd1234\n'],
+    [
+      'a name whose last word is a label',
+      json({ apiKeyHelper: 'print-key', tokenType: 'abcd1234' }),
+    ],
+    ['a count of tokens', json({ env: { MAX_THINKING_TOKENS: '31999' } })],
+    ['a user and a numeric group', 'docker run -u app:1000 image\n'],
+  ])('does not read %s', (_what, text) => {
+    expect(findCredentialShape(text)).toBeNull();
+  });
+
+  // Said in the header too: a user and a group look like a user and a password.
+  it('takes `-u user:group` for `-u user:password`, which a flag cannot tell apart', () => {
+    expect(findCredentialShape('docker run -u app:appgroup image\n')).toBe('named-secret');
+  });
+});

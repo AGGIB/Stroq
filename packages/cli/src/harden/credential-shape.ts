@@ -1,20 +1,19 @@
+import { MAX_SCAN_CHARS, MIN_SECRET_LENGTH, candidatesFromText, detectPatterns } from '@stroq/core';
 import {
-  MAX_SCAN_CHARS,
-  MIN_SECRET_LENGTH,
-  candidatesFromText,
-  detectPatterns,
-  looksLikeToken,
-} from '@stroq/core';
+  flagValueIsSecret,
+  isSecretFlag,
+  isUserFlag,
+  userPasswordValue,
+} from './credential-flags.js';
 import {
   MAX_LINE_CHARS,
   authorizationValue,
-  flagValueIsSecret,
   holdsNamedSecret,
-  isSecretFlag,
   privateKeyBlockLines,
   privateKeyHeaderIn,
 } from './credential-lines.js';
 import { nameFacts, secretUnderName, type NameFacts } from './credential-names.js';
+import { looksLikeVendorToken } from './credential-vendors.js';
 import { jsonTokens } from './json-tokens.js';
 
 /**
@@ -31,6 +30,20 @@ import { jsonTokens } from './json-tokens.js';
  * string by string with the name above each string, and three limits (`SCAN_LIMITS`) bound it: a
  * key longer than any key is, more strings than any config holds, and a total of characters
  * examined. A document that goes past one is reported as unchecked, which is not the same as clean.
+ *
+ * What it does not read, so that nobody takes "clean" for more than it is:
+ * - a value on a different line from its name (`- name: password` over `value: x`, a TOML table
+ *   whose key is in its header), and a secret split over several strings;
+ * - a secret under a name that says nothing (`"sauce": "..."`), unless the value has a known
+ *   vendor's shape or is 12 characters or more under a name core calls secret (`key`, `session` ...);
+ * - a value of under four characters, and a passphrase with spaces under any name but a password's;
+ * - a base64 `user:password` that is not given to `Authorization` or `-u`, a credential in the
+ *   name of a key or in a comment (`# API_TOKEN=...` is left alone), and one spelled in another
+ *   alphabet, language or encoding (`$env:TOKEN="..."` of PowerShell, a value URL-encoded twice);
+ * - the name `pw` or `pass` in a longer word (`bypass`), and any name whose last word is a label
+ *   (`apiKeyHelper`, `tokenType`, `secretId`, `MAX_THINKING_TOKENS`: a command, a kind, an id or a
+ *   count, and none of them a secret);
+ * - `-u user:group` is taken for `-u user:password` unless the group is a number.
  */
 
 /** What kind of credential-shaped text a file holds. Never the text itself. */
@@ -59,9 +72,15 @@ export type CredentialShape =
  */
 const PERSONAL_KINDS: ReadonlySet<string> = new Set(['card', 'iban', 'ssn']);
 
+/**
+ * The shortest string any reader finds something in (`pw=abcd`); a shorter string is only looked at
+ * for the name above it and the flag before it.
+ */
+const MIN_FORM_CHARS = 7;
+
 const hasVendorToken = (text: string): boolean =>
   text.length >= MIN_SECRET_LENGTH &&
-  candidatesFromText(text).some((candidate) => looksLikeToken(candidate.token));
+  candidatesFromText(text).some((candidate) => looksLikeVendorToken(candidate.token));
 
 const hasPersonalData = (text: string): boolean =>
   detectPatterns(text).some((span) => PERSONAL_KINDS.has(span.kind));
@@ -96,7 +115,8 @@ function stringHoldsCredential(
   if (facts !== null && facts.authorization && authorizationValue(value)) return true;
   // `["--password", "hunter2"]`: the flag and its value are two elements of one list.
   if (before !== null && isSecretFlag(before) && flagValueIsSecret(value)) return true;
-  if (value.length < MIN_SECRET_LENGTH) return false;
+  if (before !== null && isUserFlag(before) && userPasswordValue(value)) return true;
+  if (value.length < MIN_FORM_CHARS) return false;
   if (privateKeyHeaderIn(value)) return true;
   return value.includes('\n')
     ? value.split('\n').some((line) => holdsNamedSecret(line, true))

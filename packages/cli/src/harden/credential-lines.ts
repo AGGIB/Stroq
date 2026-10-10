@@ -1,12 +1,25 @@
-import { extractEnv } from '@stroq/core';
+import { flagSecretInText } from './credential-flags.js';
+import {
+  assignmentSecret,
+  isCommentLine,
+  keyValueSecret,
+  leadingPairSecret,
+} from './credential-pairs.js';
+import { isSpace, opaque } from './credential-values.js';
 
 /**
- * Credential-shaped text, found one line (or one string) at a time, in time linear in its length.
+ * Credential-shaped text, found one line (or one string) at a time. Every reader takes time in
+ * proportion to the length of what it is given (a few passes over it), because the text is a
+ * config file that a repository can commit and a pattern that backtracks on a long run of spaces
+ * is a way to hang the command that reads it:
+ * the `NAME=VALUE` pattern core uses for `.env` files is quadratic on exactly that, which is why
+ * it is not used here. Plain scans and anchored, unambiguous patterns.
  *
- * Everything here is read with plain scans and anchored, unambiguous patterns, because the text is
- * a config file that a repository can commit, and a pattern that backtracks on a long run of
- * spaces is a way to hang the command that reads it (the `NAME=VALUE` pattern core uses for
- * `.env` files is quadratic on exactly that, which is why it is not used here).
+ * The readers live in four files. `credential-pairs.ts` reads a name and the value written next to
+ * it (`NAME=VALUE`, `name: value`, the parameters of a URL), `credential-flags.ts` reads a command
+ * line (`--password x`, `-u user:pass`, `-H 'X-Key: x'`), and this file reads what has a shape of
+ * its own: an Authorization header, the front of a URL, a PEM private key. `credential-values.ts`
+ * says what stands in for a value, and `credential-names.ts` what a name says.
  *
  * "Credential-shaped" is a heuristic that leans toward yes: a false alarm costs a byte copy, and a
  * miss costs a credential in one more place. None of these functions returns any of the text.
@@ -19,195 +32,10 @@ import { extractEnv } from '@stroq/core';
  */
 export const MAX_LINE_CHARS = 4096;
 
-const TAB = 9;
-const CARRIAGE_RETURN = 13;
-const SPACE = 32;
-const HASH = 0x23;
-const SEMICOLON = 0x3b;
 const EQUALS = 0x3d;
-
-/** The characters `\s` stands for in a pattern. */
-const isSpace = (code: number): boolean =>
-  code === SPACE ||
-  (code >= TAB && code <= CARRIAGE_RETURN) ||
-  code === 0xa0 ||
-  code === 0x1680 ||
-  (code >= 0x2000 && code <= 0x200a) ||
-  code === 0x2028 ||
-  code === 0x2029 ||
-  code === 0x202f ||
-  code === 0x205f ||
-  code === 0x3000 ||
-  code === 0xfeff;
-
-const isNameStart = (code: number): boolean =>
-  (code >= 0x41 && code <= 0x5a) ||
-  (code >= 0x61 && code <= 0x7a) ||
-  code === 0x5f ||
-  code === 0x2f;
-const isNameChar = (code: number): boolean =>
-  isNameStart(code) ||
-  (code >= 0x30 && code <= 0x39) ||
-  code === 0x2e ||
-  code === 0x3a ||
-  code === 0x2d;
-
-// ---------------------------------------------------------------------------------------------
-// NAME=VALUE
-
-/** A `# comment` after a value that is not quoted. */
-function withoutInlineComment(value: string): string {
-  const first = value.charCodeAt(0);
-  if (first === 0x22 || first === 0x27) return value;
-  const space = value.indexOf(' #');
-  const tab = value.indexOf('\t#');
-  const at = space === -1 ? tab : tab === -1 ? space : Math.min(space, tab);
-  return at > 0 ? value.slice(0, at).trim() : value;
-}
-
-function unquoted(value: string): string {
-  const quote = value.charCodeAt(0);
-  const isQuote = quote === 0x22 || quote === 0x27;
-  return isQuote && value.length >= 2 && value.charCodeAt(value.length - 1) === quote
-    ? value.slice(1, -1)
-    : value;
-}
-
-/**
- * Whether `line` is `NAME=VALUE` (dotenv, ini, npmrc; an `export` in front is fine) with a value
- * that is a credential under that name. The same question core asks of an environment, answered
- * by `extractEnv`; only the splitting of the line is done here.
- */
-export function keyValueSecret(line: string): boolean {
-  const n = line.length;
-  let i = 0;
-  while (i < n && isSpace(line.charCodeAt(i))) i += 1;
-  if (i >= n) return false;
-  const first = line.charCodeAt(i);
-  if (first === HASH || first === SEMICOLON) return false;
-  if (line.startsWith('export', i) && isSpace(line.charCodeAt(i + 6))) {
-    i += 6;
-    while (i < n && isSpace(line.charCodeAt(i))) i += 1;
-  }
-  const nameStart = i;
-  if (!isNameStart(line.charCodeAt(i))) return false;
-  i += 1;
-  while (i < n && isNameChar(line.charCodeAt(i))) i += 1;
-  const name = line.slice(nameStart, i);
-  while (i < n && isSpace(line.charCodeAt(i))) i += 1;
-  if (line.charCodeAt(i) !== EQUALS) return false;
-  i += 1;
-  while (i < n && isSpace(line.charCodeAt(i))) i += 1;
-  const rest = line.slice(i).trimEnd();
-  if (rest === '') return false;
-  return extractEnv({ [name]: unquoted(withoutInlineComment(rest)) }).length > 0;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Values that are not credentials however they are spelled.
-
-/**
- * Something that stands in for a value: a template, a reference to an environment variable, a
- * path, a flag, a word every document uses for an example. Matched at the start of the value only,
- * so the cost is the length of the value at most.
- */
-const NOT_A_VALUE =
-  /^(?:[<$%{@~/-]|\.{1,2}\/|\*+$|x{3,}$|(?:change|replace)[-_]?me|todo|example|sample|dummy|placeholder|your[-_]|(?:pass(?:word|wd)?|secret|token|key)$)/i;
-
-/**
- * A value that a name or a flag says is secret: long enough to be one, in one piece, and not a
- * stand-in. `minLength` is shorter than core's for values whose position says they are secret.
- */
-function opaque(value: string, minLength: number): boolean {
-  if (value.length < minLength) return false;
-  for (let i = 0; i < value.length; i += 1) if (isSpace(value.charCodeAt(i))) return false;
-  return !NOT_A_VALUE.test(value);
-}
-
-const FLAG_VALUE_MIN = 6;
 const AUTH_TOKEN_MIN = 8;
 const URL_PASSWORD_MIN = 4;
 const URL_TOKEN_MIN = 20;
-
-// ---------------------------------------------------------------------------------------------
-// `--password hunter2` and `--token=abc`
-
-/** The flags whose value is a secret, spelled the way `--api_key` and `--API-KEY` are normalised. */
-const SECRET_FLAGS: ReadonlySet<string> = new Set([
-  'password',
-  'passwd',
-  'pass',
-  'pwd',
-  'token',
-  'api-key',
-  'apikey',
-  'secret',
-  'client-secret',
-  'access-token',
-  'auth-token',
-  'bearer-token',
-  'secret-key',
-  'access-key',
-  'private-key',
-]);
-
-/** `--API_Key` as `api-key`: the name of a flag, which is not the name of a variable. */
-function flagName(token: string): string {
-  return token.replace(/^-+/, '').replace(/_/g, '-').toLowerCase();
-}
-
-/** Quotes, commas and brackets around a word that is one element of an argument list. */
-const isWrapper = (code: number): boolean =>
-  isSpace(code) ||
-  code === 0x22 ||
-  code === 0x27 ||
-  code === 0x60 ||
-  code === 0x2c ||
-  code === 0x3b ||
-  code === 0x5b ||
-  code === 0x5d ||
-  code === 0x28 ||
-  code === 0x29 ||
-  code === 0x7b ||
-  code === 0x7d;
-
-/**
- * `word` without the wrapping characters at either end. Two plain scans: a pattern with `+$` in
- * it is quadratic on a long run of the characters it trims.
- */
-function trimmed(word: string): string {
-  let start = 0;
-  let end = word.length;
-  while (start < end && isWrapper(word.charCodeAt(start))) start += 1;
-  while (end > start && isWrapper(word.charCodeAt(end - 1))) end -= 1;
-  return word.slice(start, end);
-}
-
-/** Whether `flag` (a whole argument, as written) is one whose value is a secret. */
-export function isSecretFlag(flag: string): boolean {
-  return flag.startsWith('--') && SECRET_FLAGS.has(flagName(flag));
-}
-
-/** Whether `value`, found right after a secret flag, is a secret and not a stand-in. */
-export const flagValueIsSecret = (value: string): boolean => opaque(value, FLAG_VALUE_MIN);
-
-/**
- * Whether `text` holds a secret flag with a secret value after it, as separate words
- * (`--password hunter2`) or joined (`--token=abc123`).
- */
-export function flagSecretInText(text: string): boolean {
-  if (!text.includes('--')) return false;
-  const words = text.split(/\s+/);
-  for (let k = 0; k < words.length; k += 1) {
-    const word = trimmed(words[k] ?? '');
-    if (!word.startsWith('--')) continue;
-    const equals = word.indexOf('=');
-    if (!isSecretFlag(equals === -1 ? word : word.slice(0, equals))) continue;
-    const value = equals === -1 ? trimmed(words[k + 1] ?? '') : trimmed(word.slice(equals + 1));
-    if (flagValueIsSecret(value)) return true;
-  }
-  return false;
-}
 
 // ---------------------------------------------------------------------------------------------
 // `Authorization: Bearer <token>`
@@ -231,47 +59,61 @@ const isTokenChar = (code: number): boolean =>
   code === EQUALS ||
   code === 0x2d;
 
+/** The schemes of an Authorization header that carry a token: `Token` is Django REST's and GitHub's. */
+const SCHEMES: readonly string[] = ['bearer', 'basic', 'token'];
+
 /**
- * Whether `lower` (already in lower case) has, from `from` on, a Bearer or Basic scheme followed
- * by an opaque token, after at most a few characters of punctuation and white space.
+ * Whether `lower` (the text in lower case) has, from `from` on, a Bearer, Basic or Token scheme
+ * followed by an opaque token, after at most a few characters of punctuation and white space.
+ * The token is cut out of `source`, the text as it was written: case tells a base64 token from a
+ * path, and a flag from a token that starts with a dash.
  */
-function schemeToken(lower: string, from: number): boolean {
+function schemeToken(source: string, lower: string, from: number): boolean {
   let i = from;
   const gapEnd = i + MAX_HEADER_GAP;
   while (i < gapEnd && i < lower.length && isGap(lower.charCodeAt(i))) i += 1;
-  const scheme = lower.startsWith('bearer', i) ? 6 : lower.startsWith('basic', i) ? 5 : 0;
-  if (scheme === 0) return false;
-  i += scheme;
+  const scheme = SCHEMES.find((name) => lower.startsWith(name, i));
+  if (scheme === undefined) return false;
+  i += scheme.length;
   if (!isSpace(lower.charCodeAt(i))) return false;
   while (i < lower.length && isSpace(lower.charCodeAt(i))) i += 1;
   let end = i;
   while (end < lower.length && isTokenChar(lower.charCodeAt(end))) end += 1;
-  return opaque(lower.slice(i, end), AUTH_TOKEN_MIN);
+  return opaque(source.slice(i, end), AUTH_TOKEN_MIN);
+}
+
+/** `text` and its lower case, which has the same offsets unless a letter lower-cases to two. */
+function withLower(text: string): { readonly source: string; readonly lower: string } {
+  const lower = text.toLowerCase();
+  return { source: lower.length === text.length ? text : lower, lower };
 }
 
 /**
  * Whether `text` has an `Authorization` header (any case; `Proxy-Authorization` too) whose scheme
- * is Bearer or Basic and whose credential is an opaque token. "Basic" and "bearer" are ordinary
- * words, so the header's name has to be there too.
+ * is Bearer, Basic or Token and whose credential is an opaque token. "Basic" and "bearer" are
+ * ordinary words, so the header's name has to be there too.
  */
 export function authorizationSecret(text: string): boolean {
   if (text.length < AUTHORIZATION.length + AUTH_TOKEN_MIN) return false;
-  const lower = text.toLowerCase();
+  const { source, lower } = withLower(text);
   for (
     let at = lower.indexOf(AUTHORIZATION);
     at !== -1;
     at = lower.indexOf(AUTHORIZATION, at + AUTHORIZATION.length)
   ) {
-    if (schemeToken(lower, at + AUTHORIZATION.length)) return true;
+    if (schemeToken(source, lower, at + AUTHORIZATION.length)) return true;
   }
   return false;
 }
 
 /**
- * Whether `value`, which hangs under a key named like an authorization header, is `Bearer <token>`
- * or `Basic <token>`: the header's name is the key and not part of the value.
+ * Whether `value`, which hangs under a key named like an authorization header, is `Bearer <token>`,
+ * `Basic <token>` or `Token <token>`: the header's name is the key and not part of the value.
  */
-export const authorizationValue = (value: string): boolean => schemeToken(value.toLowerCase(), 0);
+export function authorizationValue(value: string): boolean {
+  const { source, lower } = withLower(value);
+  return schemeToken(source, lower, 0);
+}
 
 // ---------------------------------------------------------------------------------------------
 // `scheme://user:password@host`
@@ -376,13 +218,24 @@ export function privateKeyBlockLines(lines: readonly string[]): ReadonlySet<numb
 /**
  * Whether `text` (one line, or one string of a JSON document) holds a credential under a name,
  * a flag, a header or a URL. `keyValue` is for plain text: in a JSON document a line such as
- * `"a": "b"` is the document's business, not an `.env` line.
+ * `"a": "b"` is the document's business, not an `.env` line, and the walk of the document has
+ * read the name above each string. A line that is a comment holds no `NAME=VALUE`.
  */
 export function holdsNamedSecret(text: string, keyValue: boolean): boolean {
+  const words = text.split(/\s+/);
   return (
-    (keyValue && text.includes('=') && keyValueSecret(text)) ||
-    flagSecretInText(text) ||
+    (keyValue && namesAValue(text, words)) ||
+    flagSecretInText(words) ||
     authorizationSecret(text) ||
     (text.includes('://') && urlSecret(text))
+  );
+}
+
+/** A name and the value written next to it: `NAME=VALUE`, `NAME=value rest`, `name: value`. */
+function namesAValue(text: string, words: readonly string[]): boolean {
+  if (isCommentLine(text)) return false;
+  return (
+    (text.includes('=') && (keyValueSecret(text) || assignmentSecret(words))) ||
+    (text.includes(':') && leadingPairSecret(text))
   );
 }

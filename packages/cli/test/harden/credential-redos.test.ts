@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SCAN_CHARS } from '@stroq/core';
-import { findCredentialShape } from '../../src/harden/credential-shape.js';
+import { findCredentialShape, hiddenLineMask } from '../../src/harden/credential-shape.js';
 import { planJsonEdits } from '../../src/harden/json-edit.js';
 import type { JsonEdit, JsonPlan } from '../../src/harden/types.js';
 import { cpuNow } from '../helpers/cpu-time.js';
@@ -67,6 +67,18 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
     ['a key block header with a very long label', fileOf(`-----BEGIN ${'A'.repeat(3900)}`)],
     ['wrapping characters around a word', fileOf(`--token ${'))))'.repeat(950)}x`)],
     ['one very long line', 'x'.repeat(FILE_BUDGET)],
+    ['assignments over and over', fileOf('N1=abcdef N2=abcdef N3=abcdef '.repeat(130))],
+    ['a short assignment over and over', fileOf('x=y '.repeat(1000))],
+    ['query parameters over and over', fileOf('?a=b&c=d?e=f#g=h;'.repeat(230))],
+    ['npmrc names over and over', fileOf('//r/:_authToken=${T} '.repeat(190))],
+    ['a name and a colon over and over', fileOf('a:b '.repeat(1000))],
+    ['a header flag over and over', fileOf('-H password: '.repeat(300))],
+    ['a header flag and nothing', fileOf('-H '.repeat(1300))],
+    ['a user flag over and over', fileOf('-u a:b '.repeat(570))],
+    ['an option with an assignment over and over', fileOf('--env=A=b '.repeat(400))],
+    ['a long run of slashes as a value', fileOf(`--token ${'/'.repeat(3900)}`)],
+    ['a long run of dollar signs as a value', fileOf(`--token ${'$'.repeat(3900)}`)],
+    ['a long run of dashes as a value', fileOf(`--token ${'-'.repeat(3900)}`)],
   ];
 
   it.each(shapes)('reads %s in linear time', (_name, text) => {
@@ -91,6 +103,26 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
     const took = cpuTime(() => findCredentialShape(text));
 
     expect(took).toBeLessThan(3_000);
+  });
+
+  it('reads one string of a JSON document that is as long as a file may be, with the same shapes in it', () => {
+    const shapes = [
+      'N1=abcdef ',
+      '?a=b&c=d;',
+      'a:b ',
+      '-H password: ',
+      '-u a:b ',
+      'x=y ',
+      '//r/:_t=${T} ',
+    ];
+    for (const shape of shapes) {
+      const text = JSON.stringify({ command: shape.repeat(Math.floor(1_900_000 / shape.length)) });
+      expect(text.length).toBeLessThan(MAX_SCAN_CHARS);
+
+      const took = cpuTime(() => findCredentialShape(text));
+
+      expect(took, shape).toBeLessThan(3_000);
+    }
   });
 
   it('reads a JSON document with a great many tiny strings in linear time', () => {
@@ -195,5 +227,101 @@ describe('planJsonEdits: a hostile file costs the same as any other', () => {
     // reader could not look at all the way through is not one to copy, and the plan says so.
     expect(took).toBeLessThan(3_000);
     expect(plan?.backup).toBe('none-unchecked');
+  });
+});
+
+describe('findCredentialShape: lines made of the pieces the readers look for', () => {
+  // A seeded generator, so that a failure is the same failure on the next run.
+  function generator(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 0x1_0000_0000;
+    };
+  }
+  const pieces = [
+    'password',
+    'TOKEN',
+    'API_KEY',
+    'exaApiKey',
+    'Authorization',
+    'Bearer',
+    'Basic',
+    'Token',
+    '=',
+    ':',
+    '?',
+    '&',
+    '#',
+    ';',
+    '-H',
+    '-u',
+    '--user',
+    '--token',
+    '--env=',
+    '--header=',
+    "'",
+    '"',
+    '`',
+    '$',
+    '${',
+    '}',
+    '<',
+    '>',
+    '/',
+    '//',
+    '~',
+    '-',
+    '--',
+    '.',
+    '...',
+    '@',
+    '*',
+    'https://',
+    'user:',
+    ':pass',
+    'abcd1234',
+    'hunter2',
+    'x',
+    ' ',
+    ' ',
+    ' ',
+    '\t',
+    '\\',
+    '(',
+    ')',
+    '[',
+    ']',
+    ',',
+    '_',
+    '0',
+    'ghp_',
+    'sk_live_',
+    '-----BEGIN ',
+    'PRIVATE KEY',
+    'İ',
+    'é',
+  ];
+
+  it('never throws, and gives the same answer twice, for 4,000 of them', () => {
+    const next = generator(2026);
+    const shapes = new Set<string>();
+    const began = cpuNow();
+    for (let n = 0; n < 4_000; n += 1) {
+      const count = 1 + Math.floor(next() * 40);
+      const line = Array.from(
+        { length: count },
+        () => pieces[Math.floor(next() * pieces.length)],
+      ).join('');
+      for (const text of [line, JSON.stringify({ a: line }), JSON.stringify([line, line])]) {
+        const shape = findCredentialShape(text);
+        expect(findCredentialShape(text)).toBe(shape);
+        shapes.add(String(shape));
+        expect(() => hiddenLineMask(text)(0, text)).not.toThrow();
+      }
+    }
+    // The mix finds things and leaves things alone; a generator that did only one would test little.
+    expect(shapes.size).toBeGreaterThan(2);
+    expect(cpuNow() - began).toBeLessThan(10_000);
   });
 });
