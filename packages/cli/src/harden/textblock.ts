@@ -2,6 +2,7 @@ import { resolveRealPath } from './atomic.js';
 import { planBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import { linkNotices, pathRefusal } from './plan-support.js';
+import { REPLACEMENT_CHARACTER } from './read.js';
 import {
   HardenError,
   ID_PATTERN,
@@ -24,7 +25,6 @@ import {
  */
 
 const DEFAULT_RECIPE = 'custom';
-const REPLACEMENT_CHARACTER = '\u{FFFD}';
 const BEGIN_PREFIX = '# >>> stroq harden:';
 const END_PREFIX = '# <<< stroq harden:';
 

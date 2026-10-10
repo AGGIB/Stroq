@@ -82,6 +82,13 @@ export function readTargetText(path: string): string | null {
 const STRICT = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /**
+ * What decoding invalid UTF-8 loosely leaves in its place. A planner that is handed text it cannot
+ * tell was decoded loosely refuses a text that holds it, because writing that back would change
+ * bytes the owner wrote.
+ */
+export const REPLACEMENT_CHARACTER = '\u{FFFD}';
+
+/**
  * `bytes` as text, or a `not-utf8` error that names `path` and never quotes a byte: decoding
  * loosely and writing the result would replace what the owner wrote with U+FFFD.
  */

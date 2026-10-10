@@ -24,10 +24,13 @@ import { HardenError, sha256Text, type HardenEnv, type Plan } from './types.js';
 /**
  * Applying a plan: the operation that changes an owner's file.
  *
- * It runs inside the lock beside the manifest, so that two commands never interleave. It checks
- * that the plan is what a planner would have made and that the file is still what the plan was
- * made from, keeps a copy of exactly the bytes it read (unless they hold credential-shaped text),
- * RECORDS what it is about to do, looks at the file once more, and only then replaces it.
+ * It runs inside the lock beside the manifest, so that two commands on one machine do not
+ * interleave. The lock is advisory and belongs to one host: a lock older than ten seconds whose
+ * owner cannot be checked (one on another host, on a home shared over a network) is taken over.
+ * It checks that the plan is what a planner would have made and that the file is still what the
+ * plan was made from, keeps a copy of exactly the bytes it read (unless they hold
+ * credential-shaped text), RECORDS what it is about to do, looks at the file once more, and only
+ * then replaces it.
  *
  * Recording first is the safe order: a change that nobody recorded cannot be undone. The price is
  * that a record can outlive a change that did not happen (the write fails and the record cannot

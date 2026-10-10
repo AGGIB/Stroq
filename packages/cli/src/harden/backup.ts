@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { backupsDirIn } from '../paths.js';
 import {
+  PRIVATE_FILE_MODE,
   assertWriteAllowed,
   makePrivateDir,
   nodeFs,
@@ -72,8 +73,6 @@ const whyNoCopy = (shape: CredentialShape): string =>
 
 /** How many copies of one file are kept: the first, and the newest four. */
 export const BACKUPS_KEPT_PER_FILE = 5;
-
-const PRIVATE_FILE_MODE = 0o600;
 
 export interface BackupResult {
   readonly id: string;

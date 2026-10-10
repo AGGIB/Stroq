@@ -187,7 +187,13 @@ export interface RecordedTextBlockEdit {
   readonly id: string;
   /** The lines written between the markers. */
   readonly lines: readonly string[];
-  /** The lines of a block with the same id that this replaced, or `null` when it was appended. */
+  /**
+   * The lines of a block with the same id that this replaced, or `null` when it was appended. They
+   * are the lines the owner left between Stroq's markers, recorded as they were so that undo can put
+   * them back. Unlike the value a `json-set` replaced (see `PreviousValue`) they are not read for
+   * credential-shaped text: a credential the owner pasted inside Stroq's own block would be in the
+   * manifest, which is private (0600, in a 0700 directory) like the rest of Stroq's home.
+   */
   readonly previous: readonly string[] | null;
   /**
    * The bytes written before the begin marker: a line break to end the owner's last line if it

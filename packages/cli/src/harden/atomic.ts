@@ -14,15 +14,16 @@ import { HardenError, type Fs, type StatLike } from './types.js';
 
 /**
  * Writing someone else's config file so that nobody, the owner and the owner's agent included,
- * can ever read half of it: the new content goes into a temporary file, is flushed, and then
- * REPLACES the old one in a single rename.
+ * can read half of it while Stroq is running: the new content goes into a temporary file, is
+ * flushed, and then REPLACES the old one in a single rename. (If the operating system itself dies
+ * a short file is still possible: see `writeFileAtomic`.)
  */
 
 // The readers moved to `read.ts`; they are re-exported so that the engine has one place to ask.
 export { MAX_TARGET_BYTES, readTargetText } from './read.js';
 
 /** The mode of a file that has to be made, when nobody asks for another: the owner's alone. */
-const PRIVATE_FILE_MODE = 0o600;
+export const PRIVATE_FILE_MODE = 0o600;
 const OWNER_WRITE = 0o200;
 const MODE_BITS = 0o7777;
 

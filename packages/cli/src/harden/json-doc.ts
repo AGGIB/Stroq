@@ -1,4 +1,5 @@
 import { findLossyJson } from './json-lossy.js';
+import { REPLACEMENT_CHARACTER } from './read.js';
 import type { JsonObject, JsonValue, PlanRefusal } from './types.js';
 
 /**
@@ -19,8 +20,6 @@ const DEFAULT_INDENT = '  ';
 /** The widest indent taken from a file; a file indented wider than this is laid out with the default. */
 const MAX_SNIFFED_SPACES = 8;
 const BYTE_ORDER_MARK = '\u{FEFF}';
-/** What decoding invalid UTF-8 leaves in its place. */
-const REPLACEMENT_CHARACTER = '\u{FFFD}';
 
 export const isObject = (value: unknown): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

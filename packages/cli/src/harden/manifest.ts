@@ -12,10 +12,11 @@ import { HardenError, ID_PATTERN, type HardenEnv, type RecordedEdit } from './ty
  * from before them) long after the command that added them has gone.
  *
  * A file Stroq trusts to say what to delete and what to restore had better be read strictly. This
- * one is private (0600, in a 0700 directory), is never followed through a link, is refused above
- * 1 MiB, and is accepted only if all of it is exactly what the engine writes: an unknown key, a
- * sha that is not a sha or a copy id that climbs out of its directory is an error, and no part of
- * a manifest that fails is ever used.
+ * one is private (0600, in a 0700 directory), is opened without following a link (the file itself:
+ * a link in a directory above it is allowed, and the write side only checks that it stays inside
+ * the home), is refused above 1 MiB, and is accepted only if all of it is exactly what the engine
+ * writes: an unknown key, a sha that is not a sha or a copy id that climbs out of its directory is
+ * an error, and no part of a manifest that fails is ever used.
  */
 
 export const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -214,9 +215,10 @@ function unsafe(file: string, why: string): HardenError {
 }
 
 /**
- * The manifest's text, or `null` when there is none. Never through a link: it is looked at without
- * following one, then opened without following one, and what was opened is looked at again,
- * so that swapping it in between changes nothing. `O_NONBLOCK` so that a FIFO planted there fails
+ * The manifest's text, or `null` when there is none. Never through a link AT THE FILE: it is looked
+ * at without following one, then opened without following one, and what was opened is looked at
+ * again, so that swapping it in between changes nothing. (A link in a directory above it is not
+ * looked for here.) `O_NONBLOCK` so that a FIFO planted there fails
  * at once instead of waiting for a writer; Windows has neither flag, and the first look covers it.
  */
 function readManifestText(file: string): string | null {
