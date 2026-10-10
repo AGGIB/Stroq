@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { buildTree, treeDigest, treeManifest } from '../../src/install/tree.js';
@@ -6,11 +7,15 @@ import { entriesOf, treeOf } from '../helpers/install-tree.js';
 
 // The digest is a promise to people who are not here yet: an author quotes it in a README, a lock
 // file pins it, and each of them must get the same answer on any machine, today and in two years.
-// So nothing in this file computes a digest with the code under test. Every hex string below was
-// worked out by two separate programs that share no code with it and no code with each other (a
-// node script that was given the entries already in byte order, and a Python one that sorts them
-// itself), and was checked against `shasum` for the first two. The tests touch no filesystem and
-// read no clock, so the same file runs on Linux, macOS and Windows and must give the same digests.
+// So nothing in this file computes a digest with the code under test. The first ten hex strings
+// below were worked out by two separate programs that share no code with it and no code with each
+// other (a node script that was given the entries already in byte order, and a Python one that sorts
+// them itself), and the first two of them were checked against `shasum`. All thirteen were then
+// derived again by a third program, written in Ruby from the format in the spec alone: it gave the
+// first ten exactly, and the three added by the second review (the order of the whole path, and a
+// name spelled composed and decomposed). The tests touch no filesystem and read no clock, so the same
+// file is meant to run on Linux, macOS and Windows and to give the same digests; it has so far been
+// run on macOS only, because no CI has run on this branch yet.
 
 const FULL_WIDTH_Z = '\uff5a.txt'; // one BMP character: UTF-8 EF BD 9A
 const GRINNING_FACE = '\u{1f600}.txt'; // one astral character: UTF-8 F0 9F 98 80
@@ -77,6 +82,26 @@ const GOLDEN = {
   targetChanged: 'fcee979ed03f016ca2d62fcd82d1743f7ccb008a40aa4db61e6cdcb52d9bae8e',
   linkBecomesFile: 'a27f3158b3210305a7a265f99d952e6d1d9bb9b4cc3dbfca952b45acb6472d91',
 } as const;
+
+/** The vectors of (e) and (f), which are not changes to the mixed tree and so are kept apart from it. */
+const GOLDEN_ORDER = {
+  wholePath: '314b81cc68ba1e227418ed0c76e401aa609bd9a18e499585b3ebfbad369404c3',
+  /** The same three lines, in the order of a sort that goes folder by folder. Not a digest of anything real. */
+  folderByFolder: '43b1c9e7d2cec50e79ae9fe3d5fe46b87a1c7f3685e5a8281b9edeb68bd8ef52',
+  composed: 'b30ff40ed2b391f580ed00d7c320ef2bdc037dec5738387202c9b6cb7f50ac59',
+  decomposed: 'ed486ccbd1dcc27357665f5ac31cdeb80239c5275170dc6c83cc9d697b9387f4',
+} as const;
+
+const WHOLE_PATH_MANIFEST = [
+  'stroq-tree/1',
+  'f 0 2 73cb3858a687a8494ca3323053016282f3dad39d42cf62ca4e79dda2aac7d9ac lib-x',
+  'f 0 3 b541871ddf2562ec0d416dfaf9d40743ba2cf40aa60e251665cfb8088bf8bd5b lib.js',
+  'f 0 2 87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7 lib/a.js',
+  '',
+].join('\n');
+
+const sha256OfText = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
 
 /** The entries of vector (c), mixed up, for the variants below to bend one of. */
 const mixedEntries = (): TreeEntry[] => [...mixed().entries].reverse();
@@ -223,6 +248,65 @@ describe('stroq-tree/1 golden vectors', () => {
       const digests = Object.values(GOLDEN);
 
       expect(new Set(digests).size).toBe(digests.length);
+    });
+  });
+
+  // Two rules that the format depends on and that no other vector pins: what the order is the order
+  // of, and what is done to a spelling before it is hashed.
+  describe('(e) the order is that of the bytes of the whole path string', () => {
+    // `-` is 0x2d and `.` is 0x2e, both below `/` (0x2f). Compared as whole strings, `lib-x` and
+    // `lib.js` come before `lib/a.js`. A sort that goes folder by folder compares the name `lib`
+    // with `lib-x` and `lib.js` first, finds it shorter, and puts everything in `lib/` ahead of them.
+    const tree = () => treeOf({ 'lib/a.js': 'a\n', 'lib.js': 'js\n', 'lib-x': 'x\n' });
+
+    it('puts a name that continues with a character below the slash before the folder', () => {
+      expect(treeManifest(tree())).toBe(WHOLE_PATH_MANIFEST);
+    });
+
+    it('has the digest that a third program worked out', () => {
+      expect(treeDigest(tree())).toBe(GOLDEN_ORDER.wholePath);
+    });
+
+    it('is not the digest of a sort that goes folder by folder, which a reader could be written to do', () => {
+      const [header, dash, dot, folder] = WHOLE_PATH_MANIFEST.split('\n');
+      const folderByFolder = [header, folder, dash, dot, ''].join('\n');
+
+      expect(sha256OfText(folderByFolder)).toBe(GOLDEN_ORDER.folderByFolder);
+      expect(treeDigest(tree())).not.toBe(GOLDEN_ORDER.folderByFolder);
+    });
+
+    it('does not depend on the order the entries are given in', () => {
+      const entries = entriesOf({ 'lib/a.js': 'a\n', 'lib.js': 'js\n', 'lib-x': 'x\n' });
+
+      for (const order of [entries, [...entries].reverse(), [entries[1], entries[2], entries[0]]]) {
+        expect(treeDigest({ entries: order as TreeEntry[] })).toBe(GOLDEN_ORDER.wholePath);
+      }
+    });
+  });
+
+  describe('(f) a path is hashed as it is spelled, with no Unicode normalisation', () => {
+    // The same name twice: caf, then an e with an acute accent written as one character (NFC, UTF-8
+    // c3 a9) or as an e and a combining accent (NFD, UTF-8 65 cc 81). Two trees, because a tree that
+    // holds both is refused (tree-collisions.test.ts).
+    const composed = () => treeOf({ 'caf\u00e9.txt': 'x\n' });
+    const decomposed = () => treeOf({ 'cafe\u0301.txt': 'x\n' });
+
+    it('writes the bytes of each spelling, as they were given', () => {
+      const bytesOf = (tree: Tree) => Buffer.from(treeManifest(tree), 'utf8');
+
+      expect(bytesOf(composed()).includes(Buffer.from('636166c3a92e747874', 'hex'))).toBe(true);
+      expect(bytesOf(decomposed()).includes(Buffer.from('63616665cc812e747874', 'hex'))).toBe(true);
+    });
+
+    it('gives each spelling the digest that a third program worked out', () => {
+      expect(treeDigest(composed())).toBe(GOLDEN_ORDER.composed);
+      expect(treeDigest(decomposed())).toBe(GOLDEN_ORDER.decomposed);
+    });
+
+    it('gives the two spellings two digests, though they are one name once normalised', () => {
+      expect('caf\u00e9.txt'.normalize('NFD')).toBe('cafe\u0301.txt');
+      expect(GOLDEN_ORDER.composed).not.toBe(GOLDEN_ORDER.decomposed);
+      expect(treeDigest(composed())).not.toBe(treeDigest(decomposed()));
     });
   });
 });

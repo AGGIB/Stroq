@@ -244,16 +244,9 @@ describe('checkEntryPath', () => {
       }
     });
 
-    // Shapes that a pattern with a nested repeat would be slow on: runs of dots, spaces and
-    // half-matched names, at the longest size the check looks at.
-    it.each(['.', ' ', 'con', 'git~', '.gi', 'a:', 'a/', 'COM'])(
-      'long runs of %j are answered',
-      (near) => {
-        const path = near.repeat(LIMITS.maxPathBytes).slice(0, LIMITS.maxPathBytes);
-
-        expect(typeof checkEntryPath(path).ok).toBe('boolean');
-      },
-    );
+    // How fast it answers on text built to be slow (runs of dots, spaces, half-matched names,
+    // combining marks) is held by safe-path-redos-gate.test.ts, which times it and can fail on a
+    // pattern that is slow but finishes.
   });
 
   describe('accepts', () => {
