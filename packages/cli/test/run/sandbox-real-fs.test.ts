@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cliDirIn, policyFileIn, secretsFileIn } from '../../src/paths.js';
 import { generateSandbox, type SandboxHost } from '../../src/run/sandbox.js';
 import { under } from './state-names.js';
@@ -27,16 +27,26 @@ const denyWriteFor = (stroqHome: string, host?: SandboxHost): readonly string[] 
     host,
   ).settings.filesystem.denyWrite;
 
+// Every directory a test makes is under this one, made before the tests and removed after them. Its real
+// path: where a link leads is not what these tests are about.
+let root = '';
+
 /** A home with a secret index and a copy of the CLI in it, and none of the rest. */
 function homeWithTwo(): string {
-  // The real path: where a link leads is not what these tests are about.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-sandbox-home-')));
+  const dir = mkdtempSync(join(root, 'home-'));
   writeFileSync(secretsFileIn(dir), '{}');
   mkdirSync(cliDirIn(dir));
   return dir;
 }
 
 describe.skipIf(process.platform === 'win32')('the config against the real file system', () => {
+  beforeAll(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-sandbox-real-fs-')));
+  });
+  afterAll(() => {
+    if (root !== '') rmSync(root, { recursive: true, force: true });
+  });
+
   it('lists a name where it is on disk, on a platform that is not macOS', () => {
     const dir = homeWithTwo();
     expect(denyWriteFor(dir, { platform: 'linux' })).toEqual([secretsFileIn(dir), cliDirIn(dir)]);
@@ -76,8 +86,8 @@ describe.skipIf(process.platform === 'win32')('the config against the real file 
     const MAC: SandboxHost = { platform: 'darwin' };
 
     function link(): { readonly real: string; readonly link: string } {
-      const real = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-sandbox-real-')));
-      const holder = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-sandbox-holder-')));
+      const real = mkdtempSync(join(root, 'real-'));
+      const holder = mkdtempSync(join(root, 'holder-'));
       const link = join(holder, 'stroq-home-link');
       symlinkSync(real, link);
       return { real, link };

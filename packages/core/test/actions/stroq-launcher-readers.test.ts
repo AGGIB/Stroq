@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
 import { classifyTool } from '../../src/actions/classify-tool.js';
 import { commandWord } from '../../src/actions/shell-segments.js';
@@ -18,11 +18,9 @@ import { stroqStateSignals } from '../../src/actions/stroq-state.js';
  * readers to the bare name, which is what the table can know.
  */
 
-const project = (): string => mkdtempSync(join(tmpdir(), 'stroq-launcher-'));
-
 /** A directory with the scripts of a task: one that changes state, one that is dangerous on its own. */
 function scripts(): string {
-  const cwd = project();
+  const cwd = mkdtempSync(join(tmpdir(), 'stroq-launcher-'));
   writeFileSync(join(cwd, 'state.sh'), 'echo marker\nstroq harden apply\n');
   writeFileSync(
     join(cwd, 'danger.sh'),
@@ -74,7 +72,14 @@ describe('the command behind a launcher of Stroq’s is the command of the stage
 });
 
 describe('what a script is, behind a launcher of Stroq’s, is read as it is without one', () => {
-  const cwd = scripts();
+  // Made when the tests run and removed after them, and not when the file is read: a skipped suite is read too.
+  let cwd = '';
+  beforeAll(() => {
+    cwd = scripts();
+  });
+  afterAll(() => {
+    if (cwd !== '') rmSync(cwd, { recursive: true, force: true });
+  });
   const classes = (command: string) => classifyTool('Bash', { command }, cwd).classes;
   const signals = (command: string) => classifyTool('Bash', { command }, cwd).signals;
 
