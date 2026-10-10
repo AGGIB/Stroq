@@ -1,23 +1,24 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { stringify } from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, loadPolicyFile, parsePolicy, type Policy } from '@stroq/core';
 import { policySha256, writePolicy } from '../../src/live/policy-digest.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 
 /**
  * A stored check is only as good as the policy it was run under, so the policy gets a name that changes
  * when it does; and the hook that the host runs has to judge under the very policy the check expects,
  * so the policy is written where that hook will read it.
  */
+let root: string;
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'stroq-live-policy-'));
+  ({ root, stroqHome: home } = createThrowawayRoot('stroq-live-policy-'));
 });
 afterEach(() => {
-  rmSync(home, { recursive: true, force: true });
+  removeThrowawayRoot(root);
 });
 
 const without = (id: string): Policy => ({

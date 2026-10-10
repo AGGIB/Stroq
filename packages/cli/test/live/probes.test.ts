@@ -2,14 +2,11 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -25,6 +22,7 @@ import {
   promptFor,
   readSentinel,
 } from '../../src/live/probes.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import { inChild } from './child.js';
 import { FAKE, NONCE } from './helpers.js';
 import { probe } from './probe-helpers.js';
@@ -40,14 +38,10 @@ let userHome: string;
 let stroqHome: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'stroq-live-probes-'));
-  project = join(root, 'project');
-  userHome = join(root, 'h');
-  stroqHome = join(root, 's');
-  for (const dir of [project, userHome, stroqHome]) mkdirSync(dir);
+  ({ root, project, home: userHome, stroqHome } = createThrowawayRoot('stroq-live-probes-'));
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeThrowawayRoot(root);
 });
 
 describe('the nonce and the fake secret', () => {

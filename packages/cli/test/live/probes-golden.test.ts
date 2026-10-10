@@ -1,10 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AuditLog, DEFAULT_POLICY, type AuditEntry, type Policy } from '@stroq/core';
 import { createEngineAt } from '../../src/engine-factory.js';
 import { buildProbes, prepareProject } from '../../src/live/probes.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import { FAKE, NONCE, expectationOf } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
@@ -14,14 +13,10 @@ let userHome: string;
 let stroqHome: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'stroq-live-golden-'));
-  project = join(root, 'project');
-  userHome = join(root, 'h');
-  stroqHome = join(root, 's');
-  for (const dir of [project, userHome, stroqHome]) mkdirSync(dir);
+  ({ root, project, home: userHome, stroqHome } = createThrowawayRoot('stroq-live-golden-'));
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeThrowawayRoot(root);
 });
 
 // ---------------------------------------------------------------------------------------------

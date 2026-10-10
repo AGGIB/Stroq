@@ -4,13 +4,14 @@
 // Rules match action CLASSES, not commands, so a probe works only while the DEFAULT policy denies
 // the class its command falls in (`probes.test.ts` runs each one through the real engine to keep
 // that true). Every one is inert: a file in a temporary directory, a host name that cannot exist, a
-// credential that is made up for the run. This module imports nothing from `@stroq/core`, so that a
-// test can run `readSentinel` in a child process, where a path that blocks costs a time limit and
-// not a hung suite.
+// credential that is made up for the run. A test runs `readSentinel` in a child process, where a path
+// that blocks costs a time limit and not a hung suite.
 import { randomBytes } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { LiveCheckError } from './errors.js';
 import { readSmallRegularFile } from './private-file.js';
+import { assertThrowaway } from './throwaway.js';
 import type { Probe, SentinelState } from './types.js';
 
 export const ALLOW_FILE = 'stroq-live-allow.txt';
@@ -114,6 +115,8 @@ function inside(project: string, file: string): string {
  */
 export function prepareProject(dir: string, fake: string): void {
   assertFake(fake);
+  // Files in `dir` are removed below, so `dir` has to be a directory this check made for itself.
+  assertThrowaway(dir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const file of SENTINEL_FILES) rmSync(join(dir, file), { recursive: true, force: true });
   const env = join(dir, '.env');
@@ -121,9 +124,34 @@ export function prepareProject(dir: string, fake: string): void {
   chmodSync(env, 0o600);
 }
 
+/**
+ * Throws when the directory the file is in leads out of the project through a link. The model has the
+ * run of the project while a request is made, and a link left where a directory should be would make a
+ * removal land on a file of someone else's. A directory that is not there has nothing to remove.
+ */
+function assertStaysInProject(project: string, path: string): void {
+  let parent: string;
+  let root: string;
+  try {
+    parent = realpathSync(dirname(path));
+    root = realpathSync(project);
+  } catch {
+    return;
+  }
+  const way = relative(root, parent);
+  if (way === '..' || way.startsWith(`..${sep}`) || isAbsolute(way))
+    throw new LiveCheckError(
+      'unsafe-directory',
+      'will not remove the probe file: the way to it leads out of the project through a link',
+    );
+}
+
 /** Takes away the file a probe's command leaves, so that one found afterwards was made by this request. */
 export function clearSentinel(project: string, probe: Pick<Probe, 'sentinel'>): void {
-  rmSync(inside(project, probe.sentinel.file), { recursive: true, force: true });
+  assertThrowaway(project);
+  const path = inside(project, probe.sentinel.file);
+  assertStaysInProject(project, path);
+  rmSync(path, { recursive: true, force: true });
 }
 
 /** A sentinel is a few bytes; a file larger than this was not made by the command. */

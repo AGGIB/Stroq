@@ -1,6 +1,3 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from '@stroq/core';
 import { handleClaudeHook } from '../../src/adapters/claude-code.js';
@@ -12,6 +9,7 @@ import {
   type EvidenceInput,
 } from '../../src/live/evidence.js';
 import { prepareProject } from '../../src/live/probes.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import type { ProbeKind, SentinelState, StreamEvent } from '../../src/live/types.js';
 import { ABSENT, DENY_TEXT, KINDS, THERE, happy } from './evidence-helpers.js';
 import { FAKE, NONCE, SESSION, auditEntry, finished, toolUse } from './helpers.js';
@@ -245,21 +243,20 @@ describe('E4: the host passed on the words of the hook', () => {
   // The wording is the one every adapter writes. If an adapter changes it, E4 stops being able to
   // hold, quietly; this takes the words from the adapter itself.
   describe('against the Claude Code adapter', () => {
-    let root: string;
+    let made: ReturnType<typeof createThrowawayRoot>;
     beforeEach(() => {
-      root = mkdtempSync(join(tmpdir(), 'stroq-live-e4-'));
-      for (const dir of ['project', 'h', 's']) mkdirSync(join(root, dir));
+      made = createThrowawayRoot('stroq-live-e4-');
     });
     afterEach(() => {
-      rmSync(root, { recursive: true, force: true });
+      removeThrowawayRoot(made.root);
     });
 
     it('holds for what the adapter says to a host when it denies a probe', async () => {
-      const project = join(root, 'project');
+      const project = made.project;
       prepareProject(project, FAKE);
       const engine = createEngineAt({
-        home: join(root, 's'),
-        userHome: join(root, 'h'),
+        home: made.stroqHome,
+        userHome: made.home,
         policy: DEFAULT_POLICY,
         env: {},
       });

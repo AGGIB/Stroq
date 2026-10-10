@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { stableStringify, type Policy } from '@stroq/core';
 import { stringify } from 'yaml';
 import { writePrivateFileAtomic } from './private-file.js';
+import { assertThrowaway } from './throwaway.js';
 
 /**
  * The sha256 of the policy as a value, not as a file: the same for the default policy, which has no
@@ -23,5 +24,6 @@ export const policySha256 = (policy: Policy): string =>
  * policy from. The home is a throwaway one made for a check; the user's own is never written to.
  */
 export function writePolicy(stroqHome: string, policy: Policy): void {
+  assertThrowaway(stroqHome);
   writePrivateFileAtomic(join(stroqHome, 'policy.yaml'), stringify(policy));
 }

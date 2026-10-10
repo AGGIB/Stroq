@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type Policy } from '@stroq/core';
 import { expectedDecision } from '../../src/live/expectation.js';
 import { buildProbes, prepareProject } from '../../src/live/probes.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import { FAKE, NONCE } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
@@ -19,14 +19,11 @@ let project: string;
 let home: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'stroq-live-expect-test-'));
-  project = join(root, 'project');
-  home = join(root, 'h');
-  mkdirSync(home);
+  ({ root, project, home } = createThrowawayRoot('stroq-live-expect-test-'));
   prepareProject(project, FAKE);
 });
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeThrowawayRoot(root);
 });
 
 const without = (id: string): Policy => ({

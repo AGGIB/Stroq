@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuditLog, type AuditEntry } from '@stroq/core';
 import { prepareProject } from '../../src/live/probes.js';
+import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import type { ProbeContext } from '../../src/live/types.js';
 import { FAKE, NONCE, SESSION } from './helpers.js';
 
@@ -18,12 +17,10 @@ export interface Rig {
   cleanup(): void;
 }
 
+/** A real throwaway root, marker and all, which is the only kind of place the check will touch. */
 export function makeRig(prepare = true): Rig {
-  const root = mkdtempSync(join(tmpdir(), 'stroq-live-rig-'));
-  const project = join(root, 'project');
-  const stroqHome = join(root, 's');
-  const home = join(root, 'h');
-  for (const dir of [project, stroqHome, home]) mkdirSync(dir);
+  const made = createThrowawayRoot('stroq-live-rig-');
+  const { root, project, stroqHome, home } = made;
   if (prepare) prepareProject(project, FAKE);
   return {
     root,
@@ -42,6 +39,6 @@ export function makeRig(prepare = true): Rig {
       ...over,
     }),
     audit: () => new AuditLog(join(stroqHome, 'audit.jsonl')).readAll(),
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    cleanup: () => removeThrowawayRoot(root),
   };
 }

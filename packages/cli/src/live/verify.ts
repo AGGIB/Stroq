@@ -25,6 +25,7 @@ import { expectedDecision } from './expectation.js';
 import { policySha256, writePolicy } from './policy-digest.js';
 import { buildProbes, controlOf, newFakeSecret, newNonce, prepareProject } from './probes.js';
 import { makeRequest, type Observation } from './request.js';
+import { assertThrowaway } from './throwaway.js';
 import {
   caveatsFor,
   downgradeUnarmed,
@@ -235,6 +236,9 @@ export async function verifyHost(
   options: VerifyOptions,
 ): Promise<HostResult> {
   if (!AGENT_NAME.test(options.agent)) throw new Error('not an agent name');
+  // Before the host is asked anything and before a file is made or removed: the check writes and
+  // deletes in these directories, and a run that was pointed at the wrong ones must end here.
+  for (const dir of [base.project, base.stroqHome, base.home]) assertThrowaway(dir);
   const ids: IdSource = { ...DEFAULT_IDS, ...options.ids };
   const control = options.control === true;
   const detected = await lookFor(driver);
