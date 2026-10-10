@@ -206,6 +206,65 @@ function assertRecordedPath(
   }
 }
 
+/** What going back through the recorded applies came to. */
+interface Worked {
+  /** The text the file should hold; `null` when it should not exist. */
+  readonly text: string | null;
+  readonly kept: readonly string[];
+  readonly usedCopy: boolean;
+  readonly usedEntries: boolean;
+  readonly reformatted: boolean;
+  readonly blocked?: { readonly refused: PlanRefusal; readonly detail: string };
+}
+
+/**
+ * Goes back through `entries`, newest first, from the text the file holds now, and works out what
+ * it should hold. Nothing is written.
+ */
+function workOut(
+  env: HardenEnv,
+  real: string,
+  current: string | null,
+  entries: readonly ManifestEntry[],
+): Worked {
+  let text = current;
+  const kept: string[] = [];
+  let usedCopy = false;
+  let usedEntries = false;
+  let reformatted = false;
+  for (const entry of [...entries].reverse()) {
+    if (text === null) break;
+    const step = undoEntry(env, real, text, entry);
+    if (step.blocked !== undefined) {
+      return { text, kept, usedCopy, usedEntries, reformatted, blocked: step.blocked };
+    }
+    text = step.text;
+    kept.push(...step.kept);
+    usedCopy ||= step.how === 'copy';
+    usedEntries ||= step.how === 'entries';
+    reformatted ||= step.reformatted;
+  }
+  return { text, kept, usedCopy, usedEntries, reformatted };
+}
+
+/**
+ * Makes the file what undo worked out: written, or removed when it should not exist. The file is
+ * looked at once more right before (see `recheck.ts`), and a file that changed is left alone.
+ */
+async function putFileBack(
+  env: HardenEnv,
+  real: string,
+  text: string | null,
+  bytes: Uint8Array | null,
+  options: UndoOptions,
+): Promise<void> {
+  const rules = rulesOf(options.root);
+  const fs = env.fs === undefined ? {} : { fs: env.fs };
+  const look = (): void => assertUnchanged(real, real, bytes);
+  if (text === null) await removeFile(real, { ...rules, ...fs, beforeRemove: look });
+  else await writeFileAtomic(real, text, { ...rules, ...fs, beforeRename: look });
+}
+
 async function undoLocked(
   env: HardenEnv,
   asked: string,
@@ -231,41 +290,14 @@ async function undoLocked(
   // with U+FFFD. A file that is not valid UTF-8 is left exactly as it is.
   const bytes = readTargetBytes(real);
   const current = bytes === null ? null : decodeUtf8Strict(bytes, real);
-  let text = current;
-  const kept: string[] = [];
-  let usedCopy = false;
-  let usedEntries = false;
-  let reformatted = false;
-  for (const entry of [...entries].reverse()) {
-    if (text === null) break;
-    const step = undoEntry(env, real, text, entry);
-    if (step.blocked !== undefined) return { ...nothing, status: 'blocked', blocked: step.blocked };
-    text = step.text;
-    kept.push(...step.kept);
-    usedCopy ||= step.how === 'copy';
-    usedEntries ||= step.how === 'entries';
-    reformatted ||= step.reformatted;
-  }
+  const worked = workOut(env, real, current, entries);
+  if (worked.blocked !== undefined)
+    return { ...nothing, status: 'blocked', blocked: worked.blocked };
+  const { text, kept, usedCopy, usedEntries, reformatted } = worked;
 
   const changed = text !== current;
   const preview = changed ? previewOf(current, text, real) : { diff: '', notices: [] };
-  const rules = rulesOf(options.root);
-  const fs = env.fs === undefined ? {} : { fs: env.fs };
-  if (changed) {
-    if (text === null) {
-      await removeFile(real, {
-        ...rules,
-        ...fs,
-        beforeRemove: () => assertUnchanged(real, real, bytes),
-      });
-    } else {
-      await writeFileAtomic(real, text, {
-        ...rules,
-        ...fs,
-        beforeRename: () => assertUnchanged(real, real, bytes),
-      });
-    }
-  }
+  if (changed) await putFileBack(env, real, text, bytes, options);
   // The records go only once the file is as it is going to be.
   const { [real]: _undone, ...rest } = manifest.files;
   await writeManifest(env, { ...manifest, files: rest });

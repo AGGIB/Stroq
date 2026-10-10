@@ -36,6 +36,11 @@ export type HideLine = (index: number, line: string) => boolean;
 /** What a hidden line is shown as, whatever it said: the diff keeps its shape and loses the text. */
 export const HIDDEN_LINE = '[credential-shaped text hidden]';
 
+/** How the text of one line is put in a diff. */
+export type Show = (content: string) => string;
+
+const asIs: Show = (content) => content;
+
 export interface DiffOptions {
   /** Shown in the headers. It is a label, not a place to open: control characters are replaced. */
   readonly path: string;
@@ -55,8 +60,10 @@ export interface DiffOptions {
    * without its line break, the text to show. The default shows it as it is, which is what a diff
    * of the two texts says; the engine passes a function that makes control characters visible.
    */
-  readonly show?: (content: string) => string;
+  readonly show?: Show;
 }
+
+type Hide = DiffOptions['hide'];
 
 /** A diff and how many of its lines were hidden. */
 export interface DiffResult {
@@ -202,12 +209,7 @@ interface Hunks {
 const bare = (content: string): string => (content.endsWith('\r') ? content.slice(0, -1) : content);
 
 /** The hunks of an edit script: changes with `context` lines around them, close ones joined. */
-function hunks(
-  script: readonly Op[],
-  context: number,
-  hide: DiffOptions['hide'],
-  show: (content: string) => string = (content) => content,
-): Hunks {
+function hunks(script: readonly Op[], context: number, hide: Hide, show: Show): Hunks {
   const made: Hunks = { rows: [], hidden: 0 };
   const changed: number[] = [];
   script.forEach((entry, i) => {
@@ -293,7 +295,7 @@ export function diffText(a: string, b: string, options: DiffOptions): DiffResult
     editScript(splitLines(a), splitLines(b)),
     options.context ?? DEFAULT_CONTEXT,
     options.hide,
-    options.show,
+    options.show ?? asIs,
   );
   const rows = [
     options.oldMissing === true ? '--- /dev/null' : `--- a/${label}`,
