@@ -47,6 +47,7 @@ import type {
  * - `timeout`           the host does not answer in time.
  * - `host-error`        the host exits with an error and no explanation.
  * - `api-billing`       the host says it is billed to an API key.
+ * - `wrong-cwd`         the host runs as an honest one would, in a directory that is not the project.
  */
 export type Fault =
   | 'honest'
@@ -63,7 +64,8 @@ export type Fault =
   | 'garbage'
   | 'timeout'
   | 'host-error'
-  | 'api-billing';
+  | 'api-billing'
+  | 'wrong-cwd';
 
 export interface FakeCall {
   readonly probeId: string;
@@ -102,7 +104,12 @@ const EXTRA_COMMAND = 'ls -la';
 /** What the model adds after the probe in `altered-command`. */
 const ALTERATION = '; echo more';
 
-function ended(events: readonly StreamEvent[], over: Partial<HostRun> = {}): HostRun {
+/** A run that ended as a run ends, in the directory the host was started in (as its init message says). */
+function ended(
+  ctx: ProbeContext,
+  events: readonly StreamEvent[],
+  over: Partial<HostRun> = {},
+): HostRun {
   return {
     stream: [INIT, ...events, { type: 'result', isError: false, text: 'DONE' }],
     exitCode: 0,
@@ -110,6 +117,7 @@ function ended(events: readonly StreamEvent[], over: Partial<HostRun> = {}): Hos
     stderrTail: '',
     apiProvider: 'firstParty',
     apiKeySource: 'none',
+    cwd: ctx.project,
     ...over,
   };
 }
@@ -199,7 +207,7 @@ export class FakeHostDriver implements HostDriver {
 
     switch (fault) {
       case 'refusal':
-        return ended([{ type: 'text', text: 'I will not run that command.' }]);
+        return ended(ctx, [{ type: 'text', text: 'I will not run that command.' }]);
       case 'limit':
         return {
           stream: [
@@ -211,7 +219,7 @@ export class FakeHostDriver implements HostDriver {
           stderrTail: '',
         };
       case 'limit-flagged':
-        return { ...ended([]), limitHit: 'usage limit reached' };
+        return { ...ended(ctx, []), limitHit: 'usage limit reached' };
       case 'garbage':
         return { stream: [], exitCode: 0, timedOut: false, stderrTail: '', unparsedLines: 9 };
       case 'timeout':
@@ -221,10 +229,10 @@ export class FakeHostDriver implements HostDriver {
       case 'noop-hook':
       case 'never-call-hook':
         perform(probe, ctx);
-        return ended([call, ran, { type: 'text', text: 'DONE' }]);
+        return ended(ctx, [call, ran, { type: 'text', text: 'DONE' }]);
       case 'crash-fail-open':
         perform(probe, ctx);
-        return ended([call, ran, { type: 'text', text: 'DONE' }], {
+        return ended(ctx, [call, ran, { type: 'text', text: 'DONE' }], {
           stderrTail: 'hook exited with an error (non-blocking)',
         });
       case 'host-blocks-all': {
@@ -235,12 +243,12 @@ export class FakeHostDriver implements HostDriver {
           isError: true,
           text: 'Permission to use Bash has been denied.',
         };
-        return ended([call, refusal, { type: 'text', text: 'BLOCKED' }]);
+        return ended(ctx, [call, refusal, { type: 'text', text: 'BLOCKED' }]);
       }
       case 'ignore-deny': {
         await this.consultHook(probe, ctx);
         perform(probe, ctx);
-        return ended([call, ran, { type: 'text', text: 'DONE' }]);
+        return ended(ctx, [call, ran, { type: 'text', text: 'DONE' }]);
       }
       case 'extra-command': {
         const verdict = await this.consultHook(probe, ctx);
@@ -251,7 +259,7 @@ export class FakeHostDriver implements HostDriver {
           isError: v.stopped,
           text: v.stopped ? v.reason : '',
         }));
-        return ended([
+        return ended(ctx, [
           call,
           { type: 'tool_use', name: 'Bash', input: { command: EXTRA_COMMAND } },
           ...results,
@@ -265,7 +273,7 @@ export class FakeHostDriver implements HostDriver {
             ? { stopped: false, reason: '' }
             : await this.consultHook(probe, ctx, altered);
         if (!verdict.stopped) perform(probe, ctx);
-        return ended([
+        return ended(ctx, [
           { type: 'tool_use', name: 'Bash', input: { command: altered } },
           {
             type: 'tool_result',
@@ -276,15 +284,22 @@ export class FakeHostDriver implements HostDriver {
         ]);
       }
       case 'api-billing':
+      case 'wrong-cwd':
       case 'honest': {
         const verdict = await this.consultHook(probe, ctx);
-        const billing = fault === 'api-billing' ? { apiKeySource: 'ANTHROPIC_API_KEY' } : {};
+        // What the host says of itself besides what it did.
+        const says: Partial<HostRun> =
+          fault === 'api-billing'
+            ? { apiKeySource: 'ANTHROPIC_API_KEY' }
+            : fault === 'wrong-cwd'
+              ? { cwd: ctx.home }
+              : {};
         if (verdict.stopped) {
           const blocked: StreamEvent = { type: 'tool_result', isError: true, text: verdict.reason };
-          return ended([call, blocked, { type: 'text', text: 'BLOCKED' }], billing);
+          return ended(ctx, [call, blocked, { type: 'text', text: 'BLOCKED' }], says);
         }
         perform(probe, ctx);
-        return ended([call, ran, { type: 'text', text: 'DONE' }], billing);
+        return ended(ctx, [call, ran, { type: 'text', text: 'DONE' }], says);
       }
     }
   }

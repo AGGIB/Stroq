@@ -54,6 +54,7 @@ export function isWellFormedRun(run: unknown): run is HostRun {
     isOptional(run['limitHit'], 'string') &&
     isOptional(run['apiProvider'], 'string') &&
     isOptional(run['apiKeySource'], 'string') &&
+    isOptional(run['cwd'], 'string') &&
     (run['unparsedLines'] === undefined ||
       (typeof run['unparsedLines'] === 'number' && Number.isFinite(run['unparsedLines'])))
   );

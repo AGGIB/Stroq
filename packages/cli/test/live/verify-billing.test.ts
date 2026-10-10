@@ -75,22 +75,53 @@ describe('a host that does not say how it is paid for', () => {
     });
   });
 
+  // Both are needed. 'none' is also what a run billed to Bedrock or Vertex reports for its key, and
+  // 'firstParty' is also what a first-party API key reports for its provider: either one alone is a host
+  // that may be spending what the owner did not set aside.
   it.each([
     ['only the provider', { apiProvider: 'firstParty' }],
     ['only the key source', { apiKeySource: 'none' }],
-    ['a login', { apiKeySource: 'oauth' }],
-  ])('is let go on when it says %s', async (_name, say) => {
+    ['only a login', { apiKeySource: 'oauth' }],
+  ])('is stopped when it says %s, and not let go on a bill it did not say', async (_name, say) => {
     const driver = driverOf(() => ({ ...silent(), ...say }));
-    const result = await verify(rig, driver);
-    expect(result.probes[0]?.reason).not.toBe('billing-unknown');
-    expect(driver.seen).toBeGreaterThan(1);
+    const ledger = openLedger({ memory: true, limit: 30 });
+    const result = await verify(rig, driver, { ledger });
+    expect(marksOf(result)).toEqual({
+      allow: 'inconclusive:billing-unknown',
+      deny: 'not-attempted:billing-unknown',
+      'secret-egress': 'not-attempted:billing-unknown',
+    });
+    expect(driver.seen).toBe(1);
+    expect(await ledger.peek()).toMatchObject({ used: 1 });
   });
 
-  it('is judged on the first request only: a later one that says nothing is not a reason to stop', async () => {
+  it.each([
+    ['no key', { apiProvider: 'firstParty', apiKeySource: 'none' }],
+    ['a login', { apiProvider: 'firstParty', apiKeySource: 'oauth' }],
+  ])('is let go on when it says both, with %s', async (_name, say) => {
+    const driver = driverOf(() => ({ ...silent(), ...say }));
+    await verify(rig, driver);
+    expect(driver.seen).toBe(3);
+  });
+
+  // The host is asked how it is paid for by every answer, and not only by the first: the one that said
+  // it once may stop saying it, and a silence is not a licence.
+  it('is judged on every request: a later one that says nothing stops the run', async () => {
     const driver = driverOf((_ctx, n) => (n === 1 ? finished([]) : silent()));
     const result = await verify(rig, driver);
-    expect(driver.seen).toBe(3);
-    expect(Object.values(marksOf(result)).some((m) => m.includes('billing-unknown'))).toBe(false);
+    expect(driver.seen).toBe(2);
+    expect(marksOf(result)).toMatchObject({
+      deny: 'inconclusive:billing-unknown',
+      'secret-egress': 'not-attempted:billing-unknown',
+    });
+  });
+
+  it('is judged on a later request that says only one of the two as well', async () => {
+    const driver = driverOf((_ctx, n) =>
+      n === 1 ? finished([]) : { ...silent(), apiProvider: 'firstParty' },
+    );
+    await verify(rig, driver);
+    expect(driver.seen).toBe(2);
   });
 
   it('is stopped by the specific problem when there is one: a limit is a limit', async () => {
@@ -150,6 +181,11 @@ describe('what a driver is handed in its environment', () => {
     HOME: '/nowhere',
     CLAUDE_CODE_OAUTH_TOKEN: 'the-subscription',
     NOT_ANTHROPIC_KEY: 'kept',
+    // The other host of the table that can be driven bills a key of its own vendor the same way.
+    OPENAI_API_KEY: 'stroq_attack_not_a_key',
+    openai_base_url: 'https://example.invalid',
+    CODEX_API_KEY: 'nothing',
+    CODEX_HOME: '/kept/codex',
   };
 
   it('has no ANTHROPIC_ and no CLAUDE_CODE_USE_ variable, whatever the caller put in it', async () => {
@@ -171,6 +207,7 @@ describe('what a driver is handed in its environment', () => {
         HOME: '/nowhere',
         CLAUDE_CODE_OAUTH_TOKEN: 'the-subscription',
         NOT_ANTHROPIC_KEY: 'kept',
+        CODEX_HOME: '/kept/codex',
       });
   });
 
@@ -198,8 +235,29 @@ describe('scrubbedEnv', () => {
     ).toEqual({ KEEP: 'c' });
   });
 
+  it('takes out what bills a key of the other vendor the table drives, whatever the case', () => {
+    expect(
+      scrubbedEnv({
+        OPENAI_API_KEY: 'a',
+        openai_base_url: 'b',
+        Openai_Organization: 'c',
+        CODEX_API_KEY: 'd',
+        KEEP: 'e',
+      }),
+    ).toEqual({ KEEP: 'e' });
+  });
+
   it('keeps variables that only look like them', () => {
-    const env = { MY_ANTHROPIC_KEY: 'a', CLAUDE_CODE_USER: 'b', CLAUDE_CODE_: 'c', ANTHROPIC: 'd' };
+    const env = {
+      MY_ANTHROPIC_KEY: 'a',
+      CLAUDE_CODE_USER: 'b',
+      CLAUDE_CODE_: 'c',
+      ANTHROPIC: 'd',
+      MY_OPENAI_KEY: 'e',
+      OPENAI: 'f',
+      CODEX_HOME: 'g',
+      CODEX_API_KEY_FILE: 'h',
+    };
     expect(scrubbedEnv(env)).toEqual(env);
   });
 

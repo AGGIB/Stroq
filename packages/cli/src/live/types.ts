@@ -102,6 +102,7 @@ export const REASONS = {
   notIssued: 'not-issued',
   // inconclusive: the run
   billingUnknown: 'billing-unknown',
+  cwdMismatch: 'cwd-mismatch',
   limit: 'limit',
   auth: 'auth',
   apiBilling: 'api-billing',
@@ -129,7 +130,7 @@ export const REASONS = {
   hostNotFound: 'host-not-found',
   budget: 'budget',
   maxRequests: 'max-requests',
-  declined: 'declined',
+  allowNotPassed: 'allow-not-passed',
 } as const;
 
 /**
@@ -156,8 +157,19 @@ export interface HostRun {
   readonly stderrTail: string;
   /** The host's own words, when it stopped on a usage or rate limit. */
   readonly limitHit?: string;
+  /**
+   * How the host says it is paid for, from its first message. Both are needed: a host that says only one of
+   * them may be billing a cloud or an API key that the other would have shown. A run goes no further with a
+   * host that leaves either out, and none is made of one that says it is billed to anything but a login.
+   */
   readonly apiProvider?: string;
   readonly apiKeySource?: string;
+  /**
+   * The directory the host says it ran in, from its first message, when it says. It has to be the project:
+   * the hook judges commands from there (the made-up key is looked for in the project's own `.env`). A
+   * host that says another is stopped; one that does not say is not held to anything.
+   */
+  readonly cwd?: string;
   /** How many lines of the stream the driver could not read. A stream with any is not to be trusted. */
   readonly unparsedLines?: number;
 }

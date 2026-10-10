@@ -8,7 +8,7 @@ import type { HostDriver } from '../../src/live/types.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { FAKE } from './helpers.js';
 import { makeRig, type Rig } from './rig.js';
-import { marksOf, verify } from './verify-harness.js';
+import { NOW, marksOf, verify } from './verify-harness.js';
 
 /**
  * A probe is a probe only while the policy in force denies it (or, for the allow, allows it), and the hook
@@ -92,25 +92,23 @@ describe('a probe the policy does not deny', () => {
 describe('an allow probe that the policy does not allow', () => {
   const denyAll: Policy = { version: 1, threshold: 0.6, default: 'deny', rules: [] };
 
-  it('is skipped, and the check cannot be verified without it', async () => {
+  it('is skipped, and the check cannot be verified without it, so no control is made', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
     const result = await verify(rig, driver, { policy: denyAll });
     expect(result.probes[0]).toMatchObject({
       mark: 'skipped',
       reason: 'skipped-policy-blocks-allow',
     });
-    // The denies are denied by the default, which has no rule; the hook says the same.
+    // The denies are denied by the default, which has no rule; the hook says the same. They are not
+    // counted: without an allow that passed there is nothing to verify, so the controls are not run.
     expect(marksOf(result)).toMatchObject({
-      deny: 'passed:blocked',
-      'secret-egress': 'passed:blocked',
+      deny: 'inconclusive:control-inconclusive',
+      'secret-egress': 'inconclusive:control-inconclusive',
+      'deny:control': 'not-attempted:allow-not-passed',
+      'secret-egress:control': 'not-attempted:allow-not-passed',
     });
     expect(result.state).toBe('inconclusive');
-    expect(driver.calls.map((c) => c.probeId)).toEqual([
-      'deny',
-      'secret-egress',
-      'deny',
-      'secret-egress',
-    ]);
+    expect(driver.calls.map((c) => c.probeId)).toEqual(['deny', 'secret-egress']);
   });
 });
 
@@ -121,7 +119,7 @@ describe('the rule that decided', () => {
     );
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { policy });
     expect(marksOf(result)['secret-egress']).toBe('passed:blocked');
-    expect(result.probes[2]?.evidence.E4).toBe(true);
+    expect(result.probes.find((p) => p.id === 'secret-egress')?.evidence.E4).toBe(true);
   });
 
   it('is held against the policy in force and not the default: a hook under another policy is told apart', async () => {
@@ -131,7 +129,7 @@ describe('the rule that decided', () => {
     const driver = new FakeHostDriver({ fault: 'honest', hookPolicy: DEFAULT_POLICY });
     const result = await verify(rig, driver, { policy });
     expect(marksOf(result)['secret-egress']).toBe('failed:policy-mismatch');
-    expect(result.probes[2]?.detail).toBe(
+    expect(result.probes.find((p) => p.id === 'secret-egress')?.detail).toBe(
       'the audit says deny (deny-secret-egress); expected deny (my-egress-rule)',
     );
     expect(result.state).toBe('failed');
@@ -293,6 +291,24 @@ describe('what the result says produced it', () => {
 });
 
 describe('the time of the result', () => {
+  // `stroq init` writes the hook line again, and a check made before that is a check of another line. The
+  // result is dated by when the check began: an install that finished while it ran is then later than it.
+  it('is the time the run began, and not the time it ended', async () => {
+    let clock = NOW.getTime();
+    const inner = new FakeHostDriver({ fault: 'honest' });
+    // Each request takes a minute.
+    const slow: HostDriver = {
+      detect: () => inner.detect(),
+      run: (probe, ctx) => {
+        clock += 60_000;
+        return inner.run(probe, ctx);
+      },
+    };
+    const result = await verify(rig, slow, { now: () => new Date(clock) });
+    expect(inner.calls.length).toBeGreaterThan(1);
+    expect(result.at).toBe(NOW.toISOString());
+  });
+
   it('is the time of the run when no clock is given', async () => {
     const before = Date.now();
     const result = await verify(rig, new FakeHostDriver({ fault: 'refusal' }), { now: undefined });

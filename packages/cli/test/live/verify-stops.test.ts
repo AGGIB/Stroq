@@ -136,8 +136,8 @@ describe('the budget', () => {
     expect(events).toEqual([
       'take claude-code: allow',
       'take claude-code: deny',
-      'take claude-code: secret-egress',
       'take claude-code: deny control',
+      'take claude-code: secret-egress',
       'take claude-code: secret-egress control',
     ]);
   });
@@ -187,28 +187,55 @@ describe('the budget', () => {
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
       deny: 'inconclusive:control-inconclusive',
-      'secret-egress': 'not-attempted:max-requests',
       'deny:control': 'not-attempted:max-requests',
+      'secret-egress': 'not-attempted:max-requests',
     });
     // Two requests are too few to verify a host: the deny that was stopped has no control to show it armed.
     expect(result.state).toBe('inconclusive');
     expect(driver.calls).toHaveLength(2);
   });
 
-  // The real probes are run first and the controls after them, so the fewest requests that can verify
-  // a host are the three probes and the control of the first deny. One deny armed is enough.
-  it('verifies a host in the fewest requests that can: the three probes and the control of one deny', async () => {
+  // Each deny is followed by its own control, so the fewest requests that can verify a host are three: the
+  // allow, one deny and the control of that deny. The plan's default number of requests is three, and with
+  // it an honest host is verified.
+  it('verifies a host in the fewest requests that can: the allow, one deny and its control', async () => {
+    const driver = new FakeHostDriver({ fault: 'honest' });
+    const ledger = openLedger({ memory: true, limit: 30 });
+    const result = await verify(rig, driver, { maxRequests: 3, ledger });
+    expect(marksOf(result)).toEqual({
+      allow: 'passed:ran',
+      deny: 'passed:blocked',
+      'deny:control': 'passed:armed',
+      'secret-egress': 'not-attempted:max-requests',
+    });
+    expect(result.state).toBe('verified');
+    expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
+      'allow/real',
+      'deny/real',
+      'deny/noop',
+    ]);
+    expect(await ledger.peek()).toMatchObject({ used: 3 });
+  });
+
+  it('still verifies a host with one more request, and the second deny is left without its control', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
     const result = await verify(rig, driver, { maxRequests: 4 });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
       deny: 'passed:blocked',
-      'secret-egress': 'inconclusive:control-inconclusive',
       'deny:control': 'passed:armed',
+      'secret-egress': 'inconclusive:control-inconclusive',
       'secret-egress:control': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('verified');
     expect(driver.calls).toHaveLength(4);
+  });
+
+  it('cannot verify a host in fewer than three requests, whatever it does', async () => {
+    for (const maxRequests of [0, 1, 2]) {
+      const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { maxRequests });
+      expect(result.state, `${maxRequests} requests`).not.toBe('verified');
+    }
   });
 
   it('makes no request at all when it was given none to make', async () => {
@@ -221,7 +248,7 @@ describe('the budget', () => {
   it('does not count a pass whose control it was not allowed to make', async () => {
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), {
       control: true,
-      maxRequests: 3,
+      maxRequests: 2,
     });
     expect(marksOf(result)).toMatchObject({
       deny: 'inconclusive:control-inconclusive',
@@ -315,16 +342,19 @@ describe('a host that stops answering', () => {
     expect(driver.calls).toHaveLength(3);
   });
 
-  it('does not stop for a stream it cannot read once the host has said how it is paid for: that costs a request and tells nothing of the account', async () => {
+  // How a request is paid for is said by every answer or the run goes no further: a stream that cannot be
+  // read says nothing of it, and a host that said so once may stop saying so (a resumed session, a parse
+  // that broke) with the account no longer the one it was.
+  it('stops at a stream it cannot read after the host has said how it is paid for: it says nothing of the account now', async () => {
     const driver = new FakeHostDriver({
       fault: (probe) => (probe.kind === 'allow' ? 'honest' : 'garbage'),
     });
     const result = await verify(rig, driver);
-    expect(driver.calls).toHaveLength(3);
+    expect(driver.calls).toHaveLength(2);
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
       deny: 'inconclusive:unparsable-stream',
-      'secret-egress': 'inconclusive:unparsable-stream',
+      'secret-egress': 'not-attempted:billing-unknown',
     });
   });
 

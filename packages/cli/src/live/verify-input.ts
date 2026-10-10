@@ -17,6 +17,16 @@ export const DEFAULT_DETECT_MS = 10_000;
 
 /** The same line a result can hold for a version. */
 const VERSION_TEXT = /^[\x20-\x7e]{1,80}$/;
+const MAX_VERSION_CHARS = 80;
+
+/**
+ * What the driver called the host's version, as the line of plain characters a result keeps; null when it
+ * said nothing. Whoever compares a stored version with the host's today makes the same line of that.
+ */
+export const hostVersionText = (version: string | null): string | null => {
+  const text = version === null ? '' : plainText(version, MAX_VERSION_CHARS);
+  return text === '' ? null : text;
+};
 
 /** What `verifyHost` looks at in its options, which is all of them. */
 export interface CheckableOptions {
@@ -71,9 +81,12 @@ export function checkInputs(
 /**
  * The names of the variables that make a host bill an API key or another cloud, and so spend what the
  * owner did not set aside: `ANTHROPIC_*` (the key, the token, the endpoint) and `CLAUDE_CODE_USE_*`
- * (Bedrock, Vertex, Foundry). Whatever case they are in: on Windows a variable has no case.
+ * (Bedrock, Vertex, Foundry), and for the other host of the table that can be driven, `OPENAI_*` and
+ * `CODEX_API_KEY` (its login is a file, not a variable, so a variable can only be a key). Whatever case
+ * they are in: on Windows a variable has no case. (When a host gets a driver of its own, the variables
+ * that are its own belong to its row of the table; the families above are the ones known today.)
  */
-const BILLING_VARIABLE = /^(ANTHROPIC_|CLAUDE_CODE_USE_)/i;
+const BILLING_VARIABLE = /^(ANTHROPIC_|CLAUDE_CODE_USE_|OPENAI_|CODEX_API_KEY$)/i;
 
 /**
  * The environment a driver is handed: a copy, without any variable that would bill the run to an API

@@ -27,7 +27,7 @@ const PASSED_ALLOW = 'passed:ran';
 const STOPPED = 'passed:blocked';
 const ARMED = 'passed:armed';
 const UNARMED = 'inconclusive:probe-not-armed';
-const UNPROVEN = 'inconclusive:deny-not-proven-armed';
+const NOT_RUN = 'not-attempted:allow-not-passed';
 
 type Marks = Record<string, string>;
 const same = (mark: string): Marks => ({ allow: mark, deny: mark, 'secret-egress': mark });
@@ -125,20 +125,33 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'inconclusive',
       1,
     ],
-    // The host's own permissions block everything: the hook said deny and nothing ran, which is what a
-    // stop looks like, and the control shows it is not the hook's doing, because with the hook out of
-    // the way nothing ran either.
+    // The host does not say where it runs, or says it is not the project: what the hook judged was judged
+    // in another directory (the made-up key is looked for there), so nothing of it can be held against
+    // the host, and nothing more is asked of it.
+    [
+      'wrong-cwd',
+      {
+        allow: 'inconclusive:cwd-mismatch',
+        deny: 'not-attempted:cwd-mismatch',
+        'secret-egress': 'not-attempted:cwd-mismatch',
+      },
+      'inconclusive',
+      1,
+    ],
+    // The host's own permissions block everything, the allow too. The hook said deny and nothing ran, which
+    // is what a stop looks like, but a host that runs nothing cannot be verified whatever else it shows, and
+    // a control (a denied command run with the hook out of the way) is not spent on it.
     [
       'host-blocks-all',
       {
         allow: 'inconclusive:effect-missing',
-        deny: UNARMED,
-        'secret-egress': UNARMED,
-        'deny:control': UNARMED,
-        'secret-egress:control': UNARMED,
+        deny: 'inconclusive:control-inconclusive',
+        'secret-egress': 'inconclusive:control-inconclusive',
+        'deny:control': NOT_RUN,
+        'secret-egress:control': NOT_RUN,
       },
       'inconclusive',
-      5,
+      3,
     ],
   ];
 
@@ -203,7 +216,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
 });
 
 describe('the control run, probe by probe', () => {
-  // The control repeats each stopped probe with a hook that allows everything, so it costs two more.
+  // The control repeats each stopped probe with a hook that allows everything, so it costs two more. Each
+  // comes right after the deny it belongs to, so that the fewest requests that can verify a host are three.
   it('costs five requests for an honest host, and confirms both probes are armed', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
     const result = await verify(rig, driver, { control: true });
@@ -219,8 +233,8 @@ describe('the control run, probe by probe', () => {
     expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
       'allow/real',
       'deny/real',
-      'secret-egress/real',
       'deny/noop',
+      'secret-egress/real',
       'secret-egress/noop',
     ]);
   });
@@ -281,15 +295,46 @@ describe('the control run, probe by probe', () => {
     });
     const ledger = openLedger({ memory: true, limit: 30 });
     const result = await verify(rig, driver, { control: true, ledger });
-    expect(marksOf(result)).toMatchObject({
+    expect(marksOf(result)).toEqual({
+      allow: PASSED_ALLOW,
       deny: 'inconclusive:control-inconclusive',
-      'secret-egress': 'inconclusive:control-inconclusive',
       'deny:control': 'inconclusive:limit',
-      'secret-egress:control': 'not-attempted:limit',
+      'secret-egress': 'not-attempted:limit',
     });
     expect(result.state).toBe('inconclusive');
-    expect(driver.calls).toHaveLength(4);
-    expect(await ledger.peek()).toMatchObject({ used: 4 });
+    expect(driver.calls).toHaveLength(3);
+    expect(await ledger.peek()).toMatchObject({ used: 3 });
+  });
+
+  // A control runs a denied command with the hook out of the way. When the allow did not pass, nothing can
+  // be verified, so it is not run: the money is the owner's and the command, though inert, is not owed a run.
+  it('is not run when the allow did not pass, and says so', async () => {
+    const driver = new FakeHostDriver({
+      fault: (probe) => (probe.kind === 'allow' ? 'refusal' : 'honest'),
+    });
+    const result = await verify(rig, driver, { control: true });
+    expect(marksOf(result)).toEqual({
+      allow: 'not-issued:not-issued',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': NOT_RUN,
+      'secret-egress': 'inconclusive:control-inconclusive',
+      'secret-egress:control': NOT_RUN,
+    });
+    expect(result.state).toBe('inconclusive');
+    expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
+      'allow/real',
+      'deny/real',
+      'secret-egress/real',
+    ]);
+  });
+
+  it('still lets a deny that ran fail the host when the allow did not pass: that needs no control', async () => {
+    const driver = new FakeHostDriver({
+      fault: (probe) => (probe.kind === 'allow' ? 'refusal' : 'ignore-deny'),
+    });
+    const result = await verify(rig, driver, { control: true });
+    expect(result.state).toBe('failed');
+    expect(driver.calls.every((c) => c.hookMode === 'real')).toBe(true);
   });
 });
 
@@ -307,20 +352,20 @@ describe('the result as a whole', () => {
     });
   });
 
-  it('lists the probes in the order they are run, allow first, and then the controls', async () => {
+  it('lists the probes in the order they are run: allow first, and each control right after its deny', async () => {
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
     expect(result.probes.map((p) => p.id)).toEqual([
       'allow',
       'deny',
-      'secret-egress',
       'deny:control',
+      'secret-egress',
       'secret-egress:control',
     ]);
     expect(result.probes.map((p) => p.kind)).toEqual([
       'allow',
       'deny',
-      'secret-egress',
       'deny',
+      'secret-egress',
       'secret-egress',
     ]);
   });

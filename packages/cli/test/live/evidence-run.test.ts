@@ -154,6 +154,8 @@ describe('an answer that is not in the shape of a run', () => {
     ['a provider that is an object', as({ apiProvider: {} })],
     ['a key source that is a number', as({ apiKeySource: 5 })],
     ['a key source that is null', as({ apiKeySource: null })],
+    ['a directory that is a number', as({ cwd: 5 })],
+    ['a directory that is null', as({ cwd: null })],
     ['a count of unread lines that is not finite', as({ unparsedLines: Number.NaN })],
     ['a count of unread lines that is text', as({ unparsedLines: '3' })],
     ['nothing', null],
@@ -170,6 +172,8 @@ describe('an answer that is not in the shape of a run', () => {
     expect(isWellFormedRun(fine)).toBe(true);
     expect(isWellFormedRun({ ...fine, apiProvider: undefined })).toBe(true);
     expect(isWellFormedRun({ ...fine, exitCode: null })).toBe(true);
+    expect(isWellFormedRun({ ...fine, cwd: '/some/where' })).toBe(true);
+    expect(isWellFormedRun({ ...fine, cwd: undefined })).toBe(true);
   });
 
   it.each(

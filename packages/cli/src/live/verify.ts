@@ -2,26 +2,22 @@
 //
 // The order is fixed. The host is looked for. Then, before a single request is made, the policy in force
 // is asked in process what it says to each probe: a probe the policy does not deny is skipped, not failed,
-// because it proves nothing. Then the allow probe is run, then the deny probes, then the control for each
-// deny that was stopped (unless it is turned off, and then nothing can be verified). Every request is
-// taken from the ledger before it is made.
-// A limit, a login that does not work, a bill to the wrong account, a time-out or an error from the host
-// stops everything at once: the probes left get `not-attempted` with that reason, and nothing is retried.
+// because it proves nothing. Then the allow probe is run, and then each deny with its control right after
+// it: a deny that was stopped is run again, the same command with a hook that allows everything, and if its
+// file does not appear the stop proved nothing. So the fewest requests that can verify a host are three
+// (the allow, one deny and its control), a host that fails costs three, and an honest one five. A control
+// is not made when the allow did not pass (nothing can be verified then), nor when it is turned off (and
+// then no host is verified at all). Every request is taken from the ledger before it is made.
 //
 // Nothing here believes the model. A probe passes on the command having been issued, the hook having
 // judged it as the policy said it would, and the disk being as that decision says (`evidence.ts`).
 import { randomUUID } from 'node:crypto';
 import type { Policy } from '@stroq/core';
-import { capabilitiesFor, type HostCapability } from '../hosts/capabilities.js';
-import type { Ledger } from './budget.js';
-import { markControl, markProbe, plainText, runProblem, type ProbeOutcome } from './evidence.js';
+import { capabilitiesFor } from '../hosts/capabilities.js';
 import { expectedDecision } from './expectation.js';
 import { policySha256, writePolicy } from './policy-digest.js';
-import { buildProbes, controlOf, newFakeSecret, newNonce, prepareProject } from './probes.js';
-import { makeRequest, type Observation } from './request.js';
-import { controlIdOf } from './state-rule.js';
-import { assertThrowaway } from './throwaway.js';
-import { DEFAULT_DETECT_MS, checkInputs, lookForHost, scrubbedEnv } from './verify-input.js';
+import { buildProbes, newFakeSecret, newNonce, prepareProject } from './probes.js';
+import { Requests } from './requests.js';
 import {
   caveatsFor,
   downgradeUnarmed,
@@ -30,83 +26,30 @@ import {
   toProbeResult,
   type Row,
 } from './result.js';
+import { controlIdOf } from './state-rule.js';
+import { assertThrowaway } from './throwaway.js';
 import {
   REASONS,
   type Expectation,
   type HostDriver,
   type HostResult,
-  type HostRun,
   type Probe,
-  type ProbeContext,
   type SettledExpectation,
 } from './types.js';
+import {
+  DEFAULT_DETECT_MS,
+  checkInputs,
+  hostVersionText,
+  lookForHost,
+  scrubbedEnv,
+  type Detected,
+} from './verify-input.js';
+import type { BaseContext, IdSource, VerifyOptions } from './verify-types.js';
+import type { ProbeOutcome } from './evidence.js';
 
-/** Where the ids of a request come from. A test gives its own so that a failure can name a request. */
-export interface IdSource {
-  nonce(): string;
-  session(): string;
-  fake(): string;
-}
+export type { BaseContext, IdSource, VerifyOptions } from './verify-types.js';
 
 const DEFAULT_IDS: IdSource = { nonce: newNonce, session: randomUUID, fake: newFakeSecret };
-
-export interface VerifyOptions {
-  /** The agent id, as `HOOK_ROWS` in doctor.ts spells it. */
-  readonly agent: string;
-  /** The policy in force: what each probe is expected to be decided as, and what the hook is given. */
-  readonly policy: Policy;
-  readonly stroqVersion: string;
-  readonly ledger: Ledger;
-  /**
-   * Run each deny that was stopped again with a hook that allows everything. On unless it is turned off
-   * with `false`, because a deny that "did not happen" proves nothing until the same command is shown to
-   * happen without the hook: with the control off no host is ever verified, and the denies that were
-   * stopped are `deny-not-proven-armed`.
-   */
-  readonly control?: boolean | undefined;
-  /**
-   * What produced the answers. The result is live only if the driver says it is (`mode: 'live'`) and
-   * this does not say it is a stand-in: a driver that does not say what it is makes a stand-in, and this
-   * cannot make a stand-in live.
-   */
-  readonly mode?: 'live' | 'stand-in' | undefined;
-  /** The most host requests this run may make, on top of what the ledger allows. */
-  readonly maxRequests?: number | undefined;
-  /** What the host table says of the agent; by default its entry for `agent`. */
-  readonly capabilities?: HostCapability | undefined;
-  readonly now?: (() => Date) | undefined;
-  readonly ids?: Partial<IdSource> | undefined;
-  /** How long past a request's deadline a driver that has not answered is waited for. */
-  readonly graceMs?: number | undefined;
-  /** How long a driver is given to say whether its host is there. */
-  readonly detectMs?: number | undefined;
-}
-
-/** The directories and limits of a run. The session, nonce and hook mode are made for each request. */
-export type BaseContext = Omit<ProbeContext, 'sessionId' | 'nonce' | 'hookMode'> &
-  Partial<Pick<ProbeContext, 'sessionId' | 'nonce' | 'hookMode'>>;
-
-/**
- * Reasons that end the run. Asking again would spend requests on a host that has said it will not
- * answer, or on an account that must not be charged.
- */
-const STOPS: ReadonlySet<string> = new Set([
-  REASONS.limit,
-  REASONS.auth,
-  REASONS.apiBilling,
-  REASONS.timeout,
-  REASONS.hostError,
-]);
-
-const DEFAULT_GRACE_MS = 5_000;
-const MAX_VERSION_CHARS = 80;
-
-/**
- * Whether a host has said nothing of how it is paid for: no provider and no key source in a form that
- * can be read. A host that does not say may be billing an API key, and this check never spends that.
- */
-const billingUnknown = (run: HostRun): boolean =>
-  typeof run.apiProvider !== 'string' && typeof run.apiKeySource !== 'string';
 
 const say = (expectation: Expectation): string =>
   `${expectation.effect} (${expectation.ruleId ?? 'no rule'})`;
@@ -138,115 +81,141 @@ function plan(
   };
 }
 
-/** What a request is for: a probe judged by the hook, or its control, run with a hook that allows all. */
-type Step =
-  { readonly hook: 'real'; readonly expectation: SettledExpectation } | { readonly hook: 'noop' };
-
-/** The mark of a probe the real hook judged. A log that cannot be read is not a log with no entry. */
-function judge(
-  probe: Probe,
-  nonce: string,
-  observed: Observation,
-  expectation: SettledExpectation,
-): ProbeOutcome {
-  const { run, sentinel, audit } = observed;
-  return markProbe({
-    probe,
-    nonce,
-    run,
-    audit: audit.kind === 'read' ? audit.entries : [],
-    ...(audit.kind === 'unreadable' ? { auditProblem: audit.problem } : {}),
-    sentinel,
-    expectation,
-  });
+/** A probe, and what the policy in force makes of it: a request to make, or the reason there is none. */
+interface Planned {
+  readonly index: number;
+  readonly probe: Probe;
+  readonly decided: ReturnType<typeof plan>;
 }
 
-/** The requests of one run, and what has to be remembered between them: how many, and whether to stop. */
-class Requests {
-  private sent = 0;
-  private stop: { readonly reason: string; readonly detail: string } | null = null;
-
-  constructor(
-    private readonly driver: HostDriver,
-    private readonly base: BaseContext,
-    /** The environment a driver is handed: the caller's, without what bills an API key. */
-    private readonly env: Record<string, string>,
-    private readonly options: VerifyOptions,
-    private readonly ids: IdSource,
-    private readonly fake: string,
-  ) {}
-
-  /** Why no request is to be made now, if there is such a reason. */
-  private refusal(): ProbeOutcome | null {
-    if (this.stop !== null) return nothing('not-attempted', this.stop.reason, this.stop.detail);
-    return this.sent >= (this.options.maxRequests ?? Number.POSITIVE_INFINITY)
-      ? nothing(
-          'not-attempted',
-          REASONS.maxRequests,
-          'the limit on requests for this run was reached',
-        )
-      : null;
-  }
-
-  /** One probe, as a request, and the mark it earned; or the reason it was not made. */
-  async attempt(index: number, step: Step): Promise<ProbeOutcome> {
-    const refused = this.refusal();
-    if (refused !== null) return refused;
-    const nonce = this.ids.nonce();
-    const built = buildProbes(nonce, this.fake, this.base.project)[index];
-    if (built === undefined) throw new Error(`no probe at ${index}`);
-    const probe = step.hook === 'noop' ? controlOf(built) : built;
-    const ctx: ProbeContext = {
-      ...this.base,
-      env: this.env,
-      sessionId: this.ids.session(),
-      nonce,
-      hookMode: step.hook,
-    };
-    const requested = await makeRequest({
-      driver: this.driver,
-      ledger: this.options.ledger,
-      label: `${this.options.agent}: ${probe.id}${step.hook === 'noop' ? ' control' : ''}`,
+/**
+ * Every question to the policy is asked before the first request is made: one that fails after a request
+ * has been spent would lose what that request found, and asked first it costs nothing.
+ */
+async function planProbes(
+  templates: readonly Probe[],
+  base: BaseContext,
+  policy: Policy,
+): Promise<readonly Planned[]> {
+  const planned: Planned[] = [];
+  for (const [index, probe] of templates.entries())
+    planned.push({
+      index,
       probe,
-      ctx,
-      graceMs: this.options.graceMs ?? DEFAULT_GRACE_MS,
+      decided: plan(probe, await expectedDecision(probe, base, policy)),
     });
-    if (!requested.sent) {
-      this.stop = { reason: requested.reason, detail: requested.detail };
-      return nothing('not-attempted', requested.reason, requested.detail);
-    }
-    this.sent += 1;
-    const observed = requested.observation;
-    const trouble = runProblem(observed.run);
-    // The first request is the one that shows how the host is paid for. A host that says nothing of it
-    // may be billing an API key, so nothing more is asked of it, whatever else the first answer showed.
-    const unbilled = this.sent === 1 && billingUnknown(observed.run);
-    if (trouble !== null && STOPS.has(trouble.reason)) this.stop = trouble;
-    else if (unbilled)
-      this.stop = {
-        reason: REASONS.billingUnknown,
-        detail: 'the host did not say how it is paid for, so no more requests are made of it',
-      };
-    const marked =
-      step.hook === 'noop'
-        ? markControl({ probe, nonce, run: observed.run, sentinel: observed.sentinel })
-        : judge(probe, nonce, observed, step.expectation);
-    return unbilled && trouble === null
-      ? {
-          ...marked,
-          mark: 'inconclusive',
-          reason: REASONS.billingUnknown,
-          detail: this.stop?.detail ?? '',
-        }
-      : marked;
-  }
+  return planned;
 }
 
-/** What the driver called the host's version, as a line of plain characters; null when it said nothing. */
-const versionText = (version: string | null): string | null => {
-  const text = version === null ? '' : plainText(version, MAX_VERSION_CHARS);
-  return text === '' ? null : text;
-};
+/**
+ * What a run came to. `found` are the real probes as the evidence left them (the caveats are about what
+ * they found); `listed` is every row in the order it was run, after the controls have had their say.
+ */
+interface Run {
+  readonly found: readonly Row[];
+  readonly listed: readonly Row[];
+}
+
+/** A deny that was stopped: the one kind of row that has a control to run. */
+const isStoppedDeny = (row: Row): boolean => row.kind !== 'allow' && row.outcome.mark === 'passed';
+
+async function runReal(planned: Planned, requests: Requests): Promise<Row> {
+  const { index, probe, decided } = planned;
+  const outcome =
+    'skip' in decided
+      ? decided.skip
+      : await requests.attempt(index, { hook: 'real', expectation: decided.run });
+  return { id: probe.id, kind: probe.kind, outcome };
+}
+
+/** The control of a deny that was stopped. Not made when the allow did not pass: nothing can be verified. */
+async function runControl(
+  planned: Planned,
+  stopped: Row,
+  requests: Requests,
+  allowPassed: boolean,
+): Promise<Row> {
+  const outcome = allowPassed
+    ? await requests.attempt(planned.index, { hook: 'noop' })
+    : nothing(
+        'not-attempted',
+        REASONS.allowNotPassed,
+        'the allow probe did not pass, so nothing can be verified and the control was not run',
+      );
+  return { id: controlIdOf(stopped.id), kind: stopped.kind, outcome };
+}
+
+/**
+ * The probes in order, each deny followed by its control. A real run that did not pass has no control;
+ * one that did is confirmed by its control, or not (`downgradeUnarmed`).
+ */
+async function runProbes(
+  planned: readonly Planned[],
+  requests: Requests,
+  withControl: boolean,
+): Promise<Run> {
+  const found: Row[] = [];
+  const listed: Row[] = [];
+  let allowPassed = false;
+  for (const each of planned) {
+    const row = await runReal(each, requests);
+    found.push(row);
+    allowPassed = allowPassed || (row.kind === 'allow' && row.outcome.mark === 'passed');
+    const control =
+      withControl && isStoppedDeny(row)
+        ? await runControl(each, row, requests, allowPassed)
+        : undefined;
+    listed.push(downgradeUnarmed(row, control?.outcome, withControl));
+    if (control !== undefined) listed.push(control);
+  }
+  return { found, listed };
+}
+
+/** A host that is not there: every probe is not attempted, and says why. */
+function hostNotFound(templates: readonly Probe[], detected: Detected): Run {
+  const rows = templates.map((probe): Row => ({
+    id: probe.id,
+    kind: probe.kind,
+    outcome: nothing(
+      'not-attempted',
+      REASONS.hostNotFound,
+      detected.note ?? 'the host was not found',
+    ),
+  }));
+  return { found: rows, listed: rows };
+}
+
+/** What the result is made of besides what the run found. */
+interface Settings {
+  readonly driver: HostDriver;
+  readonly options: VerifyOptions;
+  readonly detected: Detected;
+  /** When the check began: an install that finished while it ran is later than it, and not earlier. */
+  readonly startedAt: Date;
+}
+
+/** The result: the state is that of the rows and the controls together, the caveats are about what the real runs found. */
+function assemble(settings: Settings, run: Run): HostResult {
+  const { driver, options, detected } = settings;
+  return {
+    version: 1,
+    agent: options.agent,
+    hostVersion: hostVersionText(detected.version),
+    stroqVersion: options.stroqVersion,
+    policySha256: policySha256(options.policy),
+    at: settings.startedAt.toISOString(),
+    // Live only when the driver says it is: a driver that does not say what it is makes a stand-in.
+    mode: driver.mode === 'live' && options.mode !== 'stand-in' ? 'live' : 'stand-in',
+    probes: run.listed.map(toProbeResult),
+    state: overallState(run.listed),
+    caveats: caveatsFor({
+      capabilities: options.capabilities ?? capabilitiesFor(options.agent),
+      note: detected.note,
+      control: options.control !== false,
+      rows: run.found,
+    }),
+  };
+}
 
 export async function verifyHost(
   driver: HostDriver,
@@ -258,87 +227,18 @@ export async function verifyHost(
   // Before the host is asked anything and before a file is made or removed: the check writes and
   // deletes in these directories, and a run that was pointed at the wrong ones must end here.
   for (const dir of [base.project, base.stroqHome, base.home]) assertThrowaway(dir);
+  const startedAt = (options.now ?? ((): Date => new Date()))();
   const ids: IdSource = { ...DEFAULT_IDS, ...options.ids };
-  const control = options.control !== false;
   const detected = await lookForHost(driver, options.detectMs ?? DEFAULT_DETECT_MS);
   const fake = ids.fake();
   const templates = buildProbes(ids.nonce(), fake, base.project);
-
-  /**
-   * `found` are the real runs as the evidence left them, `rows` the same after the controls have had
-   * their say. The state is that of the rows and the controls together; the caveats are about what the
-   * real runs found.
-   */
-  const finish = (
-    found: readonly Row[],
-    rows: readonly Row[],
-    controls: readonly Row[],
-  ): HostResult => ({
-    version: 1,
-    agent: options.agent,
-    hostVersion: versionText(detected.version),
-    stroqVersion: options.stroqVersion,
-    policySha256: policySha256(options.policy),
-    at: (options.now ?? ((): Date => new Date()))().toISOString(),
-    // Live only when the driver says it is: a driver that does not say what it is makes a stand-in.
-    mode: driver.mode === 'live' && options.mode !== 'stand-in' ? 'live' : 'stand-in',
-    probes: [...rows, ...controls].map(toProbeResult),
-    state: overallState([...rows, ...controls]),
-    caveats: caveatsFor({
-      capabilities: options.capabilities ?? capabilitiesFor(options.agent),
-      note: detected.note,
-      control,
-      rows: found,
-    }),
-  });
-
-  if (!detected.available) {
-    const notFound = templates.map((probe) => ({
-      id: probe.id,
-      kind: probe.kind,
-      outcome: nothing(
-        'not-attempted',
-        REASONS.hostNotFound,
-        detected.note ?? 'the host was not found',
-      ),
-    }));
-    return finish(notFound, notFound, []);
-  }
+  const settings: Settings = { driver, options, detected, startedAt };
+  if (!detected.available) return assemble(settings, hostNotFound(templates, detected));
 
   // The project holds the made-up key where the index finds it; the home holds the policy the hook reads.
   prepareProject(base.project, fake);
   writePolicy(base.stroqHome, options.policy);
-
-  // Every question to the policy is asked before the first request is made: one that fails after a
-  // request has been spent would lose what that request found, and asked first it costs nothing.
-  const plans: { readonly probe: Probe; readonly decided: ReturnType<typeof plan> }[] = [];
-  for (const probe of templates)
-    plans.push({
-      probe,
-      decided: plan(probe, await expectedDecision(probe, base, options.policy)),
-    });
-
+  const planned = await planProbes(templates, base, options.policy);
   const requests = new Requests(driver, base, scrubbedEnv(base.env), options, ids, fake);
-  const rows: Row[] = [];
-  for (const [index, { probe, decided }] of plans.entries()) {
-    const outcome =
-      'skip' in decided
-        ? decided.skip
-        : await requests.attempt(index, { hook: 'real', expectation: decided.run });
-    rows.push({ id: probe.id, kind: probe.kind, outcome });
-  }
-
-  const controls: Row[] = [];
-  if (control)
-    for (const [index, row] of rows.entries())
-      if (row.kind !== 'allow' && row.outcome.mark === 'passed')
-        controls.push({
-          id: controlIdOf(row.id),
-          kind: row.kind,
-          outcome: await requests.attempt(index, { hook: 'noop' }),
-        });
-  const confirmed = rows.map((row) =>
-    downgradeUnarmed(row, controls.find((c) => c.id === controlIdOf(row.id))?.outcome, control),
-  );
-  return finish(rows, confirmed, controls);
+  return assemble(settings, await runProbes(planned, requests, options.control !== false));
 }

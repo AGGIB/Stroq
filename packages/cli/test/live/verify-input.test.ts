@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openLedger } from '../../src/live/budget.js';
 import { LiveCheckError } from '../../src/live/errors.js';
 import type { HostDriver, HostRun } from '../../src/live/types.js';
+import { hostVersionText } from '../../src/live/verify-input.js';
 import { verifyHost } from '../../src/live/verify.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { finished } from './helpers.js';
@@ -272,14 +273,41 @@ describe('what a driver says of a request', () => {
     },
   );
 
-  it('goes on to the next request when a run was unreadable but the host had said how it is paid for', async () => {
+  it('stops at the request after a run that was unreadable: it said nothing of how it is paid for', async () => {
     let n = 0;
     const driver = answering(() => {
       n += 1;
       return n === 1 ? finished([]) : { ...finished([]), stream: [null] };
     });
     const result = await verify(rig, driver);
-    expect(n).toBe(3);
+    expect(n).toBe(2);
     expect(marksOf(result).deny).toBe('inconclusive:unparsable-stream');
+    expect(marksOf(result)['secret-egress']).toBe('not-attempted:billing-unknown');
+  });
+});
+
+// What a result says of the host is the version as the driver found it, made into a line of plain
+// characters. Whoever compares it with the version of the host today has to make the same line of that.
+describe('hostVersionText', () => {
+  it('is the version as one line of plain characters, with every run of white space one space', () => {
+    expect(hostVersionText('2.1.271  (Claude Code)')).toBe('2.1.271 (Claude Code)');
+    expect(hostVersionText('2.1.\u001b[31m271\n')).toBe('2.1.?[31m271');
+    expect(hostVersionText(' 2.1.271 ')).toBe('2.1.271');
+  });
+
+  it('is cut where a result cuts it', () => {
+    expect(hostVersionText('v'.repeat(200))).toBe('v'.repeat(80));
+  });
+
+  it.each([null, '', '   \n'])('is nothing when the version is %j', (version) => {
+    expect(hostVersionText(version)).toBeNull();
+  });
+
+  it('is what a result keeps, so that the two can be compared', async () => {
+    const result = await verify(
+      rig,
+      new FakeHostDriver({ fault: 'refusal', version: '2.1.271  (Claude Code)' }),
+    );
+    expect(result.hostVersion).toBe(hostVersionText('2.1.271  (Claude Code)'));
   });
 });
