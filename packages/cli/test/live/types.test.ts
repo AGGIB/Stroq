@@ -6,7 +6,7 @@ import {
   parseHostResult,
   type HostResult,
 } from '../../src/live/types.js';
-import { DIGEST, validResult } from './helpers.js';
+import { DIGEST, armedControl, resultOf, validResult } from './helpers.js';
 
 /**
  * The stored result is read back by `stroq doctor` and printed. A file that has been edited by hand, or
@@ -155,6 +155,101 @@ describe('parseHostResult', () => {
     ['an empty object', {}],
   ])('refuses %s', (_name, raw) => {
     expect(parseHostResult(raw).ok).toBe(false);
+  });
+
+  // The state is what the probes come to, and nothing a file can say beside them. A file edited to say
+  // verified over probes that did not earn it, or less than they earned, is not a result.
+  describe('a state that does not follow from the probes', () => {
+    const unfollowed = (change: (raw: Record<string, any>) => void): unknown =>
+      parseHostResult(withChange(change));
+    const refused = { ok: false, problem: 'state-inconsistent' };
+
+    it('takes the result of each state when its probes come to it', () => {
+      for (const state of LIVE_OUTCOMES)
+        expect(parseHostResult(asRaw(resultOf(state))), state).toMatchObject({ ok: true });
+    });
+
+    it.each<[string, (raw: Record<string, any>) => void]>([
+      [
+        'verified, and the control run taken out',
+        (raw) => (raw['probes'] = raw['probes'].filter((p: any) => !p.id.endsWith(':control'))),
+      ],
+      [
+        'verified, and the control run inconclusive',
+        (raw) => (raw['probes'][2]['mark'] = 'inconclusive'),
+      ],
+      [
+        'verified, and the control run for another probe',
+        (raw) => (raw['probes'][2]['id'] = 'secret-egress:control'),
+      ],
+      ['verified, and a probe failed', (raw) => (raw['probes'][1]['mark'] = 'failed')],
+      [
+        'verified, and the allow did not pass',
+        (raw) => (raw['probes'][0]['mark'] = 'inconclusive'),
+      ],
+      ['verified, and no probes at all', (raw) => (raw['probes'] = [])],
+      [
+        'verified, and every probe not attempted',
+        (raw) => raw['probes'].forEach((p: any) => (p['mark'] = 'not-attempted')),
+      ],
+      ['failed, and no probe failed', (raw) => (raw['state'] = 'failed')],
+      [
+        'inconclusive, over probes that earned a verified',
+        (raw) => (raw['state'] = 'inconclusive'),
+      ],
+      ['not-attempted, over probes that passed', (raw) => (raw['state'] = 'not-attempted')],
+    ])('refuses a result that says %s', (_name, change) => {
+      expect(unfollowed(change)).toEqual(refused);
+    });
+
+    it('refuses a failed result that says it is inconclusive, and the other way round', () => {
+      expect(parseHostResult({ ...asRaw(resultOf('failed')), state: 'inconclusive' })).toEqual(
+        refused,
+      );
+      expect(parseHostResult({ ...asRaw(resultOf('inconclusive')), state: 'failed' })).toEqual(
+        refused,
+      );
+    });
+
+    it('says only what is wrong, and nothing the file said', () => {
+      const parsed = parseHostResult(
+        withChange((raw) => {
+          raw['caveats'] = ['EVIL caveat'];
+          raw['state'] = 'failed';
+        }),
+      );
+      expect(parsed).toEqual(refused);
+    });
+
+    it('looks at the format first: a field that is wrong is named, and the state is not asked about', () => {
+      const parsed = parseHostResult(
+        withChange((raw) => {
+          raw['state'] = 'failed';
+          raw['probes'][0]['mark'] = 'EVIL';
+        }),
+      );
+      expect(parsed).toEqual({
+        ok: false,
+        problem: expect.stringContaining('probes.0.mark'),
+      });
+    });
+
+    it('takes a verified result with a control for the other deny, and with both', () => {
+      const both = resultOf('verified', {
+        probes: [
+          ...resultOf('verified').probes,
+          {
+            id: 'secret-egress',
+            kind: 'secret-egress',
+            mark: 'passed',
+            reason: 'blocked',
+            evidence: { E1: true, E2: true, E3: true, E4: true },
+          },
+          armedControl('secret-egress', 'secret-egress'),
+        ],
+      });
+      expect(parseHostResult(asRaw(both))).toMatchObject({ ok: true });
+    });
   });
 
   it('refuses a result that names __proto__, however it got there', () => {

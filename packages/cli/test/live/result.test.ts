@@ -35,7 +35,22 @@ const marks = (allow: ProbeMark, deny: ProbeMark, egress: ProbeMark): Row[] => [
   row('secret-egress', egress),
 ];
 
+const controlRow = (of: Row, mark: ProbeMark = 'passed'): Row => ({
+  id: `${of.id}:control`,
+  kind: of.kind,
+  outcome: outcome(mark, mark === 'passed' ? 'armed' : 'probe-not-armed', NONE),
+});
+
+/** The rows with a control for each deny that passed, which passes: every stopped deny is armed. */
+const armed = (rows: Row[]): Row[] => [
+  ...rows,
+  ...rows
+    .filter((r) => r.kind !== 'allow' && r.outcome.mark === 'passed')
+    .map((r) => controlRow(r)),
+];
+
 describe('overallState', () => {
+  // The cases of the rule when every deny that passed was shown, by its control, to be armed.
   const cases: ReadonlyArray<readonly [string, [ProbeMark, ProbeMark, ProbeMark], string]> = [
     ['everything passed', ['passed', 'passed', 'passed'], 'verified'],
     [
@@ -84,7 +99,7 @@ describe('overallState', () => {
   ];
 
   it.each(cases)('with %s the state is %s', (_name, [allow, deny, egress], state) => {
-    expect(overallState(marks(allow, deny, egress))).toBe(state);
+    expect(overallState(armed(marks(allow, deny, egress)))).toBe(state);
   });
 
   it('has no state for a list with nothing in it', () => {
@@ -95,6 +110,71 @@ describe('overallState', () => {
     expect(overallState([row('allow', 'passed'), row('allow', 'passed', 'r', 'again')])).toBe(
       'inconclusive',
     );
+  });
+
+  // The rule this check stands on: a deny that was stopped proves something only if the host would have
+  // run the command had the hook let it, and only the control run shows that.
+  describe('a verified needs the control run of a deny that passed to have shown the probe armed', () => {
+    it('is not verified when nothing was stopped by a hook that was shown to matter', () => {
+      expect(overallState(marks('passed', 'passed', 'passed'))).toBe('inconclusive');
+      expect(overallState(marks('passed', 'passed', 'inconclusive'))).toBe('inconclusive');
+    });
+
+    it('is verified by one deny whose control passed, the other having none', () => {
+      const rows = marks('passed', 'passed', 'passed');
+      expect(overallState([...rows, controlRow(rows[1]!)])).toBe('verified');
+      expect(overallState([...rows, controlRow(rows[2]!)])).toBe('verified');
+    });
+
+    it.each<ProbeMark>(['inconclusive', 'not-issued', 'not-attempted', 'skipped'])(
+      'is not verified when the control of the only deny that passed is %s',
+      (mark) => {
+        const rows = marks('passed', 'passed', 'inconclusive');
+        expect(overallState([...rows, controlRow(rows[1]!, mark)])).toBe('inconclusive');
+      },
+    );
+
+    it('is not verified by a control run of a deny that did not pass', () => {
+      const rows = marks('passed', 'inconclusive', 'inconclusive');
+      expect(overallState([...rows, controlRow(rows[1]!), controlRow(rows[2]!)])).toBe(
+        'inconclusive',
+      );
+    });
+
+    it('is not verified by the control of another probe, nor by one of another kind', () => {
+      const rows = marks('passed', 'passed', 'inconclusive');
+      const strangers: Row[] = [
+        { id: 'elsewhere:control', kind: 'deny', outcome: outcome('passed', 'armed', NONE) },
+        { id: 'deny:control', kind: 'secret-egress', outcome: outcome('passed', 'armed', NONE) },
+      ];
+      expect(overallState([...rows, ...strangers])).toBe('inconclusive');
+    });
+
+    it('is not verified by a control of the allow, which has none', () => {
+      const rows = marks('passed', 'inconclusive', 'inconclusive');
+      expect(overallState([...rows, controlRow(rows[0]!), controlRow(rows[1]!)])).toBe(
+        'inconclusive',
+      );
+    });
+
+    it('takes a control for a probe, and a probe that is not a control, to be what the ids say', () => {
+      const rows: Row[] = [
+        row('allow', 'passed'),
+        row('deny', 'passed', 'blocked', 'deny:control'),
+      ];
+      // A probe whose own id ends in :control is a control and not a deny.
+      expect(overallState(rows)).toBe('inconclusive');
+    });
+
+    it('is failed whatever a control says, once a probe has failed', () => {
+      const rows = marks('passed', 'failed', 'passed');
+      expect(overallState(armed(rows))).toBe('failed');
+    });
+
+    it('does not count a control that was not attempted as a probe that was tried', () => {
+      const rows = marks('not-attempted', 'not-attempted', 'not-attempted');
+      expect(overallState([...rows, controlRow(rows[1]!, 'not-attempted')])).toBe('not-attempted');
+    });
   });
 });
 
@@ -132,6 +212,24 @@ describe('downgradeUnarmed', () => {
       mark: 'inconclusive',
       reason: 'control-inconclusive',
     });
+  });
+
+  // With no control asked for, the pass is not wrong, and nothing is known against it: it simply is not
+  // proven. The reason says that, and not that a control failed to confirm it.
+  it('says a pass is not proven armed when no control was asked for', () => {
+    const shown = downgradeUnarmed(deny, undefined, false);
+    expect(shown.outcome).toMatchObject({ mark: 'inconclusive', reason: 'deny-not-proven-armed' });
+    expect(shown.outcome.detail).toMatch(/no control run was made/);
+    expect(shown.outcome.evidence).toEqual(SEEN);
+  });
+
+  it('keeps a pass whose control showed the probe armed, however it was asked for', () => {
+    expect(downgradeUnarmed(deny, control('passed', 'armed'), false)).toEqual(deny);
+  });
+
+  it('still names an unarmed probe as one that is unarmed, when the control showed it', () => {
+    const shown = downgradeUnarmed(deny, control('inconclusive', 'probe-not-armed'), false);
+    expect(shown.outcome.reason).toBe('probe-not-armed');
   });
 
   it.each<ProbeMark>(['failed', 'inconclusive', 'not-issued', 'skipped', 'not-attempted'])(

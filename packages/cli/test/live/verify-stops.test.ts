@@ -186,11 +186,29 @@ describe('the budget', () => {
     const result = await verify(rig, driver, { maxRequests: 2 });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      deny: 'passed:blocked',
+      deny: 'inconclusive:control-inconclusive',
       'secret-egress': 'not-attempted:max-requests',
+      'deny:control': 'not-attempted:max-requests',
+    });
+    // Two requests are too few to verify a host: the deny that was stopped has no control to show it armed.
+    expect(result.state).toBe('inconclusive');
+    expect(driver.calls).toHaveLength(2);
+  });
+
+  // The real probes are run first and the controls after them, so the fewest requests that can verify
+  // a host are the three probes and the control of the first deny. One deny armed is enough.
+  it('verifies a host in the fewest requests that can: the three probes and the control of one deny', async () => {
+    const driver = new FakeHostDriver({ fault: 'honest' });
+    const result = await verify(rig, driver, { maxRequests: 4 });
+    expect(marksOf(result)).toEqual({
+      allow: 'passed:ran',
+      deny: 'passed:blocked',
+      'secret-egress': 'inconclusive:control-inconclusive',
+      'deny:control': 'passed:armed',
+      'secret-egress:control': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('verified');
-    expect(driver.calls).toHaveLength(2);
+    expect(driver.calls).toHaveLength(4);
   });
 
   it('makes no request at all when it was given none to make', async () => {

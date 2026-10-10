@@ -40,11 +40,12 @@ describe('a hook that never ran for one request, after it ran for another', () =
   it('is bypassed for that request, although the log holds the entries of the first', async () => {
     const fault = (probe: { kind: string }): Fault =>
       probe.kind === 'deny' ? 'never-call-hook' : 'honest';
-    const result = await verify(rig, new FakeHostDriver({ fault }), { control: false });
+    const result = await verify(rig, new FakeHostDriver({ fault }), { control: true });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
       deny: 'failed:hook-bypassed',
       'secret-egress': 'passed:blocked',
+      'secret-egress:control': 'passed:armed',
     });
     expect(result.state).toBe('failed');
     // The log was not empty when the deny probe was judged: the allow probe had left its entry.
@@ -52,8 +53,9 @@ describe('a hook that never ran for one request, after it ran for another', () =
   });
 
   it('is not a hook that left no entry when the log has entries of its own for the request', async () => {
-    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { control: false });
+    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { control: true });
     expect(marksOf(result)).toMatchObject(PASSED);
+    expect(result.state).toBe('verified');
   });
 });
 

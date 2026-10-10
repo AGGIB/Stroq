@@ -2,8 +2,9 @@
 //
 // The order is fixed. The host is looked for. Then, before a single request is made, the policy in force
 // is asked in process what it says to each probe: a probe the policy does not deny is skipped, not failed,
-// because it proves nothing. Then the allow probe is run, then the deny probes, then (if asked) the
-// control for each deny that was stopped. Every request is taken from the ledger before it is made.
+// because it proves nothing. Then the allow probe is run, then the deny probes, then the control for each
+// deny that was stopped (unless it is turned off, and then nothing can be verified). Every request is
+// taken from the ledger before it is made.
 // A limit, a login that does not work, a bill to the wrong account, a time-out or an error from the host
 // stops everything at once: the probes left get `not-attempted` with that reason, and nothing is retried.
 //
@@ -18,6 +19,7 @@ import { expectedDecision } from './expectation.js';
 import { policySha256, writePolicy } from './policy-digest.js';
 import { buildProbes, controlOf, newFakeSecret, newNonce, prepareProject } from './probes.js';
 import { makeRequest, type Observation } from './request.js';
+import { controlIdOf } from './state-rule.js';
 import { assertThrowaway } from './throwaway.js';
 import {
   caveatsFor,
@@ -54,11 +56,17 @@ export interface VerifyOptions {
   readonly policy: Policy;
   readonly stroqVersion: string;
   readonly ledger: Ledger;
-  /** Run each deny that was stopped again with a hook that allows everything. */
+  /**
+   * Run each deny that was stopped again with a hook that allows everything. On unless it is turned off
+   * with `false`, because a deny that "did not happen" proves nothing until the same command is shown to
+   * happen without the hook: with the control off no host is ever verified, and the denies that were
+   * stopped are `deny-not-proven-armed`.
+   */
   readonly control?: boolean | undefined;
   /**
-   * What produced the answers. A driver that says it is a stand-in makes the result one whatever this
-   * says, and this cannot make a stand-in live: the result is live only if neither says otherwise.
+   * What produced the answers. The result is live only if the driver says it is (`mode: 'live'`) and
+   * this does not say it is a stand-in: a driver that does not say what it is makes a stand-in, and this
+   * cannot make a stand-in live.
    */
   readonly mode?: 'live' | 'stand-in' | undefined;
   /** The most host requests this run may make, on top of what the ledger allows. */
@@ -230,42 +238,51 @@ export async function verifyHost(
   // deletes in these directories, and a run that was pointed at the wrong ones must end here.
   for (const dir of [base.project, base.stroqHome, base.home]) assertThrowaway(dir);
   const ids: IdSource = { ...DEFAULT_IDS, ...options.ids };
-  const control = options.control === true;
+  const control = options.control !== false;
   const detected = await lookFor(driver);
   const fake = ids.fake();
   const templates = buildProbes(ids.nonce(), fake);
 
-  const finish = (rows: readonly Row[], controls: readonly Row[]): HostResult => ({
+  /**
+   * `found` are the real runs as the evidence left them, `rows` the same after the controls have had
+   * their say. The state is that of the rows and the controls together; the caveats are about what the
+   * real runs found.
+   */
+  const finish = (
+    found: readonly Row[],
+    rows: readonly Row[],
+    controls: readonly Row[],
+  ): HostResult => ({
     version: 1,
     agent: options.agent,
     hostVersion: versionText(detected.version),
     stroqVersion: options.stroqVersion,
     policySha256: policySha256(options.policy),
     at: (options.now ?? ((): Date => new Date()))().toISOString(),
-    mode: driver.mode === 'stand-in' || options.mode === 'stand-in' ? 'stand-in' : 'live',
+    // Live only when the driver says it is: a driver that does not say what it is makes a stand-in.
+    mode: driver.mode === 'live' && options.mode !== 'stand-in' ? 'live' : 'stand-in',
     probes: [...rows, ...controls].map(toProbeResult),
-    state: overallState(rows),
+    state: overallState([...rows, ...controls]),
     caveats: caveatsFor({
       capabilities: options.capabilities ?? capabilitiesFor(options.agent),
       note: detected.note,
       control,
-      rows,
+      rows: found,
     }),
   });
 
-  if (!detected.available)
-    return finish(
-      templates.map((probe) => ({
-        id: probe.id,
-        kind: probe.kind,
-        outcome: nothing(
-          'not-attempted',
-          REASONS.hostNotFound,
-          detected.note ?? 'the host was not found',
-        ),
-      })),
-      [],
-    );
+  if (!detected.available) {
+    const notFound = templates.map((probe) => ({
+      id: probe.id,
+      kind: probe.kind,
+      outcome: nothing(
+        'not-attempted',
+        REASONS.hostNotFound,
+        detected.note ?? 'the host was not found',
+      ),
+    }));
+    return finish(notFound, notFound, []);
+  }
 
   // The project holds the made-up key where the index finds it; the home holds the policy the hook reads.
   prepareProject(base.project, fake);
@@ -295,14 +312,12 @@ export async function verifyHost(
     for (const [index, row] of rows.entries())
       if (row.kind !== 'allow' && row.outcome.mark === 'passed')
         controls.push({
-          id: `${row.id}:control`,
+          id: controlIdOf(row.id),
           kind: row.kind,
           outcome: await requests.attempt(index, { hook: 'noop' }),
         });
-  const confirmed = control
-    ? rows.map((row) =>
-        downgradeUnarmed(row, controls.find((c) => c.id === `${row.id}:control`)?.outcome),
-      )
-    : rows;
-  return finish(confirmed, controls);
+  const confirmed = rows.map((row) =>
+    downgradeUnarmed(row, controls.find((c) => c.id === controlIdOf(row.id))?.outcome, control),
+  );
+  return finish(rows, confirmed, controls);
 }

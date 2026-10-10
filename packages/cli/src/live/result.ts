@@ -1,19 +1,15 @@
 // How the marks of the probes become the result of a host.
 //
-// A host is verified when the allow passed and at least one deny was stopped, nothing failed, and (when
-// a control was asked for) the stopped probe was shown to be armed. It has failed when any probe failed.
-// Everything between is inconclusive, and a run in which nothing was sent is not attempted. The state is
-// worked out from the rows after the controls have had their say, so that a pass that a control could
-// not confirm is not counted.
+// A host is verified when the allow passed and a deny was stopped AND that deny's control run showed it
+// armed (the same command, under a hook that allows everything, ran and left its file). It has failed
+// when any probe failed. Everything between is inconclusive, and a run in which nothing was sent is not
+// attempted. The rule is `state-rule.ts`, the one the reader of a stored result applies too; here the
+// rows are the real runs and their controls, after the controls have had their say, so that a pass that
+// a control could not confirm is not counted.
 import type { HostCapability } from '../hosts/capabilities.js';
 import { plainText, type ProbeOutcome } from './evidence.js';
-import {
-  REASONS,
-  type LiveOutcome,
-  type ProbeKind,
-  type ProbeMark,
-  type ProbeResult,
-} from './types.js';
+import { overallState as stateOf } from './state-rule.js';
+import { REASONS, type LiveOutcome, type ProbeKind, type ProbeResult } from './types.js';
 
 /** One probe of a run: what it is, and how it came out. */
 export interface Row {
@@ -40,40 +36,47 @@ export function nothing(
  * A deny that was stopped is a result only if the host would have run the command had the hook let it.
  * The control run is the same command with a hook that allows everything. If its file appeared, the
  * probe is armed and the pass stands. If it did not, the host would not have run the command whatever
- * the hook said, and the missing file in the real run was no proof; if there is no control run at all (it
- * was not issued, could not tell, was not attempted), the pass is not confirmed either. The evidence of
- * the real run is kept as it was found.
+ * the hook said, and the missing file in the real run was no proof. If there is no control run at all,
+ * the pass is not confirmed either: when one was asked for and did not happen (it was not issued, could
+ * not tell, was not attempted) that is `control-inconclusive`, and when none was asked for it is
+ * `deny-not-proven-armed`. The evidence of the real run is kept as it was found.
  */
-export function downgradeUnarmed(row: Row, control: ProbeOutcome | undefined): Row {
+export function downgradeUnarmed(
+  row: Row,
+  control: ProbeOutcome | undefined,
+  controlAsked: boolean = true,
+): Row {
   if (row.kind === 'allow' || row.outcome.mark !== 'passed') return row;
   if (control?.mark === 'passed') return row;
   const unarmed = control?.reason === REASONS.probeNotArmed;
+  const unasked = !unarmed && !controlAsked;
   const outcome: ProbeOutcome = {
     mark: 'inconclusive',
-    reason: unarmed ? REASONS.probeNotArmed : REASONS.controlInconclusive,
+    reason: unarmed
+      ? REASONS.probeNotArmed
+      : unasked
+        ? REASONS.denyNotProvenArmed
+        : REASONS.controlInconclusive,
     detail: plainText(
       unarmed
         ? 'with a hook that allows everything the control run left no file, so the host does not run this command and a missing file proves nothing'
-        : control === undefined
-          ? 'no control run confirmed that the probe is armed'
-          : `the control run did not confirm that the probe is armed (${control.reason})`,
+        : unasked
+          ? 'no control run was made, so it is not known that the host would have run this command had the hook let it'
+          : control === undefined
+            ? 'no control run confirmed that the probe is armed'
+            : `the control run did not confirm that the probe is armed (${control.reason})`,
     ),
     evidence: row.outcome.evidence,
   };
   return { ...row, outcome };
 }
 
-/** Marks that count as the check having been tried. */
-const NOT_TRIED: readonly ProbeMark[] = ['not-attempted', 'skipped'];
-
+/**
+ * The state of a host from the rows of a run: its probes and their controls, which are rows of their
+ * own (the id of the probe and `:control`). See `state-rule.ts` for the rule.
+ */
 export function overallState(rows: readonly Row[]): LiveOutcome {
-  if (rows.some((row) => row.outcome.mark === 'failed')) return 'failed';
-  const passed = (isAllow: boolean): boolean =>
-    rows.some((row) => (row.kind === 'allow') === isAllow && row.outcome.mark === 'passed');
-  if (passed(true) && passed(false)) return 'verified';
-  return rows.every((row) => NOT_TRIED.includes(row.outcome.mark))
-    ? 'not-attempted'
-    : 'inconclusive';
+  return stateOf(rows.map((row) => ({ id: row.id, kind: row.kind, mark: row.outcome.mark })));
 }
 
 export function toProbeResult(row: Row): ProbeResult {

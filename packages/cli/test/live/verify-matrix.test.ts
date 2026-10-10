@@ -25,13 +25,30 @@ afterEach(() => {
 
 const PASSED_ALLOW = 'passed:ran';
 const STOPPED = 'passed:blocked';
+const ARMED = 'passed:armed';
+const UNARMED = 'inconclusive:probe-not-armed';
+const UNPROVEN = 'inconclusive:deny-not-proven-armed';
 
-type Marks = { allow: string; deny: string; 'secret-egress': string };
+type Marks = Record<string, string>;
 const same = (mark: string): Marks => ({ allow: mark, deny: mark, 'secret-egress': mark });
 
-describe('every fault, with the control off', () => {
+// A host is verified only when the allow passed and a deny was stopped AND the same deny, under a hook
+// that allows everything, was run by the host and left its file. So the control is part of the check, it
+// is on unless it is turned off, and a run with it off can be anything but verified.
+describe('every fault, with the control on (as it is unless turned off)', () => {
   const matrix: ReadonlyArray<readonly [Fault, Marks, string, number]> = [
-    ['honest', { allow: PASSED_ALLOW, deny: STOPPED, 'secret-egress': STOPPED }, 'verified', 3],
+    [
+      'honest',
+      {
+        allow: PASSED_ALLOW,
+        deny: STOPPED,
+        'secret-egress': STOPPED,
+        'deny:control': ARMED,
+        'secret-egress:control': ARMED,
+      },
+      'verified',
+      5,
+    ],
     [
       'ignore-deny',
       {
@@ -97,11 +114,20 @@ describe('every fault, with the control off', () => {
       'inconclusive',
       1,
     ],
+    // The host's own permissions block everything: the hook said deny and nothing ran, which is what a
+    // stop looks like, and the control shows it is not the hook's doing, because with the hook out of
+    // the way nothing ran either.
     [
       'host-blocks-all',
-      { allow: 'inconclusive:effect-missing', deny: STOPPED, 'secret-egress': STOPPED },
+      {
+        allow: 'inconclusive:effect-missing',
+        deny: UNARMED,
+        'secret-egress': UNARMED,
+        'deny:control': UNARMED,
+        'secret-egress:control': UNARMED,
+      },
       'inconclusive',
-      3,
+      5,
     ],
   ];
 
@@ -134,6 +160,7 @@ describe('every fault, with the control off', () => {
       allow: PASSED_ALLOW,
       deny: 'failed:policy-mismatch',
       'secret-egress': STOPPED,
+      'secret-egress:control': ARMED,
     });
     expect(result.state).toBe('failed');
     expect(result.probes.find((p) => p.id === 'deny')?.detail).toBe(
@@ -149,6 +176,14 @@ describe('every fault, with the control off', () => {
     expect(byId['deny']).toEqual({ E1: true, E2: true, E3: false, E4: false });
   });
 
+  it('records the evidence of a control as the control found it', async () => {
+    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
+    const byId = Object.fromEntries(result.probes.map((p) => [p.id, p.evidence]));
+    // The hook is not asked in a control run, so there is no verdict of it to record, and nothing to
+    // find the host's words in; the command was issued and its file came.
+    expect(byId['deny:control']).toEqual({ E1: true, E2: null, E3: true, E4: null });
+  });
+
   it('keeps the evidence it found for a probe the run then made inconclusive', async () => {
     const result = await verify(rig, new FakeHostDriver({ fault: 'timeout' }));
     expect(result.probes[0]?.evidence).toEqual({ E1: false, E2: false, E3: false, E4: null });
@@ -156,7 +191,60 @@ describe('every fault, with the control off', () => {
   });
 });
 
-describe('every fault, with the control on', () => {
+// With the control turned off the denies that were stopped are not proven to be anything: the host's own
+// rules, or a command that could not run here, would have left the file absent just the same.
+describe('every fault, with the control turned off', () => {
+  it('can verify no host: a deny that was stopped is not proven armed', async () => {
+    const driver = new FakeHostDriver({ fault: 'honest' });
+    const ledger = openLedger({ memory: true, limit: 30 });
+    const result = await verify(rig, driver, { ledger, control: false });
+    expect(marksOf(result)).toEqual({
+      allow: PASSED_ALLOW,
+      deny: UNPROVEN,
+      'secret-egress': UNPROVEN,
+    });
+    expect(result.state).toBe('inconclusive');
+    expect(driver.calls).toHaveLength(3);
+    expect(await ledger.peek()).toMatchObject({ used: 3 });
+    expect(result.caveats).toContain('no-control-run');
+    expect(result.probes.find((p) => p.id === 'deny')?.detail).toMatch(/no control run was made/);
+  });
+
+  it('keeps the evidence of the stopped denies, which was good', async () => {
+    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { control: false });
+    expect(result.probes[1]?.evidence).toEqual({ E1: true, E2: true, E3: true, E4: true });
+  });
+
+  it('still fails a host that ignores a deny, which needs no control to be seen', async () => {
+    const driver = new FakeHostDriver({ fault: 'ignore-deny' });
+    const result = await verify(rig, driver, { control: false });
+    expect(result.state).toBe('failed');
+    expect(driver.calls).toHaveLength(3);
+  });
+
+  it.each(['never-call-hook', 'crash-fail-open', 'noop-hook'] as const)(
+    'still fails a hook that is bypassed (%s)',
+    async (fault) => {
+      const result = await verify(rig, new FakeHostDriver({ fault }), { control: false });
+      expect(marksOf(result)).toEqual(same('failed:hook-bypassed'));
+      expect(result.state).toBe('failed');
+    },
+  );
+
+  it('does not verify a host whose own rules block everything, with or without the control', async () => {
+    const result = await verify(rig, new FakeHostDriver({ fault: 'host-blocks-all' }), {
+      control: false,
+    });
+    expect(marksOf(result)).toEqual({
+      allow: 'inconclusive:effect-missing',
+      deny: UNPROVEN,
+      'secret-egress': UNPROVEN,
+    });
+    expect(result.state).toBe('inconclusive');
+  });
+});
+
+describe('the control run, probe by probe', () => {
   // The control repeats each stopped probe with a hook that allows everything, so it costs two more.
   it('costs five requests for an honest host, and confirms both probes are armed', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
@@ -261,15 +349,32 @@ describe('the result as a whole', () => {
     });
   });
 
-  it('lists the probes in the order they are run, allow first', async () => {
+  it('lists the probes in the order they are run, allow first, and then the controls', async () => {
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
-    expect(result.probes.map((p) => p.id)).toEqual(['allow', 'deny', 'secret-egress']);
-    expect(result.probes.map((p) => p.kind)).toEqual(['allow', 'deny', 'secret-egress']);
+    expect(result.probes.map((p) => p.id)).toEqual([
+      'allow',
+      'deny',
+      'secret-egress',
+      'deny:control',
+      'secret-egress:control',
+    ]);
+    expect(result.probes.map((p) => p.kind)).toEqual([
+      'allow',
+      'deny',
+      'secret-egress',
+      'deny',
+      'secret-egress',
+    ]);
   });
 
   it('says no control was run when a deny was stopped without one', async () => {
-    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
+    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { control: false });
     expect(result.caveats).toContain('no-control-run');
+  });
+
+  it('does not say so when the control was run, which is what it does unless it is turned off', async () => {
+    const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
+    expect(result.caveats).not.toContain('no-control-run');
   });
 
   it('copies the caveats of the host table, and says when a deny passed without the hook words', async () => {

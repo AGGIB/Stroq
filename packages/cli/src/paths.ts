@@ -37,6 +37,15 @@ export const cloakDirIn = (home: string): string => join(home, 'cloak');
 export const liveDirIn = (home: string): string => join(home, 'live');
 export const liveResultFileIn = (home: string, agent: string): string =>
   join(liveDirIn(home), `${agent}.json`);
+/**
+ * What a stand-in for a host answered, kept apart so that it can never be read as the host's result, and
+ * what the last live check said when it could not tell, kept apart so that it cannot replace a result
+ * that could. An agent name has no dot, so no agent is called the name of either file.
+ */
+export const liveStandInFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.stand-in.json`);
+export const liveLastFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.last.json`);
 
 export const sessionsDir = (): string => sessionsDirIn(stroqHome());
 export const auditFile = (): string => auditFileIn(stroqHome());

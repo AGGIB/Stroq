@@ -4,6 +4,7 @@
 // does, until this: drive the REAL host on inert probes, then show from evidence that does not come
 // from the model that a denied action did not happen. These are the words that check is made of.
 import { z } from 'zod';
+import { overallState } from './state-rule.js';
 
 /**
  * Where a host stands. The first two are read off the machine (`installed`: the config is there;
@@ -172,7 +173,12 @@ export interface ProbeContext {
 export interface HostDriver {
   detect(): Promise<{ available: boolean; version: string | null; note?: string }>;
   run(probe: Probe, ctx: ProbeContext): Promise<HostRun>;
-  /** A driver that is not a real host says so; a result can then never be shown as the host's own. */
+  /**
+   * Whether what this driver answers is a real host's. A result is live only when this says `'live'`:
+   * a driver that does not say, or says `'stand-in'`, makes a stand-in result, which is about the
+   * driver and can never be shown as a real host's. (The safe way round: forgetting to say is a
+   * stand-in, and only a driver that has been through a real host is allowed to claim it is one.)
+   */
   readonly mode?: 'live' | 'stand-in';
 }
 
@@ -308,10 +314,17 @@ export type ParsedHostResult =
  */
 export function parseHostResult(raw: unknown): ParsedHostResult {
   const parsed = HostResultSchema.safeParse(raw);
-  if (parsed.success) return { ok: true, result: toHostResult(parsed.data) };
-  const where = parsed.error.issues[0]?.path.map(String).join('.') ?? '';
-  return {
-    ok: false,
-    problem: `does not match the result format (${where === '' ? 'whole file' : where})`,
-  };
+  if (!parsed.success) {
+    const where = parsed.error.issues[0]?.path.map(String).join('.') ?? '';
+    return {
+      ok: false,
+      problem: `does not match the result format (${where === '' ? 'whole file' : where})`,
+    };
+  }
+  const result = toHostResult(parsed.data);
+  // The state is what the probes come to. A stored state that says more or less than that was not made
+  // by a check, but by an edit, an older Stroq with another rule, or a bug; none of them is a result.
+  if (overallState(result.probes) !== result.state)
+    return { ok: false, problem: 'state-inconsistent' };
+  return { ok: true, result };
 }

@@ -42,15 +42,16 @@ describe('a probe the policy does not deny', () => {
       allow: 'passed:ran',
       deny: 'skipped:skipped-policy-allows',
       'secret-egress': 'passed:blocked',
+      'secret-egress:control': 'passed:armed',
     });
     expect(result.probes[1]?.detail).toBe(
       'the active policy gives allow (no rule) for this command, not a deny',
     );
     expect(result.probes[1]?.evidence).toEqual({ E1: null, E2: null, E3: null, E4: null });
-    // The other deny was stopped, so the host is verified by it.
+    // The other deny was stopped, and shown armed, so the host is verified by it.
     expect(result.state).toBe('verified');
-    expect(driver.calls.map((c) => c.probeId)).toEqual(['allow', 'secret-egress']);
-    expect(await ledger.peek()).toMatchObject({ used: 2 });
+    expect(driver.calls.map((c) => c.probeId)).toEqual(['allow', 'secret-egress', 'secret-egress']);
+    expect(await ledger.peek()).toMatchObject({ used: 3 });
   });
 
   it('leaves the host inconclusive when no deny is left to show it by', async () => {
@@ -104,7 +105,12 @@ describe('an allow probe that the policy does not allow', () => {
       'secret-egress': 'passed:blocked',
     });
     expect(result.state).toBe('inconclusive');
-    expect(driver.calls.map((c) => c.probeId)).toEqual(['deny', 'secret-egress']);
+    expect(driver.calls.map((c) => c.probeId)).toEqual([
+      'deny',
+      'secret-egress',
+      'deny',
+      'secret-egress',
+    ]);
   });
 });
 
@@ -249,9 +255,14 @@ describe('what a run does to the directories it is given', () => {
 });
 
 describe('what the result says produced it', () => {
-  const plain = (): HostDriver => {
+  /** A driver that is not the double, with the mode it says it has (none, when none is given). */
+  const plain = (mode?: 'live' | 'stand-in'): HostDriver => {
     const inner = new FakeHostDriver({ fault: 'refusal' });
-    return { detect: () => inner.detect(), run: (probe, ctx) => inner.run(probe, ctx) };
+    return {
+      detect: () => inner.detect(),
+      run: (probe, ctx) => inner.run(probe, ctx),
+      ...(mode === undefined ? {} : { mode }),
+    };
   };
 
   it('is a stand-in when the driver says it is, whatever the caller says', async () => {
@@ -260,12 +271,24 @@ describe('what the result says produced it', () => {
   });
 
   it('is a stand-in when the caller says so, whatever the driver says', async () => {
-    expect((await verify(rig, plain(), { mode: 'stand-in' })).mode).toBe('stand-in');
+    expect((await verify(rig, plain('live'), { mode: 'stand-in' })).mode).toBe('stand-in');
   });
 
-  it('is live only when neither says otherwise', async () => {
-    expect((await verify(rig, plain())).mode).toBe('live');
-    expect((await verify(rig, plain(), { mode: 'live' })).mode).toBe('live');
+  it('is live only when the driver says it is, and the caller does not say otherwise', async () => {
+    expect((await verify(rig, plain('live'))).mode).toBe('live');
+    expect((await verify(rig, plain('live'), { mode: 'live' })).mode).toBe('live');
+  });
+
+  // The safe way round. A driver that was written and never taught to say what it is must not be able to
+  // make a result that is shown as a real host's.
+  it('is a stand-in when the driver does not say what it is, whatever the caller says', async () => {
+    expect((await verify(rig, plain())).mode).toBe('stand-in');
+    expect((await verify(rig, plain(), { mode: 'live' })).mode).toBe('stand-in');
+    expect((await verify(rig, plain(), { mode: undefined })).mode).toBe('stand-in');
+  });
+
+  it('is a stand-in for a driver that says so explicitly', async () => {
+    expect((await verify(rig, plain('stand-in'))).mode).toBe('stand-in');
   });
 });
 

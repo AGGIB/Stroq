@@ -3,7 +3,9 @@ import { auditSummaryOf } from '../../src/live/evidence.js';
 import type {
   HostResult,
   HostRun,
+  LiveOutcome,
   Probe,
+  ProbeKind,
   ProbeResult,
   SettledExpectation,
   StreamEvent,
@@ -88,7 +90,68 @@ export const passedProbe = (over: Partial<ProbeResult> = {}): ProbeResult => ({
   ...over,
 });
 
-export const validResult = (over: Partial<HostResult> = {}): HostResult => ({
+/** The control run of a probe that passed: the same command under a hook that allows all, and its file came. */
+export const armedControl = (id: string, kind: ProbeKind): ProbeResult => ({
+  id: `${id}:control`,
+  kind,
+  mark: 'passed',
+  reason: 'armed',
+  evidence: { E1: true, E2: null, E3: true, E4: null },
+});
+
+const unfinished = (
+  id: string,
+  kind: ProbeKind,
+  mark: ProbeResult['mark'],
+  reason: string,
+): ProbeResult => ({
+  id,
+  kind,
+  mark,
+  reason,
+  evidence: { E1: false, E2: false, E3: false, E4: null },
+});
+
+/** The probes a result of this state is made of: what its state is the state of. */
+export const probesFor = (state: LiveOutcome): ProbeResult[] => {
+  switch (state) {
+    case 'verified':
+      return [
+        passedProbe(),
+        passedProbe({
+          id: 'deny',
+          kind: 'deny',
+          reason: 'blocked',
+          evidence: { E1: true, E2: true, E3: true, E4: true },
+        }),
+        armedControl('deny', 'deny'),
+      ];
+    case 'failed':
+      return [
+        passedProbe(),
+        {
+          id: 'deny',
+          kind: 'deny',
+          mark: 'failed',
+          reason: 'executed-despite-deny',
+          evidence: { E1: true, E2: true, E3: false, E4: false },
+        },
+      ];
+    case 'inconclusive':
+      return [
+        unfinished('allow', 'allow', 'inconclusive', 'limit'),
+        unfinished('deny', 'deny', 'inconclusive', 'timeout'),
+      ];
+    case 'not-attempted':
+      return [
+        unfinished('allow', 'allow', 'not-attempted', 'budget'),
+        unfinished('deny', 'deny', 'not-attempted', 'budget'),
+      ];
+  }
+};
+
+/** A result of this state that follows its own rule: its probes come to the state it has. */
+export const resultOf = (state: LiveOutcome, over: Partial<HostResult> = {}): HostResult => ({
   version: 1,
   agent: 'claude-code',
   hostVersion: '2.1.271',
@@ -96,16 +159,15 @@ export const validResult = (over: Partial<HostResult> = {}): HostResult => ({
   policySha256: DIGEST,
   at: '2026-10-10T01:02:03.456Z',
   mode: 'live',
-  probes: [
-    passedProbe(),
-    passedProbe({
-      id: 'deny',
-      kind: 'deny',
-      reason: 'blocked',
-      evidence: { E1: true, E2: true, E3: true, E4: true },
-    }),
-  ],
-  state: 'verified',
-  caveats: ['no-control-run'],
+  probes: probesFor(state),
+  state,
+  caveats: [],
   ...over,
 });
+
+/**
+ * A verified result with a control run for its deny, unless it says another state, in which case its
+ * probes are the ones that state is made of. What is said outright is taken as it is said.
+ */
+export const validResult = (over: Partial<HostResult> = {}): HostResult =>
+  resultOf(over.state ?? 'verified', over);
