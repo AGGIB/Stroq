@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -18,6 +20,7 @@ import {
   pluginCliDirIn,
   policyFileIn,
   secretsFileIn,
+  storeDirIn,
 } from '../../src/paths.js';
 import { SRT_BIN, generateSandbox, srtArgv } from '../../src/run/sandbox.js';
 import { binOnPath } from '../../src/run/which.js';
@@ -32,11 +35,15 @@ import { binOnPath } from '../../src/run/which.js';
  *     STROQ_LIVE_SRT=1 PATH="$(dirname "$(command -v srt)"):$PATH" pnpm vitest run packages/cli/test/run/sandbox.live.test.ts
  *
  * What it reproduces is what `protectedState` in `run/sandbox.ts` rests on, measured on macOS
- * (Seatbelt) with srt 0.0.77 on 2026-10-10: with `allowWrite` naming a directory and `denyWrite`
- * naming paths inside it, `denyWrite` wins; a write to a denied file that does not exist yet fails
- * with "Operation not permitted" and leaves nothing behind; a file cannot be made inside a denied
- * directory that exists; `mkdir` of a denied directory that does not exist yet fails, and so does
- * `mkdir -p` below it; the rest of the allowed directory stays writable.
+ * (Seatbelt, an APFS volume that does not tell upper case from lower) with srt 0.0.77 on 2026-10-10:
+ * with `allowWrite` naming a directory and `denyWrite` naming paths inside it, `denyWrite` wins; a
+ * write to a denied file that does not exist yet fails with "Operation not permitted" and leaves
+ * nothing behind, however its name is cased (`POLICY.YAML`, `Policy.yaml`); a file cannot be made
+ * inside a denied directory that exists; `mkdir` of a denied directory that does not exist yet fails,
+ * however it is cased (`STORE`), and so does `mkdir -p` below it; a hard link to a denied file that
+ * exists fails; moving a fresh file onto the name of a denied path that does not exist yet fails;
+ * a symbolic link to such a name can be made, and a write through it fails; the denied file that exists
+ * stays as it was; the rest of the allowed directory stays writable.
  *
  * The config is made by `generateSandbox` itself, for a Stroq home in a directory under
  * `os.tmpdir()` that is NOT resolved first: on a Mac that is `/var/folders/…`, a link to
@@ -162,6 +169,113 @@ describe.skipIf(!measurable)(
         expect(deep.status, `${target}/…`).not.toBe(0);
         expect(existsSync(target), `a placeholder at ${target}`).toBe(false);
       }
+    });
+
+    // The volume this was measured on does not tell `POLICY.YAML` from `policy.yaml`; on one that does, they
+    // are two names and only the second is denied, so there is nothing to measure.
+    function caseInsensitive(): boolean {
+      const probe = join(work, 'Case-Probe.txt');
+      writeFileSync(probe, 'probe');
+      return existsSync(join(work, 'case-probe.txt'));
+    }
+
+    it('denies a write to a protected file that does not exist yet under another case, and makes none', (ctx) => {
+      if (!caseInsensitive()) ctx.skip();
+      for (const name of ['POLICY.YAML', 'Policy.yaml']) {
+        const target = join(home, name);
+        const run = inSandbox('printf marker > "$1"', target);
+        expect(run.status, name).not.toBe(0);
+        expect(run.stderr, name).toContain('Operation not permitted');
+        expect(readdirSync(home), name).not.toContain(name);
+        expect(existsSync(policyFileIn(home)), 'policy.yaml appeared').toBe(false);
+      }
+    });
+
+    it('denies making a protected directory that does not exist yet under another case', (ctx) => {
+      if (!caseInsensitive()) ctx.skip();
+      const target = join(home, 'STORE');
+      const run = inSandbox('mkdir "$1"', target);
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain('Operation not permitted');
+      expect(existsSync(storeDirIn(home)), 'store appeared').toBe(false);
+      expect(readdirSync(home)).not.toContain('STORE');
+    });
+
+    it('denies a hard link to a protected file that exists, and leaves what is in it', () => {
+      const alias = join(work, 'alias-of-secrets');
+      const run = inSandbox('ln "$1" "$2"', secretsFileIn(home), alias);
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain('Operation not permitted');
+      expect(existsSync(alias), 'a link to the file').toBe(false);
+      expect(readFileSync(secretsFileIn(home), 'utf8')).toBe('seed');
+    });
+
+    it('denies moving a fresh file onto the name of a protected file that does not exist yet', () => {
+      const fresh = join(work, 'fresh-policy.yaml');
+      writeFileSync(fresh, 'marker');
+      const run = inSandbox('mv "$1" "$2"', fresh, policyFileIn(home));
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain('Operation not permitted');
+      expect(existsSync(policyFileIn(home)), 'policy.yaml appeared').toBe(false);
+      expect(readFileSync(fresh, 'utf8'), 'the fresh file stays where it was').toBe('marker');
+    });
+
+    // A link to a name that is denied but not there is made in the workspace, which is writable: the
+    // link is not the file. Writing through it is, and it fails.
+    it('lets a symbolic link to a protected name that does not exist yet be made, and denies writing through it', () => {
+      const link = join(work, 'link-to-bindings');
+      const made = inSandbox('ln -s "$1" "$2"', join(home, 'bindings.yaml'), link);
+      expect(made.status, made.stderr).toBe(0);
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      const run = inSandbox('printf marker > "$1"', link);
+      expect(run.status).not.toBe(0);
+      expect(run.stderr).toContain('Operation not permitted');
+      expect(existsSync(join(home, 'bindings.yaml')), 'bindings.yaml appeared').toBe(false);
+    });
+
+    it('leaves the protected file that exists as it was after all of that', () => {
+      expect(readFileSync(secretsFileIn(home), 'utf8')).toBe('seed');
+      expect(readdirSync(cliDirIn(home))).toEqual([]);
+    });
+
+    // Why a home with `[` in its path is refused as a write root (`hasGlobSyntax`): srt reads the characters
+    // `* ? [ ]` in `denyRead` and `denyWrite` as a pattern, so a deny for `[x]/f` is one for `x/f`, and the file
+    // at the path as written is neither unreadable nor unwritable. If a later srt reads the path as written, this
+    // fails, and the refusal can go.
+    it('reads a bracket in a denied path as a pattern: the file at the path as written is not denied', () => {
+      const bracket = join(work, '[x]');
+      const matched = join(work, 'x');
+      for (const dir of [bracket, matched]) {
+        mkdirSync(dir);
+        writeFileSync(join(dir, 'secret.txt'), 'seed');
+      }
+      const settings = join(root, 'srt-pattern.json');
+      writeFileSync(
+        settings,
+        JSON.stringify({
+          filesystem: {
+            denyRead: [join(bracket, 'secret.txt')],
+            denyWrite: [join(bracket, 'secret.txt')],
+            allowWrite: [work],
+          },
+          network: { allowedDomains: [], deniedDomains: [] },
+        }),
+      );
+      const asInSandbox = (script: string, target: string) =>
+        spawnSync(srt as string, srtArgv(settings, 'sh', ['-c', script, 'sh', target]), {
+          encoding: 'utf8',
+          timeout: 30_000,
+        });
+      // The path the pattern matches is denied, for reading and for writing.
+      expect(asInSandbox('cat "$1"', join(matched, 'secret.txt')).status).not.toBe(0);
+      const wrote = asInSandbox('printf marker > "$1"', join(matched, 'secret.txt'));
+      expect(wrote.status).not.toBe(0);
+      expect(wrote.stderr).toContain('Operation not permitted');
+      expect(readFileSync(join(matched, 'secret.txt'), 'utf8')).toBe('seed');
+      // The path as written is not.
+      expect(asInSandbox('cat "$1"', join(bracket, 'secret.txt')).stdout).toBe('seed');
+      expect(asInSandbox('printf marker > "$1"', join(bracket, 'secret.txt')).status).toBe(0);
+      expect(readFileSync(join(bracket, 'secret.txt'), 'utf8')).toBe('marker');
     });
 
     it('leaves the rest of the allowed area writable after all of that', () => {

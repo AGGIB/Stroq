@@ -8,7 +8,12 @@ import {
   secretsFileIn,
   stroqHome,
 } from '../../src/paths.js';
-import { generateSandbox, srtArgv, type SandboxHost } from '../../src/run/sandbox.js';
+import {
+  generateSandbox,
+  hasGlobSyntax,
+  srtArgv,
+  type SandboxHost,
+} from '../../src/run/sandbox.js';
 import { under } from './state-names.js';
 
 const inputs = (over: Partial<Parameters<typeof generateSandbox>[0]> = {}, host?: SandboxHost) =>
@@ -288,6 +293,170 @@ describe.skipIf(process.platform === 'win32')(
         expect(denied).toEqual([...CREDENTIALS, ...under(HOME)]);
         expect(asked).toEqual([]);
       });
+    });
+  },
+);
+
+// What the generated config does NOT protect, so that a launch can say so. On macOS srt denies a path
+// that does not exist yet, so every name is listed; elsewhere an absent name is left out (srt would make a
+// placeholder for it), and the agent can create it during the run. `unprotected` is those names. A home
+// whose path holds a character that srt reads as a pattern cannot be denied at all.
+describe.skipIf(process.platform === 'win32')(
+  'the Stroq state the config cannot deny writes to',
+  () => {
+    const HOME = '/home/me/.stroq';
+    const PLAIN = { realpath: (path: string): string => path };
+    const MAC: SandboxHost = { ...PLAIN, platform: 'darwin', exists: () => false };
+    const elsewhere = (
+      existing: readonly string[],
+      platform: NodeJS.Platform = 'linux',
+    ): SandboxHost => ({
+      ...PLAIN,
+      platform,
+      exists: (path) => existing.includes(path),
+    });
+
+    describe('unprotected', () => {
+      it('is nothing on macOS, where every name is listed whether it exists or not', () => {
+        expect(inputs({}, MAC).unprotected).toEqual([]);
+      });
+
+      it('is, anywhere else, each name that is not there, as a path and in the order of the list', () => {
+        const there = [secretsFileIn(HOME), cliDirIn(HOME)];
+        const left = under(HOME).filter((path) => !there.includes(path));
+        expect(left.length).toBe(under(HOME).length - 2);
+        for (const platform of ['linux', 'freebsd', 'win32'] as const)
+          expect(inputs({}, elsewhere(there, platform)).unprotected, platform).toEqual(left);
+      });
+
+      it('is nothing where every name is there', () => {
+        expect(inputs({}, elsewhere(under(HOME))).unprotected).toEqual([]);
+      });
+
+      it('is every name where none is there', () => {
+        expect(inputs({}, elsewhere([])).unprotected).toEqual(under(HOME));
+      });
+
+      it('is nothing for an empty home, which names no state', () => {
+        expect(inputs({ stroqHome: '' }, elsewhere([])).unprotected).toEqual([]);
+      });
+
+      // A home that was refused as a write root cannot be written at all, so its names are not at the
+      // agent's mercy and are not reported as if they were.
+      it('is nothing for a home that was refused as too broad: nothing under it can be written', () => {
+        const broad = inputs({ stroqHome: '/home/me' }, elsewhere([]));
+        expect(broad.refused).toEqual(['/home/me']);
+        expect(broad.unprotected).toEqual([]);
+      });
+
+      // The names are those of the home with its links resolved (that is how srt matches a path that is not
+      // there), and the root that makes them writable is the home as it was given: they are compared by the same path.
+      it('finds the names under a home that is reached through a link', () => {
+        const made = inputs(
+          { stroqHome: '/srv/link/.stroq' },
+          {
+            platform: 'linux',
+            exists: () => false,
+            realpath: (path) =>
+              path.startsWith('/srv/link') ? path.replace('/srv/link', '/mnt/real') : path,
+          },
+        );
+        expect(made.unprotected).toEqual(under('/mnt/real/.stroq'));
+      });
+
+      it('finds the names under a root that is above the home, reached through a link', () => {
+        const made = inputs(
+          { stroqHome: '/srv/link/deep/.stroq', workspace: '/srv/link' },
+          {
+            platform: 'linux',
+            exists: () => false,
+            realpath: (path) =>
+              path.startsWith('/srv/link') ? path.replace('/srv/link', '/mnt/real') : path,
+          },
+        );
+        expect(made.unprotected).toEqual(under('/mnt/real/deep/.stroq'));
+      });
+
+      it('is a list of paths that the config does not deny', () => {
+        const made = inputs({}, elsewhere([secretsFileIn(HOME)]));
+        for (const path of made.unprotected)
+          expect(made.settings.filesystem.denyWrite, path).not.toContain(path);
+      });
+    });
+
+    describe('a home whose path srt reads as a pattern', () => {
+      // Measured against srt 0.0.77 on macOS (2026-10-10): a `denyWrite` entry holding `[x]` protected the
+      // path that the pattern matches (`.../x/f`) and not the file at the path as written (`.../[x]/f`), which
+      // the agent could still overwrite. A backslash before the bracket made no difference. `denyRead` reads
+      // the same way. So no entry for a state path can be written for such a home.
+      it.each(['*', '?', '[', ']'])(
+        'refuses a home with %j in its path as a write root',
+        (mark) => {
+          const home = `/home/me/st${mark}roq`;
+          const made = inputs({ stroqHome: home }, MAC);
+          expect(made.refused).toEqual([home]);
+          expect(made.settings.filesystem.allowWrite).not.toContain(home);
+          expect(made.settings.filesystem.allowWrite).toEqual([
+            '/work/repo',
+            '/tmp',
+            '/home/me/.claude',
+          ]);
+        },
+      );
+
+      it('refuses it on every platform, whatever is there', () => {
+        const home = '/srv/[stroq]';
+        for (const host of [MAC, elsewhere([]), elsewhere(under(home), 'linux')])
+          expect(inputs({ stroqHome: home }, host).refused, host.platform).toEqual([home]);
+      });
+
+      it('leaves the unprotected list empty when no other root can write there', () => {
+        expect(inputs({ stroqHome: '/srv/[stroq]' }, MAC).unprotected).toEqual([]);
+      });
+
+      it('names every protected name as unprotected when another root still covers the home', () => {
+        const home = '/work/repo/[stroq]';
+        const made = inputs({ stroqHome: home }, MAC);
+        expect(made.refused).toEqual([home]);
+        expect(made.settings.filesystem.allowWrite).toContain('/work/repo');
+        expect(made.unprotected).toEqual(under(home));
+      });
+
+      it('looks at the home as it is after its links are resolved', () => {
+        const made = inputs(
+          { stroqHome: '/srv/link/.stroq' },
+          { platform: 'darwin', exists: () => false, realpath: () => '/srv/real*/.stroq' },
+        );
+        expect(made.refused).toEqual(['/srv/link/.stroq']);
+      });
+
+      it('does not refuse an ordinary home, or one with other punctuation in it', () => {
+        for (const home of [
+          '/home/me/.stroq',
+          '/home/me/my stroq (old)/.stroq',
+          '/home/me/a-b_c+d',
+        ]) {
+          const made = inputs({ stroqHome: home }, MAC);
+          expect(made.refused, home).toEqual([]);
+          expect(made.settings.filesystem.allowWrite, home).toContain(home);
+        }
+      });
+    });
+
+    describe('hasGlobSyntax', () => {
+      it.each(['*', '?', '[', ']', '/a/[b]/c', '/a/b*', '/a/?', '/a/b]'])(
+        'is true for %j',
+        (path) => {
+          expect(hasGlobSyntax(path)).toBe(true);
+        },
+      );
+
+      it.each(['', '/a/b', '/a/b c/(d)', '/a/{b,c}', '/a/.stroq/policy.yaml', 'C:\\Users\\a'])(
+        'is false for %j',
+        (path) => {
+          expect(hasGlobSyntax(path)).toBe(false);
+        },
+      );
     });
   },
 );
