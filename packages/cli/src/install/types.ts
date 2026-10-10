@@ -14,9 +14,10 @@ import { z } from 'zod';
 
 /**
  * What a source may cost before it is refused. The size limits are held by whatever reads the bytes
- * (a directory reader, a tar reader), the path limits by `checkEntryPath`, and the clock limits by the
- * one module that touches the network. A tree that is over any of them is not looked at further: a
- * source that needs more is not a skill or a server, or is an attack on the person who looks.
+ * (a directory reader, a tar reader) and again by the tree, which judges them one entry at a time, in
+ * the order given; the path limits by `checkEntryPath`; and the clock limits by the one module that
+ * touches the network. A tree that is over any of them is not looked at further: a source that needs
+ * more is not a skill or a server, or is an attack on the person who looks.
  */
 export const LIMITS = Object.freeze({
   /** The most a download may be, as sent: 20 MiB. */

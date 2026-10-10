@@ -6,9 +6,10 @@
 // that was already vouched for, to plant a file a tool runs by itself (`.git`), or to look like
 // something it is not when it is shown to the person who has to decide.
 //
-// A path is judged as text, before any filesystem is asked, so that the answer is the same on every
-// machine. This file is plain ASCII on purpose: the characters it refuses are written as numbers, so
-// that none of them can sit unseen in the source of the code that refuses them.
+// A path is judged as text, before any filesystem is asked, so that the answer does not depend on the
+// disk of the machine (it does follow the Unicode tables of the Node that runs it, see below). This
+// file is plain ASCII on purpose: the characters it refuses are written as numbers, so that none of
+// them can sit unseen in the source of the code that refuses them.
 import { LIMITS } from './types.js';
 
 export type PathCheck =
