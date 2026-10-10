@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { buildTree, treeDigest, treeManifest } from '../../src/install/tree.js';
@@ -374,4 +375,25 @@ describe('stroq-tree/1 golden vectors', () => {
       });
     });
   });
+});
+
+// The spec is where an author of another reader looks, so what it prints has to be what is pinned here:
+// the text that the twelve-entry vector hashes, and every digest of this file.
+describe('the spec prints the vectors that are pinned here', () => {
+  const spec = readFileSync(
+    new URL('../../../../docs/superpowers/specs/2026-10-10-safe-install.md', import.meta.url),
+    'utf8',
+  );
+
+  it('prints the text that the twelve-entry vector hashes', () => {
+    expect(spec).toContain(MIXED_MANIFEST);
+    expect(sha256OfText(MIXED_MANIFEST)).toBe(GOLDEN.mixed);
+  });
+
+  it.each([...Object.entries(GOLDEN), ...Object.entries(GOLDEN_ORDER)])(
+    'prints the digest of %s',
+    (_name, digest) => {
+      expect(spec).toContain(digest);
+    },
+  );
 });

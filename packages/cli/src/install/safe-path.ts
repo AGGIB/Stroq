@@ -113,7 +113,8 @@ const DRIVE_LETTER = /^[A-Za-z]:/;
  * alias that is covered. NTFS gives every long name a short one (`GITMOD~1` for `.gitmodules`,
  * `GITATT~1` for `.gitattributes`), and a name that is not itself dangerous is not refused for what it
  * could be called: `.gitmodules` and `.gitattributes` are ordinary files in a tree, and their aliases
- * are not looked for.
+ * are not looked for. Nor is the alias of one ordinary name of a folder being another ordinary name of
+ * it (`a-long-script.sh` and `a-long~1.sh`): that is a known limit, in the hazards of the spec.
  */
 const GIT_SHORT_NAME = /^git~\d+$/;
 /**
