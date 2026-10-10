@@ -102,6 +102,33 @@ describe('an entry is read once', () => {
     });
   });
 
+  // The plainest object that can answer differently the second time: accessor properties.
+  it('an object with getters that answer differently the second time', () => {
+    const real = new TextEncoder().encode('abc');
+    const reads = { path: 0, bytes: 0 };
+    const entry: TreeEntry = {
+      get path() {
+        reads.path += 1;
+        return reads.path === 1 ? 'a.txt' : '../escape';
+      },
+      kind: 'file',
+      exec: false,
+      size: 3,
+      sha256: fileDigestOf(real),
+      get bytes() {
+        reads.bytes += 1;
+        return reads.bytes === 1 ? real : new TextEncoder().encode('xyz');
+      },
+    };
+
+    const tree = buildTree([entry]);
+
+    expect(tree.entries.map((e) => e.path)).toEqual(['a.txt']);
+    expect(new TextDecoder().decode(tree.entries[0]?.bytes)).toBe('abc');
+    expect(treeDigest(tree)).toMatch(/^[0-9a-f]{64}$/);
+    expect(reads).toEqual({ path: 1, bytes: 1 });
+  });
+
   it('a tree whose entries are not the caller objects, and cannot be changed through them', () => {
     const entry: { -readonly [K in keyof TreeEntry]: TreeEntry[K] } = {
       ...fileEntry('a.txt', 'abc'),
