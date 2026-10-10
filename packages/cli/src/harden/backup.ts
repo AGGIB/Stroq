@@ -70,7 +70,7 @@ const whyNoCopy = (shape: CredentialShape): string =>
 // ---------------------------------------------------------------------------------------------
 // Storing the copy.
 
-/** How many copies of one file are kept: this one and the four before it. */
+/** How many copies of one file are kept: the first, and the newest four. */
 export const BACKUPS_KEPT_PER_FILE = 5;
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -98,6 +98,20 @@ export function newBackupId(now: Date): string {
 export const backupPath = (home: string, id: string, real: string): string =>
   join(backupsDirIn(home), id, `${sha256Text(real)}.bak`);
 
+/**
+ * Removes the copy of `real` that `backupFile` stored under `id`, and its directory if that leaves
+ * it empty: for an apply that did not go through, whose copy nothing will ever use. Best effort;
+ * a copy that stays is clutter and not harm.
+ */
+export async function removeBackup(env: HardenEnv, real: string, id: string): Promise<void> {
+  if (!isBackupId(id)) return;
+  const fs = env.fs ?? nodeFs;
+  const file = backupPath(env.home, id, real);
+  assertWriteAllowed(file, { root: env.home, initRule: false });
+  await fs.unlink(file).catch(() => undefined);
+  await fs.rmdir(dirname(file)).catch(() => undefined);
+}
+
 /** What `backupFile` stored for `real` under `id`, or `null` when there is nothing usable there. */
 export function readBackup(env: HardenEnv, real: string, id: string): string | null {
   if (!isBackupId(id)) return null;
@@ -109,14 +123,20 @@ export function readBackup(env: HardenEnv, real: string, id: string): string | n
 }
 
 /**
- * Removes the oldest copies of `real` until `BACKUPS_KEPT_PER_FILE` are left, counting the one
- * just written (`keepId`), which is never removed whatever its id sorts like. Other files' copies
- * are not looked at, and a directory is removed only when this leaves it empty.
+ * Removes copies of `real` until `BACKUPS_KEPT_PER_FILE` are left, counting the one just written
+ * (`keepId`), which is never removed whatever its id sorts like.
+ *
+ * Which ones go: the FIRST copy stays, and so do the newest four. The first is the file as it was
+ * before Stroq ever touched it, the one thing that undo can always go back to; dropping the oldest
+ * (as a plain "newest five" does) would throw it away at the sixth apply. The ones between are
+ * only steps on the way, and undo can take an apply's entries out of the file itself when its copy
+ * is gone. Other files' copies are not looked at, and a directory is removed only when this
+ * leaves it empty.
  */
 async function prune(fs: Fs, home: string, real: string, keepId: string): Promise<void> {
   const root = backupsDirIn(home);
   const name = `${sha256Text(real)}.bak`;
-  const holders: string[] = [];
+  const holders: string[] = [keepId];
   for (const id of await fs.readdir(root)) {
     if (id === keepId || !isBackupId(id)) continue;
     const holds = await fs.stat(join(root, id, name)).then(
@@ -125,11 +145,14 @@ async function prune(fs: Fs, home: string, real: string, keepId: string): Promis
     );
     if (holds) holders.push(id);
   }
-  const old = [...holders]
-    .sort()
-    .reverse()
-    .slice(BACKUPS_KEPT_PER_FILE - 1);
-  for (const id of old) {
+  const ordered = [...holders].sort();
+  const keep = new Set([
+    ...ordered.slice(0, 1),
+    ...ordered.slice(-(BACKUPS_KEPT_PER_FILE - 1)),
+    keepId,
+  ]);
+  for (const id of ordered) {
+    if (keep.has(id)) continue;
     await fs.unlink(join(root, id, name)).catch(() => undefined);
     await fs.rmdir(join(root, id)).catch(() => undefined);
   }

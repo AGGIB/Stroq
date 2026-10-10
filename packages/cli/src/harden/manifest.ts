@@ -40,6 +40,16 @@ export interface ManifestEntry {
   readonly recipe: string;
   /** The file did not exist before this apply: undo removes it if it is still only Stroq's. */
   readonly created: boolean;
+  /**
+   * The real path of the file when it was changed, links followed. It is also the key the entry is
+   * filed under; undo refuses to act on a path that no longer leads to it.
+   */
+  readonly real: string;
+  /**
+   * The real path of the directory the file had to stay inside when it was changed, or `null`
+   * if the plan named none. Undo keeps to it whatever the caller says.
+   */
+  readonly root: string | null;
   readonly edits: readonly RecordedEdit[];
   /** SHA-256 of the file before (`null` if it did not exist) and after. */
   readonly shaBefore: string | null;
@@ -126,9 +136,13 @@ const editSchema = z.discriminatedUnion('kind', [
     ),
 ]);
 
+const absolutePath = z.string().refine((path) => isAbsolute(path), 'a path is absolute');
+
 const entrySchema = z.strictObject({
   recipe: z.string().min(1).max(128),
   created: z.boolean(),
+  real: absolutePath,
+  root: absolutePath.nullable(),
   edits: z.array(editSchema),
   shaBefore: sha256Hex.nullable(),
   shaAfter: sha256Hex,

@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ManifestEntry } from '../../src/harden/manifest.js';
 import { fakeEnv, tempDir } from './helpers.js';
@@ -9,6 +10,8 @@ export const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
 export const entry = (overrides: Partial<ManifestEntry> = {}): ManifestEntry => ({
   recipe: 'claude-deny-read',
   created: false,
+  real: join(tmpdir(), 'stroq-fixture', 'settings.json'),
+  root: null,
   edits: [
     {
       kind: 'json-array-add',

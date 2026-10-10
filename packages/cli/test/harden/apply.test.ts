@@ -24,7 +24,7 @@ const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
 
 describe('applyPlan: making the change', () => {
   it('writes the planned text, keeps a copy of what was there and records what it did', async () => {
-    const { env, file, home, planJson } = engine();
+    const { env, file, home, project, planJson } = engine();
     const before = jsonText({ permissions: { deny: ['a'] } });
     writeFileSync(file('settings.json'), before);
     const plan = planJson('settings.json', [addDeny('b')]);
@@ -41,6 +41,8 @@ describe('applyPlan: making the change', () => {
     expect(entries?.[0]).toEqual({
       recipe: 'test-recipe',
       created: false,
+      real: file('settings.json'),
+      root: project,
       edits: plan.edits,
       shaBefore: sha256(before),
       shaAfter: sha256(plan.after),

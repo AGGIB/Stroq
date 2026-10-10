@@ -153,22 +153,44 @@ describe('backupFile: a file that holds a credential', () => {
   });
 });
 
-describe('backupFile: keeping the newest five of a file', () => {
+describe('backupFile: which five copies of a file are kept', () => {
   const idsFor = (count: number): string[] => {
     const clock = steppingClock();
     return Array.from({ length: count }, () => newBackupId(clock()));
   };
 
-  it('keeps five and removes the older ones, with the directories they leave empty', async () => {
+  // The first copy is the file as it was before Stroq ever touched it. Keeping the newest five
+  // would throw it away at the sixth apply, and with it the only way back to what the owner wrote.
+  it('keeps the first copy and the newest four, and removes the ones between, with the directories they leave empty', async () => {
     const { home, real, env } = setup();
     const ids = idsFor(7);
 
     for (const id of ids) await backupFile(env, real, bytes(`copy ${id}`), id);
 
     expect(BACKUPS_KEPT_PER_FILE).toBe(5);
-    expect(copiesOf(home, real)).toEqual(ids.slice(2));
-    expect(readdirSync(join(home, 'backups')).sort()).toEqual(ids.slice(2));
+    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(3)]);
+    expect(readdirSync(join(home, 'backups')).sort()).toEqual([ids[0], ...ids.slice(3)]);
+    expect(readFileSync(backupPath(home, ids[0] ?? '', real), 'utf8')).toBe(`copy ${ids[0]}`);
     expect(readFileSync(backupPath(home, ids[6] ?? '', real), 'utf8')).toBe(`copy ${ids[6]}`);
+  });
+
+  it('keeps all of them while there are five or fewer', async () => {
+    const { home, real, env } = setup();
+    const ids = idsFor(5);
+
+    for (const id of ids) await backupFile(env, real, bytes('x'), id);
+
+    expect(copiesOf(home, real)).toEqual(ids);
+  });
+
+  it('keeps the first copy however many come after it', async () => {
+    const { home, real, env } = setup();
+    const ids = idsFor(25);
+
+    for (const id of ids) await backupFile(env, real, bytes(`copy ${id}`), id);
+
+    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(-4)]);
+    expect(readFileSync(backupPath(home, ids[0] ?? '', real), 'utf8')).toBe(`copy ${ids[0]}`);
   });
 
   it('keeps five per file, and never touches the copies of another file', async () => {
@@ -179,10 +201,11 @@ describe('backupFile: keeping the newest five of a file', () => {
     for (const id of ids.slice(0, 2)) await backupFile(env, other, bytes('other'), id);
     for (const id of ids) await backupFile(env, real, bytes('this'), id);
 
-    expect(copiesOf(home, real)).toEqual(ids.slice(2));
+    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(3)]);
     expect(copiesOf(home, other)).toEqual(ids.slice(0, 2));
-    // The two oldest directories still hold the other file's copies.
-    expect(readdirSync(join(home, 'backups')).sort()).toEqual(ids);
+    // The directory of the third copy held nothing else, and is gone; the first two still hold
+    // the other file’s copies.
+    expect(readdirSync(join(home, 'backups')).sort()).toEqual(ids.filter((id) => id !== ids[2]));
   });
 
   it('never removes the copy it has just written, even if its id sorts oldest', async () => {
@@ -195,6 +218,19 @@ describe('backupFile: keeping the newest five of a file', () => {
     const kept = copiesOf(home, real);
     expect(kept).toHaveLength(5);
     expect(kept).toContain(ids[0]);
+  });
+
+  it('never removes the copy it has just written, even if its id sorts in the middle of the rest', async () => {
+    const { home, real, env } = setup();
+    const ids = idsFor(9);
+    const middle = ids[2] ?? '';
+    for (const index of [0, 5, 6, 7, 8])
+      await backupFile(env, real, bytes('copy'), ids[index] ?? '');
+
+    await backupFile(env, real, bytes('between'), middle);
+
+    // The first copy, the four newest, and the one just written, which is neither.
+    expect(copiesOf(home, real)).toEqual([ids[0], middle, ...ids.slice(5)]);
   });
 
   it('keeps going when it cannot remove an old copy', async () => {
