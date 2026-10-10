@@ -29,9 +29,12 @@ import {
   stroqShim,
   BARE_PATH,
 } from '../helpers/plugin-wrapper.js';
+import { pluginCliDirIn } from '../../src/paths.js';
 
 describe.skipIf(process.platform === 'win32')('the plugin wrapper, with a copy of its own', () => {
-  const copyOf = (home: string): string => join(home, 'plugin-cli', PIN);
+  // Where `paths.ts` says the copy is, which is what `run/sandbox.ts` protects: the script builds
+  // the directory itself, in shell, and these tests run the script.
+  const copyOf = (home: string): string => join(pluginCliDirIn(home), PIN);
   const entryOf = (home: string): string =>
     join(copyOf(home), 'node_modules', '@stroq', 'cli', 'dist', 'index.js');
   const ALLOWED = '{"hookSpecificOutput":{"permissionDecision":"allow","from":"copy"}}';

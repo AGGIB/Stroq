@@ -24,6 +24,7 @@ import {
   type InitMachine,
 } from '../../src/commands/init.js';
 import { installKey, readInstallRecord } from '../../src/commands/install-record.js';
+import { cliDirIn } from '../../src/paths.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
 import { CODEX_PRE_MATCHER, codexHooksPath } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, isStroqCopilotHooks } from '../../src/commands/copilot-hooks.js';
@@ -903,6 +904,15 @@ describe('stableEntry', () => {
     expect(existsSync(join(home, 'cli', '9.9.9', 'node_modules', '.bin'))).toBe(false);
     // A second init reuses the copy.
     expect(stableEntry(entry, home, '9.9.9')).toBe(moved);
+  });
+
+  // The copy is the code the hooks run. `run/sandbox.ts` denies the agent writes to the directory
+  // that `paths.ts` names for it, and that is only the directory the copy lands in if it is one.
+  it('copies into the directory paths.ts protects, one directory for each version', () => {
+    const { entry } = npxTree();
+    const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
+    const moved = stableEntry(entry, home, '9.9.9');
+    expect(moved.startsWith(join(cliDirIn(home), '9.9.9'))).toBe(true);
   });
 
   // npx starts the CLI through `node_modules/.bin/stroq`, a link into the package, and

@@ -1,5 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { isShellTool } from '../actions/shell-tools.js';
 
 /**
  * Decoy files: a credentials-shaped file that no task the user asked for needs, planted
@@ -18,12 +19,21 @@ export interface CanaryFiles {
 }
 
 /**
- * A path as a comparison key: `~` and `$HOME` expanded, made absolute against `cwd`,
+ * The home as a shell spells it at the start of a path: `~`, `$HOME` and `${HOME}` for a POSIX shell, `$env:USERPROFILE`,
+ * `$env:HOME` and `${env:HOME}` for PowerShell, `%USERPROFILE%` for cmd, before a separator or the end. In any case: a
+ * variable of Windows has no case, and matching one that a POSIX shell has would only over-match.
+ */
+const HOME_SPELLING =
+  /^(?:~|\$\{?HOME\}?|\$\{?env:(?:USERPROFILE|HOME)\}?|%USERPROFILE%)(?=$|[/\\])/i;
+const expandHome = (path: string, home: string): string => path.replace(HOME_SPELLING, home);
+
+/**
+ * A path as a comparison key: the home expanded (see `HOME_SPELLING`), made absolute against `cwd`,
  * `.` and `..` resolved, separators and case folded — so every spelling of the decoy
  * an agent can use is the same key, and folding case can only over-match.
  */
 export function canaryKey(path: string, cwd: string, home: string): string {
-  const expanded = path.replace(/^(?:~|\$\{?HOME\}?)(?=$|[/\\])/, home);
+  const expanded = expandHome(path, home);
   const absolute = isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
   return absolute.replace(/\\/g, '/').toLowerCase();
 }
@@ -32,13 +42,23 @@ const PATH_KEYS = ['file_path', 'notebook_path', 'path', 'file_paths', 'paths'];
 /** Where a shell word ends: whitespace, the operators around it, and a redirect. */
 const SHELL_WORD_BREAK = /[\s;|&<>()`]+/;
 
+/**
+ * `-Path:value`: a PowerShell parameter can carry its value after a colon, as one word, and the value is
+ * the path. Any other word that begins with a dash is an option, and not one.
+ */
+function withoutParameter(word: string): string {
+  if (!word.startsWith('-')) return word;
+  const colon = word.indexOf(':');
+  return colon === -1 ? word : word.slice(colon + 1);
+}
+
 function namedPaths(toolName: string, toolInput: Readonly<Record<string, unknown>>): string[] {
   if (toolName === 'WebFetch' || toolName === 'WebSearch') return [];
-  if (toolName === 'Bash') {
+  if (isShellTool(toolName)) {
     const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
     return command
       .split(SHELL_WORD_BREAK)
-      .map((word) => word.replace(/["']/g, ''))
+      .map((word) => withoutParameter(word.replace(/["']/g, '')))
       .filter((word) => word !== '' && !word.startsWith('-'));
   }
   return PATH_KEYS.flatMap((key) => {
@@ -64,7 +84,7 @@ export function canaryFileTouched(
   for (const named of namedPaths(toolName, toolInput)) {
     const key = canaryKey(named, cwd, home);
     if (paths.has(key)) {
-      const expanded = named.replace(/^(?:~|\$\{?HOME\}?)(?=$|[/\\])/, home);
+      const expanded = expandHome(named, home);
       return isAbsolute(expanded) ? resolve(expanded) : resolve(cwd, expanded);
     }
   }

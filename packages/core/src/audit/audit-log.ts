@@ -47,6 +47,13 @@ export interface AuditEntryInput {
   readonly secrets?: readonly SecretHit[];
   /** Cloak substitutions this message carried (kinds and placeholders only). */
   readonly cloak?: readonly CloakEvent[];
+  /** The task the call ran under, when it ran under one. Not set yet; `stroq task` will fill it. */
+  readonly taskId?: string;
+  /**
+   * The host's id for the call (see `PreToolEvent.callId`), so that a call's `pre` and `post`
+   * entries can be paired. Not set yet; the adapters will fill it when the hosts' ids are read.
+   */
+  readonly callId?: string;
 }
 
 export interface AuditEntry extends AuditEntryInput {

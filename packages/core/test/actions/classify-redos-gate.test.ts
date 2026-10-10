@@ -90,12 +90,35 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['instruction file names', (r) => `echo x > ${r('CLAUDE.md ')}`],
   ['memory paths', (r) => `cat notes >> ${r('.claude/projects/')}`],
   ['memory path separators', (r) => `cat notes >> .claude/projects/x${r('/')}m`],
-  // `joinText` (stroq-state.ts) reads every command once for quotes and heredocs.
+  // `joinText` (join-text.ts) reads every command once for quotes and heredocs.
   ['quoted heredoc operators with no close', (r) => `cat ${r("<<'a")}`],
   ['bare heredoc operators', (r) => `cat ${r('<<a ')}\n`],
   ['open quotes before sh -c', (r) => `${r('bash -c "x')}`],
   ['heredoc body lines', (r) => `cat <<EOF\n${r('stroq init\n')}`],
   ['stroq runner flags', (r) => `npx ${r('-y ')}stroq untaint`],
+  // `stroq run -- …` starts the program after its `--`, and that program is read again as a command
+  // line of its own, to a depth (`stroq-state.ts`).
+  ['stroq launchers', (r) => r('stroq run -- ')],
+  ['stroq launchers, then a command of Stroq', (r) => `${r('stroq run -- ')}stroq prove`],
+  ['stroq mcp launchers', (r) => r('stroq mcp --server x -- ')],
+  ['stroq launcher options', (r) => `stroq run ${r('--agent x ')}-- claude`],
+  ['stroq launcher dashes', (r) => `stroq run ${r('-- ')}stroq prove`],
+  ['stroq launchers under wrappers', (r) => r('sudo stroq run -- env -i ')],
+  ['stroq launchers and shell strings', (r) => r("stroq run -- sh -c 'stroq run -- ")],
+  ['stroq task prompts', (r) => `stroq task -- ${r('fix --help ')}`],
+  // What says whether a flag asks for help, and what `joinText` skips: comments, the targets of redirects, quoted
+  // words, here-strings, and a quote or a `<<` inside a comment.
+  ['stroq state command, comments', (r) => `stroq untaint ${r('# --help ')}`],
+  ['stroq state command, redirect targets', (r) => `stroq untaint ${r('> --help ')}`],
+  ['stroq state command, here-strings', (r) => `stroq untaint ${r('<<< -h ')}`],
+  ['stroq state command, quoted words', (r) => `stroq untaint ${r('"a --help" ')}`],
+  ['stroq state command, quotes that never close', (r) => `stroq untaint ${r("'a ")}`],
+  ['stroq launcher operands, comments', (r) => `stroq run -- ${r('stroq untaint # -h ')}`],
+  ['comments with an apostrophe, a line each', (r) => r("echo x # it's\n")],
+  ['comments that open a heredoc, a line each', (r) => r('echo x # <<EOF\n')],
+  ['comment starts', (r) => r('x #')],
+  ['here-strings, a line each', (r) => r('cat <<< x\n')],
+  ['hashes after continued lines', (r) => r('a \\\n#')],
   ['many heredocs closed in turn', (r) => `cat ${r('<<a ')}\n${r('a\n')}`],
   // The 2026-Q3 detectors: persistence files, remote commands, trap and Windows bodies.
   ['redirects to startup files', (r) => r('echo x >> ~/.zshrc; ')],
