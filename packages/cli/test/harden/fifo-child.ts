@@ -1,8 +1,9 @@
 import { join } from 'node:path';
-import { readTargetText, writeFileAtomic } from '../../src/harden/atomic.js';
+import { writeFileAtomic } from '../../src/harden/atomic.js';
 import { readBackup } from '../../src/harden/backup.js';
 import { planJsonEdits } from '../../src/harden/json-edit.js';
 import { readManifest } from '../../src/harden/manifest.js';
+import { readTargetBytes, readTargetStrict, readTargetText } from '../../src/harden/read.js';
 
 /**
  * Run by `fifo.test.ts` in a child process, never in the test runner: it points every reader the
@@ -28,6 +29,8 @@ const outcome = (run: () => unknown): string => {
 
 const results: Record<string, string> = {
   readTargetText: outcome(() => readTargetText(join(dir, 'target'))),
+  readTargetBytes: outcome(() => readTargetBytes(join(dir, 'target'))),
+  readTargetStrict: outcome(() => readTargetStrict(join(dir, 'target'))),
   plan: outcome(() =>
     planJsonEdits(join(dir, 'target'), [{ kind: 'json-set', path: ['a'], value: 1 }], {
       read: readTargetText,

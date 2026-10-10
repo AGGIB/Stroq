@@ -18,6 +18,10 @@ import { createHash } from 'node:crypto';
 export type HardenErrorCode =
   /** The file's real path leaves the tree it was allowed to be written in (a symlink led out). */
   | 'path-escapes-root'
+  /** A link in the path points nowhere: writing "the file" would make something else, or nothing. */
+  | 'dangling-link'
+  /** The path Stroq recorded now leads to another file than it did when Stroq edited it. */
+  | 'path-changed'
   /** The target is a directory, a FIFO, a device: something that is not a regular file. */
   | 'not-regular-file'
   /** The target is larger than any agent config is. */
@@ -37,6 +41,14 @@ export type HardenErrorCode =
   | 'manifest-invalid'
   /** A plan that was refused cannot be applied. */
   | 'plan-refused'
+  /** The plan's text after is not what its edits make of its text before: it was not made by a planner. */
+  | 'plan-inconsistent'
+  /** The change cannot be made without laying the whole file out again, and nobody agreed to that. */
+  | 'reformat-not-acknowledged'
+  /** Writing the file back would lose something in it (a number, a duplicate key, a key order). */
+  | 'lossy-json'
+  /** The file is not valid UTF-8: decoding and writing it would change bytes the owner wrote. */
+  | 'not-utf8'
   /** The file is not what the plan was made from: the owner changed it, or the path now leads elsewhere. */
   | 'stale-plan';
 
@@ -53,6 +65,8 @@ export class HardenError extends Error {
 /** What a stat answers that the engine looks at. `fs.Stats` satisfies it. */
 export interface StatLike {
   readonly mode: number;
+  /** Milliseconds since the epoch. */
+  readonly mtimeMs: number;
   isFile(): boolean;
 }
 
@@ -171,7 +185,13 @@ export type PlanRefusal =
   /** An edit's path runs through, or ends in, a value of the wrong type. */
   | 'type-conflict'
   /** A text block's markers are not a matched pair, or appear twice. */
-  | 'markers-damaged';
+  | 'markers-damaged'
+  /** A link carries the path out of the tree it belongs to. The file was never opened. */
+  | 'path-escapes-root'
+  /** A link in the path points nowhere. The file was never opened. */
+  | 'dangling-link'
+  /** Plain JSON, but writing it back would lose or reorder something the file says. */
+  | 'lossy-json';
 
 /**
  * Whether a byte copy of the file will be kept before it is replaced, and if not, why.

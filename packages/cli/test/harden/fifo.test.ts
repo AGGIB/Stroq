@@ -45,6 +45,8 @@ describe.skipIf(process.platform === 'win32')('a FIFO where a file should be', (
     });
     expect(JSON.parse(child.stdout)).toEqual({
       readTargetText: 'threw not-regular-file',
+      readTargetBytes: 'threw not-regular-file',
+      readTargetStrict: 'threw not-regular-file',
       plan: 'threw not-regular-file',
       readManifest: 'threw manifest-unsafe',
       readBackup: 'returned null',

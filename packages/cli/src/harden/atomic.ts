@@ -1,8 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { readRegularFile } from '@stroq/core';
 import { assertStaysInside, realTarget, within } from '../commands/config-file.js';
+import {
+  danglingLinkIn,
+  realSleep,
+  renameWithRetry,
+  sweepStaleTemps,
+  tempNameFor,
+} from './atomic-support.js';
+import { isMissing } from './read.js';
 import { HardenError, type Fs, type StatLike } from './types.js';
 
 /**
@@ -11,12 +18,8 @@ import { HardenError, type Fs, type StatLike } from './types.js';
  * REPLACES the old one in a single rename.
  */
 
-/**
- * The most a file this engine edits may be. It is the bound `readConfigText` puts on an agent
- * config: real ones are a few kilobytes, and the bound is there so that a file which is not one
- * cannot take the process down.
- */
-export const MAX_TARGET_BYTES = 4 * 1024 * 1024;
+// The readers moved to `read.ts`; they are re-exported so that the engine has one place to ask.
+export { MAX_TARGET_BYTES, readTargetText } from './read.js';
 
 /** The mode of a file that has to be made, when nobody asks for another: the owner's alone. */
 const PRIVATE_FILE_MODE = 0o600;
@@ -51,6 +54,19 @@ export interface AtomicWriteOptions extends WriteRules {
   /** The mode of a file that does not exist yet. An existing file keeps its own. */
   readonly mode?: number;
   readonly fs?: Fs;
+  /**
+   * Called when the new content is in the temporary file and flushed, and before it replaces the
+   * target. If it throws (or rejects) nothing is replaced, the temporary file is removed and the
+   * error is the one reported. It is the last point at which a caller can look at the target again
+   * ("is it still what I read?"), which narrows the window in which an edit the owner makes can be
+   * lost to the time between that look and the rename. It does not close it: no portable call
+   * replaces a file only if it is unchanged.
+   */
+  readonly beforeRename?: () => void | Promise<void>;
+  /** Waits between the tries of a rename the system refuses for a moment. A test passes its own. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /** The clock (milliseconds) that the age of an old temporary file is judged by. */
+  readonly now?: () => number;
 }
 
 export interface AtomicWriteResult {
@@ -58,11 +74,6 @@ export interface AtomicWriteResult {
   readonly real: string;
   readonly created: boolean;
 }
-
-const isMissing = (err: unknown): boolean => {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-};
 
 /**
  * The file `file` is, with every link followed, through the nearest part of the path that
@@ -72,38 +83,11 @@ const isMissing = (err: unknown): boolean => {
 export const resolveRealPath: (file: string) => string = realTarget;
 
 /**
- * The text of a file the engine is about to edit, or `null` when there is no such file. Only a
- * regular file within `MAX_TARGET_BYTES` is read, and the check is made on the handle that is
- * then read: a FIFO planted where a config goes would otherwise block this forever.
- */
-export function readTargetText(path: string): string | null {
-  let read: ReturnType<typeof readRegularFile>;
-  try {
-    read = readRegularFile(path, MAX_TARGET_BYTES);
-  } catch (err) {
-    if (isMissing(err)) return null;
-    if ((err as NodeJS.ErrnoException).code === 'EISDIR') {
-      throw new HardenError('not-regular-file', `${path} is not a regular file`, { cause: err });
-    }
-    throw err;
-  }
-  if (read.kind === 'not-regular') {
-    throw new HardenError('not-regular-file', `${path} is not a regular file`);
-  }
-  if (read.kind === 'too-large') {
-    throw new HardenError(
-      'target-too-large',
-      `${path} is ${read.size} bytes, more than an agent config is`,
-    );
-  }
-  return read.text;
-}
-
-/**
- * Refuses a path that a link carries out of the tree it belongs to, and returns the real path it
- * resolves to. Two rules can apply: the root the caller named, which is the narrower and says
- * more, and `init`'s, so that every writer of an agent config in Stroq answers the same way about
- * the same path. Touches nothing, so it can be asked before anything else is done.
+ * Refuses a path that a link carries out of the tree it belongs to, or that runs through a link
+ * that points nowhere, and returns the real path it resolves to. Two rules can apply to the
+ * tree: the root the caller named, which is the narrower and says more, and `init`'s, so that
+ * every writer of an agent config in Stroq answers the same way about the same path. Touches
+ * nothing, so it can be asked before anything else is done.
  */
 export function assertWriteAllowed(target: string, rules: WriteRules = {}): string {
   const real = resolveRealPath(target);
@@ -125,6 +109,14 @@ export function assertWriteAllowed(target: string, rules: WriteRules = {}): stri
       });
     }
   }
+  // After the tree rules: a link that leaves the tree is the more serious thing to say first.
+  const dangling = danglingLinkIn(real);
+  if (dangling !== null) {
+    throw new HardenError(
+      'dangling-link',
+      `refusing to touch ${target}: ${dangling} is a link that points nowhere, and a file written there would be made somewhere else than the link says. Fix or remove the link first.`,
+    );
+  }
   return real;
 }
 
@@ -143,11 +135,16 @@ async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined
  * - The target is resolved first and the REAL file is the one replaced, so a dotfile that is a
  *   link into `~/dotfiles` stays a link.
  * - The temporary file is made in the real file's own directory: a rename across file systems
- *   is a copy, and a copy is not atomic.
+ *   is a copy, and a copy is not atomic. Temporary files that an earlier hard stop left there
+ *   (the exact name this makes, older than an hour) are removed first.
  * - The mode of the file it replaces is kept, whatever the umask. A new file is private.
- * - The content is flushed before the rename. A crash leaves the old file or the new one, whole.
- *   (The directory is not flushed too: that would decide whether the rename survives a power
- *   cut, not whether either file is whole.)
+ * - The content is flushed before the rename. If the process dies, at any point, the target is
+ *   the old file or the new one, whole. If the operating system dies (a power cut, a kernel
+ *   panic) a short or empty file is still possible: the flush is `fsync`, and on macOS `fsync`
+ *   does not flush the drive's own cache (only `F_FULLFSYNC` does). The directory is not flushed
+ *   either, which would decide whether the rename itself survives, not whether a file is whole.
+ * - A rename that the system refuses for a moment (EPERM or EBUSY, as Windows does for a file
+ *   another handle holds) is tried again, three tries in all.
  * - On any failure the temporary file is removed and the target has not been touched.
  *
  * A rename gives the path a new inode, so a hard link to the old file keeps the old content.
@@ -177,9 +174,11 @@ export async function writeFileAtomic(
     existing === undefined ? (options.mode ?? PRIVATE_FILE_MODE) : existing.mode & MODE_BITS;
 
   await fs.mkdir(dirname(real), { recursive: true });
+  // Before the temporary file of this write exists, so that it can never be swept by mistake.
+  await sweepStaleTemps(fs, dirname(real), basename(real), (options.now ?? Date.now)());
   const temp = join(
     dirname(real),
-    `.${basename(real)}.stroq-${process.pid}-${randomBytes(6).toString('hex')}.tmp`,
+    tempNameFor(basename(real), process.pid, randomBytes(6).toString('hex')),
   );
   // `wx`, and private while it is written: whatever the final mode, nobody else reads the
   // content before it is in place.
@@ -194,7 +193,8 @@ export async function writeFileAtomic(
       throw err;
     }
     await handle.close();
-    await fs.rename(temp, real);
+    await options.beforeRename?.();
+    await renameWithRetry(fs, temp, real, options.sleep ?? realSleep);
   } catch (err) {
     // Best effort, and never allowed to hide what actually went wrong.
     await fs.unlink(temp).catch(() => undefined);
