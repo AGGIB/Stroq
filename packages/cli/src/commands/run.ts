@@ -1,8 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
-import { secretsFile, stroqHome } from '../paths.js';
+import { pluginCliDirIn, secretsFile, stroqHome } from '../paths.js';
 import { AGENT_STATE_DIRS, OWN_SANDBOX_AGENTS, agentIdFor } from '../run/agent-name.js';
 import { launch as realLaunch } from '../run/launch.js';
 import { preflight, type PreflightResult } from '../run/preflight.js';
@@ -11,10 +11,13 @@ import {
   SRT_MISSING,
   SRT_NO_RAW_MODE,
   generateSandbox,
+  hasGlobSyntax,
+  somethingAt,
   srtArgv,
   type GeneratedSandbox,
 } from '../run/sandbox.js';
 import { binOnPath } from '../run/which.js';
+import { stroqVersion } from '../version.js';
 import { GIT_HARDENING, hardeningEnv } from './inspect.js';
 
 /**
@@ -159,10 +162,11 @@ function reportRefusals(command: string, result: PreflightResult, forced: boolea
 /**
  * The write roots and read denials for this run.
  *
- * `sourcePaths` is a stat of the credential files the index already tracks, so a
- * dry run costs nothing and writes nothing. The index itself is only rebuilt on a
- * real launch, where it has to be current BEFORE it is sealed — inside the sandbox
- * the sources are unreadable by design, and an index rebuilt there would rebuild
+ * `sourcePaths` is a stat of the places the index reads its credential files from, and not
+ * a reading of the index itself, so a dry run costs nothing, writes nothing, and lists the
+ * same files a real launch does. What a launch adds is the refresh of the index (the hashes
+ * of what those files hold), which has to be current BEFORE it is sealed — inside the
+ * sandbox the sources are unreadable by design, and an index rebuilt there would rebuild
  * itself empty (see `SEALED_SOURCES_ENV`).
  */
 async function buildSandbox(
@@ -207,11 +211,32 @@ function writeSandboxConfig(sandbox: GeneratedSandbox): string {
   return file;
 }
 
+/**
+ * What the config does not protect, said on every platform: the hooks are entries in the host's own
+ * configuration, and the agent's state directory has to be writable for the agent to start.
+ */
+const NOT_COVERED =
+  "  sandbox: not covered: the hook entries in the host's own config (settings.json, hooks.json, the plugin cache) stay writable, because the agent's own directory has to be, so an agent that runs code outside what the gate of Stroq's commands reads can still switch the firewall off from inside the sandbox. A later task mode, with a home of its own for the agent, is meant to close that.";
+
+/**
+ * Said on macOS when the copy of the CLI that the Claude Code plugin's hook wrapper runs
+ * (`plugin-cli/<version>`) is not installed. The wrapper makes it itself, with `mkdir -p` and `mv`, and on
+ * macOS a directory that is denied and does not exist yet cannot be made, so under the sandbox the first
+ * run of the plugin could not install it.
+ */
+function pluginCopyNote(home: string, plat: NodeJS.Platform): string | null {
+  if (plat !== 'darwin') return null;
+  const copy = join(pluginCliDirIn(home), stroqVersion());
+  if (somethingAt(copy)) return null;
+  return `  sandbox: ${copy} is not installed, and the sandbox does not let the Claude Code plugin's hook wrapper make it (a denied directory cannot be made): run once without the sandbox so the wrapper can install its pinned copy, if you use the plugin.`;
+}
+
 function reportSandbox(
   sandbox: GeneratedSandbox,
   agent: string | null,
   plat: NodeJS.Platform,
   isTTY: boolean,
+  home: string,
 ): void {
   const fs = sandbox.settings.filesystem;
   line(
@@ -221,8 +246,25 @@ function reportSandbox(
   for (const path of fs.allowWrite) line(`    can write: ${path}`);
   for (const path of sandbox.refused)
     process.stderr.write(
-      `  sandbox: refused "${path}" as a write root — granting it would not be a sandbox\n`,
+      hasGlobSyntax(path)
+        ? `  sandbox: refused "${path}" as a write root: its path holds one of * ? [ ], which srt reads as a pattern, so the denies for Stroq's own state in it would match nothing\n`
+        : `  sandbox: refused "${path}" as a write root — granting it would not be a sandbox\n`,
     );
+  // The same files, one by one: a pattern in the path of a credential file makes the deny match something else.
+  const patterned = fs.denyRead.filter(hasGlobSyntax);
+  if (patterned.length > 0)
+    process.stderr.write(
+      `  sandbox: srt reads * ? [ ] in a path as a pattern, so it cannot deny ${patterned.length === 1 ? 'this credential file' : 'these credential files'}: ${patterned.join(', ')}\n`,
+    );
+  if (sandbox.unprotected.length > 0) {
+    const names = sandbox.unprotected.map((path) => basename(path)).join(', ');
+    process.stderr.write(
+      `  sandbox: NOT PROTECTED on ${plat}: ${names} (in ${dirname(sandbox.unprotected[0] as string)}) do not exist, and here srt can deny only a path that is there. The agent can create them during the run, and a policy.yaml it creates replaces the policy.\n`,
+    );
+  }
+  process.stderr.write(`${NOT_COVERED}\n`);
+  const copy = pluginCopyNote(home, plat);
+  if (copy !== null) process.stderr.write(`${copy}\n`);
   if (sandbox.settings.network.allowedDomains.length === 0) {
     line(
       '  sandbox: all network is denied. The agent cannot reach its own API, and neither can anything it runs, until you name the hosts with --allow-domain.',
@@ -282,7 +324,7 @@ export async function runRun(
       ? null
       : await buildSandbox(invocation, agent, workspace, userHome, !invocation.dryRun, plat);
   if (sandbox !== null)
-    reportSandbox(sandbox, agent, plat, deps.isTTY ?? process.stdin.isTTY === true);
+    reportSandbox(sandbox, agent, plat, deps.isTTY ?? process.stdin.isTTY === true, stroqHome());
 
   const childEnvironment: NodeJS.ProcessEnv = {
     ...env,
