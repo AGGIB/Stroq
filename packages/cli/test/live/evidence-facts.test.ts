@@ -7,9 +7,9 @@ import {
   WITHHELD_SUMMARY,
   auditSummaryOf,
   gatherEvidence,
-  plainText,
   type EvidenceInput,
 } from '../../src/live/evidence.js';
+import { plainText } from '../../src/live/plain-text.js';
 import { prepareProject } from '../../src/live/probes.js';
 import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import type { ProbeKind, SentinelState, StreamEvent } from '../../src/live/types.js';

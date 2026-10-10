@@ -12,8 +12,9 @@ import { AuditLog, type AuditEntry } from '@stroq/core';
 import { auditFileIn } from '../paths.js';
 import type { Ledger } from './budget.js';
 import { LiveCheckError } from './errors.js';
-import { isWellFormedRun, plainText } from './evidence.js';
+import { plainText } from './plain-text.js';
 import { clearSentinel, readSentinel } from './probes.js';
+import { isWellFormedRun } from './run-problem.js';
 import {
   REASONS,
   type HostDriver,

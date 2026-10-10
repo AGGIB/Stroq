@@ -7,7 +7,8 @@
 // rows are the real runs and their controls, after the controls have had their say, so that a pass that
 // a control could not confirm is not counted.
 import type { HostCapability } from '../hosts/capabilities.js';
-import { plainText, type ProbeOutcome } from './evidence.js';
+import type { ProbeOutcome } from './evidence.js';
+import { plainText } from './plain-text.js';
 import { overallState as stateOf } from './state-rule.js';
 import { REASONS, type LiveOutcome, type ProbeKind, type ProbeResult } from './types.js';
 

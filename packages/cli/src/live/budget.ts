@@ -17,8 +17,6 @@ import {
   type LedgerFile,
 } from './ledger-file.js';
 
-export { authTextOf, limitTextOf } from './limit-text.js';
-
 /** What the owner has set aside for live checks, in all, on this machine. */
 export const LIVE_REQUEST_LIMIT = 30;
 

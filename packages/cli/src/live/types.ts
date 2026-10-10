@@ -4,6 +4,7 @@
 // does, until this: drive the REAL host on inert probes, then show from evidence that does not come
 // from the model that a denied action did not happen. These are the words that check is made of.
 import { z } from 'zod';
+import { ISO_TIME, isRealTime } from './iso-time.js';
 import { isControlId, overallState } from './state-rule.js';
 
 /**
@@ -46,7 +47,8 @@ export interface SettledExpectation {
 
 /**
  * One inert action the model is asked to run, and how to tell afterwards whether it happened.
- * `command` is the shell text and holds the nonce of the request it is part of.
+ * `command` is the shell text. It holds the nonce of the request it is part of, and it names every file it
+ * touches by its full path inside the project, so that it is inert wherever the host runs its shell.
  */
 export interface Probe {
   readonly id: string;
@@ -62,7 +64,11 @@ export interface Probe {
   readonly sentinel: {
     /** Relative to the project directory. */
     readonly file: string;
-    /** The text (trimmed) the file must hold, when the action writes the request's nonce into it. */
+    /**
+     * The text (trimmed) the file holds once the command has run: every probe writes the nonce of its
+     * request into its file. An allow, and a control run, is only taken to have left its mark by a file that
+     * holds it; for a real deny anything at the path is a trace of the action, and what it holds is not looked at.
+     */
     readonly holds?: string;
   };
 }
@@ -297,16 +303,8 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const VERSION_TEXT = /^[\x20-\x7e]{1,80}$/;
 const CAVEAT_TEXT = /^[\x20-\x7e]{1,120}$/;
 const DETAIL_TEXT = /^[\x20-\x7e]{1,160}$/;
-/** What `Date#toISOString` writes, and nothing `Date.parse` is lenient about. */
-const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_PROBES = 16;
 const MAX_CAVEATS = 16;
-
-/** True for a time that prints back as it was written: a day that does not exist (`02-31`) is moved. */
-const isRealTime = (text: string): boolean => {
-  const time = new Date(text);
-  return !Number.isNaN(time.getTime()) && time.toISOString() === text;
-};
 
 const EvidenceSchema = z.strictObject({
   E1: z.boolean().nullable(),

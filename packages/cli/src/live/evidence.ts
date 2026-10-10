@@ -22,7 +22,6 @@ export {
   auditSummaryOf,
   normalizeCommand,
 } from './command.js';
-export { plainText } from './plain-text.js';
 export { type AuditFinding } from './audit-finding.js';
 export { isWellFormedRun, runProblem, type RunProblem } from './run-problem.js';
 export {

@@ -6,6 +6,7 @@
 // device in its place is refused without waiting; the tests run the reader in a child process, where a
 // path that blocks costs a time limit and not a hung suite.
 import { z } from 'zod';
+import { ISO_TIME, isRealTime } from './iso-time.js';
 import { readSmallRegularFile, writePrivateFileAtomic } from './private-file.js';
 
 /** A ledger holds thirty requests and a short list of why; nothing like this size is a ledger. */
@@ -14,12 +15,6 @@ export const MAX_LEDGER_BYTES = 64 * 1024;
 export const MAX_LEDGER_LIMIT = 100_000;
 /** The newest entries are kept; `used` keeps counting. 200 of them are far below the byte cap. */
 export const MAX_LEDGER_ENTRIES = 200;
-
-const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const isRealTime = (text: string): boolean => {
-  const time = new Date(text);
-  return !Number.isNaN(time.getTime()) && time.toISOString() === text;
-};
 
 const LedgerFileSchema = z
   .strictObject({

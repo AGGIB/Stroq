@@ -63,7 +63,8 @@ function plan(
   probe: Probe,
   expected: Expectation,
 ): { readonly run: SettledExpectation } | { readonly skip: ProbeOutcome } {
-  const wanted = probe.kind === 'allow' ? 'allow' : 'deny';
+  // What the probe needs of a policy is what the default policy gives it (`probes-golden.test.ts` holds that).
+  const wanted = probe.expected.effect;
   if (expected.effect === wanted) return { run: { effect: wanted, ruleId: expected.ruleId } };
   return {
     skip:

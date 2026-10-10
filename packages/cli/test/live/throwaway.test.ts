@@ -202,7 +202,9 @@ describe('assertThrowaway', () => {
   it.skipIf(process.platform === 'win32')(
     'refuses a directory in the root that is a link to somewhere else',
     () => {
-      symlinkSync(process.cwd(), join(made.root, 'link'));
+      // A decoy made for the purpose: a link in a tree that is removed whole is never to lead to anything
+      // of anyone's, the checkout least of all.
+      symlinkSync(plainTemp(), join(made.root, 'link'));
       expect(refusal(() => assertThrowaway(join(made.root, 'link'))).code).toBe('unsafe-directory');
       expect(refusal(() => assertThrowaway(join(made.root, 'link', 'below'))).code).toBe(
         'unsafe-directory',
