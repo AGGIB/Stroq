@@ -274,8 +274,13 @@ function reportSandbox(
     );
   if (sandbox.unprotected.length > 0) {
     const names = sandbox.unprotected.map((path) => basename(path)).join(', ');
+    const where = dirname(sandbox.unprotected[0] as string);
+    // Two reasons a name is left to the agent: it is not there and srt can deny only what is (not on macOS),
+    // or the path of the home is a pattern to srt and a wider root still lets the agent write in it.
     process.stderr.write(
-      `  sandbox: NOT PROTECTED on ${plat}: ${names} (in ${dirname(sandbox.unprotected[0] as string)}) do not exist, and here srt can deny only a path that is there. The agent can create them during the run, and a policy.yaml it creates replaces the policy.\n`,
+      hasGlobSyntax(where)
+        ? `  sandbox: NOT PROTECTED: ${names} (in ${where}): srt reads * ? [ ] in that path as a pattern, so no deny for them matches, and a wider write root still lets the agent write there. A policy.yaml it makes replaces the policy.\n`
+        : `  sandbox: NOT PROTECTED on ${plat}: ${names} (in ${where}) do not exist, and here srt can deny only a path that is there. The agent can create them during the run, and a policy.yaml it creates replaces the policy.\n`,
     );
   }
   process.stderr.write(`${NOT_COVERED}\n`);

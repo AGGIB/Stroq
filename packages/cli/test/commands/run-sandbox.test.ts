@@ -211,6 +211,27 @@ describe('paths that srt would read as patterns', () => {
     expect(text).not.toContain(`can write: ${odd}`);
   });
 
+  // A wider root (here the workspace) still lets the agent write in a home that is refused as a root, and the
+  // denies for its state are patterns that match nothing: the names are unprotected, and for that reason, on any
+  // platform, whether they exist or not.
+  it.each(['darwin', 'linux'] as const)(
+    'names the state of such a home as unprotected when another root covers it, on %s',
+    async (plat) => {
+      const w = world();
+      const odd = join(w.cwd, 'st[roq]');
+      mkdirSync(odd);
+      writeFileSync(policyFileIn(odd), 'rules: []\n');
+      vi.stubEnv('STROQ_HOME', odd);
+      const text = await sandboxRun(w, { plat });
+      const line = text.split('\n').find((l) => /not protected/i.test(l)) ?? '';
+      expect(line, text).not.toBe('');
+      expect(line).toContain('policy.yaml');
+      expect(line).toContain(odd);
+      expect(line).toMatch(/pattern/i);
+      expect(line).not.toMatch(/do not exist/i);
+    },
+  );
+
   it('says that a credential file under such a path is not protected', async () => {
     const w = world();
     const userHome = join(scratch('stroq-run-pattern-'), 'me[1]');
