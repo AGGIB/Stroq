@@ -119,32 +119,51 @@ export const PASSPORT_SCHEMA = 'stroq-passport/1' as const;
 const nonEmpty = z.string().min(1);
 
 /**
- * A label for something on this machine says which skill it was, not where it lives. A passport is
+ * Text that is put in a record which is committed to a README and printed by `vet --json` and
+ * `--card`: no control character (the escape that starts a terminal sequence, NUL, a newline) and none
+ * that shows nothing or reorders what is shown (a zero-width space, a direction override). It is the
+ * same Unicode properties that `checkEntryPath` refuses in a path, written out here because
+ * `safe-path.ts` imports this file; `types-source.test.ts` asks both about every code point.
+ */
+const UNSHOWABLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
+const shown = nonEmpty.refine((text) => !UNSHOWABLE.test(text), {
+  message: 'text has a control or an invisible character in it',
+});
+
+/**
+ * A name for something on this machine says which skill it was, not where it lives. A passport is
  * canonical, so that an author can commit one and a reader can compare it: a path from the root of
- * a disk would differ from machine to machine and would carry a user name. So a label is a short
- * relative name: not absolute (a leading slash or backslash, a drive letter `C:`, or `~`, which a
- * shell reads as the home directory), with no `..` component to climb out of where it is read, and at
- * most `LABEL_MAX` characters.
+ * a disk would differ from machine to machine and would carry a user name. So such a name is relative:
+ * not absolute (a leading slash or backslash, a drive letter `C:`, or `~`, which a shell reads as the
+ * home directory), with no `..` component to climb out of where it is read. A label is such a name of
+ * at most `LABEL_MAX` characters. The subdirectory of a repository is one too, within the limit of a path.
  */
 const LABEL_MAX = 80;
 const ABSOLUTE_PATH = /^(?:[\\/~]|[A-Za-z]:)/;
 const hasParentComponent = (text: string): boolean => text.split(/[\\/]/).includes('..');
-const label = nonEmpty
-  .max(LABEL_MAX, { message: `a label is at most ${LABEL_MAX} characters` })
-  .refine((text) => !ABSOLUTE_PATH.test(text), { message: 'a label is never an absolute path' })
-  .refine((text) => !hasParentComponent(text), { message: "a label has no '..' component" });
+const relativeName = shown
+  .refine((text) => !ABSOLUTE_PATH.test(text), { message: 'a name here is never an absolute path' })
+  .refine((text) => !hasParentComponent(text), { message: "a name here has no '..' component" });
+const label = relativeName.max(LABEL_MAX, {
+  message: `a label is at most ${LABEL_MAX} characters`,
+});
+const subdirectory = relativeName.max(LIMITS.maxPathBytes, {
+  message: `a subdirectory is at most ${LIMITS.maxPathBytes} characters`,
+});
 
 /**
  * A host name, and nothing else: no scheme, user information, port, path, query or fragment. It is
  * written as a URL parser writes it, lower case and ASCII (punycode for anything else), so that the
  * same host is the same text. Labels of 1 to 63 letters, digits and hyphens (not at either end),
- * 253 characters in all, and a last label that is not a number, which keeps an IPv4 address out.
+ * 253 characters in all, and a last label that is not a number, which keeps an IPv4 address out in the
+ * forms a URL parser reads as one: the standard says a host "ends in a number" when its last label is
+ * decimal digits, or `0x` and any hexadecimal digits, so `0x7f000001` is 127.0.0.1.
  * Checked a label at a time, with the length first, so that it is linear in a hostile string.
  */
 const HOST_MAX = 253;
 const HOST_LABEL_MAX = 63;
 const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-const NUMBER = /^[0-9]+$/;
+const NUMBER = /^(?:[0-9]+|0x[0-9a-f]*)$/i;
 function isHostName(text: string): boolean {
   if (text.length > HOST_MAX) return false;
   const labels = text.split('.');
@@ -156,11 +175,27 @@ const hostName = nonEmpty.refine(isHostName, {
   message: 'a host is a bare lower-case host name: no scheme, user, port or path',
 });
 
+/** A sha-512 integrity as npm writes it: `sha512-` and base64. The only algorithm a fetch accepts. */
+const INTEGRITY = z.string().regex(/^sha512-[A-Za-z0-9+/]+={0,2}$/, {
+  message: 'an integrity is sha512- and base64',
+});
+/** A commit of GitHub: 40 lower-case hexadecimal digits. */
+const COMMIT = z.string().regex(/^[0-9a-f]{40}$/, {
+  message: 'a commit is 40 lower-case hexadecimal digits',
+});
+
 /**
  * Where an artifact came from, as much as a passport may say: enough to tell one source from another
- * and to show a person where it came from. It is NOT enough to fetch the artifact again, and is never
- * used to: a `url` keeps only its host, and a `dir` or `tarball` only a label. The lock file keeps a
- * separate, full source spec (the whole URL, the resolved commit, the integrity) for that.
+ * and to show a person where it came from. What each kind says differs. A `dir` or `tarball` keeps only
+ * a label and a `url` only its host, and none of them can be turned back into an address. An `npm` or
+ * a `github` reference is exact (name, version and integrity; owner, repo, ref, commit and
+ * subdirectory), so it names what to fetch, and for that reason it is never used to fetch: a passport
+ * can come from outside (a README, a lock file that somebody else wrote), and what it names must not
+ * pick what is downloaded. The only input to a fetch is the full source spec that the lock file keeps.
+ *
+ * Every part is held to what it is, so that the record says nothing of this machine and nothing that a
+ * terminal or a README would act on: no text with a control or an invisible character in it, no path
+ * from the root of a disk, a commit of 40 hexadecimal digits and an integrity of a sha-512.
  */
 export const SourceRefSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('dir'), label }).readonly(),
@@ -168,19 +203,19 @@ export const SourceRefSchema = z.discriminatedUnion('type', [
   z
     .strictObject({
       type: z.literal('npm'),
-      name: nonEmpty,
-      version: nonEmpty,
-      integrity: z.exactOptional(nonEmpty),
+      name: shown,
+      version: shown,
+      integrity: z.exactOptional(INTEGRITY),
     })
     .readonly(),
   z
     .strictObject({
       type: z.literal('github'),
-      owner: nonEmpty,
-      repo: nonEmpty,
-      ref: nonEmpty,
-      commit: z.exactOptional(nonEmpty),
-      subdir: z.exactOptional(nonEmpty),
+      owner: shown,
+      repo: shown,
+      ref: shown,
+      commit: z.exactOptional(COMMIT),
+      subdir: z.exactOptional(subdirectory),
     })
     .readonly(),
   // The host only: the address is the host the bytes came from, and a path or a token has no place in a record.

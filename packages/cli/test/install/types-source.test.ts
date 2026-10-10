@@ -1,5 +1,11 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { checkEntryPath } from '../../src/install/safe-path.js';
 import { PassportSchema, SourceRefSchema } from '../../src/install/types.js';
+
+const hex = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
+const REAL_INTEGRITY = `sha512-${'A'.repeat(86)}==`;
+const REAL_COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
 describe('SourceRefSchema', () => {
   it.each([
@@ -83,6 +89,14 @@ describe('the host of a URL source', () => {
     '1password.com',
     'localhost',
     'x',
+    // Not numbers to a URL parser: a name that only looks like one.
+    'example.0xyz',
+    'example.0xg',
+    'example.0b1',
+    '0x1.example',
+    'x0x1.example',
+    'a.b0x1',
+    'a.1a',
   ])('accepts %j', (host) => {
     expect(parses(host)).toBe(true);
   });
@@ -119,6 +133,15 @@ describe('the host of a URL source', () => {
     ['a full-width dot', 'example\uff0ecom'],
     ['an IPv4 address', '192.0.2.1'],
     ['a last label that is a number', 'example.123'],
+    // The URL standard reads a last label of `0x` and hex digits as a number too, and so the whole host
+    // as an IPv4 address: `http://0x7f000001/` is 127.0.0.1.
+    ['a hexadecimal number', '0x7f000001'],
+    ['the address of the metadata service in hexadecimal', '0xa9fea9fe'],
+    ['dotted hexadecimal numbers', '0x7f.0x1'],
+    ['an address with two hexadecimal parts', '0x7f.0.0.0x1'],
+    ['an address with all hexadecimal parts', '0x7f.0x0.0x0.0x1'],
+    ['an address with one hexadecimal part', '1.1.1.0x1'],
+    ['a hexadecimal prefix and no digits', 'example.0x'],
     ['a label of 64 characters', `${'a'.repeat(64)}.example`],
     ['a name of 254 characters', [63, 63, 63, 62].map((n) => 'a'.repeat(n)).join('.')],
     ['a name of 255 characters', [63, 63, 63, 63].map((n) => 'a'.repeat(n)).join('.')],
@@ -135,6 +158,33 @@ describe('the host of a URL source', () => {
     ['a list', ['example.com']],
   ])('rejects %s, which is not text', (_what, host) => {
     expect(parses(host)).toBe(false);
+  });
+
+  // The reason for the rules above, asked of the parser that matters: a host that is accepted is a name
+  // to a URL parser and comes back as the same text, and never as an address it has turned into.
+  it('only accepts hosts that a URL parser keeps as they are', () => {
+    const label = fc.constantFrom(
+      ...['0', '1', '7', '07', '0x', '0x1', '0x7f', '0xf', '0xg', '0xyz', 'x', 'x0x1', 'a', 'ff'],
+      ...['1a', '0b1', '9', '0377', 'example', 'com'],
+    );
+    const host = fc.array(label, { minLength: 1, maxLength: 4 }).map((parts) => parts.join('.'));
+    let accepted = 0;
+    let refused = 0;
+
+    fc.assert(
+      fc.property(host, (text) => {
+        if (!parses(text)) {
+          refused += 1;
+          return;
+        }
+        accepted += 1;
+        expect(new URL(`http://${text}/`).hostname, text).toBe(text);
+      }),
+      { numRuns: 3_000 },
+    );
+
+    expect(accepted).toBeGreaterThan(100);
+    expect(refused).toBeGreaterThan(100);
   });
 
   it('refuses a host of a million characters without reading it through', () => {
@@ -222,5 +272,120 @@ describe('the label of a directory or tarball source', () => {
       expect(parses(5)).toBe(false);
       expect(parses(undefined)).toBe(false);
     });
+  });
+});
+
+// An npm or a GitHub reference names exactly what it came from (a name, a version and an integrity; an
+// owner, a repo, a ref and a commit), so each part is held to what it is: the passport is canonical and
+// is read back from files that somebody else may have written, so nothing in it is a path of a machine,
+// and nothing in it is text that a terminal or a README would do something with.
+describe('the exact parts of an npm or a GitHub source', () => {
+  const npm = (extra: Record<string, unknown>): unknown => ({
+    type: 'npm',
+    name: 'p',
+    version: '1.0.0',
+    ...extra,
+  });
+  const github = (extra: Record<string, unknown>): unknown => ({
+    type: 'github',
+    owner: 'acme',
+    repo: 'demo',
+    ref: 'main',
+    ...extra,
+  });
+  const parses = (value: unknown): boolean => SourceRefSchema.safeParse(value).success;
+
+  it.each([
+    ['a sha-512 integrity', npm({ integrity: REAL_INTEGRITY })],
+    ['a short sha-512 integrity, as a fixture may write one', npm({ integrity: 'sha512-AAAA' })],
+    ['an integrity with one pad character', npm({ integrity: 'sha512-AAAAAAA=' })],
+    ['a full commit', github({ commit: REAL_COMMIT })],
+    ['a subdirectory', github({ subdir: 'skills/demo' })],
+    ['a subdirectory with a dot in the name', github({ subdir: '.claude/skills' })],
+    ['a subdirectory with a name that is not Latin', github({ subdir: 'caf\u00e9/\u65e5\u672c' })],
+  ])('accepts %s', (_what, value) => {
+    expect(parses(value)).toBe(true);
+  });
+
+  it.each([
+    ['an integrity that is not an integrity', npm({ integrity: 'x' })],
+    ['an integrity that is a sha-1', npm({ integrity: 'sha1-AAAA' })],
+    ['an integrity of nothing', npm({ integrity: 'sha512-' })],
+    ['an integrity with a character that is not base64', npm({ integrity: 'sha512-AA!A' })],
+    ['an integrity with three pad characters', npm({ integrity: 'sha512-AAAA===' })],
+    ['two integrities', npm({ integrity: 'sha512-AAAA sha512-BBBB' })],
+    ['a commit that is not hexadecimal', github({ commit: 'zzz' })],
+    ['a short commit', github({ commit: '0123456' })],
+    ['a commit in capitals', github({ commit: REAL_COMMIT.toUpperCase() })],
+    ['a commit of 41 digits', github({ commit: `${REAL_COMMIT}0` })],
+    ['a commit with a path after it', github({ commit: `${REAL_COMMIT}/x` })],
+    ['a subdirectory from the root of a disk', github({ subdir: '/home/me/skills' })],
+    ['a subdirectory in the home directory', github({ subdir: '~/skills' })],
+    ['a subdirectory on a drive', github({ subdir: 'C:\\Users\\me' })],
+    ['a subdirectory that climbs out', github({ subdir: '../skills' })],
+    ['a subdirectory that climbs out in the middle', github({ subdir: 'a/../../b' })],
+    ['a subdirectory that climbs out with backslashes', github({ subdir: 'a\\..\\b' })],
+    ['an empty subdirectory', github({ subdir: '' })],
+  ])('rejects %s', (_what, value) => {
+    expect(parses(value)).toBe(false);
+  });
+
+  const TEXT_FIELDS: readonly (readonly [where: string, make: (text: string) => unknown])[] = [
+    ['the label of a directory', (text) => ({ type: 'dir', label: text })],
+    ['the label of a tarball', (text) => ({ type: 'tarball', label: text })],
+    ['the name of an npm package', (text) => npm({ name: text })],
+    ['the version of an npm package', (text) => npm({ version: text })],
+    ['the owner of a repository', (text) => github({ owner: text })],
+    ['the name of a repository', (text) => github({ repo: text })],
+    ['the ref of a repository', (text) => github({ ref: text })],
+    ['the subdirectory of a repository', (text) => github({ subdir: text })],
+  ];
+
+  const UNSHOWABLE: readonly (readonly [what: string, text: string])[] = [
+    ['an escape sequence', 'x\u001b[2Jy'],
+    ['a newline', 'a\nb'],
+    ['a NUL', 'a\u0000b'],
+    ['a C1 control', 'a\u009bb'],
+    ['a direction override', 'a\u202eb'],
+    ['a direction isolate', 'a\u2066b'],
+    ['a zero-width space', 'a\u200bb'],
+    ['a line separator', 'a\u2028b'],
+    ['a soft hyphen', 'a\u00adb'],
+    ['a tag character', 'a\u{e0041}b'],
+    ['a lone surrogate', 'a\ud800b'],
+  ];
+
+  describe.each(TEXT_FIELDS)('%s', (_where, make) => {
+    it.each(['plain-text', 'caf\u00e9', '\u65e5\u672c\u8a9e', 'a b', '@acme/server'])(
+      'takes %j',
+      (text) => {
+        expect(parses(make(text))).toBe(true);
+      },
+    );
+
+    it.each(UNSHOWABLE)('refuses %s', (_what, text) => {
+      expect(parses(make(text))).toBe(false);
+    });
+  });
+
+  // What is refused as unshowable is what a path refuses as unshowable, by the same Unicode properties,
+  // and nothing else: asked of every code point, so that a class that one of them narrows is seen.
+  it('refuses the controls and the invisible characters that a path refuses, and no other', () => {
+    const wrong: string[] = [];
+    let unshowable = 0;
+
+    for (let code = 0; code <= 0x10ffff; code += 1) {
+      const char = String.fromCodePoint(code);
+      // Two letters before the character, so that a colon is not read as the end of a drive letter.
+      const verdict = checkEntryPath(`ab${char}b`);
+      const refusedAsText =
+        !verdict.ok &&
+        /control character|invisible or direction-changing|valid Unicode/.test(verdict.reason);
+      if (refusedAsText) unshowable += 1;
+      if (parses({ type: 'dir', label: `ab${char}b` }) === refusedAsText) wrong.push(hex(code));
+    }
+
+    expect(wrong).toEqual([]);
+    expect(unshowable).toBeGreaterThan(4_000);
   });
 });
