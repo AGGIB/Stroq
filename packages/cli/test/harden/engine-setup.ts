@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readTargetText } from '../../src/harden/atomic.js';
-import { applyPlan, undoFile } from '../../src/harden/index.js';
+import { applyPlan, undoFile, type ApplyOptions } from '../../src/harden/index.js';
 import { planJsonEdits } from '../../src/harden/json-edit.js';
 import { planTextBlock } from '../../src/harden/textblock.js';
 import type {
@@ -77,10 +77,11 @@ export async function applied(
   name: string,
   before: string | null,
   edits: readonly JsonEdit[],
+  options: ApplyOptions = {},
 ) {
   if (before !== null) writeFileSync(e.file(name), before);
   const plan = e.planJson(name, edits);
-  const result = await applyPlan(plan, e.env);
+  const result = await applyPlan(plan, e.env, options);
   return { plan, result, real: plan.real, path: e.file(name) };
 }
 

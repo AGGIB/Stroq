@@ -48,6 +48,8 @@ export type HardenErrorCode =
   | 'reformat-not-acknowledged'
   /** The path is a link, or lies behind one, and nobody agreed that the change lands in the file it leads to. */
   | 'link-not-acknowledged'
+  /** The change replaces a value that looks like a credential, which cannot be put back, and nobody agreed. */
+  | 'credential-loss-not-acknowledged'
   /** Writing the file back would lose something in it (a number, a duplicate key, a key order). */
   | 'lossy-json'
   /** The file is not valid UTF-8: decoding and writing it would change bytes the owner wrote. */

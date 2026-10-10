@@ -22,6 +22,7 @@ import {
   type PlanOptions,
   type PlanRefusal,
   type PreviousValue,
+  type RecordedEdit,
   type RecordedJsonEdit,
 } from './types.js';
 
@@ -50,6 +51,15 @@ export const REPLACED_CREDENTIAL_NOTICE =
   'a value that looks like a credential will be replaced, and no copy of it is kept';
 
 const invalid = (message: string): HardenError => new HardenError('invalid-edit', message);
+
+/**
+ * Whether any of `edits` replaces a value that was not kept because it looks like a credential:
+ * a change that no undo can take back.
+ */
+export const replacesCredential = (edits: readonly RecordedEdit[]): boolean =>
+  edits.some(
+    (edit) => edit.kind === 'json-set' && edit.previous.present && edit.previous.masked === true,
+  );
 
 /** A copy of `value` that is certainly JSON, or the typed error a recipe's mistake deserves. */
 function cloneJson(value: unknown, depth = 0): JsonValue {
@@ -190,9 +200,6 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   // labelled with the file the change lands in: when the path is a link, that is not the path.
   const shown = changed ? maskedDiff(text, outcome.after, real) : { diff: '', hidden: false };
   const backup = planBackup(text);
-  const replacesCredential = outcome.edits.some(
-    (edit) => edit.kind === 'json-set' && edit.previous.present && edit.previous.masked === true,
-  );
   return {
     kind: 'json',
     recipe: options.recipe ?? DEFAULT_RECIPE,
@@ -211,7 +218,7 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
       ...linkNotices(file, real, options.root, outcome.refusal?.refused),
       ...backup.notices,
       ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
-      ...(replacesCredential ? [REPLACED_CREDENTIAL_NOTICE] : []),
+      ...(replacesCredential(outcome.edits) ? [REPLACED_CREDENTIAL_NOTICE] : []),
     ],
     edits: outcome.edits,
     roundTrips: outcome.roundTrips,

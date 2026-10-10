@@ -139,9 +139,13 @@ describe('the manifest and a json-set that replaced a credential', () => {
   it('is written without the credential in it, and reads back', async () => {
     const e = engine();
     const before = jsonText({ env: { API_TOKEN: FAKE_SECRET }, model: 'm' });
-    const { real, result } = await applied(e, 'settings.json', before, [
-      set(['env', 'API_TOKEN'], 'new-value'),
-    ]);
+    const { real, result } = await applied(
+      e,
+      'settings.json',
+      before,
+      [set(['env', 'API_TOKEN'], 'new-value')],
+      { acknowledgeCredentialLoss: true },
+    );
 
     const manifestText = readFileSync(join(e.home, 'harden', 'manifest.json'), 'utf8');
 
@@ -155,9 +159,13 @@ describe('the manifest and a json-set that replaced a credential', () => {
   it('is undone by leaving the new value, and the owner is told', async () => {
     const e = engine();
     const before = jsonText({ env: { API_TOKEN: FAKE_SECRET }, model: 'm' });
-    const { real, path } = await applied(e, 'settings.json', before, [
-      set(['env', 'API_TOKEN'], 'new-value'),
-    ]);
+    const { real, path } = await applied(
+      e,
+      'settings.json',
+      before,
+      [set(['env', 'API_TOKEN'], 'new-value')],
+      { acknowledgeCredentialLoss: true },
+    );
     owner(path, (doc) => ({ ...doc, theirs: true }));
 
     const result = await undo(e, real);

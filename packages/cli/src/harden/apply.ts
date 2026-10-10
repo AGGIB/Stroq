@@ -14,6 +14,7 @@ import {
   type Manifest,
   type ManifestEntry,
 } from './manifest.js';
+import { replacesCredential } from './json-edit.js';
 import { linkNotice, linkTarget } from './plan-support.js';
 import { readTargetBytes, sameBytes } from './read.js';
 import { assertUnchanged } from './recheck.js';
@@ -57,6 +58,13 @@ export interface ApplyOptions {
    * `link-not-acknowledged`, and nothing is touched.
    */
   readonly acknowledgeLink?: boolean;
+  /**
+   * The caller has shown the owner that this change replaces a value that looks like a credential
+   * (the plan's notices say so) and that no copy of it is kept, so that undo cannot put it back,
+   * and the owner agreed. Without it such a plan is refused with `credential-loss-not-acknowledged`,
+   * and nothing is touched.
+   */
+  readonly acknowledgeCredentialLoss?: boolean;
 }
 
 export interface ApplyResult {
@@ -89,6 +97,25 @@ function currentBytes(plan: Plan): Uint8Array | null {
   const expected = plan.existed ? Buffer.from(plan.before, 'utf8') : null;
   if (!sameBytes(bytes, expected)) throw stale('the file has changed since the plan was made');
   return bytes;
+}
+
+/**
+ * Refuses a change the owner may not have been told about: one that lays the whole file out again,
+ * and one that replaces a credential, which nothing can put back. The caller says it told them.
+ */
+function assertOwnerTold(plan: Plan, reformats: boolean, options: ApplyOptions): void {
+  if (reformats && options.acknowledgeReformat !== true) {
+    throw new HardenError(
+      'reformat-not-acknowledged',
+      `this change lays all of ${plan.file} out again (its layout is not the one Stroq writes), not only the lines it adds; the diff shows all of it. Apply it only if the owner has agreed`,
+    );
+  }
+  if (replacesCredential(plan.edits) && options.acknowledgeCredentialLoss !== true) {
+    throw new HardenError(
+      'credential-loss-not-acknowledged',
+      `this change replaces a value in ${plan.file} that looks like a credential, no copy of it is kept and it cannot be put back; apply it only if the owner has agreed`,
+    );
+  }
 }
 
 /** Refuses a change that lands in another file than the one named, unless the owner has been told. */
@@ -168,6 +195,8 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
  * - `plan-inconsistent` for a plan whose text after, diff or edits are not what a planner makes;
  * - `reformat-not-acknowledged` for a change that lays the file out again, unless
  *   `options.acknowledgeReformat` is `true`;
+ * - `credential-loss-not-acknowledged` for a change that replaces a value that looks like a
+ *   credential, unless `options.acknowledgeCredentialLoss` is `true`;
  * - `link-not-acknowledged` for a path that is a link, or lies behind one, below the plan's root,
  *   unless `options.acknowledgeLink` is `true`;
  * - `path-escapes-root` and `dangling-link` for a path that leaves its tree or leads nowhere;
@@ -191,12 +220,7 @@ export async function applyPlan(
   }
   // The plan is judged by what it is made of, not by what it says about itself.
   const { reformats } = verifyPlan(plan);
-  if (reformats && options.acknowledgeReformat !== true) {
-    throw new HardenError(
-      'reformat-not-acknowledged',
-      `this change lays all of ${plan.file} out again (its layout is not the one Stroq writes), not only the lines it adds; the diff shows all of it. Apply it only if the owner has agreed`,
-    );
-  }
+  assertOwnerTold(plan, reformats, options);
   // Before anything is made or kept: a path that leads out of its tree or nowhere, or a file that
   // is not what the plan was made from, must cost nothing. The same checks are made again inside
   // the lock, where they are the ones that count.
