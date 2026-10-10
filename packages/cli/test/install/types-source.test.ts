@@ -368,6 +368,19 @@ describe('the exact parts of an npm or a GitHub source', () => {
     });
   });
 
+  // The parts are checked by patterns, and a passport is read back from a file that somebody else may
+  // have written, so none of them may take longer than the text is long.
+  it('refuses a part of a million characters without reading it through again and again', () => {
+    const million = 1_000_000;
+
+    expect(parses(npm({ integrity: `sha512-${'A'.repeat(million)}!` }))).toBe(false);
+    expect(parses(npm({ integrity: `sha512-${'A'.repeat(million)}===` }))).toBe(false);
+    expect(parses(github({ commit: 'a'.repeat(million) }))).toBe(false);
+    expect(parses(github({ subdir: 'a/'.repeat(million / 2) }))).toBe(false);
+    expect(parses({ type: 'dir', label: 'a/.'.repeat(million / 3) })).toBe(false);
+    expect(parses({ type: 'tarball', label: `${'a'.repeat(million)}\u0000` })).toBe(false);
+  });
+
   // What is refused as unshowable is what a path refuses as unshowable, by the same Unicode properties,
   // and nothing else: asked of every code point, so that a class that one of them narrows is seen.
   it('refuses the controls and the invisible characters that a path refuses, and no other', () => {
