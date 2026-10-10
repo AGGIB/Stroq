@@ -309,15 +309,15 @@ describe('the rule, against a model of a disk', () => {
     expect(canBeWritten(['Docs/a', 'docs/b'], byCase)).toBe(false);
     expect(canBeWritten(['docs/b', 'Docs/a'], byCase)).toBe(false);
     // And with a composed and a decomposed letter, which only the second way of comparing joins.
-    expect(canBeWritten(['café/a', 'café/b'], byCase)).toBe(true);
-    expect(canBeWritten(['café/a', 'café/b'], byCaseAndForm)).toBe(false);
+    expect(canBeWritten(['caf\u00e9/a', 'cafe\u0301/b'], byCase)).toBe(true);
+    expect(canBeWritten(['caf\u00e9/a', 'cafe\u0301/b'], byCaseAndForm)).toBe(false);
   });
 
   const ALPHABETS: readonly (readonly [what: string, names: readonly string[], keyOf: KeyOf])[] = [
     ['letter case', ['a', 'A', 'b', 'B'], byCase],
     [
       'letter case and Unicode form',
-      ['e', 'E', 'café', 'café', 'CAFÉ', 'ss', 'ß', 'SS'],
+      ['e', 'E', 'caf\u00e9', 'cafe\u0301', 'CAF\u00c9', 'ss', '\u00df', 'SS'],
       byCaseAndForm,
     ],
   ];

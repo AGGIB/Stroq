@@ -251,12 +251,14 @@ describe('findFolderSpellings', () => {
   });
 
   it('pairs a composed and a decomposed letter in a folder name', () => {
-    expect(findFolderSpellings(['café/a', 'café/b'])).toEqual([['café/a', 'café/b']]);
+    expect(findFolderSpellings(['caf\u00e9/a', 'cafe\u0301/b'])).toEqual([
+      ['caf\u00e9/a', 'cafe\u0301/b'],
+    ]);
   });
 
   it('pairs names that a filesystem with fuller case rules would also join', () => {
-    expect(findFolderSpellings(['straße/a', 'STRASSE/b'])).toHaveLength(1);
-    expect(findFolderSpellings(['ẞ/a', 'ss/b'])).toHaveLength(1);
+    expect(findFolderSpellings(['stra\u00dfe/a', 'STRASSE/b'])).toHaveLength(1);
+    expect(findFolderSpellings(['\u1e9e/a', 'ss/b'])).toHaveLength(1);
   });
 
   it('finds it at any depth', () => {
