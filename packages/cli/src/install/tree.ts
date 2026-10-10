@@ -20,10 +20,11 @@
 //
 // A tree is checked every time it is hashed, not once when it is made: the bytes of a tree are the
 // ones that get analysed and then written, and a digest that was true when it was taken says nothing
-// of bytes that changed since. The check includes that the tree can be written to every kind of disk,
-// so a reader that makes entries (a directory, a tarball) does not have to remember to ask.
+// of bytes that changed since. The check includes that the tree can be written to a disk that ignores
+// letter case and Unicode form, as far as `path-collision.ts` knows how such a disk folds a name, so a
+// reader that makes entries (a directory, a tarball) does not have to remember to ask.
 import { createHash } from 'node:crypto';
-import { findCollisions, findFolderConflicts } from './path-collision.js';
+import { findCollisions, findFolderConflicts, findFolderSpellings } from './path-collision.js';
 import { checkEntryPath, isWellFormed, quotePath } from './safe-path.js';
 import { LIMITS, type EntryKind, type Tree, type TreeEntry } from './types.js';
 
@@ -40,10 +41,15 @@ export type TreeErrorCode =
   /** A path that is a file and also the folder of another entry. */
   | 'path-conflict'
   /**
-   * Two entries that are one name on a filesystem that ignores letter case or Unicode form (`README`
-   * and `readme`; a composed and a decomposed letter), or a file and the folder of another entry that
-   * are. A Linux tree can hold both, no other disk can, so a tree like this is not a tree. The message
-   * is a fixed phrase that names no path; `path` is the later of the two in the order of the digest.
+   * Entries that cannot all be written to a filesystem that ignores letter case or Unicode form (NTFS,
+   * the default APFS, HFS+) and read back as the list of paths that was inspected, though a Linux tree
+   * can hold them: two entries whose names are one name there (`README` and `readme`; a composed and a
+   * decomposed letter), an entry and the folder of another entry that are, or two entries in folders
+   * that are one folder there but are spelled differently (`Docs/a.md` and `docs/b.md`), which such a
+   * disk merges. A tree like this is not a tree. The message is a fixed phrase, one of three, that
+   * names no path. For two entries `path` is the later of the two in the order of the digest and
+   * `other` the earlier; for an entry and a folder `path` is the entry below and `other` the entry it
+   * is below, which can come earlier or later in that order.
    */
   | 'path-collision'
   /** An entry that is not shaped like one: an unknown kind, a size that is not a size, bytes on a link. */
@@ -56,18 +62,26 @@ export type TreeErrorCode =
 /**
  * Why a tree is refused. `message` is a fixed phrase, usually with the path in quotes and everything
  * that could act on a terminal written out, so it is safe to print (for a collision it is a fixed
- * phrase and no path). `path` is the offending path exactly as it was given: text from outside, and
- * not to be shown without the same care.
+ * phrase and no path). `path` is the offending path exactly as it was given, and `other` the path it
+ * is in conflict with when there is one (only for 'path-collision', otherwise null): both are text from
+ * outside, and not to be shown without the same care.
  */
 export class TreeError extends Error {
   readonly code: TreeErrorCode;
   readonly path: string | null;
+  readonly other: string | null;
 
-  constructor(code: TreeErrorCode, message: string, path: string | null = null) {
+  constructor(
+    code: TreeErrorCode,
+    message: string,
+    path: string | null = null,
+    other: string | null = null,
+  ) {
     super(message);
     this.name = 'TreeError';
     this.code = code;
     this.path = path;
+    this.other = other;
   }
 }
 
@@ -242,26 +256,39 @@ function hasEntryAsFolder(path: string, paths: ReadonlySet<string>): boolean {
 }
 
 // A Linux tree can hold `README` and `readme`; NTFS, the default APFS and HFS+ cannot, and one of the
-// two would overwrite the other when the files are written. The refusal belongs to the tree and not to
-// a reader, so that every way of making a tree (a directory, a tarball, a manifest read back) meets
-// it, and a tree is refused when it is looked at and not when it is installed. The phrases name no
-// path: the names are text from outside, and are in `path` for whoever shows them with care.
+// two would overwrite the other when the files are written. It can hold `Docs/a.md` and `docs/b.md`
+// too, and such a disk merges the two folders under the spelling of the first, so that a read of the
+// disk lists a path that was never inspected. The refusal belongs to the tree and not to a reader, so
+// that every way of making a tree (a directory, a tarball, a manifest read back) meets it, and a tree
+// is refused when it is looked at and not when it is installed. The phrases name no path: the names
+// are text from outside, and are in `path` and `other` for whoever shows them with care.
 const COLLISION_MESSAGE =
   'two entries have names that are one name on a filesystem that ignores letter case or Unicode form, so this tree cannot be written to every disk';
 const FOLDER_COLLISION_MESSAGE =
   'an entry and the folder of another entry have names that are one name on a filesystem that ignores letter case or Unicode form, so this tree cannot be written to every disk';
+const FOLDER_SPELLING_MESSAGE =
+  'two entries are in folders whose names are one name on a filesystem that ignores letter case or Unicode form, but are spelled differently, so this tree cannot be written to every disk';
+
+/** What is looked for, in the order it is said: each finder pairs `[other, path]`. */
+const UNWRITABLE: readonly (readonly [
+  find: (paths: readonly string[]) => readonly (readonly [string, string])[],
+  message: string,
+])[] = [
+  [findCollisions, COLLISION_MESSAGE],
+  [findFolderConflicts, FOLDER_COLLISION_MESSAGE],
+  [findFolderSpellings, FOLDER_SPELLING_MESSAGE],
+];
 
 /**
- * Throws if the tree cannot be written to a filesystem that ignores letter case and Unicode form:
- * two paths that are one name there, or a file and the folder of another entry that are. `paths` are
- * in the order of the digest, which makes the path that is reported the same for the same tree.
+ * Throws if the tree cannot be written to a filesystem that ignores letter case and Unicode form and
+ * read back as the same paths: two paths that are one name there, a file and the folder of another
+ * entry that are, or two folders that are one folder there but spelled two ways. `paths` are in the
+ * order of the digest, which makes the paths that are reported the same for the same tree.
  */
 function refuseUnwritable(paths: readonly string[]): void {
-  const [pair] = findCollisions(paths);
-  if (pair !== undefined) throw new TreeError('path-collision', COLLISION_MESSAGE, pair[1]);
-  const [clash] = findFolderConflicts(paths);
-  if (clash !== undefined) {
-    throw new TreeError('path-collision', FOLDER_COLLISION_MESSAGE, clash[1]);
+  for (const [find, message] of UNWRITABLE) {
+    const [pair] = find(paths);
+    if (pair !== undefined) throw new TreeError('path-collision', message, pair[1], pair[0]);
   }
 }
 

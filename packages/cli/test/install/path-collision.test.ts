@@ -1,6 +1,11 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { findCollisions, findFolderConflicts, foldCase } from '../../src/install/path-collision.js';
+import {
+  findCollisions,
+  findFolderConflicts,
+  findFolderSpellings,
+  foldCase,
+} from '../../src/install/path-collision.js';
 import { LIMITS } from '../../src/install/types.js';
 
 const LAST_CODE_POINT = 0x10ffff;
@@ -234,5 +239,89 @@ describe('findFolderConflicts', () => {
     const paths = ['A', ...Array.from({ length: LIMITS.maxEntries }, (_, i) => `a/${i}`)];
 
     expect(findFolderConflicts(paths)).toHaveLength(LIMITS.maxEntries);
+  });
+});
+
+// Two folders that are one folder on a disk that ignores letter case and Unicode form, spelled two
+// ways: the disk makes the folder once, with the first spelling it is given, and writes the files of
+// both into it. A read of the disk then lists a path that was never inspected.
+describe('findFolderSpellings', () => {
+  it('pairs two paths whose folders differ only in case', () => {
+    expect(findFolderSpellings(['Docs/a.md', 'docs/b.md'])).toEqual([['Docs/a.md', 'docs/b.md']]);
+  });
+
+  it('pairs a composed and a decomposed letter in a folder name', () => {
+    expect(findFolderSpellings(['café/a', 'café/b'])).toEqual([['café/a', 'café/b']]);
+  });
+
+  it('pairs names that a filesystem with fuller case rules would also join', () => {
+    expect(findFolderSpellings(['straße/a', 'STRASSE/b'])).toHaveLength(1);
+    expect(findFolderSpellings(['ẞ/a', 'ss/b'])).toHaveLength(1);
+  });
+
+  it('finds it at any depth', () => {
+    expect(findFolderSpellings(['x/Docs/a', 'x/docs/b'])).toHaveLength(1);
+    expect(findFolderSpellings(['A/b/x', 'a/b/y'])).toHaveLength(1);
+    expect(findFolderSpellings(['a/B/x', 'a/b/y'])).toHaveLength(1);
+  });
+
+  it('pairs each later path with the first one through the folder, once each, in input order', () => {
+    expect(findFolderSpellings(['Docs/a', 'docs/b', 'Docs/c', 'DOCS/d'])).toEqual([
+      ['Docs/a', 'docs/b'],
+      ['Docs/a', 'DOCS/d'],
+    ]);
+  });
+
+  it('pairs a path once, for the folder nearest the root that it spells differently', () => {
+    expect(findFolderSpellings(['A/B/x', 'a/b/y'])).toEqual([['A/B/x', 'a/b/y']]);
+  });
+
+  it('says nothing of paths whose folders are spelled alike', () => {
+    expect(findFolderSpellings(['Docs/a', 'Docs/b', 'Docs/sub/c', 'other/Docs/d'])).toEqual([]);
+    expect(findFolderSpellings(['a/b/c', 'a/b/d', 'a/e'])).toEqual([]);
+  });
+
+  it('says nothing of the same folder name under two different folders', () => {
+    expect(findFolderSpellings(['a/Docs/x', 'b/docs/y'])).toEqual([]);
+  });
+
+  // The names of the files themselves are for findCollisions, and a file against a folder of the
+  // same name is for findFolderConflicts.
+  it('says nothing of the last component of a path', () => {
+    expect(findFolderSpellings(['Docs/a.md', 'Docs/A.md'])).toEqual([]);
+    expect(findFolderSpellings(['Docs', 'docs/x'])).toEqual([]);
+    expect(findFolderSpellings(['a', 'A'])).toEqual([]);
+  });
+
+  it('says nothing of nothing', () => {
+    expect(findFolderSpellings([])).toEqual([]);
+    expect(findFolderSpellings(['only'])).toEqual([]);
+    expect(findFolderSpellings(['only/one'])).toEqual([]);
+  });
+
+  it('does not change what it is given', () => {
+    const paths = ['b/Docs/c', 'b/docs/d', 'a'];
+    findFolderSpellings(paths);
+
+    expect(paths).toEqual(['b/Docs/c', 'b/docs/d', 'a']);
+  });
+
+  it('keeps the answer no longer than the input when every path spells the folder its own way', () => {
+    const letters = Array.from('abcdefghijkl');
+    const spellings = Array.from({ length: 1 << letters.length }, (_, bits) =>
+      letters.map((letter, at) => (bits & (1 << at) ? letter.toUpperCase() : letter)).join(''),
+    ).slice(0, LIMITS.maxEntries);
+    const pairs = findFolderSpellings(spellings.map((spelling) => `${spelling}/file`));
+
+    expect(pairs).toHaveLength(spellings.length - 1);
+    expect(pairs.every(([first]) => first === `${spellings[0]}/file`)).toBe(true);
+  });
+
+  // A name longer than a path may be is not folded (see FOLDED_UNITS), so its spellings are two names.
+  it('leaves a name longer than a path may be as it is', () => {
+    const tooLong = 'A'.repeat(LIMITS.maxPathBytes + 1);
+
+    expect(findFolderSpellings([`${tooLong}/a`, `${tooLong.toLowerCase()}/b`])).toEqual([]);
+    expect(findFolderSpellings([`${tooLong}/a`, `${tooLong}/b`])).toEqual([]);
   });
 });

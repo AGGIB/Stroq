@@ -93,10 +93,11 @@ const foldedParts = (path: string): string[] => path.split('/').map(collisionNam
  * many collide. A path given twice is a collision with itself: the second overwrites the first.
  *
  * It compares whole paths. Two folders that differ only in case are one folder there, and the files in
- * them collide only when their whole paths do. A file and a folder of one name (`a` and `a/b`, or
- * `Docs` and `docs/x`) is a different fault, found by `findFolderConflicts`. A name longer than a path
- * may be is not folded (see `FOLDED_UNITS`), so two spellings of it are two names here: it is refused
- * by `checkEntryPath` before it could be an entry.
+ * them collide only when their whole paths do; that the folders are spelled two ways is a different
+ * fault, found by `findFolderSpellings`. So is a file and a folder of one name (`a` and `a/b`, or
+ * `Docs` and `docs/x`), found by `findFolderConflicts`. A name longer than a path may be is not folded
+ * (see `FOLDED_UNITS`), so two spellings of it are two names here: it is refused by `checkEntryPath`
+ * before it could be an entry.
  */
 export function findCollisions(paths: readonly string[]): readonly (readonly [string, string])[] {
   const firstOfKey = new Map<string, string>();
@@ -147,6 +148,52 @@ export function findFolderConflicts(
       step = step.below.get(part);
       if (step === undefined) break;
       if (step.owner !== null) pairs.push([step.owner, path]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * The pairs `[first, later]` of paths that go through one folder on a filesystem that ignores letter
+ * case and Unicode form, and spell its name differently: `Docs/a.md` with `docs/b.md`, or a composed
+ * and a decomposed "e acute" in a folder name. Such a disk makes the folder once, with the spelling of
+ * whichever path is written first, and writes the files of both into it, so a read of the disk lists
+ * `docs/b.md` as `Docs/b.md` (or the other way round): a path that was never inspected, and another
+ * digest than the one that was confirmed. With this rule and the other two (`findCollisions`,
+ * `findFolderConflicts`) a folder has one spelling in a tree, whatever the disk.
+ *
+ * `first` is the first of the paths given that goes through the folder, and `later` one that spells it
+ * another way. A path is paired at most once, for the folder nearest the root that it spells
+ * differently, so the answer is never longer than the input. The last component of a path is the name
+ * of an entry and not of a folder: that is for `findCollisions`.
+ */
+export function findFolderSpellings(
+  paths: readonly string[],
+): readonly (readonly [string, string])[] {
+  // A tree of folded names, as in `findFolderConflicts`: each step down it is one folder, and it
+  // remembers the spelling it was first given and the path that gave it.
+  interface Folder {
+    readonly spelled: string;
+    readonly first: string;
+    readonly below: Map<string, Folder>;
+  }
+  const root = new Map<string, Folder>();
+  const pairs: (readonly [string, string])[] = [];
+
+  for (const path of paths) {
+    const folders = path.split('/').slice(0, -1);
+    let level = root;
+    for (const name of folders) {
+      const key = collisionName(name);
+      let folder = level.get(key);
+      if (folder === undefined) {
+        folder = { spelled: name, first: path, below: new Map() };
+        level.set(key, folder);
+      } else if (folder.spelled !== name) {
+        pairs.push([folder.first, path]);
+        break;
+      }
+      level = folder.below;
     }
   }
   return pairs;
