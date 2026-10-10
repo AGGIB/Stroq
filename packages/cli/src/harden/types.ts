@@ -230,8 +230,10 @@ export type BackupPlan =
 
 export interface PlanOptions {
   /**
-   * Reads a file's text, or `null` when there is no such file. It is called with the REAL path.
-   * Planning reads nothing else and writes nothing at all.
+   * Reads a file's text, or `null` when there is no such file. It is called with the REAL path,
+   * and only after the path has passed the rules a write would apply: for a path that leaves its
+   * tree, or leads nowhere, it is not called at all. Planning reads nothing else and writes
+   * nothing at all.
    */
   readonly read: (path: string) => string | null;
   /** Which recipe asked, recorded with what was changed. */
@@ -249,14 +251,19 @@ export interface PlanBase {
   readonly file: string;
   /** The file that will be replaced: `file` with every link followed. */
   readonly real: string;
+  /** Whether the file was there. `false` too for a plan refused before the file was opened. */
   readonly existed: boolean;
-  /** The text now (`''` when the file does not exist). */
+  /** The text now (`''` when the file does not exist, or was never opened: see `refused`). */
   readonly before: string;
   /** The text after the edits. Equal to `before` when nothing changes or the plan is refused. */
   readonly after: string;
   /** Unified diff from `before` to `after`; `''` when nothing changes. */
   readonly diff: string;
   readonly changed: boolean;
+  /**
+   * Why the plan cannot be applied. `path-escapes-root` and `dangling-link` mean the file was never
+   * opened, so the plan holds nothing of it.
+   */
   readonly refused?: PlanRefusal;
   /** What the refusal is about, in words that name the place and never the value. */
   readonly refusedDetail?: string;
