@@ -6,7 +6,7 @@ const report = (blocked: number, asked: number, passed: number): AttackReport =>
   version: 1,
   policy: 'default',
   scenarios: [],
-  totals: { blocked, asked, passed },
+  totals: { blocked, asked, askedByLimit: 0, passed, timeout: 0, error: 0, inconclusive: 0 },
   ok: passed === 0,
 });
 
