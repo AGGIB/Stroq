@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SCAN_CHARS } from '@stroq/core';
 import { findCredentialShape, planBackup } from '../../src/harden/backup.js';
-import { cpuNow } from '../../../core/test/cpu-time.js';
+import { cpuNow } from '../helpers/cpu-time.js';
 
 /**
  * Values taken from the detectors' own test fixtures in core, or built on the synthetic prefix

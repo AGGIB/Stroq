@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { deepEqual, findJsoncSyntax, planJsonEdits } from '../../src/harden/json-edit.js';
 import { HardenError, type JsonEdit, type JsonPlan } from '../../src/harden/types.js';
-import { cpuNow } from '../../../core/test/cpu-time.js';
+import { cpuNow } from '../helpers/cpu-time.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);

@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { nodeFs } from '../../src/harden/atomic.js';
 import {
-  MAX_MANIFEST_BYTES,
   emptyManifest,
   readManifest,
   withManifestLock,

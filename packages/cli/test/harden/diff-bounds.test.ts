@@ -7,7 +7,7 @@ import {
   unifiedDiff,
 } from '../../src/harden/diff.js';
 import { HardenError } from '../../src/harden/types.js';
-import { cpuNow } from '../../../core/test/cpu-time.js';
+import { cpuNow } from '../helpers/cpu-time.js';
 import { applyUnifiedDiff, diff, lines, numbers } from './diff-apply.js';
 
 describe('unifiedDiff: size bound', () => {

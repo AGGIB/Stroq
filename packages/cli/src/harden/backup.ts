@@ -18,8 +18,8 @@ import {
   writeFileAtomic,
 } from './atomic.js';
 import {
-  BACKUP_ID_PATTERN,
   HardenError,
+  ID_PATTERN,
   sha256Text,
   type BackupPlan,
   type Fs,
@@ -172,7 +172,7 @@ export interface BackupResult {
   readonly reason?: string;
 }
 
-const isBackupId = (id: string): boolean => BACKUP_ID_PATTERN.test(id);
+const isBackupId = (id: string): boolean => ID_PATTERN.test(id);
 
 /**
  * A new id for one apply: the UTC time to the millisecond, so that ids sort in the order they were

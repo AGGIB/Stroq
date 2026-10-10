@@ -241,11 +241,13 @@ export interface TextBlockPlan extends PlanBase {
 export type Plan = JsonPlan | TextBlockPlan;
 
 /**
- * What a backup id may be: the name of one directory, so no separator, no dot at the front and
- * nothing that is not a plain character. Backups and the manifest both check it, because an id is
- * joined into a path and the manifest is a file someone else could have written.
+ * What an id may be, for a backup (the name of one directory) and for a text block (a word inside
+ * a marker line): a plain name, so no separator, no dot at the front, no space and nothing that
+ * is not a plain character. Backups, text blocks and the manifest all check this one rule,
+ * because an id is joined into a path or a line, and the manifest is a file someone else could
+ * have written.
  */
-export const BACKUP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The SHA-256 of `text` as UTF-8, in lower-case hex: how the engine tells one version of a file from another. */
 export const sha256Text = (text: string): string =>

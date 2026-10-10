@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 
 /**
@@ -102,13 +102,18 @@ export function parseConfigJson<T>(file: string, text: string): T {
   }
 }
 
-const within = (path: string, root: string): boolean => {
+/**
+ * Whether `path` is `root` or lies under it. Shared with the harden engine's writer, so that the
+ * two writers of an agent config give one answer. A directory called `..x` is a directory, not a
+ * way out: only `..` itself, or `..` followed by a separator, leaves the root.
+ */
+export const within = (path: string, root: string): boolean => {
   const rel = relative(root, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 };
 
 /** The real path `file` resolves to, through its nearest existing ancestor. */
-function realTarget(file: string): string {
+export function realTarget(file: string): string {
   const pending: string[] = [];
   let at = resolve(file);
   for (;;) {

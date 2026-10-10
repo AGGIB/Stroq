@@ -1,9 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { realpathSync } from 'node:fs';
 import * as fsp from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { readRegularFile } from '@stroq/core';
-import { assertStaysInside } from '../commands/config-file.js';
+import { assertStaysInside, realTarget, within } from '../commands/config-file.js';
 import { HardenError, type Fs, type StatLike } from './types.js';
 
 /**
@@ -65,30 +64,12 @@ const isMissing = (err: unknown): boolean => {
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
 
-const within = (path: string, root: string): boolean => {
-  const rel = relative(root, path);
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-};
-
 /**
  * The file `file` is, with every link followed, through the nearest part of the path that
  * exists, so that a file that is not made yet still gets the real directory it will be made in.
- * A link that points nowhere is not followed: it is where the file goes.
+ * It is the function `stroq init` resolves its own writes with, so the two writers agree.
  */
-export function resolveRealPath(file: string): string {
-  const pending: string[] = [];
-  let at = resolve(file);
-  for (;;) {
-    try {
-      return resolve(realpathSync(at), ...pending);
-    } catch {
-      const parent = dirname(at);
-      if (parent === at) return resolve(file);
-      pending.unshift(basename(at));
-      at = parent;
-    }
-  }
-}
+export const resolveRealPath: (file: string) => string = realTarget;
 
 /**
  * The text of a file the engine is about to edit, or `null` when there is no such file. Only a

@@ -4,8 +4,7 @@ import { withLock } from '@stroq/core';
 import { z } from 'zod';
 import { hardenDirIn, hardenManifestFileIn } from '../paths.js';
 import { assertWriteAllowed, makePrivateDir, nodeFs, writeFileAtomic } from './atomic.js';
-import { BLOCK_ID_PATTERN } from './textblock.js';
-import { BACKUP_ID_PATTERN, HardenError, type HardenEnv, type RecordedEdit } from './types.js';
+import { HardenError, ID_PATTERN, type HardenEnv, type RecordedEdit } from './types.js';
 
 /**
  * What `stroq harden` remembers about the files it changed: for each real path, one entry per
@@ -93,7 +92,7 @@ const editSchema = z.discriminatedUnion('kind', [
     .refine(pathFits, 'createdFrom is past the end of the path'),
   z.strictObject({
     kind: z.literal('text-block'),
-    id: z.string().regex(BLOCK_ID_PATTERN),
+    id: z.string().regex(ID_PATTERN),
     lines: z.array(z.string()),
     previous: z.array(z.string()).nullable(),
     // Nothing but the one or two line breaks that Stroq writes before an appended block.
@@ -110,7 +109,7 @@ const entrySchema = z.strictObject({
   edits: z.array(editSchema),
   shaBefore: sha256Hex.nullable(),
   shaAfter: sha256Hex,
-  backup: z.string().regex(BACKUP_ID_PATTERN).nullable(),
+  backup: z.string().regex(ID_PATTERN).nullable(),
   stroqVersion: z.string().min(1).max(64),
   appliedAt: z.iso.datetime(),
 });
