@@ -14,13 +14,11 @@ import { CLI_PACKAGE, TSX_ARGS } from './child.js';
  */
 const CHILD = fileURLToPath(new URL('./ledger-child.ts', import.meta.url));
 /**
- * Far above what the children need, and below the time each test is given; it ends a hang. Each child loads
+ * Far above what the children need, and below the 120 s each test is given; it ends a hang. Each child loads
  * the source of core through `tsx` before it takes a request, which a loaded Windows runner is slow at, so
- * the time scales there.
+ * the time a child is given is four times as long there (and still shorter than a test).
  */
-const SLOWNESS = process.platform === 'win32' ? 4 : 1;
-const CHILD_TIMEOUT_MS = 25_000 * SLOWNESS;
-const TEST_TIMEOUT_MS = 60_000 * SLOWNESS;
+const CHILD_TIMEOUT_MS = process.platform === 'win32' ? 100_000 : 25_000;
 
 let dir: string;
 let file: string;
@@ -85,42 +83,30 @@ const sum = (outcomes: readonly Outcome[], pick: (o: Outcome) => number): number
   outcomes.reduce((total, o) => total + pick(o), 0);
 
 describe('a ledger shared by processes', () => {
-  it(
-    'gives out the cap between two processes asking at the same moment, and not a request more',
-    async () => {
-      const outcomes = await takeFromProcesses(2, 30, 30);
-      // Sixty asks for thirty requests. A lock that let two takes read the same count would lose a
-      // write, and more than thirty would have been granted, or the file would count fewer.
-      expect(sum(outcomes, (o) => o.granted)).toBe(30);
-      expect(sum(outcomes, (o) => o.refused['limit-reached'] ?? 0)).toBe(30);
-      expect(sum(outcomes, (o) => Object.values(o.refused).reduce((a, b) => a + b, 0))).toBe(30);
-      const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number; entries: unknown[] };
-      expect(stored.used).toBe(30);
-      expect(stored.entries).toHaveLength(30);
-    },
-    TEST_TIMEOUT_MS,
-  );
+  it('gives out the cap between two processes asking at the same moment, and not a request more', async () => {
+    const outcomes = await takeFromProcesses(2, 30, 30);
+    // Sixty asks for thirty requests. A lock that let two takes read the same count would lose a
+    // write, and more than thirty would have been granted, or the file would count fewer.
+    expect(sum(outcomes, (o) => o.granted)).toBe(30);
+    expect(sum(outcomes, (o) => o.refused['limit-reached'] ?? 0)).toBe(30);
+    expect(sum(outcomes, (o) => Object.values(o.refused).reduce((a, b) => a + b, 0))).toBe(30);
+    const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number; entries: unknown[] };
+    expect(stored.used).toBe(30);
+    expect(stored.entries).toHaveLength(30);
+  }, 120_000);
 
-  it(
-    'counts every request when the processes ask for less than the cap between them',
-    async () => {
-      const outcomes = await takeFromProcesses(2, 30, 10);
-      expect(sum(outcomes, (o) => o.granted)).toBe(20);
-      const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number; entries: unknown[] };
-      expect(stored.used).toBe(20);
-      expect(stored.entries).toHaveLength(20);
-    },
-    TEST_TIMEOUT_MS,
-  );
+  it('counts every request when the processes ask for less than the cap between them', async () => {
+    const outcomes = await takeFromProcesses(2, 30, 10);
+    expect(sum(outcomes, (o) => o.granted)).toBe(20);
+    const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number; entries: unknown[] };
+    expect(stored.used).toBe(20);
+    expect(stored.entries).toHaveLength(20);
+  }, 120_000);
 
-  it(
-    'holds for three processes as well',
-    async () => {
-      const outcomes = await takeFromProcesses(3, 12, 10);
-      expect(sum(outcomes, (o) => o.granted)).toBe(12);
-      const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number };
-      expect(stored.used).toBe(12);
-    },
-    TEST_TIMEOUT_MS,
-  );
+  it('holds for three processes as well', async () => {
+    const outcomes = await takeFromProcesses(3, 12, 10);
+    expect(sum(outcomes, (o) => o.granted)).toBe(12);
+    const stored = JSON.parse(readFileSync(file, 'utf8')) as { used: number };
+    expect(stored.used).toBe(12);
+  }, 120_000);
 });
