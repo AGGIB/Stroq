@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyCommand } from '../../src/actions/classify-bash.js';
+import { classifyCommand, commandUrls } from '../../src/actions/classify-bash.js';
 import { cpuNow } from '../cpu-time.js';
 
 /**
@@ -380,34 +380,92 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
 const at = (build: Build, size: number): string =>
   build((unit) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size));
 
-const timed = (command: string): number => {
-  const started = cpuNow();
-  classifyCommand(command, '/tmp');
-  return cpuNow() - started;
-};
+/** How long `read` takes to read one command, in the processor time of the reference machine. */
+const timedBy =
+  (read: (command: string) => unknown) =>
+  (command: string): number => {
+    const started = cpuNow();
+    read(command);
+    return cpuNow() - started;
+  };
+const timed = timedBy((command) => classifyCommand(command, '/tmp'));
 
 /** How often a size that looks too slow is timed, the first time included: noise only adds to a time. */
 const TRIES = 3;
 
+/** `build` at the three sizes, each held against the one before it (see the top of this file). */
+function holdsLinear(build: Build, time: (command: string) => number): void {
+  const times: number[] = [time(at(build, SIZES[0]))];
+  for (let i = 1; i < SIZES.length; i += 1) {
+    const command = at(build, SIZES[i] as number);
+    const small = times[i - 1] as number;
+    let big = time(command);
+    for (let tries = 1; tries < TRIES && big >= BOUND_MS && big >= MAX_GROWTH * small; tries += 1)
+      big = Math.min(big, time(command));
+    times.push(big);
+  }
+  const growth = times.map((ms, i) => `${ms.toFixed(0)} ms at ${(SIZES[i] as number) / 1024} KiB`);
+  for (let i = 1; i < times.length; i += 1) {
+    const small = times[i - 1] as number;
+    const big = times[i] as number;
+    expect(big < BOUND_MS || big < MAX_GROWTH * small, growth.join(', ')).toBe(true);
+  }
+}
+
 describe('classifyCommand stays linear on commands built to be slow', () => {
   it.each(ADVERSARIAL)('%s', (_name, build) => {
-    const times: number[] = [timed(at(build, SIZES[0]))];
-    for (let i = 1; i < SIZES.length; i += 1) {
-      const command = at(build, SIZES[i] as number);
-      const small = times[i - 1] as number;
-      let big = timed(command);
-      for (let tries = 1; tries < TRIES && big >= BOUND_MS && big >= MAX_GROWTH * small; tries += 1)
-        big = Math.min(big, timed(command));
-      times.push(big);
-    }
-    const growth = times.map(
-      (ms, i) => `${ms.toFixed(0)} ms at ${(SIZES[i] as number) / 1024} KiB`,
-    );
-    for (let i = 1; i < times.length; i += 1) {
-      const small = times[i - 1] as number;
-      const big = times[i] as number;
-      expect(big < BOUND_MS || big < MAX_GROWTH * small, growth.join(', ')).toBe(true);
-    }
+    holdsLinear(build, timed);
+  });
+});
+
+/** Addresses that are all different, as many as fill `size` characters. */
+const distinctAddresses = (size: number): string =>
+  Array.from({ length: Math.ceil(size / 24) }, (_, i) => `https://h${i}.example/ `).join('');
+
+/**
+ * `commandUrls` (the addresses a task's scope and egress binding are given) reads the same text as the classifier and
+ * is held to the same growth. Its shapes are the ways a scheme can start and not finish, an address that runs on, one
+ * that is cut at its length, the same address over and over, and many different ones.
+ */
+const URL_SHAPES: ReadonlyArray<readonly [string, Build]> = [
+  ['schemes', (r) => r('http://')],
+  ['secure schemes', (r) => r('https://')],
+  ['schemes in capitals', (r) => r('HTTPS://')],
+  ['schemes, then spaces', (r) => r('http:// ')],
+  ['schemes, then control characters', (r) => r('http://\t\n')],
+  ['schemes that never finish', (r) => r('http:/ htt https:')],
+  ['half a scheme', (r) => r('http')],
+  ['one run of addresses', (r) => r('https://a.example/')],
+  [
+    'one run of addresses, in the query of the first',
+    (r) => `https://a.example/?${r('u=https://b.example/')}`,
+  ],
+  ['addresses at the length they are cut at', (r) => r(`https://a.example/${'a'.repeat(4_000)}`)],
+  [
+    'addresses a little under the length they are cut at',
+    (r) => r(`https://a.example/${'a'.repeat(3_950)} `),
+  ],
+  ['one address, over and over', (r) => r('curl https://a.example/x; ')],
+  ['one address, over and over, in quotes', (r) => r("curl 'https://a.example/x' ")],
+  ['addresses between operators', (r) => r('https://a.example/;')],
+  ['addresses between pipes', (r) => r('https://a.example/|')],
+  ['addresses between parentheses', (r) => r('(https://a.example/)')],
+  ['many different addresses', (r) => distinctAddresses(r('x').length)],
+  ['one long host', (r) => `https://${r('a')}`],
+  ['one long host of labels', (r) => `https://${r('a.')}`],
+  ['one long run of user information', (r) => `https://${r('u:p@')}h.example/`],
+  ['hosts with ports', (r) => r('https://a.example:8443/ ')],
+  ['ssh targets', (r) => r('a@b.example ')],
+  ['ssh targets with no space between', (r) => r('a@b.example,')],
+  ['the shape of an ssh target', (r) => `ssh ${r('a.')}`],
+  ['the shape of an ssh target with its host', (r) => `ssh ${r('a.')}@b.example`],
+  ['at signs', (r) => r('x@')],
+];
+
+describe('commandUrls stays linear on commands built to be slow', () => {
+  const timedUrls = timedBy((command) => commandUrls(command, 256));
+  it.each(URL_SHAPES)('%s', (_name, build) => {
+    holdsLinear(build, timedUrls);
   });
 });
 
