@@ -315,9 +315,22 @@ describe('a host that stops answering', () => {
     expect(driver.calls).toHaveLength(3);
   });
 
-  it('does not stop for a stream it cannot read: that costs a request and tells nothing of the account', async () => {
+  it('does not stop for a stream it cannot read once the host has said how it is paid for: that costs a request and tells nothing of the account', async () => {
+    const driver = new FakeHostDriver({
+      fault: (probe) => (probe.kind === 'allow' ? 'honest' : 'garbage'),
+    });
+    const result = await verify(rig, driver);
+    expect(driver.calls).toHaveLength(3);
+    expect(marksOf(result)).toEqual({
+      allow: 'passed:ran',
+      deny: 'inconclusive:unparsable-stream',
+      'secret-egress': 'inconclusive:unparsable-stream',
+    });
+  });
+
+  it('stops at a stream it cannot read when the host has said nothing of how it is paid for', async () => {
     const driver = new FakeHostDriver({ fault: 'garbage' });
     await verify(rig, driver);
-    expect(driver.calls).toHaveLength(3);
+    expect(driver.calls).toHaveLength(1);
   });
 });

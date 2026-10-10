@@ -9,7 +9,7 @@
 import { AuditLog, type AuditEntry } from '@stroq/core';
 import { auditFileIn } from '../paths.js';
 import type { Ledger } from './budget.js';
-import { plainText } from './evidence.js';
+import { isWellFormedRun, plainText } from './evidence.js';
 import { clearSentinel, readSentinel } from './probes.js';
 import {
   REASONS,
@@ -92,6 +92,20 @@ const didNotRun = (message: string): HostRun => ({
 const HUNG: HostRun = { stream: [], exitCode: null, timedOut: true, stderrTail: '' };
 
 /**
+ * What an answer that is not in the shape of a run is taken to have been: a run whose stream could not be
+ * read. A driver is code that talks to a program we do not control; what it returns is looked at before
+ * it is used, so that a null where an event should be is a run that cannot be read and not a throw after
+ * the request has been taken from the ledger.
+ */
+const NOT_A_RUN: HostRun = {
+  stream: [],
+  exitCode: 0,
+  timedOut: false,
+  stderrTail: '',
+  unparsedLines: 1,
+};
+
+/**
  * Asks the driver, and never waits longer than the request's deadline and a short grace after it: a
  * driver is meant to enforce its own deadline, and one that does not must not hang the check. A
  * driver that throws, or that throws before it returns a promise, is a run that did not get to the end.
@@ -135,7 +149,8 @@ export async function makeRequest(args: {
     };
   clearSentinel(args.ctx.project, args.probe);
   const before = await auditPosition(args.ctx.stroqHome);
-  const run = await runGuarded(args.driver, args.probe, args.ctx, args.graceMs);
+  const answer: unknown = await runGuarded(args.driver, args.probe, args.ctx, args.graceMs);
+  const run = isWellFormedRun(answer) ? answer : NOT_A_RUN;
   return {
     sent: true,
     observation: {

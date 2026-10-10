@@ -21,6 +21,7 @@ import { buildProbes, controlOf, newFakeSecret, newNonce, prepareProject } from 
 import { makeRequest, type Observation } from './request.js';
 import { controlIdOf } from './state-rule.js';
 import { assertThrowaway } from './throwaway.js';
+import { DEFAULT_DETECT_MS, checkInputs, lookForHost, scrubbedEnv } from './verify-input.js';
 import {
   caveatsFor,
   downgradeUnarmed,
@@ -30,11 +31,11 @@ import {
   type Row,
 } from './result.js';
 import {
-  AGENT_NAME,
   REASONS,
   type Expectation,
   type HostDriver,
   type HostResult,
+  type HostRun,
   type Probe,
   type ProbeContext,
   type SettledExpectation,
@@ -77,6 +78,8 @@ export interface VerifyOptions {
   readonly ids?: Partial<IdSource> | undefined;
   /** How long past a request's deadline a driver that has not answered is waited for. */
   readonly graceMs?: number | undefined;
+  /** How long a driver is given to say whether its host is there. */
+  readonly detectMs?: number | undefined;
 }
 
 /** The directories and limits of a run. The session, nonce and hook mode are made for each request. */
@@ -97,6 +100,13 @@ const STOPS: ReadonlySet<string> = new Set([
 
 const DEFAULT_GRACE_MS = 5_000;
 const MAX_VERSION_CHARS = 80;
+
+/**
+ * Whether a host has said nothing of how it is paid for: no provider and no key source in a form that
+ * can be read. A host that does not say may be billing an API key, and this check never spends that.
+ */
+const billingUnknown = (run: HostRun): boolean =>
+  typeof run.apiProvider !== 'string' && typeof run.apiKeySource !== 'string';
 
 const say = (expectation: Expectation): string =>
   `${expectation.effect} (${expectation.ruleId ?? 'no rule'})`;
@@ -159,6 +169,8 @@ class Requests {
   constructor(
     private readonly driver: HostDriver,
     private readonly base: BaseContext,
+    /** The environment a driver is handed: the caller's, without what bills an API key. */
+    private readonly env: Record<string, string>,
     private readonly options: VerifyOptions,
     private readonly ids: IdSource,
     private readonly fake: string,
@@ -186,6 +198,7 @@ class Requests {
     const probe = step.hook === 'noop' ? controlOf(built) : built;
     const ctx: ProbeContext = {
       ...this.base,
+      env: this.env,
       sessionId: this.ids.session(),
       nonce,
       hookMode: step.hook,
@@ -205,10 +218,27 @@ class Requests {
     this.sent += 1;
     const observed = requested.observation;
     const trouble = runProblem(observed.run);
+    // The first request is the one that shows how the host is paid for. A host that says nothing of it
+    // may be billing an API key, so nothing more is asked of it, whatever else the first answer showed.
+    const unbilled = this.sent === 1 && billingUnknown(observed.run);
     if (trouble !== null && STOPS.has(trouble.reason)) this.stop = trouble;
-    return step.hook === 'noop'
-      ? markControl({ probe, nonce, run: observed.run, sentinel: observed.sentinel })
-      : judge(probe, nonce, observed, step.expectation);
+    else if (unbilled)
+      this.stop = {
+        reason: REASONS.billingUnknown,
+        detail: 'the host did not say how it is paid for, so no more requests are made of it',
+      };
+    const marked =
+      step.hook === 'noop'
+        ? markControl({ probe, nonce, run: observed.run, sentinel: observed.sentinel })
+        : judge(probe, nonce, observed, step.expectation);
+    return unbilled && trouble === null
+      ? {
+          ...marked,
+          mark: 'inconclusive',
+          reason: REASONS.billingUnknown,
+          detail: this.stop?.detail ?? '',
+        }
+      : marked;
   }
 }
 
@@ -218,28 +248,19 @@ const versionText = (version: string | null): string | null => {
   return text === '' ? null : text;
 };
 
-async function lookFor(
-  driver: HostDriver,
-): Promise<{ available: boolean; version: string | null; note?: string }> {
-  try {
-    return await driver.detect();
-  } catch {
-    return { available: false, version: null, note: 'the driver could not look for the host' };
-  }
-}
-
 export async function verifyHost(
   driver: HostDriver,
   base: BaseContext,
   options: VerifyOptions,
 ): Promise<HostResult> {
-  if (!AGENT_NAME.test(options.agent)) throw new Error('not an agent name');
+  // What is handed over is looked at before anything else is done with it.
+  checkInputs(base, options);
   // Before the host is asked anything and before a file is made or removed: the check writes and
   // deletes in these directories, and a run that was pointed at the wrong ones must end here.
   for (const dir of [base.project, base.stroqHome, base.home]) assertThrowaway(dir);
   const ids: IdSource = { ...DEFAULT_IDS, ...options.ids };
   const control = options.control !== false;
-  const detected = await lookFor(driver);
+  const detected = await lookForHost(driver, options.detectMs ?? DEFAULT_DETECT_MS);
   const fake = ids.fake();
   const templates = buildProbes(ids.nonce(), fake);
 
@@ -297,7 +318,7 @@ export async function verifyHost(
       decided: plan(probe, await expectedDecision(probe, base, options.policy)),
     });
 
-  const requests = new Requests(driver, base, options, ids, fake);
+  const requests = new Requests(driver, base, scrubbedEnv(base.env), options, ids, fake);
   const rows: Row[] = [];
   for (const [index, { probe, decided }] of plans.entries()) {
     const outcome =
