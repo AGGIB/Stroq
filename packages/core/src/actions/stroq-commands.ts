@@ -51,6 +51,12 @@ export const RUNNER_VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--config',
   '--loglevel',
 ]);
+/** A word's program name: no directory, no Windows launcher extension, lower case. */
+export const baseName = (word: string): string =>
+  word
+    .replace(/^.*[\\/]/, '')
+    .replace(/\.(?:cmd|exe|ps1|bat)$/i, '')
+    .toLowerCase();
 export const WRAPPERS: ReadonlySet<string> = new Set([
   'sudo',
   'doas',
