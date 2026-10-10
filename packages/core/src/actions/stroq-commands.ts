@@ -134,7 +134,7 @@ export function subcommandChangesState(sub: string, args: readonly string[]): bo
  * Subcommands that start the program written after their `--`: `stroq run -- claude` starts
  * an agent, and `stroq mcp --server NAME -- npx some-server` starts an MCP server. Whatever
  * stands there runs, so a command of Stroq's own that changes state is one behind them as well
- * (`stroq run -- stroq prove`), and is read as it would be alone.
+ * (`stroq run -- stroq prove`), and is read as a command of its own, which no flag opens there.
  */
 export const LAUNCHERS: ReadonlySet<string> = new Set(['run', 'mcp']);
 

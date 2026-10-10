@@ -8,7 +8,7 @@ import { QUOTED_BEHIND_LAUNCHERS, SPELLINGS, joined, type Spelling } from './str
  * `stroq run -- <command>` and `stroq mcp -- <command>` start whatever program follows the
  * `--`, so a command of Stroq's that changes state is one when it stands there as well:
  * `stroq run -- stroq prove` was read as a `run` with an agent called `stroq`, and went
- * through. The program after the `--` is judged as it would be alone, in every spelling.
+ * through. The program after the `--` is judged by the command it names, in every spelling.
  *
  * The words after that `--` belong to that program and not to `stroq run`, which is how the
  * CLI reads them (`help.ts`: `ownArgs`). So `--help`, `-h` and `--dry-run`, which keep a

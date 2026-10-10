@@ -17,7 +17,7 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   uninstall: ['stroq uninstall', 'stroq uninstall --agent mcp --client cursor'],
   untaint: ['stroq untaint', 'stroq untaint --all'],
   trust: ['stroq trust README.md', 'stroq trust --remove README.md'],
-  // Starts the program after the `--`, which is judged as it would be alone.
+  // Starts the program after the `--`, which is judged by the command it names.
   run: ['stroq run -- stroq uninstall', 'stroq run --sandbox -- npx @stroq/cli init'],
   mcp: ['stroq mcp --server s -- stroq untaint --all'],
   // Starts every stdio server the project's `.mcp.json` names, which an agent can have written.
