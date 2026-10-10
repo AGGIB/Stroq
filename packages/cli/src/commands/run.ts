@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
@@ -199,16 +199,32 @@ async function buildSandbox(
   );
 }
 
-/** Writes the generated config where `srt` can read it, and hands back the path. */
-function writeSandboxConfig(sandbox: GeneratedSandbox): string {
-  const dir = join(stroqHome(), 'run');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = join(dir, `srt-${process.pid}.json`);
+/**
+ * Writes the generated config where `srt` can read it, and hands back the path of the file and
+ * of the directory that holds it, which the caller removes.
+ *
+ * The run directory is inside the Stroq home, which the sandbox leaves writable (the hooks have to
+ * write there), so a name that can be guessed is one that an earlier run could have planted a link
+ * at: `srt-<pid>.json`, written with the flags that follow a link, truncated whatever the link led
+ * to. The file goes into a directory that is new every time (`mkdtemp`, mode 0700) and is opened
+ * with `wx`, which fails where anything stands and does not follow a link.
+ */
+function writeSandboxConfig(sandbox: GeneratedSandbox): {
+  readonly file: string;
+  readonly dir: string;
+} {
+  const run = join(stroqHome(), 'run');
+  mkdirSync(run, { recursive: true, mode: 0o700 });
+  const dir = mkdtempSync(join(run, 'srt-'));
+  const file = join(dir, 'settings.json');
   // `srt` reads this before the sandbox exists, and compiles the filesystem rules
   // in at wrap time — so an agent that later rewrites the file (the Stroq home is
   // writable, because the hooks have to be) changes nothing about its own run.
-  writeFileSync(file, `${JSON.stringify(sandbox.settings, null, 2)}\n`, { mode: 0o600 });
-  return file;
+  writeFileSync(file, `${JSON.stringify(sandbox.settings, null, 2)}\n`, {
+    mode: 0o600,
+    flag: 'wx',
+  });
+  return { file, dir };
 }
 
 /**
@@ -335,12 +351,12 @@ export async function runRun(
     ...(sandbox === null ? {} : { [SEALED_SOURCES_ENV]: '1' }),
   };
   // A dry run writes no config, so it has nothing to name and nothing to clean up.
-  const settingsFile = sandbox === null || invocation.dryRun ? null : writeSandboxConfig(sandbox);
+  const written = sandbox === null || invocation.dryRun ? null : writeSandboxConfig(sandbox);
   const file = srtPath ?? invocation.command;
   const args =
     srtPath === null
       ? invocation.args
-      : srtArgv(settingsFile ?? '<written at launch>', invocation.command, invocation.args);
+      : srtArgv(written?.file ?? '<written at launch>', invocation.command, invocation.args);
 
   if (invocation.dryRun) {
     line(`  would run: ${[file, ...args].join(' ')}`);
@@ -356,6 +372,6 @@ export async function runRun(
       env: childEnvironment,
     });
   } finally {
-    if (settingsFile !== null) rmSync(settingsFile, { force: true });
+    if (written !== null) rmSync(written.dir, { recursive: true, force: true });
   }
 }
