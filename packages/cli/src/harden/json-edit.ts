@@ -185,8 +185,10 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   const { file, real, text, options } = frame;
   const before = text ?? '';
   const changed = outcome.after !== before;
-  const backup = planBackup(text);
+  // The diff first: it refuses a file that is too large to show, and that must cost nothing more
+  // than counting its lines. Reading it for credentials is the dearest part of a plan.
   const shown = changed ? maskedDiff(text, outcome.after, file) : { diff: '', hidden: false };
+  const backup = planBackup(text);
   const replacesCredential = outcome.edits.some(
     (edit) => edit.kind === 'json-set' && edit.previous.present && edit.previous.masked === true,
   );
@@ -256,12 +258,15 @@ function planJsonText(frame: Frame, requested: readonly JsonEdit[]): JsonPlan {
       roundTrips: parsed.roundTrips,
     });
   }
+  let after: string;
   try {
-    const after = serializeJson(doc, parsed.layout);
-    return buildPlan(frame, { after, edits: recorded, roundTrips: parsed.roundTrips });
+    after = serializeJson(doc, parsed.layout);
   } catch {
     return refusedPlan(frame, 'invalid-json', 'the file is nested too deeply to rewrite');
   }
+  // Outside the `try`: a file too large to show a diff of is a typed error, and not a file that
+  // is "nested too deeply".
+  return buildPlan(frame, { after, edits: recorded, roundTrips: parsed.roundTrips });
 }
 
 /**

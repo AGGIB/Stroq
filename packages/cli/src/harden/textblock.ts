@@ -165,8 +165,9 @@ function buildPlan(
   const { file, real, text, options } = frame;
   const before = text ?? '';
   const changed = after !== before;
-  const backup = planBackup(text);
+  // The diff first: a file too large to show is refused before it is read for credentials.
   const shown = changed ? maskedDiff(text, after, file) : { diff: '', hidden: false };
+  const backup = planBackup(text);
   return {
     kind: 'text-block',
     recipe: options.recipe ?? DEFAULT_RECIPE,

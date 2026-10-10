@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_SCAN_CHARS } from '@stroq/core';
 import { findCredentialShape } from '../../src/harden/credential-shape.js';
+import { planJsonEdits } from '../../src/harden/json-edit.js';
+import type { JsonEdit, JsonPlan } from '../../src/harden/types.js';
 import { cpuNow } from '../helpers/cpu-time.js';
 
 /**
@@ -105,5 +107,93 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
     const took = cpuTime(() => findCredentialShape(text));
 
     expect(took).toBeLessThan(3_000);
+  });
+});
+
+/**
+ * A name is read once, where its key is, and an array hands the verdict down to its items. Reading
+ * the key again for every item makes the cost the length of the key times the number of items:
+ * a hostile repo can commit a 1.9 MB settings file (under the scan limit, valid JSON, one key)
+ * that took one call of this reader 175 s. The shapes below are the ones that were measured.
+ */
+describe('findCredentialShape: a long key above a long list', () => {
+  const list = (count: number, item = 'a'): string =>
+    Array.from({ length: count }, () => JSON.stringify(item)).join(',');
+  const under = (key: string, body: string): string => `{${JSON.stringify(key)}:[${body}]}`;
+
+  it('reads a 400,000-character key above 20,000 items in a few CPU seconds', () => {
+    const text = under('k'.repeat(400_000), list(20_000));
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    // Per-item reading of the key took 5.8 s on the machine that measured it.
+    expect(took).toBeLessThan(1_000);
+  });
+
+  it('reads a 900,000-character key above 250,000 items in a few CPU seconds', () => {
+    const text = under('k'.repeat(900_000), list(250_000));
+    expect(text.length).toBeGreaterThan(1_800_000);
+    expect(text.length).toBeLessThan(MAX_SCAN_CHARS);
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    // This one took 175 s.
+    expect(took).toBeLessThan(1_000);
+  });
+
+  it('reads long items under a long key, which the name rules read as well', () => {
+    // Not `xxxx...`: that is a placeholder, and is set aside before the name is looked at.
+    const text = under('k'.repeat(300_000), list(8_000, 'abcdefghij'.repeat(4)));
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    expect(took).toBeLessThan(1_000);
+  });
+
+  it('reads a key that is as long as a key may be above the most items it may hold', () => {
+    const text = under('k'.repeat(512), list(50_000));
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    expect(took).toBeLessThan(2_000);
+  });
+
+  it('reads lists nested very deep under one key', () => {
+    const depth = 40_000;
+    const text = `{${JSON.stringify('k'.repeat(500))}:${'['.repeat(depth)}${list(40_000)}${']'.repeat(depth)}}`;
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    expect(took).toBeLessThan(2_000);
+  });
+
+  it('reads objects nested very deep, each with a key of its own', () => {
+    const depth = 8_000;
+    const key = JSON.stringify('k'.repeat(60));
+    const text = `${`{${key}:`.repeat(depth)}"a"${'}'.repeat(depth)}`;
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    expect(took).toBeLessThan(2_000);
+  });
+});
+
+describe('planJsonEdits: a hostile file costs the same as any other', () => {
+  it('plans an edit of a 490 KB file with a 400,000-character key above 10,000 items', () => {
+    // Sized so that the file, and the text after the edit lays it out one item to a line, are both
+    // small enough for a diff: a plan that is refused as too large never reads the file at all.
+    const body = Array.from({ length: 10_000 }, () => '"a"').join(',');
+    const text = `{${JSON.stringify('k'.repeat(400_000))}:[${body}]}`;
+    const edit: JsonEdit = { kind: 'json-array-add', path: ['permissions', 'deny'], value: 'x' };
+
+    let plan: JsonPlan | undefined;
+    const took = cpuTime(() => {
+      plan = planJsonEdits('/project/settings.json', [edit], { read: () => text });
+    });
+
+    // Reading the key for every item took 25.7 s for the plan of a file this shape. A file the
+    // reader could not look at all the way through is not one to copy, and the plan says so.
+    expect(took).toBeLessThan(3_000);
+    expect(plan?.backup).toBe('none-unchecked');
   });
 });

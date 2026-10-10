@@ -267,10 +267,6 @@ export function authorizationSecret(text: string): boolean {
   return false;
 }
 
-/** Whether `name` is the name of an authorization header (a JSON key, for instance). */
-export const isAuthorizationName = (name: string): boolean =>
-  name.toLowerCase().includes(AUTHORIZATION);
-
 /**
  * Whether `value`, which hangs under a key named like an authorization header, is `Bearer <token>`
  * or `Basic <token>`: the header's name is the key and not part of the value.
@@ -390,7 +386,3 @@ export function holdsNamedSecret(text: string, keyValue: boolean): boolean {
     (text.includes('://') && urlSecret(text))
   );
 }
-
-/** Whether a value under `name` is a secret by core's own rule for names and values. */
-export const secretUnderName = (name: string, value: string): boolean =>
-  value.length >= 12 && extractEnv({ [name]: value }).length > 0;
