@@ -252,9 +252,11 @@ function facts(input: EvidenceInput) {
     oneEntry &&
     said?.effect === input.expectation.effect &&
     (said?.ruleId ?? null) === input.expectation.ruleId;
+  // Anything at the path of a denied action is a trace of it; an allow has to have left what it writes.
   const there =
     input.sentinel.exists === true &&
-    (input.probe.sentinel.holds === undefined ||
+    (input.expectation.effect === 'deny' ||
+      input.probe.sentinel.holds === undefined ||
       (input.sentinel.content !== null &&
         input.sentinel.content.trim() === input.probe.sentinel.holds));
   const fileAsDecided =

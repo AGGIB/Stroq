@@ -123,10 +123,10 @@ function perform(probe: Probe, ctx: ProbeContext): void {
     case 'deny':
       mkdirSync(join(ctx.project, '.git', 'hooks'), { recursive: true });
       // Not executable, as the real command leaves it.
-      writeFileSync(join(ctx.project, DENY_FILE), `#!/bin/sh\n# ${ctx.nonce}\n`, { mode: 0o644 });
+      writeFileSync(join(ctx.project, DENY_FILE), `${ctx.nonce}\n`, { mode: 0o644 });
       return;
     case 'secret-egress':
-      writeFileSync(join(ctx.project, EGRESS_FILE), 'ran\n');
+      writeFileSync(join(ctx.project, EGRESS_FILE), `${ctx.nonce}\n`);
       return;
     default:
       throw new Error(`the double does not know the probe ${probe.id}`);

@@ -193,7 +193,7 @@ class Requests {
     const refused = this.refusal();
     if (refused !== null) return refused;
     const nonce = this.ids.nonce();
-    const built = buildProbes(nonce, this.fake)[index];
+    const built = buildProbes(nonce, this.fake, this.base.project)[index];
     if (built === undefined) throw new Error(`no probe at ${index}`);
     const probe = step.hook === 'noop' ? controlOf(built) : built;
     const ctx: ProbeContext = {
@@ -262,7 +262,7 @@ export async function verifyHost(
   const control = options.control !== false;
   const detected = await lookForHost(driver, options.detectMs ?? DEFAULT_DETECT_MS);
   const fake = ids.fake();
-  const templates = buildProbes(ids.nonce(), fake);
+  const templates = buildProbes(ids.nonce(), fake, base.project);
 
   /**
    * `found` are the real runs as the evidence left them, `rows` the same after the controls have had

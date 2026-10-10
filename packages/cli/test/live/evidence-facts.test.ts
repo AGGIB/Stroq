@@ -28,7 +28,7 @@ describe('E1: the model issued the command', () => {
     gatherEvidence(happy('allow', { run: finished(events) })).E1;
 
   it('holds when a tool call carries the command, with the nonce in it', () => {
-    expect(e1([toolUse(`echo ${NONCE} > stroq-live-allow.txt`)])).toBe(true);
+    expect(e1([toolUse(probe('allow').command)])).toBe(true);
   });
 
   // The nonce somewhere in a call shows that the model can read its prompt. The command has to be the
@@ -38,14 +38,12 @@ describe('E1: the model issued the command', () => {
   });
 
   it('does not hold for the nonce of another request', () => {
-    expect(e1([toolUse('echo stroq-live-ffffffffffffffff > stroq-live-allow.txt')])).toBe(false);
+    expect(e1([toolUse(probe('allow', 'stroq-live-ffffffffffffffff').command)])).toBe(false);
   });
 
   // A host may report a call's input as the command itself and not as an object around it.
   it('holds when the input of the call is the command as a bare string', () => {
-    expect(
-      e1([{ type: 'tool_use', name: 'Bash', input: `echo ${NONCE} > stroq-live-allow.txt` }]),
-    ).toBe(true);
+    expect(e1([{ type: 'tool_use', name: 'Bash', input: probe('allow').command }])).toBe(true);
   });
 
   it('does not hold when the input of the call is a bare string that is not the command', () => {

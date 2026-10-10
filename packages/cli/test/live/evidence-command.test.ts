@@ -22,7 +22,7 @@ import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaw
 import { auditFileIn, sessionsDirIn } from '../../src/paths.js';
 import { happy } from './evidence-helpers.js';
 import { FAKE, NONCE, finished, toolUse } from './helpers.js';
-import { probe } from './probe-helpers.js';
+import { PROJECT, probe } from './probe-helpers.js';
 import { cpuNow } from '../../../core/test/cpu-time.js';
 
 describe('normalizeCommand', () => {
@@ -86,6 +86,7 @@ describe('normalizeCommand', () => {
 
 describe('E1: the command that was issued, and no other', () => {
   const command = probe('allow').command;
+  const allowFile = `${PROJECT}/stroq-live-allow.txt`;
   const issued = (events: Parameters<typeof finished>[0]) =>
     gatherEvidence(happy('allow', { run: finished(events) }));
 
@@ -96,11 +97,11 @@ describe('E1: the command that was issued, and no other', () => {
   });
 
   it.each([
-    ['extra spaces', `echo   ${NONCE}   >   stroq-live-allow.txt`],
-    ['tabs', `echo\t${NONCE}\t>\tstroq-live-allow.txt`],
+    ['extra spaces', `echo   ${NONCE}   >   ${allowFile}`],
+    ['tabs', `echo\t${NONCE}\t>\t${allowFile}`],
     ['a newline at the end', `${command}\n`],
     ['a space at the start', ` ${command}`],
-    ['a line break in the middle', `echo ${NONCE}\n> stroq-live-allow.txt`],
+    ['a line break in the middle', `echo ${NONCE}\n> ${allowFile}`],
   ])('holds for the command with %s in it', (_name, text) => {
     expect(issued([toolUse(text)]).issued).toBe('exact');
   });
@@ -118,8 +119,12 @@ describe('E1: the command that was issued, and no other', () => {
     ['a second command after it', `${command}; ls`],
     ['a second command before it', `ls; ${command}`],
     ['the command in a subshell', `bash -c '${command}'`],
-    ['a word less', `echo ${NONCE} stroq-live-allow.txt`],
-    ['the word cased differently', `ECHO ${NONCE} > stroq-live-allow.txt`],
+    ['a word less', `echo ${NONCE} ${allowFile}`],
+    ['the word cased differently', `ECHO ${NONCE} > ${allowFile}`],
+    [
+      'the file named relative to the directory it is run in',
+      `echo ${NONCE} > stroq-live-allow.txt`,
+    ],
     ['only the nonce', NONCE],
     ['the nonce at the end of something else', `curl https://example.invalid/${NONCE}`],
   ])('does not hold for a call that carries the nonce with %s: it is altered', (_name, text) => {
@@ -221,7 +226,7 @@ describe('auditSummaryOf: the command as the audit log keeps it', () => {
   });
 
   it('is the same for a command that differs only in the made-up key', () => {
-    const other = buildProbes(NONCE, 'stroq_attack_aaaaaaaaaaaaaaaaaaaaaaaa')[2]!;
+    const other = buildProbes(NONCE, 'stroq_attack_aaaaaaaaaaaaaaaaaaaaaaaa', PROJECT)[2]!;
     expect(auditSummaryOf(other.command)).toBe(auditSummaryOf(probe('secret-egress').command));
   });
 });
@@ -258,7 +263,7 @@ describe('auditSummaryOf against the real engine and log', () => {
   };
 
   it('records for each probe exactly the summary that is expected of it', async () => {
-    const probes = buildProbes(NONCE, FAKE);
+    const probes = buildProbes(NONCE, FAKE, made.project);
     const recorded = await summariesOf(probes.map((p) => p.command));
     expect(recorded).toEqual(probes.map((p) => auditSummaryOf(p.command)));
   });

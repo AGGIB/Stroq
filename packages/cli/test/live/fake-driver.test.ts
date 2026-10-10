@@ -241,7 +241,7 @@ describe('a host or a model in trouble', () => {
   });
 
   it('does not know a probe it was not built for', async () => {
-    const odd: Probe = { ...buildProbes(NONCE, FAKE)[0]!, id: 'unknown' };
+    const odd: Probe = { ...buildProbes(NONCE, FAKE, rig.project)[0]!, id: 'unknown' };
     await expect(
       new FakeHostDriver({ fault: 'never-call-hook' }).run(odd, rig.ctx()),
     ).rejects.toThrow(/does not know/);

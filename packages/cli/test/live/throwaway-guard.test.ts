@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -73,6 +74,41 @@ describe('prepareProject', () => {
     expect(() => prepareProject(rig.project, FAKE)).not.toThrow();
     expect(readFileSync(join(rig.project, '.env'), 'utf8')).toContain(FAKE);
   });
+
+  // A project is reused when a run is retried, and a model had the run of it the time before: it can have
+  // left a link where a file or a directory of ours goes. The key is written to a file of our own, and
+  // nothing is removed through a link.
+  it.skipIf(process.platform === 'win32')(
+    'does not write the made-up key through a link left at .env, and leaves what it led to as it was',
+    () => {
+      const elsewhere = plainTemp();
+      writeFileSync(join(elsewhere, 'target.txt'), 'the owner kept this');
+      symlinkSync(join(elsewhere, 'target.txt'), join(rig.project, '.env'));
+      prepareProject(rig.project, FAKE);
+      expect(readFileSync(join(elsewhere, 'target.txt'), 'utf8')).toBe('the owner kept this');
+      expect(lstatSync(join(rig.project, '.env')).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(rig.project, '.env'), 'utf8')).toBe(`STROQ_LIVE_API_KEY=${FAKE}\n`);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a project whose .git is a link to a directory elsewhere, and removes nothing there',
+    async () => {
+      const elsewhere = plainTemp();
+      mkdirSync(join(elsewhere, 'hooks'));
+      writeFileSync(join(elsewhere, 'hooks', 'pre-commit'), "the owner's own hook");
+      symlinkSync(elsewhere, join(rig.project, '.git'));
+      await refuses(() => prepareProject(rig.project, FAKE));
+      expect(readFileSync(join(elsewhere, 'hooks', 'pre-commit'), 'utf8')).toBe(
+        "the owner's own hook",
+      );
+    },
+  );
+
+  it('is content with a file where the .git directory should be', () => {
+    writeFileSync(join(rig.project, '.git'), 'a file where a directory should be');
+    expect(() => prepareProject(rig.project, FAKE)).not.toThrow();
+  });
 });
 
 describe('clearSentinel', () => {
@@ -113,6 +149,16 @@ describe('clearSentinel', () => {
 
   it('is content when the directory above the file is not there', () => {
     expect(() => clearSentinel(rig.project, probe('deny'))).not.toThrow();
+  });
+
+  // Node 22 and Node 24 answer a removal below a file differently (ENOTDIR, and nothing); a model can leave
+  // a file where a directory should be, and what is not there is not a reason to stop.
+  it('is content with a file where the .git directory should be, on every Node', () => {
+    writeFileSync(join(rig.project, '.git'), 'a file where a directory should be');
+    expect(() => clearSentinel(rig.project, probe('deny'))).not.toThrow();
+    expect(readFileSync(join(rig.project, '.git'), 'utf8')).toBe(
+      'a file where a directory should be',
+    );
   });
 });
 

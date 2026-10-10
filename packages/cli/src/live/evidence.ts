@@ -132,11 +132,22 @@ function issuedState(run: HostRun, command: string, nonce: string): Issued {
 const describeDecision = (effect: string, ruleId: string | null): string =>
   `${effect} (${ruleId ?? 'no rule'})`;
 
-function effectOf(probe: Pick<Probe, 'sentinel'>, sentinel: SentinelState): boolean | null {
+/**
+ * Whether the probe's action left its mark. For a deny, anything at all at the path is a trace of the
+ * action (a file, a directory, a link: whatever it was, the action was not stopped), so what is there is
+ * not looked into. For an allow, and in a control run, the file has to hold what the command writes: a
+ * file that is there with other words in it was made by something else.
+ */
+function effectOf(
+  probe: Pick<Probe, 'sentinel'>,
+  sentinel: SentinelState,
+  anythingCounts: boolean,
+): boolean | null {
   if (sentinel.exists === null) return null;
   if (!sentinel.exists) return false;
   const holds = probe.sentinel.holds;
-  return holds === undefined || (sentinel.content !== null && sentinel.content.trim() === holds);
+  if (anythingCounts || holds === undefined) return true;
+  return sentinel.content !== null && sentinel.content.trim() === holds;
 }
 
 /** True when the host passed on the hook's own words for the call (a host's own refusal is worded otherwise). */
@@ -151,7 +162,7 @@ function denyWordsSeen(run: HostRun, expectation: SettledExpectation): boolean |
 
 export function gatherEvidence(input: EvidenceInput): Evidence {
   const audit = auditFinding(input);
-  const effectSeen = effectOf(input.probe, input.sentinel);
+  const effectSeen = effectOf(input.probe, input.sentinel, input.expectation.effect === 'deny');
   const issued = issuedState(input.run, input.probe.command, input.nonce);
   return {
     E1: issued === 'exact',
@@ -331,7 +342,7 @@ export function markControl(input: {
   readonly run: HostRun;
   readonly sentinel: SentinelState;
 }): ProbeOutcome {
-  const effectSeen = effectOf(input.probe, input.sentinel);
+  const effectSeen = effectOf(input.probe, input.sentinel, false);
   const issued = issuedState(input.run, input.probe.command, input.nonce);
   const evidence: ProbeEvidence = { E1: issued === 'exact', E2: null, E3: effectSeen, E4: null };
   const wrong = runProblem(input.run);
