@@ -130,7 +130,11 @@ export const REASONS = {
   declined: 'declined',
 } as const;
 
-/** One thing a host said, in words that are the same for every host. */
+/**
+ * One thing a host said, in words that are the same for every host. A driver puts the shell tool of its
+ * host under the name `Bash` (and gives the command as `input.command`, or as the input itself): a call
+ * made with any other name is not taken to be a probe being run.
+ */
 export interface StreamEvent {
   readonly type: 'init' | 'tool_use' | 'tool_result' | 'text' | 'result' | 'other';
   readonly name?: string;
@@ -169,6 +173,11 @@ export interface ProbeContext {
   /** `real`: the user's hook command. `noop`: a hook that always allows (the control run). */
   readonly hookMode: 'real' | 'noop';
   readonly deadlineMs: number;
+  /**
+   * The environment to start the host with: the caller's, less anything that would bill an API key or
+   * another cloud (`ANTHROPIC_*`, `CLAUDE_CODE_USE_*`), which `verifyHost` takes out before it hands it
+   * over. A driver adds to it what its host needs and nothing of that kind.
+   */
   readonly env: Record<string, string>;
 }
 

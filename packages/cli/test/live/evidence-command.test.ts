@@ -19,7 +19,7 @@ import {
 } from '../../src/live/evidence.js';
 import { buildProbes, prepareProject } from '../../src/live/probes.js';
 import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
-import { sessionsDirIn } from '../../src/paths.js';
+import { auditFileIn, sessionsDirIn } from '../../src/paths.js';
 import { happy } from './evidence-helpers.js';
 import { FAKE, NONCE, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
@@ -253,7 +253,7 @@ describe('auditSummaryOf against the real engine and log', () => {
         toolInput: { command },
         cwd: made.project,
       });
-    const entries = await new AuditLog(`${made.stroqHome}/audit.jsonl`).readAll();
+    const entries = await new AuditLog(auditFileIn(made.stroqHome)).readAll();
     return entries.map((entry) => entry.summary);
   };
 
@@ -280,7 +280,7 @@ describe('auditSummaryOf against the real engine and log', () => {
       rules: loadBundledRules(),
       policy: DEFAULT_POLICY,
       sessions: new FileSessionStore(sessionsDirIn(made.stroqHome)),
-      audit: new AuditLog(`${made.stroqHome}/audit.jsonl`),
+      audit: new AuditLog(auditFileIn(made.stroqHome)),
       secrets: failing,
     });
     await engine.pre({
@@ -289,7 +289,7 @@ describe('auditSummaryOf against the real engine and log', () => {
       toolInput: { command: probe('allow').command },
       cwd: made.project,
     });
-    const [entry] = await new AuditLog(`${made.stroqHome}/audit.jsonl`).readAll();
+    const [entry] = await new AuditLog(auditFileIn(made.stroqHome)).readAll();
     expect(entry?.summary).toBe(WITHHELD_SUMMARY);
   });
 });

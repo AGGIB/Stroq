@@ -198,8 +198,7 @@ describe('which result is kept', () => {
     expect(readdirSync(liveDirIn(home)).sort()).toEqual(['claude-code.last.json', 'codex.json']);
   });
 
-  it('writes the three files to their owner alone', () => {
-    if (process.platform === 'win32') return;
+  it.skipIf(process.platform === 'win32')('writes the three files to their owner alone', () => {
     writeHostResult(home, resultOf('verified'));
     writeHostResult(home, resultOf('inconclusive'));
     writeHostResult(home, resultOf('verified', { mode: 'stand-in' }));
@@ -265,6 +264,32 @@ describe('reading what is not a result', () => {
     expect(read.problem).toEqual(expect.any(String));
     expect(read.problem).toMatch(/^[\x20-\x7e]+$/);
   });
+
+  // A state the probes do not come to is not a result. The doctor shows what a file says of a host, so a
+  // file with `verified` over probes that did not earn it is the one it must not believe.
+  it.each([
+    [
+      'verified, with the control run taken out',
+      (raw: any) => (raw.probes = raw.probes.slice(0, 2)),
+    ],
+    ['verified, over probes that failed', (raw: any) => (raw.probes[1].mark = 'failed')],
+    ['failed, over probes that passed', (raw: any) => (raw.state = 'failed')],
+    [
+      'inconclusive, over probes that earned a verified',
+      (raw: any) => (raw.state = 'inconclusive'),
+    ],
+  ])(
+    'reads a result that says %s as no result, and says the state is inconsistent',
+    (_n, change) => {
+      const raw = JSON.parse(JSON.stringify(validResult()));
+      change(raw);
+      plant(JSON.stringify(raw));
+      expect(readHostResult(home, 'claude-code')).toEqual({
+        result: null,
+        problem: 'state-inconsistent',
+      });
+    },
+  );
 
   it("reads a result that is another agent's as no result: a file moved into place proves nothing", () => {
     plant(JSON.stringify(validResult({ agent: 'codex' })));

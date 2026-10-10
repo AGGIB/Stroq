@@ -62,8 +62,8 @@ export function createThrowawayRoot(prefix: string): Throwaway {
 /** Text from outside as it may be put in a message: plain characters, one line, short. */
 const shown = (text: unknown): string =>
   String(text)
-    .replace(/[^\x20-\x7e]/g, '?')
-    .slice(0, 100);
+    .slice(0, 100)
+    .replace(/[^\x20-\x7e]/g, '?');
 
 const gone = (err: unknown): boolean => {
   const code = (err as NodeJS.ErrnoException).code;
