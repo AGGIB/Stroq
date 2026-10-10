@@ -55,12 +55,15 @@ export interface AtomicWriteOptions extends WriteRules {
   readonly mode?: number;
   readonly fs?: Fs;
   /**
-   * Called when the new content is in the temporary file and flushed, and before it replaces the
-   * target. If it throws (or rejects) nothing is replaced, the temporary file is removed and the
-   * error is the one reported. It is the last point at which a caller can look at the target again
-   * ("is it still what I read?"), which narrows the window in which an edit the owner makes can be
-   * lost to the time between that look and the rename. It does not close it: no portable call
-   * replaces a file only if it is unchanged.
+   * Called when the new content is in the temporary file and flushed, and before EVERY try to
+   * replace the target: a rename that the system refuses for a moment is tried again after a wait,
+   * and the file may have changed during it. If it throws (or rejects) nothing is replaced, no
+   * further try is made, the temporary file is removed and the error is the one reported. It is
+   * the last point at which a caller can look at the target again ("is it still what I read?"),
+   * which narrows the window in which an edit the owner makes can be lost to the time between
+   * that look and the rename. It does not close it: no portable call replaces an existing file only
+   * if it is unchanged, and the rename that puts a new file in place does not refuse to replace
+   * one that has appeared since (an exclusive create would, but not on every file system).
    */
   readonly beforeRename?: () => void | Promise<void>;
   /** Waits between the tries of a rename the system refuses for a moment. A test passes its own. */
@@ -193,8 +196,7 @@ export async function writeFileAtomic(
       throw err;
     }
     await handle.close();
-    await options.beforeRename?.();
-    await renameWithRetry(fs, temp, real, options.sleep ?? realSleep);
+    await renameWithRetry(fs, temp, real, options.sleep ?? realSleep, options.beforeRename);
   } catch (err) {
     // Best effort, and never allowed to hide what actually went wrong.
     await fs.unlink(temp).catch(() => undefined);
@@ -218,11 +220,17 @@ export async function makePrivateDir(fs: Fs, dir: string): Promise<void> {
 
 /**
  * Removes a file the engine made, under the same rules as a write. Returns whether there was
- * a file to remove.
+ * a file to remove. `beforeRemove` is called when everything else has been checked and right
+ * before the file goes, the last point at which a caller can look at it again; if it throws,
+ * nothing is removed. As for a write, that narrows the window in which an edit can be lost and does
+ * not close it.
  */
 export async function removeFile(
   target: string,
-  options: WriteRules & { readonly fs?: Fs } = {},
+  options: WriteRules & {
+    readonly fs?: Fs;
+    readonly beforeRemove?: () => void | Promise<void>;
+  } = {},
 ): Promise<boolean> {
   const fs = options.fs ?? nodeFs;
   const real = assertWriteAllowed(target, options);
@@ -231,6 +239,7 @@ export async function removeFile(
   if (!existing.isFile()) {
     throw new HardenError('not-regular-file', `refusing to remove ${real}: not a regular file`);
   }
+  await options.beforeRemove?.();
   await fs.unlink(real);
   return true;
 }

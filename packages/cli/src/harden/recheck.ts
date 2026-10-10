@@ -7,12 +7,15 @@ import { HardenError } from './types.js';
  *
  * The engine reads a file, works out what to write, and writes it, and in between the owner (or
  * an editor, or an agent) can change the file. A replacement built from the old text would erase
- * that change without a word. So the file is read once more at the last point there is, and the
- * replacement is made only if it is still what was read.
+ * that change without a word. So the file is read once more at the last point there is, before
+ * every try of the rename (a rename that was refused for a moment is tried again after a wait, and
+ * the wait is when the file is likely to be saved), and the replacement is made only if it is still
+ * what was read.
  *
  * This narrows the window in which an edit can be lost to the time between that read and the
- * rename that follows it. It does not close it: no portable call replaces a file only if it is
- * unchanged, so an edit made in those few microseconds is still overwritten.
+ * rename that follows it. It does not close it: no portable call replaces an existing file only
+ * if it is unchanged, and the rename that puts a new file in place does not refuse to replace one
+ * that has appeared since, so an edit made in those few microseconds is still overwritten.
  */
 
 /**

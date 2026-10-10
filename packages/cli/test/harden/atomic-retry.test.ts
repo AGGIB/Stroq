@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { nodeFs, writeFileAtomic } from '../../src/harden/atomic.js';
+import { assertUnchanged } from '../../src/harden/recheck.js';
 import type { Fs } from '../../src/harden/types.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
@@ -122,6 +123,96 @@ describe('writeFileAtomic: a rename that is refused for a moment', () => {
     await writeFileAtomic(file, 'new', { fs, sleep: () => Promise.resolve() });
 
     expect(new Set(seen).size).toBe(1);
+    expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+});
+
+/**
+ * The last look at the target is only worth anything if it comes right before the file is
+ * replaced. A rename that is tried again comes after a wait, and a wait is exactly when whoever
+ * holds the file (an editor, an indexer) is likely to be saving it: the look has to be taken again.
+ */
+describe('writeFileAtomic: the last look comes before every try', () => {
+  /** An Fs that fails the first `failures` renames with EBUSY, and a log of what happened. */
+  function logged(failures: number, whileWaiting: () => void = () => undefined) {
+    const events: string[] = [];
+    let renames = 0;
+    const fs: Fs = {
+      ...nodeFs,
+      rename: (from, to) => {
+        events.push('rename');
+        return (renames += 1) <= failures
+          ? Promise.reject(failure('EBUSY'))
+          : nodeFs.rename(from, to);
+      },
+    };
+    const sleep = (): Promise<void> => {
+      events.push('sleep');
+      whileWaiting();
+      return Promise.resolve();
+    };
+    const look = (): void => {
+      events.push('look');
+    };
+    return { fs, sleep, look, events };
+  }
+
+  it('looks before the first try and again before each try that follows a wait', async () => {
+    const dir = tempDir();
+    const file = join(dir, 'settings.json');
+    writeFileSync(file, 'old');
+    const { fs, sleep, look, events } = logged(2);
+
+    await writeFileAtomic(file, 'new', { fs, sleep, beforeRename: look });
+
+    expect(events).toEqual([
+      'look',
+      'rename',
+      'sleep',
+      'look',
+      'rename',
+      'sleep',
+      'look',
+      'rename',
+    ]);
+    expect(readFileSync(file, 'utf8')).toBe('new');
+  });
+
+  it('does not replace a file that was saved while it waited, and leaves the saved text', async () => {
+    const dir = tempDir();
+    const file = join(dir, 'settings.json');
+    writeFileSync(file, 'old');
+    const { fs, sleep } = logged(1, () => writeFileSync(file, 'the owner saved this'));
+
+    const error = await writeFileAtomic(file, 'new', {
+      fs,
+      sleep,
+      beforeRename: () => assertUnchanged(file, file, Buffer.from('old')),
+    }).catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ code: 'stale-plan' });
+    expect(readFileSync(file, 'utf8')).toBe('the owner saved this');
+    expect(readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  it('does not try the rename again once a look fails, and reports that failure', async () => {
+    const dir = tempDir();
+    const file = join(dir, 'settings.json');
+    writeFileSync(file, 'old');
+    const { fs, sleep, events } = logged(99);
+    let looks = 0;
+
+    const error = await writeFileAtomic(file, 'new', {
+      fs,
+      sleep,
+      beforeRename: () => {
+        if ((looks += 1) === 2) throw new Error('changed under us');
+      },
+    }).catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ message: 'changed under us' });
+    expect(events.filter((event) => event === 'rename')).toHaveLength(1);
+    expect(readFileSync(file, 'utf8')).toBe('old');
     expect(readdirSync(dir)).toEqual(['settings.json']);
   });
 });

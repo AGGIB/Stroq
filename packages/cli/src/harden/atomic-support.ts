@@ -113,14 +113,21 @@ export const realSleep = (ms: number): Promise<void> => delay(ms);
 /**
  * `fs.rename(from, to)`, tried again after a transient refusal. Any other failure, and the last
  * transient one, is thrown as it came.
+ *
+ * `before` is called before EVERY try, not once before the first. A try that follows a refusal
+ * comes after a wait, and the wait is exactly when whoever holds the file (an editor saving it, an
+ * indexer) is likely to change it: a look taken before the first try says nothing about it. If
+ * `before` throws, that is the error, and no further try is made.
  */
 export async function renameWithRetry(
   fs: Fs,
   from: string,
   to: string,
   sleep: (ms: number) => Promise<void>,
+  before?: () => void | Promise<void>,
 ): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
+    await before?.();
     try {
       await fs.rename(from, to);
       return;

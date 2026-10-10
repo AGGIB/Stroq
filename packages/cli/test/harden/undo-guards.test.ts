@@ -335,6 +335,73 @@ describe('undoFile: the file changes after undo has read it', () => {
   });
 });
 
+describe('undoFile: the file changes while a busy rename is waited for', () => {
+  it('does not replace it after the wait, leaves the owner’s save and keeps the record', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'settings.json', jsonText({ model: 'm' }), [
+      addDeny('a'),
+    ]);
+    owner(path, (doc) => ({ ...doc, theirs: 1 }));
+    const saved = jsonText({ model: 'saved while it waited' });
+    let busy = true;
+    const fs: Fs = {
+      ...nodeFs,
+      rename: (from, to) => {
+        if (!busy || !to.endsWith('settings.json')) return nodeFs.rename(from, to);
+        busy = false;
+        writeFileSync(path, saved);
+        return Promise.reject(Object.assign(new Error('simulated busy file'), { code: 'EBUSY' }));
+      },
+    };
+
+    await expect(undoFile({ ...e.env, fs }, real, { root: e.project })).rejects.toMatchObject({
+      code: 'stale-plan',
+    });
+
+    expect(readFileSync(path, 'utf8')).toBe(saved);
+    expect(readManifest(e.env).files[real]).toHaveLength(1);
+    expect(readdirSync(e.project).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+});
+
+describe('undoFile: the file changes just before it is removed', () => {
+  it('does not remove a file Stroq made once the owner has written to it', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'new.json', null, [addDeny('a')]);
+    const theirs = jsonText({ model: 'the owner wrote this after Stroq made the file' });
+    let done = false;
+    // `removeFile` looks at the file before it removes it; the owner writes right after that look.
+    const fs: Fs = {
+      ...nodeFs,
+      stat: async (file) => {
+        const found = await nodeFs.stat(file);
+        if (!done && file === real) {
+          done = true;
+          writeFileSync(path, theirs);
+        }
+        return found;
+      },
+    };
+
+    await expect(undoFile({ ...e.env, fs }, real, { root: e.project })).rejects.toMatchObject({
+      code: 'stale-plan',
+    });
+
+    expect(readFileSync(path, 'utf8')).toBe(theirs);
+    expect(readManifest(e.env).files[real]).toHaveLength(1);
+  });
+
+  it('still removes it when nothing changed', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'new.json', null, [addDeny('a')]);
+
+    const result = await undo(e, real);
+
+    expect(result.status).toBe('restored');
+    expect(existsSync(path)).toBe(false);
+  });
+});
+
 describe('undoFile: a record of a change that never happened', () => {
   it('is read as nothing to take out, and nothing is said about a value Stroq never set', async () => {
     const e = engine();

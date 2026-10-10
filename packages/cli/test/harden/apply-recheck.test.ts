@@ -161,6 +161,64 @@ describe('applyPlan: the file changes while the new content is being written', (
   );
 });
 
+/** An Fs whose first rename onto `name` is refused as busy, and the owner saves while it is. */
+function busyWhileOwnerSaves(name: string, owner: () => void): Fs {
+  let done = false;
+  return {
+    ...nodeFs,
+    rename: (from, to) => {
+      if (done || !to.endsWith(name)) return nodeFs.rename(from, to);
+      done = true;
+      owner();
+      return Promise.reject(Object.assign(new Error('simulated busy file'), { code: 'EBUSY' }));
+    },
+  };
+}
+
+describe('applyPlan: the file changes while a busy rename is waited for', () => {
+  it('does not replace it after the wait, and the owner’s save is the file', async () => {
+    const e = engine();
+    writeFileSync(e.file('settings.json'), jsonText({ model: 'mine' }));
+    const plan = e.planJson('settings.json', [addDeny('x')]);
+    const fs = busyWhileOwnerSaves('settings.json', () =>
+      writeFileSync(e.file('settings.json'), THEIRS),
+    );
+
+    await expect(applyPlan(plan, { ...e.env, fs })).rejects.toMatchObject({ code: 'stale-plan' });
+
+    expect(readFileSync(e.file('settings.json'), 'utf8')).toBe(THEIRS);
+    expect(leftovers(e.project)).toEqual([]);
+  });
+
+  it('takes back the record and the copy, as for any apply that did not go through', async () => {
+    const e = engine();
+    writeFileSync(e.file('settings.json'), jsonText({ model: 'mine' }));
+    const plan = e.planJson('settings.json', [addDeny('x')]);
+    const fs = busyWhileOwnerSaves('settings.json', () =>
+      writeFileSync(e.file('settings.json'), THEIRS),
+    );
+
+    await expect(applyPlan(plan, { ...e.env, fs })).rejects.toBeDefined();
+
+    expect(readManifest(e.env).files).toEqual({});
+    expect(existsSync(join(e.home, 'backups')) ? readdirSync(join(e.home, 'backups')) : []).toEqual(
+      [],
+    );
+  });
+
+  it('still goes through when the file did not change during the wait', async () => {
+    const e = engine();
+    writeFileSync(e.file('settings.json'), jsonText({ model: 'mine' }));
+    const plan = e.planJson('settings.json', [addDeny('x')]);
+    const fs = busyWhileOwnerSaves('settings.json', () => undefined);
+
+    const result = await applyPlan(plan, { ...e.env, fs });
+
+    expect(result.changed).toBe(true);
+    expect(readFileSync(e.file('settings.json'), 'utf8')).toBe(plan.after);
+  });
+});
+
 describe('applyPlan: the copy is the bytes that were read', () => {
   it('keeps every byte of a file with a byte order mark, CRLF line ends and non-ASCII text', async () => {
     const e = engine();

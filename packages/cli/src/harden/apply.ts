@@ -27,9 +27,11 @@ import { HardenError, sha256Text, type HardenEnv, type Plan } from './types.js';
  * undo reads such a record against the file, and a file that is exactly as it was before that
  * apply has nothing of that apply's to take out, so nothing is taken out and nothing is said.
  *
- * The look at the file just before it is replaced narrows the window in which an edit the owner
- * makes can be lost to the time between that read and the rename. It does not close it: no
- * portable call replaces a file only if it is unchanged.
+ * The look at the file just before it is replaced (before every try, when the system refuses the
+ * rename for a moment and it is tried again) narrows the window in which an edit the owner makes
+ * can be lost to the time between that read and the rename. It does not close it: no portable
+ * call replaces an existing file only if it is unchanged, and a file that was not there when the
+ * plan was made can be replaced by the rename if it has appeared since.
  */
 
 export interface ApplyOptions {

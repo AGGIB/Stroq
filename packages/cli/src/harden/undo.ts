@@ -253,8 +253,11 @@ async function undoLocked(
   const fs = env.fs === undefined ? {} : { fs: env.fs };
   if (changed) {
     if (text === null) {
-      assertUnchanged(real, real, bytes);
-      await removeFile(real, { ...rules, ...fs });
+      await removeFile(real, {
+        ...rules,
+        ...fs,
+        beforeRemove: () => assertUnchanged(real, real, bytes),
+      });
     } else {
       await writeFileAtomic(real, text, {
         ...rules,
