@@ -100,73 +100,103 @@ function memoryLedger(limit: number): Ledger {
   };
 }
 
-function fileLedger(path: string, wanted: number, options: LedgerOptions): Ledger {
-  const now = options.now ?? ((): Date => new Date());
-  const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
-  // The cap in the file is the owner's; a caller that asks for more does not get it.
-  const capOf = (stored: LedgerFile | null): number => Math.min(stored?.limit ?? wanted, wanted);
+/** The cap in the file is the owner's; a caller that asks for more does not get it. */
+const capOf = (stored: LedgerFile | null, wanted: number): number =>
+  Math.min(stored?.limit ?? wanted, wanted);
 
-  /** One request for requests, with the file read and written inside the lock. */
-  const takeLocked = (n: number, reason: string): TakeResult => {
-    const read = readLedgerFile(path);
-    if (read.kind === 'problem') return refused('unreadable', null, wanted, read.problem);
-    const stored = read.kind === 'ledger' ? read.ledger : null;
-    const limit = capOf(stored);
-    const used = stored?.used ?? 0;
-    if (used + n > limit) return refused('limit-reached', used, limit, `${used} of ${limit} spent`);
-    const next: LedgerFile = {
-      version: 1,
-      limit: stored?.limit ?? wanted,
-      used: used + n,
-      entries: [
-        ...(stored?.entries ?? []),
-        { at: now().toISOString(), reason: cleanReason(reason) },
-      ].slice(-MAX_LEDGER_ENTRIES),
-    };
-    try {
-      writeLedgerFile(path, next);
-    } catch (err) {
-      return refused(
-        'unwritable',
-        used,
-        limit,
-        (err as NodeJS.ErrnoException).code ?? 'write failed',
-      );
-    }
-    return { ok: true, used: next.used, limit };
+/** What is in the ledger file, as a count; or why it cannot be read. */
+function readCount(
+  path: string,
+  wanted: number,
+): { readonly stored: LedgerFile | null; readonly limit: number } | { readonly problem: string } {
+  const read = readLedgerFile(path);
+  if (read.kind === 'problem') return { problem: read.problem };
+  const stored = read.kind === 'ledger' ? read.ledger : null;
+  return { stored, limit: capOf(stored, wanted) };
+}
+
+/** One request for requests, with the file read and written. It runs inside the lock. */
+function takeLocked(
+  path: string,
+  wanted: number,
+  now: () => Date,
+  n: number,
+  reason: string,
+): TakeResult {
+  const counted = readCount(path, wanted);
+  if ('problem' in counted) return refused('unreadable', null, wanted, counted.problem);
+  const { stored, limit } = counted;
+  const used = stored?.used ?? 0;
+  if (used + n > limit) return refused('limit-reached', used, limit, `${used} of ${limit} spent`);
+  const next: LedgerFile = {
+    version: 1,
+    limit: stored?.limit ?? wanted,
+    used: used + n,
+    entries: [
+      ...(stored?.entries ?? []),
+      { at: now().toISOString(), reason: cleanReason(reason) },
+    ].slice(-MAX_LEDGER_ENTRIES),
   };
+  try {
+    writeLedgerFile(path, next);
+  } catch (err) {
+    return refused(
+      'unwritable',
+      used,
+      limit,
+      (err as NodeJS.ErrnoException).code ?? 'write failed',
+    );
+  }
+  return { ok: true, used: next.used, limit };
+}
 
+/** Takes under the lock of the file, or says why the lock could not be had. */
+async function takeUnderLock(
+  path: string,
+  wanted: number,
+  options: LedgerOptions,
+  n: number,
+  reason: string,
+): Promise<TakeResult> {
+  const now = options.now ?? ((): Date => new Date());
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  } catch (err) {
+    return refused(
+      'unwritable',
+      null,
+      wanted,
+      (err as NodeJS.ErrnoException).code ?? 'mkdir failed',
+    );
+  }
+  try {
+    return await withLock(
+      `${path}.lock`,
+      () => Promise.resolve(takeLocked(path, wanted, now, n, reason)),
+      {
+        timeoutMs: options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS,
+      },
+    );
+  } catch (err) {
+    // Only the lock itself can end up here: reading and writing report through `takeLocked`. A
+    // directory that cannot be written has no room for the lock either, and that is not a wait.
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'EACCES' || code === 'EROFS' || code === 'ENOSPC'
+      ? refused('unwritable', null, wanted, code)
+      : refused('busy', null, wanted, 'another run holds the ledger');
+  }
+}
+
+function fileLedger(path: string, wanted: number, options: LedgerOptions): Ledger {
   return {
-    async take(n, reason) {
-      if (!isCount(n)) return refused('invalid-request', null, wanted, 'not a count');
-      try {
-        mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-      } catch (err) {
-        return refused(
-          'unwritable',
-          null,
-          wanted,
-          (err as NodeJS.ErrnoException).code ?? 'mkdir failed',
-        );
-      }
-      try {
-        return await withLock(`${path}.lock`, () => Promise.resolve(takeLocked(n, reason)), {
-          timeoutMs: lockTimeoutMs,
-        });
-      } catch (err) {
-        // Only the lock itself can end up here: reading and writing report through `takeLocked`. A
-        // directory that cannot be written has no room for the lock either, and that is not a wait.
-        const code = (err as NodeJS.ErrnoException).code;
-        return code === 'EACCES' || code === 'EROFS' || code === 'ENOSPC'
-          ? refused('unwritable', null, wanted, code)
-          : refused('busy', null, wanted, 'another run holds the ledger');
-      }
-    },
+    take: (n, reason) =>
+      isCount(n)
+        ? takeUnderLock(path, wanted, options, n, reason)
+        : Promise.resolve(refused('invalid-request', null, wanted, 'not a count')),
     peek() {
-      const read = readLedgerFile(path);
-      if (read.kind === 'problem') return Promise.resolve({ ok: false, problem: read.problem });
-      const stored = read.kind === 'ledger' ? read.ledger : null;
-      return Promise.resolve({ ok: true, used: stored?.used ?? 0, limit: capOf(stored) });
+      const counted = readCount(path, wanted);
+      if ('problem' in counted) return Promise.resolve({ ok: false, problem: counted.problem });
+      return Promise.resolve({ ok: true, used: counted.stored?.used ?? 0, limit: counted.limit });
     },
   };
 }

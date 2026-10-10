@@ -131,6 +131,8 @@ export const REASONS = {
   budget: 'budget',
   maxRequests: 'max-requests',
   allowNotPassed: 'allow-not-passed',
+  unsafeDirectory: 'unsafe-directory',
+  cannotClear: 'cannot-clear',
 } as const;
 
 /**

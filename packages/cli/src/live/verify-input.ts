@@ -134,6 +134,7 @@ function cleanDetected(answer: unknown): Detected {
  */
 export async function lookForHost(driver: HostDriver, timeoutMs: number): Promise<Detected> {
   let timer: NodeJS.Timeout | undefined;
+  // Not unreferenced: a driver that holds nothing leaves this the one thing keeping the process alive.
   const silent = new Promise<Detected>((resolve) => {
     timer = setTimeout(
       () =>
@@ -144,7 +145,6 @@ export async function lookForHost(driver: HostDriver, timeoutMs: number): Promis
         }),
       timeoutMs,
     );
-    timer.unref();
   });
   const asked = Promise.resolve()
     .then(() => driver.detect())
