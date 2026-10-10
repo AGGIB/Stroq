@@ -23,11 +23,30 @@ describe('the capability table', () => {
     });
   });
 
-  it('lets the MCP proxy be checked without any host', () => {
+  it('lets the MCP proxy be checked without any host, and says there is no host version to know', () => {
     expect(HOST_CAPABILITIES['mcp']).toEqual({
       headless: true,
+      hostFree: true,
       caveats: ['host-free proxy check'],
     });
+  });
+
+  it('says a host has a version to know unless it is the one that has no host', () => {
+    for (const [agent, capability] of Object.entries(HOST_CAPABILITIES))
+      expect(capability.hostFree === true, agent).toBe(agent === 'mcp');
+  });
+
+  // Nothing here has been confirmed by a live run except the one caveat of Codex, and the file says so,
+  // in its header, so that a row is not read as a fact it is not.
+  it('says in its own words that the rows are assumptions until a live run has measured them', () => {
+    // The comment as prose: the line breaks of a comment are not part of what it says.
+    const prose = readFileSync(
+      fileURLToPath(new URL('../../src/hosts/capabilities.ts', import.meta.url)),
+      'utf8',
+    ).replace(/\s*\n\s*\/\/\s*/g, ' ');
+    expect(prose).toMatch(/assumptions, until a live run has measured them/);
+    expect(prose).toMatch(/The one measured fact in the table is the caveat of Codex/);
+    expect(prose).toMatch(/MEASURED, on Codex 0\.158\.0-alpha\.2/);
   });
 
   it.each(['cursor', 'windsurf', 'antigravity', 'copilot'])(

@@ -9,7 +9,10 @@ import { overallState } from './state-rule.js';
 /**
  * Where a host stands. The first two are read off the machine (`installed`: the config is there;
  * `observed`: something ran the hook command after it was installed). The rest are what a live
- * check, or the passing of time, makes of it.
+ * check, or the passing of time, makes of it. `unsupported` comes from the table of hosts
+ * (`hosts/capabilities.ts`), whose rows are assumptions until a live run has measured them: the one
+ * measured fact in it is the caveat of Codex, and a host that is `unsupported` is one nobody has shown to
+ * be drivable, which is not the same as one that cannot be.
  */
 export const HOST_STATES = [
   'installed',
@@ -215,6 +218,11 @@ export interface HostResult {
   readonly mode: 'live' | 'stand-in';
   readonly probes: readonly ProbeResult[];
   readonly state: LiveOutcome;
+  /**
+   * What this result does not show, as short codes: the caveats of the host's row in the table (assumptions
+   * until a live run has measured them, but for the one measured caveat of Codex), what the driver said
+   * when it looked for the host, and what the run itself could not show.
+   */
   readonly caveats: readonly string[];
 }
 

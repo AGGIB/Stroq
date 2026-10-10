@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { HOST_CAPABILITIES } from '../../src/hosts/capabilities.js';
 import { displayState, type DisplayStateInput } from '../../src/live/states.js';
 import type { LiveOutcome } from '../../src/live/types.js';
-import { CLAUDE, CURSOR, T0, T1, input, stateOf, stored } from './states-helpers.js';
+import {
+  AFTER_CHECK,
+  CLAUDE,
+  CURSOR,
+  MCP,
+  STORED_AT,
+  T0,
+  T1,
+  input,
+  stateOf,
+  stored,
+} from './states-helpers.js';
 
 /**
  * What `stroq doctor` shows for a host is one of eight states, and the table below is every cell of the
@@ -117,10 +128,81 @@ describe('a host with a verified result stored', () => {
     expect(shown.reason).toContain('2.1.271');
   });
 
-  it('is verified for a host that has no version, when it had none then either', () => {
-    expect(stateOf({ stored: stored('verified', { hostVersion: null }), hostVersion: null })).toBe(
-      'verified',
+  // Two versions that are both not known are not the same version: a host that was updated since is
+  // exactly what a check cannot tell if it never knew which host it checked.
+  it('is stale for a host that has no version, even when it had none then either', () => {
+    const shown = displayState(
+      input({ stored: stored('verified', { hostVersion: null }), hostVersion: null }),
     );
+    expect(shown.state).toBe('stale');
+    expect(shown.reason).toMatch(/version of the host is not known/);
+    expect(shown.reason).toMatch(/stroq prove/);
+  });
+
+  // A host-free check (the MCP proxy is run against a server of ours, with no client) has no host whose
+  // version could be known, so a missing one on both sides is the same as it should be.
+  it('is verified for a host-free check, which has no host version to know, then or now', () => {
+    expect(
+      stateOf({
+        capabilities: MCP,
+        stored: stored('verified', { agent: 'mcp', hostVersion: null }),
+        hostVersion: null,
+      }),
+    ).toBe('verified');
+  });
+
+  it.each<[string, string | null, string | null]>([
+    ['a version then and none now', '1.0.0', null],
+    ['none then and a version now', null, '1.0.0'],
+    ['another version', '1.0.0', '1.1.0'],
+  ])('is stale for a host-free check too, with %s', (_name, then, now) => {
+    expect(
+      stateOf({
+        capabilities: MCP,
+        stored: stored('verified', { hostVersion: then }),
+        hostVersion: now,
+      }),
+    ).toBe('stale');
+  });
+
+  describe('and the hook installed again', () => {
+    // `stroq init` writes the hook line again, and it may not be the line the check ran with.
+    it('is stale when the install was recorded after the check was made, and says so', () => {
+      const shown = displayState(
+        input({ stored: stored('verified'), installRecordedAt: AFTER_CHECK }),
+      );
+      expect(shown.state).toBe('stale');
+      expect(shown.reason).toMatch(/installed again/);
+      expect(shown.reason).toMatch(/stroq prove/);
+    });
+
+    it('is stale when the install was recorded after a check that was made earlier on, by a millisecond', () => {
+      const at = new Date(Date.parse(STORED_AT) + 1);
+      expect(stateOf({ stored: stored('verified'), installRecordedAt: at })).toBe('stale');
+    });
+
+    it('is verified when the install was recorded before the check, and at the very moment of it', () => {
+      expect(stateOf({ stored: stored('verified'), installRecordedAt: T1 })).toBe('verified');
+      expect(stateOf({ stored: stored('verified'), installRecordedAt: new Date(STORED_AT) })).toBe(
+        'verified',
+      );
+    });
+
+    it('is verified when there is no record of the install, which is nothing to compare the check with', () => {
+      expect(stateOf({ stored: stored('verified'), installRecordedAt: null })).toBe('verified');
+    });
+
+    it('names it among the other things that changed', () => {
+      const shown = displayState(
+        input({
+          stored: stored('verified'),
+          installRecordedAt: AFTER_CHECK,
+          stroqVersion: '0.24.0',
+        }),
+      );
+      expect(shown.reason).toMatch(/installed again/);
+      expect(shown.reason).toMatch(/Stroq 0\.23\.0 is now 0\.24\.0/);
+    });
   });
 
   it('is verified whatever the calls after the install say: a check outranks a sighting', () => {
@@ -130,6 +212,12 @@ describe('a host with a verified result stored', () => {
     expect(stateOf({ stored: stored('verified'), stampAt: T0, installRecordedAt: T1 })).toBe(
       'verified',
     );
+  });
+
+  it('is stale, and not verified, once the hook was installed after the check, calls or no calls', () => {
+    expect(
+      stateOf({ stored: stored('verified'), stampAt: T1, installRecordedAt: AFTER_CHECK }),
+    ).toBe('stale');
   });
 
   const stale: ReadonlyArray<readonly [string, Partial<DisplayStateInput>, RegExp[]]> = [
@@ -283,4 +371,122 @@ describe('a result from a stand-in for a host', () => {
       ).toBe('observed');
     },
   );
+});
+
+describe('the caveats of a result', () => {
+  const caveated = (state: LiveOutcome, caveats: string[]) =>
+    displayState(input({ stored: stored(state, { caveats }) }));
+
+  it('are in the reason of a verified result, so that a check driven with the trust check off is not shown as a plain one', () => {
+    const shown = caveated('verified', ['hook-trust-bypassed']);
+    expect(shown.state).toBe('verified');
+    expect(shown.reason).toContain('hook-trust-bypassed');
+    expect(shown.reason).toMatch(/caveats?: hook-trust-bypassed/);
+  });
+
+  it.each<LiveOutcome>(['verified', 'failed', 'inconclusive', 'not-attempted'])(
+    'are in the reason of a %s result',
+    (state) => {
+      expect(caveated(state, ['no-control-run', 'host-free proxy check']).reason).toMatch(
+        /no-control-run, host-free proxy check/,
+      );
+    },
+  );
+
+  it('are in the reason of a stale result, which is the result of a check that was a verified one', () => {
+    const shown = displayState(
+      input({
+        stored: stored('verified', { caveats: ['hook-trust-bypassed'] }),
+        stroqVersion: '0.24.0',
+      }),
+    );
+    expect(shown.state).toBe('stale');
+    expect(shown.reason).toContain('hook-trust-bypassed');
+  });
+
+  it('are left out when there are none', () => {
+    expect(caveated('verified', []).reason).not.toMatch(/caveat/);
+  });
+
+  it('are a few, each cut short, with the number of the rest', () => {
+    const shown = caveated('verified', ['one', 'two', 'three', 'four', 'five', 'x'.repeat(100)]);
+    expect(shown.reason).toMatch(/one, two, three/);
+    expect(shown.reason).not.toContain('four');
+    expect(shown.reason).toMatch(/\+3 more/);
+    const cut = caveated('verified', ['y'.repeat(100)]);
+    expect(cut.reason).not.toContain('y'.repeat(100));
+    expect(cut.reason).toContain('y'.repeat(30));
+  });
+
+  it('leave the reason one line of plain characters, whatever their number and length', () => {
+    const shown = caveated(
+      'failed',
+      Array.from({ length: 16 }, () => 'z'.repeat(120)),
+    );
+    expect(shown.reason).toMatch(/^[\x20-\x7e]{1,400}$/);
+  });
+});
+
+describe('a hook that is not whole, and what to do about it', () => {
+  // The fix for a hook that does not work is the hook, and a check run again against it would find
+  // nothing new: it is never "run stroq prove again".
+  const fixes: ReadonlyArray<readonly [string, DisplayStateInput['installed'], RegExp]> = [
+    ['not installed', { installed: false, changed: false }, /run stroq init/],
+    ['changed since stroq init', { installed: true, changed: true }, /run stroq init/],
+    [
+      'pointing at a path that is gone',
+      { installed: true, changed: false, vanished: true },
+      /run stroq init/,
+    ],
+    ['not approved by the host', { installed: true, changed: false, unapproved: true }, /approve/],
+    [
+      'shadowed by another file',
+      { installed: true, changed: false, shadowed: true },
+      /stroq doctor/,
+    ],
+    ['unable to start', { installed: true, changed: false, unstartable: true }, /stroq doctor/],
+  ];
+
+  it.each(fixes)(
+    'tells a verified result whose hook is %s the fix, and not to prove again',
+    (_n, installed, fix) => {
+      const shown = displayState(input({ stored: stored('verified'), installed }));
+      expect(shown.state).toBe('stale');
+      expect(shown.reason).toMatch(fix);
+      expect(shown.reason).not.toMatch(/stroq prove/);
+    },
+  );
+
+  it.each(fixes)(
+    'tells a host that was never checked, whose hook is %s, the fix too',
+    (_n, installed, fix) => {
+      const shown = displayState(input({ installed }));
+      expect(shown.state).toBe('not-attempted');
+      expect(shown.reason).toMatch(fix);
+      expect(shown.reason).not.toMatch(/stroq prove/);
+    },
+  );
+
+  it.each(fixes)(
+    'tells a failed result with something changed since, whose hook is %s, the fix and not to prove again',
+    (_n, installed, fix) => {
+      const shown = displayState(
+        input({ stored: stored('failed'), installed, stroqVersion: '0.24.0' }),
+      );
+      expect(shown.state).toBe('failed');
+      expect(shown.reason).toMatch(fix);
+      expect(shown.reason).not.toMatch(/stroq prove/);
+    },
+  );
+
+  it('still says to prove again when the hook is whole and something else changed', () => {
+    const shown = displayState(input({ stored: stored('failed'), stroqVersion: '0.24.0' }));
+    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).not.toMatch(/stroq init/);
+  });
+
+  it('says to prove again for a stale result whose hook is whole', () => {
+    const shown = displayState(input({ stored: stored('verified'), stroqVersion: '0.24.0' }));
+    expect(shown.reason).toMatch(/stroq prove/);
+  });
 });

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   HOST_STATES,
@@ -49,6 +51,19 @@ describe('the vocabulary', () => {
       'skipped',
       'not-attempted',
     ]);
+  });
+});
+
+describe('what the vocabulary says of the table of hosts', () => {
+  // `unsupported` and the caveats of a result come from a table whose rows nobody has measured yet, but
+  // for one caveat of Codex. The words that define them say so, so that a state is not read as a fact.
+  it('says plainly that the rows of the table are assumptions until a live run has measured them', () => {
+    const prose = readFileSync(
+      fileURLToPath(new URL('../../src/live/types.ts', import.meta.url)),
+      'utf8',
+    ).replace(/\s*\n\s*(\/\/|\*)\s*/g, ' ');
+    expect(prose).toMatch(/rows are assumptions until a live run has measured them/);
+    expect(prose).toMatch(/the one\s+measured fact in it is the caveat of Codex/);
   });
 });
 
