@@ -1,3 +1,4 @@
+import { neutralizeControls } from '@stroq/core';
 import { createHash } from 'node:crypto';
 
 /**
@@ -45,6 +46,8 @@ export type HardenErrorCode =
   | 'plan-inconsistent'
   /** The change cannot be made without laying the whole file out again, and nobody agreed to that. */
   | 'reformat-not-acknowledged'
+  /** The path is a link, or lies behind one, and nobody agreed that the change lands in the file it leads to. */
+  | 'link-not-acknowledged'
   /** Writing the file back would lose something in it (a number, a duplicate key, a key order). */
   | 'lossy-json'
   /** The file is not valid UTF-8: decoding and writing it would change bytes the owner wrote. */
@@ -55,8 +58,13 @@ export type HardenErrorCode =
 export class HardenError extends Error {
   readonly code: HardenErrorCode;
 
+  /**
+   * The message is for a person, and it names paths that a repository chose (the name of a link,
+   * what it leads to). A terminal obeys the control sequences in a name, so the message is made
+   * safe to print: every such character is written out as a visible `\uXXXX` escape.
+   */
   constructor(code: HardenErrorCode, message: string, options?: { readonly cause?: unknown }) {
-    super(message, options);
+    super(neutralizeControls(message), options);
     this.name = 'HardenError';
     this.code = code;
   }

@@ -117,7 +117,8 @@ describe('applyPlan: making the change', () => {
       symlinkSync(real, file('settings.json'));
       const plan = planJson('settings.json', [addDeny('a')]);
 
-      const result = await applyPlan(plan, env);
+      // A link is followed, and the owner has to be told: see link-in-root.test.ts.
+      const result = await applyPlan(plan, env, { acknowledgeLink: true });
 
       expect(readFileSync(real, 'utf8')).toBe(plan.after);
       expect(statSync(file('settings.json')).isFile()).toBe(true);

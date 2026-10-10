@@ -12,7 +12,7 @@ import {
   setAt,
   type Parsed,
 } from './json-doc.js';
-import { pathRefusal } from './plan-support.js';
+import { linkNotices, pathRefusal } from './plan-support.js';
 import {
   HardenError,
   type JsonEdit,
@@ -186,8 +186,9 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   const before = text ?? '';
   const changed = outcome.after !== before;
   // The diff first: it refuses a file that is too large to show, and that must cost nothing more
-  // than counting its lines. Reading it for credentials is the dearest part of a plan.
-  const shown = changed ? maskedDiff(text, outcome.after, file) : { diff: '', hidden: false };
+  // than counting its lines. Reading it for credentials is the dearest part of a plan. It is
+  // labelled with the file the change lands in: when the path is a link, that is not the path.
+  const shown = changed ? maskedDiff(text, outcome.after, real) : { diff: '', hidden: false };
   const backup = planBackup(text);
   const replacesCredential = outcome.edits.some(
     (edit) => edit.kind === 'json-set' && edit.previous.present && edit.previous.masked === true,
@@ -207,6 +208,7 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
       : { refused: outcome.refusal.refused, refusedDetail: outcome.refusal.detail }),
     backup: backup.backup,
     notices: [
+      ...linkNotices(file, real, options.root, outcome.refusal?.refused),
       ...backup.notices,
       ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
       ...(replacesCredential ? [REPLACED_CREDENTIAL_NOTICE] : []),

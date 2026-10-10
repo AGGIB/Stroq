@@ -8,6 +8,7 @@ import {
   type Manifest,
   type ManifestEntry,
 } from './manifest.js';
+import { linkNotice, linkTarget } from './plan-support.js';
 import { readTargetBytes, sameBytes } from './read.js';
 import { assertUnchanged } from './recheck.js';
 import { verifyPlan } from './replay.js';
@@ -41,6 +42,15 @@ export interface ApplyOptions {
    * such a plan is refused with `reformat-not-acknowledged`, and nothing is touched.
    */
   readonly acknowledgeReformat?: boolean;
+  /**
+   * The caller has shown the owner that the path is a link, or lies behind one, and that the change
+   * lands in the file it leads to (the plan's notices say so), and the owner agreed. A link that
+   * stays inside the project is followed, and that is how many people keep their dotfiles; but a
+   * repository chooses its links too, and one that points `.cursorignore` at `.env` would have the
+   * change land in a file the owner never named. Without this such a plan is refused with
+   * `link-not-acknowledged`, and nothing is touched.
+   */
+  readonly acknowledgeLink?: boolean;
 }
 
 export interface ApplyResult {
@@ -73,6 +83,16 @@ function currentBytes(plan: Plan): Uint8Array | null {
   const expected = plan.existed ? Buffer.from(plan.before, 'utf8') : null;
   if (!sameBytes(bytes, expected)) throw stale('the file has changed since the plan was made');
   return bytes;
+}
+
+/** Refuses a change that lands in another file than the one named, unless the owner has been told. */
+function assertLinkAcknowledged(plan: Plan, options: ApplyOptions): void {
+  if (options.acknowledgeLink === true) return;
+  if (linkTarget(plan.file, plan.real, plan.root) === null) return;
+  throw new HardenError(
+    'link-not-acknowledged',
+    `refusing to apply: ${linkNotice(plan.file, plan.real)}. Apply it only if the owner has seen that and agreed`,
+  );
 }
 
 const withEntry = (manifest: Manifest, real: string, entry: ManifestEntry): Manifest => ({
@@ -138,6 +158,8 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
  * - `plan-inconsistent` for a plan whose text after, diff or edits are not what a planner makes;
  * - `reformat-not-acknowledged` for a change that lays the file out again, unless
  *   `options.acknowledgeReformat` is `true`;
+ * - `link-not-acknowledged` for a path that is a link, or lies behind one, below the plan's root,
+ *   unless `options.acknowledgeLink` is `true`;
  * - `path-escapes-root` and `dangling-link` for a path that leaves its tree or leads nowhere;
  * - `stale-plan` for a file that is not what the plan was made from.
  *
@@ -170,5 +192,8 @@ export async function applyPlan(
   // the lock, where they are the ones that count.
   assertWriteAllowed(plan.file, rulesOf(plan.root));
   currentBytes(plan);
+  // After `currentBytes`: it has just shown that `plan.real` is where the path leads now, so a plan
+  // that says it is not a link cannot get round this by lying about it.
+  assertLinkAcknowledged(plan, options);
   return withManifestLock(env, () => applyLocked(plan, env));
 }

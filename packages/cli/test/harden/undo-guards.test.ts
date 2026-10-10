@@ -51,7 +51,7 @@ describe('what apply records of where it wrote', () => {
     writeFileSync(real, jsonText({ model: 'm' }));
     symlinkSync(real, e.file('settings.json'));
 
-    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env);
+    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env, { acknowledgeLink: true });
 
     expect(Object.keys(readManifest(e.env).files)).toEqual([real]);
     expect(readManifest(e.env).files[real]?.[0]?.real).toBe(real);
@@ -131,7 +131,7 @@ describe.skipIf(onWindows)('undoFile: the recorded path now leads somewhere else
     const before = jsonText({ model: 'm' });
     writeFileSync(real, before);
     symlinkSync(real, e.file('settings.json'));
-    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env);
+    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env, { acknowledgeLink: true });
 
     const result = await undo(e, e.file('settings.json'));
 

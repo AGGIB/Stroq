@@ -114,7 +114,7 @@ describe('undoFile: when there is nothing to undo, or it cannot be done', () => 
     const before = jsonText({ model: 'm' });
     writeFileSync(real, before);
     symlinkSync(real, e.file('settings.json'));
-    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env);
+    await applyPlan(e.planJson('settings.json', [addDeny('a')]), e.env, { acknowledgeLink: true });
 
     const result = await undo(e, e.file('settings.json'));
 

@@ -1,7 +1,7 @@
 import { resolveRealPath } from './atomic.js';
 import { planBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
-import { pathRefusal } from './plan-support.js';
+import { linkNotices, pathRefusal } from './plan-support.js';
 import {
   HardenError,
   ID_PATTERN,
@@ -165,8 +165,9 @@ function buildPlan(
   const { file, real, text, options } = frame;
   const before = text ?? '';
   const changed = after !== before;
-  // The diff first: a file too large to show is refused before it is read for credentials.
-  const shown = changed ? maskedDiff(text, after, file) : { diff: '', hidden: false };
+  // The diff first: a file too large to show is refused before it is read for credentials. It is
+  // labelled with the file the change lands in: when the path is a link, that is not the path.
+  const shown = changed ? maskedDiff(text, after, real) : { diff: '', hidden: false };
   const backup = planBackup(text);
   return {
     kind: 'text-block',
@@ -180,7 +181,11 @@ function buildPlan(
     changed,
     ...(refusal === undefined ? {} : { refused: refusal.refused, refusedDetail: refusal.detail }),
     backup: backup.backup,
-    notices: [...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
+    notices: [
+      ...linkNotices(file, real, options.root, refusal?.refused),
+      ...backup.notices,
+      ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
+    ],
     edits,
     ...(options.root === undefined ? {} : { root: options.root }),
     ...(options.newFileMode === undefined ? {} : { newFileMode: options.newFileMode }),
