@@ -80,16 +80,24 @@ function failFor(path: unknown): Fail {
   };
 }
 
-/** What every kind of entry has. */
+/** What every kind of entry has, once it has been checked. */
 interface Header {
+  readonly path: string;
   readonly kind: EntryKind;
+  readonly exec: boolean;
   readonly size: number;
   readonly sha256: string;
 }
 
-/** The fields every entry has, checked for what they are and not yet for what they say. */
-function checkHeader(raw: Record<string, unknown>, fail: Fail): Header {
-  const { path, kind, exec, size, sha256 } = raw;
+/** What an entry carries, once it has been checked: a file its bytes, a symlink its target text. */
+interface Carried {
+  readonly bytes?: Uint8Array;
+  readonly target?: string;
+}
+
+/** The fields every entry has, as they were read from it: checked for what they are, not yet for what they say. */
+function checkHeader(fields: Readonly<Record<keyof Header, unknown>>, fail: Fail): Header {
+  const { path, kind, exec, size, sha256 } = fields;
   const checked = checkEntryPath(path);
   if (!checked.ok) return fail('bad-path', `path refused: ${checked.reason}`);
   if (kind !== 'file' && kind !== 'symlink' && kind !== 'gitlink') {
@@ -105,42 +113,54 @@ function checkHeader(raw: Record<string, unknown>, fail: Fail): Header {
   if (typeof sha256 !== 'string' || !SHA256_HEX.test(sha256)) {
     return fail('bad-entry', 'sha256 is not 64 lower-case hex digits');
   }
-  return { kind, size, sha256 };
+  return { path: checked.path, kind, exec, size, sha256 };
 }
 
 /** What each kind of entry may carry: a file its bytes, a symlink its target text, a gitlink nothing. */
-function checkCarried(header: Header, bytes: unknown, target: unknown, fail: Fail): void {
+function checkCarried(header: Header, bytes: unknown, target: unknown, fail: Fail): Carried {
   if (header.kind === 'file') {
-    if (target !== undefined) fail('bad-entry', 'a file has no target');
-    if (bytes !== undefined && !(bytes instanceof Uint8Array)) {
-      fail('bad-entry', 'bytes are not bytes');
-    }
-  } else if (header.kind === 'symlink') {
-    if (bytes !== undefined) fail('bad-entry', 'a symlink has a target and no bytes');
-    const notText = typeof target !== 'string' || target === '' || !isWellFormed(target);
-    if (target !== undefined && notText) fail('bad-entry', 'the target of a symlink is not text');
-  } else {
-    if (bytes !== undefined || target !== undefined) fail('bad-entry', 'a gitlink has no content');
-    if (header.size !== 0) fail('size-mismatch', 'a gitlink records a size of 0');
-    if (header.sha256 !== GITLINK_SHA256) {
-      fail('digest-mismatch', 'a gitlink records 64 zeros for its hash');
-    }
+    if (target !== undefined) return fail('bad-entry', 'a file has no target');
+    if (bytes === undefined) return {};
+    if (!(bytes instanceof Uint8Array)) return fail('bad-entry', 'bytes are not bytes');
+    return { bytes };
   }
+  if (header.kind === 'symlink') {
+    if (bytes !== undefined) return fail('bad-entry', 'a symlink has a target and no bytes');
+    if (target === undefined) return {};
+    if (typeof target !== 'string' || target === '' || !isWellFormed(target)) {
+      return fail('bad-entry', 'the target of a symlink is not text');
+    }
+    return { target };
+  }
+  if (bytes !== undefined || target !== undefined) {
+    return fail('bad-entry', 'a gitlink has no content');
+  }
+  if (header.size !== 0) return fail('size-mismatch', 'a gitlink records a size of 0');
+  if (header.sha256 !== GITLINK_SHA256) {
+    return fail('digest-mismatch', 'a gitlink records 64 zeros for its hash');
+  }
+  return {};
 }
 
 /**
  * That the size and the hash an entry records are those of what it carries (a symlink is hashed by
- * its target text). The length is compared before anything is encoded or hashed: a text is never
- * fewer bytes than it has UTF-16 units, so a target longer than its recorded size is wrong unread.
+ * its target text), and what it carries as it is to be kept. The length is compared before anything
+ * is encoded, copied or hashed: a text is never fewer bytes than it has UTF-16 units, so a target
+ * longer than its recorded size is wrong unread. When `ownBytes` is set the bytes are copied first and
+ * the copy is what is hashed and returned, so the bytes that were checked are the bytes that are kept
+ * even if the owner of the original changes them afterwards, or while the other entries are read.
  */
-function checkContent(header: Header, bytes: unknown, target: unknown, fail: Fail): void {
+function checkContent(header: Header, carried: Carried, ownBytes: boolean, fail: Fail): Carried {
   const { size, sha256 } = header;
-  if (bytes instanceof Uint8Array) {
-    if (bytes.byteLength !== size) {
-      fail('size-mismatch', `size is ${size}, the bytes are ${bytes.byteLength}`);
-    }
-    if (fileDigestOf(bytes) !== sha256) fail('digest-mismatch', 'sha256 is not that of the bytes');
-  } else if (typeof target === 'string') {
+  const { bytes, target } = carried;
+  if (bytes !== undefined) {
+    const length = bytes.byteLength;
+    if (length !== size) fail('size-mismatch', `size is ${size}, the bytes are ${length}`);
+    const kept = ownBytes ? new Uint8Array(bytes) : bytes;
+    if (fileDigestOf(kept) !== sha256) fail('digest-mismatch', 'sha256 is not that of the bytes');
+    return { bytes: kept };
+  }
+  if (target !== undefined) {
     if (target.length > size) fail('size-mismatch', `size is ${size}, the target is longer`);
     const text = Buffer.from(target, 'utf8');
     if (text.byteLength !== size) {
@@ -148,28 +168,43 @@ function checkContent(header: Header, bytes: unknown, target: unknown, fail: Fai
     }
     if (fileDigestOf(text) !== sha256) fail('digest-mismatch', 'sha256 is not that of the target');
   }
+  return carried;
 }
 
 /**
  * Checks one entry and says how many bytes it adds to the tree. Everything is checked that can be
- * checked from the entry itself: its path, its shape, the rules of its kind, the limits, and that
- * its record agrees with what it carries. The limits are judged before anything is hashed, so a tree
- * that is too big is refused for being too big and not after the work of hashing it.
+ * checked from the entry itself: its path, its shape, the rules of its kind, the limits, and that its
+ * record agrees with what it carries.
+ *
+ * The limits are judged for one entry at a time, in the order the entries were given, and an entry is
+ * hashed only after its own size has been held against the limit for a file and against what the
+ * entries before it add up to. So the work done before a refusal is bounded by the limits (never more
+ * than `maxExpanded` bytes are hashed), but it is not none: an entry that comes before the one that is
+ * over a limit has been hashed already, and the fault reported is the first one in the order given.
+ *
+ * Each property of `raw` is read here, once, and `raw` is not looked at again. What is returned is a
+ * new frozen object made of what was read and checked, and that is all the rest of the code uses: an
+ * entry is an object the caller still holds, and a getter, a proxy, or a reader that reuses its
+ * objects could answer differently the next time it is asked.
  */
-function checkEntry(raw: unknown, expandedSoFar: number): { entry: TreeEntry; size: number } {
+function checkEntry(
+  raw: unknown,
+  expandedSoFar: number,
+  ownBytes: boolean,
+): { entry: TreeEntry; size: number } {
   if (!isRecord(raw)) throw new TreeError('bad-entry', 'an entry is not an object');
-  const fail = failFor(raw['path']);
-  const header = checkHeader(raw, fail);
-  const { bytes, target } = raw;
-  checkCarried(header, bytes, target, fail);
+  const { path, kind, exec, size, sha256, bytes, target } = raw;
+  const fail = failFor(path);
+  const header = checkHeader({ path, kind, exec, size, sha256 }, fail);
+  const carried = checkCarried(header, bytes, target, fail);
   if (header.size > LIMITS.maxFileBytes) {
     fail('limit', `${header.size} bytes is over the ${LIMITS.maxFileBytes} a file may be`);
   }
   if (expandedSoFar + header.size > LIMITS.maxExpanded) {
     fail('limit', `the tree is over ${LIMITS.maxExpanded} bytes in all`);
   }
-  checkContent(header, bytes, target, fail);
-  return { entry: raw as unknown as TreeEntry, size: header.size };
+  const content = checkContent(header, carried, ownBytes, fail);
+  return { entry: Object.freeze({ ...header, ...content }), size: header.size };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -190,18 +225,24 @@ function hasEntryAsFolder(path: string, paths: ReadonlySet<string>): boolean {
   return false;
 }
 
-/** The entries of a tree, checked and in the order of the UTF-8 bytes of their paths. Throws a TreeError. */
-function checkedEntries(tree: unknown): readonly Checked[] {
+/**
+ * The entries of a tree, checked and in the order of the UTF-8 bytes of their paths. Throws a
+ * TreeError. The list is read the way its entries are: its length once, and each place in it once,
+ * so a list that grows as it is read cannot get past the limit on the number of entries. With
+ * `ownBytes` the entries returned hold copies of the bytes they were given (see `checkContent`).
+ */
+function checkedEntries(tree: unknown, ownBytes: boolean): readonly Checked[] {
   const entries = isRecord(tree) ? tree['entries'] : undefined;
   if (!Array.isArray(entries)) throw new TreeError('bad-entry', 'a tree has a list of entries');
-  if (entries.length > LIMITS.maxEntries) {
+  const count = entries.length;
+  if (count > LIMITS.maxEntries) {
     throw new TreeError('limit', `the tree has more than ${LIMITS.maxEntries} entries`);
   }
 
   let expanded = 0;
   const checked: Checked[] = [];
-  for (const raw of entries) {
-    const { entry, size } = checkEntry(raw, expanded);
+  for (let at = 0; at < count; at += 1) {
+    const { entry, size } = checkEntry(entries[at], expanded, ownBytes);
     expanded += size;
     checked.push({ entry, key: Buffer.from(entry.path, 'utf8') });
   }
@@ -234,7 +275,7 @@ function checkedEntries(tree: unknown): readonly Checked[] {
  * TreeError for a tree that is not valid, as `treeDigest` does.
  */
 export function treeManifest(tree: Tree): string {
-  const lines = checkedEntries(tree).map(({ entry }) => {
+  const lines = checkedEntries(tree, false).map(({ entry }) => {
     const { kind, exec, size, sha256, path } = entry;
     return `${KIND_LETTER[kind]} ${exec ? 1 : 0} ${size} ${sha256} ${path}\n`;
   });
@@ -251,26 +292,15 @@ export function treeDigest(tree: Tree): string {
   return createHash('sha256').update(treeManifest(tree), 'utf8').digest('hex');
 }
 
-/** A copy of an entry that nothing the caller holds points into, bytes included. */
-function ownedCopy(entry: TreeEntry): TreeEntry {
-  return Object.freeze({
-    path: entry.path,
-    kind: entry.kind,
-    exec: entry.exec,
-    size: entry.size,
-    sha256: entry.sha256,
-    ...(entry.bytes !== undefined ? { bytes: new Uint8Array(entry.bytes) } : {}),
-    ...(entry.target !== undefined ? { target: entry.target } : {}),
-  });
-}
-
 /**
  * A tree from entries: checked as `treeDigest` checks it, sorted in the order of the digest, and
- * frozen. The bytes are copied, so a reader that goes on to reuse its buffers cannot change the
- * bytes that were checked. (A byte array cannot be frozen; `treeDigest` catches a change anyway.)
+ * frozen. Nothing the caller holds points into it: each entry is a new object, and the bytes are
+ * copied before they are hashed, so what was checked is what is kept, and a reader that goes on to
+ * reuse its buffers cannot change it. (A byte array cannot be frozen; `treeDigest` catches a change
+ * anyway.)
  */
 export function buildTree(entries: readonly TreeEntry[]): Tree {
-  const owned = checkedEntries({ entries }).map(({ entry }) => ownedCopy(entry));
+  const owned = checkedEntries({ entries }, true).map(({ entry }) => entry);
   return Object.freeze({ entries: Object.freeze(owned) });
 }
 

@@ -217,8 +217,10 @@ describe('treeDigest refuses', () => {
       expect(codeOf([...exact, declared('one-more', 1)])).toBe('limit');
     });
 
-    // Hashing is the costly part; a tree is refused for its size before any of its bytes are hashed.
-    it('without hashing what it will refuse', () => {
+    // Hashing is the costly part. An entry is hashed only after its size has been held against the
+    // limits, so the entry that takes a tree over them is refused for its size, not after the work of
+    // hashing it. The limits are judged per entry, in the order given, which is the next test.
+    it('without hashing the entry that takes it over', () => {
       const bytes = new Uint8Array(LIMITS.maxFileBytes);
       const lying = { ...fileEntry('f0', bytes), sha256: 'ab'.repeat(32) };
       const entries = [
@@ -227,6 +229,16 @@ describe('treeDigest refuses', () => {
       ];
 
       expect(codeOf(entries)).toBe('limit');
+    });
+
+    // So "before anything is hashed" would be too much to say: an entry that comes before the one over
+    // a limit has been hashed already, and the first fault in the order given is the one reported.
+    it('and reports the first fault in the order the entries were given', () => {
+      const lying = { ...fileEntry('a', 'x'), sha256: 'ab'.repeat(32) };
+      const tooBig = declared('big', LIMITS.maxFileBytes + 1);
+
+      expect(codeOf([lying, tooBig])).toBe('digest-mismatch');
+      expect(codeOf([tooBig, lying])).toBe('limit');
     });
   });
 
