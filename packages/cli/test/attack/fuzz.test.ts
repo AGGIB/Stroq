@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from '@stroq/core';
 import { formatFuzz, runFuzz, type FuzzReport } from '../../src/attack/fuzz.js';
 import { MUTATIONS, type Mutation } from '../../src/attack/mutate.js';
@@ -12,6 +12,7 @@ const report = (over: Partial<FuzzReport> = {}): FuzzReport => ({
   mutations: 25,
   variants: 300,
   survived: 298,
+  survivedByLimit: 0,
   escaped: [
     {
       scenarioId: '02-sentry-agentjacking',
@@ -24,6 +25,7 @@ const report = (over: Partial<FuzzReport> = {}): FuzzReport => ({
   ],
   recorded: [],
   errored: [],
+  inconclusive: [],
   notApplicable: 25,
   textless: ['08-rm-rf-home'],
   ok: false,
@@ -162,7 +164,176 @@ describe('runFuzz', () => {
   }, 60_000);
 });
 
+/** A scenario whose attack step is a malformed event, so that every variant of it throws when run. */
+const THROWING_STEP_SCENARIO: Scenario = {
+  ...ALWAYS_ALLOWED_SCENARIO,
+  id: '99-fixture-throwing-step',
+  title: 'fixture: the attack step is a malformed event',
+  steps: [
+    ALWAYS_ALLOWED_SCENARIO.steps[0],
+    {
+      event: {
+        session_id: 'stroq-attack',
+        hook_event_name: 'PreToolUse',
+        tool_name: '',
+        tool_input: { command: 'echo hello world' },
+        cwd: '__CWD__',
+      },
+      expect: 'deny',
+    },
+  ],
+};
+
+/** A scan budget no scan can meet. */
+const TINY_BUDGET = '0.000001';
+
+describe('runFuzz with a variant that could not be judged', () => {
+  const saved = process.env['STROQ_SCAN_BUDGET_MS'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['STROQ_SCAN_BUDGET_MS'];
+    else process.env['STROQ_SCAN_BUDGET_MS'] = saved;
+  });
+
+  const identity = MUTATIONS.find((m) => m.id === 'identity')!;
+  const readme = SCENARIOS.filter((s) => s.id === '01-readme-pipe-to-shell');
+
+  it('counts the variant as survived when the scan is in time (the control)', async () => {
+    const out = await runFuzz(readme, [identity], DEFAULT_POLICY, 'default');
+    expect(out.variants).toBe(1);
+    expect(out.survived).toBe(1);
+    expect(out.inconclusive).toEqual([]);
+    expect(out.ok).toBe(true);
+  }, 60_000);
+
+  it('files a variant whose scan ran out of its budget as inconclusive: not survived, not escaped', async () => {
+    process.env['STROQ_SCAN_BUDGET_MS'] = TINY_BUDGET;
+    const out = await runFuzz(readme, [identity], DEFAULT_POLICY, 'default');
+    expect(out.variants).toBe(1);
+    expect(out.survived).toBe(0);
+    expect(out.escaped).toEqual([]);
+    expect(out.recorded).toEqual([]);
+    expect(out.inconclusive).toHaveLength(1);
+    expect(out.inconclusive[0]).toMatchObject({
+      scenarioId: '01-readme-pipe-to-shell',
+      mutationId: 'identity',
+      outcome: 'timeout',
+    });
+    expect(out.inconclusive[0]?.error).toContain('time budget');
+    expect(out.ok).toBe(false);
+  }, 60_000);
+
+  it('files a variant whose step threw as inconclusive, and goes on to the next', async () => {
+    const out = await runFuzz(
+      [THROWING_STEP_SCENARIO],
+      [identity, MUTATIONS.find((m) => m.id === 'rot13')!],
+      DEFAULT_POLICY,
+      'default',
+    );
+    expect(out.variants).toBe(2);
+    expect(out.inconclusive.map((v) => [v.mutationId, v.outcome])).toEqual([
+      ['identity', 'error'],
+      ['rot13', 'error'],
+    ]);
+    expect(out.inconclusive[0]?.error).toContain('scenario 99-fixture-throwing-step step 2');
+    expect(out.survived).toBe(0);
+    expect(out.escaped).toEqual([]);
+    expect(out.errored).toEqual([]);
+    expect(out.ok).toBe(false);
+  }, 60_000);
+
+  it('accounts for every variant: survived, escaped, recorded and inconclusive add up to variants', async () => {
+    process.env['STROQ_SCAN_BUDGET_MS'] = TINY_BUDGET;
+    const out = await runFuzz(
+      [...readme, ALWAYS_ALLOWED_SCENARIO, THROWING_STEP_SCENARIO],
+      [identity, MUTATIONS.find((m) => m.id === 'rot13')!],
+      DEFAULT_POLICY,
+      'default',
+    );
+    expect(out.variants).toBe(6);
+    expect(out.survived + out.escaped.length + out.recorded.length + out.inconclusive.length).toBe(
+      out.variants,
+    );
+    // Every variant of these three is inconclusive: the scan runs out in the first two, and the
+    // third throws. The one that got through (the always-allowed attack) is among them, shown
+    // with the outcome it had, and not hidden in `escaped` or lost.
+    expect(out.inconclusive).toHaveLength(6);
+    expect(
+      out.inconclusive
+        .filter((v) => v.scenarioId === '99-fixture-benign-tail')
+        .map((v) => v.outcome),
+    ).toEqual(['passed', 'passed']);
+  }, 60_000);
+
+  it('counts a variant asked at a limit as survived, and says how many', async () => {
+    const tooLarge: Scenario = {
+      ...ALWAYS_ALLOWED_SCENARIO,
+      id: '99-fixture-too-large',
+      steps: [
+        ALWAYS_ALLOWED_SCENARIO.steps[0],
+        {
+          event: {
+            session_id: 'stroq-attack',
+            hook_event_name: 'PreToolUse',
+            tool_name: 'Bash',
+            tool_input: { command: 'echo x;'.repeat(100_000) },
+            cwd: '__CWD__',
+          },
+          expect: 'ask',
+        },
+      ],
+    };
+    const out = await runFuzz([tooLarge], [identity], DEFAULT_POLICY, 'default');
+    expect(out.survived).toBe(1);
+    expect(out.survivedByLimit).toBe(1);
+    expect(out.inconclusive).toEqual([]);
+    expect(out.ok).toBe(true);
+  }, 60_000);
+
+  it('keeps the two fields the CI gate reads: escaped and variants', async () => {
+    const out = await runFuzz([ALWAYS_ALLOWED_SCENARIO], [identity], DEFAULT_POLICY, 'default');
+    expect(Array.isArray(out.escaped)).toBe(true);
+    expect(out.escaped).toHaveLength(1);
+    expect(typeof out.variants).toBe('number');
+    expect(out.variants).toBe(1);
+    expect(Array.isArray(out.inconclusive)).toBe(true);
+  }, 60_000);
+});
+
 describe('formatFuzz', () => {
+  it('states the variants that could not be judged, with their reason, and fails them', () => {
+    const out = formatFuzz(
+      report({
+        escaped: [],
+        ok: false,
+        inconclusive: [
+          {
+            scenarioId: '01-readme-pipe-to-shell',
+            mutationId: 'rot13',
+            preserving: false,
+            outcome: 'timeout',
+            ruleId: 'deny-encoded-exec',
+            error: 'step 1 (post Read): the scan ran out of its time budget',
+          },
+        ],
+      }),
+    );
+    expect(out).toMatch(/inconclusive:\s+1/);
+    expect(out).toContain('01-readme-pipe-to-shell');
+    expect(out).toContain('the scan ran out of its time budget');
+    // Not a clean bill of health: the run cannot say that nothing escaped.
+    expect(out).not.toMatch(/no escapes/i);
+  });
+
+  it('says nothing about inconclusive variants when there are none', () => {
+    expect(formatFuzz(report({ escaped: [], ok: true }))).not.toMatch(/inconclusive/i);
+  });
+
+  it('says how many of the survivors were asked at a limit, when any were', () => {
+    const out = formatFuzz(report({ survivedByLimit: 3 }));
+    expect(out).toMatch(/3 of them were asked because Stroq could not read them/);
+    expect(formatFuzz(report())).not.toMatch(/could not read them/);
+  });
+
   it('leads with the variant count and the survival ratio', () => {
     const out = formatFuzz(report());
     expect(out).toContain(

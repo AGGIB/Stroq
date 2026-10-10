@@ -10,7 +10,11 @@ export interface VariantResult {
   /** Null when the variant errored before it could be run — see `error`. */
   readonly outcome: Outcome | null;
   readonly ruleId: string | null;
-  /** The mutation's thrown error message, or null for every variant that actually ran. */
+  /**
+   * Why there is no verdict: the mutation's thrown error message (then `outcome` is null), or, for
+   * a variant in `inconclusive`, what stopped the run from judging it. Null for every variant that
+   * was judged.
+   */
   readonly error: string | null;
 }
 
@@ -19,15 +23,27 @@ export interface FuzzReport {
   readonly policy: string;
   readonly scenarios: number;
   readonly mutations: number;
-  /** Variants actually produced and run — textless cells and errored cells are not counted here. */
+  /**
+   * Variants actually produced and run — textless cells and errored cells are not counted here.
+   * Every one is in exactly one of `survived`, `escaped`, `recorded` and `inconclusive`.
+   */
   readonly variants: number;
+  /** Variants that were blocked or asked about, judged by a rule or by a limit (`survivedByLimit`). */
   readonly survived: number;
+  /** Of `survived`, those asked about because Stroq could not read them, with no rule naming a danger. */
+  readonly survivedByLimit: number;
   /** Semantics-preserving variants that reached `allow`. This list is the deliverable. */
   readonly escaped: readonly VariantResult[];
   /** Non-preserving variants that reached `allow`: printed, never asserted. */
   readonly recorded: readonly VariantResult[];
   /** Variants whose mutation threw instead of producing text — printed, never asserted. */
   readonly errored: readonly VariantResult[];
+  /**
+   * Variants that were run but could not be judged: a step timed out or threw. They are neither
+   * survived nor escaped (a fail-closed timeout looks exactly like a block, and a pass after one
+   * is not a clean pass), and any of them fails the run. Each keeps the outcome it had and says why.
+   */
+  readonly inconclusive: readonly VariantResult[];
   readonly notApplicable: number;
   /** Scenarios that carry no untrusted text, so no variant could be built from them. */
   readonly textless: readonly string[];
@@ -63,9 +79,11 @@ export async function runFuzz(
   const escaped: VariantResult[] = [];
   const recorded: VariantResult[] = [];
   const errored: VariantResult[] = [];
+  const inconclusive: VariantResult[] = [];
   const textless = new Set<string>();
   let variants = 0;
   let survived = 0;
+  let survivedByLimit = 0;
   let notApplicable = 0;
   const total = scenarios.length * mutations.length;
   let done = 0;
@@ -95,11 +113,17 @@ export async function runFuzz(
         preserving: mutation.preserving,
         outcome: result.outcome,
         ruleId: result.ruleId,
-        error: null,
+        error: result.reason,
       };
-      if (result.outcome !== 'passed') survived += 1;
-      else if (mutation.preserving) escaped.push(variant);
-      else recorded.push(variant);
+      if (result.inconclusive) {
+        // Not judged: counted as neither a block nor a pass, even when the attack step let it through.
+        inconclusive.push(variant);
+      } else if (result.outcome === 'passed') {
+        (mutation.preserving ? escaped : recorded).push(variant);
+      } else {
+        survived += 1;
+        if (result.outcome === 'asked-by-limit') survivedByLimit += 1;
+      }
       onProgress?.(done, total);
     }
 
@@ -110,12 +134,15 @@ export async function runFuzz(
     mutations: mutations.length,
     variants,
     survived,
+    survivedByLimit,
     escaped,
     recorded,
     errored,
+    inconclusive,
     notApplicable,
     textless: [...textless],
-    ok: escaped.length === 0,
+    // A run that could not judge a variant cannot say that nothing escaped.
+    ok: escaped.length === 0 && inconclusive.length === 0,
   };
 }
 
@@ -127,6 +154,9 @@ const variantLine = (v: VariantResult): string =>
 
 const erroredLine = (v: VariantResult): string =>
   `  ${v.scenarioId.padEnd(ID_WIDTH)} ${v.mutationId.padEnd(MUTATION_WIDTH)} ${v.error ?? 'unknown error'}`;
+
+const inconclusiveLine = (v: VariantResult): string =>
+  `  ${v.scenarioId.padEnd(ID_WIDTH)} ${v.mutationId.padEnd(MUTATION_WIDTH)} ${v.outcome ?? '-'}: ${v.error ?? 'no reason recorded'}`;
 
 const ratio = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`;
@@ -142,11 +172,22 @@ export function formatFuzz(report: FuzzReport): string {
   const lines = [
     `stroq attack --fuzz: ${mutated} scenarios x ${report.mutations} mutations = ${report.variants} variants${apart}, policy ${report.policy}`,
     `survived:  ${report.survived} / ${report.variants}   (${ratio(report.survived, report.variants)})`,
+    ...(report.survivedByLimit > 0
+      ? [
+          `           ${report.survivedByLimit} of them were asked because Stroq could not read them, with no rule naming a danger`,
+        ]
+      : []),
     `escaped:   ${report.escaped.length}`,
     ...report.escaped.map(variantLine),
   ];
-  if (report.escaped.length === 0)
+  if (report.escaped.length === 0 && report.inconclusive.length === 0)
     lines.push('  no escapes: every semantics-preserving variant was stopped.');
+  if (report.inconclusive.length > 0) {
+    lines.push(
+      `inconclusive: ${report.inconclusive.length} (a timeout or an error is neither a block nor a pass, so nothing can be said about these variants; the run fails)`,
+      ...report.inconclusive.map(inconclusiveLine),
+    );
+  }
   if (report.recorded.length > 0) {
     lines.push(
       `recorded, not asserted: ${report.recorded.length} (the mutation destroys the payload, so getting through proves nothing)`,

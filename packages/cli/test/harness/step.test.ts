@@ -14,6 +14,7 @@ import {
   stepKind,
   stepLabel,
   substituteCwd,
+  troubleOf,
   type StepKind,
   type StepResult,
 } from '../../src/harness/step.js';
@@ -155,6 +156,43 @@ describe('stepKind', () => {
     const before = JSON.stringify(input);
     stepKind(input);
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+describe('troubleOf', () => {
+  const step = (over: Partial<StepResult>): StepResult => ({
+    phase: 'pre',
+    tool: 'Bash',
+    actual: 'ask',
+    ruleId: null,
+    reason: null,
+    signals: [],
+    timedOut: false,
+    ...over,
+  });
+
+  it('is null for a step that was judged, by a rule or at a limit', () => {
+    expect(troubleOf(step({ actual: 'allow' }), 0)).toBeNull();
+    expect(troubleOf(step({ actual: 'deny' }), 0)).toBeNull();
+    expect(troubleOf(step({ signals: ['command-too-large'] }), 0)).toBeNull();
+  });
+
+  it('says that the scan ran out of its budget, and where', () => {
+    expect(
+      troubleOf(step({ phase: 'post', tool: 'Read', actual: 'suspect', timedOut: true }), 2),
+    ).toBe('step 3 (post Read): the scan ran out of its time budget');
+  });
+
+  it('says that the reading ran past its deadline, and where', () => {
+    expect(troubleOf(step({ signals: ['reading-took-too-long'] }), 0)).toBe(
+      'step 1 (pre Bash): the reading of the command ran past its deadline',
+    );
+  });
+
+  it('gives the error as it is, which already says where it was', () => {
+    expect(
+      troubleOf(step({ actual: null, error: 'scenario 07-x step 2 (PreToolUse Bash): boom' }), 1),
+    ).toBe('scenario 07-x step 2 (PreToolUse Bash): boom');
   });
 });
 

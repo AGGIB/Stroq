@@ -1,15 +1,24 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_POLICY, type Policy, type StroqEngine } from '@stroq/core';
-import {
-  ClaudeHookInputSchema,
-  toolResultToText,
-  type ClaudeHookEvent,
-} from '../adapters/claude-code.js';
-import { substituteCwd, writeFixtures } from '../attack/run.js';
+import { DEFAULT_POLICY, type Policy } from '@stroq/core';
+import { ClaudeHookInputSchema, type ClaudeHookEvent } from '../adapters/claude-code.js';
+import { writeFixtures } from '../attack/run.js';
 import { createEngineAt } from '../engine-factory.js';
+import {
+  runStep,
+  stepKind,
+  stepLabel,
+  substituteCwd,
+  troubleOf,
+  type StepKind,
+  type StepResult,
+  type StepVerdict,
+} from '../harness/step.js';
 import { ACTION_SCENARIOS } from './actions-corpus.js';
+
+// Re-exported: the verdict type moved to the shared step runner, and callers have always found it here.
+export type { StepVerdict };
 
 /**
  * Ordinary agent work, replayed against the real policy and rules in a clean session: how often
@@ -35,19 +44,27 @@ export interface ActionStep {
   readonly event: ClaudeHookEvent;
 }
 
-/** What a step produced: a decision for a tool call, a scan verdict for a tool result. */
-export type StepVerdict = 'allow' | 'ask' | 'deny' | 'clean' | 'suspect';
-
 export interface ActionStepResult {
   readonly phase: 'pre' | 'post';
   readonly tool: string;
   /** What the step was, for a person reading the report: the command, the path, the URL. */
   readonly subject: string;
-  readonly verdict: StepVerdict;
+  /** Null exactly when the step threw (see `error`): there is no verdict to report. */
+  readonly verdict: StepVerdict | null;
   /** The rule that decided a tool call, or the first rule that matched a result. */
   readonly ruleId: string | null;
   readonly reason: string | null;
-  /** True when the step was anything but allowed (a call) or clean (a result). */
+  /** The classification signals behind a tool call (see `PreResult.signals`); none for a result. */
+  readonly signals: readonly string[];
+  /** The scan of a tool result ran out of its time budget. */
+  readonly timedOut: boolean;
+  /** What the step threw, with the scenario and step it was. */
+  readonly error?: string;
+  /**
+   * True when the step was anything but allowed (a call) or clean (a result), judged by a rule or
+   * at a limit. A step that timed out or threw is not counted either way: its answer is the
+   * clock's or nothing, and counting it would make the rate a rate of how busy the machine was.
+   */
   readonly interrupted: boolean;
 }
 
@@ -56,6 +73,10 @@ export interface ActionScenarioResult {
   readonly title: string;
   readonly steps: readonly ActionStepResult[];
   readonly interrupted: boolean;
+  /** A step timed out or threw: the scenario says nothing sure about the policy. */
+  readonly inconclusive: boolean;
+  /** What made the scenario inconclusive; null when it is not. */
+  readonly reason: string | null;
 }
 
 export interface ActionsReport {
@@ -64,14 +85,21 @@ export interface ActionsReport {
   readonly policy: string;
   readonly scenarios: readonly ActionScenarioResult[];
   readonly total: number;
-  /** Scenarios in which at least one step was interrupted. */
+  /** Scenarios in which at least one step was interrupted (asks at a limit included). */
   readonly interrupted: number;
+  /** Steps a rule or a limit put to the user as a question. */
   readonly asked: number;
+  /** Of `asked`, those asked because Stroq could not read the call (a limit), not because of a rule. */
+  readonly askedByLimit: number;
   readonly denied: number;
   /** Tool results the scan flagged. */
   readonly flagged: number;
+  /** Scenarios in which a step timed out or threw, so their interruptions cannot be counted. */
+  readonly inconclusive: number;
   /** interrupted / total, computed and never typed by a human. */
   readonly rate: number;
+  /** False when any scenario was inconclusive: an interruption rate that could not be measured. */
+  readonly ok: boolean;
 }
 
 /** The longest a subject is shown in a report line. */
@@ -93,45 +121,38 @@ function subjectOf(tool: string, input: Readonly<Record<string, unknown>>): stri
   return line.length <= SUBJECT_CHARS ? line : `${line.slice(0, SUBJECT_CHARS - 1)}…`;
 }
 
-async function runStep(
-  engine: StroqEngine,
-  step: ActionStep,
-  cwd: string,
-): Promise<ActionStepResult> {
-  const event = ClaudeHookInputSchema.parse(substituteCwd(step.event, cwd));
-  const base = {
-    sessionId: event.session_id,
-    toolName: event.tool_name,
-    toolInput: event.tool_input,
-    cwd: event.cwd || cwd,
-  };
-  const subject = subjectOf(event.tool_name, event.tool_input);
-  if (event.hook_event_name === 'PreToolUse') {
-    const { decision } = await engine.pre(base);
-    return {
-      phase: 'pre',
-      tool: event.tool_name,
-      subject,
-      verdict: decision.effect,
-      ruleId: decision.ruleId,
-      reason: decision.effect === 'allow' ? null : decision.reason,
-      interrupted: decision.effect !== 'allow',
-    };
-  }
-  const { scan } = await engine.post({
-    ...base,
-    toolResultText: toolResultToText(event.tool_response ?? event.tool_result),
-  });
+/** The subject of a step, without ever throwing: a malformed event has the tool name it claims, or none. */
+function subjectOfEvent(event: ClaudeHookEvent, cwd: string): string {
+  const parsed = ClaudeHookInputSchema.safeParse(substituteCwd(event, cwd));
+  return parsed.success ? subjectOf(parsed.data.tool_name, parsed.data.tool_input) : '';
+}
+
+const isJudged = (kind: StepKind): boolean => kind === 'decided' || kind === 'asked-by-limit';
+
+function toActionStep(result: StepResult, subject: string): ActionStepResult {
+  const kind = stepKind(result);
   return {
-    phase: 'post',
-    tool: event.tool_name,
+    phase: result.phase,
+    tool: result.tool,
     subject,
-    verdict: scan.verdict,
-    ruleId: scan.matches[0]?.ruleId ?? null,
-    reason: scan.matches[0]?.title ?? null,
-    interrupted: scan.verdict !== 'clean',
+    verdict: result.actual,
+    ruleId: result.ruleId,
+    reason: result.reason,
+    signals: result.signals,
+    timedOut: result.timedOut,
+    ...(result.error === undefined ? {} : { error: result.error }),
+    interrupted: isJudged(kind) && result.actual !== 'allow' && result.actual !== 'clean',
   };
 }
+
+/** The kind of a step as the report holds it. */
+const kindOf = (step: ActionStepResult): StepKind =>
+  stepKind({
+    actual: step.verdict,
+    signals: step.signals,
+    timedOut: step.timedOut,
+    ...(step.error === undefined ? {} : { error: step.error }),
+  });
 
 /** Runs one scenario in a fresh temporary root, the way `stroq attack` runs an attack. */
 export async function runActionScenario(
@@ -146,20 +167,24 @@ export async function runActionScenario(
     await Promise.all([cwd, home, userHome].map((dir) => mkdir(dir, { recursive: true })));
     await writeFixtures(cwd, scenario.files ?? {});
     const engine = createEngineAt({ home, userHome, policy, env: {} });
+    const ran: StepResult[] = [];
     const steps: ActionStepResult[] = [];
     for (const [index, step] of scenario.steps.entries()) {
-      try {
-        steps.push(await runStep(engine, step, cwd));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new Error(`action scenario ${scenario.id} step ${index + 1}: ${message}`);
-      }
+      const label = stepLabel('action scenario', scenario.id, index, step.event);
+      const result = await runStep(engine, step, cwd, label);
+      ran.push(result);
+      steps.push(toActionStep(result, subjectOfEvent(step.event, cwd)));
+      // What follows would run against a session the scenario did not mean to leave behind.
+      if (result.error !== undefined) break;
     }
+    const trouble = ran.flatMap((result, index) => troubleOf(result, index) ?? []);
     return {
       id: scenario.id,
       title: scenario.title,
       steps,
       interrupted: steps.some((s) => s.interrupted),
+      inconclusive: trouble.length > 0,
+      reason: trouble.length > 0 ? trouble.join('; ') : null,
     };
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -174,9 +199,13 @@ export async function runActionsBench(
 ): Promise<ActionsReport> {
   const results: ActionScenarioResult[] = [];
   for (const scenario of scenarios) results.push(await runActionScenario(scenario, policy));
-  const steps = results.flatMap((r) => r.steps);
-  const count = (verdict: StepVerdict): number => steps.filter((s) => s.verdict === verdict).length;
+  // Only a step that was judged is counted by its verdict: the fail-closed `suspect` of a scan that
+  // ran out of its budget is not a flagged result, and an ask the clock produced is not an ask.
+  const judged = results.flatMap((r) => r.steps).filter((s) => isJudged(kindOf(s)));
+  const count = (verdict: StepVerdict): number =>
+    judged.filter((s) => s.verdict === verdict).length;
   const interrupted = results.filter((r) => r.interrupted).length;
+  const inconclusive = results.filter((r) => r.inconclusive).length;
   return {
     version: 1,
     policy: policySource,
@@ -184,9 +213,12 @@ export async function runActionsBench(
     total: results.length,
     interrupted,
     asked: count('ask'),
+    askedByLimit: judged.filter((s) => kindOf(s) === 'asked-by-limit').length,
     denied: count('deny'),
     flagged: count('suspect'),
+    inconclusive,
     rate: results.length === 0 ? 0 : interrupted / results.length,
+    ok: inconclusive === 0,
   };
 }
 
@@ -203,10 +235,11 @@ const pad = (text: string, width: number): string => text.padEnd(width);
 /** The report as the command prints it, and as `docs/BENCH.md` quotes it: no time, no path. */
 export function formatActionsBench(report: ActionsReport): string {
   const percent = (report.rate * 100).toFixed(1);
+  const atLimit = report.askedByLimit > 0 ? ` (${report.askedByLimit} at a limit)` : '';
   const lines = [
     `stroq bench --actions: ${report.total} scenarios of ordinary agent work, ` +
       `${report.interrupted} interrupted (${percent}%)`,
-    `asked ${report.asked} · denied ${report.denied} · tool results flagged ${report.flagged}`,
+    `asked ${report.asked}${atLimit} · denied ${report.denied} · tool results flagged ${report.flagged}`,
   ];
   const hit = report.scenarios.filter((s) => s.interrupted);
   if (hit.length > 0) {
@@ -214,10 +247,27 @@ export function formatActionsBench(report: ActionsReport): string {
     for (const scenario of hit) {
       for (const step of scenario.steps.filter((s) => s.interrupted)) {
         lines.push(
-          `  ${pad(scenario.id, 34)} ${pad(step.verdict, 8)} ${pad(step.ruleId ?? '-', 28)} ` +
+          `  ${pad(scenario.id, 34)} ${pad(step.verdict ?? '-', 8)} ${pad(step.ruleId ?? '-', 28)} ` +
             `${step.tool}: ${step.subject}`,
         );
       }
+    }
+  }
+  const unjudged = report.scenarios.filter((s) => s.inconclusive);
+  if (unjudged.length > 0) {
+    lines.push(
+      '',
+      'Inconclusive (a timeout or an error is no verdict, so these scenarios are not in the numbers above):',
+    );
+    for (const scenario of unjudged) {
+      for (const step of scenario.steps.filter(
+        (s) => kindOf(s) === 'timeout' || kindOf(s) === 'error',
+      )) {
+        lines.push(
+          `  ${pad(scenario.id, 34)} ${pad(kindOf(step), 8)} ${step.tool}: ${step.subject}`,
+        );
+      }
+      lines.push(`    ${scenario.reason ?? 'no reason recorded'}`);
     }
   }
   lines.push('', `policy: ${report.policy}`);

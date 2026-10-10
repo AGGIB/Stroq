@@ -190,6 +190,7 @@ describe('stroq attack', () => {
       mutations: 1,
       variants: 1,
       survived: 0,
+      survivedByLimit: 0,
       escaped: [
         {
           scenarioId: 'fixture-scenario',
@@ -202,6 +203,7 @@ describe('stroq attack', () => {
       ],
       recorded: [],
       errored: [],
+      inconclusive: [],
       notApplicable: 0,
       textless: [],
       ok: false,

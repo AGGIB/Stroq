@@ -69,6 +69,24 @@ export function stepKind(
   return 'decided';
 }
 
+/**
+ * Why a step could not be counted, in a sentence a person can act on, or null for a step that was
+ * judged (`decided`, `asked-by-limit`). Reports use it as the reason a scenario is inconclusive.
+ */
+export function troubleOf(
+  step: Pick<StepResult, 'phase' | 'tool' | 'actual' | 'signals' | 'timedOut' | 'error'>,
+  index: number,
+): string | null {
+  const kind = stepKind(step);
+  // A step that threw already says which scenario and step it was.
+  if (kind === 'error') return step.error ?? 'the step threw';
+  if (kind !== 'timeout') return null;
+  const why = step.timedOut
+    ? 'the scan ran out of its time budget'
+    : 'the reading of the command ran past its deadline';
+  return `step ${index + 1} (${step.phase} ${step.tool}): ${why}`;
+}
+
 /** Replaces `__CWD__` in every string of a recorded event, however deeply nested. */
 export function substituteCwd(value: unknown, cwd: string): unknown {
   if (typeof value === 'string') return value.split(CWD_PLACEHOLDER).join(cwd);

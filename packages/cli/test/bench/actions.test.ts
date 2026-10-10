@@ -214,6 +214,148 @@ describe('the default policy on ordinary work', () => {
     const report = await runActionsBench(ACTION_SCENARIOS, DEFAULT_POLICY, 'default');
     expect(report.interrupted).toBeLessThanOrEqual(BASELINE_INTERRUPTED);
   });
+
+  // The pin above is about verdicts. If one scenario of the set timed out or threw, the number would
+  // be low for the wrong reason (a step that did not run interrupts nothing), so the run must also
+  // have been conclusive throughout, and no ask in it was a limit rather than a rule.
+  it('was judged throughout: no step timed out, threw or was asked at a limit', async () => {
+    const report = await runActionsBench(ACTION_SCENARIOS, DEFAULT_POLICY, 'default');
+    expect(report.total).toBe(75);
+    expect(report.interrupted).toBe(BASELINE_INTERRUPTED);
+    expect(report.askedByLimit).toBe(0);
+    expect(report.inconclusive).toBe(0);
+    expect(report.ok).toBe(true);
+    const steps = report.scenarios.flatMap((s) => s.steps);
+    expect(steps.every((s) => !s.timedOut && s.error === undefined)).toBe(true);
+  });
+});
+
+/** A scan budget no scan can meet. */
+const TINY_BUDGET = '0.000001';
+
+const hostileReadme = (id: string): ActionScenario => ({
+  id,
+  title: id,
+  steps: [
+    {
+      event: {
+        session_id: 'actions-test',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'cat README.md' },
+        tool_response: { stdout: 'A plain paragraph of documentation, with nothing in it.' },
+        cwd: '__CWD__',
+      },
+    },
+  ],
+});
+
+describe('what is not a verdict', () => {
+  const saved = process.env['STROQ_SCAN_BUDGET_MS'];
+  afterEach(() => {
+    if (saved === undefined) delete process.env['STROQ_SCAN_BUDGET_MS'];
+    else process.env['STROQ_SCAN_BUDGET_MS'] = saved;
+  });
+
+  const tooLarge = scenario('02-too-large', 'echo x;'.repeat(100_000));
+
+  it('counts a command asked about at a limit in asked and in interrupted, and in askedByLimit', async () => {
+    const report = await runActionsBench(
+      [scenario('01-ok', 'ls -la'), tooLarge],
+      DEFAULT_POLICY,
+      'default',
+    );
+    expect(report.scenarios[1]?.steps[0]).toMatchObject({
+      verdict: 'ask',
+      signals: ['command-too-large'],
+      timedOut: false,
+      interrupted: true,
+    });
+    // The pins read `interrupted` and `asked`: an ask at a limit is still an interruption.
+    expect(report.interrupted).toBe(1);
+    expect(report.asked).toBe(1);
+    expect(report.askedByLimit).toBe(1);
+    expect(report.inconclusive).toBe(0);
+    expect(report.ok).toBe(true);
+  });
+
+  it('counts an ask that names a danger in asked and not in askedByLimit', async () => {
+    const report = await runActionsBench(
+      [scenario('01-unparsed', 'bash -c "$PROGRAM"')],
+      DEFAULT_POLICY,
+      'default',
+    );
+    expect(report.asked).toBe(1);
+    expect(report.askedByLimit).toBe(0);
+  });
+
+  it('is inconclusive, not interrupted, when the scan runs out of its budget', async () => {
+    const control = await runActionsBench([hostileReadme('01-readme')], DEFAULT_POLICY, 'default');
+    expect(control.interrupted).toBe(0);
+    expect(control.ok).toBe(true);
+
+    process.env['STROQ_SCAN_BUDGET_MS'] = TINY_BUDGET;
+    const report = await runActionsBench([hostileReadme('01-readme')], DEFAULT_POLICY, 'default');
+    const step = report.scenarios[0]?.steps[0];
+    // The fail-closed answer is `suspect`, which used to be counted as a flagged result.
+    expect(step).toMatchObject({
+      phase: 'post',
+      verdict: 'suspect',
+      timedOut: true,
+      interrupted: false,
+    });
+    expect(report.scenarios[0]).toMatchObject({ inconclusive: true, interrupted: false });
+    expect(report.scenarios[0]?.reason).toContain('time budget');
+    expect(report.flagged).toBe(0);
+    expect(report.interrupted).toBe(0);
+    expect(report.inconclusive).toBe(1);
+    expect(report.ok).toBe(false);
+  });
+
+  it('is inconclusive, and does not stop the run, when a step throws', async () => {
+    const malformed: ActionScenario = {
+      id: '02-malformed',
+      title: 'a recorded event that fails schema validation',
+      steps: [{ event: { ...step('ls').event, tool_name: '' } }],
+    };
+    const report = await runActionsBench(
+      [scenario('01-ok', 'ls -la'), malformed, scenario('03-wipe', 'bash -c "$PROGRAM"')],
+      DEFAULT_POLICY,
+      'default',
+    );
+    expect(report.scenarios.map((s) => [s.id, s.inconclusive, s.interrupted])).toEqual([
+      ['01-ok', false, false],
+      ['02-malformed', true, false],
+      ['03-wipe', false, true],
+    ]);
+    const bad = report.scenarios[1]?.steps[0];
+    expect(bad?.verdict).toBeNull();
+    expect(bad?.error).toMatch(/^action scenario 02-malformed step 1 \(PreToolUse \): /);
+    expect(report.scenarios[1]?.reason).toBe(bad?.error);
+    expect(report.inconclusive).toBe(1);
+    expect(report.interrupted).toBe(1);
+    expect(report.ok).toBe(false);
+  });
+
+  it('shows the scenarios that could not be judged, and what was asked at a limit', async () => {
+    process.env['STROQ_SCAN_BUDGET_MS'] = TINY_BUDGET;
+    const text = formatActionsBench(
+      await runActionsBench([hostileReadme('01-readme'), tooLarge], DEFAULT_POLICY, 'default'),
+    );
+    expect(text).toContain('1 interrupted (50.0%)');
+    expect(text).toContain('1 at a limit');
+    expect(text).toMatch(/Inconclusive/);
+    expect(text).toMatch(/01-readme\s+timeout/);
+    expect(text).toContain('time budget');
+  });
+
+  it('prints no inconclusive section, and no limit note, for a run that was judged throughout', async () => {
+    const text = formatActionsBench(
+      await runActionsBench([scenario('01-ok', 'ls -la')], DEFAULT_POLICY, 'default'),
+    );
+    expect(text).not.toMatch(/Inconclusive/);
+    expect(text).not.toContain('at a limit');
+  });
 });
 
 describe('stroq bench --actions', () => {
@@ -239,5 +381,17 @@ describe('stroq bench --actions', () => {
     expect(parsed.version).toBe(1);
     expect(parsed.total).toBe(75);
     expect(typeof parsed.rate).toBe('number');
+  });
+
+  it('exits 1 when a scenario could not be judged, and says so', async () => {
+    const saved = process.env['STROQ_SCAN_BUDGET_MS'];
+    process.env['STROQ_SCAN_BUDGET_MS'] = TINY_BUDGET;
+    try {
+      expect(await runBenchCommand(['--actions'])).toBe(1);
+    } finally {
+      if (saved === undefined) delete process.env['STROQ_SCAN_BUDGET_MS'];
+      else process.env['STROQ_SCAN_BUDGET_MS'] = saved;
+    }
+    expect(out.join('')).toContain('Inconclusive');
   });
 });

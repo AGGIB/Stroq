@@ -8,6 +8,7 @@ import {
   stepKind,
   stepLabel,
   substituteCwd,
+  troubleOf,
   type StepKind,
   type StepResult as SharedStepResult,
 } from '../harness/step.js';
@@ -142,16 +143,6 @@ function checkShape(scenario: Scenario): void {
   }
 }
 
-/** Why a step could not be counted, in a sentence a person can act on. */
-function troubleOf(step: StepResult, index: number): string {
-  // A step that threw already says which scenario and step it was.
-  if (step.error !== undefined) return step.error;
-  const where = `step ${index + 1} (${step.phase} ${step.tool})`;
-  return step.timedOut
-    ? `${where}: the scan ran out of its time budget`
-    : `${where}: the reading of the command ran past its deadline`;
-}
-
 /**
  * What the attack came to. An attack that got through is `passed` whatever else happened: an earlier
  * step that timed out makes the scenario inconclusive, and must not hide it. Past that, an error or
@@ -177,9 +168,7 @@ function outcomeOf(steps: readonly StepResult[], kinds: readonly StepKind[]): Ou
 /** The result of a scenario from the steps that ran. */
 function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioResult {
   const kinds = steps.map(stepKind);
-  const trouble = steps.flatMap((step, index) =>
-    kinds[index] === 'timeout' || kinds[index] === 'error' ? [troubleOf(step, index)] : [],
-  );
+  const trouble = steps.flatMap((step, index) => troubleOf(step, index) ?? []);
   const inconclusive = trouble.length > 0;
   return {
     id: scenario.id,
