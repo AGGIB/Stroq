@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -13,7 +12,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { nodeFs } from '../../src/harden/atomic.js';
 import {
-  BACKUPS_KEPT_PER_FILE,
   backupFile,
   backupPath,
   newBackupId,
@@ -21,29 +19,13 @@ import {
   removeBackup,
 } from '../../src/harden/backup.js';
 import { HardenError, type Fs } from '../../src/harden/types.js';
+import { bytes, copiesOf, setup, sha256 } from './backup-fixtures.js';
 import { fakeEnv, removeTempDirs, steppingClock, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);
 
 const onWindows = process.platform === 'win32';
-const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
-const bytes = (text: string): Uint8Array => Buffer.from(text, 'utf8');
 const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
-
-/** A home, an env around it, and the real path of a file somebody else owns. */
-function setup() {
-  const home = tempDir('home');
-  const real = join(tempDir('project'), '.claude', 'settings.json');
-  return { home, real, env: fakeEnv(home) };
-}
-
-const copiesOf = (home: string, real: string): string[] => {
-  const root = join(home, 'backups');
-  if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .filter((id) => existsSync(join(root, id, `${sha256(real)}.bak`)))
-    .sort();
-};
 
 describe('backupFile: what it stores', () => {
   it('keeps the bytes under backups/<id>/<sha256 of the real path>.bak', async () => {
@@ -151,97 +133,6 @@ describe('backupFile: a file that holds a credential', () => {
     const result = await backupFile(env, real, bytes(`API_TOKEN=${FAKE_SECRET}\n`), 'b1');
 
     expect(JSON.stringify(result)).not.toContain(FAKE_SECRET);
-  });
-});
-
-describe('backupFile: which five copies of a file are kept', () => {
-  const idsFor = (count: number): string[] => {
-    const clock = steppingClock();
-    return Array.from({ length: count }, () => newBackupId(clock()));
-  };
-
-  // The first copy is the file as it was before Stroq ever touched it. Keeping the newest five
-  // would throw it away at the sixth apply, and with it the only way back to what the owner wrote.
-  it('keeps the first copy and the newest four, and removes the ones between, with the directories they leave empty', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(7);
-
-    for (const id of ids) await backupFile(env, real, bytes(`copy ${id}`), id);
-
-    expect(BACKUPS_KEPT_PER_FILE).toBe(5);
-    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(3)]);
-    expect(readdirSync(join(home, 'backups')).sort()).toEqual([ids[0], ...ids.slice(3)]);
-    expect(readFileSync(backupPath(home, ids[0] ?? '', real), 'utf8')).toBe(`copy ${ids[0]}`);
-    expect(readFileSync(backupPath(home, ids[6] ?? '', real), 'utf8')).toBe(`copy ${ids[6]}`);
-  });
-
-  it('keeps all of them while there are five or fewer', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(5);
-
-    for (const id of ids) await backupFile(env, real, bytes('x'), id);
-
-    expect(copiesOf(home, real)).toEqual(ids);
-  });
-
-  it('keeps the first copy however many come after it', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(25);
-
-    for (const id of ids) await backupFile(env, real, bytes(`copy ${id}`), id);
-
-    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(-4)]);
-    expect(readFileSync(backupPath(home, ids[0] ?? '', real), 'utf8')).toBe(`copy ${ids[0]}`);
-  });
-
-  it('keeps five per file, and never touches the copies of another file', async () => {
-    const { home, real, env } = setup();
-    const other = join(tempDir('other'), 'settings.json');
-    const ids = idsFor(7);
-
-    for (const id of ids.slice(0, 2)) await backupFile(env, other, bytes('other'), id);
-    for (const id of ids) await backupFile(env, real, bytes('this'), id);
-
-    expect(copiesOf(home, real)).toEqual([ids[0], ...ids.slice(3)]);
-    expect(copiesOf(home, other)).toEqual(ids.slice(0, 2));
-    // The directory of the third copy held nothing else, and is gone; the first two still hold
-    // the other file’s copies.
-    expect(readdirSync(join(home, 'backups')).sort()).toEqual(ids.filter((id) => id !== ids[2]));
-  });
-
-  it('never removes the copy it has just written, even if its id sorts oldest', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(6);
-    for (const id of ids.slice(1)) await backupFile(env, real, bytes('later'), id);
-
-    await backupFile(env, real, bytes('earlier id'), ids[0] ?? '');
-
-    const kept = copiesOf(home, real);
-    expect(kept).toHaveLength(5);
-    expect(kept).toContain(ids[0]);
-  });
-
-  it('never removes the copy it has just written, even if its id sorts in the middle of the rest', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(9);
-    const middle = ids[2] ?? '';
-    for (const index of [0, 5, 6, 7, 8])
-      await backupFile(env, real, bytes('copy'), ids[index] ?? '');
-
-    await backupFile(env, real, bytes('between'), middle);
-
-    // The first copy, the four newest, and the one just written, which is neither.
-    expect(copiesOf(home, real)).toEqual([ids[0], middle, ...ids.slice(5)]);
-  });
-
-  it('keeps going when it cannot remove an old copy', async () => {
-    const { home, real, env } = setup();
-    const ids = idsFor(6);
-    const fs: Fs = { ...nodeFs, unlink: () => Promise.reject(new Error('simulated EPERM')) };
-
-    for (const id of ids) await backupFile({ ...env, fs }, real, bytes('x'), id);
-
-    expect(copiesOf(home, real)).toEqual(ids);
   });
 });
 

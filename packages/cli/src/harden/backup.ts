@@ -126,12 +126,13 @@ export function readBackup(env: HardenEnv, real: string, id: string): string | n
  * Removes copies of `real` until `BACKUPS_KEPT_PER_FILE` are left, counting the one just written
  * (`keepId`), which is never removed whatever its id sorts like.
  *
- * Which ones go: the FIRST copy stays, and so do the newest four. The first is the file as it was
- * before Stroq ever touched it, the one thing that undo can always go back to; dropping the oldest
- * (as a plain "newest five" does) would throw it away at the sixth apply. The ones between are
- * only steps on the way, and undo can take an apply's entries out of the file itself when its copy
- * is gone. Other files' copies are not looked at, and a directory is removed only when this
- * leaves it empty.
+ * Which ones go: the OLDEST copy that exists for this file stays, and so do the newest four. The
+ * oldest is the file as it was before Stroq first touched it, unless an earlier undo left its own
+ * copy behind (copies stay after an undo), in which case that older copy holds the place; dropping
+ * the oldest (as a plain "newest five" does) would throw the original away at the sixth apply. The
+ * ones between are only steps on the way, and undo can take an apply's entries out of the file
+ * itself when its copy is gone. Other files' copies are not looked at, and a directory is removed
+ * only when this leaves it empty.
  */
 async function prune(fs: Fs, home: string, real: string, keepId: string): Promise<void> {
   const root = backupsDirIn(home);
@@ -160,8 +161,9 @@ async function prune(fs: Fs, home: string, real: string, keepId: string): Promis
 
 /**
  * Keeps a byte copy of `real`, whose text is `bytes`, as `<home>/backups/<id>/<sha256 of the
- * path>.bak` (directories 0700, the file 0600), and drops the oldest copies of the same file
- * beyond five.
+ * path>.bak` (directories 0700, the file 0600). It removes nothing: an older copy is dropped by
+ * `pruneBackups`, once the change that needed the room has been made, because a copy pruned for an
+ * apply that then fails is lost for nothing.
  *
  * Returns `stored: false`, with the reason, and writes nothing when the bytes hold
  * credential-shaped text. Throws for an id that is not a plain name, and when the place it
@@ -196,7 +198,15 @@ export async function backupFile(
     await fs.rmdir(dirname(file)).catch(() => undefined);
     throw err;
   }
-  // A copy that cannot be pruned is still a copy; the next one tries again.
-  await prune(fs, env.home, real, id).catch(() => undefined);
   return { id, stored: true };
+}
+
+/**
+ * Drops the copies of `real` beyond `BACKUPS_KEPT_PER_FILE`, keeping `keepId`, which has just been
+ * stored for a change that has been made. Best effort, and it never throws: a copy that cannot be
+ * removed is still a copy, and the next apply tries again.
+ */
+export async function pruneBackups(env: HardenEnv, real: string, keepId: string): Promise<void> {
+  if (!isBackupId(keepId)) return;
+  await prune(env.fs ?? nodeFs, env.home, real, keepId).catch(() => undefined);
 }

@@ -1,5 +1,11 @@
 import { assertWriteAllowed, resolveRealPath, writeFileAtomic, type WriteRules } from './atomic.js';
-import { backupFile, newBackupId, removeBackup, type BackupResult } from './backup.js';
+import {
+  backupFile,
+  newBackupId,
+  pruneBackups,
+  removeBackup,
+  type BackupResult,
+} from './backup.js';
 import {
   entriesFor,
   readManifest,
@@ -135,6 +141,10 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
       ...(env.fs === undefined ? {} : { fs: env.fs }),
       beforeRename: () => assertUnchanged(plan.file, plan.real, bytes),
     });
+    // Only now: an older copy is dropped to make room for this one once the change has been made.
+    // It never throws, which matters here: a failure after the file was replaced must not undo
+    // the record of it.
+    if (backup?.stored === true) await pruneBackups(env, plan.real, backup.id);
     return { changed: true, real: plan.real, diff: plan.diff, backup, entry };
   } catch (err) {
     // Take back what was done, and never let a failure to do so hide the failure that matters.

@@ -43,6 +43,7 @@ export {
   findCredentialShape,
   newBackupId,
   planBackup,
+  pruneBackups,
   readBackup,
   removeBackup,
   type BackupResult,
