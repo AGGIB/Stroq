@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readTargetText } from '../../src/harden/atomic.js';
 import { applyPlan } from '../../src/harden/index.js';
-import { planJsonEdits } from '../../src/harden/json-edit.js';
+import { planJsonEdits, replayJsonPlan } from '../../src/harden/json-edit.js';
 import { linkTarget } from '../../src/harden/plan-support.js';
+import { replayTextBlockPlan } from '../../src/harden/textblock.js';
 import { HardenError } from '../../src/harden/types.js';
 import { addDeny, engine, jsonText } from './engine-setup.js';
 import { removeTempDirs, tempDir } from './helpers.js';
@@ -145,6 +146,60 @@ describe.skipIf(onWindows)('the words about a link, when a repository named it',
     expect(plan.refused).toBe('path-escapes-root');
     expect(plan.refusedDetail).not.toMatch(CONTROL);
     expect(plan.refusedDetail).toContain('\\u001b');
+  });
+});
+
+/**
+ * A replay is the planner run again on a plan's own text, to see whether the plan is what a planner
+ * makes. It touches nothing, and says nothing to the owner: what a link is depends on the file
+ * system, which the planner looked at and the replay does not.
+ */
+describe.skipIf(onWindows)('the replay of a plan', () => {
+  it('does not look at the file system for a link, in a plan of a JSON file', () => {
+    const e = engine();
+    writeFileSync(e.file('package.json'), jsonText({}));
+    symlinkSync(e.file('package.json'), e.file('settings.json'));
+    const plan = e.planJson('settings.json', [addDeny('a')]);
+    expect(linkLines(plan.notices)).toHaveLength(1);
+
+    expect(linkLines(replayJsonPlan(plan).notices)).toEqual([]);
+  });
+
+  it('does not look at the file system for a link, in a plan of a block of lines', () => {
+    const e = engine();
+    writeFileSync(e.file('.env'), 'PORT=3000\n');
+    symlinkSync(e.file('.env'), e.file('.cursorignore'));
+    const plan = e.planBlock('.cursorignore');
+    expect(linkLines(plan.notices)).toHaveLength(1);
+
+    expect(linkLines(replayTextBlockPlan(plan)?.notices ?? ['not replayed'])).toEqual([]);
+  });
+
+  it('still makes the same text, diff and edits as the planner did', () => {
+    const e = engine();
+    writeFileSync(e.file('package.json'), jsonText({ name: 'x' }));
+    symlinkSync(e.file('package.json'), e.file('settings.json'));
+    const plan = e.planJson('settings.json', [addDeny('a')]);
+
+    const replay = replayJsonPlan(plan);
+
+    expect(replay.after).toBe(plan.after);
+    expect(replay.diff).toBe(plan.diff);
+    expect(replay.edits).toEqual(plan.edits);
+  });
+});
+
+describe.skipIf(onWindows)('a plan that was refused for its path', () => {
+  it('has said where the path leads in its refusal, and has no notice about a link besides', () => {
+    const e = engine();
+    const outside = tempDir('outside');
+    writeFileSync(join(outside, 'target.json'), '{}\n');
+    symlinkSync(join(outside, 'target.json'), e.file('settings.json'));
+
+    const plan = e.planJson('settings.json', [addDeny('a')]);
+
+    expect(plan.refused).toBe('path-escapes-root');
+    expect(plan.notices).toEqual([]);
   });
 });
 

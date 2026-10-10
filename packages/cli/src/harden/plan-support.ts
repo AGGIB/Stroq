@@ -62,16 +62,16 @@ export function linkTarget(file: string, real: string, root: string | undefined)
 }
 
 /**
- * What a plan says to the owner about a link in its path, as the one notice it takes. A plan that
- * was refused for its path has said where the path leads already, and never opened the file.
+ * What a planner says to the owner about a link in the path of a file it has opened, as the one
+ * notice it takes. It looks at the file system (where the root really is), so it belongs to the
+ * planners and not to the replay of a plan, which touches nothing. A path that was refused is not
+ * asked about: the refusal has said where it leads, and the file was never opened.
  */
 export function linkNotices(
   file: string,
   real: string,
   root: string | undefined,
-  refused: PlanRefusal | undefined,
 ): readonly string[] {
-  if (refused === 'path-escapes-root' || refused === 'dangling-link') return [];
   return linkTarget(file, real, root) === null ? [] : [linkNotice(file, real)];
 }
 

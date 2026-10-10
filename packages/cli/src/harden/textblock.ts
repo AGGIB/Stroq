@@ -154,6 +154,8 @@ interface Frame {
   /** The file's text, or `null` when there is no file (or it was never opened). */
   readonly text: string | null;
   readonly options: Pick<PlanOptions, 'recipe' | 'root' | 'newFileMode'>;
+  /** What the owner is told because of where the path leads: only a planner, who looked, knows. */
+  readonly notices: readonly string[];
 }
 
 function buildPlan(
@@ -181,11 +183,7 @@ function buildPlan(
     changed,
     ...(refusal === undefined ? {} : { refused: refusal.refused, refusedDetail: refusal.detail }),
     backup: backup.backup,
-    notices: [
-      ...linkNotices(file, real, options.root, refusal?.refused),
-      ...backup.notices,
-      ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
-    ],
+    notices: [...frame.notices, ...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
     edits,
     ...(options.root === undefined ? {} : { root: options.root }),
     ...(options.newFileMode === undefined ? {} : { newFileMode: options.newFileMode }),
@@ -279,6 +277,7 @@ export function planTextBlock(
     real,
     text: refusal === null ? options.read(real) : null,
     options,
+    notices: refusal === null ? linkNotices(file, real, options.root) : [],
   };
   if (refusal !== null) return buildPlan(frame, '', [], refusal);
   return planBlockText(frame, block);
@@ -301,6 +300,7 @@ export function replayTextBlockPlan(plan: TextBlockPlan): TextBlockPlan | null {
       ...(plan.root === undefined ? {} : { root: plan.root }),
       ...(plan.newFileMode === undefined ? {} : { newFileMode: plan.newFileMode }),
     },
+    notices: [],
   };
   return planBlockText(frame, { id: edit.id, lines: edit.lines });
 }
