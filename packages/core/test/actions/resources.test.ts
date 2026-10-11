@@ -6,11 +6,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_URL_CHARS } from '../../src/actions/classify-bash.js';
 import {
   MAX_RESOURCE_PATHS,
+  MAX_RESOURCE_URLS,
   resourcesOfFileTool,
   resourcesOfMcp,
+  resourcesOfShellTool,
   resourcesOfWebFetch,
   type ScannedPath,
 } from '../../src/actions/resources.js';
+import { cpuNow } from '../cpu-time.js';
 
 const POSIX = process.platform !== 'win32';
 
@@ -41,6 +44,19 @@ afterAll(() => {
 
 /** What a call that names no path and no address looks like once it is read in full. */
 const UNKNOWN = { paths: [], pathsComplete: false, urls: [], shell: false } as const;
+
+describe('resourcesOfShellTool', () => {
+  it('bounds resource extraction for two million characters of addresses', () => {
+    const input = { command: 'http://'.repeat(300_000) };
+    const started = cpuNow();
+    const resources = resourcesOfShellTool('Bash', input);
+    expect(cpuNow() - started).toBeLessThan(5_000);
+    expect(resources).toMatchObject({ paths: [], pathsComplete: false, shell: true });
+    expect(resources.urls.length).toBeGreaterThan(0);
+    expect(resources.urls.length).toBeLessThanOrEqual(MAX_RESOURCE_URLS);
+    for (const { url } of resources.urls) expect(url.length).toBeLessThanOrEqual(MAX_URL_CHARS);
+  });
+});
 
 describe('resourcesOfFileTool: one named file', () => {
   it.each([

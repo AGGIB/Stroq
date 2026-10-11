@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import fc from 'fast-check';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MAX_URL_CHARS } from '../../src/actions/classify-bash.js';
 import { classifyTool } from '../../src/actions/classify-tool.js';
 import {
   MAX_RESOURCE_PATHS,
+  MAX_RESOURCE_URLS,
   resourcesOfFileTool,
   resourcesOfShellTool,
   resourcesOfWebFetch,
@@ -526,11 +528,6 @@ describe('classifyTool does not throw, and finishes quickly, on anything an agen
       () => ({ url: `https://h.example/${'a'.repeat(2_000_000)}` }),
     ],
     [
-      'a command of two million characters of addresses',
-      'Bash',
-      () => ({ command: 'http://'.repeat(300_000) }),
-    ],
-    [
       'an MCP path of two million characters',
       'mcp__fs__read_file',
       () => ({ path: `/${'a'.repeat(2_000_000)}` }),
@@ -540,5 +537,16 @@ describe('classifyTool does not throw, and finishes quickly, on anything an agen
     const started = cpuNow();
     expect(() => classifyTool(tool, toolInput, cwd)).not.toThrow();
     expect(cpuNow() - started).toBeLessThan(5_000);
+  });
+
+  it('does not throw for a command of two million characters of addresses', () => {
+    // The shell reader has its own deadline and ReDoS gates; resources.test.ts times
+    // the added resource extraction separately from that existing reading.
+    const { resources } = classifyTool('Bash', { command: 'http://'.repeat(300_000) }, cwd);
+    expect(resources).toMatchObject({ paths: [], pathsComplete: false, shell: true });
+    expect(resources?.urls.length).toBeGreaterThan(0);
+    expect(resources?.urls.length).toBeLessThanOrEqual(MAX_RESOURCE_URLS);
+    for (const { url } of resources?.urls ?? [])
+      expect(url.length).toBeLessThanOrEqual(MAX_URL_CHARS);
   });
 });
