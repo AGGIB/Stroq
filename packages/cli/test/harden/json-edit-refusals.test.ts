@@ -1,8 +1,10 @@
 import {
+  closeSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -215,12 +217,26 @@ describe('planJsonEdits: it only reads', () => {
     const dir = tempDir();
     const file = join(dir, 'settings.json');
     writeFileSync(file, '{"a": 1}\n');
-    const before = statSync(file);
+    const beforeFd = openSync(file, 'r');
+    try {
+      const before = fstatSync(beforeFd);
 
-    planJsonEdits(file, [addDeny('x')], { read: (path) => readFileSync(path, 'utf8') });
+      planJsonEdits(file, [addDeny('x')], { read: (path) => readFileSync(path, 'utf8') });
 
-    expect(readFileSync(file, 'utf8')).toBe('{"a": 1}\n');
-    expect(statSync(file).mtimeMs).toBe(before.mtimeMs);
+      const afterFd = openSync(file, 'r');
+      try {
+        expect(readFileSync(afterFd, 'utf8')).toBe('{"a": 1}\n');
+        expect(fstatSync(afterFd)).toMatchObject({
+          dev: before.dev,
+          ino: before.ino,
+          mtimeMs: before.mtimeMs,
+        });
+      } finally {
+        closeSync(afterFd);
+      }
+    } finally {
+      closeSync(beforeFd);
+    }
     expect(readdirSync(dir)).toEqual(['settings.json']);
   });
 

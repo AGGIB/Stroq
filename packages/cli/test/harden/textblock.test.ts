@@ -1,8 +1,10 @@
 import {
+  closeSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -290,24 +292,38 @@ describe('planTextBlock: the plan', () => {
     const dir = tempDir();
     const file = join(dir, 'ignore');
     writeFileSync(file, 'a\n');
-    const before = statSync(file);
     const asked: string[] = [];
+    const beforeFd = openSync(file, 'r');
+    try {
+      const before = fstatSync(beforeFd);
 
-    const result = planTextBlock(
-      file,
-      { id: ID, lines: LINES },
-      {
-        read: (path) => {
-          asked.push(path);
-          return readFileSync(path, 'utf8');
+      const result = planTextBlock(
+        file,
+        { id: ID, lines: LINES },
+        {
+          read: (path) => {
+            asked.push(path);
+            return readFileSync(path, 'utf8');
+          },
         },
-      },
-    );
+      );
 
-    expect(asked).toEqual([file]);
-    expect(result.real).toBe(file);
-    expect(readFileSync(file, 'utf8')).toBe('a\n');
-    expect(statSync(file).mtimeMs).toBe(before.mtimeMs);
+      expect(asked).toEqual([file]);
+      expect(result.real).toBe(file);
+      const afterFd = openSync(file, 'r');
+      try {
+        expect(readFileSync(afterFd, 'utf8')).toBe('a\n');
+        expect(fstatSync(afterFd)).toMatchObject({
+          dev: before.dev,
+          ino: before.ino,
+          mtimeMs: before.mtimeMs,
+        });
+      } finally {
+        closeSync(afterFd);
+      }
+    } finally {
+      closeSync(beforeFd);
+    }
     expect(readdirSync(dir)).toEqual(['ignore']);
   });
 

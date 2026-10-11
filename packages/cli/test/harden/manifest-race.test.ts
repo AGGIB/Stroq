@@ -7,28 +7,22 @@ import { entry, setup, thrownBy } from './manifest-fixtures.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 /**
- * The race, made deterministic: right after the reader first looks at `race.path` (the check), the
- * file there is replaced by something else. That is what a process running beside Stroq could do
- * between the check and the read that trusts it. A reader that checks one handle and reads that
- * same handle never sees the swap; one that looks at a path and then reads it again by name reads
- * a file the check never looked at.
- *
- * The same shape as `check-then-read.test.ts`, which does this for the other readers.
+ * Replace the manifest just as it is opened. The descriptor must be checked before it is read,
+ * even if an earlier view of the path would have shown a small regular manifest.
  */
 const race = vi.hoisted(() => ({ path: '', swap: undefined as (() => void) | undefined }));
 
 vi.mock('node:fs', async (importOriginal) => {
   const fs = await importOriginal<typeof import('node:fs')>();
-  const lstatThenSwap = ((path: PathLike, ...rest: unknown[]) => {
-    const result = (fs.lstatSync as (...args: unknown[]) => unknown)(path, ...rest);
+  const openAfterSwap = ((path: PathLike, ...rest: unknown[]) => {
     const swap = race.swap;
     if (swap !== undefined && String(path) === race.path) {
       race.swap = undefined;
       swap();
     }
-    return result;
-  }) as typeof fs.lstatSync;
-  return { ...fs, lstatSync: lstatThenSwap };
+    return (fs.openSync as (...args: unknown[]) => number)(path, ...rest);
+  }) as typeof fs.openSync;
+  return { ...fs, openSync: openAfterSwap };
 });
 
 afterEach(() => {
@@ -39,7 +33,7 @@ afterEach(() => {
 const onWindows = process.platform === 'win32';
 const GOOD = JSON.stringify({ version: 1, files: {} });
 
-/** A manifest in place, and a swap armed to run right after the reader looks at it. */
+/** A manifest in place, and a swap armed to run immediately before it is opened. */
 function armed(swap: (manifestFile: string) => void) {
   const made = setup();
   mkdirSync(join(made.manifestFile, '..'), { recursive: true });
@@ -49,7 +43,7 @@ function armed(swap: (manifestFile: string) => void) {
   return made;
 }
 
-describe('a manifest replaced between the check and the read', () => {
+describe('a manifest replaced while it is being opened', () => {
   it('is judged by the file that was opened: a swap for one past the size bound is refused, not read', () => {
     const { env } = armed((file) => {
       unlinkSync(file);
@@ -63,24 +57,21 @@ describe('a manifest replaced between the check and the read', () => {
     expect(race.swap).toBeUndefined();
   });
 
-  it.skipIf(onWindows)(
-    'is never followed through a link that was put there after the check',
-    () => {
-      const elsewhere = join(tempDir('elsewhere'), 'other.json');
-      writeFileSync(elsewhere, JSON.stringify({ version: 1, files: { '/x/y.json': [entry()] } }));
-      const { env } = armed((file) => {
-        unlinkSync(file);
-        symlinkSync(elsewhere, file);
-      });
+  it.skipIf(onWindows)('is never followed through a link that was put there as open began', () => {
+    const elsewhere = join(tempDir('elsewhere'), 'other.json');
+    writeFileSync(elsewhere, JSON.stringify({ version: 1, files: { '/x/y.json': [entry()] } }));
+    const { env } = armed((file) => {
+      unlinkSync(file);
+      symlinkSync(elsewhere, file);
+    });
 
-      const error = thrownBy(() => readManifest(env));
+    const error = thrownBy(() => readManifest(env));
 
-      expect(error).toMatchObject({ code: 'manifest-unsafe' });
-      expect(race.swap).toBeUndefined();
-    },
-  );
+    expect(error).toMatchObject({ code: 'manifest-unsafe' });
+    expect(race.swap).toBeUndefined();
+  });
 
-  it.skipIf(onWindows)('is refused when what was put there after the check is a directory', () => {
+  it.skipIf(onWindows)('is refused when what was put there as open began is a directory', () => {
     const { env } = armed((file) => {
       unlinkSync(file);
       mkdirSync(file);
