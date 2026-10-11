@@ -12,11 +12,11 @@ import { HardenError, ID_PATTERN, type HardenEnv, type RecordedEdit } from './ty
  * from before them) long after the command that added them has gone.
  *
  * A file Stroq trusts to say what to delete and what to restore had better be read strictly. This
- * one is private (0600, in a 0700 directory), is opened without following a link (the file itself:
- * a link in a directory above it is allowed, and the write side only checks that it stays inside
- * the home), is refused above 1 MiB, and is accepted only if all of it is exactly what the engine
- * writes: an unknown key, a sha that is not a sha or a copy id that climbs out of its directory is
- * an error, and no part of a manifest that fails is ever used.
+ * one is private (0600, in a 0700 directory), is only read after its open handle matches a regular,
+ * non-link file entry (a link in a directory above it is allowed, and the write side checks that
+ * it stays inside the home), is refused above 1 MiB, and is accepted only if all of it is exactly
+ * what the engine writes: an unknown key, a sha that is not a sha or a copy id that climbs out of
+ * its directory is an error, and no part of a manifest that fails is ever used.
  */
 
 export const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -215,23 +215,13 @@ function unsafe(file: string, why: string): HardenError {
 }
 
 /**
- * The manifest's text, or `null` when there is none. Never through a link AT THE FILE: it is looked
- * at without following one, then opened without following one, and what was opened is looked at
- * again, so that swapping it in between changes nothing. (A link in a directory above it is not
- * looked for here.) `O_NONBLOCK` so that a FIFO planted there fails
- * at once instead of waiting for a writer; Windows has neither flag, and the first look covers it.
+ * The manifest's text, or `null` when there is none. Open first, then validate and read the same
+ * descriptor. `O_NOFOLLOW` rejects links at open where available; matching the descriptor's
+ * identity to a non-link path entry before reading also covers platforms without that flag.
+ * A later path swap cannot change the descriptor. A link in a directory above it is not checked
+ * here. `O_NONBLOCK` keeps a FIFO from waiting for a writer on platforms with named pipes.
  */
 function readManifestText(file: string): string | null {
-  try {
-    const found = lstatSync(file);
-    if (found.isSymbolicLink() || !found.isFile()) throw unsafe(file, 'is not a regular file');
-    if (found.size > MAX_MANIFEST_BYTES) {
-      throw new HardenError('manifest-too-large', `${file} is larger than a manifest can be`);
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw err;
-  }
   let fd: number;
   try {
     fd = openSync(
@@ -241,16 +231,34 @@ function readManifestText(file: string): string | null {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ELOOP') throw unsafe(file, 'is a link');
-    if (code === 'ENOENT') return null;
+    if (code === 'EISDIR') throw unsafe(file, 'is not a regular file');
+    if (code === 'ENOENT') {
+      // Without O_NOFOLLOW a dangling link also produces ENOENT. Only an absent entry is empty.
+      if (lstatSync(file, { throwIfNoEntry: false }) !== undefined) {
+        throw unsafe(file, 'could not be opened as a regular file');
+      }
+      return null;
+    }
     throw err;
   }
   try {
-    const opened = fstatSync(fd);
+    const opened = fstatSync(fd, { bigint: true });
     if (!opened.isFile()) throw unsafe(file, 'is not a regular file');
-    if (opened.size > MAX_MANIFEST_BYTES) {
+    if (opened.size > BigInt(MAX_MANIFEST_BYTES)) {
       throw new HardenError('manifest-too-large', `${file} is larger than a manifest can be`);
     }
-    const buffer = Buffer.alloc(opened.size);
+    if (opened.ino === 0n) throw unsafe(file, 'has no verifiable file identity');
+    const found = lstatSync(file, { bigint: true, throwIfNoEntry: false });
+    if (
+      found === undefined ||
+      found.isSymbolicLink() ||
+      !found.isFile() ||
+      found.dev !== opened.dev ||
+      found.ino !== opened.ino
+    ) {
+      throw unsafe(file, 'no longer names the regular file that was opened');
+    }
+    const buffer = Buffer.alloc(Number(opened.size));
     let filled = 0;
     while (filled < buffer.length) {
       const read = readSync(fd, buffer, filled, buffer.length - filled, filled);

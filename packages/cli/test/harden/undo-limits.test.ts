@@ -129,7 +129,9 @@ describe('undoFile: when there is nothing to undo, or it cannot be done', () => 
       const { real, path } = await applied(e, 'settings.json', jsonText({ model: 'm' }), [
         addDeny('a'),
       ]);
-      const commented = readFileSync(path, 'utf8').replace('{', '{\n  // my note');
+      const original = readFileSync(path, 'utf8');
+      expect(original[0]).toBe('{');
+      const commented = `{\n  // my note${original.slice(1)}`;
       writeFileSync(path, commented);
 
       const result = await undo(e, real);
@@ -141,7 +143,7 @@ describe('undoFile: when there is nothing to undo, or it cannot be done', () => 
       expect(readManifest(e.env).files[real]).toHaveLength(1);
 
       // The owner takes the comment out, and the same undo goes through.
-      writeFileSync(path, commented.replace('\n  // my note', ''));
+      writeFileSync(path, original);
       const later = await undo(e, real);
       expect(later.status).not.toBe('blocked');
       expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ model: 'm' });
