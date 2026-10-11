@@ -68,6 +68,14 @@ export interface PreResult {
   readonly provenance: readonly ProvenanceHit[];
   /** Known secrets whose values appeared in the arguments (never the values). */
   readonly secrets: readonly SecretHit[];
+  /**
+   * The classification signals behind `classes`, such as `reading-took-too-long`: how the
+   * call was read, which a class alone does not say (a command asked about because the
+   * reading ran past its clock and one asked about because it is dangerous can carry the
+   * same class). Not set yet. It will be filled when `stroq attack` and `stroq bench` report
+   * a run Stroq could not judge as inconclusive rather than as a pass or a miss.
+   */
+  readonly signals?: readonly string[];
 }
 
 export interface PostResult {

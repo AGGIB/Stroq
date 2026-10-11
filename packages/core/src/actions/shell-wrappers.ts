@@ -141,6 +141,23 @@ export const VERB_WRAPPERS: Readonly<Record<string, VerbWrapper>> = {
   poetry: { verbs: verbs('run'), words: 0 },
   pipenv: { verbs: verbs('run'), words: 0 },
   bundle: { verbs: verbs('exec'), words: 0 },
+  // Stroq's own: `stroq run [--agent a] [--sandbox] -- agent …` starts the agent after the `--`, and `stroq mcp
+  // --server s -- cmd …` the server. Any other word after `stroq` (`doctor`, `why`) is the program itself. Only the
+  // bare name (and the system copy) is known here, as for the others; `stroq-state.ts` reads every spelling of it.
+  stroq: {
+    verbs: verbs('run', 'mcp'),
+    words: 0,
+    dashes: true,
+    flags: verbs(
+      '--agent',
+      '--allow-domain',
+      '--server',
+      '--client',
+      '--cwd',
+      '--session',
+      '--pass-env',
+    ),
+  },
   conda: { verbs: verbs('run'), words: 0, flags: verbs('-n', '--name', '-p', '--prefix', '--cwd') },
   mamba: { verbs: verbs('run'), words: 0, flags: verbs('-n', '--name', '-p', '--prefix', '--cwd') },
 };
