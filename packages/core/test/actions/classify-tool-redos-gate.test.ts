@@ -75,6 +75,25 @@ const TARGETS: ReadonlyArray<readonly [string, string]> = [
   ['a file named like nothing', `${cwd}/.alt/config`],
 ];
 
+describe('resource URL extraction through classifyTool stays linear', () => {
+  const shapes: ReadonlyArray<readonly [string, Build]> = [
+    ['many URL starts', repeated('https://a.example/x ')],
+    ['one unclosed authority', (size) => `https://${'a'.repeat(size)}`],
+    ['quoted URL punctuation', repeated("'https://a.example/x?y=(z)' ")],
+  ];
+  for (const [name, build] of shapes) {
+    it(name, () => {
+      // One quoted shell argument exercises command URL extraction through the public classifier
+      // at all three sizes, without turning every URL into another shell command.
+      const times = [SIZE / 4, SIZE / 2, SIZE].map((size) =>
+        timed(() => classifyTool('Bash', { command: `printf '%s' "${build(size)}"` }, cwd)),
+      );
+      const [quarter = 0, , full = 0] = times;
+      expect(full < BOUND_MS || full < MAX_GROWTH * quarter, times.join(', ')).toBe(true);
+    });
+  }
+});
+
 describe('the text a Write carries stays linear', () => {
   for (const [targetName, path] of TARGETS) {
     for (const [textName, build] of TEXTS) {
