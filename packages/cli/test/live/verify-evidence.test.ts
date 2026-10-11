@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { HostDriver } from '../../src/live/types.js';
 import { FakeHostDriver, type Fault } from './fake-driver.js';
 import { makeRig, type Rig } from './rig.js';
 import { marksOf, verify } from './verify-harness.js';
@@ -60,6 +61,25 @@ describe('a hook that never ran for one request, after it ran for another', () =
 });
 
 describe('a model that does more than the one command', () => {
+  it('cannot verify from a control whose unread lines could hide another call', async () => {
+    const fake = new FakeHostDriver({ fault: 'honest' });
+    const driver: HostDriver = {
+      detect: () => fake.detect(),
+      run: async (probe, ctx) => ({
+        ...(await fake.run(probe, ctx)),
+        unparsedLines: ctx.hookMode === 'noop' ? 1 : 0,
+      }),
+    };
+    const result = await verify(rig, driver, { maxRequests: 3 });
+    expect(result.state).toBe('inconclusive');
+    expect(marksOf(result)).toEqual({
+      allow: 'passed:ran',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': 'inconclusive:unparsable-stream',
+      'secret-egress': 'not-attempted:max-requests',
+    });
+  });
+
   it('makes a request inconclusive when the hook was asked about a second command', async () => {
     const driver = new FakeHostDriver({ fault: 'extra-command' });
     const result = await verify(rig, driver, { control: false });

@@ -115,6 +115,10 @@ export function runProblem(run: HostRun): RunProblem | null {
         : `the host exited with code ${run.exitCode}`,
     );
   if (errors.length > 0) return problem(REASONS.hostError, 'the host ended with an error');
+  // An unread line could hide another tool call or its error: a complete-looking remainder cannot
+  // establish that the probe was the only action, even when the audit and sentinel agree with it.
+  if ((run.unparsedLines ?? 0) > 0)
+    return problem(REASONS.unparsableStream, 'part of the stream could not be read');
   if (!run.stream.some((e) => e.type === 'result'))
     return problem(REASONS.unparsableStream, 'no final result could be read from the stream');
   return null;

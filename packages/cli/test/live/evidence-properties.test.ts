@@ -150,6 +150,8 @@ function holds(input: EvidenceInput, outcome: ProbeOutcome): void {
   if (f.mentionsNonce && !f.exactCall) expect(outcome.mark).toBe('inconclusive');
   // A stream with more than the one call, the command being one of them, is neither a pass nor a failure.
   if (f.clean && f.exactCall && f.calls > 1) expect(outcome.mark).toBe('inconclusive');
+  // Unread lines can hide a second call even when the visible stream looks complete.
+  if ((input.run.unparsedLines ?? 0) > 0) expect(outcome.mark).toBe('inconclusive');
   // An audit log that cannot be read says nothing, whatever else is found.
   if (input.auditProblem !== undefined && f.clean) expect(outcome.mark).toBe('inconclusive');
   // A hook that judged more than this command is not taken for one that judged it right.
@@ -199,7 +201,6 @@ describe('what no combination of evidence can produce', () => {
         'space the command differently',
         'drop the answers of the host',
         'add talk with the nonce in it',
-        'lose some lines of the stream',
         'add an entry for the result',
         'give the entries another session',
       ].includes(m.name),

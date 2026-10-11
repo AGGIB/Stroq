@@ -148,7 +148,8 @@ function armedByTheBook(input: Input): boolean {
   const errored = stream
     .filter(isObject)
     .some((e) => e['type'] === 'tool_result' && e['isError'] === true);
-  return runProblem(input.run) === null && issuedAlone && fileHolds && !errored;
+  const complete = (input.run.unparsedLines ?? 0) === 0;
+  return complete && runProblem(input.run) === null && issuedAlone && fileHolds && !errored;
 }
 
 describe('what no combination of evidence can make of a control', () => {
@@ -182,10 +183,9 @@ describe('what no combination of evidence can make of a control', () => {
         'space the command differently',
         'add an answer that is not an error',
         'add talk with the nonce in it',
-        'lose some lines of the stream',
       ].includes(m.name),
     );
-    expect(benign).toHaveLength(4);
+    expect(benign).toHaveLength(3);
     for (const kind of KINDS) {
       expect(markControl(happyControl(kind)).mark).toBe('passed');
       for (const m of benign)

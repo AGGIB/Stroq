@@ -336,7 +336,7 @@ describe('a probe file that cannot be cleared', () => {
         const ledger = openLedger({ memory: true, limit: 30 });
         const driver = new FakeHostDriver({ fault: 'honest' });
         const requested = await makeRequest(args(driver, { ledger, probe: probe('deny') }));
-        expect(requested).toMatchObject({ sent: false, reason: 'cannot-clear' });
+        expect(requested).toMatchObject({ sent: false, reason: 'unsafe-directory' });
         if (requested.sent) return;
         expect(requested.detail).toMatch(/^[\x20-\x7e]+$/);
         await notPaidFor(ledger, driver, requested);

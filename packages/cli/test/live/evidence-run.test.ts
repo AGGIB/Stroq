@@ -113,6 +113,7 @@ describe('runProblem', () => {
     ['no stream at all', { stream: [] }],
     ['no final result', { stream: [{ type: 'init' }, toolUse('x')] }],
     ['lines it could not read and nothing more', { stream: [], unparsedLines: 12 }],
+    ['a complete-looking stream with an unread line', { unparsedLines: 1 }],
   ];
 
   it.each(unreadable)('finds an unreadable stream in %s', (_name, over) => {

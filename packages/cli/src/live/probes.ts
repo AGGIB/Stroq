@@ -183,25 +183,39 @@ const gone = (err: unknown): boolean => {
 };
 
 /**
- * Throws when the directory the file is in leads out of the project through a link. The model has the
- * run of the project while a request is made, and a link left where a directory should be would make a
- * removal land on a file of someone else's. A directory that is not there has nothing to remove.
+ * Checks each existing ancestor before accepting a missing directory. Checking only the full parent
+ * misses a link followed by a directory that has not been made yet: the next control would create that
+ * directory outside the project. A dangling or unreadable link is not an ordinary absent directory.
  */
 function assertStaysInProject(project: string, path: string): void {
-  let parent: string;
+  const refuse = (why: string): never => {
+    throw new LiveCheckError('unsafe-directory', `will not use the probe file: ${why}`);
+  };
   let root: string;
   try {
-    parent = realpathSync(dirname(path));
     root = realpathSync(project);
   } catch {
-    return;
+    return refuse('the project real path cannot be established');
   }
-  const way = relative(root, parent);
-  if (way === '..' || way.startsWith(`..${sep}`) || isAbsolute(way))
-    throw new LiveCheckError(
-      'unsafe-directory',
-      'will not remove the probe file: the way to it leads out of the project through a link',
-    );
+  let parent = root;
+  for (const part of relative(project, dirname(path)).split(sep).filter(Boolean)) {
+    const next = join(parent, part);
+    try {
+      // lstat distinguishes a missing directory from a dangling link before realpath follows it.
+      lstatSync(next);
+    } catch (err) {
+      if (gone(err)) return;
+      return refuse('an ancestor cannot be inspected');
+    }
+    try {
+      parent = realpathSync(next);
+    } catch {
+      return refuse('an ancestor cannot be resolved through its links');
+    }
+    const way = relative(root, parent);
+    if (way === '..' || way.startsWith(`..${sep}`) || isAbsolute(way))
+      return refuse('the way to it leads out of the project through a link');
+  }
 }
 
 /**

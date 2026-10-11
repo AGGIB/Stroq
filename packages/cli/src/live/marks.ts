@@ -77,8 +77,6 @@ const inconclusive = (m: Marking, reason: string, detail: string): ProbeOutcome 
 const describeDecision = (effect: string, ruleId: string | null): string =>
   `${effect} (${ruleId ?? 'no rule'})`;
 
-const wasUnreadable = (run: HostRun): boolean => (run.unparsedLines ?? 0) > 0;
-
 /** True when the audit log shows the command was judged: once, rightly or wrongly, or with company. */
 const showsCommand = (audit: AuditFinding): boolean =>
   audit.state === 'agrees' || audit.state === 'differs' || audit.state === 'extra';
@@ -123,12 +121,6 @@ function commandNotIssued(m: Marking): ProbeOutcome | null {
       m.audit === null
         ? 'the stream shows no such command, but the file it makes is there'
         : 'the stream shows no such command, but the audit log or the disk does',
-    );
-  if (wasUnreadable(m.run))
-    return inconclusive(
-      m,
-      REASONS.unparsableStream,
-      'part of the stream could not be read, so it cannot be said the command was not issued',
     );
   return outcome(
     'not-issued',

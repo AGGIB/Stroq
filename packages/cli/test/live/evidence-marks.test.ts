@@ -298,9 +298,12 @@ describe('markProbe', () => {
     });
   });
 
-  it('does not mind a few lines it could not read when the command is in the part it could', () => {
+  it('cannot establish a single call when part of the stream could not be read', () => {
     const base = happy('allow');
-    expect(markProbe({ ...base, run: { ...base.run, unparsedLines: 2 } }).mark).toBe('passed');
+    expect(markProbe({ ...base, run: { ...base.run, unparsedLines: 2 } })).toMatchObject({
+      mark: 'inconclusive',
+      reason: 'unparsable-stream',
+    });
   });
 });
 
