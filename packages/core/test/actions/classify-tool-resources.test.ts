@@ -20,7 +20,7 @@ let root: string;
 let cwd: string;
 
 beforeAll(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-tool-resources-')));
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-tool-resources-')));
   cwd = join(root, 'proj');
   mkdirSync(cwd);
   mkdirSync(join(root, 'outside'));
