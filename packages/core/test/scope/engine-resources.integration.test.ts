@@ -101,10 +101,11 @@ describe.skipIf(process.platform === 'win32')(
       expect(result.decision).toMatchObject({ effect: 'deny', ruleId: 'task-scope-path' });
     });
 
-    it('denies a deeply absent write target reached through an outside symlink', async () => {
+    it('denies a write through an outside symlink followed by 65 missing parents', async () => {
       const f = fixture();
-      const raw = `${f.project}/escape/future/deeper/new.txt`;
-      const target = join(f.outside, 'nested', 'future', 'deeper', 'new.txt');
+      const missing = Array.from({ length: 65 }, (_, index) => `missing-${index}`);
+      const raw = `${f.project}/escape/${missing.join('/')}/new.txt`;
+      const target = join(f.outside, 'nested', ...missing, 'new.txt');
       expect(existsSync(target)).toBe(false);
       const result = await f.engine.pre(f.event('Write', { file_path: raw, content: 'marker' }));
       expect(f.seen()?.classification.resources).toMatchObject({
