@@ -221,6 +221,7 @@ describe('the default policy on ordinary work', () => {
   it('was judged throughout: no step timed out, threw or was asked at a limit', async () => {
     const report = await runActionsBench(ACTION_SCENARIOS, DEFAULT_POLICY, 'default');
     expect(report.total).toBe(75);
+    expect(report.judged).toBe(75);
     expect(report.interrupted).toBe(BASELINE_INTERRUPTED);
     expect(report.askedByLimit).toBe(0);
     expect(report.inconclusive).toBe(0);
@@ -342,7 +343,7 @@ describe('what is not a verdict', () => {
     const text = formatActionsBench(
       await runActionsBench([hostileReadme('01-readme'), tooLarge], DEFAULT_POLICY, 'default'),
     );
-    expect(text).toContain('1 interrupted (50.0%)');
+    expect(text).toContain('1 judged, 1 interrupted (100.0%)');
     expect(text).toContain('1 at a limit');
     expect(text).toMatch(/Inconclusive/);
     expect(text).toMatch(/01-readme\s+timeout/);
@@ -378,7 +379,7 @@ describe('stroq bench --actions', () => {
   it('emits the record as JSON', async () => {
     await runBenchCommand(['--actions', '--json']);
     const parsed = JSON.parse(out.join('')) as { version: number; total: number; rate: number };
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.total).toBe(75);
     expect(typeof parsed.rate).toBe('number');
   });

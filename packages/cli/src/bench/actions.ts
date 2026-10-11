@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_POLICY, type Policy } from '@stroq/core';
 import { ClaudeHookInputSchema, type ClaudeHookEvent } from '../adapters/claude-code.js';
+import { buildMeta, type ReportMeta } from '../attack/report.js';
 import { writeFixtures } from '../attack/run.js';
 import { createEngineAt } from '../engine-factory.js';
 import {
@@ -72,6 +73,7 @@ export interface ActionScenarioResult {
   readonly id: string;
   readonly title: string;
   readonly steps: readonly ActionStepResult[];
+  /** A conclusive scenario with an interruption. Inconclusive scenarios contribute no measurement. */
   readonly interrupted: boolean;
   /** A step timed out or threw: the scenario says nothing sure about the policy. */
   readonly inconclusive: boolean;
@@ -79,26 +81,33 @@ export interface ActionScenarioResult {
   readonly reason: string | null;
 }
 
+/** The id this bench gives its corpus in the meta block of a report. */
+const ACTIONS_CORPUS_ID = 'actions-scenarios';
+
 export interface ActionsReport {
-  readonly version: 1;
+  /** 2 since a step that timed out or threw was set apart from a verdict and `meta` was added. */
+  readonly version: 2;
+  readonly meta: ReportMeta;
   /** `default` or the path of the policy override that was used. */
   readonly policy: string;
   readonly scenarios: readonly ActionScenarioResult[];
   readonly total: number;
-  /** Scenarios in which at least one step was interrupted (asks at a limit included). */
+  /** Conclusive scenarios only: the denominator of the measured interruption rate. */
+  readonly judged: number;
+  /** Judged scenarios in which at least one step was interrupted (asks at a limit included). */
   readonly interrupted: number;
-  /** Steps a rule or a limit put to the user as a question. */
+  /** Steps in judged scenarios that a rule or a limit put to the user as a question. */
   readonly asked: number;
   /** Of `asked`, those asked because Stroq could not read the call (a limit), not because of a rule. */
   readonly askedByLimit: number;
   readonly denied: number;
-  /** Tool results the scan flagged. */
+  /** Tool results the scan flagged in judged scenarios. */
   readonly flagged: number;
   /** Scenarios in which a step timed out or threw, so their interruptions cannot be counted. */
   readonly inconclusive: number;
-  /** interrupted / total, computed and never typed by a human. */
-  readonly rate: number;
-  /** False when any scenario was inconclusive: an interruption rate that could not be measured. */
+  /** interrupted / judged; null when no scenario could be judged. */
+  readonly rate: number | null;
+  /** False when any scenario was inconclusive: the rate does not measure the full corpus. */
   readonly ok: boolean;
 }
 
@@ -182,7 +191,7 @@ export async function runActionScenario(
       id: scenario.id,
       title: scenario.title,
       steps,
-      interrupted: steps.some((s) => s.interrupted),
+      interrupted: trouble.length === 0 && steps.some((s) => s.interrupted),
       inconclusive: trouble.length > 0,
       reason: trouble.length > 0 ? trouble.join('; ') : null,
     };
@@ -199,25 +208,28 @@ export async function runActionsBench(
 ): Promise<ActionsReport> {
   const results: ActionScenarioResult[] = [];
   for (const scenario of scenarios) results.push(await runActionScenario(scenario, policy));
-  // Only a step that was judged is counted by its verdict: the fail-closed `suspect` of a scan that
-  // ran out of its budget is not a flagged result, and an ask the clock produced is not an ask.
-  const judged = results.flatMap((r) => r.steps).filter((s) => isJudged(kindOf(s)));
-  const count = (verdict: StepVerdict): number =>
-    judged.filter((s) => s.verdict === verdict).length;
-  const interrupted = results.filter((r) => r.interrupted).length;
+  // A timed-out scan taints the session, so even a later ordinary denial may be the clock's result.
+  // Exclude the whole scenario, including earlier interruptions, from every measured count. Keep
+  // its raw step results above so the report still explains what happened.
+  const judged = results.filter((r) => !r.inconclusive);
+  const steps = judged.flatMap((r) => r.steps);
+  const count = (verdict: StepVerdict): number => steps.filter((s) => s.verdict === verdict).length;
+  const interrupted = judged.filter((r) => r.interrupted).length;
   const inconclusive = results.filter((r) => r.inconclusive).length;
   return {
-    version: 1,
+    version: 2,
+    meta: buildMeta({ policy, policySource, corpusId: ACTIONS_CORPUS_ID, scenarios }),
     policy: policySource,
     scenarios: results,
     total: results.length,
+    judged: judged.length,
     interrupted,
     asked: count('ask'),
-    askedByLimit: judged.filter((s) => kindOf(s) === 'asked-by-limit').length,
+    askedByLimit: steps.filter((s) => kindOf(s) === 'asked-by-limit').length,
     denied: count('deny'),
     flagged: count('suspect'),
     inconclusive,
-    rate: results.length === 0 ? 0 : interrupted / results.length,
+    rate: judged.length === 0 ? null : interrupted / judged.length,
     ok: inconclusive === 0,
   };
 }
@@ -234,11 +246,11 @@ const pad = (text: string, width: number): string => text.padEnd(width);
 
 /** The report as the command prints it, and as `docs/BENCH.md` quotes it: no time, no path. */
 export function formatActionsBench(report: ActionsReport): string {
-  const percent = (report.rate * 100).toFixed(1);
+  const rate = report.rate === null ? 'rate unavailable' : `${(report.rate * 100).toFixed(1)}%`;
   const atLimit = report.askedByLimit > 0 ? ` (${report.askedByLimit} at a limit)` : '';
   const lines = [
     `stroq bench --actions: ${report.total} scenarios of ordinary agent work, ` +
-      `${report.interrupted} interrupted (${percent}%)`,
+      `${report.judged} judged, ${report.interrupted} interrupted (${rate})`,
     `asked ${report.asked}${atLimit} · denied ${report.denied} · tool results flagged ${report.flagged}`,
   ];
   const hit = report.scenarios.filter((s) => s.interrupted);
@@ -257,7 +269,7 @@ export function formatActionsBench(report: ActionsReport): string {
   if (unjudged.length > 0) {
     lines.push(
       '',
-      'Inconclusive (a timeout or an error is no verdict, so these scenarios are not in the numbers above):',
+      'Inconclusive (excluded from judged scenarios, interruption counts and the rate):',
     );
     for (const scenario of unjudged) {
       for (const step of scenario.steps.filter(

@@ -12,6 +12,7 @@ import {
   type StepKind,
   type StepResult as SharedStepResult,
 } from '../harness/step.js';
+import { ATTACK_CORPUS_ID, buildMeta, type ReportMeta } from './report.js';
 import {
   CWD_PLACEHOLDER,
   HOME_PLACEHOLDER,
@@ -82,7 +83,9 @@ export interface AttackTotals {
 }
 
 export interface AttackReport {
-  readonly version: 1;
+  /** 2 since the outcomes were told apart (`timeout`, `error`, `asked-by-limit`) and `meta` was added. */
+  readonly version: 2;
+  readonly meta: ReportMeta;
   /** `default` or the path of the policy override that was used. */
   readonly policy: string;
   readonly scenarios: readonly ScenarioResult[];
@@ -245,7 +248,8 @@ export async function runAttack(
   for (const scenario of scenarios) results.push(await runScenario(scenario, policy));
   const totals = totalsOf(results);
   return {
-    version: 1,
+    version: 2,
+    meta: buildMeta({ policy, policySource, corpusId: ATTACK_CORPUS_ID, scenarios }),
     policy: policySource,
     scenarios: results,
     totals,

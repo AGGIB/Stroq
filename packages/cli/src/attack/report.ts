@@ -1,4 +1,85 @@
+import { createHash } from 'node:crypto';
+import { stableStringify, type Policy } from '@stroq/core';
+import type { ClaudeHookEvent } from '../adapters/claude-code.js';
+import { stroqVersion } from '../version.js';
 import type { AttackReport, ScenarioResult } from './run.js';
+
+/**
+ * What every report of version 2 says about the run that made it, so that two reports can be told
+ * apart and one can be read without the machine it came from: which Stroq, which policy, what the
+ * "host" was, what was replayed.
+ */
+export interface ReportMeta {
+  /** The version of the CLI that made the report. */
+  readonly stroq: string;
+  readonly policy: {
+    /** `default` or the path of the policy override that was used. */
+    readonly source: string;
+    /** `sha256` of the policy as loaded; see `buildMeta` for what exactly is hashed. */
+    readonly sha256: string;
+  };
+  /**
+   * What the events were sent to. These reports replay the events a Claude Code hook would send
+   * into the engine in this process, so there is no host and no version of one: `mode` says so.
+   */
+  readonly host: {
+    readonly id: 'claude-code';
+    readonly version: null;
+    readonly mode: 'in-process';
+  };
+  /** Every tool named by the steps that were replayed, once each, sorted. */
+  readonly tools: readonly string[];
+  /** Not run under a sandbox: nothing here starts a process. */
+  readonly sandbox: null;
+  readonly corpus: {
+    readonly id: string;
+    /** `sha256` of the scenarios as given; see `buildMeta`. */
+    readonly sha256: string;
+    readonly count: number;
+  };
+}
+
+export interface MetaInput {
+  readonly policy: Policy;
+  readonly policySource: string;
+  readonly corpusId: string;
+  /** The scenarios that were replayed: only their steps' events and their own data are read. */
+  readonly scenarios: readonly { readonly steps: readonly { readonly event: ClaudeHookEvent }[] }[];
+}
+
+/** The id the attack suite and its fuzzer give the corpus they replay (they share the scenarios). */
+export const ATTACK_CORPUS_ID = 'attack-scenarios';
+
+const sha256Of = (value: unknown): string =>
+  createHash('sha256').update(stableStringify(value)).digest('hex');
+
+/**
+ * The meta block of a report of version 2.
+ *
+ * Both hashes are of canonical JSON (keys sorted, no whitespace) of the data as the code holds it,
+ * not of any file's bytes: the policy is hashed as parsed, so the built-in policy (which lives in
+ * code and has no file) has a hash like any other, and a comment or a reordering in a policy file
+ * does not change it; the corpus is hashed as the scenarios that were replayed, so a `--only` run
+ * says what it ran. The same data hashes the same on every machine.
+ */
+export function buildMeta(input: MetaInput): ReportMeta {
+  const tools = new Set<string>();
+  for (const scenario of input.scenarios)
+    for (const step of scenario.steps)
+      if (typeof step.event.tool_name === 'string') tools.add(step.event.tool_name);
+  return {
+    stroq: stroqVersion(),
+    policy: { source: input.policySource, sha256: sha256Of(input.policy) },
+    host: { id: 'claude-code', version: null, mode: 'in-process' },
+    tools: [...tools].sort(),
+    sandbox: null,
+    corpus: {
+      id: input.corpusId,
+      sha256: sha256Of(input.scenarios),
+      count: input.scenarios.length,
+    },
+  };
+}
 
 const ID_WIDTH = 32;
 const OUTCOME_WIDTH = 8;

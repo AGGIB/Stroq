@@ -101,7 +101,15 @@ const errored: ScenarioResult = {
 };
 
 const report = (scenarios: ScenarioResult[], ok: boolean): AttackReport => ({
-  version: 1,
+  version: 2,
+  meta: {
+    stroq: '0.0.0-test',
+    policy: { source: 'default', sha256: '0'.repeat(64) },
+    host: { id: 'claude-code', version: null, mode: 'in-process' },
+    tools: [],
+    sandbox: null,
+    corpus: { id: 'attack-scenarios', sha256: '0'.repeat(64), count: scenarios.length },
+  },
   policy: 'default',
   scenarios,
   totals: totalsOf(scenarios),

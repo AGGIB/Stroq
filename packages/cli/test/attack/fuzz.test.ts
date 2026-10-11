@@ -6,7 +6,16 @@ import type { Scenario } from '../../src/attack/scenario.js';
 import { SCENARIOS } from '../../src/attack/scenarios/index.js';
 
 const report = (over: Partial<FuzzReport> = {}): FuzzReport => ({
-  version: 1,
+  version: 2,
+  meta: {
+    stroq: '0.0.0-test',
+    policy: { source: 'default', sha256: '0'.repeat(64) },
+    host: { id: 'claude-code', version: null, mode: 'in-process' },
+    tools: [],
+    sandbox: null,
+    corpus: { id: 'attack-scenarios', sha256: '0'.repeat(64), count: 13 },
+    budget: { variants: 325, seed: null },
+  },
   policy: 'default',
   scenarios: 13,
   mutations: 25,

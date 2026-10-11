@@ -1,5 +1,6 @@
 import type { Policy } from '@stroq/core';
 import { mutateScenario, type Mutation } from './mutate.js';
+import { ATTACK_CORPUS_ID, buildMeta, type ReportMeta } from './report.js';
 import { runScenario, type Outcome } from './run.js';
 import type { Scenario } from './scenario.js';
 
@@ -18,8 +19,20 @@ export interface VariantResult {
   readonly error: string | null;
 }
 
+/** What a fuzz report says about its run: the common block, and how much was tried. */
+export interface FuzzMeta extends ReportMeta {
+  readonly budget: {
+    /** Every scenario crossed with every mutation, the cells that carry no text to mutate included. */
+    readonly variants: number;
+    /** Null: the crossing is exhaustive and in a fixed order, so there is nothing to seed. */
+    readonly seed: number | null;
+  };
+}
+
 export interface FuzzReport {
-  readonly version: 1;
+  /** 2 since variants that could not be judged were set apart (`inconclusive`) and `meta` was added. */
+  readonly version: 2;
+  readonly meta: FuzzMeta;
   readonly policy: string;
   readonly scenarios: number;
   readonly mutations: number;
@@ -128,7 +141,11 @@ export async function runFuzz(
     }
 
   return {
-    version: 1,
+    version: 2,
+    meta: {
+      ...buildMeta({ policy, policySource, corpusId: ATTACK_CORPUS_ID, scenarios }),
+      budget: { variants: total, seed: null },
+    },
     policy: policySource,
     scenarios: scenarios.length,
     mutations: mutations.length,

@@ -100,7 +100,7 @@ describe('substituteCwd', () => {
 describe('runAttack with the default policy', () => {
   it('stops all thirty-six scenarios and reports rule ids', async () => {
     const report = await runAttack(SCENARIOS, DEFAULT_POLICY, 'default');
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(report.policy).toBe('default');
     expect(report.ok).toBe(true);
     expect(report.totals).toEqual({

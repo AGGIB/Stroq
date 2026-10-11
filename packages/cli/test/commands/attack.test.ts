@@ -62,7 +62,7 @@ describe('stroq attack', () => {
       scenarios: unknown[];
       totals: unknown;
     };
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(report.ok).toBe(true);
     expect(report.scenarios).toHaveLength(36);
     expect(report.totals).toEqual({
@@ -184,7 +184,16 @@ describe('stroq attack', () => {
   // thing proving the gate can fail at all.
   it('--fuzz exits 1 when the report carries an escape', async () => {
     fuzzState.forcedReport = {
-      version: 1,
+      version: 2,
+      meta: {
+        stroq: '0.0.0-test',
+        policy: { source: 'default', sha256: '0'.repeat(64) },
+        host: { id: 'claude-code', version: null, mode: 'in-process' },
+        tools: [],
+        sandbox: null,
+        corpus: { id: 'attack-scenarios', sha256: '0'.repeat(64), count: 1 },
+        budget: { variants: 1, seed: null },
+      },
       policy: 'default',
       scenarios: 1,
       mutations: 1,
