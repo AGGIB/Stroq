@@ -1,9 +1,9 @@
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolResources } from '../types.js';
 import { MAX_URL_CHARS, commandUrls } from './classify-bash.js';
 import { monitorSocket, monitorSocketHost } from './monitor-socket.js';
-import { resolveThroughLinks } from './symlink.js';
+import { createResourcePathResolver } from './resource-path.js';
 
 /**
  * What a tool call reaches, as data: the files it reads or writes, the addresses it contacts,
@@ -91,6 +91,7 @@ function listPaths(requests: readonly PathRequest[]): {
   paths: readonly ResourcePath[];
   complete: boolean;
 } {
+  const resolveResourcePath = createResourcePathResolver();
   const seen = new Set<string>();
   const paths: ResourcePath[] = [];
   let complete = true;
@@ -98,12 +99,16 @@ function listPaths(requests: readonly PathRequest[]): {
     const described = describe(raw, base);
     if (described === null || !described.resolved) complete = false;
     if (described === null) continue;
-    const key = `${op}\0${described.path}`;
+    // Keep parent steps until the filesystem has followed links: link/../x is not necessarily
+    // the same file as x. Prefixing a relative spelling must not normalize it either.
+    const absolute = isAbsolute(raw) ? raw : `${base}${sep}${raw}`;
+    const target = described.resolved ? resolveResourcePath(absolute) : null;
+    if (target === null) complete = false;
+    const real = target === described.path ? null : target;
+    const key = `${op}\0${described.path}\0${real ?? ''}`;
     if (seen.has(key)) continue;
     if (paths.length >= MAX_RESOURCE_PATHS) return { paths, complete: false };
     seen.add(key);
-    // An absolute path never reads its second argument, so the path stands in for it.
-    const real = described.resolved ? resolveThroughLinks(described.path, described.path) : null;
     paths.push({ path: described.path, ...(real === null ? {} : { real }), op });
   }
   return { paths, complete };
@@ -148,12 +153,30 @@ function ofNamedFiles(
 const named = (value: unknown): value is string => typeof value === 'string' && value !== '';
 const unnamed = (value: unknown): boolean => value === undefined || value === null || value === '';
 
-/** Grep searches `path`, or the working directory when it names none. */
+const SEARCH_FIELDS = /^(path|file_path|notebook_path|directory|root|files|paths)$/i;
+
+/** Grep's named targets, including the aliases the classifier accepts; cwd is the default. */
 function ofSearch(input: Readonly<Record<string, unknown>>, cwd: string): ToolResources {
-  const path = input['path'];
-  if (unnamed(path)) return ofPaths([{ raw: cwd, op: 'read', base: cwd }], true);
-  if (!named(path)) return unknown(false);
-  return ofPaths([{ raw: path, op: 'read', base: cwd }], true);
+  const requests: PathRequest[] = [];
+  let complete = true;
+  for (const [key, value] of Object.entries(input)) {
+    if (!SEARCH_FIELDS.test(key)) continue;
+    if (unnamed(value)) continue;
+    if (Array.isArray(value) && !/^(paths|files)$/i.test(key)) {
+      complete = false;
+      continue;
+    }
+    const values = Array.isArray(value) ? value : [value];
+    for (const path of values) {
+      if (!named(path)) complete = false;
+      else requests.push({ raw: path, op: 'read', base: cwd });
+      if (requests.length > MAX_RESOURCE_PATHS) return ofPaths(requests, false);
+    }
+  }
+  if (requests.length === 0) {
+    return complete ? ofPaths([{ raw: cwd, op: 'read', base: cwd }], true) : unknown(false);
+  }
+  return ofPaths(requests, complete);
 }
 
 const SLASH = 0x2f;
@@ -198,7 +221,8 @@ function ofGlob(input: Readonly<Record<string, unknown>>, cwd: string): ToolReso
   const root = patternKnown ? globRoot(pattern) : '';
   const starts = root !== '' && (isAbsolute(root) || root.startsWith('~'));
   // What a relative root is relative to: the directory the search starts in.
-  const searchBase = named(path) && !path.startsWith('~') ? resolve(cwd, path) : cwd;
+  const searchBase =
+    named(path) && !path.startsWith('~') ? (isAbsolute(path) ? path : `${cwd}${sep}${path}`) : cwd;
   const requests: PathRequest[] = [];
   if (named(path)) requests.push({ raw: path, op: 'read', base: cwd });
   else if (!starts) requests.push({ raw: cwd, op: 'read', base: cwd });

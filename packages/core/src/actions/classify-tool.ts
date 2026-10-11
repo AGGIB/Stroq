@@ -6,6 +6,12 @@ import { NONE, mergeClassifications } from './merge-classifications.js';
 import { isShellTool } from './shell-tools.js';
 import { isGitExecPath } from './git-exec.js';
 import { isPersistencePath } from './persistence.js';
+import {
+  resourcesOfFileTool,
+  resourcesOfMcp,
+  resourcesOfShellTool,
+  resourcesOfWebFetch,
+} from './resources.js';
 import { resolveThroughLinks } from './symlink.js';
 import { writtenTexts } from './written-text.js';
 import { decodePercentRuns } from '../normalize/percent-runs.js';
@@ -17,8 +23,10 @@ export { normalizePathForMatch } from './normalize-path.js';
 export interface ToolClassification extends CommandClassification {
   readonly mcp?: { readonly server: string; readonly tool: string };
   /**
-   * What the call reaches (see `ToolResources`). Not set yet; a classification without it
-   * says nothing about resources, not that there are none.
+   * What the call reaches (see `ToolResources` and `resources.ts`): set for the file tools, WebFetch,
+   * the shell tools and MCP calls. A classification without it, for a tool this does not read, says
+   * nothing about resources, not that there are none. It is read from the arguments beside the
+   * classification and moves no class, host or signal.
    */
   readonly resources?: ToolResources;
 }
@@ -322,6 +330,8 @@ interface PathScan {
   readonly entries: readonly PathEntry[];
   /** False when a limit was reached and some path-like values were not read. */
   readonly complete: boolean;
+  /** Resource scopes cannot treat malformed named arguments as an empty, complete list. */
+  readonly resourcesComplete: boolean;
 }
 
 interface ScanState {
@@ -329,6 +339,7 @@ interface ScanState {
   readonly seen: Set<string>;
   chars: number;
   complete: boolean;
+  resourcesComplete: boolean;
   /** Values read only because they look like paths: their own list, budget and dedupe. */
   readonly weakEntries: PathEntry[];
   readonly weakSeen: Set<string>;
@@ -373,6 +384,7 @@ function scanPaths(
     seen: new Set(),
     chars: 0,
     complete: true,
+    resourcesComplete: true,
     weakEntries: [],
     weakSeen: new Set(),
     weakChars: 0,
@@ -385,12 +397,21 @@ function scanPaths(
       else if (weak) addWeak(value, state);
       continue;
     }
-    if (typeof value !== 'object' || value === null) continue;
+    if (typeof value !== 'object' || value === null) {
+      if (frame.isPathKey) state.resourcesComplete = false;
+      continue;
+    }
     if (Array.isArray(value)) {
+      if (frame.isPathKey && value.length === 0 && !/^(files|paths)$/i.test(frame.key))
+        state.resourcesComplete = false;
       for (let i = value.length - 1; i >= 0; i -= 1) stack.push({ ...frame, value: value[i] });
       continue;
     }
     const children: Frame[] = [];
+    // A path-key object is a recognized container only when it names a child path. Keep
+    // traversing unknown objects for legacy classification, but never call their resources known.
+    if (frame.isPathKey && !Object.keys(value).some((key) => keyPattern.test(key)))
+      state.resourcesComplete = false;
     for (const [childKey, child] of Object.entries(value)) {
       const childIsPath = keyPattern.test(childKey);
       if (!childIsPath && PROSE_KEY.test(childKey)) continue;
@@ -409,7 +430,11 @@ function scanPaths(
     for (let i = children.length - 1; i >= 0; i -= 1) stack.push(children[i] as Frame);
   }
   // The named keys first, so what they hold is classified whatever else was found.
-  return { entries: [...state.entries, ...state.weakEntries], complete: state.complete };
+  return {
+    entries: [...state.entries, ...state.weakEntries],
+    complete: state.complete,
+    resourcesComplete: state.complete && state.resourcesComplete,
+  };
 }
 
 /** A link is not a file the tool opens; `file:` is the one scheme that is. */
@@ -528,13 +553,21 @@ const UNREADABLE_ARGUMENTS = {
   signal: 'mcp-args-unreadable',
 };
 
-function classifyGrep(toolInput: Readonly<Record<string, unknown>>): ToolClassification {
+function classifyGrep(
+  toolInput: Readonly<Record<string, unknown>>,
+  cwd: string,
+): ToolClassification {
   const scan = scanPaths(toolInput, GREP_PATH_KEY, false);
   const files = classifyPaths(scan.entries, false);
-  if (scan.complete) return files;
+  const resources =
+    scan.entries.length === 0 && scan.resourcesComplete
+      ? resourcesOfFileTool('Grep', toolInput, cwd)
+      : resourcesOfMcp(scan.entries, scan.resourcesComplete, false, cwd);
+  if (scan.complete) return { ...files, resources };
   return {
     classes: [...files.classes, ...UNREADABLE_ARGUMENTS.classes],
     hosts: [],
+    resources,
     signals: [...files.signals, UNREADABLE_ARGUMENTS.signal],
   };
 }
@@ -608,7 +641,9 @@ function classifyMcp(
   const signals: string[] = [...files.signals, ...content.signals];
   if (sideEffect) signals.push('mcp-side-effect-name');
   if (!scan.complete) signals.push(UNREADABLE_ARGUMENTS.signal);
-  return { classes, hosts: [], signals, mcp };
+  // The scan above found the paths; the resources reuse it (one scan) and its verb logic.
+  const resources = resourcesOfMcp(scan.entries, scan.resourcesComplete, write, cwd);
+  return { classes, hosts: [], signals, mcp, resources };
 }
 
 function classifyFetch(toolInput: Readonly<Record<string, unknown>>): ToolClassification {
@@ -617,16 +652,31 @@ function classifyFetch(toolInput: Readonly<Record<string, unknown>>): ToolClassi
   return { classes: ['network.fetch'], hosts: host ? [host] : [], signals: ['web-fetch'] };
 }
 
+/** `classification` with what the call reaches added, and nothing else of it changed. */
+const reaching = (
+  classification: ToolClassification,
+  resources: ToolResources,
+): ToolClassification => ({ ...classification, resources });
+
 export function classifyTool(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): ToolClassification {
-  if (isShellTool(toolName)) return classifyShellTool(toolName, toolInput, cwd);
-  if (WRITE_TOOLS.has(toolName)) return classifyFilePath(toolInput, cwd, true);
-  if (toolName === 'Read') return classifyFilePath(toolInput, cwd, false);
-  if (toolName === 'Grep') return classifyGrep(toolInput);
-  if (toolName === 'WebFetch') return classifyFetch(toolInput);
+  if (isShellTool(toolName)) {
+    return reaching(
+      classifyShellTool(toolName, toolInput, cwd),
+      resourcesOfShellTool(toolName, toolInput),
+    );
+  }
+  // Glob has no class of its own (listing names is not an action), but a scope needs its paths.
+  const files = (): ToolResources => resourcesOfFileTool(toolName, toolInput, cwd);
+  if (WRITE_TOOLS.has(toolName)) return reaching(classifyFilePath(toolInput, cwd, true), files());
+  if (toolName === 'Read') return reaching(classifyFilePath(toolInput, cwd, false), files());
+  if (toolName === 'Grep') return classifyGrep(toolInput, cwd);
+  if (toolName === 'Glob') return reaching(EMPTY, files());
+  if (toolName === 'WebFetch')
+    return reaching(classifyFetch(toolInput), resourcesOfWebFetch(toolInput['url']));
   if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput, cwd);
   return EMPTY;
 }
