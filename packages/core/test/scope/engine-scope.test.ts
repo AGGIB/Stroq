@@ -62,10 +62,10 @@ describe('the engine applies the task gate to every pre-tool decision', () => {
     expect(await audit.verify()).toMatchObject({ ok: true, count: 1 });
   });
 
-  it('refuses file tools when the older classifier supplies no complete resource inventory', async () => {
+  it('refuses file tools when malformed arguments prevent a complete resource inventory', async () => {
     const { e } = engine(gateFixture());
     expect(
-      (await e.pre(event('Read', { file_path: `${PROJECT}/src/a.ts` }))).decision,
+      (await e.pre(event('Read', { file_path: { path: `${PROJECT}/src/a.ts` } }))).decision,
     ).toMatchObject({
       effect: 'deny',
       ruleId: 'task-scope-incomplete',
