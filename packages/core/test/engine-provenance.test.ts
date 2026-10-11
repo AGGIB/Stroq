@@ -80,6 +80,20 @@ describe('StroqEngine provenance', () => {
     ]);
   });
 
+  // Atoms were read from the command of `Bash` only, so a package copied from a page into a
+  // command run by Claude Code's other two shell tools was never compared with what was read.
+  it.each(['PowerShell', 'Monitor'])(
+    'asks when a %s command copies an unknown package from unflagged tool output',
+    async (tool) => {
+      const { engine: e } = engine();
+      await e.post(post('mcp__sentry__get_issue', { issue_id: 'PROJ-4521' }, SENTRY));
+      const r = await e.pre(pre(tool, { command: 'npx @sentry-tooling/report-fix --apply' }));
+      expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+      expect(r.classes).toEqual(['origin.untrusted']);
+      expect(r.provenance[0]?.atom).toEqual({ kind: 'pkg', value: '@sentry-tooling/report-fix' });
+    },
+  );
+
   it('matches a package named at the end of a sentence', async () => {
     const { engine: e } = engine();
     await e.post(

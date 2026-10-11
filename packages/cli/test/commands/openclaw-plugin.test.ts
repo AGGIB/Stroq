@@ -18,6 +18,7 @@ import {
   runOpenClawInstall,
   type RunCommand,
 } from '../../src/commands/openclaw-plugin.js';
+import { openclawPluginDirIn } from '../../src/paths.js';
 
 const cliDir = join(import.meta.dirname, '../..');
 const command = ['/usr/bin/node', '/opt/stroq/dist/index.js'];
@@ -104,6 +105,14 @@ describe('openclawPluginDir', () => {
     expect(openclawPluginDir({})).toMatch(/\.stroq[\\/]openclaw-plugin$/);
     // An empty variable is not a home directory.
     expect(openclawPluginDir({ STROQ_HOME: '' })).toMatch(/\.stroq[\\/]openclaw-plugin$/);
+  });
+
+  // `run/sandbox.ts` denies the agent writes to this directory by the name `paths.ts` gives it,
+  // because the Gateway loads its code. It is the same directory only if it is the same name.
+  it('is the directory paths.ts protects', () => {
+    expect(openclawPluginDir({ STROQ_HOME: '/opt/stroq-home' })).toBe(
+      openclawPluginDirIn('/opt/stroq-home'),
+    );
   });
 });
 

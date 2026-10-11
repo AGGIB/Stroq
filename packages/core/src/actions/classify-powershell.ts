@@ -47,13 +47,24 @@ import { anyOf, followedBy } from './followed-by.js';
  */
 
 /**
- * PowerShell's HTTP surface, and the two Windows LOLBins that exist to fetch files.
- * `curl` and `wget` are absent on purpose: they are PowerShell aliases for
- * `Invoke-WebRequest`, and `classify-bash.ts` already treats both as network
- * commands under either spelling.
+ * PowerShell's HTTP surface, with its aliases (`iwr`, `irm`), and the two Windows LOLBins
+ * that exist to fetch files. The bare words `curl` and `wget` are absent on purpose: they
+ * are PowerShell aliases for `Invoke-WebRequest`, and `classify-bash.ts` already treats
+ * both as network commands. Their `.exe` spellings are not the same word to it, which is
+ * what `PS_FETCH_EXE` is for.
  */
 const PS_NETWORK =
   /\b(?:Invoke-WebRequest|Invoke-RestMethod|iwr|irm|Start-BitsTransfer|Net\.WebClient|DownloadString|DownloadFile|DownloadData)\b/i;
+/**
+ * `curl.exe` and `wget.exe`: the programs themselves, which is how PowerShell reaches them
+ * without the alias (Windows ships `curl.exe`, and `wget.exe` is what people install). The
+ * classifier reads a command word as it is written, so `curl.exe` was not `curl` to it and
+ * `curl.exe https://… | iex` was a pipe from a command it did not know. The name has to
+ * stand as a word of its own, so a lookbehind and a lookahead rather than `\b`, which
+ * stands between `-` or `.` and a letter and would read `notes-curl.exe` and `curl.exe.bak`
+ * as the tool. No quantifier, so it runs in linear time over whatever a command holds.
+ */
+const PS_FETCH_EXE = /(?<![\w.-])(?:curl|wget)\.exe(?![\w.-])/i;
 /** `certutil` and `bitsadmin` are ordinary admin tools until they are given a transfer to do. */
 export const PS_LOLBIN_FETCH = anyOf(
   followedBy(/\bcertutil\b/i, /-urlcache\b/i),
@@ -61,7 +72,7 @@ export const PS_LOLBIN_FETCH = anyOf(
 );
 
 const isPsNetwork = (segment: string): boolean =>
-  PS_NETWORK.test(segment) || PS_LOLBIN_FETCH.test(segment);
+  PS_NETWORK.test(segment) || PS_FETCH_EXE.test(segment) || PS_LOLBIN_FETCH.test(segment);
 
 /**
  * `Invoke-Expression` and its alias, as a whole word.

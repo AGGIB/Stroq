@@ -1,3 +1,5 @@
+import { monitorSocketText } from '../actions/monitor-socket.js';
+import { isShellTool } from '../actions/shell-tools.js';
 import { MIN_SECRET_LENGTH } from './extract.js';
 
 /** One substring of a tool input that might be the value of a known secret. */
@@ -64,7 +66,12 @@ const QUOTED = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-  if (toolName === 'Bash') return str(toolInput['command']);
+  // Monitor takes a command or, instead of it, a WebSocket to open (see `monitor-socket.ts`).
+  if (toolName === 'Monitor')
+    return [str(toolInput['command']), monitorSocketText(toolInput)]
+      .filter((t) => t !== '')
+      .join(' ');
+  if (isShellTool(toolName)) return str(toolInput['command']);
   if (toolName === 'WebFetch') return `${str(toolInput['url'])} ${str(toolInput['prompt'])}`;
   if (toolName.startsWith('mcp__')) return JSON.stringify(toolInput);
   return '';

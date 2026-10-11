@@ -17,7 +17,7 @@ interface CommandHelp {
   readonly passThrough?: boolean;
 }
 
-const COMMANDS: readonly CommandHelp[] = [
+export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'init',
     synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
@@ -285,6 +285,9 @@ const COMMANDS: readonly CommandHelp[] = [
 ];
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
+
+/** The name of every command, in the order the help lists them. */
+export const commandNames = (): readonly string[] => COMMANDS.map((c) => c.name);
 const INDENT = 37;
 
 const START_INDENT = 22;

@@ -45,6 +45,113 @@ describe('canaryFileTouched', () => {
   it('never fires with no decoys registered', () => {
     expect(canaryFileTouched(new Set(), 'Read', { file_path: decoy }, '/w', home)).toBeNull();
   });
+
+  // Claude Code runs a command through `PowerShell` and `Monitor` as well as `Bash`, and the
+  // check read the command of `Bash` only: the same decoy, named in the same words, was
+  // denied from one tool and opened from the other two.
+  describe.each(['PowerShell', 'Monitor'])('a command run by %s', (tool) => {
+    it.each([
+      'cat ~/.aws/credentials.bak',
+      'Get-Content ~/.aws/credentials.bak',
+      'Get-Content "$HOME/.aws/credentials.bak" | Select-Object -First 3',
+      'type /home/u/.aws/credentials.bak',
+      'tail -f ${HOME}/.aws/credentials.bak',
+    ])('sees the decoy named in it: %s', (command) => {
+      const hit = touched(tool, { command });
+      expect(hit === null ? null : canaryKey(hit, '/', home)).toBe(canaryKey(decoy, '/', home));
+    });
+
+    it('resolves a relative name against the directory it runs in', () => {
+      const hit = touched(tool, { command: 'Get-Content credentials.bak' }, '/home/u/.aws');
+      expect(hit === null ? null : canaryKey(hit, '/', home)).toBe(canaryKey(decoy, '/', home));
+    });
+
+    it.each([
+      'Get-ChildItem ~/.aws',
+      'Get-Content ~/.aws/credentials',
+      'Get-Content ~/.aws/credentials.bak.old',
+      'Write-Output "nothing to see"',
+    ])('leaves a command that does not name the decoy alone: %s', (command) => {
+      expect(touched(tool, { command })).toBeNull();
+    });
+
+    it('reads nothing from a call without a command string', () => {
+      for (const input of [{}, { command: 7 }, { command: [decoy] }, { script: decoy }])
+        expect(touched(tool, input), JSON.stringify(input)).toBeNull();
+    });
+  });
+});
+
+// A decoy is named in the words of the shell that is asked to open it, and for `PowerShell` and `cmd` the home is
+// not `~` or `$HOME`: it is `$env:USERPROFILE`, `$env:HOME`, `${env:HOME}` or `%USERPROFILE%`, written with either
+// separator and in any case, and a parameter can carry its value after a colon (`-Path:~/x`), which is one word.
+describe('the decoy named the way a Windows shell names it', () => {
+  const key = canaryKey(decoy, '/', home);
+  const keyOf = (path: string, cwd = '/work') => canaryKey(path, cwd, home);
+
+  it.each([
+    '$env:USERPROFILE\\.aws\\credentials.bak',
+    '$env:USERPROFILE/.aws/credentials.bak',
+    '$ENV:userprofile\\.aws\\credentials.bak',
+    '$env:HOME/.aws/credentials.bak',
+    '${env:HOME}/.aws/credentials.bak',
+    '${env:USERPROFILE}\\.aws\\credentials.bak',
+    '%USERPROFILE%\\.aws\\credentials.bak',
+    '%userprofile%/.aws/credentials.bak',
+    '$HOME\\.aws\\credentials.bak',
+    '$home/.aws/credentials.bak',
+  ])('has the key of the decoy: %s', (spelling) => {
+    expect(keyOf(spelling)).toBe(key);
+  });
+
+  it.each([
+    '$env:USERPROFILEX/.aws/credentials.bak',
+    '$env:OTHER/.aws/credentials.bak',
+    '%USERPROFILE%x/.aws/credentials.bak',
+    '%USERPROFILE/.aws/credentials.bak',
+    'x$env:USERPROFILE/.aws/credentials.bak',
+    '$env:USERPROFILE/.aws/credentials',
+  ])('is not the decoy: %s', (spelling) => {
+    expect(keyOf(spelling)).not.toBe(key);
+  });
+
+  describe.each(['PowerShell', 'Monitor', 'Bash'])('a command run by %s', (tool) => {
+    it.each([
+      'Get-Content $env:USERPROFILE\\.aws\\credentials.bak',
+      'Get-Content "$env:USERPROFILE\\.aws\\credentials.bak"',
+      'Get-Content ${env:HOME}/.aws/credentials.bak',
+      'Get-Content $env:HOME\\.aws\\credentials.bak | Select-Object -First 3',
+      'type %USERPROFILE%\\.aws\\credentials.bak',
+      'Get-Content -Path:~/.aws/credentials.bak',
+      'Get-Content -Path:"$env:USERPROFILE\\.aws\\credentials.bak"',
+      'Get-Content -LiteralPath:$env:USERPROFILE/.aws/credentials.bak -Raw',
+      "Get-Content -Path:'~/.aws/credentials.bak'",
+    ])('sees the decoy named in it: %s', (command) => {
+      const hit = touched(tool, { command });
+      expect(hit === null ? null : canaryKey(hit, '/', home)).toBe(key);
+    });
+
+    it.each([
+      'Get-Content -Path:',
+      'Get-Content -Path:~/.aws/credentials',
+      'Get-ChildItem -Path:$env:USERPROFILE/.aws',
+      'Get-Content -Force -Raw ~/.aws/credentials',
+      'Write-Output -InputObject:nothing',
+      'Get-Content $env:USERPROFILEX/.aws/credentials.bak',
+    ])('leaves a command that does not name the decoy alone: %s', (command) => {
+      expect(touched(tool, { command })).toBeNull();
+    });
+  });
+
+  it.each(['Read', 'Grep'])('sees the decoy in the path a call of %s names', (tool) => {
+    for (const path of [
+      '$env:USERPROFILE\\.aws\\credentials.bak',
+      '%USERPROFILE%/.aws/credentials.bak',
+    ]) {
+      const hit = touched(tool, { file_path: path, path });
+      expect(hit === null ? null : canaryKey(hit, '/', home), path).toBe(key);
+    }
+  });
 });
 
 describe('the registry of decoy files', () => {

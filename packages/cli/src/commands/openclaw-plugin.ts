@@ -11,6 +11,7 @@ import {
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openclawPluginDirIn } from '../paths.js';
 import { onInterrupt } from '../ui/cleanup.js';
 import { killTree } from './process-tree.js';
 import { isPlainObject, writeJsonObject } from './config-file.js';
@@ -78,7 +79,7 @@ export function openclawPluginDir(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
   const home = env['STROQ_HOME'];
-  return join(home !== undefined && home !== '' ? home : join(homedir(), '.stroq'), PLUGIN_DIRNAME);
+  return openclawPluginDirIn(home !== undefined && home !== '' ? home : join(homedir(), '.stroq'));
 }
 
 /** Copies the five shipped files into `dir` and records `command` beside them. */
