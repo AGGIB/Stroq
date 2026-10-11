@@ -25,7 +25,8 @@ export async function runBenchCommand(args: readonly string[]): Promise<number> 
     process.stdout.write(
       values.json ? `${JSON.stringify(report, null, 2)}\n` : formatActionsBench(report),
     );
-    return 0;
+    // A rate that could not be measured (a timeout, an error) is not a rate that passed.
+    return report.ok ? 0 : 1;
   }
   const dir = values.corpus ?? defaultCorpusDir();
   if (dir === null) {

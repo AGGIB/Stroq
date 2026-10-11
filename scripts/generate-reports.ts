@@ -211,6 +211,18 @@ async function deriveBench(): Promise<string> {
       'been read (the taint rules) do not appear here; a rule that does is firing on the work ' +
       'itself.',
     '',
+    'What is not a verdict is not counted as one. A scan that runs out of its time budget, a ' +
+      'command whose reading runs past its deadline or a step that throws makes its whole ' +
+      'scenario inconclusive. All its steps are excluded from the interruption counts, including ' +
+      'a denial caused by an earlier timed-out scan. The total still includes every scenario; ' +
+      '`judged` counts only conclusive scenarios, and the rate is `interrupted / judged`. ' +
+      'With no judged scenarios the JSON rate is `null` and the text says "rate unavailable". ' +
+      'Any inconclusive scenario makes `stroq bench --actions` exit 1: a rate for the judged ' +
+      'subset does not stand for the full corpus. A command too large to read is asked about, which ' +
+      'is a result the same on every machine; it is counted as asked and as interrupted, and the ' +
+      '`asked` line says how many were asked at a limit rather than by a rule. The set holds ' +
+      'none of either today.',
+    '',
     'The first fifty scenarios were written before they were measured, from the tools and ' +
       'commands an agent uses day to day (the shell first: git, builds and tests, searching ' +
       'and editing files, a little network; then reads, edits, web fetches and MCP calls), ' +

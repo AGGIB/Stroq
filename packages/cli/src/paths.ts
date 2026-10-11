@@ -58,6 +58,21 @@ export const passportsFileIn = (home: string): string => join(home, 'passports.j
 export const tasksDirIn = (home: string): string => join(home, 'tasks');
 export const bindingsFileIn = (home: string): string => join(home, 'bindings.yaml');
 
+/**
+ * What `stroq prove` last found out about each host: one file per agent, `<agent>.json`, in a
+ * directory of its own. The caller checks the agent's name; this only joins.
+ */
+export const liveResultFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.json`);
+/**
+ * What a stand-in for a host answered, kept apart so that it can never be read as the host's result, and
+ * what the last live check said when it could not tell, kept apart so that it cannot replace a result
+ * that could. An agent name has no dot, so no agent is called the name of either file.
+ */
+export const liveStandInFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.stand-in.json`);
+export const liveLastFileIn = (home: string, agent: string): string =>
+  join(liveDirIn(home), `${agent}.last.json`);
 /** The reversible-edit manifest, kept beside its writer lock. */
 export const hardenManifestFileIn = (home: string): string =>
   join(hardenDirIn(home), 'manifest.json');
@@ -73,3 +88,5 @@ export const inventoryFile = (): string => inventoryFileIn(stroqHome());
 export const canaryFilesFile = (): string => canaryFilesFileIn(stroqHome());
 export const cloakDir = (): string => cloakDirIn(stroqHome());
 export const lastHookDir = (): string => lastHookDirIn(stroqHome());
+export const liveDir = (): string => liveDirIn(stroqHome());
+export const liveResultFile = (agent: string): string => liveResultFileIn(stroqHome(), agent);

@@ -79,7 +79,7 @@ This corpus is deliberately disjoint from `rules/fixtures/benign`, a separate, m
 The documentation corpus above measures one thing: how often a rule fires on text an agent reads. It cannot say what Stroq does to the work itself, and rules were fitted to it (the history above), so it flatters. This is the other half: seventy-five scenarios of ordinary agent work, tool calls and what the tools print, replayed against the default policy in a clean session, counting the scenarios Stroq interrupts.
 
 ```text
-stroq bench --actions: 75 scenarios of ordinary agent work, 4 interrupted (5.3%)
+stroq bench --actions: 75 scenarios of ordinary agent work, 75 judged, 4 interrupted (5.3%)
 asked 4 · denied 0 · tool results flagged 0
 
 Interrupted:
@@ -92,6 +92,8 @@ policy: default
 ```
 
 An interruption is a tool call the policy asks about or denies, or a tool result the scan flags. Every session is clean, so the rules that wait for something hostile to have been read (the taint rules) do not appear here; a rule that does is firing on the work itself.
+
+What is not a verdict is not counted as one. A scan that runs out of its time budget, a command whose reading runs past its deadline or a step that throws makes its whole scenario inconclusive. All its steps are excluded from the interruption counts, including a denial caused by an earlier timed-out scan. The total still includes every scenario; `judged` counts only conclusive scenarios, and the rate is `interrupted / judged`. With no judged scenarios the JSON rate is `null` and the text says "rate unavailable". Any inconclusive scenario makes `stroq bench --actions` exit 1: a rate for the judged subset does not stand for the full corpus. A command too large to read is asked about, which is a result the same on every machine; it is counted as asked and as interrupted, and the `asked` line says how many were asked at a limit rather than by a rule. The set holds none of either today.
 
 The first fifty scenarios were written before they were measured, from the tools and commands an agent uses day to day (the shell first: git, builds and tests, searching and editing files, a little network; then reads, edits, web fetches and MCP calls), and not from the rules. They included, on purpose, shapes known to be hard, and five of them were interrupted: a JSON response piped to `python3 -m json.tool` (twice), `eval "$(ssh-agent -s)"`, a commit message that talks about `curl | sh`, and a git log whose messages say "do not skip the previous step". Those five are why the release that adds this report also changed how pipes into an interpreter, here-documents that are text, `eval` of a tool that prints its own setup, and one pattern of `ATR-2026-00032` are read; they stay in the set, now allowed. The last twenty-five were written after that, from the shapes real agent work took in a Claude Code and Codex history, and are not fitted to a rule either. They keep four that Stroq still asks about on purpose: an inline Python program that reads the environment or writes a file, and an inline Node program, each reading what `curl` printed, which Stroq cannot tell from one that runs it. Read the rate as which scenarios Stroq interrupts and why, not as a share of commands: the set holds more hard shapes than ordinary work does. A scenario that is interrupted stays in the set: removing it would be fitting the set to the rules.
 
