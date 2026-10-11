@@ -109,21 +109,28 @@ function afterFirst(span: string, sep: string): string[] {
  * after each one's first `=` or `:`.
  */
 function valueSpans(text: string): string[] {
-  const level1 = [...quotedContents(text), ...text.split(WORD_BOUNDARY).filter((w) => w !== '')];
+  // A suffix cannot be longer than its whole span; skip short spans before allocating tails.
+  const level1 = [...quotedContents(text), ...text.split(WORD_BOUNDARY)].filter(
+    (span) => span.length >= MIN_SECRET_LENGTH,
+  );
   return [...level1, ...level1.flatMap((s) => [...afterFirst(s, '='), ...afterFirst(s, ':')])];
 }
 
-/** Each span as a candidate, plus its URL-decoded form when decoding changes it. */
+/** Each sufficiently long span as a candidate, plus its URL-decoded form when it changes. */
 function withDecoded(spans: readonly string[]): SecretCandidate[] {
-  return spans.flatMap((raw) => {
-    const decoded = decodedVariant(raw);
-    return decoded
-      ? [
-          { token: raw, raw },
-          { token: decoded, raw },
-        ]
-      : [{ token: raw, raw }];
-  });
+  // Percent decoding cannot increase UTF-16 length: a shorter raw span cannot produce a kept
+  // candidate. Discard it before allocating candidate objects and decoded variants.
+  return spans
+    .filter((raw) => raw.length >= MIN_SECRET_LENGTH)
+    .flatMap((raw) => {
+      const decoded = decodedVariant(raw);
+      return decoded
+        ? [
+            { token: raw, raw },
+            { token: decoded, raw },
+          ]
+        : [{ token: raw, raw }];
+    });
 }
 
 /**
