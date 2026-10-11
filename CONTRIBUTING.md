@@ -77,18 +77,26 @@ See `.github/PULL_REQUEST_TEMPLATE.md` for the checklist used on the pull reques
 
 ## Release Process
 
-Releases are cut from `main` once CI is green:
+Releases are cut from `main` once CI is green. Merging a pull request does not bump the version or publish to npm.
 
-1. Update `CHANGELOG.md` with the new version's changes (Keep a Changelog format).
-2. Bump `version` in `packages/cli/package.json` (and `packages/core/package.json`, which stays private).
-3. Commit, then tag and push the tag:
+1. Update `CHANGELOG.md` with a non-empty `## [x.y.z]` section for the new version (Keep a Changelog format).
+2. Keep the release version synchronized in all eight files:
+   - `package.json` (private workspace root)
+   - `packages/cli/package.json` (the published package)
+   - `packages/core/package.json` (private)
+   - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+   - `plugins/stroq/.claude-plugin/plugin.json`
+   - `plugins/stroq/hooks/stroq-hook.sh` (`STROQ_PIN`)
+   - `packages/cli/openclaw-plugin/package.json`
+   - `packages/cli/openclaw-plugin/openclaw.plugin.json`
+3. Commit the release changes, merge them into `main`, and wait for green CI before tagging that commit. Push only the intended tag, for example:
 
    ```bash
-   git tag v0.1.0
-   git push --tags
+   git tag v0.24.0
+   git push origin v0.24.0
    ```
 
-4. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and runs `npm publish --provenance --access public` for the `packages/cli` package. To publish manually instead, run `cd packages/cli && npm publish --access public` (the `--access public` flag is required the first time a scoped package is published, since scoped packages default to private).
-5. This requires an `NPM_TOKEN` repository secret with publish rights for the `@stroq/cli` package (or npm trusted publishing configured for this repository as an alternative to a long-lived token).
-6. The workflow only stages the version on npm: a maintainer approves it with 2FA on npmjs.com (Staged Packages), or with `npm stage list` and `npm stage approve <id>`. Do that at once: the plugin in the repository already names the new version.
-7. The release page on GitHub is made by the workflow, with nobody to remind. Its second job waits for npm to show the version (up to 90 minutes), then makes the page from the `CHANGELOG.md` section of that version (`scripts/release-notes.ts`: the section as it is where it is short, one line to a change where it is long, with a link to the whole). If npm does not show the version in time the page is made as a draft, to be published by hand once the version is out; a page that exists already is left alone. So `CHANGELOG.md` needs a `## [x.y.z]` section for the version, which a test checks.
+4. Pushing a `v*` tag triggers `.github/workflows/release.yml`. It verifies that the tag matches `packages/cli/package.json`, runs the release checks, builds the package, and stages it with `npm stage publish --access public` (with `--provenance` for token publishing). It does not make the staged version publicly installable. A manual workflow run is accepted only on `main`, for example to retry after configuring npm publishing; it does not create a GitHub release page.
+5. Staging requires either an `NPM_TOKEN` repository secret with publish rights for `@stroq/cli`, or npm trusted publishing configured for this repository/workflow with stage-publish allowed and the repository variable `NPM_TRUSTED_PUBLISHING=true`. If neither is configured, the workflow warns that nothing was published.
+6. A maintainer approves the staged version with 2FA on npmjs.com (Staged Packages), or with `npm stage list` and `npm stage approve <id>` using npm 11.15.0 or later. Approval makes the version publicly installable. Approve promptly: the plugin in the repository already names the new version.
+7. On a tag push, the workflow's second job waits up to 90 minutes for npm to show the version, then creates the GitHub release page from its `CHANGELOG.md` section using `scripts/release-notes.ts`. If npm does not show the version in time, the page is created as a draft; publish that draft after approving the staged version. An existing release page is left unchanged. The release-notes tests require a non-empty changelog section for the CLI version.

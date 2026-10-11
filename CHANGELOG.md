@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-11
+
+### Changed
+
+- **Attack and action-benchmark JSON reports are version 2.** `stroq attack`, its fuzz mode, and `stroq bench --actions` report policy, corpus and execution context. Timeouts and errors are explicit inconclusive outcomes; benchmarks exclude them from judged measurements. Consumers of JSON reports must handle the new version and fields. These are in-process measurements, not evidence of live-host enforcement.
+
+### Fixed
+
+- **An interrupted scan can no longer count as protection.** Attack and fuzz runs fail on inconclusive scenarios, and both CI and release gates reject inconclusive fuzz variants as well as escapes.
+
+### Added
+
+- **Internal host-verification library.** Correlates issued commands, hook audit and temporary sentinels with a matching no-op control; missing evidence, limits and billing uncertainty stay inconclusive or not attempted.
+- **Internal reversible configuration-edit library.** Adds bounded previews, JSON and marked-block edits, atomic writes, private backups and undo that preserves later owner edits. Files containing credential-shaped text are not copied into backups; replaced JSON credentials are masked in undo records, and credential-bearing text blocks are not replaced. Linked-target previews require acknowledgement.
+- **Artifact contracts.** Strict source/passport schemas, bounded trees and the versioned `stroq-tree/1` digest reject unsafe paths, aliases and inconsistent metadata before acceptance.
+- **Task-scope foundations.** The classifier exposes bounded file/network resources; core scope evaluation validates signed Ed25519 permits and exact-call extensions while retaining hard denies and rejecting incomplete resources.
+
+These foundations do not yet provide `prove`, `harden`, `vet`, `add`, `remove`, `task` or `permit` commands, live-host drivers, adapter-wide task enforcement or filesystem isolation.
+
 ## [0.23.0] - 2026-10-08
 
 ### Added
