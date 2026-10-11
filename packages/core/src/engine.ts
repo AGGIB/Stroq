@@ -72,8 +72,9 @@ export interface PreResult {
    * The classification signals behind `classes`, such as `reading-took-too-long`: how the
    * call was read, which a class alone does not say (a command asked about because the
    * reading ran past its clock and one asked about because it is dangerous can carry the
-   * same class). Not set yet. It will be filled when `stroq attack` and `stroq bench` report
-   * a run Stroq could not judge as inconclusive rather than as a pass or a miss.
+   * same class). Always set by `pre`, empty when the call raised none. `stroq attack` and
+   * `stroq bench` read it to report a run Stroq could not judge (the clock, a limit) as
+   * such, rather than as a pass or a miss (see `limit-signals.ts` for which signals).
    */
   readonly signals?: readonly string[];
 }
@@ -548,6 +549,7 @@ export class StroqEngine {
       taint,
       provenance: origin.counted,
       secrets,
+      signals: classification.signals,
     };
   }
 

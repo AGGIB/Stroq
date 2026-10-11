@@ -3,10 +3,18 @@ import type { AttackReport } from '../../src/attack/run.js';
 import { reachFindings, reachFrom } from '../../src/exposure/reach.js';
 
 const report = (blocked: number, asked: number, passed: number): AttackReport => ({
-  version: 1,
+  version: 2,
+  meta: {
+    stroq: '0.0.0-test',
+    policy: { source: 'default', sha256: '0'.repeat(64) },
+    host: { id: 'claude-code', version: null, mode: 'in-process' },
+    tools: [],
+    sandbox: null,
+    corpus: { id: 'attack-scenarios', sha256: '0'.repeat(64), count: blocked + asked + passed },
+  },
   policy: 'default',
   scenarios: [],
-  totals: { blocked, asked, passed },
+  totals: { blocked, asked, askedByLimit: 0, passed, timeout: 0, error: 0, inconclusive: 0 },
   ok: passed === 0,
 });
 
