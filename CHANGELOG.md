@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Attack and action-benchmark JSON reports are version 2.** `stroq attack`, its fuzz mode, and `stroq bench --actions` report policy, corpus and execution context. Timeouts and errors are explicit inconclusive outcomes; benchmarks exclude them from judged measurements. Consumers of JSON reports must handle the new version and fields. These are in-process measurements, not evidence of live-host enforcement.
+- **Attack and action-benchmark JSON reports are version 2.** `stroq attack`, its fuzz mode, and `stroq bench --actions` report policy, corpus and execution context. Timeouts and errors are explicit inconclusive outcomes; benchmarks exclude them from judged measurements. Consumers of JSON reports must handle the new version and fields: in `attack --json` the `ruleId` of a post step now names the first rule that matched (it was always `null`). `stroq attack`, `attack --fuzz` and `stroq bench --actions` exit 1 when anything is inconclusive, and the bench `rate` is `null` then. These are in-process measurements, not evidence of live-host enforcement.
 
 ### Fixed
 
-- **An interrupted scan can no longer count as protection.** Attack and fuzz runs fail on inconclusive scenarios, and both CI and release gates reject inconclusive fuzz variants as well as escapes.
+- **An interrupted scan can no longer count as protection.** Attack and fuzz runs fail on inconclusive scenarios, and both CI and release gates reject inconclusive fuzz variants as well as escapes. This includes the scan of the text a write puts into an instruction file (`CLAUDE.md`, `AGENTS.md`): when it runs out of its time budget the call is still asked about, as before, but `PreResult.signals` now says `instruction-scan-took-too-long` and a report counts it as inconclusive, not as a rule that held.
+- **`stroq exposure` counts every incident.** Incidents that timed out or failed were left out of its total, so a machine that could not judge 20 of 36 showed a shorter, cleaner count; it now reports them as `incident-unjudged`.
+- **Secret scanning skips spans too short to be a secret** before it builds candidates for them, which cuts the time spent on settings files with many short strings by about a third. The candidates it produces are the same.
 
 ### Added
 

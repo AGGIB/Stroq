@@ -218,7 +218,9 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'attack',
     synopsis: 'attack [--json] [--only <id>] [--fuzz]',
-    about: ['replay recorded attacks against your policy; exit 1 if any gets through'],
+    about: [
+      'replay recorded attacks against your policy; exit 1 if any gets through or could not be judged',
+    ],
     flags: [
       ['--json', 'machine-readable output'],
       ['--only <id>', 'one scenario, e.g. 05'],

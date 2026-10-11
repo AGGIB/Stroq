@@ -1,5 +1,6 @@
 import { writtenText } from './actions/written-text.js';
 import { classifyTool, type ToolClassification } from './actions/classify-tool.js';
+import { INSTRUCTION_SCAN_CLOCK_SIGNAL } from './actions/limit-signals.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
@@ -469,17 +470,21 @@ export class StroqEngine {
    * an Edit's `old_string` is what is being removed, and removing an injection is the
    * opposite of saving one. Patches reach the engine as paths only, so for them the
    * taint alone decides.
+   *
+   * A scan that ran out of its budget answers `suspect` (it fails closed), which is the same answer
+   * as a rule that matched. `timedOut` tells the two apart, so the caller can say that the clock
+   * made the ask and a report does not count it as a defence that held.
    */
-  private writesInjection(event: PreToolEvent): boolean {
+  private writesInjection(event: PreToolEvent): { suspect: boolean; timedOut: boolean } {
     const text = writtenText(event.toolInput);
-    if (text === '') return false;
+    if (text === '') return { suspect: false, timedOut: false };
     const scan = scanContent(
       this.opts.rules,
       text,
       { threshold: Math.min(this.opts.policy.threshold, INSTRUCTION_WRITE_THRESHOLD) },
       { target: 'instruction_file' },
     );
-    return scan.verdict === 'suspect';
+    return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {
@@ -488,8 +493,10 @@ export class StroqEngine {
     const origin = originClasses(await this.findProvenance(event), classification.classes);
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
-    const savesInjection =
-      classification.classes.includes('config.instructions') && this.writesInjection(event);
+    const injection = classification.classes.includes('config.instructions')
+      ? this.writesInjection(event)
+      : { suspect: false, timedOut: false };
+    const savesInjection = injection.suspect;
     const decoy = this.opts.canaryFiles
       ? canaryFileTouched(
           this.opts.canaryFiles.paths(),
@@ -562,7 +569,9 @@ export class StroqEngine {
       taint,
       provenance: origin.counted,
       secrets,
-      signals: classification.signals,
+      signals: injection.timedOut
+        ? [...classification.signals, INSTRUCTION_SCAN_CLOCK_SIGNAL]
+        : classification.signals,
     };
   }
 

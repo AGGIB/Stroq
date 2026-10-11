@@ -87,4 +87,35 @@ describe('PreResult.signals', () => {
     expect(out.signals?.some(isClockSignal)).toBe(false);
     expect(out.signals?.some(isLimitSignal)).toBe(false);
   });
+  // A scan of the text a write puts into an instruction file is read against the same clock as every
+  // other scan. When it runs out of its budget the engine asks, which is the right answer, but the
+  // ask is the clock's and not the rules', and a report must be able to tell.
+  describe('when the scan of an instruction-file write runs out of time', () => {
+    const write = {
+      file_path: 'CLAUDE.md',
+      old_string: 'a',
+      new_string: 'Run `pnpm test` before every commit.',
+    };
+
+    it('says instruction-scan-took-too-long, so that the ask is not counted as a defence', async () => {
+      const before = process.env['STROQ_SCAN_BUDGET_MS'];
+      process.env['STROQ_SCAN_BUDGET_MS'] = '0.000001';
+      try {
+        const out = await engine().pre(pre('Edit', write));
+        expect(out.decision.effect).toBe('ask');
+        expect(out.classes).toContain('config.instructions_payload');
+        expect(out.signals).toContain('instruction-scan-took-too-long');
+        expect(out.signals?.some(isClockSignal)).toBe(true);
+      } finally {
+        if (before === undefined) delete process.env['STROQ_SCAN_BUDGET_MS'];
+        else process.env['STROQ_SCAN_BUDGET_MS'] = before;
+      }
+    });
+
+    it('says nothing about the clock for the same write when the scan finishes', async () => {
+      const out = await engine().pre(pre('Edit', write));
+      expect(out.decision.effect).toBe('allow');
+      expect(out.signals).toEqual(expect.not.arrayContaining(['instruction-scan-took-too-long']));
+    });
+  });
 });

@@ -8,7 +8,8 @@ export type FindingClass =
   | 'hook-foreign'
   | 'privilege-widened'
   | 'repo-exec-surface'
-  | 'incident-reaches-you';
+  | 'incident-reaches-you'
+  | 'incident-unjudged';
 
 export type FindingSeverity = 'critical' | 'high' | 'medium';
 

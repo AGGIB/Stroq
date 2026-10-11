@@ -37,7 +37,7 @@ const base: ExposureReport = {
     onOpen: [{ kind: 'husky-hook', file: '.husky/pre-commit', what: 'pre-commit' }],
     capped: false,
   },
-  reach: { total: 13, passedPolicy: 0, anyAgentProtected: true },
+  reach: { total: 13, unjudged: 0, passedPolicy: 0, anyAgentProtected: true },
   findings: [
     {
       class: 'privilege-widened',
