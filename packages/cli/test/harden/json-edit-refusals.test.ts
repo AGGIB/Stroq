@@ -1,6 +1,7 @@
 import {
   closeSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -223,17 +224,12 @@ describe('planJsonEdits: it only reads', () => {
 
       planJsonEdits(file, [addDeny('x')], { read: (path) => readFileSync(path, 'utf8') });
 
-      const afterFd = openSync(file, 'r');
-      try {
-        expect(readFileSync(afterFd, 'utf8')).toBe('{"a": 1}\n');
-        expect(fstatSync(afterFd)).toMatchObject({
-          dev: before.dev,
-          ino: before.ino,
-          mtimeMs: before.mtimeMs,
-        });
-      } finally {
-        closeSync(afterFd);
-      }
+      expect(readFileSync(beforeFd, 'utf8')).toBe('{"a": 1}\n');
+      expect(lstatSync(file)).toMatchObject({
+        dev: before.dev,
+        ino: before.ino,
+        mtimeMs: before.mtimeMs,
+      });
     } finally {
       closeSync(beforeFd);
     }
