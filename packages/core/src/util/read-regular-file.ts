@@ -14,6 +14,18 @@ export type RegularFileRead =
  */
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 
+/** What `readRegularFile` can be asked for beyond the path and the bound. */
+export interface ReadRegularFileOptions {
+  /**
+   * Fail the open itself when the last component of the path is a symlink (`ELOOP`), instead
+   * of reading what it points at. For files that must be what they say they are, such as a
+   * permit: a link planted where it goes is refused on the same call that would have read it,
+   * with no gap between a check on the path and the read. Windows defines no `O_NOFOLLOW`, so
+   * there the option changes nothing and a caller that needs the guarantee checks with `lstat`.
+   */
+  readonly noFollow?: boolean;
+}
+
 /**
  * A file someone else chose, read only if it is a regular file of at most `maxBytes`,
  * and checked on the same handle that is then read.
@@ -30,8 +42,15 @@ const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
  * A path that cannot be opened (missing, unreadable, a broken symlink) throws, as the
  * `fs` calls this replaces did; callers decide what that means.
  */
-export function readRegularFile(path: string, maxBytes: number): RegularFileRead {
-  const fd = openSync(path, OPEN_FLAGS);
+export function readRegularFile(
+  path: string,
+  maxBytes: number,
+  options: ReadRegularFileOptions = {},
+): RegularFileRead {
+  const fd = openSync(
+    path,
+    options.noFollow === true ? OPEN_FLAGS | (constants.O_NOFOLLOW ?? 0) : OPEN_FLAGS,
+  );
   try {
     const stats = fstatSync(fd);
     if (!stats.isFile()) return { kind: 'not-regular' };

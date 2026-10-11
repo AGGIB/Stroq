@@ -1,0 +1,249 @@
+import { parseMcpToolName } from '../actions/classify-tool.js';
+import { isShellTool } from '../actions/shell-tools.js';
+import type { ActionClass, ToolResources } from '../types.js';
+import { neutralizeControls } from '../util/controls.js';
+import { fileTarget, fingerprintOf, genericTarget, mcpTarget, shellTarget } from './fingerprint.js';
+import { type PathOptions, evaluatePath } from './paths.js';
+import type { ScopeGateInput, TaskScope } from './types.js';
+
+/**
+ * What a task's scope refuses (step 3 of the gate), and the name of each operation refused,
+ * for `stroq permit extend` to take. Pure: no files, no clock, no keys.
+ */
+
+/** One refusal, with the fingerprints an escalation would have to name to lift it. */
+export interface Refusal {
+  readonly ruleId: string;
+  readonly reason: string;
+  readonly fingerprints: readonly string[];
+}
+
+/** The tools that name files, and so that the scope's path rules are held against. */
+const FILE_TOOLS: ReadonlySet<string> = new Set([
+  'Read',
+  'Grep',
+  'Glob',
+  'LS',
+  'Edit',
+  'MultiEdit',
+  'Write',
+  'NotebookEdit',
+]);
+
+// The classifier reports a search root, not an inventory of every descendant the tool
+// may open. Until the launcher supplies that stronger contract, these calls need an
+// exact-call extension, including pattern/options, even when their root resolved.
+const RECURSIVE_TOOLS: ReadonlySet<string> = new Set(['Grep', 'Glob', 'LS']);
+
+const fileFingerprints = (tool: string): boolean =>
+  FILE_TOOLS.has(tool) && !RECURSIVE_TOOLS.has(tool);
+
+const NETWORK_CLASSES: readonly ActionClass[] = [
+  'shell.network',
+  'network.fetch',
+  'git.push_external',
+];
+
+const MAX_SHOWN_CHARS = 160;
+const MAX_HOST_CHARS = 253;
+
+/** Text from the agent, on one line and without anything a terminal would obey. */
+const show = (text: string): string =>
+  neutralizeControls(text)
+    .replace(/[\n\t]/g, ' ')
+    .slice(0, MAX_SHOWN_CHARS);
+
+type PathEntry = ToolResources['paths'][number];
+
+const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
+
+function mcpOf(input: ScopeGateInput): { server: string; tool: string } | null {
+  return input.classification.mcp ?? parseMcpToolName(input.event.toolName);
+}
+
+const pathFingerprint = (tool: string, entry: PathEntry): string =>
+  fingerprintOf(tool, `file:${entry.op}`, fileTarget(entry.path, entry.real));
+
+/** Bind exact-call approval to execution context as well as every argument. */
+export const wholeCallFingerprint = (input: ScopeGateInput): string => {
+  const { toolName, toolInput } = input.event;
+  const boundTarget = (target: string): string =>
+    genericTarget({
+      target,
+      cwd: input.event.cwd,
+      toolInput,
+      // A changed symlink target is a different operation even when the written path and
+      // cwd are identical. Missing resources remain explicit rather than a wildcard.
+      resources: input.classification.resources ?? null,
+    });
+  if (isShellTool(toolName)) {
+    const command = toolInput['command'];
+    return fingerprintOf(
+      toolName,
+      'shell',
+      boundTarget(typeof command === 'string' ? shellTarget(command) : genericTarget(toolInput)),
+    );
+  }
+  if (toolName.startsWith('mcp__')) {
+    const mcp = mcpOf(input);
+    return fingerprintOf(
+      toolName,
+      'mcp',
+      boundTarget(
+        mcp === null ? genericTarget(toolInput) : mcpTarget(mcp.server, mcp.tool, toolInput),
+      ),
+    );
+  }
+  return fingerprintOf(toolName, 'tool', boundTarget(genericTarget(toolInput)));
+};
+
+/**
+ * The operations a call consists of, as fingerprints: one per file for a file tool that
+ * names files, one for the whole call otherwise. A call is lifted only when every one of
+ * them has an escalation.
+ */
+export function callFingerprints(input: ScopeGateInput): string[] {
+  const entries = input.classification.resources?.paths ?? [];
+  if (fileFingerprints(input.event.toolName) && entries.length > 0) {
+    return unique(entries.map((entry) => pathFingerprint(input.event.toolName, entry)));
+  }
+  return [wholeCallFingerprint(input)];
+}
+
+/** A host as it should be compared: lower case, no port, no trailing dot, plain DNS characters. */
+function hostName(raw: string): string | null {
+  if (raw.length === 0 || raw.length > MAX_HOST_CHARS + 8) return null;
+  const host = raw.toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (host.length === 0 || host.length > MAX_HOST_CHARS || !/^[a-z0-9.-]+$/.test(host)) return null;
+  return host.split('.').every((label) => label.length > 0) ? host : null;
+}
+
+function hostAllowed(host: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) =>
+    pattern.startsWith('*.') ? host.endsWith(pattern.slice(1)) : host === pattern,
+  );
+}
+
+function networkRefusal(scope: TaskScope, input: ScopeGateInput, whole: string): Refusal | null {
+  const classes = input.classes.filter((name) => NETWORK_CLASSES.includes(name));
+  if (classes.length === 0) return null;
+  if (scope.net.mode === 'none') {
+    return {
+      ruleId: 'task-scope-net',
+      reason: `network access (${classes.join(', ')}) is not part of this task`,
+      fingerprints: [whole],
+    };
+  }
+  const seen = [
+    ...(input.classification.resources?.urls.map((u) => u.host) ?? []),
+    ...input.classification.hosts,
+  ];
+  const refused = seen.find((raw) => {
+    const host = hostName(raw);
+    return host === null || !hostAllowed(host, scope.net.mode === 'hosts' ? scope.net.hosts : []);
+  });
+  if (seen.length > 0 && refused === undefined) return null;
+  return {
+    ruleId: 'task-scope-net',
+    reason:
+      refused === undefined
+        ? `network access (${classes.join(', ')}) to a host that could not be read is not part of this task`
+        : `host ${show(refused)} is not in this task's network scope`,
+    fingerprints: [whole],
+  };
+}
+
+function pathRefusal(
+  scope: TaskScope,
+  input: ScopeGateInput,
+  opts: PathOptions,
+  whole: string,
+): Refusal | null {
+  const tool = input.event.toolName;
+  const refused = (input.classification.resources?.paths ?? [])
+    .map((entry) => ({
+      entry,
+      verdict: evaluatePath(entry.op === 'read' ? scope.read : scope.write, entry, opts),
+    }))
+    .filter(({ verdict }) => verdict !== 'allow');
+  const first = refused[0];
+  if (first === undefined) return null;
+  const { entry, verdict } = first;
+  const real =
+    entry.real !== undefined && entry.real !== entry.path ? ` (really ${show(entry.real)})` : '';
+  return {
+    ruleId: 'task-scope-path',
+    reason: `${entry.op} of ${show(entry.path)}${real} is ${verdict === 'deny' ? 'excluded from' : 'outside'} this task's ${entry.op} scope`,
+    fingerprints: fileFingerprints(tool)
+      ? unique(refused.map((r) => pathFingerprint(tool, r.entry)))
+      : [whole],
+  };
+}
+
+/**
+ * Every way this call falls outside the scope, in the order: tool, shell, path, incomplete,
+ * network. Empty when it is inside.
+ *
+ * An allowed shell command is not held to the path rules: the hook sees the text of a
+ * command and not what the programs it starts will open (`python x.py`, `npm test`). File
+ * access by those is enforced by the operating system's sandbox when there is one; the paths
+ * the classifier happens to find in a command are no basis for a promise.
+ */
+export function checkScope(scope: TaskScope, input: ScopeGateInput, opts: PathOptions): Refusal[] {
+  const { toolName } = input.event;
+  const whole = wholeCallFingerprint(input);
+  const refusals: Array<Refusal | null> = [];
+
+  if (toolName.startsWith('mcp__')) {
+    const mcp = mcpOf(input);
+    const listed =
+      mcp !== null &&
+      scope.mcp.some(
+        (grant) =>
+          grant.server === mcp.server && (grant.tools === '*' || grant.tools.includes(mcp.tool)),
+      );
+    refusals.push(
+      listed
+        ? null
+        : {
+            ruleId: 'task-scope-mcp',
+            reason: `MCP tool ${show(toolName)} is not in this task's scope`,
+            fingerprints: [whole],
+          },
+    );
+  } else if (!scope.tools.includes(toolName)) {
+    refusals.push({
+      ruleId: 'task-scope-tool',
+      reason: `tool ${show(toolName)} is not in this task's scope`,
+      fingerprints: [whole],
+    });
+  }
+
+  const shell = isShellTool(toolName);
+  if (shell && scope.shell === 'denied') {
+    refusals.push({
+      ruleId: 'task-scope-shell',
+      reason: "this task's scope does not allow shell commands",
+      fingerprints: [whole],
+    });
+  }
+
+  if (!shell) refusals.push(pathRefusal(scope, input, opts, whole));
+
+  const pathsComplete = input.classification.resources?.pathsComplete;
+  if (
+    !shell &&
+    (pathsComplete === false ||
+      (FILE_TOOLS.has(toolName) && pathsComplete !== true) ||
+      RECURSIVE_TOOLS.has(toolName))
+  ) {
+    refusals.push({
+      ruleId: 'task-scope-incomplete',
+      reason: `the paths ${show(toolName)} will touch could not be read in full, so they cannot be held to this task's scope`,
+      fingerprints: [whole],
+    });
+  }
+
+  refusals.push(networkRefusal(scope, input, whole));
+  return refusals.filter((refusal): refusal is Refusal => refusal !== null);
+}
