@@ -1,6 +1,7 @@
 import {
   closeSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -310,17 +311,12 @@ describe('planTextBlock: the plan', () => {
 
       expect(asked).toEqual([file]);
       expect(result.real).toBe(file);
-      const afterFd = openSync(file, 'r');
-      try {
-        expect(readFileSync(afterFd, 'utf8')).toBe('a\n');
-        expect(fstatSync(afterFd)).toMatchObject({
-          dev: before.dev,
-          ino: before.ino,
-          mtimeMs: before.mtimeMs,
-        });
-      } finally {
-        closeSync(afterFd);
-      }
+      expect(readFileSync(beforeFd, 'utf8')).toBe('a\n');
+      expect(lstatSync(file)).toMatchObject({
+        dev: before.dev,
+        ino: before.ino,
+        mtimeMs: before.mtimeMs,
+      });
     } finally {
       closeSync(beforeFd);
     }
