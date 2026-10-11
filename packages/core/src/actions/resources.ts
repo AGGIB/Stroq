@@ -11,8 +11,8 @@ import { createResourcePathResolver } from './resource-path.js';
  * closed, so every reader below is honest about what it could not determine: `pathsComplete`
  * is false whenever the call may touch something the lists do not name.
  *
- * Pure apart from one question to the filesystem per listed path (are there links on the way,
- * `symlink.ts`). Bounded, because every argument is the agent's: at most `MAX_RESOURCE_PATHS`
+ * Pure apart from a bounded filesystem walk per listed path (`resource-path.ts`). Bounded,
+ * because every argument is the agent's: at most `MAX_RESOURCE_PATHS`
  * paths and `MAX_RESOURCE_URLS` addresses, a path longer than any filesystem opens is not
  * listed, and a reader that fails for any reason answers "I do not know" and never throws.
  *
@@ -155,7 +155,7 @@ const unnamed = (value: unknown): boolean => value === undefined || value === nu
 
 const SEARCH_FIELDS = /^(path|file_path|notebook_path|directory|root|files|paths)$/i;
 
-/** Grep's named targets, including the aliases the classifier accepts; cwd is the default. */
+/** Grep/LS roots, including directory aliases; cwd is the default, not a descendant inventory. */
 function ofSearch(input: Readonly<Record<string, unknown>>, cwd: string): ToolResources {
   const requests: PathRequest[] = [];
   let complete = true;
@@ -232,8 +232,8 @@ function ofGlob(input: Readonly<Record<string, unknown>>, cwd: string): ToolReso
 }
 
 /**
- * The files a file tool reads or writes: Read, Write, Edit, MultiEdit, NotebookEdit, Grep and
- * Glob. A tool this does not know, and an input that is not an object, are not understood.
+ * The files a file tool reads or writes: Read, Write, Edit, MultiEdit, NotebookEdit, Grep,
+ * Glob and LS. A tool this does not know, and an input that is not an object, are not understood.
  */
 export function resourcesOfFileTool(
   toolName: string,
@@ -251,6 +251,7 @@ export function resourcesOfFileTool(
       case 'NotebookEdit':
         return ofNamedFiles(toolInput, 'write', cwd);
       case 'Grep':
+      case 'LS':
         return ofSearch(toolInput, cwd);
       case 'Glob':
         return ofGlob(toolInput, cwd);
