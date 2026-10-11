@@ -73,6 +73,9 @@ export const liveStandInFileIn = (home: string, agent: string): string =>
   join(liveDirIn(home), `${agent}.stand-in.json`);
 export const liveLastFileIn = (home: string, agent: string): string =>
   join(liveDirIn(home), `${agent}.last.json`);
+/** The reversible-edit manifest, kept beside its writer lock. */
+export const hardenManifestFileIn = (home: string): string =>
+  join(hardenDirIn(home), 'manifest.json');
 
 export const sessionsDir = (): string => sessionsDirIn(stroqHome());
 export const auditFile = (): string => auditFileIn(stroqHome());
