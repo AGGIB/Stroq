@@ -96,6 +96,15 @@ jobs:
         # a genuine crash (any exit code other than 0 or 1, or a report that doesn't
         # parse) still must fail the step. Exactly one fuzz run: it takes about a
         # minute.
+        #
+        # A variant whose scan runs out of its time budget, or whose step throws, is
+        # not a block and not an escape: the report lists it in `inconclusive`, the
+        # run exits 1, and this step fails on it too. The scan budget is raised to
+        # 60 s for this step (the default is 4 s) so that a timeout here means a scan
+        # that really is stuck and not a runner that is slow; the gate must not fail
+        # on a busy machine, and must not pass on one either.
+        env:
+          STROQ_SCAN_BUDGET_MS: '60000'
         run: |
           set +e
           node packages/cli/dist/index.js attack --fuzz --json > fuzz-report.json
@@ -116,6 +125,14 @@ jobs:
             console.log(`escaped ${escaped.length} of ${report.variants} variants (baseline ${BASELINE})`);
             if (escaped.length > BASELINE) {
               console.error(`escape count ${escaped.length} exceeds the baseline of ${BASELINE} — a new escape was introduced`);
+              process.exit(1);
+            }
+            const inconclusive = report.inconclusive;
+            if (!Array.isArray(inconclusive)) throw new Error("fuzz-report.json has no inconclusive array");
+            for (const v of inconclusive) console.log(`${v.scenarioId} ${v.mutationId} ${v.outcome}: ${v.error}`);
+            console.log(`inconclusive ${inconclusive.length} of ${report.variants} variants`);
+            if (inconclusive.length > 0) {
+              console.error(`${inconclusive.length} variants timed out or errored and could not be judged — a timeout is not a block`);
               process.exit(1);
             }
           '

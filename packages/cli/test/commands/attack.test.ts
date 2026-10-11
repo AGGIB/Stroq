@@ -1,5 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { displayPath, runAttackCommand } from '../../src/commands/attack.js';
 import type { FuzzReport } from '../../src/attack/fuzz.js';
 
@@ -60,11 +62,86 @@ describe('stroq attack', () => {
       scenarios: unknown[];
       totals: unknown;
     };
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(report.ok).toBe(true);
     expect(report.scenarios).toHaveLength(36);
-    expect(report.totals).toEqual({ blocked: 17, asked: 19, passed: 0 });
+    expect(report.totals).toEqual({
+      blocked: 17,
+      asked: 19,
+      askedByLimit: 0,
+      passed: 0,
+      timeout: 0,
+      error: 0,
+      inconclusive: 0,
+    });
   }, 60_000);
+
+  // The exit code is what CI reads. A run that could not judge a scenario is not a run that
+  // passed, and an attack that got through is not either: both are 1, whatever else came out right.
+  describe('exit code', () => {
+    const saved: Record<string, string | undefined> = {};
+    const setEnv = (key: string, value: string): void => {
+      if (!(key in saved)) saved[key] = process.env[key];
+      process.env[key] = value;
+    };
+    afterEach(() => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+        delete saved[key];
+      }
+    });
+
+    it('is 1 when a scan runs out of its budget, and the report says what could not be judged', async () => {
+      setEnv('STROQ_SCAN_BUDGET_MS', '0.000001');
+      const out = capture();
+      const code = await runAttackCommand(['--json']);
+      out.restore();
+      expect(code).toBe(1);
+      const report = JSON.parse(out.lines.join('')) as {
+        ok: boolean;
+        totals: { passed: number; timeout: number; inconclusive: number };
+      };
+      expect(report.ok).toBe(false);
+      expect(report.totals.passed).toBe(0);
+      expect(report.totals.timeout).toBeGreaterThan(0);
+      expect(report.totals.inconclusive).toBe(report.totals.timeout);
+    }, 60_000);
+
+    it('prints the inconclusive scenarios as such', async () => {
+      setEnv('STROQ_SCAN_BUDGET_MS', '0.000001');
+      const out = capture();
+      const code = await runAttackCommand(['--only', '01']);
+      out.restore();
+      expect(code).toBe(1);
+      const text = out.lines.join('');
+      expect(text).toMatch(/\? 01-readme-pipe-to-shell\s+timeout/);
+      expect(text).toContain('1 scenario could not be judged');
+      expect(text).not.toContain('each was blocked or put to you as a question');
+    });
+
+    it('is 1 when an attack passes through, and 0 for the same scenario under the default policy', async () => {
+      const home = mkdtempSync(join(tmpdir(), 'stroq-attack-open-home-'));
+      try {
+        writeFileSync(join(home, 'policy.yaml'), 'version: 1\nrules: []\n');
+        setEnv('STROQ_HOME', home);
+        let out = capture();
+        const open = await runAttackCommand(['--only', '08', '--json']);
+        out.restore();
+        expect(open).toBe(1);
+        const report = JSON.parse(out.lines.join('')) as { totals: { passed: number } };
+        expect(report.totals.passed).toBe(1);
+
+        rmSync(join(home, 'policy.yaml'));
+        out = capture();
+        const standard = await runAttackCommand(['--only', '08']);
+        out.restore();
+        expect(standard).toBe(0);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  });
 
   it('runs a single scenario with --only, by id or number', async () => {
     let out = capture();
@@ -107,12 +184,22 @@ describe('stroq attack', () => {
   // thing proving the gate can fail at all.
   it('--fuzz exits 1 when the report carries an escape', async () => {
     fuzzState.forcedReport = {
-      version: 1,
+      version: 2,
+      meta: {
+        stroq: '0.0.0-test',
+        policy: { source: 'default', sha256: '0'.repeat(64) },
+        host: { id: 'claude-code', version: null, mode: 'in-process' },
+        tools: [],
+        sandbox: null,
+        corpus: { id: 'attack-scenarios', sha256: '0'.repeat(64), count: 1 },
+        budget: { variants: 1, seed: null },
+      },
       policy: 'default',
       scenarios: 1,
       mutations: 1,
       variants: 1,
       survived: 0,
+      survivedByLimit: 0,
       escaped: [
         {
           scenarioId: 'fixture-scenario',
@@ -125,6 +212,7 @@ describe('stroq attack', () => {
       ],
       recorded: [],
       errored: [],
+      inconclusive: [],
       notApplicable: 0,
       textless: [],
       ok: false,
