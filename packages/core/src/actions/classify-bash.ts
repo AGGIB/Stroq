@@ -739,6 +739,121 @@ function hostsOf(command: string): string[] {
   return [...new Set(hosts.filter((h) => h.length > 0))];
 }
 
+/** A network address a command names: its text as written, and the host it names. */
+export interface CommandUrl {
+  readonly url: string;
+  readonly host: string;
+}
+
+/** An address longer than this is cut: nobody types one, and its host comes first. */
+export const MAX_URL_CHARS = 4096;
+/** How much of a command is read for addresses; what the classifier itself would read is about this. */
+const MAX_URL_SCAN_CHARS = 4 * 1024 * 1024;
+/** Occurrences examined per address kept, so that a command of one address repeated ends. */
+const EXAMINED_PER_URL = 4;
+
+/**
+ * Where the shell ends the word an address is in: blank space or a control character, a quote,
+ * and the operators `; | & < > ( )`. A `&` inside a quoted query string cuts it short, which
+ * leaves the host as it was.
+ */
+function endsUrl(code: number): boolean {
+  return (
+    code <= 0x20 ||
+    code === 0x22 || // "
+    code === 0x27 || // '
+    code === 0x60 || // `
+    code === 0x3b || // ;
+    code === 0x7c || // |
+    code === 0x26 || // &
+    code === 0x3c || // <
+    code === 0x3e || // >
+    code === 0x28 || // (
+    code === 0x29 // )
+  );
+}
+
+/** The index after `http://` or `https://`, in any case, if one starts at `at`; otherwise -1. */
+function afterScheme(text: string, at: number): number {
+  const lower = (offset: number): number => text.charCodeAt(at + offset) | 0x20;
+  // `| 0x20` folds a capital letter to its small one, and maps no other character to a letter.
+  if (lower(0) !== 0x68 || lower(1) !== 0x74 || lower(2) !== 0x74 || lower(3) !== 0x70) return -1;
+  const next = lower(4) === 0x73 ? at + 5 : at + 4;
+  return text.startsWith('://', next) ? next + 3 : -1;
+}
+
+/** The host a client would connect to for `url`, or '' when it names none that can be read. */
+function hostOfUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The addresses a command names: each `http://` or `https://` address, and each `user@host`
+ * target, with its text as written. A sibling of `hostsOf`, which keeps only the host and is
+ * what the policy reads; this is for a task's scope and for egress binding, which need the
+ * address.
+ *
+ * One pass with no pattern that backtracks: a scheme is looked for character by character, the
+ * run it ends in is measured once for every scheme inside it (an address inside the query of
+ * another is listed too, as `hostsOf` lists its host), and the `user@host` targets come from
+ * the same pattern `hostsOf` uses. The host is what a client would connect to: lower case, with
+ * no port and no user information, so `https://trusted.example@evil.example/` is `evil.example`
+ * (`hostsOf` keeps all of `trusted.example@evil.example`, which no request goes to).
+ *
+ * Bounded, because the command is the agent's: at most `limit` addresses are kept, an address
+ * is cut at `MAX_URL_CHARS`, only the first `MAX_URL_SCAN_CHARS` of the command are read, and a
+ * command that repeats one address is given up on after a few times `limit` occurrences.
+ * Wherever a bound cut something, `capped` is true: the list is then not the whole of it.
+ */
+export function commandUrls(
+  command: string,
+  limit: number,
+): { readonly urls: readonly CommandUrl[]; readonly capped: boolean } {
+  const text = command.length > MAX_URL_SCAN_CHARS ? command.slice(0, MAX_URL_SCAN_CHARS) : command;
+  const found = new Map<string, CommandUrl>();
+  const maxExamined = EXAMINED_PER_URL * limit;
+  let capped = text.length < command.length;
+  let examined = 0;
+  /** Keeps one address; false once a bound says to look no further. */
+  const keep = (url: string, hostOf: () => string): boolean => {
+    examined += 1;
+    if (examined > maxExamined) capped = true;
+    else if (found.has(url)) return true;
+    else if (found.size >= limit) capped = true;
+    else {
+      found.set(url, { url, host: hostOf() });
+      return true;
+    }
+    return false;
+  };
+  /** Where the run that the last scheme was in ends: the next scheme inside it shares the answer. */
+  let runEnd = -1;
+  for (let at = 0; at < text.length; at += 1) {
+    const start = afterScheme(text, at);
+    if (start < 0) continue;
+    if (at >= runEnd) {
+      runEnd = start;
+      while (runEnd < text.length && !endsUrl(text.charCodeAt(runEnd))) runEnd += 1;
+    }
+    // Nothing after the scheme: `echo http://` names no address.
+    if (runEnd > start) {
+      const stop = Math.min(runEnd, at + MAX_URL_CHARS);
+      const url = text.slice(at, stop);
+      if (stop < runEnd) capped = true;
+      if (!keep(url, () => hostOfUrl(url))) return { urls: [...found.values()], capped };
+    }
+    at = start - 1;
+  }
+  for (const [target, host] of text.matchAll(SSH_TARGET)) {
+    if (!keep(target, () => host ?? '')) break;
+  }
+  return { urls: [...found.values()], capped };
+}
+
 /** A classification with each class's own signals kept apart, for callers that remap classes. */
 export interface CommandGroups {
   readonly groups: ReadonlyArray<readonly [ActionClass, readonly string[]]>;
