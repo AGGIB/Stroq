@@ -1,6 +1,6 @@
 import { resolveRealPath } from './atomic.js';
 import { findCredentialShape, planBackup } from './backup.js';
-import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
+import { DIFF_HIDDEN_NOTICE, LINK_PREVIEW_NOTICE, maskedDiff } from './diff-mask.js';
 import {
   DEFAULT_LAYOUT,
   deepEqual,
@@ -119,7 +119,7 @@ type Applied =
       readonly ok: true;
       readonly doc: JsonObject;
       readonly changed: boolean;
-      readonly record: RecordedJsonEdit;
+      readonly record: RecordedJsonEdit | null;
     }
   | { readonly ok: false; readonly conflict: string };
 
@@ -164,11 +164,12 @@ function previousOf(path: readonly string[], leaf: JsonValue | undefined): Previ
 function applySet(doc: JsonObject, edit: JsonEdit): Applied {
   const found = probe(doc, edit.path);
   if (!found.ok) return found;
+  if (found.leaf !== undefined && deepEqual(found.leaf, edit.value)) {
+    // No undo needs this value. Recording it could persist an existing credential as edit.value.
+    return { ok: true, doc, changed: false, record: null };
+  }
   const previous = previousOf(edit.path, found.leaf);
   const base = { kind: 'json-set', path: edit.path, value: edit.value, previous } as const;
-  if (found.leaf !== undefined && deepEqual(found.leaf, edit.value)) {
-    return { ok: true, doc, changed: false, record: { ...base, createdFrom: edit.path.length } };
-  }
   const record = { ...base, createdFrom: found.createdFrom };
   return { ok: true, doc: setAt(doc, edit.path, edit.value), changed: true, record };
 }
@@ -184,6 +185,7 @@ interface Frame {
   readonly options: Pick<PlanOptions, 'recipe' | 'root' | 'newFileMode'>;
   /** What the owner is told because of where the path leads: only a planner, who looked, knows. */
   readonly notices: readonly string[];
+  readonly previewWithheld: boolean;
 }
 
 interface Outcome {
@@ -200,7 +202,9 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
   // The diff first: it refuses a file that is too large to show, and that must cost nothing more
   // than counting its lines. Reading it for credentials is the dearest part of a plan. It is
   // labelled with the file the change lands in: when the path is a link, that is not the path.
-  const shown = changed ? maskedDiff(text, outcome.after, real) : { diff: '', hidden: false };
+  const shown = changed
+    ? maskedDiff(text, outcome.after, real, frame.previewWithheld)
+    : { diff: '', hidden: false };
   const backup = planBackup(text);
   return {
     kind: 'json',
@@ -211,6 +215,7 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
     before,
     after: outcome.after,
     diff: shown.diff,
+    ...(frame.previewWithheld ? { previewWithheld: true as const } : {}),
     changed,
     ...(outcome.refusal === undefined
       ? {}
@@ -218,6 +223,7 @@ function buildPlan(frame: Frame, outcome: Outcome): JsonPlan {
     backup: backup.backup,
     notices: [
       ...frame.notices,
+      ...(frame.previewWithheld ? [LINK_PREVIEW_NOTICE] : []),
       ...backup.notices,
       ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
       ...(replacesCredential(outcome.edits) ? [REPLACED_CREDENTIAL_NOTICE] : []),
@@ -258,7 +264,7 @@ function planJsonText(frame: Frame, requested: readonly JsonEdit[]): JsonPlan {
     if (!applied.ok) return refusedPlan(frame, 'type-conflict', applied.conflict);
     doc = applied.doc;
     changed ||= applied.changed;
-    recorded.push(applied.record);
+    if (applied.record !== null) recorded.push(applied.record);
   }
 
   // Nothing to change is nothing to write: the file is not even laid out again.
@@ -304,12 +310,14 @@ export function planJsonEdits(
   const requested = edits.map(validateEdit);
   const real = resolveRealPath(file);
   const refusal = pathRefusal(file, options.root);
+  const notices = refusal === null ? linkNotices(file, real, options.root) : [];
   const frame: Frame = {
     file,
     real,
     text: refusal === null ? options.read(real) : null,
     options,
-    notices: refusal === null ? linkNotices(file, real, options.root) : [],
+    notices,
+    previewWithheld: notices.length > 0 && options.acknowledgeLink !== true,
   };
   if (refusal !== null) return refusedPlan(frame, refusal.refused, refusal.detail);
   return planJsonText(frame, requested);
@@ -334,6 +342,7 @@ export function replayJsonPlan(plan: JsonPlan): JsonPlan {
       ...(plan.newFileMode === undefined ? {} : { newFileMode: plan.newFileMode }),
     },
     notices: [],
+    previewWithheld: plan.previewWithheld === true,
   };
   return planJsonText(frame, requested);
 }

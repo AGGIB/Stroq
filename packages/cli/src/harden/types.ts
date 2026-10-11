@@ -191,7 +191,8 @@ export interface RecordedTextBlockEdit {
    * The lines of a block with the same id that this replaced, or `null` when it was appended. They
    * are the lines the owner left between Stroq's markers, recorded as they were so that undo can put
    * them back. The record is a file, so a block whose lines look like a credential is not replaced
-   * at all (the plan is refused with `credential-in-block`), and none is ever recorded.
+   * at all (the plan is refused with `credential-in-block`), and none is ever recorded. An unchanged
+   * plan can still carry raw lines here; do not print or serialize a whole plan for presentation.
    */
   readonly previous: readonly string[] | null;
   /**
@@ -255,13 +256,25 @@ export interface PlanOptions {
   readonly read: (path: string) => string | null;
   /** Which recipe asked, recorded with what was changed. */
   readonly recipe?: string;
-  /** The directory the file's real path must stay inside when it is written. */
+  /**
+   * The project or home directory the real path must stay inside. Pass the trusted top-level
+   * directory, not a config subdirectory: only links below this root count as repository links.
+   */
   readonly root?: string;
   /** The mode of the file if it has to be created. */
   readonly newFileMode?: number;
+  /**
+   * The owner has seen the link notice and agreed to preview the named target. Without this the
+   * entire diff is withheld for a linked path, including context and reformatted additions. This
+   * permits preview only; apply still needs its own `acknowledgeLink` option.
+   */
+  readonly acknowledgeLink?: boolean;
 }
 
-/** What every plan says, whatever kind of file it edits. */
+/**
+ * Internal engine data, including raw owner text. Never print or serialize a whole plan for UI,
+ * logging or `--json`; construct an explicit presentation object from diff, notices and metadata.
+ */
 export interface PlanBase {
   readonly recipe: string;
   /** The path as it was asked for. */
@@ -270,12 +283,14 @@ export interface PlanBase {
   readonly real: string;
   /** Whether the file was there. `false` too for a plan refused before the file was opened. */
   readonly existed: boolean;
-  /** The text now (`''` when the file does not exist, or was never opened: see `refused`). */
+  /** Raw text now, possibly secret. Engine-only; `''` when absent or never opened. */
   readonly before: string;
-  /** The text after the edits. Equal to `before` when nothing changes or the plan is refused. */
+  /** Raw text after the edits, possibly secret. Engine-only; equals before when unchanged/refused. */
   readonly after: string;
-  /** Unified diff from `before` to `after`; `''` when nothing changes. */
+  /** Unified diff; `''` when nothing changes or a linked preview is withheld. */
   readonly diff: string;
+  /** The linked target was not acknowledged for preview. Replayed without reading the file system. */
+  readonly previewWithheld?: true;
   readonly changed: boolean;
   /**
    * Why the plan cannot be applied. `path-escapes-root` and `dangling-link` mean the file was never

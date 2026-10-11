@@ -21,7 +21,7 @@ afterEach(removeTempDirs);
  */
 const onWindows = process.platform === 'win32';
 const linkLines = (notices: readonly string[]): string[] =>
-  notices.filter((text) => text.includes('link'));
+  notices.filter((text) => text.startsWith('this path is a link:'));
 
 describe.skipIf(onWindows)('a link above the root', () => {
   /** A project reached through a link, as a linked home or /tmp makes every project. */

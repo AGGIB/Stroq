@@ -14,6 +14,9 @@ import { assertDiffable, diffText } from './diff.js';
 
 /** What the owner is told when a diff left lines out. */
 export const DIFF_HIDDEN_NOTICE = 'the diff hides lines that hold credential-shaped text';
+/** A linked target can contain private text the caller did not mean to preview. */
+export const LINK_PREVIEW_NOTICE =
+  'the diff is withheld until the owner acknowledges the linked target';
 
 /**
  * A line of the text as it may be printed. A repository writes these lines, and a terminal obeys
@@ -33,14 +36,22 @@ export interface MaskedDiff {
 
 /**
  * The unified diff from `before` to `after`, where `null` is a file that is not there. Throws
- * `HardenError('diff-too-large')` for texts the preview will not compute a diff of.
+ * `HardenError('diff-too-large')` for texts the preview will not compute a diff of. A withheld
+ * linked preview still enforces those bounds, but exposes none of either side, including additions
+ * derived from reformatting the owner's text.
  */
-export function maskedDiff(before: string | null, after: string | null, path: string): MaskedDiff {
+export function maskedDiff(
+  before: string | null,
+  after: string | null,
+  path: string,
+  withheld = false,
+): MaskedDiff {
   const old = before ?? '';
   const next = after ?? '';
   // Asked first: a text too large to diff is not worth reading for credentials either.
   assertDiffable(old);
   assertDiffable(next);
+  if (withheld) return { diff: '', hidden: false };
   const sensitive = findCredentialShape(old) !== null || findCredentialShape(next) !== null;
   const result = diffText(old, next, {
     path,

@@ -130,12 +130,12 @@ describe('findCredentialShape: NAME=VALUE in plain text', () => {
     ['a value followed by a comment', 'API_TOKEN=abcd1234 # rotate monthly\n'],
     ['a value followed by a command', 'MY_SECRET=abc123def456ghi789 node run.js\n'],
     ['a quoted passphrase', 'PASSWORD="correct horse battery"\n'],
+    ['a commented-out password', '# DB_PASSWORD=devpass1\n'],
   ])('finds %s', (_what, text) => {
     expect(findCredentialShape(text)).toBe('named-secret');
   });
 
   it.each([
-    ['a comment', '# DB_PASSWORD=devpass1\n'],
     ['a stand-in', 'DB_PASSWORD=changeme\n'],
     ['a variable', 'DB_PASSWORD=$DB_PASSWORD\n'],
     ['a short value', 'DB_PASSWORD=abc\n'],
@@ -158,6 +158,7 @@ describe('findCredentialShape: name: value in YAML-like text and header strings'
     ['an HTTP header', 'X-Api-Key: abcd1234efgh\n'],
     ['an auth header', 'X-Auth-Token: abcd1234\n'],
     ['a key with no space after the colon', 'password:hunter2hunter2\n'],
+    ['a commented-out password', '# password: hunter2hunter2\n'],
   ])('finds %s', (_what, text) => {
     expect(findCredentialShape(text)).toBe('named-secret');
   });
@@ -167,7 +168,6 @@ describe('findCredentialShape: name: value in YAML-like text and header strings'
     ['a template', 'token: <token>\n'],
     ['a mode', 'auth: none\n'],
     ['a permission in a workflow', 'permissions:\n  id-token: write\n  contents: read\n'],
-    ['a comment', '# password: hunter2hunter2\n'],
     ['a location', 'auth_url: https://login.example.invalid/auth\n'],
     ['a name that says nothing', 'greeting: hello-world\n'],
     ['a URL', 'https://example.invalid/auth\n'],

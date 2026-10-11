@@ -6,8 +6,9 @@ import { HardenError, type JsonValue, type Plan } from './types.js';
 /**
  * Checking that a plan is what it says it is.
  *
- * A plan is plain data: it can be written to a file, read back, passed between processes, and
- * made by anything. What it carries (the text after, the diff a person looked at, the record of
+ * A plan is untrusted engine data and may be made by anything. It also carries raw owner text,
+ * so it must not be printed, logged or serialized as a user-facing report. What it carries (the
+ * text after, the diff a person looked at, the record of
  * what undo should take out) is only worth trusting if it is what a planner would have made of
  * the text before and the edits. So the planner is run again, on the plan's own text and edits,
  * with nothing read and nothing written, and the plan is accepted only if the answer is the same.

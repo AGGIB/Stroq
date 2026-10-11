@@ -219,7 +219,7 @@ describe('planJsonEdits: setting a value', () => {
 
     expect(result.after).toBe(before);
     expect(result.changed).toBe(false);
-    expect(result.edits[0]).toMatchObject({ previous: { present: true, value: true } });
+    expect(result.edits).toEqual([]);
   });
 
   it('makes the objects on the way, and says from where', () => {

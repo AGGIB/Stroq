@@ -182,10 +182,11 @@ describe('findCredentialShape: what it found before still turns up', () => {
     expect(findCredentialShape(`  API_TOKEN='${SECRET}'\n`)).toBe('named-secret');
     expect(findCredentialShape(`API_TOKEN=${SECRET} # note\n`)).toBe('named-secret');
     expect(findCredentialShape(`//registry.invalid/:_authToken=${SECRET}\n`)).toBe('named-secret');
+    expect(findCredentialShape('$env:API_TOKEN="abcd1234"\n')).toBe('named-secret');
   });
 
-  it('leaves a comment, a location and a placeholder alone', () => {
-    expect(findCredentialShape(`# API_TOKEN=${SECRET}\n`)).toBeNull();
+  it('finds a commented-out credential, but leaves a location and a placeholder alone', () => {
+    expect(findCredentialShape(`# API_TOKEN=${SECRET}\n`)).toBe('named-secret');
     expect(findCredentialShape('AUTH_URL=https://login.example.invalid/token\n')).toBeNull();
     expect(findCredentialShape('API_TOKEN=<your-token-here>\n')).toBeNull();
   });
@@ -269,7 +270,6 @@ describe('findCredentialShape: what it says it does not read', () => {
     ['a value on a different line from its name', '- name: DB_PASSWORD\n  value: devpass1\n'],
     ['a secret under a name that says nothing', json({ sauce: 'abcd1234' })],
     ['a value of three characters under a name that says password', json({ password: 'abc' })],
-    ['a PowerShell assignment', '$env:API_TOKEN="abcd1234"\n'],
     ['a pass that is part of a longer word', 'bypass=abcd1234\n'],
     [
       'a name whose last word is a label',

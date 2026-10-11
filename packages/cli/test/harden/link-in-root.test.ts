@@ -41,10 +41,10 @@ function linked(target: string, link: string, content: string) {
 
 describe.skipIf(onWindows)('a link inside the project', () => {
   describe('the plan', () => {
-    it('labels the diff with the file the change lands in, and not with the link', () => {
+    it('labels an acknowledged diff with the file the change lands in, and not with the link', () => {
       const { e, targetPath } = linked('package.json', 'settings.json', jsonText({ name: 'x' }));
 
-      const plan = e.planJson('settings.json', [addDeny('a')]);
+      const plan = e.planJson('settings.json', [addDeny('a')], { acknowledgeLink: true });
 
       const [header] = plan.diff.split('\n');
       expect(header).toBe(`--- a/${label(targetPath)}`);
@@ -93,7 +93,7 @@ describe.skipIf(onWindows)('a link inside the project', () => {
       (_what, target, link, content) => {
         const { e, targetPath } = linked(target, link, content);
 
-        const plan = e.planBlock(link);
+        const plan = e.planBlock(link, IGNORE_LINES, { acknowledgeLink: true });
 
         expect(plan.diff.split('\n')[0]).toBe(`--- a/${label(targetPath)}`);
         expect(plan.notices.join('\n')).toContain(targetPath);
@@ -136,7 +136,7 @@ describe.skipIf(onWindows)('a link inside the project', () => {
       mkdirSync(e.file('shared/cursor'), { recursive: true });
       symlinkSync(e.file('shared/cursor'), e.file('.cursor'));
 
-      const plan = e.planJson('.cursor/mcp.json', [addDeny('a')]);
+      const plan = e.planJson('.cursor/mcp.json', [addDeny('a')], { acknowledgeLink: true });
 
       expect(plan.existed).toBe(false);
       expect(plan.notices.join('\n')).toContain(e.file('shared/cursor/mcp.json'));

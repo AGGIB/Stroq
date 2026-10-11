@@ -1,7 +1,7 @@
 import { flagSecretInText } from './credential-flags.js';
 import {
   assignmentSecret,
-  isCommentLine,
+  withoutCommentPrefix,
   keyValueSecret,
   leadingPairSecret,
 } from './credential-pairs.js';
@@ -219,7 +219,7 @@ export function privateKeyBlockLines(lines: readonly string[]): ReadonlySet<numb
  * Whether `text` (one line, or one string of a JSON document) holds a credential under a name,
  * a flag, a header or a URL. `keyValue` is for plain text: in a JSON document a line such as
  * `"a": "b"` is the document's business, not an `.env` line, and the walk of the document has
- * read the name above each string. A line that is a comment holds no `NAME=VALUE`.
+ * read the name above each string. Comments can hold stale credentials too.
  */
 export function holdsNamedSecret(text: string, keyValue: boolean): boolean {
   const words = text.split(/\s+/);
@@ -233,9 +233,9 @@ export function holdsNamedSecret(text: string, keyValue: boolean): boolean {
 
 /** A name and the value written next to it: `NAME=VALUE`, `NAME=value rest`, `name: value`. */
 function namesAValue(text: string, words: readonly string[]): boolean {
-  if (isCommentLine(text)) return false;
+  const content = withoutCommentPrefix(text);
   return (
-    (text.includes('=') && (keyValueSecret(text) || assignmentSecret(words))) ||
-    (text.includes(':') && leadingPairSecret(text))
+    (content.includes('=') && (keyValueSecret(content) || assignmentSecret(words))) ||
+    (content.includes(':') && leadingPairSecret(content))
   );
 }

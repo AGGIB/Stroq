@@ -38,8 +38,8 @@ import { jsonTokens } from './json-tokens.js';
  *   vendor's shape or is 12 characters or more under a name core calls secret (`key`, `session` ...);
  * - a value of under four characters, and a passphrase with spaces under any name but a password's;
  * - a base64 `user:password` that is not given to `Authorization` or `-u`, a credential in the
- *   name of a key or in a comment (`# API_TOKEN=...` is left alone), and one spelled in another
- *   alphabet, language or encoding (`$env:TOKEN="..."` of PowerShell, a value URL-encoded twice);
+ *   name of a key, and one spelled in another
+ *   alphabet, language or encoding (a value URL-encoded twice, for example);
  * - the name `pw` or `pass` in a longer word (`bypass`), and any name whose last word is a label
  *   (`apiKeyHelper`, `tokenType`, `secretId`, `MAX_THINKING_TOKENS`: a command, a kind, an id or a
  *   count, and none of them a secret);

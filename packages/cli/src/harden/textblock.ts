@@ -1,6 +1,6 @@
 import { resolveRealPath } from './atomic.js';
 import { findCredentialShape, planBackup } from './backup.js';
-import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
+import { DIFF_HIDDEN_NOTICE, LINK_PREVIEW_NOTICE, maskedDiff } from './diff-mask.js';
 import { linkNotices, pathRefusal } from './plan-support.js';
 import { REPLACEMENT_CHARACTER } from './read.js';
 import {
@@ -103,6 +103,7 @@ interface Frame {
   readonly options: Pick<PlanOptions, 'recipe' | 'root' | 'newFileMode'>;
   /** What the owner is told because of where the path leads: only a planner, who looked, knows. */
   readonly notices: readonly string[];
+  readonly previewWithheld: boolean;
 }
 
 function buildPlan(
@@ -116,7 +117,9 @@ function buildPlan(
   const changed = after !== before;
   // The diff first: a file too large to show is refused before it is read for credentials. It is
   // labelled with the file the change lands in: when the path is a link, that is not the path.
-  const shown = changed ? maskedDiff(text, after, real) : { diff: '', hidden: false };
+  const shown = changed
+    ? maskedDiff(text, after, real, frame.previewWithheld)
+    : { diff: '', hidden: false };
   const backup = planBackup(text);
   return {
     kind: 'text-block',
@@ -127,10 +130,16 @@ function buildPlan(
     before,
     after,
     diff: shown.diff,
+    ...(frame.previewWithheld ? { previewWithheld: true as const } : {}),
     changed,
     ...(refusal === undefined ? {} : { refused: refusal.refused, refusedDetail: refusal.detail }),
     backup: backup.backup,
-    notices: [...frame.notices, ...backup.notices, ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : [])],
+    notices: [
+      ...frame.notices,
+      ...(frame.previewWithheld ? [LINK_PREVIEW_NOTICE] : []),
+      ...backup.notices,
+      ...(shown.hidden ? [DIFF_HIDDEN_NOTICE] : []),
+    ],
     edits,
     ...(options.root === undefined ? {} : { root: options.root }),
     ...(options.newFileMode === undefined ? {} : { newFileMode: options.newFileMode }),
@@ -235,12 +244,14 @@ export function planTextBlock(file: string, block: Block, options: PlanOptions):
   validateBlock(block);
   const real = resolveRealPath(file);
   const refusal = pathRefusal(file, options.root);
+  const notices = refusal === null ? linkNotices(file, real, options.root) : [];
   const frame: Frame = {
     file,
     real,
     text: refusal === null ? options.read(real) : null,
     options,
-    notices: refusal === null ? linkNotices(file, real, options.root) : [],
+    notices,
+    previewWithheld: notices.length > 0 && options.acknowledgeLink !== true,
   };
   if (refusal !== null) return buildPlan(frame, '', [], refusal);
   return planBlockText(frame, block);
@@ -264,6 +275,7 @@ export function replayTextBlockPlan(plan: TextBlockPlan): TextBlockPlan | null {
       ...(plan.newFileMode === undefined ? {} : { newFileMode: plan.newFileMode }),
     },
     notices: [],
+    previewWithheld: plan.previewWithheld === true,
   };
   return planBlockText(frame, { id: edit.id, lines: edit.lines });
 }

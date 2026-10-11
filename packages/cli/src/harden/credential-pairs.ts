@@ -77,12 +77,12 @@ function unquoted(value: string): string {
     : value;
 }
 
-/** Whether the first character of `line` that is not white space starts a comment. */
-export function isCommentLine(line: string): boolean {
+/** Commented-out credentials still belong to the owner: read past the comment marker. */
+export function withoutCommentPrefix(line: string): string {
   let i = 0;
   while (i < line.length && isSpace(line.charCodeAt(i))) i += 1;
   const first = line.charCodeAt(i);
-  return first === HASH || first === SEMICOLON;
+  return first === HASH || first === SEMICOLON ? line.slice(i + 1).trimStart() : line;
 }
 
 /** The first word of `value`: the shell reads `NAME=value rest` as the value, then a command. */
@@ -101,7 +101,7 @@ export function keyValueSecret(line: string): boolean {
   const n = line.length;
   let i = 0;
   while (i < n && isSpace(line.charCodeAt(i))) i += 1;
-  if (i >= n || isCommentLine(line)) return false;
+  if (i >= n) return false;
   if (line.startsWith('export', i) && isSpace(line.charCodeAt(i + 6))) {
     i += 6;
     while (i < n && isSpace(line.charCodeAt(i))) i += 1;
@@ -111,7 +111,7 @@ export function keyValueSecret(line: string): boolean {
   i += 1;
   while (i < n && isNameChar(line.charCodeAt(i))) i += 1;
   const name = line.slice(nameStart, i);
-  if (name.length > MAX_NAME_CHARS) return false;
+  if (!isPlainName(name)) return false;
   while (i < n && isSpace(line.charCodeAt(i))) i += 1;
   if (line.charCodeAt(i) !== EQUALS) return false;
   i += 1;
@@ -132,6 +132,17 @@ export function keyValueSecret(line: string): boolean {
 /** What separates the parameters of a query string and its fragment, and commands. */
 const PARAMETER_SEPARATORS = /[?&#;]/;
 
+/** A wrapper such as `Bash(` is not part of the assignment's name. Never truncate a long name. */
+function assignmentName(head: string): string {
+  const text = trimmed(head);
+  let start = text.length;
+  while (start > 0 && isNameChar(text.charCodeAt(start - 1))) {
+    start -= 1;
+    if (text.length - start > MAX_NAME_CHARS) return '';
+  }
+  return text.slice(start);
+}
+
 /**
  * Whether `part` (a word, or a piece of one between `?`, `&`, `#` and `;`) is `NAME=VALUE` with a
  * secret value. `inQuery` is for the pieces after the first: a parameter of a URL.
@@ -146,7 +157,7 @@ function partHoldsSecret(part: string, inQuery: boolean): boolean {
   }
   const equals = assignment.indexOf('=');
   if (equals <= 0) return false;
-  const name = trimmed(assignment.slice(0, equals));
+  const name = assignmentName(assignment.slice(0, equals));
   return isPlainName(name) && secretUnderPair(name, trimmed(assignment.slice(equals + 1)), inQuery);
 }
 
