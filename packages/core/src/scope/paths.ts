@@ -19,8 +19,10 @@ export type PathVerdict = 'allow' | 'deny' | 'outside';
 
 export interface PathOptions {
   readonly flavor: 'posix' | 'win32';
-  /** True where the file system treats `A` and `a` as one name (macOS and Windows by default). */
+  /** Fold allow globs only when the file system is known to treat `A` and `a` as one name. */
   readonly foldCase: boolean;
+  /** Separate conservative deny matching; defaults to foldCase for explicit options. */
+  readonly denyFoldCase?: boolean;
 }
 
 export interface PathResource {
@@ -34,7 +36,11 @@ export function defaultPathOptions(): PathOptions {
   const platform = process.platform;
   return {
     flavor: platform === 'win32' ? 'win32' : 'posix',
-    foldCase: platform === 'win32' || platform === 'darwin',
+    // macOS supports both sensitive and insensitive volumes. The launcher should inject
+    // verified semantics; until then exact allows avoid granting a distinct path, while
+    // folded denies also protect aliases on insensitive volumes.
+    foldCase: platform === 'win32',
+    denyFoldCase: platform === 'win32' || platform === 'darwin',
   };
 }
 
@@ -194,9 +200,13 @@ export function evaluatePath(
   const paths = subjects.map((subject) => normalize(subject, opts, false));
   const known = paths.filter((path): path is Normalized => path !== null);
 
-  const denies = rules.deny.map((glob) => compileGlob(glob, opts));
+  const denyOpts = { ...opts, foldCase: opts.denyFoldCase ?? opts.foldCase };
+  const denyPaths = subjects
+    .map((subject) => normalize(subject, denyOpts, false))
+    .filter((path): path is Normalized => path !== null);
+  const denies = rules.deny.map((glob) => compileGlob(glob, denyOpts));
   if (denies.some((glob) => glob === null)) return 'deny';
-  if (known.some((path) => denies.some((glob) => globMatches(glob as CompiledGlob, path)))) {
+  if (denyPaths.some((path) => denies.some((glob) => globMatches(glob as CompiledGlob, path)))) {
     return 'deny';
   }
   if (known.length < paths.length) return 'outside';

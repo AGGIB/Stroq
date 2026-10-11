@@ -73,13 +73,17 @@ function sameDigests(expected: Readonly<Record<string, string>>, actual: unknown
  * Every comparison below is written so that a value that is not a number (a clock that
  * returned an invalid date) fails the check instead of passing it.
  */
-function timeProblem(body: PermitBody, now: number): PermitRejection | null {
-  const issuedAt = Date.parse(body.issuedAt);
-  const expiresAt = Date.parse(body.expiresAt);
+export function windowProblem(
+  window: { readonly issuedAt: string; readonly expiresAt: string },
+  now: number,
+  maxLifetimeMs: number,
+): 'expired' | 'not-yet-valid' | 'lifetime' | null {
+  const issuedAt = Date.parse(window.issuedAt);
+  const expiresAt = Date.parse(window.expiresAt);
   if (!(expiresAt > now)) return 'expired';
   if (!(issuedAt <= now + CLOCK_SKEW_MS)) return 'not-yet-valid';
   const lifetime = expiresAt - issuedAt;
-  if (!(lifetime > 0 && lifetime <= MAX_LIFETIME_MS)) return 'lifetime';
+  if (!(lifetime > 0 && lifetime <= maxLifetimeMs)) return 'lifetime';
   return null;
 }
 
@@ -113,7 +117,7 @@ export function verifyPermit(
 function contextProblem(body: PermitBody, ctx: VerifyContext): PermitRejection | null {
   if (!sameText(body.nonce, ctx.nonce)) return 'nonce';
   if (ctx.taskId !== undefined && !sameText(body.taskId, ctx.taskId)) return 'task-id';
-  const timed = timeProblem(body, ctx.now.getTime());
+  const timed = windowProblem(body, ctx.now.getTime(), MAX_LIFETIME_MS);
   if (timed !== null) return timed;
   if (!sameText(body.projectRoot, ctx.projectRoot)) return 'project-root';
   if (body.sessionId !== undefined && !sameText(body.sessionId, ctx.sessionId)) return 'session';

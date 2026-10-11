@@ -3,8 +3,8 @@ import { stableStringify } from '../audit/audit-log.js';
 
 /**
  * The name of one operation, as `stroq permit extend` takes it. An escalation is signed for
- * exactly one fingerprint, so the fingerprint has to be the same for the same operation
- * however it is spelled on the way in, and different for any other.
+ * exactly one fingerprint. Only representations known to mean the same operation may
+ * share one; uncertainty costs another approval instead of granting a different operation.
  */
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -21,11 +21,13 @@ export const mcpTarget = (server: string, tool: string, args: unknown): string =
   `${server}/${tool}#${sha256(stableStringify(args))}`;
 
 /**
- * A command is named by the digest of its text with runs of ASCII whitespace made single
- * spaces. ASCII only: a no-break space is part of a word to a shell, not a gap between two,
- * and merging them would let an approval for one command stand for another. Whitespace
- * inside quotes is collapsed too, which is the cost of not reading shell here.
+ * Shell whitespace is syntax: a newline ends a comment and quoted spaces change an argument.
+ * Hash the exact command bytes. This deliberately forgoes the plan's whitespace normalization:
+ * another approval for differently spaced text is safer than one approval for different commands.
  */
 export function shellTarget(command: string): string {
-  return sha256(command.replace(/[ \t\r\n\v\f]+/g, ' ').replace(/^ | $/g, ''));
+  return sha256(command);
 }
+
+/** Any other call (a fetch, a task, a note) is named by the digest of its whole input. */
+export const genericTarget = (toolInput: unknown): string => sha256(stableStringify(toolInput));

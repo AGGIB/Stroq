@@ -240,10 +240,32 @@ describe('case folding is injected, not assumed', () => {
     expect(verdict(rules([composed]), decomposed, POSIX)).toBe('outside');
   });
 
-  it('defaults foldCase to the platform and the flavour to the platform', () => {
+  it('defaults unknown macOS volumes to exact grants and folded denies', () => {
     const defaults = defaultPathOptions();
     expect(defaults.flavor).toBe(process.platform === 'win32' ? 'win32' : 'posix');
-    expect(defaults.foldCase).toBe(process.platform === 'darwin' || process.platform === 'win32');
+    expect(defaults.foldCase).toBe(process.platform === 'win32');
+    expect(defaults.denyFoldCase).toBe(
+      process.platform === 'darwin' || process.platform === 'win32',
+    );
+  });
+
+  it('does not grant distinct case-sensitive names while covering case-insensitive deny aliases', () => {
+    const unknownVolume = { flavor: 'posix', foldCase: false, denyFoldCase: true } as const;
+    expect(verdict(rules(['/p/Safe/**']), '/p/safe/private', unknownVolume)).toBe('outside');
+    expect(verdict(rules(['/p/**'], ['/p/private/**']), '/p/PRIVATE/key', unknownVolume)).toBe(
+      'deny',
+    );
+    expect(
+      verdict(rules(['/p/**'], ['/p/private/**']), '/p/link', unknownVolume, '/p/PRIVATE/key'),
+    ).toBe('deny');
+    expect(verdict(rules(['/p/Safe/**']), '/p/Safe/ok', unknownVolume)).toBe('allow');
+  });
+
+  it('honors an explicit verified case-sensitive deny override', () => {
+    const verifiedVolume = { flavor: 'posix', foldCase: false, denyFoldCase: false } as const;
+    expect(verdict(rules(['/p/**'], ['/p/private/**']), '/p/PRIVATE/key', verifiedVolume)).toBe(
+      'allow',
+    );
   });
 });
 

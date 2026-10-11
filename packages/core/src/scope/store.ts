@@ -9,7 +9,9 @@ import {
   writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { stableStringify } from '../audit/audit-log.js';
 import { readRegularFile } from '../util/read-regular-file.js';
+import { parseStrictJson } from './strict-json.js';
 import { isTaskId } from './types.js';
 
 /**
@@ -18,7 +20,7 @@ import { isTaskId } from './types.js';
  *   <home>/tasks/<taskId>/permit.json              the signed permit
  *   <home>/tasks/<taskId>/revoked, ended           markers: their existence is the message
  *   <home>/tasks/<taskId>/extensions/<fp>.json     a signed escalation for one operation
- *   <home>/tasks/<taskId>/extensions/<fp>.<h>.used the escalation whose bytes hash to <h> was used
+ *   <home>/tasks/<taskId>/extensions/<fp>.<h>.used the escalation whose canonical content hashes to <h> was used
  *
  * The reader returns a typed result and never throws, because it runs inside a hook: an
  * exception there is a crashed hook, which the host may read as "no objection". Everything
@@ -48,7 +50,7 @@ export type StoreRead =
 export interface PermitStore {
   readPermit(taskId: string): StoreRead;
   readEscalation(taskId: string, fingerprint: string): StoreRead;
-  /** Records that this escalation (these exact bytes) was used. False if it already was, or cannot be. */
+  /** Records that this signed escalation was used. Formatting it differently cannot grant another use. */
   consumeEscalation(taskId: string, fingerprint: string, text: string): boolean;
 }
 
@@ -76,8 +78,13 @@ function lookup(path: string): { found: Found; isFile: boolean; isDirectory: boo
   }
 }
 
-const hashOf = (text: string): string =>
-  createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
+function hashOf(text: string): string {
+  const parsed = parseStrictJson(text);
+  // A valid signature covers canonical content, not JSON spacing or key order. Malformed text is
+  // never accepted by the gate, but the store can still identify it without throwing.
+  const identity = parsed.ok ? stableStringify(parsed.value) : text;
+  return createHash('sha256').update(identity, 'utf8').digest('hex').slice(0, 16);
+}
 
 function createFile(path: string, data: string): void {
   const fd = openSync(path, CREATE_NEW, PRIVATE_FILE_MODE);

@@ -22,7 +22,7 @@ export const iso = (ms: number): string => new Date(ms).toISOString();
 
 export function sampleScope(over: Partial<TaskScope> = {}): TaskScope {
   return {
-    tools: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'],
+    tools: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite'],
     read: { allow: [`${PROJECT}/**`], deny: [`${PROJECT}/**/.env*`] },
     write: { allow: [`${PROJECT}/src/**`, `${PROJECT}/test/**`], deny: [`${PROJECT}/.git/**`] },
     net: { mode: 'none' },

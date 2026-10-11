@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { fileTarget, fingerprintOf, mcpTarget, shellTarget } from '../../src/scope/fingerprint.js';
+import {
+  fileTarget,
+  fingerprintOf,
+  genericTarget,
+  mcpTarget,
+  shellTarget,
+} from '../../src/scope/fingerprint.js';
 
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -41,16 +47,22 @@ describe('target helpers', () => {
     expect(mcpTarget('s', 't', {})).not.toBe(mcpTarget('r', 't', {}));
   });
 
-  it('names a shell command by the digest of the command with its whitespace collapsed', () => {
-    expect(shellTarget('npm   test')).toBe(sha256('npm test'));
-    expect(shellTarget('  npm\ttest \n')).toBe(sha256('npm test'));
-    expect(shellTarget('npm test\r\n\r\n')).toBe(sha256('npm test'));
+  it('names a shell command by the digest of its exact bytes', () => {
+    expect(shellTarget('npm   test')).toBe(sha256('npm   test'));
+    expect(shellTarget('  npm\ttest \n')).toBe(sha256('  npm\ttest \n'));
+    expect(shellTarget('npm test\r\n\r\n')).toBe(sha256('npm test\r\n\r\n'));
     expect(shellTarget('npm test')).not.toBe(shellTarget('npm tests'));
   });
 
-  it('collapses ASCII whitespace only: a no-break space is part of a word to a shell, not a gap', () => {
-    expect(shellTarget('echo a b')).not.toBe(shellTarget('echo a b'));
-    expect(shellTarget('echo a b')).not.toBe(shellTarget('echo a b'));
+  it('does not equate whitespace inside words or quoted arguments', () => {
+    const noBreakSpace = String.fromCharCode(0xa0);
+    const emSpace = String.fromCharCode(0x2003);
+    expect(shellTarget(`echo a${noBreakSpace}b`)).not.toBe(shellTarget('echo a b'));
+    expect(shellTarget(`echo a${emSpace}b`)).not.toBe(shellTarget('echo a b'));
+    expect(shellTarget("printf '%s' 'a  b'")).not.toBe(shellTarget("printf '%s' 'a b'"));
+    expect(shellTarget('printf ok # comment\nprintf marker')).not.toBe(
+      shellTarget('printf ok # comment printf marker'),
+    );
   });
 
   it('keeps the case and the quoting of a command', () => {
@@ -59,6 +71,16 @@ describe('target helpers', () => {
   });
 
   it('copes with a very long command in one pass', () => {
-    expect(shellTarget(`a${' '.repeat(200_000)}b`)).toBe(sha256('a b'));
+    const command = `a${' '.repeat(200_000)}b`;
+    expect(shellTarget(command)).toBe(sha256(command));
+  });
+});
+
+describe('genericTarget', () => {
+  it('names a call with no file, command or server by the digest of its canonical input', () => {
+    expect(genericTarget({ b: 1, a: 'x' })).toBe(sha256('{"a":"x","b":1}'));
+    expect(genericTarget({ a: 'x', b: 1 })).toBe(genericTarget({ b: 1, a: 'x' }));
+    expect(genericTarget({ a: 'x' })).not.toBe(genericTarget({ a: 'y' }));
+    expect(genericTarget({})).toBe(sha256('{}'));
   });
 });

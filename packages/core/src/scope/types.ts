@@ -67,8 +67,11 @@ export function isHostPattern(host: string): boolean {
   return labels.every((label) => HOST_LABEL.test(label));
 }
 
-const Timestamp = z.string().refine(isCanonicalIso, 'not a canonical ISO timestamp');
-const Hex64 = z.string().regex(HEX_64);
+export const TimestampSchema = z.string().refine(isCanonicalIso, 'not a canonical ISO timestamp');
+export const Hex64Schema = z.string().regex(HEX_64);
+export const NonceSchema = z.string().regex(NONCE);
+export const KeyIdSchema = z.string().regex(KEY_ID);
+export const SignatureSchema = z.string().regex(SIGNATURE);
 const Name = z.string().regex(NAME);
 const Glob = z
   .string()
@@ -106,7 +109,7 @@ export const TaskScopeSchema = z.strictObject({
 export const PermitBodySchema = z.strictObject({
   v: z.literal(1),
   taskId: z.string().regex(TASK_ID_PATTERN),
-  nonce: z.string().regex(NONCE),
+  nonce: NonceSchema,
   host: z.literal('claude-code'),
   profile: z.string().regex(SLUG),
   projectRoot: z
@@ -115,20 +118,20 @@ export const PermitBodySchema = z.strictObject({
     .max(MAX_PATH_LENGTH)
     .refine((path) => !path.includes('\0'), 'a path has no NUL'),
   sessionId: z.string().regex(SESSION_ID).optional(),
-  issuedAt: Timestamp,
-  expiresAt: Timestamp,
-  policyDigest: Hex64,
+  issuedAt: TimestampSchema,
+  expiresAt: TimestampSchema,
+  policyDigest: Hex64Schema,
   stateDigests: z
-    .record(z.string().regex(STATE_LABEL), Hex64)
+    .record(z.string().regex(STATE_LABEL), Hex64Schema)
     .refine((digests) => Object.keys(digests).length <= 32, 'too many state digests'),
   scope: TaskScopeSchema,
-  screenDigest: Hex64,
+  screenDigest: Hex64Schema,
 });
 
 export const SignedPermitSchema = z.strictObject({
   body: PermitBodySchema,
-  keyId: z.string().regex(KEY_ID),
-  sig: z.string().regex(SIGNATURE),
+  keyId: KeyIdSchema,
+  sig: SignatureSchema,
 });
 
 export type PathRules = z.infer<typeof PathRulesSchema>;
