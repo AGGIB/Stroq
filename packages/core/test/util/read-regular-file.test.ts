@@ -51,6 +51,29 @@ describe('readRegularFile', () => {
     expect(readRegularFile(fifo, 1024)).toEqual({ kind: 'not-regular' });
   });
 
+  // A permit or a key is read where an attacker may have put a link: with `noFollow` the open
+  // itself fails on a symlink, so there is no gap between checking the path and reading it.
+  it.skipIf(process.platform === 'win32')('refuses a symlink when told not to follow links', () => {
+    const base = dir();
+    writeFileSync(join(base, 'real.json'), '{}');
+    symlinkSync(join(base, 'real.json'), join(base, 'link.json'));
+    expect(() => readRegularFile(join(base, 'link.json'), 1024, { noFollow: true })).toThrow(
+      /ELOOP|EMLINK/,
+    );
+    expect(readRegularFile(join(base, 'real.json'), 1024, { noFollow: true })).toEqual({
+      kind: 'text',
+      text: '{}',
+      size: 2,
+    });
+  });
+
+  it('follows links as before when no option is given', () => {
+    const base = dir();
+    writeFileSync(join(base, 'real.json'), '{}');
+    symlinkSync(join(base, 'real.json'), join(base, 'link.json'));
+    expect(readRegularFile(join(base, 'link.json'), 1024).kind).toBe('text');
+  });
+
   it('throws for a path that does not exist, like the fs call it replaces', () => {
     expect(() => readRegularFile(join(dir(), 'missing.json'), 1024)).toThrow(/ENOENT/);
   });

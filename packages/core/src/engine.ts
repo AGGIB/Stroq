@@ -18,6 +18,8 @@ import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
+import { evaluateScope } from './scope/engine-gate.js';
+import type { ScopeGate } from './scope/types.js';
 import {
   MAX_SCAN_CHARS,
   candidateTokens,
@@ -56,6 +58,8 @@ export interface EngineOptions {
   readonly trust?: TrustStore;
   /** Optional: decoy files planted with `stroq canary --file`. Without it `fs.canary` never fires. */
   readonly canaryFiles?: CanaryFiles;
+  /** Optional task contract. Without a gate the policy decision and audit shape are unchanged. */
+  readonly scope?: ScopeGate;
   readonly now?: () => Date;
 }
 
@@ -503,13 +507,20 @@ export class StroqEngine {
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
-    const decision = withWayOut(
+    const policyDecision = withWayOut(
       evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null),
       this.opts.policy,
       state.taint,
       event.sessionId,
       new Date(this.now()),
     );
+    const gated = await evaluateScope(this.opts.scope, {
+      event,
+      classification,
+      classes,
+      decision: policyDecision,
+    });
+    const decision = gated?.decision ?? policyDecision;
     const provenance = origin.counted.map(toEvidence);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
@@ -523,6 +534,8 @@ export class StroqEngine {
       summary,
       classes,
       decision,
+      ...(gated === null ? {} : { taskId: gated.taskId, scope: gated.evidence }),
+      ...(event.callId === undefined ? {} : { callId: event.callId }),
       ...(provenance.length > 0 ? { provenance } : {}),
       ...(secrets.length > 0 ? { secrets } : {}),
     });
