@@ -519,9 +519,11 @@ function splitWhole(
     const pipelines = pipelinesOf(cut);
     const plain = plainReadings(lexedIn(lexes, text), pipelines, readings);
     const top = splitTop(cut).map(foldCommandWord);
+    const lexedText = lexedIn(lexes, text);
+    const whole = stagesCutInQuotes(lexedText, top);
     return {
-      segments: [...top, ...plain.segments, ...stagesNotCut(lexedIn(lexes, text), top)],
-      pipelines: [...pipelines, ...plain.pipelines],
+      segments: [...top, ...plain.segments, ...stagesNotCut(lexedText, top), ...whole.segments],
+      pipelines: [...pipelines, ...plain.pipelines, ...whole.pipelines],
     };
   };
   const own = read(command);
@@ -539,6 +541,35 @@ function splitWhole(
       texts: [command, ...nested],
     },
   };
+}
+
+/** True where the plain cut would cut the text in two. */
+const cutInTwo = (text: string): boolean => text.split(SEGMENT_SPLIT).length > 1;
+
+/**
+ * The stages the lexer reads whole where the plain cut cuts them: a `;`, `|`, `&&` or `||` inside a
+ * quote is a character of a word and the shell does not cut there, but the plain cut does. A path
+ * that holds one (`echo x > '/tmp/a;b/p/.git/hooks/pre-commit'`) came apart into two segments, and
+ * no segment held both the write and the file it wrote, so a detector that reads a segment found
+ * neither. The plain cut stays (what it cuts is read as before); these are added to it, and only
+ * for a stage the plain cut would cut, so a command without a separator in a quote is read as it was.
+ */
+function stagesCutInQuotes(
+  lexed: Lexed,
+  cut: readonly string[],
+): { readonly segments: string[]; readonly pipelines: string[][] } {
+  if (lexed.uncertain) return { segments: [], pipelines: [] };
+  const known = new Set(cut);
+  const segments = new Set<string>();
+  const pipelines: string[][] = [];
+  for (const stages of lexed.pipelines) {
+    const texts = stages.map((stage) => foldCommandWord(stage.text.trim()));
+    const split = texts.filter(cutInTwo);
+    if (split.length === 0) continue;
+    pipelines.push(texts);
+    for (const text of split) if (!known.has(text)) segments.add(text);
+  }
+  return { segments: [...segments], pipelines };
 }
 
 /**

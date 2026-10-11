@@ -473,9 +473,12 @@ describe('the room that the reading of functions has to spend', () => {
 
     classifyCommand(command, CWD, 0, { room });
 
-    // Once where the text is classified as a command, and once for the rules of a server.
-    expect(room.added).toBe(46);
-    expect(room.read).toBe(30);
+    // Once where the text is classified as a command, and once for the rules of a server. The `;`
+    // in the quotes no longer cuts the command in two before its text is taken for the server: it
+    // is read whole as well (see `stagesCutInQuotes`), which is two more reads of it than the 46
+    // and 30 this held while the quote was cut.
+    expect(room.added).toBe(44);
+    expect(room.read).toBe(28);
   });
 
   it('is charged for what it adds', () => {
