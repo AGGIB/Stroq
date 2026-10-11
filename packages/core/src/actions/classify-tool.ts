@@ -669,12 +669,12 @@ export function classifyTool(
       resourcesOfShellTool(toolName, toolInput),
     );
   }
-  // Glob has no class of its own (listing names is not an action), but a scope needs its paths.
+  // Glob/LS have no class of their own (listing names is not an action), but a scope needs roots.
   const files = (): ToolResources => resourcesOfFileTool(toolName, toolInput, cwd);
   if (WRITE_TOOLS.has(toolName)) return reaching(classifyFilePath(toolInput, cwd, true), files());
   if (toolName === 'Read') return reaching(classifyFilePath(toolInput, cwd, false), files());
   if (toolName === 'Grep') return classifyGrep(toolInput, cwd);
-  if (toolName === 'Glob') return reaching(EMPTY, files());
+  if (toolName === 'Glob' || toolName === 'LS') return reaching(EMPTY, files());
   if (toolName === 'WebFetch')
     return reaching(classifyFetch(toolInput), resourcesOfWebFetch(toolInput['url']));
   if (toolName.startsWith('mcp__')) return classifyMcp(toolName, toolInput, cwd);
