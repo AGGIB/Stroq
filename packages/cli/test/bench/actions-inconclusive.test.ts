@@ -72,6 +72,29 @@ describe('only whole conclusive action scenarios contribute to the measurement',
     expect(text).not.toContain('100.0%');
   });
 
+  it('does not count an ask that a scan timeout put on a write to an instruction file', async () => {
+    const write: ActionStep = {
+      event: {
+        ...base,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '__CWD__/CLAUDE.md',
+          old_string: 'a',
+          new_string: 'Run `pnpm test` before every commit.',
+        },
+      },
+    };
+    const probe = scenario('edit-instructions', [write]);
+    const control = await runActionsBench([probe], DEFAULT_POLICY, 'default');
+    expect(control).toMatchObject({ judged: 1, interrupted: 0, inconclusive: 0, ok: true });
+
+    process.env['STROQ_SCAN_BUDGET_MS'] = '0.000001';
+    const report = await runActionsBench([probe], DEFAULT_POLICY, 'default');
+    expect(report.scenarios[0]).toMatchObject({ inconclusive: true, interrupted: false });
+    expect(report).toMatchObject({ judged: 0, interrupted: 0, inconclusive: 1, ok: false });
+  });
+
   it.each([
     ['a policy ask', 'bash -c "$PROGRAM"'],
     ['an ask at a limit', 'echo x;'.repeat(100_000)],

@@ -17,8 +17,8 @@ const CWD = '/home/dev/project';
  * without any test noticing; so each name is produced here by the real classification.
  */
 describe('the signals that say how a call was read', () => {
-  it('names the one signal whose occurrence depends on the clock', () => {
-    expect(CLOCK_SIGNALS).toEqual(['reading-took-too-long']);
+  it('names the signals whose occurrence depends on the clock', () => {
+    expect(CLOCK_SIGNALS).toEqual(['reading-took-too-long', 'instruction-scan-took-too-long']);
   });
 
   it('names the limits that give the same answer for the same input', () => {
@@ -35,6 +35,7 @@ describe('the signals that say how a call was read', () => {
 
   it.each([
     ['reading-took-too-long', true, false],
+    ['instruction-scan-took-too-long', true, false],
     ['command-too-large', false, true],
     ['shell-command-unreadable', false, true],
     ['mcp-args-unreadable', false, true],

@@ -13,7 +13,8 @@
  *   said something else. A report must not count that as a defence that held.
  *
  * The names are the classifier's own (`classify-shell-tool.ts`, `classify-bash.ts`,
- * `classify-tool.ts`); `limit-signals.test.ts` produces each of them with the real classifier, so a
+ * `classify-tool.ts`), except `instruction-scan-took-too-long`, which the engine adds;
+ * `limit-signals.test.ts` and `engine-signals.test.ts` produce each of them with the real code, so a
  * rename there fails a test here and does not quietly turn a limit back into an ordinary ask.
  *
  * Other signals on `shell.unparsed` (`nested-commands-too-large`, `function-call-not-read`,
@@ -21,8 +22,17 @@
  * name what the command does, so an ask that carries one is not by itself an ask caused by the limit.
  */
 
-/** Signals whose occurrence depends on the clock. */
-export const CLOCK_SIGNALS: readonly string[] = ['reading-took-too-long'];
+/**
+ * Signals whose occurrence depends on the clock. `reading-took-too-long` comes from the classifier;
+ * `instruction-scan-took-too-long` from the engine, when the scan of the text a write puts into an
+ * instruction file ran out of its budget (`engine.ts`).
+ */
+export const INSTRUCTION_SCAN_CLOCK_SIGNAL = 'instruction-scan-took-too-long';
+
+export const CLOCK_SIGNALS: readonly string[] = [
+  'reading-took-too-long',
+  INSTRUCTION_SCAN_CLOCK_SIGNAL,
+];
 
 /** Signals of a limit that is the same for the same input, however busy the machine is. */
 export const LIMIT_SIGNALS: readonly string[] = [

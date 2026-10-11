@@ -74,6 +74,11 @@ jobs:
         run: ./examples/demo/run-mcp-demo.sh
 
       - name: Attack suite
+        # A scenario whose scan runs out of its time budget is inconclusive and the run exits 1, so
+        # the budget is raised as it is for the fuzz step: a timeout here must mean a stuck scan and
+        # not a slow runner.
+        env:
+          STROQ_SCAN_BUDGET_MS: '60000'
         run: node packages/cli/dist/index.js attack
 
       - name: Attack suite — mutation fuzz
