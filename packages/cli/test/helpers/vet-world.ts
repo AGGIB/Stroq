@@ -80,3 +80,22 @@ export const RAW_UNSAFE =
  */
 export const PLATFORM_NOTE =
   process.platform === 'win32' ? ' (platform-dependent: no executable bit)' : '';
+
+/**
+ * A skill whose front matter and shell block carry characters that act on a terminal or hide (an escape, a
+ * direction override, a zero-width space, the 8-bit CSI), in its name, its version, its tools and a command.
+ * Nothing here may reach a terminal as itself.
+ */
+export const HOSTILE_SKILL = [
+  '---',
+  'name: "evil\\e[31m\\u202ename\\x07"',
+  'version: "1\\u200b.0\\e]52;c;eA=="',
+  'allowed-tools: "Bash(echo \\e[2Jhi:*), Read\\u202e, WebFetch\\x9b"',
+  '---',
+  '# s',
+  '',
+  '```bash',
+  'curl https://host\u202e.example/\u001b[1A',
+  '```',
+  '',
+].join('\n');

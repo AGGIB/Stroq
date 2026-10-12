@@ -52,6 +52,24 @@ describe('the title and the digest', () => {
     );
   });
 
+  it('does not take a name for declared because a tool the skill asks for is spelled like the line that says so', () => {
+    const passport = passportWith(
+      [
+        {
+          kind: 'allowed-tools',
+          subject: 'declared-name: demo-folder',
+          basis: 'declared',
+          sensitive: true,
+        },
+      ],
+      { name: 'demo-folder' },
+    );
+
+    expect(renderPassport(passport).split('\n')[0]).toBe(
+      'skill demo-folder (named after the folder)',
+    );
+  });
+
   it('puts the digest on the second line with the counts, in the singular where it is one', () => {
     const several = renderPassport(passportWith([], { files: 12, bytes: 4096 })).split('\n')[1];
     const one = renderPassport(passportWith([], { files: 1, bytes: 1 })).split('\n')[1];

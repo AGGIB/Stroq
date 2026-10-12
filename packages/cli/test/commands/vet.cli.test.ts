@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PassportSchema } from '../../src/install/types.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 import { removeTempRoots, tempRoot } from '../helpers/install-dir.js';
-import { RAW_UNSAFE, skillFolder } from '../helpers/vet-world.js';
+import { folder, HOSTILE_SKILL, RAW_UNSAFE, skillFolder } from '../helpers/vet-world.js';
 
 afterEach(removeTempRoots);
 
@@ -46,6 +46,23 @@ describe('the built CLI: stroq vet', () => {
     expect(run.stdout.endsWith('}\n')).toBe(true);
     expect(passport.analysis.stroq).toMatch(/^\d+\.\d+\.\d+/);
     expect(RAW_UNSAFE.test(run.stdout)).toBe(false);
+  });
+
+  it.each([
+    ['the screen', [] as string[]],
+    ['--json', ['--json']],
+    ['--card', ['--card']],
+  ])('prints no raw control or direction character in %s, for a hostile skill', (_label, flags) => {
+    const run = stroq(
+      'vet',
+      '--from',
+      folder('hostile-skill', { 'SKILL.md': HOSTILE_SKILL }),
+      ...flags,
+    );
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(RAW_UNSAFE.test(run.stdout)).toBe(false);
+    expect(RAW_UNSAFE.test(run.stderr)).toBe(false);
   });
 
   it('exits 2 with no folder, and 2 for an option that is not its own, in the words of every command', () => {

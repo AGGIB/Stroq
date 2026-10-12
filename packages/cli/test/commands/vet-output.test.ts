@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { READINGS, type NamedReading } from '../../src/install/inspect/index.js';
 import { PassportSchema, type Passport } from '../../src/install/types.js';
 import { removeTempRoots, tempRoot } from '../helpers/install-dir.js';
-import { folder, RAW_UNSAFE, skillFolder, vet } from '../helpers/vet-world.js';
+import { folder, HOSTILE_SKILL, RAW_UNSAFE, skillFolder, vet } from '../helpers/vet-world.js';
 
 afterEach(removeTempRoots);
 
@@ -247,20 +247,6 @@ describe('a passport that lacks what a reading would find', () => {
 });
 
 describe('what a hostile artifact cannot make the command print', () => {
-  const HOSTILE_SKILL = [
-    '---',
-    'name: "evil\\e[31m\\u202ename\\x07"',
-    'version: "1\\u200b.0\\e]52;c;eA=="',
-    'allowed-tools: "Bash(echo \\e[2Jhi:*), Read\\u202e, WebFetch\\x9b"',
-    '---',
-    '# s',
-    '',
-    '```bash',
-    'curl https://host\u202e.example/\u001b[1A',
-    '```',
-    '',
-  ].join('\n');
-
   it.each([
     ['the terminal text', [] as string[]],
     ['--json', ['--json']],

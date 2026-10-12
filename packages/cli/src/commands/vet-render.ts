@@ -45,11 +45,17 @@ function originOf(type: Passport['artifact']['source']['type']): string {
   return type === 'tarball' ? 'named after the archive' : 'named by its source';
 }
 
-/** What the name and version in the title rest on: the artifact's own words, or where it was taken from. */
+/**
+ * What the name and version in the title rest on: the artifact's own words, or where it was taken from. Only
+ * the line that the identity reading makes counts (a signal on the basis `declared`): a tool that a skill asks
+ * for is a line on the same basis, its subject is the skill's own text, and it can be written to look like one.
+ */
 function declaredParts(passport: Passport): { name: boolean; version: boolean } {
   const { name, version } = passport.artifact;
   const subjects = new Set(
-    passport.lines.filter((line) => line.basis === 'declared').map((line) => line.subject),
+    passport.lines
+      .filter((line) => line.kind === 'signal' && line.basis === 'declared')
+      .map((line) => line.subject),
   );
   const versioned = version === null ? null : `declared-name: ${name} ${version}`;
   return {

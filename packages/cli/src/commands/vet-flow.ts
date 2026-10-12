@@ -34,7 +34,7 @@ import type { VetDeps, VetOptions } from './vet-types.js';
  * made (the command line was well formed, but it asks for a file that is there already); 3 the files cannot
  * be read as an artifact. The usage faults (also 2) are `vet.ts`'s.
  */
-const EXIT_INCOMPLETE = 1;
+const EXIT_UNCONFIRMED = 1;
 const EXIT_OUTPUT = 2;
 const EXIT_UNREADABLE = 3;
 /** The longest label a passport allows of a source (`types.ts`); the folder name is cut to less, for the escape of a prefix. */
@@ -59,7 +59,7 @@ const streamsOf = (deps: VetDeps): Streams => ({
  */
 export function labelOf(dir: string): string {
   const safe = showable(basename(resolve(dir)), LABEL_MAX).replace(/[\\/]/g, '_');
-  const label = /^(?:[~]|[A-Za-z]:)/.test(safe) ? `_${safe}` : safe;
+  const label = /^(?:~|[A-Za-z]:)/.test(safe) ? `_${safe}` : safe;
   return SourceRefSchema.safeParse({ type: 'dir', label }).success ? label : FALLBACK_LABEL;
 }
 
@@ -178,7 +178,7 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
   const { passport } = made;
   if (options.expect !== null && options.expect !== passport.artifact.digest) {
     io.err(mismatchText(options.expect, passport.artifact.digest));
-    return EXIT_INCOMPLETE;
+    return EXIT_UNCONFIRMED;
   }
   // The text is made safe once more on its way out: the screen and the card already are, and the passport
   // is JSON that has no raw control in it, so this changes nothing a reader sees and keeps a file clean.
@@ -187,5 +187,5 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
   if (written !== 0) return written;
   if (!passportIsIncomplete(passport)) return 0;
   io.err(incompleteText(passport));
-  return EXIT_INCOMPLETE;
+  return EXIT_UNCONFIRMED;
 }
