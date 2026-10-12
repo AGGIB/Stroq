@@ -1,11 +1,22 @@
 import {
   type KeyObject,
   createHash,
+  randomBytes,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
 } from 'node:crypto';
-import { chmodSync, closeSync, constants, mkdirSync, openSync, writeSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { type RegularFileRead, readRegularFile } from '../util/read-regular-file.js';
 
@@ -83,16 +94,39 @@ const CREATE_NEW =
 
 export const nodeKeyFs: KeyFs = {
   mkdirPrivate(dir) {
+    // `chmod` follows a link, and a link where the directory should be would have it change the
+    // rights of whatever the link points at.
+    let existing = null;
+    try {
+      existing = lstatSync(dir);
+    } catch (err) {
+      if (!isMissing(err)) throw err;
+    }
+    if (existing?.isSymbolicLink() === true)
+      throw Object.assign(new Error('the key directory is a link'), { code: 'ELOOP' });
     mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     // `mkdir` applies the umask, and the directory may have existed with wider rights.
     chmodSync(dir, PRIVATE_DIR_MODE);
   },
+  // The file appears whole or not at all: it is written under another name and linked into place,
+  // and `link` fails with EEXIST where a file is, as `O_EXCL` would. A crash in the middle leaves
+  // a temporary file and no key file that is empty and so can never be read.
   writeExclusive(path, data, mode) {
-    const fd = openSync(path, CREATE_NEW, mode);
+    const temp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+    const fd = openSync(temp, CREATE_NEW, mode);
     try {
-      writeSync(fd, data);
+      try {
+        writeSync(fd, data);
+      } finally {
+        closeSync(fd);
+      }
+      linkSync(temp, path);
     } finally {
-      closeSync(fd);
+      try {
+        unlinkSync(temp);
+      } catch {
+        // Nothing to clean up that matters: the name is unique and the file holds the same bytes.
+      }
     }
   },
   read: (path, maxBytes) => readRegularFile(path, maxBytes, { noFollow: true }),

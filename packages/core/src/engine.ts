@@ -534,13 +534,19 @@ export class StroqEngine {
       event.cwd,
       matches,
     );
+    // A task's refusals name the path, host or tool the agent asked for, and the agent chose that
+    // text: the audit gets it as redacted as the summary of the call is.
+    const audited =
+      gated === null
+        ? decision
+        : { ...decision, reason: await this.safeSummary(decision.reason, event.cwd, matches) };
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
       tool: event.toolName,
       summary,
       classes,
-      decision,
+      decision: audited,
       ...(gated === null ? {} : { taskId: gated.taskId, scope: gated.evidence }),
       ...(event.callId === undefined ? {} : { callId: event.callId }),
       ...(provenance.length > 0 ? { provenance } : {}),

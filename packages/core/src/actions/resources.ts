@@ -135,7 +135,7 @@ const FILE_FIELDS = ['file_path', 'notebook_path', 'path'] as const;
  */
 function ofNamedFiles(
   input: Readonly<Record<string, unknown>>,
-  op: Op,
+  op: Op | 'edit',
   cwd: string,
 ): ToolResources {
   const requests: PathRequest[] = [];
@@ -143,8 +143,12 @@ function ofNamedFiles(
   for (const field of FILE_FIELDS) {
     const value = input[field];
     if (value === undefined || value === null) continue;
-    if (typeof value === 'string' && value !== '') requests.push({ raw: value, op, base: cwd });
-    else complete = false;
+    if (typeof value === 'string' && value !== '') {
+      // An edit reads the file it changes (it matches `old_string` against it and answers with
+      // what it found), so a scope that keeps a file unreadable has to keep it uneditable too.
+      if (op === 'edit') requests.push({ raw: value, op: 'read', base: cwd });
+      requests.push({ raw: value, op: op === 'edit' ? 'write' : op, base: cwd });
+    } else complete = false;
   }
   return ofPaths(requests, complete && requests.length > 0);
 }
@@ -246,10 +250,11 @@ export function resourcesOfFileTool(
       case 'Read':
         return ofNamedFiles(toolInput, 'read', cwd);
       case 'Write':
+        return ofNamedFiles(toolInput, 'write', cwd);
       case 'Edit':
       case 'MultiEdit':
       case 'NotebookEdit':
-        return ofNamedFiles(toolInput, 'write', cwd);
+        return ofNamedFiles(toolInput, 'edit', cwd);
       case 'Grep':
       case 'LS':
         return ofSearch(toolInput, cwd);

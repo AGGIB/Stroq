@@ -7,7 +7,8 @@ import type { ScopeGate, ScopeGateInput } from '../../src/scope/types.js';
 import { FileSecretIndex } from '../../src/secrets/index.js';
 import { FileSessionStore } from '../../src/taint/session-store.js';
 import type { PreToolEvent } from '../../src/types.js';
-import { gateFixture, type Fixture } from './gate-fixture.js';
+import { createScopeGate } from '../../src/scope/gate.js';
+import { POSIX_PATHS, gateFixture, type Fixture } from './gate-fixture.js';
 import { NOW, PROJECT, SESSION, tempDir } from './helpers.js';
 
 const event = (toolName: string, toolInput: Record<string, unknown> = {}): PreToolEvent => ({
@@ -138,9 +139,16 @@ describe('the engine applies the task gate to every pre-tool decision', () => {
     },
   );
 
-  it('leaves decisions and audit shape unchanged when a configured gate finds no task', async () => {
+  it('leaves decisions and audit shape unchanged when the process runs under no task', async () => {
     const f = gateFixture({ permit: 'none' });
-    const { e, audit } = engine(f);
+    const scope = createScopeGate({
+      taskId: null,
+      store: f.store,
+      keys: f.keyStore,
+      context: () => f.run,
+      paths: POSIX_PATHS,
+    });
+    const { e, audit } = engine(f, { scope });
     const result = await e.pre(event('TodoWrite'));
     expect(result.decision.effect).toBe('allow');
     const entry = (await audit.readAll())[0];

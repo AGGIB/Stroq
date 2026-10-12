@@ -200,10 +200,23 @@ describe('step 3: the scope refuses', () => {
     });
 
     it('does not ask a tool that touches no files for paths it does not have', async () => {
-      const f = gateFixture({ scope: { tools: ['TodoWrite', 'Task'] } });
+      const f = gateFixture({
+        scope: { tools: ['TodoWrite', 'WebSearch'], net: { mode: 'hosts', hosts: ['a.invalid'] } },
+      });
       expect((await verdictOf(f, callOf('TodoWrite'))).decision.effect).toBe('allow');
-      expect((await verdictOf(f, callOf('Task'))).decision.effect).toBe('allow');
+      expect((await verdictOf(f, callOf('WebSearch'))).decision.effect).toBe('allow');
     });
+
+    // A tool the classifier read no resources of may open any file; a subagent can do anything.
+    it.each(['Task', 'NotebookRead', 'LSP', 'SomethingNew'])(
+      'holds %s to the scope as an incomplete call, because nothing says what it opens',
+      async (tool) => {
+        const f = gateFixture({ scope: { tools: [tool] } });
+        const verdict = await verdictOf(f, callOf(tool, { filePath: '/etc/passwd' }));
+        expect(verdict.decision.effect).toBe('deny');
+        expect(verdict.decision.ruleId).toBe('task-scope-incomplete');
+      },
+    );
   });
 
   describe('the network', () => {

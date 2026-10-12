@@ -62,8 +62,6 @@ describe('resourcesOfFileTool: one named file', () => {
   it.each([
     ['Read', 'read'],
     ['Write', 'write'],
-    ['Edit', 'write'],
-    ['MultiEdit', 'write'],
   ] as const)('%s names its file_path as a %s', (tool, op) => {
     const path = join(cwd, 'src', 'a.ts');
     expect(resourcesOfFileTool(tool, { file_path: path }, cwd)).toEqual({
@@ -74,12 +72,33 @@ describe('resourcesOfFileTool: one named file', () => {
     });
   });
 
-  it('reads the notebook_path of NotebookEdit as a write', () => {
+  // An edit matches `old_string` against the file and answers with what it found, so it reads the
+  // file it changes. A scope that keeps a file unreadable must keep it uneditable as well.
+  it.each(['Edit', 'MultiEdit'] as const)(
+    '%s names its file_path as a read and a write',
+    (tool) => {
+      const path = join(cwd, 'src', 'a.ts');
+      expect(resourcesOfFileTool(tool, { file_path: path }, cwd)).toEqual({
+        paths: [
+          { path, op: 'read' },
+          { path, op: 'write' },
+        ],
+        pathsComplete: true,
+        urls: [],
+        shell: false,
+      });
+    },
+  );
+
+  it('reads the notebook_path of NotebookEdit as a read and a write', () => {
     const path = join(cwd, 'analysis.ipynb');
     expect(
       resourcesOfFileTool('NotebookEdit', { notebook_path: path, new_source: 'x' }, cwd),
     ).toEqual({
-      paths: [{ path, op: 'write' }],
+      paths: [
+        { path, op: 'read' },
+        { path, op: 'write' },
+      ],
       pathsComplete: true,
       urls: [],
       shell: false,

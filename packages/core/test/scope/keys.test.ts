@@ -1,5 +1,15 @@
 import { createHash, createPublicKey, sign, verify } from 'node:crypto';
-import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -280,4 +290,26 @@ describe('nodeKeyFs', () => {
     expect(() => nodeKeyFs.writeExclusive(path, 'two', 0o600)).toThrow(/EEXIST/);
     expect(readFileSync(path, 'utf8')).toBe('one');
   });
+
+  it('leaves no temporary file behind, whether the write succeeds or the file exists', () => {
+    const dir = tempDir('keys');
+    const path = join(dir, 'x');
+    nodeKeyFs.writeExclusive(path, 'one', 0o600);
+    expect(() => nodeKeyFs.writeExclusive(path, 'two', 0o600)).toThrow(/EEXIST/);
+    expect(readdirSync(dir)).toEqual(['x']);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a key directory that is a link, and does not change what it points at',
+    () => {
+      const home = tempDir('keys');
+      const target = join(home, 'elsewhere');
+      mkdirSync(target, { mode: 0o755 });
+      chmodSync(target, 0o755);
+      const link = join(home, 'keys');
+      symlinkSync(target, link);
+      expect(() => nodeKeyFs.mkdirPrivate(link)).toThrow(/link/);
+      expect(statSync(target).mode & 0o777).toBe(0o755);
+    },
+  );
 });

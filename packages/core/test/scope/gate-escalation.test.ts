@@ -146,9 +146,9 @@ describe('escalation: a signed extension lifts one refusal, once', () => {
         ]),
       },
     );
-    f.escalate(fingerprintOf('Edit', 'file:write', a));
+    f.escalate(fingerprintOf('Edit', 'file:edit', a));
     expect((await verdictOf(f, call)).decision.effect).toBe('deny');
-    f.escalate(fingerprintOf('Edit', 'file:write', b));
+    f.escalate(fingerprintOf('Edit', 'file:edit', b));
     expect((await verdictOf(f, call)).decision.effect).toBe('allow');
     expect((await verdictOf(f, call)).decision.effect).toBe('deny');
   });

@@ -62,7 +62,6 @@ export interface FixtureOptions {
   readonly run?: Partial<TaskRunContext>;
   /** `none` leaves the task without a permit file. */
   readonly permit?: 'write' | 'none';
-  readonly requirePermit?: boolean;
 }
 
 /** A real key store, permit store and gate on a temp home: nothing here touches the real one. */
@@ -90,7 +89,6 @@ export function gateFixture(options: FixtureOptions = {}): Fixture {
     context: () => run,
     now: () => clock.now,
     paths: POSIX_PATHS,
-    ...(options.requirePermit === undefined ? {} : { requirePermit: options.requirePermit }),
   });
   return {
     home,
