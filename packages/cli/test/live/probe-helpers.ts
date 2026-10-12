@@ -25,3 +25,18 @@ export const probe = (
   if (found === undefined) throw new Error(`no ${kind} probe`);
   return found;
 };
+
+/** Two directories down, in the project: a place the real probes never use. */
+export const NESTED_FILE = 'sub/dir/marker.txt';
+
+/**
+ * A probe whose file has directories in front of it. The three real probes keep their files in the root of
+ * the project, but the code that clears and reads a sentinel takes any path inside the project, and a link
+ * in front of the file is the way such a path could lead out of it. The tests that prove it never does use
+ * this probe, so that the proof does not depend on where the real probes happen to put their files today.
+ */
+export const nestedProbe = (file: string = NESTED_FILE): Probe => ({
+  ...probe('allow'),
+  id: 'nested',
+  sentinel: { file, holds: NONCE },
+});

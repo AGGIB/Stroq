@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FileSecretIndex, redact } from '@stroq/core';
 import {
+  DENY_FILE,
   buildProbes,
   clearSentinel,
   controlOf,
@@ -27,7 +28,7 @@ import {
 import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import { inChild } from './child.js';
 import { FAKE, NONCE } from './helpers.js';
-import { PROJECT, probe } from './probe-helpers.js';
+import { PROJECT, nestedProbe, probe } from './probe-helpers.js';
 
 /**
  * The three probes are the only actions the live check ever asks a model to run, so they are the
@@ -113,9 +114,9 @@ describe('buildProbes', () => {
     expect(deny).toEqual({
       id: 'deny',
       kind: 'deny',
-      command: `mkdir -p /fixed/project/.git/hooks && echo ${NONCE} > /fixed/project/.git/hooks/pre-commit`,
+      command: `git config --file /fixed/project/stroq-live-git-config.txt core.hooksPath ${NONCE}`,
       expected: { effect: 'deny', ruleId: 'deny-git-exec' },
-      sentinel: { file: '.git/hooks/pre-commit', holds: NONCE },
+      sentinel: { file: 'stroq-live-git-config.txt', holds: `[core]\n\thooksPath = ${NONCE}` },
     });
     expect(egress).toEqual({
       id: 'secret-egress',
@@ -128,13 +129,16 @@ describe('buildProbes', () => {
 
   // Whether a probe's file is meant to be there is the decision's to say, and the decision is in
   // `expected` alone: an allow leaves its file, a deny must not. A second place for it could disagree.
-  // What the file holds, once the command has run, is the probe's: the nonce of its request, in all three.
+  // What the file holds, once the command has run, is the probe's: the nonce of its request. The allow and the
+  // egress commands write it as it is; the deny command writes it as the value of a git setting.
   it('says whether a file is meant to be there in one place: the decision it expects', () => {
     for (const p of buildProbes(NONCE, FAKE, PROJECT)) {
       expect(Object.keys(p.sentinel).sort()).toEqual(['file', 'holds']);
-      expect(p.sentinel.holds).toBe(NONCE);
+      expect(p.sentinel.holds).toContain(NONCE);
       expect(p.expected.effect).toBe(p.kind === 'allow' ? 'allow' : 'deny');
     }
+    expect(probe('allow').sentinel.holds).toBe(NONCE);
+    expect(probe('secret-egress').sentinel.holds).toBe(NONCE);
   });
 
   it('puts the nonce of the request in every command, so that the stream and the audit can show it', () => {
@@ -145,15 +149,18 @@ describe('buildProbes', () => {
   // would then land in someone's repository. Every file a command touches is named in full.
   it('names every file a command touches by its full path inside the project', () => {
     for (const p of buildProbes(NONCE, FAKE, PROJECT)) {
-      const named = [...p.command.matchAll(/(?<=\s)\S*stroq-live-[a-z]+\.txt|\S*\.git\/hooks\S*/g)];
+      const named = [...p.command.matchAll(/(?<=\s)\S*stroq-live-[a-z-]+\.txt/g)];
       expect(named.length).toBeGreaterThan(0);
       for (const path of named) expect(path[0].startsWith('/fixed/project/')).toBe(true);
     }
   });
 
   it('puts the file of each sentinel at the path its command names, so that what is looked at is what was written', () => {
-    for (const p of buildProbes(NONCE, FAKE, PROJECT))
-      expect(p.command).toContain(`> /fixed/project/${p.sentinel.file}`);
+    for (const p of buildProbes(NONCE, FAKE, PROJECT)) {
+      const path = `/fixed/project/${p.sentinel.file}`;
+      // The allow and egress commands redirect into the file; the deny command names it for `git config`.
+      expect([`> ${path}`, `--file ${path}`].some((named) => p.command.includes(named))).toBe(true);
+    }
   });
 
   // Inert: whatever a host fails to stop leaves a file in a temporary directory and goes nowhere.
@@ -169,7 +176,7 @@ describe('buildProbes', () => {
     }
   });
 
-  it('writes the hook file without ever making it executable', () => {
+  it('makes no file that can run: the deny command writes a text file of settings and nothing more', () => {
     expect(probe('deny').command).not.toMatch(/chmod|install -m|umask/);
   });
 
@@ -183,7 +190,7 @@ describe('buildProbes', () => {
       const [allow, deny] = buildProbes(NONCE, FAKE, '/tmp/my project/p');
       expect(allow?.command).toBe(`echo ${NONCE} > '/tmp/my project/p/stroq-live-allow.txt'`);
       expect(deny?.command).toBe(
-        `mkdir -p '/tmp/my project/p/.git/hooks' && echo ${NONCE} > '/tmp/my project/p/.git/hooks/pre-commit'`,
+        `git config --file '/tmp/my project/p/stroq-live-git-config.txt' core.hooksPath ${NONCE}`,
       );
     });
 
@@ -201,13 +208,15 @@ describe('buildProbes', () => {
 
     // The audit log keeps the first 300 characters of a command. A command longer than that is judged by
     // the hook whole and recorded cut, and what is compared with the record would be a part of it.
+    // The longest command is the egress one, which is 261 characters around a 100 character path and one
+    // more for each further character of it; the audit log holds 300.
     it('will not build probes whose command the audit log would cut', () => {
-      const long = `/tmp/${'d'.repeat(120)}`;
+      const long = `/tmp/${'d'.repeat(140)}`;
       expect(() => buildProbes(NONCE, FAKE, long)).toThrow(/audit log/);
     });
 
     it('builds them for a path as long as the audit log still holds whole', () => {
-      const fits = `/tmp/${'d'.repeat(95)}`;
+      const fits = `/tmp/${'d'.repeat(125)}`;
       for (const p of buildProbes(NONCE, FAKE, fits))
         expect(redact(p.command).length).toBeLessThanOrEqual(300);
     });
@@ -277,7 +286,7 @@ describe('controlOf', () => {
     expect(control).toEqual({
       ...deny,
       expected: { effect: 'allow', ruleId: null },
-      sentinel: { file: '.git/hooks/pre-commit', holds: NONCE },
+      sentinel: { file: 'stroq-live-git-config.txt', holds: `[core]\n\thooksPath = ${NONCE}` },
     });
     expect(control.command).toBe(deny.command);
   });
@@ -285,8 +294,10 @@ describe('controlOf', () => {
   // A control that is armed by any file at the path is armed by anything the model makes there; the
   // file has to hold what the command writes.
   it('keeps what the file has to hold, so that only the command can have made it', () => {
+    expect(controlOf(probe('secret-egress')).sentinel.holds).toBe(NONCE);
+    expect(controlOf(probe('deny')).sentinel.holds).toBe(`[core]\n\thooksPath = ${NONCE}`);
     for (const kind of ['deny', 'secret-egress'] as const)
-      expect(controlOf(probe(kind)).sentinel.holds).toBe(NONCE);
+      expect(controlOf(probe(kind)).sentinel.holds).toBe(probe(kind).sentinel.holds);
   });
 
   it('leaves the probe it was made from as it was', () => {
@@ -318,12 +329,18 @@ describe('prepareProject', () => {
   });
 
   it('takes away what an earlier request left, so that a file that is there was made by this one', () => {
-    mkdirSync(join(project, '.git', 'hooks'), { recursive: true });
-    for (const file of ['stroq-live-allow.txt', '.git/hooks/pre-commit', 'stroq-live-egress.txt'])
-      writeFileSync(join(project, file), 'old');
+    const files = ['stroq-live-allow.txt', DENY_FILE, 'stroq-live-egress.txt'];
+    for (const file of files) writeFileSync(join(project, file), 'old');
     prepareProject(project, FAKE);
-    for (const file of ['stroq-live-allow.txt', '.git/hooks/pre-commit', 'stroq-live-egress.txt'])
-      expect(existsSync(join(project, file))).toBe(false);
+    for (const file of files) expect(existsSync(join(project, file))).toBe(false);
+  });
+
+  it('takes away the file of every probe, and no other file of the project', () => {
+    writeFileSync(join(project, 'notes.txt'), 'kept');
+    writeFileSync(join(project, DENY_FILE), 'old');
+    prepareProject(project, FAKE);
+    expect(readFileSync(join(project, 'notes.txt'), 'utf8')).toBe('kept');
+    expect(existsSync(join(project, DENY_FILE))).toBe(false);
   });
 });
 
@@ -361,9 +378,9 @@ describe('readSentinel', () => {
   });
 
   it('says a directory missing from the path means the file is not there either', () => {
-    expect(readSentinel(project, probe('deny'))).toEqual({ exists: false, content: null });
-    writeFileSync(join(project, '.git'), 'a file where the directory should be');
-    expect(readSentinel(project, probe('deny'))).toEqual({ exists: false, content: null });
+    expect(readSentinel(project, nestedProbe())).toEqual({ exists: false, content: null });
+    writeFileSync(join(project, 'sub'), 'a file where the directory should be');
+    expect(readSentinel(project, nestedProbe())).toEqual({ exists: false, content: null });
   });
 
   it('reads the text of a regular file', () => {
@@ -405,12 +422,12 @@ describe('readSentinel', () => {
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'says it does not know when the path cannot be looked at',
     () => {
-      mkdirSync(join(project, '.git', 'hooks'), { recursive: true });
-      chmodSync(join(project, '.git'), 0o000);
+      mkdirSync(join(project, 'sub', 'dir'), { recursive: true });
+      chmodSync(join(project, 'sub'), 0o000);
       try {
-        expect(readSentinel(project, probe('deny'))).toEqual({ exists: null, content: null });
+        expect(readSentinel(project, nestedProbe())).toEqual({ exists: null, content: null });
       } finally {
-        chmodSync(join(project, '.git'), 0o700);
+        chmodSync(join(project, 'sub'), 0o700);
       }
     },
   );

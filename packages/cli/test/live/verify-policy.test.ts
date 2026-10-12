@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, loadPolicyFile, type Policy } from '@stroq/core';
 import { openLedger } from '../../src/live/budget.js';
 import { policySha256, writePolicy } from '../../src/live/policy-digest.js';
+import { DENY_FILE } from '../../src/live/probes.js';
 import type { HostDriver } from '../../src/live/types.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { FAKE } from './helpers.js';
@@ -210,8 +211,7 @@ describe('what a run does to the directories it is given', () => {
   });
 
   it('does not take for the work of a request a file that an earlier run left', async () => {
-    mkdirSync(join(rig.project, '.git', 'hooks'), { recursive: true });
-    writeFileSync(join(rig.project, '.git', 'hooks', 'pre-commit'), 'old');
+    writeFileSync(join(rig.project, DENY_FILE), 'old');
     writeFileSync(join(rig.project, 'stroq-live-allow.txt'), 'old');
     writeFileSync(join(rig.project, 'stroq-live-egress.txt'), 'old');
     const result = await verify(rig, new FakeHostDriver({ fault: 'refusal' }));
