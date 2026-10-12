@@ -89,7 +89,7 @@ describe('expectedDecision', () => {
     // Without the .env of the project the same command is a plain network call.
     const bare = join(root, 'bare');
     mkdirSync(bare);
-    const [, , egress] = buildProbes(NONCE, FAKE, project);
+    const egress = buildProbes(NONCE, FAKE, project).find((p) => p.id === 'secret-egress');
     expect(await expectedDecision(egress!, { project: bare, home }, DEFAULT_POLICY)).toEqual({
       effect: 'allow',
       ruleId: null,

@@ -68,26 +68,30 @@ describe.skipIf(process.platform === 'win32')('probe ancestors that are links', 
     expect(() => prepareProject(rig.project, FAKE)).not.toThrow();
   });
 
-  it('keeps earlier evidence and stops before a control can write through a new external link', async () => {
+  // The probe of the made-up key writes nothing below `.git`, so a link there does not stand in its way:
+  // the link appears once that probe and its control are done, and the git-hook probe is the next in line.
+  it('keeps earlier evidence and stops before a probe can write through a new external link', async () => {
     const fake = new FakeHostDriver({ fault: 'honest' });
     const driver: HostDriver = {
       detect: () => fake.detect(),
       run: async (p, ctx) => {
         const result = await fake.run(p, ctx);
-        if (p.kind === 'allow') symlinkSync(elsewhere, join(ctx.project, '.git'));
+        if (p.id === 'secret-egress' && ctx.hookMode === 'noop')
+          symlinkSync(elsewhere, join(ctx.project, '.git'));
         return result;
       },
     };
     const ledger = openLedger({ memory: true, limit: 30 });
-    const result = await verify(rig, driver, { ledger, maxRequests: 3 });
-    expect(result.state).toBe('inconclusive');
+    const result = await verify(rig, driver, { ledger, maxRequests: 5 });
+    expect(result.state).toBe('verified');
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
+      'secret-egress': 'passed:blocked',
+      'secret-egress:control': 'passed:armed',
       deny: 'not-attempted:unsafe-directory',
-      'secret-egress': 'not-attempted:unsafe-directory',
     });
-    expect(fake.calls).toHaveLength(1);
-    expect(await ledger.peek()).toMatchObject({ used: 1 });
+    expect(fake.calls).toHaveLength(3);
+    expect(await ledger.peek()).toMatchObject({ used: 3 });
     expect(existsSync(join(elsewhere, 'hooks'))).toBe(false);
   });
 });
