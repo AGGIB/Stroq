@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runProblem } from '../../../src/live/run-problem.js';
 import { type HostRun, REASONS } from '../../../src/live/types.js';
@@ -94,7 +95,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
 
   describe('a host that cannot be started', () => {
     it('is a run that did not get to the end, with the reason, and not a throw', async () => {
-      const run = await driverOf({ bin: `${fake.dir}/no-such-claude` }).run(
+      const run = await driverOf({ bin: join(fake.dir, 'no-such-claude') }).run(
         probe('allow', NONCE, rig.project),
         ctxFor(),
       );
@@ -106,7 +107,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     it('is the same when the directory to run in is not there', async () => {
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
-        ctxFor({ project: `${rig.root}/gone` }),
+        ctxFor({ project: join(rig.root, 'gone') }),
       );
       expect(run.exitCode).toBeNull();
       expect(run.stderrTail).toMatch(/could not start/);

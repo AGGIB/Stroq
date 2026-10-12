@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { claudeArgv } from '../../../src/live/drivers/claude-argv.js';
 import { controlOf } from '../../../src/live/probes.js';
@@ -39,7 +40,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     });
 
     it('says a program that is not there is not there, and why', async () => {
-      const found = await driverOf({ bin: `${fake.dir}/no-such-claude` }).detect();
+      const found = await driverOf({ bin: join(fake.dir, 'no-such-claude') }).detect();
       expect(found.available).toBe(false);
       expect(found.version).toBeNull();
       expect(found.note).toMatch(/not found|could not start/);

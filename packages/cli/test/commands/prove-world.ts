@@ -15,6 +15,12 @@ import { fakeTerminal } from '../helpers/fake-terminal.js';
  * probes hold the path of the folder a check runs in, and the audit log keeps 300 characters of a command), a
  * Stroq home and a HOME of its own, and a stand-in for the host. The real `claude` is never started.
  */
+/**
+ * `stroq prove` says "the live check does not run on Windows yet" and exits 3 there, which `prove-usage.test.ts`
+ * holds by naming the system. The tests of what the command does when it does run are for the systems it runs on.
+ */
+export const RUNS_HERE = process.platform !== 'win32';
+
 export let temp: string;
 export let stroqHome: string;
 let saved: Record<string, string | undefined>;

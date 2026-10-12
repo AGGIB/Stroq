@@ -9,6 +9,7 @@ import {
   leftBehind,
   prove,
   putPolicyFile,
+  RUNS_HERE,
   stroqHome,
   temp,
 } from './prove-world.js';
@@ -18,7 +19,17 @@ import {
  * what becomes of it when it is interrupted.
  */
 
-describe('a dry run', () => {
+/** The names of what is below a directory, or none when it is not there: one read, with no look first. */
+function namesBelow(dir: string): string[] {
+  try {
+    return readdirSync(dir, { recursive: true, withFileTypes: true }).map((entry) => entry.name);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+}
+
+describe.skipIf(!RUNS_HERE)('a dry run', () => {
   it('makes no request, writes nothing and exits 0', async () => {
     const ledger = join(temp, 'ledger.json');
     process.env[LEDGER_ENV] = ledger;
@@ -72,7 +83,7 @@ describe('a dry run', () => {
   });
 });
 
-describe('what it spends from', () => {
+describe.skipIf(!RUNS_HERE)('what it spends from', () => {
   it('counts the requests in the file STROQ_LIVE_LEDGER names, when it is set', async () => {
     const ledger = join(temp, 'owner', 'ledger.json');
     process.env[LEDGER_ENV] = ledger;
@@ -98,8 +109,7 @@ describe('what it spends from', () => {
   it('keeps the count in memory, to the cap of the run, and writes no ledger, when it is not set', async () => {
     const ran = await prove(['--yes', '--max-requests', '2'], HONEST_LIVE);
     expect(ran.driver?.calls).toHaveLength(2);
-    const files = existsSync(stroqHome) ? readdirSync(stroqHome, { recursive: true }) : [];
-    expect(files.map(String).filter((name) => /ledger/i.test(name))).toEqual([]);
+    expect(namesBelow(stroqHome).filter((name) => /ledger/i.test(name))).toEqual([]);
   });
 
   it('refuses a ledger it cannot use, before it asks or spends', async () => {
@@ -112,7 +122,7 @@ describe('what it spends from', () => {
   });
 });
 
-describe('what it leaves behind', () => {
+describe.skipIf(!RUNS_HERE)('what it leaves behind', () => {
   it('removes its temporary folder when the check ends well', async () => {
     const ran = await prove(['--yes'], HONEST_LIVE);
     expect(ran.code).toBe(0);
@@ -149,7 +159,7 @@ describe('what it leaves behind', () => {
   });
 });
 
-describe('a check that is interrupted', () => {
+describe.skipIf(!RUNS_HERE)('a check that is interrupted', () => {
   function interruptible() {
     const handlers = new Map<string, () => void>();
     const signals = {

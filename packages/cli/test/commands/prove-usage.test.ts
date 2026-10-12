@@ -3,7 +3,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { type HostDriver } from '../../src/live/types.js';
 import { fakeTerminal } from '../helpers/fake-terminal.js';
-import { HONEST_LIVE, json, leftBehind, prove, RAW_CONTROL, stroqHome } from './prove-world.js';
+import {
+  HONEST_LIVE,
+  json,
+  leftBehind,
+  prove,
+  RAW_CONTROL,
+  RUNS_HERE,
+  stroqHome,
+} from './prove-world.js';
 
 /**
  * `stroq prove`, the command, before it spends anything: the command lines it refuses, the hosts it cannot
@@ -101,21 +109,24 @@ describe('a host it cannot check', () => {
     expect(ran.driver?.calls).toEqual([]);
   });
 
-  it('says the host is not there, makes no request, writes nothing and exits 3', async () => {
-    const ran = await prove(['--yes'], {
-      ...HONEST_LIVE,
-      fake: { fault: 'honest', available: false, note: 'claude was not found' },
-    });
-    expect(ran.code).toBe(3);
-    expect(ran.out).toMatch(/NOT RUN/);
-    expect(ran.out).toContain('claude was not found');
-    expect(ran.driver?.calls).toEqual([]);
-    expect(existsSync(join(stroqHome, 'live'))).toBe(false);
-    expect(leftBehind()).toEqual([]);
-  });
+  it.skipIf(!RUNS_HERE)(
+    'says the host is not there, makes no request, writes nothing and exits 3',
+    async () => {
+      const ran = await prove(['--yes'], {
+        ...HONEST_LIVE,
+        fake: { fault: 'honest', available: false, note: 'claude was not found' },
+      });
+      expect(ran.code).toBe(3);
+      expect(ran.out).toMatch(/NOT RUN/);
+      expect(ran.out).toContain('claude was not found');
+      expect(ran.driver?.calls).toEqual([]);
+      expect(existsSync(join(stroqHome, 'live'))).toBe(false);
+      expect(leftBehind()).toEqual([]);
+    },
+  );
 });
 
-describe('what it asks before it spends anything', () => {
+describe.skipIf(!RUNS_HERE)('what it asks before it spends anything', () => {
   it('refuses, with exit 2 and the word to say, where nobody can answer and --yes was not said', async () => {
     const ran = await prove([], HONEST_LIVE);
     expect(ran.code).toBe(2);
@@ -172,7 +183,7 @@ describe('what it asks before it spends anything', () => {
   });
 });
 
-describe('what it exits with', () => {
+describe.skipIf(!RUNS_HERE)('what it exits with', () => {
   it('is 0 for a live check that verified the host', async () => {
     const ran = await prove(['--yes'], HONEST_LIVE);
     expect(ran.code, ran.err).toBe(0);

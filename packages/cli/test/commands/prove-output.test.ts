@@ -3,13 +3,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readHostResult } from '../../src/live/store.js';
 import { type HostDriver, type HostRun } from '../../src/live/types.js';
-import { HONEST_LIVE, json, prove, RAW_CONTROL, stroqHome } from './prove-world.js';
+import { HONEST_LIVE, json, prove, RAW_CONTROL, RUNS_HERE, stroqHome } from './prove-world.js';
 
 /**
  * `stroq prove`, the command, after it has worked: what it keeps for `stroq doctor`, and what it prints.
  */
 
-describe('what it keeps', () => {
+describe.skipIf(!RUNS_HERE)('what it keeps', () => {
   it('keeps a live verification where the doctor reads it', async () => {
     await prove(['--yes'], HONEST_LIVE);
     const stored = readHostResult(stroqHome, 'claude-code');
@@ -46,7 +46,7 @@ describe('what it keeps', () => {
   });
 });
 
-describe('what it prints', () => {
+describe.skipIf(!RUNS_HERE)('what it prints', () => {
   it('prints the table, the verdict and the advice for a person', async () => {
     const ran = await prove(['--yes'], HONEST_LIVE);
     expect(ran.out).toMatch(/Probe\s+Mark\s+Why/);
