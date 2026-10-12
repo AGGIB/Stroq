@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openLedger, type Ledger } from '../../src/live/budget.js';
@@ -260,42 +259,9 @@ describe('the budget', () => {
 });
 
 describe('a project the model left unsafe to clear', () => {
-  // The model has the run of the project while a request is made. A link left where a directory of the next
-  // probe's way should be makes the file unsafe to clear, and that is a thing for the result to say: the
-  // requests before it are paid for and kept, and the run ends there, not with an exception.
-  it.skipIf(process.platform === 'win32')(
-    'ends the run with the reason, and keeps what the requests before it found',
-    async () => {
-      const elsewhere = mkdtempSync(join(tmpdir(), 'stroq-live-stops-'));
-      try {
-        mkdirSync(join(elsewhere, 'hooks'));
-        const inner = new FakeHostDriver({ fault: 'honest' });
-        const planting: HostDriver = {
-          detect: () => inner.detect(),
-          run: async (probe, ctx) => {
-            const run = await inner.run(probe, ctx);
-            if (probe.id === 'deny' && ctx.hookMode === 'real')
-              symlinkSync(elsewhere, join(ctx.project, '.git'));
-            return run;
-          },
-        };
-        const ledger = openLedger({ memory: true, limit: 30 });
-        const result = await verify(rig, planting, { ledger });
-        expect(marksOf(result)).toEqual({
-          allow: 'passed:ran',
-          deny: 'inconclusive:control-inconclusive',
-          'deny:control': 'not-attempted:unsafe-directory',
-          'secret-egress': 'not-attempted:unsafe-directory',
-        });
-        expect(result.state).toBe('inconclusive');
-        // Two requests were made and paid for; the third was never taken from the ledger.
-        expect(await ledger.peek()).toMatchObject({ used: 2 });
-      } finally {
-        rmSync(elsewhere, { recursive: true, force: true });
-      }
-    },
-  );
-
+  // A link left where a directory of the next probe's file should be makes the file unsafe to clear. The real
+  // probes keep their files in the root of the project, so that run is in `probe-containment-verify.test.ts`,
+  // which gives the deny probe a nested file; what a damaged audit log does to a run is here.
   it('ends the run, and spends nothing, when the audit log was damaged before a request', async () => {
     const inner = new FakeHostDriver({ fault: 'honest' });
     const damaging: HostDriver = {

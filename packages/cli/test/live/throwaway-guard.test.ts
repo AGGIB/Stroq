@@ -14,11 +14,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from '@stroq/core';
 import { LiveCheckError } from '../../src/live/errors.js';
 import { writePolicy } from '../../src/live/policy-digest.js';
-import { clearSentinel, prepareProject } from '../../src/live/probes.js';
+import { DENY_FILE, clearSentinel, prepareProject } from '../../src/live/probes.js';
 import { verifyHost } from '../../src/live/verify.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { FAKE } from './helpers.js';
-import { probe } from './probe-helpers.js';
+import { nestedProbe, probe } from './probe-helpers.js';
 import { makeRig, type Rig } from './rig.js';
 import { verifyOptions } from './verify-harness.js';
 
@@ -91,23 +91,43 @@ describe('prepareProject', () => {
     },
   );
 
+  // The probe files are all in the root of the project, so there is no directory in front of one for a link
+  // to stand in. What is left to prove is that a link in the place of a probe file goes as the link, and
+  // that a link elsewhere in the project (`.git` was where a model most often left one) is not followed.
   it.skipIf(process.platform === 'win32')(
-    'refuses a project whose .git is a link to a directory elsewhere, and removes nothing there',
-    async () => {
+    'removes a link in the place of a probe file as the link, and removes nothing where it led',
+    () => {
       const elsewhere = plainTemp();
-      mkdirSync(join(elsewhere, 'hooks'));
-      writeFileSync(join(elsewhere, 'hooks', 'pre-commit'), "the owner's own hook");
-      symlinkSync(elsewhere, join(rig.project, '.git'));
-      await refuses(() => prepareProject(rig.project, FAKE));
-      expect(readFileSync(join(elsewhere, 'hooks', 'pre-commit'), 'utf8')).toBe(
-        "the owner's own hook",
-      );
+      writeFileSync(join(elsewhere, 'target.txt'), "the owner's own file");
+      symlinkSync(join(elsewhere, 'target.txt'), join(rig.project, DENY_FILE));
+      prepareProject(rig.project, FAKE);
+      expect(existsSync(join(rig.project, DENY_FILE))).toBe(false);
+      expect(readFileSync(join(elsewhere, 'target.txt'), 'utf8')).toBe("the owner's own file");
     },
   );
 
-  it('is content with a file where the .git directory should be', () => {
-    writeFileSync(join(rig.project, '.git'), 'a file where a directory should be');
-    expect(() => prepareProject(rig.project, FAKE)).not.toThrow();
+  it.skipIf(process.platform === 'win32')(
+    'does not follow a link left at .git to a directory elsewhere, and removes nothing there',
+    () => {
+      const elsewhere = plainTemp();
+      mkdirSync(join(elsewhere, 'hooks'));
+      writeFileSync(join(elsewhere, 'hooks', 'pre-commit'), "the owner's own hook");
+      writeFileSync(join(elsewhere, DENY_FILE), "the owner's own file");
+      symlinkSync(elsewhere, join(rig.project, '.git'));
+      prepareProject(rig.project, FAKE);
+      expect(readFileSync(join(elsewhere, 'hooks', 'pre-commit'), 'utf8')).toBe(
+        "the owner's own hook",
+      );
+      expect(readFileSync(join(elsewhere, DENY_FILE), 'utf8')).toBe("the owner's own file");
+      expect(lstatSync(join(rig.project, '.git')).isSymbolicLink()).toBe(true);
+    },
+  );
+
+  it('takes away a directory a model left in the place of a probe file, with what is in it', () => {
+    mkdirSync(join(rig.project, DENY_FILE, 'inner'), { recursive: true });
+    writeFileSync(join(rig.project, DENY_FILE, 'inner', 'x.txt'), 'left by the model');
+    prepareProject(rig.project, FAKE);
+    expect(existsSync(join(rig.project, DENY_FILE))).toBe(false);
   });
 });
 
@@ -122,15 +142,15 @@ describe('clearSentinel', () => {
   // The model has the run of the project while a request is made, and it can leave a link where a
   // directory should be. A file removed through it would be one of the owner's.
   it.skipIf(process.platform === 'win32')(
-    'refuses a project whose .git is a link to a directory elsewhere, and removes nothing there',
+    'refuses a file below a directory that is a link to a directory elsewhere, and removes nothing there',
     async () => {
       const elsewhere = plainTemp();
-      mkdirSync(join(elsewhere, 'hooks'));
-      writeFileSync(join(elsewhere, 'hooks', 'pre-commit'), "the owner's own hook");
-      symlinkSync(elsewhere, join(rig.project, '.git'));
-      await refuses(() => clearSentinel(rig.project, probe('deny')));
-      expect(readFileSync(join(elsewhere, 'hooks', 'pre-commit'), 'utf8')).toBe(
-        "the owner's own hook",
+      mkdirSync(join(elsewhere, 'dir'));
+      writeFileSync(join(elsewhere, 'dir', 'marker.txt'), "the owner's own file");
+      symlinkSync(elsewhere, join(rig.project, 'sub'));
+      await refuses(() => clearSentinel(rig.project, nestedProbe()));
+      expect(readFileSync(join(elsewhere, 'dir', 'marker.txt'), 'utf8')).toBe(
+        "the owner's own file",
       );
     },
   );
@@ -148,15 +168,16 @@ describe('clearSentinel', () => {
   );
 
   it('is content when the directory above the file is not there', () => {
+    expect(() => clearSentinel(rig.project, nestedProbe())).not.toThrow();
     expect(() => clearSentinel(rig.project, probe('deny'))).not.toThrow();
   });
 
   // Node 22 and Node 24 answer a removal below a file differently (ENOTDIR, and nothing); a model can leave
   // a file where a directory should be, and what is not there is not a reason to stop.
-  it('is content with a file where the .git directory should be, on every Node', () => {
-    writeFileSync(join(rig.project, '.git'), 'a file where a directory should be');
-    expect(() => clearSentinel(rig.project, probe('deny'))).not.toThrow();
-    expect(readFileSync(join(rig.project, '.git'), 'utf8')).toBe(
+  it('is content with a file where the directory above it should be, on every Node', () => {
+    writeFileSync(join(rig.project, 'sub'), 'a file where a directory should be');
+    expect(() => clearSentinel(rig.project, nestedProbe())).not.toThrow();
+    expect(readFileSync(join(rig.project, 'sub'), 'utf8')).toBe(
       'a file where a directory should be',
     );
   });
