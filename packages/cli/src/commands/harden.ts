@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util';
+import { applyCommand } from './harden-apply.js';
 import { failureOf } from './harden-errors.js';
 import { contextOf, type HardenContext, type HardenDeps } from './harden-deps.js';
 import type { HardenFlags } from './harden-flags.js';
@@ -67,6 +68,9 @@ export async function runHarden(args: readonly string[], deps: HardenDeps = {}):
     acknowledgeCredentialLoss: values['acknowledge-credential-loss'] === true,
     acknowledgeReformat: values['acknowledge-reformat'] === true,
   };
+  if (chosen.subcommand === 'apply' && flags.json && !flags.yes) {
+    return usageError('--json does not ask a question, so apply needs --yes with it');
+  }
   const selection = chooseRecipe(values);
   if (!selection.ok) {
     return selection.code === USAGE_ERROR
@@ -90,7 +94,9 @@ async function dispatch(
 ): Promise<number> {
   const printer: Printer = makePrinter(flags.json, subcommand);
   try {
-    return planCommand(ctx, recipe, scope, flags, printer);
+    return subcommand === 'apply'
+      ? await applyCommand(ctx, recipe, scope, flags, printer)
+      : planCommand(ctx, recipe, scope, flags, printer);
   } catch (err) {
     const { code, outcome } = failureOf(err);
     return printer.finish(code, outcome);

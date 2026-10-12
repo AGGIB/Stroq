@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { stroqHome } from '../paths.js';
-import type { HardenEnv } from '../harden/types.js';
+import type { Fs, HardenEnv } from '../harden/types.js';
 import type { Terminal } from '../ui/terminal.js';
 import { stroqVersion } from '../version.js';
 
@@ -17,6 +17,8 @@ export interface HardenDeps {
   readonly stroqHome?: string;
   readonly now?: () => Date;
   readonly version?: string;
+  /** The file system the engine writes with; a test makes one of its calls fail or interfere. */
+  readonly fs?: Fs;
   /** A terminal for the question; without one the process's own is used when a person is at it. */
   readonly terminal?: Terminal;
 }
@@ -50,6 +52,7 @@ export function contextOf(deps: HardenDeps): HardenContext {
       home: deps.stroqHome ?? stroqHome(),
       now: deps.now ?? (() => new Date()),
       version: deps.version ?? stroqVersion(),
+      ...(deps.fs === undefined ? {} : { fs: deps.fs }),
     },
     askable: async () =>
       deps.terminal === undefined

@@ -30,8 +30,11 @@ export interface HardenWorld {
   readonly deps: HardenDeps;
   /** Runs `stroq harden <args>`; `extra` replaces some of the world's own deps for this one run. */
   run(args: readonly string[], extra?: Partial<HardenDeps>): Promise<Run>;
-  /** Runs it with a person at a terminal who types `answers`. */
-  runAsking(args: readonly string[], answers: readonly (string | null)[]): Promise<Run>;
+  /** Runs it with a person at a terminal who types `answers`; `prompts` are the questions it was asked. */
+  runAsking(
+    args: readonly string[],
+    answers: readonly (string | null)[],
+  ): Promise<Run & { readonly prompts: readonly string[] }>;
   /** Runs it with a terminal that is not interactive: a pipe, a script. */
   runPiped(args: readonly string[]): Promise<Run>;
 }
@@ -80,8 +83,11 @@ export function hardenWorld(overrides: Partial<HardenDeps> = {}): HardenWorld {
     inProject: (...parts) => join(project, ...parts),
     deps,
     run,
-    runAsking: (args, answers) =>
-      run(args, { terminal: fakeTerminal({ interactive: true, answers }).term }),
+    runAsking: async (args, answers) => {
+      const fake = fakeTerminal({ interactive: true, answers });
+      const result = await run(args, { terminal: fake.term });
+      return { ...result, prompts: fake.prompts };
+    },
     runPiped: (args) => run(args, { terminal: fakeTerminal({ interactive: false }).term }),
   };
 }

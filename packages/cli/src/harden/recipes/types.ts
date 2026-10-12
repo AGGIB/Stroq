@@ -50,6 +50,8 @@ export interface RecipeTarget {
     readonly adds: string;
     /** Said instead of the change when everything is there already. */
     readonly alreadyDone: string;
+    /** Said after the change is made: what it does now, and that it is not more than that. */
+    readonly done: string;
   };
   readonly change: RecipeChange;
   /** The mode of the file if the recipe has to make it. */

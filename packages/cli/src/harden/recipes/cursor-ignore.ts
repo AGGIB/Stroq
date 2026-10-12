@@ -37,6 +37,7 @@ function target(context: RecipeContext): RecipeTarget {
     words: {
       adds: 'Adds this block to the file, between two marker lines:',
       alreadyDone: 'Nothing to change: the block is already in place.',
+      done: 'Cursor is now asked to leave these files out of what it indexes and sends.',
     },
     change: { kind: 'text-block', id: BLOCK_ID, lines: PROJECT_SECRET_FILES },
     newFileMode: NEW_IGNORE_MODE,
