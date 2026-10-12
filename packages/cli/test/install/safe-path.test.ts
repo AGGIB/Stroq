@@ -135,7 +135,6 @@ const ACCEPTED: readonly string[] = [
   'gitx',
   'git~',
   'git~x',
-  'git~1.txt',
   'COM10',
   'LPT10',
   'COM',

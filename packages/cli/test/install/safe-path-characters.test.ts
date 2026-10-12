@@ -40,6 +40,11 @@ const NAMED_CODE_POINTS: readonly (readonly [label: string, char: string])[] = N
 const CONTROL = /^\p{Cc}$/u;
 const HIDDEN = /^[\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]$/u;
 const BIDI_CONTROL = /^\p{Bidi_Control}$/u;
+// A space that is not the ordinary one, and the braille blank; and the one combining mark that NTFS
+// upper-cases. Refused for the look of the name, or the name it can be on a disk, and not for a class
+// of hidden characters. A character that narrows to a separator is found by its plain form.
+const LOOKALIKE_SPACE = /^(?:(?! )\p{Zs}|\u{2800})$/u;
+const YPOGEGRAMMENI = '\u0345';
 const DEFAULT_IGNORABLE = /^\p{Default_Ignorable_Code_Point}$/u;
 
 /** The characters that are refused for what they do to a path and not for what they look like. */
@@ -155,6 +160,12 @@ function expectedReason(char: string, isSurrogate: boolean): RegExp | null {
   if (CONTROL.test(char)) return /control character/;
   if (HIDDEN.test(char)) return /invisible or direction-changing character/;
   if (STRUCTURAL.has(char)) return /./;
+  // A space that narrows to a plain space at the end of a name is refused as ending in one first.
+  if (LOOKALIKE_SPACE.test(char)) return /not the ordinary space|ending in a dot or a space/;
+  if (char === YPOGEGRAMMENI) return /combining mark/;
+  const plain = char.normalize('NFKC');
+  // (The slash itself is how a path is written.)
+  if (char !== '/' && (plain.includes('/') || plain.includes('\\'))) return /path separator/;
   return null;
 }
 
@@ -193,8 +204,19 @@ describe('characters Windows does not allow in a file name', () => {
     ['full-width question mark', 'what\uff1f.md'],
     ['full-width asterisk', 'a\uff0ab.md'],
     ['full-width colon', 'chapter\uff1a1.md'],
-    ['full-width solidus', 'a\uff0fb.md'],
   ])('accepts %s, which is a different character', (_what, path) => {
     expect(checkEntryPath(path)).toEqual({ ok: true, path });
+  });
+
+  // The exception: a program that narrows names turns these two into the separators, and `..`, a
+  // full-width solidus, `.git` is then a path into a repository's hooks. See `componentProblem`.
+  it.each([
+    ['full-width solidus', 'a\uff0fb.md'],
+    ['full-width reverse solidus', 'a\uff3cb.md'],
+  ])('refuses %s, which narrows to a separator', (_what, path) => {
+    expect(checkEntryPath(path)).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/path separator/),
+    });
   });
 });

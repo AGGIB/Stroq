@@ -25,7 +25,7 @@
 // reader that makes entries (a directory, a tarball) does not have to remember to ask.
 import { createHash } from 'node:crypto';
 import { findCollisions, findFolderConflicts, findFolderSpellings } from './path-collision.js';
-import { checkEntryPath, isWellFormed, quotePath } from './safe-path.js';
+import { checkEntryPath, hasUnshowableCharacter, isWellFormed, quotePath } from './safe-path.js';
 import { LIMITS, type EntryKind, type Tree, type TreeEntry } from './types.js';
 
 /** The first line of the text that is hashed. A change to the format is a new name, never a quiet edit. */
@@ -89,6 +89,17 @@ export class TreeError extends Error {
 export function fileDigestOf(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
+
+/**
+ * The length of a byte array as the engine holds it. A class that extends `Uint8Array` can answer
+ * `byteLength` with anything it likes, and a size that was checked against the answer would not be
+ * the size of the bytes that are copied and hashed.
+ */
+const byteLengthGetter = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  'byteLength',
+)?.get as (this: Uint8Array) => number;
+const realLength = (bytes: Uint8Array): number => byteLengthGetter.call(bytes);
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const KIND_LETTER: Readonly<Record<EntryKind, string>> = { file: 'f', symlink: 'l', gitlink: 'g' };
@@ -157,8 +168,13 @@ function checkCarried(header: Header, bytes: unknown, target: unknown, fail: Fai
   if (header.kind === 'symlink') {
     if (bytes !== undefined) return fail('bad-entry', 'a symlink has a target and no bytes');
     if (target === undefined) return {};
-    if (typeof target !== 'string' || target === '' || !isWellFormed(target)) {
-      return fail('bad-entry', 'the target of a symlink is not text');
+    if (
+      typeof target !== 'string' ||
+      target === '' ||
+      !isWellFormed(target) ||
+      hasUnshowableCharacter(target)
+    ) {
+      return fail('bad-entry', 'the target of a symlink is not text that can be shown');
     }
     return { target };
   }
@@ -184,9 +200,12 @@ function checkContent(header: Header, carried: Carried, ownBytes: boolean, fail:
   const { size, sha256 } = header;
   const { bytes, target } = carried;
   if (bytes !== undefined) {
-    const length = bytes.byteLength;
+    const length = realLength(bytes);
     if (length !== size) fail('size-mismatch', `size is ${size}, the bytes are ${length}`);
     const kept = ownBytes ? new Uint8Array(bytes) : bytes;
+    // The copy is a plain array: its length is the one that was compared, or the original lied.
+    if (realLength(kept) !== size)
+      fail('size-mismatch', 'the bytes are not the length they report');
     if (fileDigestOf(kept) !== sha256) fail('digest-mismatch', 'sha256 is not that of the bytes');
     return { bytes: kept };
   }
@@ -221,12 +240,23 @@ function checkEntry(
   raw: unknown,
   expandedSoFar: number,
   ownBytes: boolean,
+  complete: boolean,
 ): { entry: TreeEntry; size: number } {
   if (!isRecord(raw)) throw new TreeError('bad-entry', 'an entry is not an object');
   const { path, kind, exec, size, sha256, bytes, target } = raw;
   const fail = failFor(path);
   const header = checkHeader({ path, kind, exec, size, sha256 }, fail);
   const carried = checkCarried(header, bytes, target, fail);
+  // A record read back from a lock has no content, and its digest is still the digest. A tree that
+  // is about to be inspected is different: an inspector that is given a file with nothing to read
+  // sees nothing, and says nothing, so it must hold what the entries say they hold.
+  if (
+    complete &&
+    ((header.kind === 'file' && carried.bytes === undefined) ||
+      (header.kind === 'symlink' && carried.target === undefined))
+  ) {
+    fail('bad-entry', 'the content is missing, and this tree has to be complete');
+  }
   if (header.size > LIMITS.maxFileBytes) {
     fail('limit', `${header.size} bytes is over the ${LIMITS.maxFileBytes} a file may be`);
   }
@@ -298,7 +328,7 @@ function refuseUnwritable(paths: readonly string[]): void {
  * so a list that grows as it is read cannot get past the limit on the number of entries. With
  * `ownBytes` the entries returned hold copies of the bytes they were given (see `checkContent`).
  */
-function checkedEntries(tree: unknown, ownBytes: boolean): readonly Checked[] {
+function checkedEntries(tree: unknown, ownBytes: boolean, complete = false): readonly Checked[] {
   const entries = isRecord(tree) ? tree['entries'] : undefined;
   if (!Array.isArray(entries)) throw new TreeError('bad-entry', 'a tree has a list of entries');
   const count = entries.length;
@@ -309,7 +339,7 @@ function checkedEntries(tree: unknown, ownBytes: boolean): readonly Checked[] {
   let expanded = 0;
   const checked: Checked[] = [];
   for (let at = 0; at < count; at += 1) {
-    const { entry, size } = checkEntry(entries[at], expanded, ownBytes);
+    const { entry, size } = checkEntry(entries[at], expanded, ownBytes, complete);
     expanded += size;
     checked.push({ entry, key: Buffer.from(entry.path, 'utf8') });
   }
@@ -367,9 +397,19 @@ export function treeDigest(tree: Tree): string {
  * copied before they are hashed, so what was checked is what is kept, and a reader that goes on to
  * reuse its buffers cannot change it. (A byte array cannot be frozen; `treeDigest` catches a change
  * anyway.)
+ *
+ * With `complete` every file must carry its bytes and every symlink its target. A reader that
+ * quarantines an artifact for inspection asks for that: a tree of claims alone has a digest but
+ * nothing for an inspector to read, and an inspector that finds nothing reports nothing. Without it a
+ * record such as a lock keeps (what each entry says it holds) is a tree too.
  */
-export function buildTree(entries: readonly TreeEntry[]): Tree {
-  const owned = checkedEntries({ entries }, true).map(({ entry }) => entry);
+export function buildTree(
+  entries: readonly TreeEntry[],
+  options: { readonly complete?: boolean } = {},
+): Tree {
+  const owned = checkedEntries({ entries }, true, options.complete === true).map(
+    ({ entry }) => entry,
+  );
   return Object.freeze({ entries: Object.freeze(owned) });
 }
 

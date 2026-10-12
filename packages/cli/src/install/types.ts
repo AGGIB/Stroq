@@ -147,6 +147,15 @@ const relativeName = shown
 const label = relativeName.max(LABEL_MAX, {
   message: `a label is at most ${LABEL_MAX} characters`,
 });
+/**
+ * The longest each part of a source may be, which is what npm and GitHub allow of a name: 214
+ * characters for a package, 256 for a version, 39 for an owner, 100 for a repository and 255 for a
+ * ref. A record that comes from outside (a README, a lock) has no business with more, and printing
+ * a name of five million characters is a way to bury what is around it.
+ */
+const SOURCE_PART_MAX = { npmName: 214, version: 256, owner: 39, repo: 100, ref: 255 } as const;
+const part = (max: number, what: string) =>
+  shown.max(max, { message: `${what} is at most ${max} characters` });
 const subdirectory = relativeName.max(LIMITS.maxPathBytes, {
   message: `a subdirectory is at most ${LIMITS.maxPathBytes} characters`,
 });
@@ -203,17 +212,17 @@ export const SourceRefSchema = z.discriminatedUnion('type', [
   z
     .strictObject({
       type: z.literal('npm'),
-      name: shown,
-      version: shown,
+      name: part(SOURCE_PART_MAX.npmName, 'a package name'),
+      version: part(SOURCE_PART_MAX.version, 'a version'),
       integrity: z.exactOptional(INTEGRITY),
     })
     .readonly(),
   z
     .strictObject({
       type: z.literal('github'),
-      owner: shown,
-      repo: shown,
-      ref: shown,
+      owner: part(SOURCE_PART_MAX.owner, 'an owner'),
+      repo: part(SOURCE_PART_MAX.repo, 'a repository'),
+      ref: part(SOURCE_PART_MAX.ref, 'a ref'),
       commit: z.exactOptional(COMMIT),
       subdir: z.exactOptional(subdirectory),
     })
