@@ -136,62 +136,72 @@ function finish(block: OpenBlock): FencedShell | null {
   return text.trim() === '' ? null : { line: block.first, lang: block.lang, text, cut: block.cut };
 }
 
-export function readMarkdownShell(text: string): MarkdownShell {
-  const blocks: FencedShell[] = [];
-  const inline: InlineShell[] = [];
-  let untagged = 0;
-  let open: OpenBlock | null = null;
+/** Keeps what fits of a line of a block, to the character: a line past the cap is cut where the cap falls. */
+function keep(block: OpenBlock, raw: string): void {
+  const room = SHELL_SNIPPET_MAX - block.size;
+  const line = dedent(raw, block.fence.indent);
+  if (line.length + 1 > room) block.cut = true;
+  if (room > 0) {
+    block.lines.push(line.slice(0, room));
+    block.size += Math.min(line.length, room) + 1;
+  }
+}
 
+/** The state of a read of a document, fed one line at a time. */
+class Reader {
+  readonly blocks: FencedShell[] = [];
+  readonly inline: InlineShell[] = [];
+  untagged = 0;
+  private open: OpenBlock | null = null;
+
+  feed(raw: string, number: number): void {
+    if (this.open === null) this.outside(raw, number);
+    else if (closes(raw, this.open.fence)) this.close();
+    else if (this.open.shell) keep(this.open, raw);
+    else inlineOn(raw, number, this.inline);
+  }
+
+  /** A fence that is never closed ends with the document. */
+  close(): void {
+    if (this.open === null) return;
+    const done = finish(this.open);
+    if (done !== null) this.blocks.push(done);
+    this.open = null;
+  }
+
+  private outside(raw: string, number: number): void {
+    const fence = fenceOf(raw);
+    // A backtick fence has no backtick in its info string; a line that has one is inline code.
+    if (fence === null || (fence.char === '`' && fence.info.includes('`'))) {
+      inlineOn(raw, number, this.inline);
+      return;
+    }
+    const lang = langOf(fence.info);
+    if (lang === '') this.untagged += 1;
+    this.open = {
+      fence,
+      lang,
+      shell: SHELL_LANGS.has(lang),
+      first: number + 1,
+      lines: [],
+      size: 0,
+      cut: false,
+    };
+  }
+}
+
+export function readMarkdownShell(text: string): MarkdownShell {
+  const reader = new Reader();
   let number = 0;
   for (let start = 0; start <= text.length;) {
     const next = text.indexOf('\n', start);
     const end = next === -1 ? text.length : next;
-    const raw =
-      text.endsWith('\r', end) && end > start ? text.slice(start, end - 1) : text.slice(start, end);
+    const cr = end > start && text.endsWith('\r', end);
     number += 1;
-
-    if (open !== null) {
-      if (closes(raw, open.fence)) {
-        const done = finish(open);
-        if (done !== null) blocks.push(done);
-        open = null;
-      } else if (open.shell) {
-        // Keep what fits, to the character: a line past the cap is cut where the cap falls.
-        const room = SHELL_SNIPPET_MAX - open.size;
-        const line = dedent(raw, open.fence.indent);
-        if (line.length + 1 > room) open.cut = true;
-        if (room > 0) {
-          open.lines.push(line.slice(0, room));
-          open.size += Math.min(line.length, room) + 1;
-        }
-      } else {
-        inlineOn(raw, number, inline);
-      }
-    } else {
-      const fence = fenceOf(raw);
-      // A backtick fence has no backtick in its info string; a line that has one is inline code.
-      if (fence !== null && !(fence.char === '`' && fence.info.includes('`'))) {
-        const lang = langOf(fence.info);
-        if (lang === '') untagged += 1;
-        open = {
-          fence,
-          lang,
-          shell: SHELL_LANGS.has(lang),
-          first: number + 1,
-          lines: [],
-          size: 0,
-          cut: false,
-        };
-      } else {
-        inlineOn(raw, number, inline);
-      }
-    }
+    reader.feed(text.slice(start, cr ? end - 1 : end), number);
     if (next === -1) break;
     start = next + 1;
   }
-  if (open !== null) {
-    const done = finish(open);
-    if (done !== null) blocks.push(done);
-  }
-  return { blocks, inline, untagged };
+  reader.close();
+  return { blocks: reader.blocks, inline: reader.inline, untagged: reader.untagged };
 }

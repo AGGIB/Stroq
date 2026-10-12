@@ -111,26 +111,34 @@ function placeOf(snippet: ShellSnippet, lines: LineIndex, token: string | null):
   return at === -1 ? snippet.line : snippet.line + lines.lineAt(at) - 1;
 }
 
-function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void {
-  const lines = new LineIndex(snippet.text);
-  const note = ORIGIN_NOTE[snippet.origin];
-  const at = (token: string | null) => placeOf(snippet, lines, token);
-  const base = { file: snippet.file, basis: 'observed' as const };
+/** What the emitters of one piece of text share: where it is, what was read of it, and how to point at a token. */
+interface Emitting {
+  readonly snippet: ShellSnippet;
+  readonly reading: Reading;
+  readonly note: string;
+  readonly findings: Findings;
+  /** The line of the file that a token of the text is on. */
+  readonly at: (token: string | null) => number;
+}
 
+function emitHosts({ snippet, reading, note, findings, at }: Emitting): void {
+  const how = reading.talksToNetwork
+    ? 'a command that talks to the network was recognised'
+    : 'named in the text, not known to be contacted';
   for (const found of reading.hosts) {
     findings.line({
-      ...base,
+      file: snippet.file,
       kind: 'net',
       subject: found.host ?? 'unknown',
       basis: found.host === null ? 'unknown' : 'observed',
       sensitive: reading.talksToNetwork,
       line: at(found.url),
-      detector: `an address in ${note}, ${READING}${reading.talksToNetwork ? '; a command that talks to the network was recognised' : '; named in the text, not known to be contacted'}`,
+      detector: `an address in ${note}, ${READING}; ${how}`,
     });
   }
   if (reading.talksToNetwork && reading.hosts.length === 0) {
     findings.line({
-      ...base,
+      file: snippet.file,
       kind: 'net',
       subject: 'unknown',
       basis: 'unknown',
@@ -139,20 +147,25 @@ function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void
       detector: `a command that talks to the network in ${note} with an address that is not written out, ${READING}`,
     });
   }
-  if (reading.hasCredentialFile) {
-    const files =
-      reading.credentialFiles.length > 0 ? reading.credentialFiles : ['a credential file'];
-    for (const file of files) {
-      findings.line({
-        ...base,
-        kind: 'cred.file',
-        subject: file,
-        sensitive: true,
-        line: at(file === 'a credential file' ? null : file),
-        detector: `a credential file named in ${note}, ${READING}`,
-      });
-    }
+}
+
+function emitCredentials({ snippet, reading, note, findings, at }: Emitting): void {
+  if (!reading.hasCredentialFile) return;
+  const named = reading.credentialFiles.length > 0;
+  for (const file of named ? reading.credentialFiles : ['a credential file']) {
+    findings.line({
+      file: snippet.file,
+      kind: 'cred.file',
+      subject: file,
+      basis: 'observed',
+      sensitive: true,
+      line: at(named ? file : null),
+      detector: `a credential file named in ${note}, ${READING}`,
+    });
   }
+}
+
+function emitClasses({ snippet, reading, note, findings }: Emitting): void {
   for (const found of reading.classes) {
     findings.signal({
       ruleId: found.action,
@@ -163,22 +176,28 @@ function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void
       detector: `${found.action} in ${note}, ${READING}`,
     });
   }
-  emitUnread(snippet, reading, note, findings);
-  // The scripts of a package that run only on request (`test`, `build`) are mostly its own tools: they
-  // are read for addresses and dangers, and not listed program by program.
-  // A launch command is already an exec line of its own, declared by the manifest.
-  if (snippet.origin !== 'package-script' && snippet.origin !== 'launch') {
-    emitPrograms(snippet, reading, note, findings, at);
-  }
 }
 
-function emitPrograms(
-  snippet: ShellSnippet,
-  reading: Reading,
-  note: string,
-  findings: Findings,
-  at: (token: string | null) => number,
-): void {
+function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void {
+  const lines = new LineIndex(snippet.text);
+  const emitting: Emitting = {
+    snippet,
+    reading,
+    note: ORIGIN_NOTE[snippet.origin],
+    findings,
+    at: (token) => placeOf(snippet, lines, token),
+  };
+  emitHosts(emitting);
+  emitCredentials(emitting);
+  emitClasses(emitting);
+  emitUnread(emitting);
+  // The scripts of a package that run only on request (`test`, `build`) are mostly its own tools: they
+  // are read for addresses and dangers, and not listed program by program. A launch command is already
+  // an exec line of its own, declared by the manifest.
+  if (snippet.origin !== 'package-script' && snippet.origin !== 'launch') emitPrograms(emitting);
+}
+
+function emitPrograms({ snippet, reading, note, findings, at }: Emitting): void {
   for (const program of reading.programs) {
     findings.line({
       file: snippet.file,
@@ -209,22 +228,15 @@ const UNREAD_SUBJECT = {
   'too-slow': 'shell text that took too long to read',
 } as const;
 
-function emitUnread(
-  snippet: ShellSnippet,
-  reading: Reading,
-  note: string,
-  findings: Findings,
-): void {
+function emitUnread({ snippet, reading, note, findings }: Emitting): void {
   if (reading.unreadable === null) return;
   const ids = reading.unparsedIds.slice(0, 3).join(', ');
+  const what = UNREAD_SUBJECT[reading.unreadable];
   findings.line({
     kind: 'exec',
     file: snippet.file,
     line: snippet.line,
-    subject:
-      ids === ''
-        ? UNREAD_SUBJECT[reading.unreadable]
-        : `${UNREAD_SUBJECT[reading.unreadable]} (${ids})`,
+    subject: ids === '' ? what : `${what} (${ids})`,
     basis: 'unknown',
     sensitive: true,
     detector: `what the text runs could not be told, in ${note}, ${READING}`,

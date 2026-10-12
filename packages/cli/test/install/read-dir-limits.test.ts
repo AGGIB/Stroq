@@ -75,6 +75,31 @@ describe('readDirTree: limits are typed errors and never a partial tree', () => 
     expect(error.message).toContain('3');
   });
 
+  it('refuses a folder of one more file than the contract allows, without an option to ask for it', async () => {
+    const root = tempRoot();
+    const files = Object.fromEntries(
+      Array.from({ length: LIMITS.maxEntries + 1 }, (_, i) => [`f${i}.txt`, 'x']),
+    );
+    writeFiles(root, files);
+
+    const error = await refusal(() => readDirTree(root));
+
+    expect(error.code).toBe('limit');
+    expect(error.message).toContain(String(LIMITS.maxEntries));
+  });
+
+  it('takes a folder of exactly the number of entries the contract allows', async () => {
+    const root = tempRoot();
+    writeFiles(
+      root,
+      Object.fromEntries(Array.from({ length: LIMITS.maxEntries }, (_, i) => [`f${i}.txt`, 'x'])),
+    );
+
+    const { tree } = await readDirTree(root);
+
+    expect(tree.entries).toHaveLength(LIMITS.maxEntries);
+  });
+
   it.skipIf(isWindows)('counts a link as an entry too', async () => {
     const root = tempRoot();
     writeFiles(root, { 'a.txt': '1', 'b.txt': '2' });
