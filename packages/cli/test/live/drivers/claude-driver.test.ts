@@ -105,7 +105,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     });
 
     it('says nothing of the provider for a host that does not name it', async () => {
-      fake.script([{ lines: lines('allowRan', false) }]);
+      fake.script([{ lines: lines('noProvider') }]);
       const run = await driverOf().run(probe('allow', NONCE, rig.project), ctxFor());
       expect('apiProvider' in run).toBe(false);
     });
@@ -146,22 +146,22 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     });
 
     it('hands over the words the hook gave for a call it denied', async () => {
-      fake.script([{ lines: lines('egressBlocked') }]);
-      const run = await driverOf().run(probe('secret-egress', NONCE, rig.project), ctxFor());
+      fake.script([{ lines: lines('denyBlocked') }]);
+      const run = await driverOf().run(probe('deny', NONCE, rig.project), ctxFor());
       const result = run.stream.find((event) => event.type === 'tool_result');
       expect(result).toMatchObject({ isError: true });
-      expect(result?.text).toContain('Stroq blocked this action (deny-secret-egress)');
+      expect(result?.text).toContain('Stroq blocked this action (deny-git-exec)');
     });
 
     it("hands over the host's own words for a call its permission step stopped, which are not the hook's", async () => {
-      fake.script([{ lines: lines('denyControl') }]);
+      fake.script([{ lines: lines('denyControlUnarmed') }]);
       const run = await driverOf().run(
         controlOf(probe('deny', NONCE, rig.project)),
         ctxFor({ hookMode: 'noop' }),
       );
       const result = run.stream.find((event) => event.type === 'tool_result');
       expect(result).toMatchObject({ isError: true });
-      expect(result?.text).toMatch(/^This Bash command contains multiple operations/);
+      expect(result?.text).toBe('This command requires approval');
       expect(result?.text).not.toContain('Stroq blocked this action');
     });
 

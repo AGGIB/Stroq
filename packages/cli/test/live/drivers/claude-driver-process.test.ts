@@ -9,6 +9,7 @@ import {
   driverOf,
   fake,
   lines,
+  linesThroughCall,
   rig,
   SLOW_START_MS,
   untilDead,
@@ -19,7 +20,7 @@ import {
 describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
   describe('a host that does not finish', () => {
     it('is ended at the deadline, with everything it started, and the run says it timed out', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
+      fake.script([{ lines: linesThroughCall('allowRan'), hang: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
         ctxFor({ deadlineMs: SLOW_START_MS }),
@@ -35,7 +36,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     });
 
     it('is ended with SIGKILL when it will not die of SIGTERM, children included', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true, ignoreTerm: true }]);
+      fake.script([{ lines: linesThroughCall('allowRan'), hang: true, ignoreTerm: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
         ctxFor({ deadlineMs: SLOW_START_MS }),
@@ -46,7 +47,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
     });
 
     it('keeps what the host said before the deadline', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
+      fake.script([{ lines: linesThroughCall('allowRan'), hang: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
         ctxFor({ deadlineMs: SLOW_START_MS }),
@@ -134,7 +135,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
 
   describe('a check that is interrupted', () => {
     it('kills the host and everything it started, at once, and returns the run', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
+      fake.script([{ lines: linesThroughCall('allowRan'), hang: true }]);
       const controller = new AbortController();
       const pending = driverOf({ signal: controller.signal }).run(
         probe('allow', NONCE, rig.project),
@@ -164,11 +165,11 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
 
   describe('a control run', () => {
     it('is started as the real run is started, but for the command of the hook', async () => {
-      fake.script([{ lines: lines('egressBlocked') }, { lines: lines('egressControl') }]);
+      fake.script([{ lines: lines('denyBlocked') }, { lines: lines('denyControl') }]);
       const driver = driverOf();
-      await driver.run(probe('secret-egress', NONCE, rig.project), ctxFor());
+      await driver.run(probe('deny', NONCE, rig.project), ctxFor());
       await driver.run(
-        probe('secret-egress', NONCE, rig.project),
+        probe('deny', NONCE, rig.project),
         ctxFor({ hookMode: 'noop', sessionId: '99999999-2222-4333-8444-555555555555' }),
       );
       const [real, control] = fake.calls();

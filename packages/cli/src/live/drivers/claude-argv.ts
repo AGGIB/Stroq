@@ -4,8 +4,10 @@
 //
 // - `acceptEdits`, not `dontAsk`. Under `dontAsk` the host's own rules block `echo x > file` (a redirect
 //   needs a write permission) and nothing is proven. Under `acceptEdits` the commands of the probes that
-//   `--allowedTools` names run unasked, and anything else (the `mkdir` of the git-hook probe in `.git`, which
-//   the host protects) is stopped by the host's own permission step, which is what the control is there to tell.
+//   `--allowedTools` names run unasked, and anything else is stopped by the host's own permission step,
+//   which is what the control is there to tell. Measured on 2.1.271: the control of the deny probe, a
+//   `git config --file ...`, is stopped by that step ("This command requires approval") unless
+//   `Bash(git config:*)` is among the allowed tools, and then it runs.
 // - `--setting-sources project` and an inline `--settings`: the only hook is the one this check hands over.
 //   The user's own settings file is not read, and the check does not say it is.
 // - `--allowedTools` is variadic: it takes every word after it, so it is last.
@@ -22,11 +24,10 @@ export const CLAUDE_MODEL = 'haiku';
 
 export const CLAUDE_PERMISSION_MODE = 'acceptEdits';
 
-/** What may run unasked: the commands of the probes, and nothing else. */
+/** What may run unasked: the commands of the three probes (`echo`, `git config`, `curl`), and nothing else. */
 export const CLAUDE_ALLOWED_TOOLS: readonly string[] = [
   'Bash(echo:*)',
-  'Bash(printf:*)',
-  'Bash(mkdir:*)',
+  'Bash(git config:*)',
   'Bash(curl:*)',
 ];
 

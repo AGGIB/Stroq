@@ -97,8 +97,7 @@ describe('claudeArgv', () => {
       'acceptEdits',
       '--allowedTools',
       'Bash(echo:*)',
-      'Bash(printf:*)',
-      'Bash(mkdir:*)',
+      'Bash(git config:*)',
       'Bash(curl:*)',
     ]);
   });

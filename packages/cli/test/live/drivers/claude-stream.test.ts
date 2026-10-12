@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeStreamParser, parseClaudeStream } from '../../../src/live/drivers/claude-stream.js';
 import { cpuNow } from '../../helpers/cpu-time.js';
-import { FIXTURE_PROJECT, linesOf, readFixture, STREAMS, withProvider } from './fixtures.js';
+import { FIXTURE_NONCE, FIXTURE_PROJECT, linesOf, readFixture, STREAMS } from './fixtures.js';
 import { assistant, init, parse, result } from './stream-lines.js';
 
 /**
@@ -35,11 +35,7 @@ describe('the streams of a real host', () => {
       {
         type: 'tool_use',
         name: 'Bash',
-        input: {
-          command: expect.stringMatching(
-            /^echo stroq-live-[0-9a-f]{16} > \/tmp\/stroq-live-fixture\/project\/stroq-live-allow\.txt$/,
-          ) as string,
-        },
+        input: { command: `echo ${FIXTURE_NONCE} > ${FIXTURE_PROJECT}/stroq-live-allow.txt` },
       },
       { type: 'tool_result', isError: false, text: '(Bash completed with no output)' },
       { type: 'text', text: 'DONE' },
@@ -50,32 +46,55 @@ describe('the streams of a real host', () => {
     expect(parsed.unparsedLines).toBe(0);
   });
 
-  it('says nothing of the provider for a host whose result line does not name it', () => {
-    expect(parse(readFixture(STREAMS.allowRan)).apiProvider).toBeUndefined();
+  it('says nothing of the provider for a host whose result line does not name it (2.1.144)', () => {
+    expect(parse(readFixture(STREAMS.noProvider)).apiProvider).toBeUndefined();
   });
 
-  it('reads the provider from the result line when it is there', () => {
-    const text = withProvider(readFixture(STREAMS.allowRan), 'firstParty');
-    expect(parse(text).apiProvider).toBe('firstParty');
+  it('reads the provider from the result line when it is there (2.1.271)', () => {
+    expect(parse(readFixture(STREAMS.allowRan)).apiProvider).toBe('firstParty');
   });
 
   it("keeps the hook's own words in the result of a call the hook denied", () => {
-    const { parsed } = parseClaudeStream(readFixture(STREAMS.egressBlocked));
+    const { parsed } = parseClaudeStream(readFixture(STREAMS.denyBlocked));
+    expect(parsed.stream.map((event) => event.type)).toEqual([
+      'init',
+      'tool_use',
+      'tool_result',
+      'text',
+      'result',
+    ]);
     const result = parsed.stream.find((event) => event.type === 'tool_result');
     expect(result?.isError).toBe(true);
-    expect(result?.text).toMatch(/^Stroq blocked this action \(deny-secret-egress\): /);
+    expect(result?.text).toMatch(/^Stroq blocked this action \(deny-git-exec\): /);
   });
 
   it("keeps the host's own words in the result of a call the host's permission step stopped", () => {
-    const control = parse(readFixture(STREAMS.denyControl)).stream.find(
+    const stopped = parse(readFixture(STREAMS.denyControlUnarmed)).stream.find(
       (event) => event.type === 'tool_result',
     );
-    expect(control).toMatchObject({ isError: true });
-    expect(control?.text).toMatch(/^This Bash command contains multiple operations\./);
-    const dontAsk = parse(readFixture(STREAMS.allowHostBlocked)).stream.find(
-      (event) => event.type === 'tool_result',
-    );
-    expect(dontAsk?.text).toMatch(/^Permission to use Bash has been denied because Claude Code/);
+    expect(stopped).toMatchObject({ isError: true, text: 'This command requires approval' });
+    expect(stopped?.text).not.toContain('Stroq blocked this action');
+  });
+
+  it('reads the command that ran in a control that was armed, and a result with no error', () => {
+    const { parsed } = parseClaudeStream(readFixture(STREAMS.denyControl));
+    expect(parsed.stream.find((event) => event.type === 'tool_use')).toMatchObject({
+      input: {
+        command: `git config --file ${FIXTURE_PROJECT}/stroq-live-git-config.txt core.hooksPath ${FIXTURE_NONCE}`,
+      },
+    });
+    expect(parsed.stream.find((event) => event.type === 'tool_result')).toMatchObject({
+      isError: false,
+    });
+  });
+
+  it('reads the secret-egress probe the model declined: no call at all, and an answer that begins BLOCKED', () => {
+    const { parsed, stop } = parseClaudeStream(readFixture(STREAMS.egressRefused));
+    expect(stop).toBeNull();
+    expect(parsed.stream.map((event) => event.type)).toEqual(['init', 'text', 'result']);
+    expect(parsed.stream.some((event) => event.type === 'tool_use')).toBe(false);
+    expect(parsed.stream[1]?.text).toMatch(/^BLOCKED/);
+    expect(parsed.apiProvider).toBe('firstParty');
   });
 
   it('puts the thinking of the model nowhere in the stream', () => {

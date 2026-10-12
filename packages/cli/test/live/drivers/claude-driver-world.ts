@@ -4,7 +4,7 @@ import { type HostDriver } from '../../../src/live/types.js';
 import { NONCE, SESSION } from '../helpers.js';
 import { makeRig, type Rig } from '../rig.js';
 import { type FakeClaude, isAlive, makeFakeClaude } from './fake-claude.js';
-import { linesOf, readFixture, STREAMS, withProvider } from './fixtures.js';
+import { linesOf, readFixture, STREAMS } from './fixtures.js';
 
 /**
  * The driver against a program that stands in for `claude`: a real process with an argv, an environment, a
@@ -57,12 +57,21 @@ export async function untilDead(pid: number): Promise<boolean> {
   return false;
 }
 
-export const lines = (stream: keyof typeof STREAMS, provider = true): string[] =>
-  linesOf(
-    provider
-      ? withProvider(readFixture(STREAMS[stream]), 'firstParty')
-      : readFixture(STREAMS[stream]),
-  );
+/** The lines of a real stream, as the stand-in host prints them. */
+export const lines = (stream: keyof typeof STREAMS): string[] =>
+  linesOf(readFixture(STREAMS[stream]));
+
+/**
+ * The lines of a stream up to the call the model made, which is where a host that then hangs has got to. Found
+ * by what the line says and not by a count of lines: a host prints a different number of lines before its first
+ * call from one version to the next.
+ */
+export function linesThroughCall(stream: keyof typeof STREAMS): string[] {
+  const all = lines(stream);
+  const at = all.findIndex((text) => text.includes('"type":"tool_use"'));
+  if (at < 0) throw new Error(`no call in the stream ${stream}`);
+  return all.slice(0, at + 1);
+}
 
 export const INIT_WITH_KEY = (source: string): string =>
   JSON.stringify({ type: 'system', subtype: 'init', cwd: '/project', apiKeySource: source });

@@ -144,12 +144,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver keeps the contract of a
   it('reads the process it started for what it was given, so that a difference would be seen', async () => {
     const { real, control } = await pair('deny');
     expect(real.permissions.mode).toBe('acceptEdits');
-    expect(real.permissions.allow).toEqual([
-      'Bash(echo:*)',
-      'Bash(printf:*)',
-      'Bash(mkdir:*)',
-      'Bash(curl:*)',
-    ]);
+    expect(real.permissions.allow).toEqual(['Bash(echo:*)', 'Bash(git config:*)', 'Bash(curl:*)']);
     expect(real.flags).toEqual(
       expect.arrayContaining([
         '--output-format',
