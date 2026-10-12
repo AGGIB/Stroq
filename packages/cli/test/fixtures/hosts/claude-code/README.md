@@ -15,7 +15,7 @@ The version is in the first line of each stream (`claude_code_version`) and the 
 
 - `2.1.271/plain.jsonl` is a request with no tools at all. Its last line is the only one that carries
   `modelUsage.<model>.provider` (`firstParty`), which is where the driver reads the provider from.
-- `2.1.144/` holds the nine files of the probe runs. The Claude Code that answered those requests was
+- `2.1.144/` holds the ten files of the probe runs. The Claude Code that answered those requests was
   2.1.144 (the driver was written against 2.1.271, whose output differs in the one place below), and the
   result line of that version has NO `provider` in `modelUsage`. A driver reading it cannot say
   `apiProvider`, and the check then stops on `billing-unknown` after the first request, which is the

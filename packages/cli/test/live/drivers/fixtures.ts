@@ -55,6 +55,7 @@ export const STREAMS = {
 
 export const AUDITS = {
   allow: { version: '2.1.144', file: 'allow.real.acceptEdits.audit.jsonl' },
+  allowDontAsk: { version: '2.1.144', file: 'allow.real.dontAsk.audit.jsonl' },
   egress: { version: '2.1.144', file: 'secret-egress.real.acceptEdits.audit.jsonl' },
   deny: { version: '2.1.144', file: 'deny.real.acceptEdits.audit.jsonl' },
 } as const satisfies Record<string, FixtureName>;

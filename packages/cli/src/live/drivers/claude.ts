@@ -70,7 +70,7 @@ const didNotRun = (why: string): HostRun => ({
 });
 
 /** What was said on the way, together with how the process ended: the run a verdict is made of. */
-function runOf(parsed: ParsedStream, ended: Supervised): HostRun {
+export function hostRunOf(parsed: ParsedStream, ended: Supervised): HostRun {
   const interrupted = 'stopped: the check was interrupted';
   return {
     stream: parsed.stream,
@@ -127,7 +127,7 @@ export function createClaudeDriver(options: ClaudeDriverOptions): HostDriver {
         onStdout: (chunk) => parser.push(chunk) !== null,
         signal: options.signal,
       });
-      return runOf(parser.finish(), ended);
+      return hostRunOf(parser.finish(), ended);
     } catch (err) {
       return didNotRun(
         `could not run the host: ${err instanceof Error ? err.message : String(err)}`,
