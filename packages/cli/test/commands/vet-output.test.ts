@@ -237,8 +237,11 @@ describe('a passport that lacks what a reading would find', () => {
   });
 
   it('exits 1 for a mismatch before it exits 1 for this: one failure is enough, and the digests are told', async () => {
+    // `--expect` is refused on Windows (a folder there has no executable bit); this is about the order
+    // of the two failures, so the platform is the one where both can happen.
     const run = await vet(['--from', skillFolder(), '--expect', 'f'.repeat(64)], {
       readings: readingsWithFailure(),
+      platform: 'darwin',
     });
 
     expect(run.code).toBe(1);
