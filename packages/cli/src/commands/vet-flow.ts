@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { stableStringify } from '@stroq/core';
 import {
   READING_PHRASES,
@@ -120,8 +120,19 @@ function whyNotWritten(error: unknown): string {
     : 'it could not be created';
 }
 
+/** Whether `file` is somewhere inside `folder`, judged on the paths as they are written. */
+function isInside(folder: string, file: string): boolean {
+  const way = relative(resolve(folder), resolve(file));
+  return way !== '' && way !== '..' && !way.startsWith(`..${sep}`) && !isAbsolute(way);
+}
+
+const INSIDE_NOTE =
+  'stroq vet: note: the file is inside the folder that was read, so from now on it is one of that ' +
+  "folder's files and the next reading of the folder has another digest. Write it outside the folder " +
+  'to keep this digest.\n';
+
 /** Writes `text` to a file that does not exist yet. `wx` refuses an existing file and a link, even a dangling one. */
-function writeNew(path: string, text: string, io: Streams): number {
+function writeNew(options: VetOptions, path: string, text: string, io: Streams): number {
   try {
     writeFileSync(path, text, { flag: 'wx', mode: 0o644 });
   } catch (error) {
@@ -129,6 +140,8 @@ function writeNew(path: string, text: string, io: Streams): number {
     return EXIT_OUTPUT;
   }
   io.out(`wrote ${outsideLine(path)}\n`);
+  // A passport kept beside the files it describes is one of them the next time: it is said once, and not refused.
+  if (isInside(options.from, path)) io.err(INSIDE_NOTE);
   return 0;
 }
 
@@ -170,7 +183,7 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
   // The text is made safe once more on its way out: the screen and the card already are, and the passport
   // is JSON that has no raw control in it, so this changes nothing a reader sees and keeps a file clean.
   const text = neutralizeControls(textOf(passport, options));
-  const written = options.out === null ? show(text, io) : writeNew(options.out, text, io);
+  const written = options.out === null ? show(text, io) : writeNew(options, options.out, text, io);
   if (written !== 0) return written;
   if (!passportIsIncomplete(passport)) return 0;
   io.err(incompleteText(passport));

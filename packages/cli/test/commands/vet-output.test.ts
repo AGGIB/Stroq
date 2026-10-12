@@ -1,5 +1,5 @@
 import { readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { READINGS, type NamedReading } from '../../src/install/inspect/index.js';
 import { PassportSchema, type Passport } from '../../src/install/types.js';
@@ -99,6 +99,40 @@ describe('stroq vet --out', () => {
 
     expect(run.code, run.stderr).toBe(0);
     expect(readFileSync(out, 'utf8')).toBe(plain.stdout);
+  });
+
+  it('says so when the file is written inside the folder it describes, because the next reading will include it', async () => {
+    const dir = skillFolder();
+    const inside = join(dir, 'passport.json');
+    const before = await passportOf(dir);
+
+    const run = await vet(['--from', dir, '--json', '--out', inside]);
+    const after = await passportOf(dir);
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stderr).toContain('inside the folder that was read');
+    expect(after.artifact.digest).not.toBe(before.artifact.digest);
+  });
+
+  it('does not say it when the file is written beside the folder, or under a name that only starts with two dots', async () => {
+    const dir = skillFolder();
+    const beside = await vet([
+      '--from',
+      dir,
+      '--json',
+      '--out',
+      join(dirname(dir), 'passport.json'),
+    ]);
+    const dotted = await vet([
+      '--from',
+      dir,
+      '--json',
+      '--out',
+      join(tempRoot('out'), '..odd-name.json'),
+    ]);
+
+    expect(beside.stderr).toBe('');
+    expect(dotted.stderr).toBe('');
   });
 
   it('exits 2 and leaves the file as it was when it exists', async () => {

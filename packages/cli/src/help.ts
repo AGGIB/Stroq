@@ -405,7 +405,10 @@ export const COMMANDS: readonly CommandHelp[] = [
         '--card',
         'a Markdown snippet for a README: the name, the digest, the counts and the command that reproduces it, and nothing else from the artifact',
       ],
-      ['--out <file>', 'write the output to a file that does not exist yet, never over one'],
+      [
+        '--out <file>',
+        "write the output to a file that does not exist yet, never over one. Write it outside the folder it describes: inside, it is one of that folder's files and changes its digest",
+      ],
     ],
   },
 ];
