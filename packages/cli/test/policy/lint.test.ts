@@ -7,6 +7,7 @@ import type {
   HighThreshold,
   ShadowedRule,
 } from '../../src/policy/findings.js';
+import { RAW_CONTROL, RIGHT_TO_LEFT_OVERRIDE } from './policy-files.js';
 
 type Rule = Policy['rules'][number];
 
@@ -195,14 +196,14 @@ describe('lint: dropped protection', () => {
 
   it('names a rule id with a control character only in neutralized form', () => {
     const hostile = policyOf([
-      rule('allow\u001b[2Jeverything‮', 'allow', ['secret.egress']),
+      rule(`allow\u001b[2Jeverything${RIGHT_TO_LEFT_OVERRIDE}`, 'allow', ['secret.egress']),
       ...DEFAULT_POLICY.rules,
     ]);
     const egress = dropped(lintPolicy(hostile)).find((f) => f.class === 'secret.egress');
     expect(egress).toBeDefined();
-    // eslint-disable-next-line no-control-regex
-    expect(egress?.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f‮]/);
+    expect(egress?.message).not.toMatch(RAW_CONTROL);
     expect(egress?.message).toContain('\\u001b');
+    expect(egress?.message).toContain('\\u202e');
   });
 });
 

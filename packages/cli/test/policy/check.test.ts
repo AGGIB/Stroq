@@ -6,7 +6,14 @@ import { stringify } from 'yaml';
 import { runPolicy } from '../../src/commands/policy.js';
 import { policySha256 } from '../../src/policy/digest.js';
 import { buildMeta } from '../../src/attack/report.js';
-import { capture, defaultWithout, workspace, RAW_CONTROL, type Ran } from './policy-files.js';
+import {
+  capture,
+  defaultWithout,
+  workspace,
+  RAW_CONTROL,
+  RIGHT_TO_LEFT_OVERRIDE,
+  type Ran,
+} from './policy-files.js';
 
 const ws = workspace();
 afterAll(ws.cleanup);
@@ -302,7 +309,7 @@ describe('stroq policy check: what a hostile file can make it print', () => {
   });
 
   it('prints a path with a control character in it safely, when it cannot read it', async () => {
-    const ran = await check(join(ws.dir, 'no\u001b[2Jfile‮.yaml'));
+    const ran = await check(join(ws.dir, `no\u001b[2Jfile${RIGHT_TO_LEFT_OVERRIDE}.yaml`));
     expect(ran.code).toBe(2);
     expect(ran.stderr).not.toMatch(RAW_CONTROL);
   });
