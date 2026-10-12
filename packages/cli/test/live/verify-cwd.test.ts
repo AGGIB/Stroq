@@ -107,8 +107,8 @@ describe('a host that says where it ran', () => {
     const result = await verify(rig, driver);
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      deny: 'inconclusive:cwd-mismatch',
-      'secret-egress': 'not-attempted:cwd-mismatch',
+      'secret-egress': 'inconclusive:cwd-mismatch',
+      deny: 'not-attempted:cwd-mismatch',
     });
     expect(driver.seen).toBe(2);
   });
