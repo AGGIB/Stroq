@@ -1,4 +1,6 @@
 import { PolicyRuleSchema, PolicySchema } from '@stroq/core';
+import { quotePath } from '../install/safe-path.js';
+import type { UnknownField } from './findings.js';
 
 /**
  * The keys a policy file has that Stroq does not read.
@@ -30,11 +32,22 @@ export function unknownFieldPaths(document: unknown): readonly string[] {
   const found = unknownIn(document, TOP_KEYS, '');
   const rules = document['rules'];
   if (!Array.isArray(rules)) return found;
+  // Loops, not `push(...many)`: a spread of a hundred thousand keys is more arguments than a call takes.
   rules.forEach((rule: unknown, index) => {
-    found.push(...unknownIn(rule, RULE_KEYS, `rules.${index}.`));
-    if (isRecord(rule)) {
-      found.push(...unknownIn(rule['when'], WHEN_KEYS, `rules.${index}.when.`));
-    }
+    for (const path of unknownIn(rule, RULE_KEYS, `rules.${index}.`)) found.push(path);
+    if (!isRecord(rule)) return;
+    for (const path of unknownIn(rule['when'], WHEN_KEYS, `rules.${index}.when.`)) found.push(path);
   });
   return found;
+}
+
+/** The paths as findings: a warning each, because what the key was meant to say is not said. */
+export function unknownFieldFindings(paths: readonly string[]): readonly UnknownField[] {
+  return paths.map((path) => ({
+    kind: 'unknown-field',
+    severity: 'warning',
+    path,
+    message: `${quotePath(path)} is not a field Stroq reads, so it is ignored and what it was meant to say is not said`,
+    fix: 'correct the spelling of the field, or delete it',
+  }));
 }
