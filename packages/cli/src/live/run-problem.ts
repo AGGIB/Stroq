@@ -15,6 +15,14 @@ import { REASONS, type HostRun, type StreamEvent } from './types.js';
  */
 const SUBSCRIPTION_KEY_SOURCES: ReadonlySet<string> = new Set(['none', 'oauth']);
 
+/**
+ * Whether a key source a host reports is a login and no key. A driver asks this of the first message of
+ * its host, so that it stops a host that is billed to a key before it answers; `runProblem` asks the same
+ * of a finished run, and the two are one rule so that they cannot drift apart.
+ */
+export const isSubscriptionKeySource = (source: string): boolean =>
+  SUBSCRIPTION_KEY_SOURCES.has(source.trim().toLowerCase());
+
 const EVENT_TYPES: ReadonlySet<string> = new Set([
   'init',
   'tool_use',
@@ -91,10 +99,7 @@ export function runProblem(run: HostRun): RunProblem | null {
   if (run.limitHit !== undefined) return problem(REASONS.limit, `the host said: ${run.limitHit}`);
   if (run.apiProvider !== undefined && run.apiProvider !== 'firstParty')
     return problem(REASONS.apiBilling, `the host is not first party (${run.apiProvider})`);
-  if (
-    run.apiKeySource !== undefined &&
-    !SUBSCRIPTION_KEY_SOURCES.has(run.apiKeySource.trim().toLowerCase())
-  )
+  if (run.apiKeySource !== undefined && !isSubscriptionKeySource(run.apiKeySource))
     return problem(REASONS.apiBilling, `the host used an API key (${run.apiKeySource})`);
   const errors = run.stream.filter((e) => e.type === 'result' && e.isError === true);
   const words = [run.stderrTail, ...errors.map((e) => e.text ?? '')];

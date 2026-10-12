@@ -172,16 +172,18 @@ export interface HostRun {
    */
   readonly limitHit?: string;
   /**
-   * How the host says it is paid for, from its first message. Both are needed: a host that says only one of
-   * them may be billing a cloud or an API key that the other would have shown. A run goes no further with a
-   * host that leaves either out, and none is made of one that says it is billed to anything but a login.
+   * How the host says it is paid for. Both are needed: a host that says only one of them may be billing a
+   * cloud or an API key that the other would have shown. A run goes no further with a host that leaves either
+   * out, and none is made of one that says it is billed to anything but a login. A host does not have to
+   * say them in one message (Claude Code names the source of its key in its first message, `init`, and the
+   * provider only in its last, the `result`, per model), so a driver puts together what the host said.
    */
   readonly apiProvider?: string;
   readonly apiKeySource?: string;
   /**
-   * The directory the host says it ran in, from its first message, when it says. It has to be the project:
-   * the hook judges commands from there (the made-up key is looked for in the project's own `.env`). A
-   * host that says another is stopped; one that does not say is not held to anything.
+   * The directory the host says it ran in (Claude Code says it in its `init` message), when it says. It has
+   * to be the project: the hook judges commands from there (the made-up key is looked for in the project's
+   * own `.env`). A host that says another is stopped; one that does not say is not held to anything.
    */
   readonly cwd?: string;
   /** How many lines of the stream the driver could not read. A stream with any is not to be trusted. */
@@ -226,12 +228,15 @@ export interface ProbeContext {
  * what the real run's host would never have run, and a stop by the host's own rules then looks like a stop
  * by the hook. `test/live/driver-contract.ts` holds the check a driver's own tests run to show it keeps this.
  *
- * THE FIRST MESSAGE. A driver reports, from the first message of the host, how it is paid for (both
- * `apiProvider` and `apiKeySource`) and the directory it runs in (`cwd`). It aborts the host on that message
- * when either billing value is not a subscription login, so that no paid request is made at all; `verifyHost`
- * stops the run after a request that did not say both (or said another directory), but a request already
- * made is already paid for. It also reports as `limitHit` what the host says when it moves a subscription
- * on to extra usage or an overage, in the host's own words: that is billing the owner did not set aside.
+ * WHO PAYS. A driver reports how the host is paid for (both `apiProvider` and `apiKeySource`) and the
+ * directory it runs in (`cwd`), from whichever messages of the host say them: for Claude Code `apiKeySource`
+ * and `cwd` are in the first message (`init`) and the provider only in the last (`result`). It aborts the
+ * host as soon as a message shows that the key source is not a subscription login, which is the first
+ * message, so that no paid request is made at all. `verifyHost` stops the run after a request that did not
+ * say both (or said another directory), but a request already made is already paid for, which is why the
+ * driver does not wait for the end. It also reports as `limitHit` what the host says when it moves a
+ * subscription on to extra usage or an overage, in the host's own words, and aborts the host then too: that
+ * is billing the owner did not set aside.
  */
 export interface HostDriver {
   detect(): Promise<{ available: boolean; version: string | null; note?: string }>;

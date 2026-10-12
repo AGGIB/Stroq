@@ -147,7 +147,10 @@ describe('claudeArgv', () => {
     const one = claudeArgv(probe('allow'), ctx(), HOOK_LINE);
     const other = claudeArgv(
       probe('allow', 'stroq-live-fedcba9876543210'),
-      ctx({ sessionId: '99999999-2222-4333-8444-555555555555', nonce: 'stroq-live-fedcba9876543210' }),
+      ctx({
+        sessionId: '99999999-2222-4333-8444-555555555555',
+        nonce: 'stroq-live-fedcba9876543210',
+      }),
       HOOK_LINE,
     );
     const differing = one.flatMap((word, i) => (word === other[i] ? [] : [one[i - 1] ?? word]));
