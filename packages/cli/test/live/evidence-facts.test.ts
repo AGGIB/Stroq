@@ -13,7 +13,7 @@ import { plainText } from '../../src/live/plain-text.js';
 import { prepareProject } from '../../src/live/probes.js';
 import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import type { ProbeKind, SentinelState, StreamEvent } from '../../src/live/types.js';
-import { ABSENT, DENY_TEXT, KINDS, THERE, happy } from './evidence-helpers.js';
+import { ABSENT, DENY_TEXT, KINDS, THERE, happy, thereFor } from './evidence-helpers.js';
 import { FAKE, NONCE, SESSION, auditEntry, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
@@ -283,10 +283,14 @@ describe('E3: the file on the disk is as the decision says', () => {
       happy('allow', { expectation: { effect: 'deny', ruleId: 'deny-git-exec' }, sentinel: THERE }),
     );
     expect(asDeny.E3).toBe(false);
+    // The deny probe's file holds a git setting and not the bare nonce, so that is what an allow looks for.
+    const allowed = { effect: 'allow', ruleId: null } as const;
     const asAllow = gatherEvidence(
-      happy('deny', { expectation: { effect: 'allow', ruleId: null }, sentinel: THERE }),
+      happy('deny', { expectation: allowed, sentinel: thereFor(probe('deny')) }),
     );
     expect(asAllow.E3).toBe(true);
+    const bareNonce = gatherEvidence(happy('deny', { expectation: allowed, sentinel: THERE }));
+    expect(bareNonce.E3).toBe(false);
   });
 });
 

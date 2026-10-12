@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, loadPolicyFile, type Policy } from '@stroq/core';
 import { openLedger } from '../../src/live/budget.js';
 import { policySha256, writePolicy } from '../../src/live/policy-digest.js';
+import { DENY_FILE } from '../../src/live/probes.js';
 import type { HostDriver } from '../../src/live/types.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { FAKE } from './helpers.js';
@@ -44,11 +45,10 @@ describe('a probe the policy does not deny', () => {
       'secret-egress': 'passed:blocked',
       'secret-egress:control': 'passed:armed',
     });
-    const skipped = result.probes.find((probe) => probe.id === 'deny');
-    expect(skipped?.detail).toBe(
+    expect(result.probes[1]?.detail).toBe(
       'the active policy gives allow (no rule) for this command, not a deny',
     );
-    expect(skipped?.evidence).toEqual({ E1: null, E2: null, E3: null, E4: null });
+    expect(result.probes[1]?.evidence).toEqual({ E1: null, E2: null, E3: null, E4: null });
     // The other deny was stopped, and shown armed, so the host is verified by it.
     expect(result.state).toBe('verified');
     expect(driver.calls.map((c) => c.probeId)).toEqual(['allow', 'secret-egress', 'secret-egress']);
@@ -78,9 +78,8 @@ describe('a probe the policy does not deny', () => {
       rule.id === 'deny-git-exec' ? { ...rule, effect: 'ask' as const } : rule,
     );
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { policy });
-    const skipped = result.probes.find((probe) => probe.id === 'deny');
-    expect(skipped).toMatchObject({ mark: 'skipped', reason: 'skipped-policy-allows' });
-    expect(skipped?.detail).toContain('ask (deny-git-exec)');
+    expect(result.probes[1]).toMatchObject({ mark: 'skipped', reason: 'skipped-policy-allows' });
+    expect(result.probes[1]?.detail).toContain('ask (deny-git-exec)');
   });
 
   it('is not a reason to doubt the allow probe, which is run if the policy allows it', async () => {
@@ -110,7 +109,7 @@ describe('an allow probe that the policy does not allow', () => {
       'secret-egress:control': 'not-attempted:allow-not-passed',
     });
     expect(result.state).toBe('inconclusive');
-    expect(driver.calls.map((c) => c.probeId)).toEqual(['secret-egress', 'deny']);
+    expect(driver.calls.map((c) => c.probeId)).toEqual(['deny', 'secret-egress']);
   });
 });
 
@@ -212,8 +211,7 @@ describe('what a run does to the directories it is given', () => {
   });
 
   it('does not take for the work of a request a file that an earlier run left', async () => {
-    mkdirSync(join(rig.project, '.git', 'hooks'), { recursive: true });
-    writeFileSync(join(rig.project, '.git', 'hooks', 'pre-commit'), 'old');
+    writeFileSync(join(rig.project, DENY_FILE), 'old');
     writeFileSync(join(rig.project, 'stroq-live-allow.txt'), 'old');
     writeFileSync(join(rig.project, 'stroq-live-egress.txt'), 'old');
     const result = await verify(rig, new FakeHostDriver({ fault: 'refusal' }));

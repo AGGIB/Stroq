@@ -11,11 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openLedger, type Ledger } from '../../src/live/budget.js';
+import { DENY_FILE } from '../../src/live/probes.js';
 import { auditPosition, makeRequest, readAuditAfter } from '../../src/live/request.js';
 import type { HostDriver, HostRun, Probe, ProbeContext } from '../../src/live/types.js';
 import { FakeHostDriver } from './fake-driver.js';
 import { NONCE, auditEntry, finished } from './helpers.js';
-import { probe } from './probe-helpers.js';
+import { nestedProbe, probe } from './probe-helpers.js';
 import { makeRig, type Rig } from './rig.js';
 
 /**
@@ -310,12 +311,12 @@ describe('a probe file that cannot be cleared', () => {
     async () => {
       const elsewhere = mkdtempSync(join(tmpdir(), 'stroq-live-request-'));
       try {
-        mkdirSync(join(elsewhere, 'hooks'));
-        writeFileSync(join(elsewhere, 'hooks', 'pre-commit'), "the owner's own hook");
-        symlinkSync(elsewhere, join(rig.project, '.git'));
+        mkdirSync(join(elsewhere, 'dir'));
+        writeFileSync(join(elsewhere, 'dir', 'marker.txt'), "the owner's own file");
+        symlinkSync(elsewhere, join(rig.project, 'sub'));
         const ledger = openLedger({ memory: true, limit: 30 });
         const driver = new FakeHostDriver({ fault: 'honest' });
-        const requested = await makeRequest(args(driver, { ledger, probe: probe('deny') }));
+        const requested = await makeRequest(args(driver, { ledger, probe: nestedProbe() }));
         expect(requested).toMatchObject({ sent: false, reason: 'unsafe-directory' });
         if (requested.sent) return;
         expect(requested.detail).toMatch(/link/);
@@ -329,19 +330,43 @@ describe('a probe file that cannot be cleared', () => {
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'is a request that is not made, for a way to it that cannot be gone through',
     async () => {
-      mkdirSync(join(rig.project, '.git', 'hooks'), { recursive: true });
-      writeFileSync(join(rig.project, '.git', 'hooks', 'pre-commit'), 'left by the model');
-      chmodSync(join(rig.project, '.git'), 0o000);
+      mkdirSync(join(rig.project, 'sub', 'dir'), { recursive: true });
+      writeFileSync(join(rig.project, 'sub', 'dir', 'marker.txt'), 'left by the model');
+      chmodSync(join(rig.project, 'sub'), 0o000);
       try {
         const ledger = openLedger({ memory: true, limit: 30 });
         const driver = new FakeHostDriver({ fault: 'honest' });
-        const requested = await makeRequest(args(driver, { ledger, probe: probe('deny') }));
+        const requested = await makeRequest(args(driver, { ledger, probe: nestedProbe() }));
         expect(requested).toMatchObject({ sent: false, reason: 'unsafe-directory' });
         if (requested.sent) return;
         expect(requested.detail).toMatch(/^[\x20-\x7e]+$/);
         await notPaidFor(ledger, driver, requested);
       } finally {
-        chmodSync(join(rig.project, '.git'), 0o700);
+        chmodSync(join(rig.project, 'sub'), 0o700);
+      }
+    },
+  );
+
+  // The real probes keep their files in the root of the project, where what stops a removal is the file
+  // itself: a directory a model left in its place that cannot be emptied. That is a request not made
+  // either, with its own reason, and the owner is not charged for it.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'is a request that is not made, for a directory in the place of the file that cannot be emptied',
+    async () => {
+      const locked = join(rig.project, DENY_FILE, 'locked');
+      mkdirSync(locked, { recursive: true });
+      writeFileSync(join(locked, 'left.txt'), 'left by the model');
+      chmodSync(locked, 0o500);
+      try {
+        const ledger = openLedger({ memory: true, limit: 30 });
+        const driver = new FakeHostDriver({ fault: 'honest' });
+        const requested = await makeRequest(args(driver, { ledger, probe: probe('deny') }));
+        expect(requested).toMatchObject({ sent: false, reason: 'cannot-clear' });
+        if (requested.sent) return;
+        expect(requested.detail).toMatch(/^[\x20-\x7e]+$/);
+        await notPaidFor(ledger, driver, requested);
+      } finally {
+        chmodSync(locked, 0o700);
       }
     },
   );

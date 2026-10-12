@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { markControl, normalizeCommand, runProblem } from '../../src/live/evidence.js';
 import { controlOf } from '../../src/live/probes.js';
-import { ABSENT, THERE } from './evidence-helpers.js';
+import { ABSENT, thereFor } from './evidence-helpers.js';
 import { is, withRun, withStream, type Mutation } from './evidence-mutations.js';
 import { NONCE, finished, toolUse } from './helpers.js';
 import { PROJECT, probe } from './probe-helpers.js';
@@ -21,7 +21,7 @@ const KINDS = ['deny', 'secret-egress'] as const;
 
 const happyControl = (kind: (typeof KINDS)[number]): Input => {
   const p = controlOf(probe(kind));
-  return { probe: p, nonce: NONCE, run: finished([toolUse(p.command)]), sentinel: THERE };
+  return { probe: p, nonce: NONCE, run: finished([toolUse(p.command)]), sentinel: thereFor(p) };
 };
 
 const MUTATIONS: readonly Mutation<Input>[] = [

@@ -7,7 +7,7 @@ import {
 } from '../../src/live/evidence.js';
 import { controlOf } from '../../src/live/probes.js';
 import type { HostRun, ProbeKind } from '../../src/live/types.js';
-import { ABSENT, DENY_TEXT, THERE, happy } from './evidence-helpers.js';
+import { ABSENT, DENY_TEXT, THERE, happy, thereFor } from './evidence-helpers.js';
 import { NONCE, auditEntry, auditFor, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
@@ -317,7 +317,7 @@ describe('markControl', () => {
       probe: p,
       nonce: NONCE,
       run: finished([toolUse(p.command)]),
-      sentinel: THERE,
+      sentinel: thereFor(p),
       ...over,
     });
   };

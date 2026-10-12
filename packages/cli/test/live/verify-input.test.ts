@@ -281,8 +281,8 @@ describe('what a driver says of a request', () => {
     });
     const result = await verify(rig, driver);
     expect(n).toBe(2);
-    expect(marksOf(result)['secret-egress']).toBe('inconclusive:unparsable-stream');
-    expect(marksOf(result).deny).toBe('not-attempted:billing-unknown');
+    expect(marksOf(result).deny).toBe('inconclusive:unparsable-stream');
+    expect(marksOf(result)['secret-egress']).toBe('not-attempted:billing-unknown');
   });
 });
 

@@ -242,9 +242,7 @@ describe('auditSummaryOf: the command as the audit log keeps it', () => {
   });
 
   it('is the same for a command that differs only in the made-up key', () => {
-    const other = buildProbes(NONCE, 'stroq_attack_aaaaaaaaaaaaaaaaaaaaaaaa', PROJECT).find(
-      (p) => p.id === 'secret-egress',
-    )!;
+    const other = buildProbes(NONCE, 'stroq_attack_aaaaaaaaaaaaaaaaaaaaaaaa', PROJECT)[2]!;
     expect(auditSummaryOf(other.command)).toBe(auditSummaryOf(probe('secret-egress').command));
   });
 });

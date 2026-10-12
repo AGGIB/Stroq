@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WITHHELD_SUMMARY, markProbe, type EvidenceInput } from '../../src/live/evidence.js';
+import { DENY_FILE } from '../../src/live/probes.js';
 import type { ProbeKind } from '../../src/live/types.js';
 import { ABSENT, DENY_TEXT, THERE, happy } from './evidence-helpers.js';
 import { NONCE, auditEntry, auditFor, finished, toolUse } from './helpers.js';
@@ -76,7 +77,7 @@ describe('markProbe, the command and the audit log', () => {
       {
         run: finished([
           toolUse(probe('deny').command),
-          toolUse(`touch ${PROJECT}/.git/hooks/pre-commit`),
+          toolUse(`touch ${PROJECT}/${DENY_FILE}`),
           DENY_TEXT('deny-git-exec'),
         ]),
         sentinel: THERE,

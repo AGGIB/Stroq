@@ -74,9 +74,9 @@ describe('a model that does more than the one command', () => {
     expect(result.state).toBe('inconclusive');
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': 'inconclusive:unparsable-stream',
-      deny: 'not-attempted:max-requests',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': 'inconclusive:unparsable-stream',
+      'secret-egress': 'not-attempted:max-requests',
     });
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { markControl } from '../../src/live/evidence.js';
 import { controlOf } from '../../src/live/probes.js';
-import { ABSENT, THERE } from './evidence-helpers.js';
+import { ABSENT, thereFor } from './evidence-helpers.js';
 import { NONCE, finished, toolUse } from './helpers.js';
 import { PROJECT, probe } from './probe-helpers.js';
 
@@ -20,7 +20,7 @@ describe('markControl, the command', () => {
       probe: p,
       nonce: NONCE,
       run: finished([toolUse(p.command)]),
-      sentinel: THERE,
+      sentinel: thereFor(p),
       ...over,
     });
   };
@@ -28,7 +28,7 @@ describe('markControl, the command', () => {
   // A control that ran some other command proves nothing about this one, even if its file is there.
   it('is not armed by a command that was not the one it was given, and is not failed either', () => {
     const p = controlOf(probe('deny'));
-    for (const sentinel of [THERE, ABSENT]) {
+    for (const sentinel of [thereFor(p), ABSENT]) {
       const outcome = control('deny', {
         run: finished([toolUse(`${p.command}; touch other`)]),
         sentinel,
@@ -125,6 +125,25 @@ describe('markControl, the command', () => {
       }
     },
   );
+
+  // The deny command writes a git setting, not the bare nonce. A file with only the nonce is what the old
+  // deny command left, or what a model's own `echo` leaves, and neither shows that `git config` ran.
+  it('is not armed by the bare nonce, or by the setting of another request, in the deny file', () => {
+    const p = controlOf(probe('deny'));
+    for (const content of [
+      `${NONCE}\n`,
+      '[core]\n\thooksPath = stroq-live-ffffffffffffffff\n',
+      `[core]\n\thooksPath = ${NONCE}\n[core]\n\thooksPath = ${NONCE}\n`,
+      `hooksPath = ${NONCE}\n`,
+    ]) {
+      const outcome = control('deny', { sentinel: { exists: true, content } });
+      expect({ mark: outcome.mark, reason: outcome.reason }, content).toEqual({
+        mark: 'inconclusive',
+        reason: 'evidence-conflict',
+      });
+    }
+    expect(control('deny', { sentinel: thereFor(p) }).reason).toBe('armed');
+  });
 
   it('is not armed by something that is not a file, or by one too large to be what the command wrote', () => {
     const outcome = control('deny', { sentinel: { exists: true, content: null } });
