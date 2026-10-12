@@ -4,6 +4,7 @@ import { runCanary } from './commands/canary.js';
 import { runCoverageCommand } from './commands/coverage.js';
 import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
+import { runHarden } from './commands/harden.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInitCommand } from './commands/init-agent.js';
 import { runInspect } from './commands/inspect.js';
@@ -51,6 +52,7 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   exposure: runExposure,
   bench: runBenchCommand,
   coverage: runCoverageCommand,
+  harden: runHarden,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {
