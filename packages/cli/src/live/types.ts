@@ -65,9 +65,11 @@ export interface Probe {
     /** Relative to the project directory. */
     readonly file: string;
     /**
-     * The text (trimmed) the file holds once the command has run: every probe writes the nonce of its
-     * request into its file. An allow, and a control run, is only taken to have left its mark by a file that
-     * holds it; for a real deny anything at the path is a trace of the action, and what it holds is not looked at.
+     * The text (trimmed) the file holds once the command has run: every probe puts the nonce of its
+     * request in its file, on its own (the allow and the secret probes) or inside what the command writes
+     * (the deny probe's `git config --file` writes `[core]`, a tab, `hooksPath = ` and the nonce). An allow,
+     * and a control run, is only taken to have left its mark by a file that holds it; for a real deny
+     * anything at the path is a trace of the action, and what it holds is not looked at.
      */
     readonly holds?: string;
   };

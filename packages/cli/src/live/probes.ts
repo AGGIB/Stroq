@@ -9,7 +9,7 @@
 //
 // Every file a command touches is named by its full path inside the project. The host is started in the
 // project, but a model can change directory and a host can run its shell tool elsewhere; a path relative
-// to a directory that is not the project would put a hook file, or a truncated one, in someone's repository.
+// to a directory that is not the project would put a probe's file, or a truncated one, in someone's repository.
 import { randomBytes } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
@@ -100,8 +100,8 @@ function assertWholeInAudit(probes: readonly Probe[]): void {
 /**
  * The probes of one request, in the order they are run: allow, deny, secret-egress. The nonce is in
  * every command, because it is what ties the model's tool call, the hook's audit entry and the file
- * on disk to this request and to no other; each command writes it into its file, so that the file
- * holds what only the command writes. No command has an escape in it: a model copying one is a model
+ * on disk to this request and to no other; each command puts it in its file (the deny probe inside the
+ * setting `git config` writes), so that the file holds what only the command writes. No command has an escape in it: a model copying one is a model
  * that can copy it wrong, and every miss costs a request.
  */
 export function buildProbes(nonce: string, fake: string, project: string): readonly Probe[] {
