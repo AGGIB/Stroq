@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../fixtures/hosts/claude-code/', import.meta.url));
 
-export { FIXTURE_FAKE, FIXTURE_NONCE, FIXTURE_PROJECT } from './clean-fixture.js';
+import { FIXTURE_FAKE, FIXTURE_NONCE, FIXTURE_PROJECT, FIXTURE_SESSION } from './clean-fixture.js';
+import type { Behaviour } from './fake-claude.js';
+
+export { FIXTURE_FAKE, FIXTURE_NONCE, FIXTURE_PROJECT, FIXTURE_SESSION };
 
 /** The folder of a version, and the name of a file in it. */
 export interface FixtureName {
@@ -46,3 +49,21 @@ export const AUDITS = {
   deny: { version: '2.1.271', file: 'deny.real.acceptEdits.audit.jsonl' },
   noProvider: { version: '2.1.144', file: 'allow.real.acceptEdits.audit.jsonl' },
 } as const satisfies Record<string, FixtureName>;
+
+/**
+ * A stand-in host that plays back a real stream for one request: the fake `claude` prints the lines of the
+ * fixture with the nonce, the made-up key, the project and the session of that request put in place of the
+ * fixed ones, and asks the real hook about the call in it (`fake-claude-emulator.ts`). Several of them, given to
+ * `fake.script` in order, are several requests.
+ */
+export const replayOf = (stream: FixtureName): Behaviour => ({
+  replay: {
+    lines: linesOf(readFixture(stream)),
+    fixed: {
+      project: FIXTURE_PROJECT,
+      session: FIXTURE_SESSION,
+      nonce: FIXTURE_NONCE,
+      fake: FIXTURE_FAKE,
+    },
+  },
+});

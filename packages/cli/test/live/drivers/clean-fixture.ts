@@ -11,6 +11,8 @@ export const FIXTURE_PROJECT = '/tmp/stroq-live-fixture/project';
 /** The nonce and the made-up key of every cleaned stream: the commands in them are built around these. */
 export const FIXTURE_NONCE = 'stroq-live-0123456789abcdef';
 export const FIXTURE_FAKE = 'stroq_attack_0123456789abcdef01234567';
+/** The first UUID of a stream is the session of its run, and the cleaner numbers it first. */
+export const FIXTURE_SESSION = '00000000-0000-4000-8000-000000000001';
 
 /** Keys the host fills from the machine it runs on, and that no test reads. */
 const DROPPED_KEYS: ReadonlySet<string> = new Set([

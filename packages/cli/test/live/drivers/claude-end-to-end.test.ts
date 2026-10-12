@@ -1,5 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hookCommand } from '../../../src/commands/hook-command.js';
@@ -15,8 +14,10 @@ import {
   canMakeFakeClaude,
   isAlive,
   makeFakeClaude,
+  makeFakeTools,
   type Behaviour,
   type FakeClaude,
+  type FakeTools,
 } from './fake-claude.js';
 
 /**
@@ -28,25 +29,22 @@ import {
  */
 let rig: Rig;
 let fake: FakeClaude;
-let tools: string;
+let tools: FakeTools;
 beforeEach(() => {
   rig = makeRig(false);
   fake = makeFakeClaude();
-  // `curl` is a stub that fails the way an unresolvable host does: the egress probe makes no request.
-  tools = mkdtempSync(join(tmpdir(), 'stroq-fake-tools-'));
-  const curl = join(tools, 'curl');
-  writeFileSync(curl, '#!/bin/sh\nexit 6\n');
-  chmodSync(curl, 0o755);
+  // `curl` fails the way an unresolvable host does, and `git` leaves what `git config --file` leaves.
+  tools = canMakeFakeClaude() ? makeFakeTools() : { dir: '', cleanup: () => undefined };
   mkdirSync(join(rig.root, 'host-home'));
 });
 afterEach(() => {
   fake.cleanup();
   rig.cleanup();
-  rmSync(tools, { recursive: true, force: true });
+  tools.cleanup();
 });
 
 const ENV = (): Record<string, string> => ({
-  PATH: `${tools}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+  PATH: `${tools.dir}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
   HOME: join(rig.root, 'host-home'),
 });
 
@@ -70,51 +68,64 @@ const behave = (emulate: NonNullable<Behaviour['emulate']>): void => fake.script
 
 describe.skipIf(!canMakeFakeClaude())('the Claude driver, the real hook and verifyHost', () => {
   it('verifies a host that obeys the hook, in the five requests of a full check', async () => {
-    behave({ protectGit: true });
+    // The host's own permission step is in play: the control is armed only because the argv names a rule for
+    // `git config`, which is what the driver gives it.
+    behave({ permissionStep: true });
     const result = await check();
-    // The git-hook probe is stopped by the host's own permission step in its control, as on the real host.
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
+      deny: 'passed:blocked',
+      'deny:control': 'passed:armed',
       'secret-egress': 'passed:blocked',
       'secret-egress:control': 'passed:armed',
-      deny: 'inconclusive:probe-not-armed',
-      'deny:control': 'inconclusive:probe-not-armed',
     });
     expect(result.state).toBe('verified');
     expect(result.hostVersion).toBe('2.1.271');
     expect(fake.calls()).toHaveLength(5);
-    const stopped = result.probes.find((p) => p.id === 'secret-egress');
+    const stopped = result.probes.find((p) => p.id === 'deny');
     expect(stopped?.evidence).toEqual({ E1: true, E2: true, E3: true, E4: true });
   });
 
-  it('verifies a host in the three requests the default allows, the git-hook probe left for later', async () => {
-    behave({ protectGit: true });
+  it('verifies a host in the three requests the default allows: the allow, the deny and its control', async () => {
+    behave({ permissionStep: true });
     const result = await check({ maxRequests: 3 });
-    expect(marksOf(result)).toMatchObject({
+    expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'passed:blocked',
-      'secret-egress:control': 'passed:armed',
-      deny: 'not-attempted:max-requests',
+      deny: 'passed:blocked',
+      'deny:control': 'passed:armed',
+      'secret-egress': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('verified');
     expect(fake.calls()).toHaveLength(3);
   });
 
   it('judged the commands with the hook of the check: the audit log of the throwaway home has them', async () => {
-    behave({ protectGit: true });
+    behave({ permissionStep: true });
     await check({ maxRequests: 3 });
     const entries = await rig.audit();
-    // The allow and the made-up key probe were judged; the control run has no hook to ask.
+    // The allow and the deny probe were judged; the control run has no hook to ask.
     expect(entries).toHaveLength(2);
     expect(entries.map((entry) => entry.decision?.effect)).toEqual(['allow', 'deny']);
-    expect(entries[1]?.decision?.ruleId).toBe('deny-secret-egress');
+    expect(entries[1]?.decision?.ruleId).toBe('deny-git-exec');
+  });
+
+  it('does not verify a host whose own permission step stops the control, and does not fail it either', async () => {
+    // The step asks about `git config` although a rule allows it: the deny was stopped, but by whom is not known.
+    behave({ permissionStep: true, alwaysAsk: ['git config'] });
+    const result = await check({ maxRequests: 3 });
+    expect(marksOf(result)).toMatchObject({
+      allow: 'passed:ran',
+      deny: 'inconclusive:probe-not-armed',
+      'deny:control': 'inconclusive:probe-not-armed',
+    });
+    expect(result.state).toBe('inconclusive');
   });
 
   it('fails a host that runs a command the hook denied', async () => {
-    behave({ ignoreDeny: true, protectGit: true });
+    behave({ ignoreDeny: true, permissionStep: true });
     const result = await check();
     expect(result.state).toBe('failed');
-    expect(marksOf(result)['secret-egress']).toBe('failed:executed-despite-deny');
+    expect(marksOf(result)['deny']).toBe('failed:executed-despite-deny');
   });
 
   it('stops a host that is paid for by an API key before the hook is asked or a command is run', async () => {

@@ -29,13 +29,29 @@ export interface Behaviour {
   /**
    * Behave as a host with a hook: run the hook command of the settings it was given, and obey it.
    * `apiKeySource` is what its first message says; `ignoreDeny` runs a command the hook denied;
-   * `protectGit` has its own permission step stop a command that writes below `.git`.
+   * `permissionStep` has its own permission step stop a command that no rule of `--allowedTools` covers
+   * ("This command requires approval", as the real host does), and `alwaysAsk` names words it stops even
+   * when a rule allows them: a host that does not honour a rule.
    */
   readonly emulate?: {
     readonly apiKeySource?: string;
     readonly ignoreDeny?: boolean;
-    readonly protectGit?: boolean;
+    readonly permissionStep?: boolean;
+    readonly alwaysAsk?: readonly string[];
     readonly pauseAfterInitMs?: number;
+  };
+  /**
+   * Play back a stream a real host printed (the lines of a cleaned fixture), with the values the cleaner fixed
+   * swapped for those of this request, and ask the real hook about the call in it, as `emulate` does.
+   */
+  readonly replay?: {
+    readonly lines: readonly string[];
+    readonly fixed: {
+      readonly project: string;
+      readonly session: string;
+      readonly nonce: string;
+      readonly fake: string;
+    };
   };
 }
 
@@ -80,6 +96,11 @@ if (b.ignoreTerm) process.on('SIGTERM', () => undefined);
 if (b.emulate) {
   const { emulate } = await import('./emulator.mjs');
   emulate(args, b.emulate);
+  process.exit(0);
+}
+if (b.replay) {
+  const { replay } = await import('./emulator.mjs');
+  replay(args, b.replay);
   process.exit(0);
 }
 
@@ -169,6 +190,33 @@ export function makeFakeClaude(): FakeClaude {
   };
   fake.script({ behaviours: [{}] });
   return fake;
+}
+
+export interface FakeTools {
+  /** A directory to put in front of the `PATH` of the host. */
+  readonly dir: string;
+  cleanup(): void;
+}
+
+/**
+ * Stand-ins for the two programs the probes run that a test machine should not run for real: a `curl` that fails
+ * the way an unresolvable host does, so the egress probe makes no request, and a `git` that leaves in the file what
+ * `git config --file <file> core.hooksPath <value>` leaves in it, byte for byte (`probes-deny.test.ts` holds those
+ * bytes to the real git where there is one), so that a machine with no git can still be the host's.
+ */
+export function makeFakeTools(): FakeTools {
+  const dir = mkdtempSync(join(tmpdir(), 'stroq-fake-tools-'));
+  const programs: Readonly<Record<string, string>> = {
+    curl: '#!/bin/sh\nexit 6\n',
+    git:
+      '#!/bin/sh\n[ "$1" = config ] && [ "$2" = --file ] && [ "$4" = core.hooksPath ] || exit 1\n' +
+      'printf \'[core]\\n\\thooksPath = %s\\n\' "$5" > "$3"\n',
+  };
+  for (const [name, text] of Object.entries(programs)) {
+    writeFileSync(join(dir, name), text, { mode: 0o755 });
+    chmodSync(join(dir, name), 0o755);
+  }
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** Whether a process with this pid is alive (a zombie that has not been reaped counts as alive). */
