@@ -247,6 +247,22 @@ describe('scrubbedEnv', () => {
     ).toEqual({ KEEP: 'e' });
   });
 
+  // The model's shell inherits what the driver is given. The ledger path would let it delete the
+  // ledger (an absent ledger starts again at nothing), and the owner's home or Claude config would
+  // send the hook to the real settings.
+  it("takes out the variables that point at the owner's own state, whatever the case", () => {
+    expect(
+      scrubbedEnv({
+        STROQ_LIVE_LEDGER: '/home/me/ledger.json',
+        Stroq_Home: '/home/me/.stroq',
+        STROQ_SESSION_SECRET: 's',
+        CLAUDE_CONFIG_DIR: '/home/me/.claude',
+        Claude_Config_Dir: '/home/me/.claude',
+        KEEP: 'c',
+      }),
+    ).toEqual({ KEEP: 'c' });
+  });
+
   it('keeps variables that only look like them', () => {
     const env = {
       MY_ANTHROPIC_KEY: 'a',
@@ -257,6 +273,9 @@ describe('scrubbedEnv', () => {
       OPENAI: 'f',
       CODEX_HOME: 'g',
       CODEX_API_KEY_FILE: 'h',
+      MY_STROQ_HOME: 'i',
+      STROQ: 'j',
+      CLAUDE_CONFIG: 'k',
     };
     expect(scrubbedEnv(env)).toEqual(env);
   });

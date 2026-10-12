@@ -89,15 +89,25 @@ export function checkInputs(
 const BILLING_VARIABLE = /^(ANTHROPIC_|CLAUDE_CODE_USE_|OPENAI_|CODEX_API_KEY$)/i;
 
 /**
+ * The variables that point the host at the owner's own state: `STROQ_*` (the home, the path of the
+ * ledger) and `CLAUDE_CONFIG_DIR`. The model's shell inherits what the driver is given, so a ledger
+ * path in it is a ledger the model can delete (an absent ledger starts again at nothing), and the
+ * owner's home or Claude config sends the hook to the real settings. The driver sets its own
+ * `STROQ_HOME` and `HOME` for the throwaway, after this.
+ */
+const OWNER_VARIABLE = /^(STROQ_|CLAUDE_CONFIG_DIR$)/i;
+
+/**
  * The environment a driver is handed: a copy, without any variable that would bill the run to an API
- * key, and without a value that is not text (a child process cannot be given one). The caller's own
+ * key or point it at the owner's own state, and without a value that is not text (a child process cannot be given one). The caller's own
  * environment is left as it was.
  */
 export function scrubbedEnv(env: Readonly<Record<string, string>>): Record<string, string> {
   const kept: Record<string, string> = {};
   if (typeof env !== 'object' || env === null) return kept;
   for (const [name, value] of Object.entries(env))
-    if (typeof value === 'string' && !BILLING_VARIABLE.test(name)) kept[name] = value;
+    if (typeof value === 'string' && !BILLING_VARIABLE.test(name) && !OWNER_VARIABLE.test(name))
+      kept[name] = value;
   return kept;
 }
 
