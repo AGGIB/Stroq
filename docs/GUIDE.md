@@ -12,6 +12,7 @@ The full reference. The [README](../README.md) is the short version; this is eve
 - [Which credentials appeared in a recorded agent session](#which-credentials-appeared-in-a-recorded-agent-session)
 - [Know your own exposure](#know-your-own-exposure)
 - [Before you open a repository](#before-you-open-a-repository)
+- [Read a skill before you add it](#read-a-skill-before-you-add-it)
 - [Or start the agent already confined](#or-start-the-agent-already-confined)
 - [When a rule is wrong about your file](#when-a-rule-is-wrong-about-your-file)
 - [Check a policy before you use it](#check-a-policy-before-you-use-it)
@@ -349,6 +350,60 @@ Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the ste
 
 `--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. The server is started with the variables it needs to run (`PATH`, `HOME`, the proxy and locale settings) and the `env` its own config declares, not with your shell's environment, so the cloud keys and tokens your shell exports do not reach it. It is still a program that runs as you, with your `HOME`: it can read `~/.aws` or `~/.ssh` and it sees a proxy password. `--probe` starts whatever the config names, and a `.mcp.json` can arrive with a repository, so use it on servers you would run anyway, not on a repository you have not read. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
+## Read a skill before you add it
+
+`stroq vet --from <dir>` reads a skill, an MCP server or a plugin that is in a folder on your disk, before you put it anywhere an agent will find it, and prints what it asks for or can do. It reads the files and runs none of them, fetches nothing and writes nothing, except the file `--out` names. Here it is on a small skill: a `SKILL.md` that asks to be allowed a few tools, and a Python script that reads two environment variables and calls a service.
+
+```text
+skill pdf-forms 1.2.0 (name and version declared by the artifact, not checked)
+stroq-tree/1 sha256:32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6  4 files, 945 bytes
+SENSITIVE (8)
+  [declared] allowed-tools  Bash(python3:*)            SKILL.md:5
+  [declared] allowed-tools  WebFetch                   SKILL.md:5
+  [observed] cred.env       PDF_API_KEY                scripts/fill.py:5
+  [observed] exec           curl                       SKILL.md:20
+  [observed] exec           python3                    SKILL.md:19
+  [observed] exec           subprocess                 scripts/fill.py:2 (+1 more)
+  [observed] net            api.pdf-tools.example      SKILL.md:20 (+1 more)
+  [observed] signal         process-spawn: subprocess  scripts/fill.py:2 (+1 more)
+OTHER (6)
+  [declared] allowed-tools  Grep                       SKILL.md:5
+  [declared] allowed-tools  Read                       SKILL.md:5
+  and 4 more lines not shown; stroq vet --json lists all of them
+SIGNALS (1): process-spawn
+BLIND SPOTS (6), what was not looked at
+  - 1 code block in markdown without a language tag was not read as shell
+  - anything the program fetches, builds or decides at run time was not looked at
+  - code in languages other than JavaScript, TypeScript, Python and shell was not read
+  - front matter was read with one YAML reader, and the host that runs the skill may read it differently
+  - nothing was run: this is a reading of the files, and what the program does when it runs was not observed
+  - the prose of documents was not read, only their shell blocks and inline commands
+
+This is a reading of the files, not a security certificate: an absent line means nothing was seen, not that nothing is there.
+```
+
+How to read it:
+
+- **Line 1** is the kind and the name. The name and the version are what the artifact says about itself; Stroq does not check them, and says so. If the artifact says nothing, the name is the folder's.
+- **Line 2** is the digest of the files, `stroq-tree/1 sha256:...`, and how many files and bytes it covers. The same files give the same digest on any machine, whatever order they were made in. It is the digest of what is in the folder: a checkout can rewrite line endings, so the digest of a folder is not expected to equal the digest of the archive an author published.
+- **Every line says what it rests on.** `[declared]`: the artifact says so about itself (its front matter, its manifest). `[observed]`: reading its files found it. `[limited]`: Stroq itself holds the artifact to it when it runs it. `[unknown]`: something here could not be understood. The sensitive lines come first. A screen is about 25 lines; the lines that do not fit are counted, and `--json` lists all of them.
+- **`SIGNALS`** are the rules that matched: a place to look, not a verdict. A harmless document can match.
+- **`BLIND SPOTS`** are always printed, all of them: what was not looked at (nothing was run; code in other languages; the prose of documents). **An absent line means nothing was seen, not that nothing is there.** A claim such as "no credentials granted" would only be honest with the basis `limited`, and a reading of files cannot give that.
+
+| Flag                      | What it does                                                                                                                                                                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind skill\|mcp\|plugin` | Say what the folder is. Needed when its files do not say, or say two things (Stroq exits 3 and asks)                                                                                                                                                                         |
+| `--json`                  | The passport itself, in a canonical form: one object, keys in a fixed order, no time and no path of this machine. The same files read by the same Stroq give the same bytes, so an author can commit it. It records which Stroq and which rules made it (`analysis`)          |
+| `--expect <sha256>`       | Exit 1, with both digests, unless the digest of the files is the one given (64 hex digits, bare or as `sha256:<hex>`). Refused on Windows: a folder read there has no executable bit, so its digest depends on the platform, and a bare digest cannot say which it is        |
+| `--card`                  | A Markdown snippet for a README: the name, the digest, the counts of sensitive lines, signals and blind spots, and the command that reproduces it. Nothing else from the artifact, so it cannot carry its text into your README. It says "Not a security certificate."      |
+| `--out <file>`            | Write what would be printed to a file that does not exist yet. It never writes over a file, or through a link                                                                                                                                                                 |
+
+Exit codes: **0** the passport is complete; **1** `--expect` did not match, or a reading failed so that the passport lacks what that reading finds (it is printed all the same, with the reading named, and marked `INCOMPLETE`); **2** the command line cannot be used; **3** the files cannot be read as an artifact (the kind cannot be told, the path is not a folder, a file cannot be opened, a limit of the reader is passed). A symbolic link is recorded and not followed, and a `.git` or `node_modules` folder is left out; each is a blind spot.
+
+An agent can run `stroq vet --from` itself: it only reads. The form of `vet` that will go to the network for a package is held back from agents before it exists; this command does not have it yet.
+
+There is no `stroq install`. Typing it prints where to go: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.
+
 ## Or start the agent already confined
 
 Everything on this page so far is something you have to remember to do. `stroq run` is the same protections applied by the launch itself.
@@ -637,6 +692,7 @@ node packages/cli/dist/index.js doctor
 | `stroq policy test [--policy <file>] [--baseline <default\|file>] [--cases <file>] [--max-new-interruptions <n>] [--json]`                                                    | Replay the attack corpus, the ordinary-work benchmark and your own cases under a policy (the one in force) and under a baseline (the default policy) and print every step whose decision changed, then the attacks that now pass and the ordinary work newly interrupted. Exit 1 if an attack passes, a case is not met, something could not be judged (a timeout is not a defence) or `--max-new-interruptions` is exceeded; 2 for a wrong command line or an unreadable input                                     |
 | `stroq exposure [--probe] [--share] [--json] [--verbose]`                                                                                                                     | Map this machine's agent surface and report what reaches you; exit 1 on any finding. `--share` prints a redacted summary, `--probe` starts your MCP servers to read their tool descriptions                                                                                                                                                                                                                                                                          |
 | `stroq inspect [<dir>] [--json\|--sarif] [--env]`                                                                                                                             | Read what a repository runs when you open it, before you point an agent at it; exit 1 when something runs before you could approve it. `--sarif` writes a SARIF 2.1.0 log for code scanning. `--env` prints the git settings that neutralise it                                                                                                                                                                                                                      |
+| `stroq vet --from <dir> [--kind skill\|mcp\|plugin] [--json\|--card] [--expect <sha256>] [--out <file>]` | Read a skill, an MCP server or a plugin folder before you add it, and print its passport: what it asks for or can do, each line marked `declared`, `observed`, `limited` or `unknown`, the rules that matched, and every blind spot. The files are read and none of them is run. A reading, not a security certificate: an absent line means nothing was seen. `--json` prints the passport in a canonical form, `--expect` checks the digest of the files, `--card` prints a snippet for a README. Exit 0 complete, 1 mismatch or incomplete, 2 usage, 3 unreadable |
 | `stroq bench [--corpus <dir> \| --actions] [--json] [--verbose]`                                                                                                              | Measure the shipped rule set's false-positive rate against a corpus of benign developer documentation (the vendored one, or your own with `--corpus <dir>`); `--verbose` lists the flagged files. `--actions` instead replays 75 scenarios of ordinary agent work against your policy and counts how many it interrupts                                                                                                                                              |
 | `stroq coverage [--format table\|navigator] [--json]`                                                                                                                         | Print the control mapping against MITRE ATLAS and OWASP ASI, built from the attack corpus's own scenario tags; `--format navigator` emits an ATT&CK Navigator layer                                                                                                                                                                                                                                                                                                  |
 | `stroq harden [plan\|apply\|undo\|status] [--agent <id>] [--scope user\|project] [--recipe <name>] [--json] [--yes] [--acknowledge-link]`                                     | Make Claude Code's or Cursor's own protection of credential files stronger, show exactly what changes, and undo it byte for byte. `plan` (the default) writes nothing; `apply` and `undo` ask first, or need `--yes` where there is no terminal. `claude-read-deny` adds read rules to `permissions.deny`; `cursor-ignore` adds a block to `.cursorignore`. A filter inside the agent, not a guarantee                                                               |
