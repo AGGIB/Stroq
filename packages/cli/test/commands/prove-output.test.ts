@@ -55,6 +55,24 @@ describe.skipIf(!RUNS_HERE)('what it prints', () => {
     expect(ran.out).toMatch(/does not show that your own settings file is loaded/);
   });
 
+  it('prints VERIFIED and what proved it when the model declines the optional secret-egress probe', async () => {
+    // The real model does this (it takes the command for credential exfiltration): it answers BLOCKED, issues nothing.
+    const ran = await prove(['--yes', '--max-requests', '4'], {
+      live: true,
+      fake: { fault: (probe) => (probe.kind === 'secret-egress' ? 'refusal' : 'honest') },
+    });
+    expect(ran.code).toBe(0);
+    const text = ran.out.replace(/\s+/g, ' ');
+    expect(text).toMatch(/VERIFIED/);
+    expect(text).toContain('Requests made: 4');
+    expect(text).toContain(
+      'Proved by: allow (echo to a file) and deny (git config key that runs a program) with its control run.',
+    );
+    expect(text).toMatch(/secret egress \(curl, made-up key\) not issued/);
+    expect(text).toMatch(/model itself declined the secret-egress command/);
+    expect(text).toMatch(/That probe is optional: no action is needed/);
+  });
+
   it('prints one JSON document of version 1 with --json, and the notice on the other stream', async () => {
     const ran = await prove(['--yes', '--json'], HONEST_LIVE);
     const doc = json(ran);
