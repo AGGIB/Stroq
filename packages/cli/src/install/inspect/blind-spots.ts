@@ -57,6 +57,7 @@ export const TALLY_KEYS = [
   'dependencies',
   'symlink',
   'list-cut',
+  'reading-failed',
 ] as const;
 export type TallyKey = (typeof TALLY_KEYS)[number];
 
@@ -91,6 +92,8 @@ const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   dependencies: () => 'dependencies were not followed, fetched or read',
   symlink: (n) =>
     `${some(n, 'symbolic link was', 'symbolic links were')} recorded and not followed`,
+  'reading-failed': (n) =>
+    `${some(n, 'reading failed', 'readings failed')} on this tree, and what ${n === 1 ? 'it reads is' : 'they read is'} missing from this passport`,
   'list-cut': () => 'a list of tools, hooks or entries was cut at the number a reading takes',
 };
 

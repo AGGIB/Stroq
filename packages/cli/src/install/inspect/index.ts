@@ -23,7 +23,7 @@ import { detectKind } from './detect-kind.js';
 import { Findings } from './findings.js';
 import { identify } from './identity.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
-import { buildInput } from './input.js';
+import { buildInput, type InspectInput } from './input.js';
 import { inspectManifests } from './manifest-lines.js';
 import { inspectNativeCode } from './native-code.js';
 import { inspectPackages } from './package-lines.js';
@@ -91,6 +91,53 @@ function assertComplete(tree: Tree): void {
 }
 
 /**
+ * The name of the rules this version reads by, for the caller to put in the context. It changes
+ * whenever a reading changes what it finds, because another reading of the same files is another
+ * passport (`analysis` says which), and a changed answer is then put down to the reader and not to
+ * the artifact.
+ */
+export const INSPECT_RULES_ID = 'stroq-vet-rules/1';
+
+/** The kind of the artifact: the one it was told, or the one its files say. */
+function kindOf(input: InspectInput, asked: ArtifactKind | 'auto'): ArtifactKind {
+  if (asked !== 'auto') return asked;
+  const detected = detectKind(input);
+  if ('problem' in detected)
+    throw new InspectError('cannot-tell-kind', CANNOT_TELL[detected.problem]);
+  return detected.kind;
+}
+
+type Reading = (input: InspectInput, findings: Findings, shell: ShellQueue) => void;
+
+/** The readings of the files, in the order they are made. The shell text they queue is read last. */
+const READINGS: readonly Reading[] = [
+  (input, findings, shell) => queueMarkdownShell(input, findings, shell),
+  (input, _findings, shell) => queueScriptShell(input, shell),
+  inspectPackages,
+  inspectManifests,
+  (input, findings) => inspectPython(input, findings),
+  (input, findings) => inspectNativeCode(input, findings),
+  (input, findings) => inspectSource(input, findings),
+  (input, findings) => inspectObfuscation(input, findings),
+  (input, findings) => inspectRepoFiles(input, findings),
+  (input, findings) => inspectTreeEntries(input, findings),
+  (_input, findings, shell) => addShellLines(shell, findings),
+];
+
+/**
+ * Runs one reading so that a fault in it cannot take the others with it, or the passport. A reading that
+ * fails is a blind spot, said in words: the passport does not claim what the reading would have found.
+ */
+function guarded<T>(findings: Findings, run: () => T, fallback: T): T {
+  try {
+    return run();
+  } catch {
+    findings.tally('reading-failed');
+    return fallback;
+  }
+}
+
+/**
  * The passport of a tree. Throws a `TreeError` for a tree that is not valid (its digest is taken here,
  * which checks every size and hash against the bytes), and an `InspectError` for the faults above.
  */
@@ -100,30 +147,12 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
   const findings = new Findings();
   for (const spot of context.extraBlindSpots) findings.blindSpot(spot);
   const input = buildInput(tree, findings);
-
-  let kind: ArtifactKind;
-  if (context.kind === 'auto') {
-    const detected = detectKind(input);
-    if ('problem' in detected)
-      throw new InspectError('cannot-tell-kind', CANNOT_TELL[detected.problem]);
-    kind = detected.kind;
-  } else {
-    kind = context.kind;
-  }
+  const kind = kindOf(input, context.kind);
 
   const shell = new ShellQueue();
-  const declared = inspectFrontmatter(input, findings, shell);
-  queueMarkdownShell(input, findings, shell);
-  queueScriptShell(input, shell);
-  inspectPackages(input, findings, shell);
-  inspectManifests(input, findings, shell);
-  inspectPython(input, findings);
-  inspectNativeCode(input, findings);
-  inspectSource(input, findings);
-  inspectObfuscation(input, findings);
-  inspectRepoFiles(input, findings);
-  inspectTreeEntries(input, findings);
-  addShellLines(shell, findings);
+  const declared = guarded(findings, () => inspectFrontmatter(input, findings, shell), {});
+  for (const reading of READINGS)
+    guarded(findings, () => reading(input, findings, shell), undefined);
 
   const identity = identify(kind, input, context.source, declared);
   const found = findings.result();
