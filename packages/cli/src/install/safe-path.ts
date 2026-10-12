@@ -99,6 +99,27 @@ const LONE_SURROGATE = /[\u{d800}-\u{dfff}]/u;
  */
 export const isWellFormed = (text: string): boolean => !LONE_SURROGATE.test(text);
 
+/**
+ * Whether `text` holds a control character, one that shows nothing or reorders what is shown, or the
+ * replacement character: text that cannot be shown as it is, or that stands for more than one thing.
+ * For text that is not a path but is printed like one (the target of a symlink).
+ */
+export const hasUnshowableCharacter = (text: string): boolean =>
+  CONTROL.test(text) || HIDDEN_CHAR.test(text) || text.includes(REPLACEMENT_CHARACTER);
+
+/**
+ * A space that is not the ordinary one, and the braille blank (U+2800, which is a symbol and shows
+ * as a space): in the middle of a name it makes `a b` and `a<that>b` look like one name and be two.
+ * The ordinary space stays; it is in many real names.
+ */
+const LOOKALIKE_SPACE = /(?! )\p{Zs}|\u{2800}/u;
+/**
+ * COMBINING GREEK YPOGEGRAMMENI: the one combining mark with a case of its own. NTFS upper-cases it
+ * to the letter IOTA one code point at a time, so `IOTA, grave` and `it, grave` are one name there
+ * while NFC makes them two (the first composes into one letter). It is refused instead of folded:
+ * folding it the way NTFS does would split APFS, which folds the other way.
+ */
+const YPOGEGRAMMENI = String.fromCodePoint(0x345);
 /** What a decoder writes for bytes that were not UTF-8, so that two different names become one. */
 const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
 const ELLIPSIS = String.fromCodePoint(0x2026);
@@ -117,6 +138,15 @@ const DRIVE_LETTER = /^[A-Za-z]:/;
  * it (`a-long-script.sh` and `a-long~1.sh`): that is a known limit, in the hazards of the spec.
  */
 const GIT_SHORT_NAME = /^git~\d+$/;
+/**
+ * `~` and a digit: how NTFS writes the short name it gives a long one. Two names of one folder can
+ * be the same file there (`a-long-script.sh` and `a-long~1.sh`), and the second write replaces the
+ * first, so a name that looks like a short name is refused. The cost is the files of a person who
+ * names a backup `x~1`.
+ */
+const SHORT_NAME_MARK = /~\d/;
+/** A separator that a narrowing program makes of a character that is not one (a full-width slash). */
+const SEPARATOR = /[\\/]/;
 /**
  * Names that Windows opens as a device whatever folder they are in and whatever follows a dot:
  * `NUL.txt` is NUL. `COM0` and `LPT0` are included, and so are the console handles, because the cost
@@ -151,6 +181,12 @@ function componentProblem(component: string): string | null {
   if (name.endsWith('.') || name.endsWith(' ')) {
     return 'component ending in a dot or a space';
   }
+  // The full-width slash and backslash are other characters, and through Node's file system they
+  // are ordinary letters. A program that narrows names turns them into the separators, and then
+  // `..` + slash + `.git` + slash + `hooks` is a path. (The full-width colon and the other full-width
+  // forms of the six characters Windows refuses are left alone: they are in real file names, and the
+  // harm of narrowing them is a hidden stream or a name Windows will not make, not a path.)
+
   if (name === '.git' || GIT_SHORT_NAME.test(name)) {
     return 'component named .git (or its Windows short name)';
   }
@@ -159,6 +195,8 @@ function componentProblem(component: string): string | null {
   const dot = name.indexOf('.');
   const device = (dot === -1 ? name : name.slice(0, dot)).trimEnd();
   if (DEVICE_NAMES.has(device)) return 'Windows device name';
+  if (SEPARATOR.test(name)) return 'component that becomes a path separator once narrowed';
+  if (SHORT_NAME_MARK.test(name)) return 'component that looks like a Windows short name (~1)';
   return null;
 }
 
@@ -204,6 +242,10 @@ export function checkEntryPath(path: unknown): PathCheck {
     const problem = componentProblem(component);
     if (problem !== null) return refuse(problem);
   }
+  // After the components, so that a name which is refused for what it is (`.git` followed by a
+  // no-break space) keeps the reason that says so.
+  if (LOOKALIKE_SPACE.test(path)) return refuse('a space that is not the ordinary space');
+  if (path.includes(YPOGEGRAMMENI)) return refuse('combining mark that NTFS upper-cases');
   return { ok: true, path };
 }
 

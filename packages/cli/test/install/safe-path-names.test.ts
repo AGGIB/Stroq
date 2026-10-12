@@ -52,6 +52,15 @@ const REFUSED: readonly (readonly [what: string, path: string, reason: RegExp])[
   // Two full-width full stops are `..` once made plain.
   ['two full-width full stops', '\uff0e\uff0e', TRAILING],
   ['a two dot leader', '\u2025', TRAILING],
+  // Any name that looks like an NTFS short name (`~` and a digit) is refused: `a-long~1.sh` can be
+  // `a-long-script.sh` on such a disk, and the second write replaces the first.
+  ['the short name of .gitmodules', 'GITMOD~1', /Windows short name/],
+  ['the short name of .gitattributes', 'GITATT~1', /Windows short name/],
+  ['the short name of a long folder name', 'PROGRA~1/x', /Windows short name/],
+  ['a short name with an extension', 'a-long~1.sh', /Windows short name/],
+  // A space that is not the ordinary one makes a name that reads like another (`a b`).
+  ['an ideographic space inside a name', 'a\u3000b', /not the ordinary space/],
+  ['an ideographic space at the start of a name', '\u3000a', /not the ordinary space/],
   // And still the plain ones, any case.
   ['.GIT', '.GIT', GIT],
   ['GIT~1', 'GIT~1', GIT],
@@ -61,11 +70,6 @@ const REFUSED: readonly (readonly [what: string, path: string, reason: RegExp])[
 ];
 
 const ACCEPTED: readonly (readonly [what: string, path: string])[] = [
-  // Only `git~N` is covered of the 8.3 short names (see the comment on GIT_SHORT_NAME): the file that
-  // `.gitmodules` or `.gitattributes` is called by, on a disk that makes short names, is not looked for.
-  ['the short name of .gitmodules', 'GITMOD~1'],
-  ['the short name of .gitattributes', 'GITATT~1'],
-  ['the short name of a long folder name', 'PROGRA~1/x'],
   ['.gitmodules itself', '.gitmodules'],
   ['.gitattributes itself', '.gitattributes'],
   // Names that begin like a reserved one are not it.
@@ -78,8 +82,6 @@ const ACCEPTED: readonly (readonly [what: string, path: string])[] = [
   // Only the end of a name matters to Windows: a character that is a dot or a space once made plain is
   // an ordinary character anywhere else in it, and CJK names use them on purpose.
   ['a full-width full stop inside a name', 'a\uff0eb.md'],
-  ['an ideographic space inside a name', 'a\u3000b'],
-  ['an ideographic space at the start of a name', '\u3000a'],
   ['an ellipsis inside a name', 'wait\u2026what.md'],
   ['.git with something after the wide dot', '.git\uff0ex'],
 ];
