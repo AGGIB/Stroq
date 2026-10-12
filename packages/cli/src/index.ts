@@ -10,6 +10,7 @@ import { runInitCommand } from './commands/init-agent.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { runProve } from './commands/prove.js';
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { handleStdoutError } from './stdout-errors.js';
 import { runReplay } from './commands/replay.js';
@@ -40,6 +41,7 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   uninstall: runUninstall,
   run: runRun,
   doctor: runDoctor,
+  prove: runProve,
   log: runLog,
   verify: () => runVerify(),
   trust: runTrust,
