@@ -89,6 +89,13 @@ describe('front matter: allowed-tools', () => {
     expect(passport.blindSpots.some((spot) => spot.includes('was cut at the number'))).toBe(true);
   });
 
+  it('says nothing of an empty list of tools, which is a list and not a fault', () => {
+    const passport = passportOf({ 'SKILL.md': skillWith('allowed-tools: []') });
+
+    expect(linesOf(passport, 'allowed-tools')).toEqual([]);
+    expect(passport.signals).toEqual([]);
+  });
+
   it('says nothing when there is no allowed-tools', () => {
     expect(toolsOf('name: demo\ndescription: x')).toEqual([]);
   });

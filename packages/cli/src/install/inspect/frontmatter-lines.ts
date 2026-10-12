@@ -33,7 +33,7 @@ export function hasDeclaringFrontmatter(path: string): boolean {
 
 function toolLines(file: TextFile, value: unknown, line: number, findings: Findings): boolean {
   const lists = Array.isArray(value) ? (value as unknown[]) : [value];
-  if (lists.length === 0 || !lists.every((item) => typeof item === 'string')) return false;
+  if (!lists.every((item) => typeof item === 'string')) return false;
   for (const item of lists as string[]) {
     const { tools, cut } = splitToolList(item);
     if (cut) findings.tally('list-cut');
