@@ -110,10 +110,22 @@ describe('an edit reads the file it changes', () => {
   });
 
   it('still lets an edit of a file inside both scopes through', async () => {
+    // The resources are written out: the classifier resolves a POSIX path as a Windows one does on
+    // Windows CI, and what is tested here is the scope, not the resolving.
     const f = gateFixture({ scope });
+    const file = `${PROJECT}/src/a.ts`;
     const verdict = await verdictOf(
       f,
-      classified('Edit', { file_path: `${PROJECT}/src/a.ts`, old_string: 'a', new_string: 'b' }),
+      callOf(
+        'Edit',
+        { file_path: file },
+        {
+          resources: resourcesOf([
+            ['read', file],
+            ['write', file],
+          ]),
+        },
+      ),
     );
     expect(verdict.decision.effect).toBe('allow');
   });
