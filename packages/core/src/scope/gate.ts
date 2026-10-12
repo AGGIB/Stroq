@@ -5,7 +5,7 @@ import { firstHardClass } from './hard-set.js';
 import type { PublicKeyRead } from './keys.js';
 import { type PathOptions, defaultPathOptions } from './paths.js';
 import { type PermitRejection, verifyPermit } from './permit.js';
-import { type Refusal, callFingerprints, checkScope } from './scope-check.js';
+import { type Refusal, checkScope, wholeCallFingerprint } from './scope-check.js';
 import type { PermitStore, StoreVoidReason } from './store.js';
 import {
   type ScopeEvidence,
@@ -20,8 +20,9 @@ import {
  * The task lock's decision on one call. Four steps, in this order, and the order is the
  * design: a step can only make the answer stricter than the one before it, never looser.
  *
- *   1. The permit. None at all: not a task (null). One that is present but not good for any
- *      reason: every tool is denied, Read and Grep included.
+ *   1. The permit. No task id: not a task (null). A task id and no permit file is a deleted
+ *      contract, and so is one that is present but not good for any reason: every tool is
+ *      denied, Read and Grep included.
  *   2. The hard set: a class no scope can lift.
  *   3. The scope: tools, paths, network, MCP, shell.
  *   4. The policy's own decision: a deny stays a deny, an ask becomes a deny (there is nobody
@@ -43,19 +44,13 @@ export interface TaskRunContext {
 }
 
 export interface ScopeGateDeps {
-  /** The task this process runs under, or null when it runs under none. */
-  readonly taskId: string | null;
+  /** The task this process runs under, or null (or undefined) when it runs under none. */
+  readonly taskId: string | null | undefined;
   readonly store: PermitStore;
   readonly keys: { readPublicKey(): PublicKeyRead };
   readonly context: () => TaskRunContext;
   readonly now?: () => Date;
   readonly paths?: PathOptions;
-  /**
-   * When the launcher knows a task is running, a missing permit file is not "no task": it is a
-   * deleted contract, and everything is denied. Off by default, which is the plain reading of
-   * "no permit, no task".
-   */
-  readonly requirePermit?: boolean;
 }
 
 export type TaskVoidReason =
@@ -111,15 +106,13 @@ class Gate implements ScopeGate {
     return (this.deps.now ?? (() => new Date()))();
   }
 
+  /**
+   * The task id says a task is running: the launcher gave it to the process tree. Whether its
+   * permit file is still there is not asked, because a file an agent can delete must not be able
+   * to turn the task off.
+   */
   activeTask(): string | null {
-    const id = safeTaskId(this.taskId);
-    try {
-      if (this.deps.requirePermit === true || !isTaskId(this.taskId)) return id;
-      return this.deps.store.readPermit(this.taskId).kind === 'absent' ? null : id;
-    } catch {
-      // It cannot tell, and the answer that fails closed is "a task is running".
-      return id;
-    }
+    return safeTaskId(this.taskId);
   }
 
   async evaluate(input: ScopeGateInput): Promise<ScopeVerdict | null> {
@@ -136,8 +129,7 @@ class Gate implements ScopeGate {
 
     // Step 1: the permit.
     const found = deps.store.readPermit(taskId);
-    if (found.kind === 'absent')
-      return deps.requirePermit === true ? voidVerdict(id, 'missing') : null;
+    if (found.kind === 'absent') return voidVerdict(id, 'missing');
     if (found.kind === 'void') return voidVerdict(id, found.reason);
     const key = deps.keys.readPublicKey();
     if (key.kind !== 'ok')
@@ -184,14 +176,17 @@ class Gate implements ScopeGate {
       );
     }
 
+    // What a policy asks about may be in the content of the call (a line written to a shell
+    // profile), which a fingerprint of the path does not name: lifting an ask takes the whole call.
     const asked = policy.effect === 'ask';
     const needed = [
       ...new Set([
         ...refusals.flatMap((r) => r.fingerprints),
-        ...(asked ? callFingerprints(input) : []),
+        ...(asked ? [wholeCallFingerprint(input)] : []),
       ]),
     ];
-    if (this.lifted(id, needed, key.key, run, now)) {
+    const lifted = this.lifted(id, needed, key.key, run, now);
+    if (lifted === null) {
       return verdict(
         id,
         {
@@ -203,7 +198,7 @@ class Gate implements ScopeGate {
         needed[0],
       );
     }
-    return this.refused(id, refusal, policy, needed[0]);
+    return this.refused(id, refusal, policy, lifted);
   }
 
   private refused(
@@ -227,39 +222,48 @@ class Gate implements ScopeGate {
     );
   }
 
-  /** Whether every operation has a good, unused escalation; if so, they are all used up now. */
+  /**
+   * Null when every operation has a good, unused escalation, and then they are all used up now.
+   * Otherwise the first operation that has none, which is the one to name in the hint: after the
+   * person extends it, the next refusal names the next.
+   */
   private lifted(
     id: string,
     fingerprints: readonly string[],
     key: KeyObject,
     run: TaskRunContext,
     now: Date,
-  ): boolean {
-    if (fingerprints.length === 0 || fingerprints.length > MAX_LIFTED_OPERATIONS) return false;
+  ): string | undefined | null {
+    if (fingerprints.length === 0 || fingerprints.length > MAX_LIFTED_OPERATIONS)
+      return fingerprints[0];
     const texts: string[] = [];
     for (const fingerprint of fingerprints) {
       const read = this.deps.store.readEscalation(id, fingerprint);
-      if (read.kind !== 'present') return false;
+      if (read.kind !== 'present') return fingerprint;
       const checked = verifyEscalation(read.text, key, {
         now,
         nonce: run.nonce,
         taskId: id,
         fingerprint,
       });
-      if (!checked.ok) return false;
+      if (!checked.ok) return fingerprint;
       texts.push(read.text);
     }
-    return fingerprints.every((fingerprint, i) =>
-      this.deps.store.consumeEscalation(id, fingerprint, texts[i] as string),
+    const used = fingerprints.findIndex(
+      (fingerprint, i) => !this.deps.store.consumeEscalation(id, fingerprint, texts[i] as string),
     );
+    return used === -1 ? null : fingerprints[used];
   }
 }
 
 /**
  * The gate for the task this process runs under. A process under no task gets one that
- * says "not a task" to everything, so the caller never has to branch.
+ * says "not a task" to everything, so the caller never has to branch. A task id that is
+ * `undefined` (a variable of the environment that is not set) is no task either, as `null` is;
+ * an empty one is a task with an id that cannot be right, and everything is refused.
  */
 export function createScopeGate(deps: ScopeGateDeps): ScopeGate {
-  if (deps.taskId === null) return { evaluate: async () => null, activeTask: () => null };
+  if (deps.taskId === null || deps.taskId === undefined)
+    return { evaluate: async () => null, activeTask: () => null };
   return new Gate(deps, deps.taskId);
 }

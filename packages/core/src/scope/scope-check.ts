@@ -38,6 +38,14 @@ const RECURSIVE_TOOLS: ReadonlySet<string> = new Set(['Grep', 'Glob', 'LS']);
 const fileFingerprints = (tool: string): boolean =>
   FILE_TOOLS.has(tool) && !RECURSIVE_TOOLS.has(tool);
 
+/** Tools that name no file, and so need no resources to be held to a path scope. */
+const PATHLESS_TOOLS: ReadonlySet<string> = new Set([
+  'TodoWrite',
+  'TodoRead',
+  'ExitPlanMode',
+  'WebSearch',
+]);
+
 const NETWORK_CLASSES: readonly ActionClass[] = [
   'shell.network',
   'network.fetch',
@@ -61,8 +69,16 @@ function mcpOf(input: ScopeGateInput): { server: string; tool: string } | null {
   return input.classification.mcp ?? parseMcpToolName(input.event.toolName);
 }
 
+/** The tools that read a file in order to change it: they list a read and a write of each file. */
+const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'NotebookEdit']);
+
+/** One fingerprint per file for an edit, whichever of its two entries was refused. */
 const pathFingerprint = (tool: string, entry: PathEntry): string =>
-  fingerprintOf(tool, `file:${entry.op}`, fileTarget(entry.path, entry.real));
+  fingerprintOf(
+    tool,
+    `file:${EDIT_TOOLS.has(tool) ? 'edit' : entry.op}`,
+    fileTarget(entry.path, entry.real),
+  );
 
 /** Bind exact-call approval to execution context as well as every argument. */
 export const wholeCallFingerprint = (input: ScopeGateInput): string => {
@@ -97,19 +113,6 @@ export const wholeCallFingerprint = (input: ScopeGateInput): string => {
   return fingerprintOf(toolName, 'tool', boundTarget(genericTarget(toolInput)));
 };
 
-/**
- * The operations a call consists of, as fingerprints: one per file for a file tool that
- * names files, one for the whole call otherwise. A call is lifted only when every one of
- * them has an escalation.
- */
-export function callFingerprints(input: ScopeGateInput): string[] {
-  const entries = input.classification.resources?.paths ?? [];
-  if (fileFingerprints(input.event.toolName) && entries.length > 0) {
-    return unique(entries.map((entry) => pathFingerprint(input.event.toolName, entry)));
-  }
-  return [wholeCallFingerprint(input)];
-}
-
 /** A host as it should be compared: lower case, no port, no trailing dot, plain DNS characters. */
 function hostName(raw: string): string | null {
   if (raw.length === 0 || raw.length > MAX_HOST_CHARS + 8) return null;
@@ -124,30 +127,50 @@ function hostAllowed(host: string, patterns: readonly string[]): boolean {
   );
 }
 
+/**
+ * Options of a program that make a connection go somewhere other than the address it is given:
+ * curl's `--connect-to`, `--resolve`, `--proxy`, `--preproxy` and `--socks*`. Under a scope that
+ * lists hosts the address would be checked and the connection made elsewhere.
+ */
+const REDIRECTING_OPTION =
+  /(?:^|\s)(?:--(?:connect-to|resolve|preproxy|socks[45][a-z-]*|proxy[a-z0-9.-]*)(?:[=\s]|$)|-x\s)/;
+
 function networkRefusal(scope: TaskScope, input: ScopeGateInput, whole: string): Refusal | null {
   const classes = input.classes.filter((name) => NETWORK_CLASSES.includes(name));
-  if (classes.length === 0) return null;
+  const urls = input.classification.resources?.urls ?? [];
+  const named = [...urls.map((u) => u.host), ...input.classification.hosts];
+  // An address in a command is a network operation whatever class the command got: `git fetch URL`,
+  // `git clone`, `npm install URL` carry no network class, and an address in a query string can
+  // carry what a file holds. A command that only prints an address is refused too; an exact-call
+  // extension lifts that.
+  if (classes.length === 0 && named.length === 0) return null;
+  const what = classes.length > 0 ? classes.join(', ') : 'an address in the call';
   if (scope.net.mode === 'none') {
     return {
       ruleId: 'task-scope-net',
-      reason: `network access (${classes.join(', ')}) is not part of this task`,
+      reason: `network access (${what}) is not part of this task`,
       fingerprints: [whole],
     };
   }
-  const seen = [
-    ...(input.classification.resources?.urls.map((u) => u.host) ?? []),
-    ...input.classification.hosts,
-  ];
-  const refused = seen.find((raw) => {
+  const command = input.event.toolInput['command'];
+  if (typeof command === 'string' && REDIRECTING_OPTION.test(command)) {
+    return {
+      ruleId: 'task-scope-net',
+      reason:
+        'an option that sends the connection somewhere other than the address is not part of this task',
+      fingerprints: [whole],
+    };
+  }
+  const refused = named.find((raw) => {
     const host = hostName(raw);
     return host === null || !hostAllowed(host, scope.net.mode === 'hosts' ? scope.net.hosts : []);
   });
-  if (seen.length > 0 && refused === undefined) return null;
+  if (named.length > 0 && refused === undefined) return null;
   return {
     ruleId: 'task-scope-net',
     reason:
       refused === undefined
-        ? `network access (${classes.join(', ')}) to a host that could not be read is not part of this task`
+        ? `network access (${what}) to a host that could not be read is not part of this task`
         : `host ${show(refused)} is not in this task's network scope`,
     fingerprints: [whole],
   };
@@ -196,8 +219,11 @@ export function checkScope(scope: TaskScope, input: ScopeGateInput, opts: PathOp
 
   if (toolName.startsWith('mcp__')) {
     const mcp = mcpOf(input);
+    // `mcp__a__b__c` is server `a` with tool `b__c`, or server `a__b` with tool `c`: the name does
+    // not say which. A server whose own name holds `__` is never granted by a name that does.
     const listed =
       mcp !== null &&
+      !mcp.tool.includes('__') &&
       scope.mcp.some(
         (grant) =>
           grant.server === mcp.server && (grant.tools === '*' || grant.tools.includes(mcp.tool)),
@@ -230,10 +256,17 @@ export function checkScope(scope: TaskScope, input: ScopeGateInput, opts: PathOp
 
   if (!shell) refusals.push(pathRefusal(scope, input, opts, whole));
 
-  const pathsComplete = input.classification.resources?.pathsComplete;
+  const resources = input.classification.resources;
+  const pathsComplete = resources?.pathsComplete;
+  // A tool the classifier gave no resources at all (`NotebookRead`, `LSP`, anything new) may open
+  // any file, and nothing here knows which: it is held to the scope as an incomplete call is,
+  // unless it is one that names no file by its nature.
+  const unread =
+    resources === undefined && !toolName.startsWith('mcp__') && !PATHLESS_TOOLS.has(toolName);
   if (
     !shell &&
     (pathsComplete === false ||
+      unread ||
       (FILE_TOOLS.has(toolName) && pathsComplete !== true) ||
       RECURSIVE_TOOLS.has(toolName))
   ) {

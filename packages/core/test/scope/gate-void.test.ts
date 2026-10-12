@@ -276,31 +276,70 @@ describe('a permit that is present but void denies every tool', () => {
 });
 
 describe('no permit at all', () => {
-  it('returns null: the call is not part of a task and the engine behaves as it always has', async () => {
+  // The permit file is in a directory the agent can reach by a path it can spell in many ways, and a
+  // file it can delete must not be able to turn the task off.
+  it('is a deleted contract for a task: everything is refused, Read included', async () => {
     const f = gateFixture({ permit: 'none' });
-    expect(await f.gate.evaluate(callOf('Bash', { command: 'echo hello' }))).toBeNull();
-    expect(await f.gate.evaluate(callOf('Read', {}, { decision: DENY }))).toBeNull();
-    expect(f.gate.activeTask()).toBeNull();
+    for (const [tool, input] of TOOLS) {
+      const verdict = await verdictOf(f, callOf(tool, input, { decision: ALLOW }));
+      expect(verdict.decision.effect).toBe('deny');
+      expect(verdict.decision.ruleId).toBe('task-void:missing');
+    }
+    expect(f.gate.activeTask()).toBe(f.taskId);
   });
 
-  it('returns null when the process has no task at all', async () => {
+  it('is a void permit after a good one was deleted in the middle of the task', async () => {
+    const f = gateFixture();
+    expect(
+      (
+        await verdictOf(
+          f,
+          callOf(
+            'Read',
+            { file_path: '/work/project/src/a.ts' },
+            { resources: resourcesOf([['read', '/work/project/src/a.ts']]) },
+          ),
+        )
+      ).decision.effect,
+    ).toBe('allow');
+    unlinkSync(permitPath(f));
+    const verdict = await verdictOf(
+      f,
+      callOf(
+        'Read',
+        { file_path: '/work/project/src/a.ts' },
+        { resources: resourcesOf([['read', '/work/project/src/a.ts']]) },
+      ),
+    );
+    expect(verdict.decision.ruleId).toBe('task-void:missing');
+  });
+
+  it.each([null, undefined])(
+    'returns null when the process has no task at all (%s)',
+    async (taskId) => {
+      const f = gateFixture();
+      const gate = createScopeGate({
+        taskId,
+        store: f.store,
+        keys: f.keyStore,
+        context: () => f.run,
+        paths: POSIX_PATHS,
+      });
+      expect(await gate.evaluate(callOf('Read'))).toBeNull();
+      expect(gate.activeTask()).toBeNull();
+    },
+  );
+
+  it('refuses everything for a task id that is empty: it is a task whose id cannot be right', async () => {
     const f = gateFixture();
     const gate = createScopeGate({
-      taskId: null,
+      taskId: '',
       store: f.store,
       keys: f.keyStore,
       context: () => f.run,
       paths: POSIX_PATHS,
     });
-    expect(await gate.evaluate(callOf('Read'))).toBeNull();
-    expect(gate.activeTask()).toBeNull();
-  });
-
-  it('can be told that a permit is required, and then its absence is a void permit', async () => {
-    const f = gateFixture({ permit: 'none', requirePermit: true });
-    const verdict = await verdictOf(f, callOf('Read'));
-    expect(verdict.decision.ruleId).toBe('task-void:missing');
-    expect(f.gate.activeTask()).toBe(f.taskId);
+    expect((await gate.evaluate(callOf('Read')))?.decision.effect).toBe('deny');
   });
 });
 
