@@ -1,76 +1,24 @@
 import { realpathSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createClaudeDriver } from '../../../src/live/drivers/claude.js';
+import { describe, expect, it } from 'vitest';
 import { claudeArgv } from '../../../src/live/drivers/claude-argv.js';
 import { controlOf } from '../../../src/live/probes.js';
 import { runProblem } from '../../../src/live/run-problem.js';
-import { REASONS, type HostDriver, type HostRun } from '../../../src/live/types.js';
-import { NONCE, SESSION } from '../helpers.js';
+import { REASONS } from '../../../src/live/types.js';
+import { NONCE } from '../helpers.js';
 import { probe } from '../probe-helpers.js';
-import { makeRig, type Rig } from '../rig.js';
-import { canMakeFakeClaude, isAlive, makeFakeClaude, type FakeClaude } from './fake-claude.js';
-import { STREAMS, linesOf, readFixture, withProvider } from './fixtures.js';
+import { canMakeFakeClaude } from './fake-claude.js';
+import {
+  ctxFor,
+  driverOf,
+  fake,
+  HOOK_LINE,
+  INIT_WITH_KEY,
+  lines,
+  rig,
+  untilDead,
+} from './claude-driver-world.js';
 
-/**
- * The driver against a program that stands in for `claude`: a real process with an argv, an environment, a
- * working directory and pipes, which prints what the cleaned real streams say (and misbehaves on demand).
- * The real `claude` is never started here.
- */
-const HOOK_LINE = '"/usr/local/bin/node" "/opt/stroq/dist/index.js" hook claude-code';
-
-let rig: Rig;
-let fake: FakeClaude;
-beforeEach(() => {
-  rig = makeRig(false);
-  fake = makeFakeClaude();
-});
-afterEach(() => {
-  fake.cleanup();
-  rig.cleanup();
-});
-
-const driverOf = (over: Partial<Parameters<typeof createClaudeDriver>[0]> = {}): HostDriver =>
-  createClaudeDriver({ hookLine: HOOK_LINE, bin: fake.bin, killGraceMs: 200, ...over });
-
-/** The env a driver is given by `verifyHost`: nothing of the caller's but what the host needs. */
-const ENV = { PATH: process.env['PATH'] ?? '/usr/bin:/bin', HOME: '/home/someone', LANG: 'C' };
-
-const ctxFor = (over: Parameters<Rig['ctx']>[0] = {}): ReturnType<Rig['ctx']> =>
-  rig.ctx({ sessionId: SESSION, nonce: NONCE, env: ENV, deadlineMs: 20_000, ...over });
-
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * The deadline of a request in a test of a host that never ends. It has to be long enough for the stand-in to
- * start, print and start a child of its own on a machine that is busy (a process of Node takes a second or two
- * to start then), and it is what a test of the deadline waits for in full.
- */
-const SLOW_START_MS = 3_000;
-
-async function untilDead(pid: number): Promise<boolean> {
-  for (let tries = 0; tries < 200; tries += 1) {
-    if (!isAlive(pid)) return true;
-    await wait(25);
-  }
-  return false;
-}
-
-const lines = (stream: keyof typeof STREAMS, provider = true): string[] =>
-  linesOf(
-    provider
-      ? withProvider(readFixture(STREAMS[stream]), 'firstParty')
-      : readFixture(STREAMS[stream]),
-  );
-
-const INIT_WITH_KEY = (source: string): string =>
-  JSON.stringify({ type: 'system', subtype: 'init', cwd: '/project', apiKeySource: source });
-const MORE = JSON.stringify({
-  type: 'result',
-  subtype: 'success',
-  is_error: false,
-  result: 'DONE',
-});
-
+/** The Claude driver in an ordinary request: what it asks, what it hands over, and what it stops a host for. */
 describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
   describe('what it is', () => {
     it('says it is a driver of a real host', () => {
@@ -327,173 +275,6 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
       const run = await driverOf().run(probe('allow', NONCE, rig.project), ctxFor());
       expect(run.limitHit).toBeUndefined();
       expect(runProblem(run)).toBeNull();
-    });
-  });
-
-  describe('a host that does not finish', () => {
-    it('is ended at the deadline, with everything it started, and the run says it timed out', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
-      const run = await driverOf().run(
-        probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: SLOW_START_MS }),
-      );
-      expect(run.timedOut).toBe(true);
-      expect(run.exitCode).toBeNull();
-      expect(runProblem(run)?.reason).toBe(REASONS.timeout);
-      const [call] = fake.calls();
-      expect(await untilDead(call?.pid ?? 0)).toBe(true);
-      const child = fake.grandchildPid();
-      expect(child).not.toBeNull();
-      expect(await untilDead(child ?? 0)).toBe(true);
-    });
-
-    it('is ended with SIGKILL when it will not die of SIGTERM, children included', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true, ignoreTerm: true }]);
-      const run = await driverOf().run(
-        probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: SLOW_START_MS }),
-      );
-      expect(run.timedOut).toBe(true);
-      expect(await untilDead(fake.calls()[0]?.pid ?? 0)).toBe(true);
-      expect(await untilDead(fake.grandchildPid() ?? 0)).toBe(true);
-    });
-
-    it('keeps what the host said before the deadline', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
-      const run = await driverOf().run(
-        probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: SLOW_START_MS }),
-      );
-      expect(run.stream.map((event) => event.type)).toEqual(['init', 'tool_use']);
-    });
-  });
-
-  describe('a stream that cannot be trusted', () => {
-    it('counts a line that is not JSON, and the run is not readable', async () => {
-      fake.script([
-        {
-          lines: [
-            ...lines('allowRan').slice(0, 2),
-            'Segmentation fault',
-            ...lines('allowRan').slice(2),
-          ],
-        },
-      ]);
-      const run = await driverOf().run(probe('allow', NONCE, rig.project), ctxFor());
-      expect(run.unparsedLines).toBe(1);
-      expect(runProblem(run)?.reason).toBe(REASONS.unparsableStream);
-    });
-
-    it('reads a last line that has no newline', async () => {
-      const all = lines('allowRan');
-      fake.script([{ lines: all.slice(0, -1), raw: [all[all.length - 1] ?? ''] }]);
-      const run = await driverOf().run(probe('allow', NONCE, rig.project), ctxFor());
-      expect(run.stream[run.stream.length - 1]?.type).toBe('result');
-      expect(run.unparsedLines).toBe(0);
-    });
-
-    it('stops a host that prints without end, and does not trust what it printed', async () => {
-      fake.script([{ flood: true }]);
-      const run = await driverOf({ limits: { maxChars: 500_000, maxLineChars: 200_000 } }).run(
-        probe('allow', NONCE, rig.project),
-        ctxFor(),
-      );
-      expect(run.unparsedLines).toBeGreaterThan(0);
-      expect(run.exitCode).toBeNull();
-      expect(await untilDead(fake.calls()[0]?.pid ?? 0)).toBe(true);
-    });
-  });
-
-  describe('a host that cannot be started', () => {
-    it('is a run that did not get to the end, with the reason, and not a throw', async () => {
-      const run = await driverOf({ bin: `${fake.dir}/no-such-claude` }).run(
-        probe('allow', NONCE, rig.project),
-        ctxFor(),
-      );
-      expect(run).toMatchObject({ exitCode: null, timedOut: false, stream: [] });
-      expect(run.stderrTail).toMatch(/could not start/);
-      expect(runProblem(run)?.reason).toBe(REASONS.hostError);
-    });
-
-    it('is the same when the directory to run in is not there', async () => {
-      const run = await driverOf().run(
-        probe('allow', NONCE, rig.project),
-        ctxFor({ project: `${rig.root}/gone` }),
-      );
-      expect(run.exitCode).toBeNull();
-      expect(run.stderrTail).toMatch(/could not start/);
-    });
-
-    it('is the same when starting the program throws', async () => {
-      const run = await driverOf({
-        spawn: () => {
-          throw new Error('EMFILE: too many open files');
-        },
-      }).run(probe('allow', NONCE, rig.project), ctxFor());
-      expect(run).toMatchObject({ exitCode: null, timedOut: false, stream: [] });
-      expect(run.stderrTail).toMatch(/could not start/);
-    });
-
-    it('does not start the host on Windows', async () => {
-      const run = await driverOf({ platform: 'win32' }).run(
-        probe('allow', NONCE, rig.project),
-        ctxFor(),
-      );
-      expect(run.exitCode).toBeNull();
-      expect(run.stderrTail).toMatch(/Windows/);
-      expect(fake.calls()).toEqual([]);
-    });
-  });
-
-  describe('a check that is interrupted', () => {
-    it('kills the host and everything it started, at once, and returns the run', async () => {
-      fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
-      const controller = new AbortController();
-      const pending = driverOf({ signal: controller.signal }).run(
-        probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: 60_000 }),
-      );
-      // The host has started, and has a child of its own, when the check is interrupted.
-      for (let tries = 0; tries < 400 && fake.grandchildPid() === null; tries += 1) await wait(25);
-      controller.abort();
-      const run: HostRun = await pending;
-      expect(run.timedOut).toBe(false);
-      expect(run.exitCode).toBeNull();
-      expect(await untilDead(fake.calls()[0]?.pid ?? 0)).toBe(true);
-      expect(await untilDead(fake.grandchildPid() ?? 0)).toBe(true);
-    });
-
-    it('does not start the host at all when the check was interrupted before the request', async () => {
-      const controller = new AbortController();
-      controller.abort();
-      const run = await driverOf({ signal: controller.signal }).run(
-        probe('allow', NONCE, rig.project),
-        ctxFor(),
-      );
-      expect(run.exitCode).toBeNull();
-      expect(fake.calls()).toEqual([]);
-    });
-  });
-
-  describe('a control run', () => {
-    it('is started as the real run is started, but for the command of the hook', async () => {
-      fake.script([{ lines: lines('egressBlocked') }, { lines: lines('egressControl') }]);
-      const driver = driverOf();
-      await driver.run(probe('secret-egress', NONCE, rig.project), ctxFor());
-      await driver.run(
-        probe('secret-egress', NONCE, rig.project),
-        ctxFor({ hookMode: 'noop', sessionId: '99999999-2222-4333-8444-555555555555' }),
-      );
-      const [real, control] = fake.calls();
-      const settingsOf = (argv: readonly string[] | undefined): string =>
-        argv?.[(argv ?? []).indexOf('--settings') + 1] ?? '';
-      expect(JSON.parse(settingsOf(control?.argv)) as unknown).toEqual({
-        hooks: {
-          PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'node -e 0' }] }],
-        },
-      });
-      expect(real?.env).toEqual(control?.env);
-      expect(real?.cwd).toBe(control?.cwd);
     });
   });
 });
