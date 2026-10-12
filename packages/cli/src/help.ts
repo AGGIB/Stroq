@@ -248,7 +248,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'policy',
     synopsis:
-      'policy check [<file>] [--json] | policy test [--policy <file>] [--baseline <default|file>] [--cases <file>] [--max-new-interruptions <n>] [--json]',
+      'policy check [<file>] [--json] | policy test [--policy <file>] [--baseline <file>] [--cases <file>] [--max-new-interruptions <n>] [--json]',
     about: [
       'see what an edit to your policy.yaml does before you rely on it; both only read. check',
       'loads a file as the hook does and lists what is wrong: faults by field, a rule that can',
