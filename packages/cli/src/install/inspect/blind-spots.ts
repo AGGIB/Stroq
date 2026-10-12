@@ -1,0 +1,136 @@
+// What a reading of an artifact did not look at, in the words a passport says it with.
+//
+// A passport is a list of what was found and never a promise of what is not there, so the list of what
+// was not looked at is as much a part of it as the lines. The wording is fixed here and nowhere else:
+// an inspector counts (`Findings.tally`) and the text is made once, at the end, from the counts, so the
+// same artifact always gives the same words. No name of a file from the artifact is ever in a blind
+// spot; they say how many, not which.
+/** The most lines a passport lists. */
+export const MAX_LINES = 500;
+/** The most places a line lists. */
+export const MAX_PLACES = 20;
+/** The most of one piece of shell text that is read; the rest is a blind spot. */
+export const SHELL_SNIPPET_MAX = 64 * 1024;
+/** The most shell text one artifact is read for, and the most pieces of it. */
+export const SHELL_TOTAL_MAX = 256 * 1024;
+/** The longest all the reading of shell text may take, in milliseconds; what is left after it is a blind spot. */
+export const SHELL_TOTAL_MS = 6000;
+export const SHELL_SNIPPET_COUNT_MAX = 300;
+/** The most places that read shell text is put in a passport for: the same text in more places is listed for the first ones. */
+export const SHELL_PLACEMENT_MAX = 1000;
+/** How much of a file is read for inspection; the rest of a longer file is a blind spot. */
+export const READ_CAP_BYTES = 1024 * 1024;
+/** How much front matter is read. */
+export const FRONTMATTER_CAP_BYTES = 16 * 1024;
+/** The most files whose front matter is read, and the most bytes of it in all. */
+export const FRONTMATTER_FILES_MAX = 200;
+export const FRONTMATTER_TOTAL_MAX = 512 * 1024;
+/** The most matches of the patterns for source that are followed in all the files of a tree. */
+export const SOURCE_MATCHES_MAX = 20_000;
+
+const some = (count: number, one: string, many: string): string =>
+  `${count} ${count === 1 ? one : many}`;
+
+/** What is true of every reading, whatever it found. */
+export const ALWAYS_BLIND_SPOTS: readonly string[] = [
+  'nothing was run: this is a reading of the files, and what the program does when it runs was not observed',
+  'anything the program fetches, builds or decides at run time was not looked at',
+  'code in languages other than JavaScript, TypeScript, Python and shell was not read',
+];
+
+/** What a reading counts as it goes; each count becomes one blind spot if it is not zero. */
+export const TALLY_KEYS = [
+  'unreadable-text',
+  'partial-file',
+  'frontmatter-too-long',
+  'frontmatter-over-budget',
+  'frontmatter-reader',
+  'obfuscated-file',
+  'shell-over-budget',
+  'shell-text-cut',
+  'prose',
+  'untagged-fence',
+  'lfs-pointer',
+  'gitlink',
+  'native-code',
+  'unreadable-manifest',
+  'dependencies',
+  'symlink',
+  'list-cut',
+] as const;
+export type TallyKey = (typeof TALLY_KEYS)[number];
+
+const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
+  'unreadable-text': (n) =>
+    `${some(n, 'file looked', 'files looked')} binary or ${n === 1 ? 'was' : 'were'} not valid UTF-8 text, and ${n === 1 ? 'was' : 'were'} not read`,
+  'partial-file': (n) =>
+    `${some(n, 'file was', 'files were')} not read in full (only the first ${READ_CAP_BYTES / 1024 / 1024} MiB of ${n === 1 ? 'it was' : 'each was'} looked at)`,
+  'frontmatter-too-long': (n) =>
+    `${some(n, 'front matter block was', 'front matter blocks were')} not read, because ${n === 1 ? 'it is' : 'they are'} longer than ${FRONTMATTER_CAP_BYTES / 1024} KiB or never closed`,
+  'frontmatter-over-budget': (n) =>
+    `${some(n, 'front matter block was', 'front matter blocks were')} not read, because the reading of front matter has a limit`,
+  'frontmatter-reader': () =>
+    'front matter was read with one YAML reader, and the host that runs the skill may read it differently',
+  prose: () => 'the prose of documents was not read, only their shell blocks and inline commands',
+  'obfuscated-file': (n) =>
+    `${some(n, 'file looks', 'files look')} minified or obfuscated, so what ${n === 1 ? 'it does is' : 'they do is'} not understood`,
+  'shell-over-budget': (n) =>
+    `${some(n, 'piece of shell text was', 'pieces of shell text were')} not read, because the reading of shell text has a limit`,
+  'shell-text-cut': (n) =>
+    `${some(n, 'piece of shell text was', 'pieces of shell text were')} not read in full`,
+  'untagged-fence': (n) =>
+    `${some(n, 'code block', 'code blocks')} in markdown without a language tag ${n === 1 ? 'was' : 'were'} not read as shell`,
+  'lfs-pointer': (n) =>
+    `${some(n, 'Git LFS pointer file stands', 'Git LFS pointer files stand')} for content that is not in this tree`,
+  gitlink: (n) =>
+    `${some(n, 'nested repository (a gitlink) was', 'nested repositories (gitlinks) were')} recorded and not opened`,
+  'native-code': (n) =>
+    `${some(n, 'file of native code was', 'files of native code were')} not looked at (a binding.gyp, a .node file or a compiled program)`,
+  'unreadable-manifest': (n) =>
+    `${some(n, 'manifest could', 'manifests could')} not be parsed, so what ${n === 1 ? 'it declares' : 'they declare'} was not read`,
+  dependencies: () => 'dependencies were not followed, fetched or read',
+  symlink: (n) =>
+    `${some(n, 'symbolic link was', 'symbolic links were')} recorded and not followed`,
+  'list-cut': () => 'a list of tools, hooks or entries was cut at the number a reading takes',
+};
+
+/** The blind spots for the counts of a reading, in a fixed order. */
+export function tallySpots(counts: Readonly<Partial<Record<TallyKey, number>>>): string[] {
+  return TALLY_KEYS.flatMap((key) => {
+    const count = counts[key] ?? 0;
+    return count > 0 ? [SPOTS[key](count)] : [];
+  });
+}
+
+/**
+ * The readings of a tree, by the fixed names a passport uses for them, and what each one reads in words.
+ * A reading that fails is named in a signal and a blind spot, and the name is one of these and never
+ * text of the artifact, so that a person and the next tool can tell which reading is missing.
+ */
+export const READING_PHRASES = {
+  frontmatter: 'the front matter of skills and commands',
+  markdown: 'shell blocks and inline commands in documents',
+  'script-files': 'files of shell and the files that run at the edge of a repository',
+  'package-json': 'package.json files',
+  manifests: 'MCP and plugin manifests',
+  python: 'Python requirements',
+  'native-code': 'native code',
+  source: 'JavaScript, TypeScript and Python source',
+  obfuscation: 'minified or obfuscated files',
+  'repo-files': 'files of a repository that run on their own',
+  'tree-entries': 'links, nested repositories, LFS pointers and executables',
+  shell: 'shell text',
+} as const;
+export type ReadingName = keyof typeof READING_PHRASES;
+export const READING_NAMES = Object.keys(READING_PHRASES) as readonly ReadingName[];
+
+/** What a passport says of a reading that failed: its name, what it reads, and that it is missing. */
+export const failedReadingSpot = (name: ReadingName): string =>
+  `the reading "${name}" (${READING_PHRASES[name]}) failed, and what it finds is missing from this passport`;
+
+/** What is said when more was found than a passport lists. */
+export const moreLinesSpot = (hidden: number): string =>
+  `${some(hidden, 'more finding was', 'more findings were')} found and ${hidden === 1 ? 'is' : 'are'} not listed, because a passport lists at most ${MAX_LINES}`;
+
+export const morePlacesSpot =
+  'some findings have more places than are listed, because a passport lists a few places for each';

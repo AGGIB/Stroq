@@ -1,0 +1,195 @@
+{
+  "schema": "stroq-passport/1",
+  "artifact": {
+    "kind": "mcp",
+    "name": "@acme/weather-mcp",
+    "version": "1.2.0",
+    "source": {
+      "type": "dir",
+      "label": "fixture"
+    },
+    "digest": "7ed133a0bd471b30e7c6eca150c6eab9c71482983d0a0a6a130cfc111d22ddce",
+    "files": 4,
+    "bytes": 1113
+  },
+  "lines": [
+    {
+      "kind": "cred.env",
+      "subject": "HOME",
+      "basis": "observed",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "dist/index.js",
+          "line": 6
+        }
+      ],
+      "detector": "an environment variable read in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "cred.env",
+      "subject": "WEATHER_API_KEY",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "dist/index.js",
+          "line": 5
+        }
+      ],
+      "detector": "an environment variable read in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "bin weather-mcp",
+      "basis": "declared",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "package.json",
+          "line": 4
+        }
+      ],
+      "detector": "bin or main in package.json: how the package is started, as it declares itself"
+    },
+    {
+      "kind": "exec",
+      "subject": "child_process",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "dist/index.js",
+          "line": 3
+        }
+      ],
+      "detector": "a use of a program or of code run from text, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "main dist/index.js",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "package.json",
+          "line": 7
+        }
+      ],
+      "detector": "bin or main in package.json: how the package is started, as it declares itself"
+    },
+    {
+      "kind": "exec",
+      "subject": "node",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "package.json",
+          "line": 9
+        }
+      ],
+      "detector": "a command in a script of the artifact, read by Stroq's shell reader; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "install-script",
+      "subject": "postinstall: node scripts/postinstall.js",
+      "basis": "declared",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "package.json",
+          "line": 9
+        }
+      ],
+      "detector": "a lifecycle script in package.json: npm runs it by itself when the package is installed, as the package declares"
+    },
+    {
+      "kind": "net",
+      "subject": "api.weather.example",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "dist/index.js",
+          "line": 9
+        }
+      ],
+      "detector": "an address written as a string in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "net",
+      "subject": "cdn.weather.example",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "scripts/postinstall.js",
+          "line": 2
+        }
+      ],
+      "detector": "an address written as a string in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "signal",
+      "subject": "declared-name: @acme/weather-mcp 1.2.0",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "package.json",
+          "line": null
+        }
+      ],
+      "detector": "the name and version the artifact gives itself, in its own files; they have not been checked against anything, and the title of this passport is not taken from them where the source names the artifact"
+    },
+    {
+      "kind": "signal",
+      "subject": "non-registry-dependency: left-pad-fork (github, github:acme/left-pad-fork#v2)",
+      "basis": "declared",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "package.json",
+          "line": 16
+        }
+      ],
+      "detector": "a dependency in package.json that does not come from a registry: what it fetches is what is at the address when it is installed; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "signal",
+      "subject": "process-spawn: child_process",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "dist/index.js",
+          "line": 3
+        }
+      ],
+      "detector": "a use of a program or of code run from text, found by reading the text; a signal to look at, not a verdict"
+    }
+  ],
+  "blindSpots": [
+    "anything the program fetches, builds or decides at run time was not looked at",
+    "code in languages other than JavaScript, TypeScript, Python and shell was not read",
+    "dependencies were not followed, fetched or read",
+    "nothing was run: this is a reading of the files, and what the program does when it runs was not observed",
+    "the prose of documents was not read, only their shell blocks and inline commands"
+  ],
+  "signals": [
+    {
+      "ruleId": "non-registry-dependency",
+      "file": "package.json"
+    },
+    {
+      "ruleId": "process-spawn",
+      "file": "dist/index.js"
+    }
+  ],
+  "imported": [],
+  "analysis": {
+    "stroq": "0.0.0-test",
+    "rules": "test-rules/1"
+  }
+}
