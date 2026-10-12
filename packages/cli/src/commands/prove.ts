@@ -28,7 +28,7 @@ export const PROVE_OPTIONS = {
 /** The exit code of a command line that cannot be used (the other codes are `prove-report.ts`'s). */
 const EXIT_USAGE = 2;
 
-/** Requests a run makes unless told otherwise: the allow, the made-up key probe, and its control. */
+/** Requests a run makes unless told otherwise: the allow, the deny probe, and the control run of the deny. */
 export const DEFAULT_MAX_REQUESTS = 3;
 /** The most a run may be told to make: the five of a full check, and one more. */
 export const MAX_REQUESTS_CEILING = 6;

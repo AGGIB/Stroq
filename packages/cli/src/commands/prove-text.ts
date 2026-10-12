@@ -14,7 +14,7 @@ import { isControlId, CONTROL_SUFFIX } from '../live/state-rule.js';
 import type { ProveReport } from './prove-report.js';
 
 const WIDTH = 78;
-const NAME_WIDTH = 38;
+const NAME_WIDTH = 44;
 const MARK_WIDTH = 15;
 
 /** The model the check asks, which is the cheapest there is. */
@@ -31,8 +31,8 @@ const hostWithVersion = (agent: string, version: string | null): string =>
 
 const PROBE_NAMES: Readonly<Record<string, string>> = {
   allow: 'allow (echo to a file)',
+  deny: 'deny (git config key that runs a program)',
   'secret-egress': 'secret egress (curl, made-up key)',
-  deny: 'git hook (write under .git)',
 };
 
 const baseIdOf = (id: string): string =>
@@ -143,6 +143,33 @@ function doubtWords(probes: readonly ProbeResult[]): string {
   return reasons.slice(0, 3).join('; ');
 }
 
+/** `a`, `a and b`, `a, b and c`. */
+const listed = (items: readonly string[]): string =>
+  items.length < 2
+    ? (items[0] ?? '')
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+/**
+ * The probes a verified result stands on, by name: the allow that ran, and each deny the hook stopped in its own
+ * words whose control run then ran (`state-rule.ts` is the rule). A probe that was left, declined or not armed
+ * is not among them.
+ */
+function provedBy(probes: readonly ProbeResult[]): string[] {
+  const armed = new Set(
+    probes
+      .filter((probe) => isControlId(probe.id) && probe.mark === 'passed')
+      .map((probe) => baseIdOf(probe.id)),
+  );
+  return probes
+    .filter((probe) => !isControlId(probe.id) && probe.mark === 'passed')
+    .flatMap((probe) => {
+      if (probe.kind === 'allow') return [probeName(probe.id)];
+      return probe.evidence.E4 === true && armed.has(probe.id)
+        ? [`${probeName(probe.id)} with its control run`]
+        : [];
+    });
+}
+
 /** The verdict, as paragraphs of lines. */
 function verdictLines(report: ProveReport): string[] {
   const host = hostWithVersion(report.agent, report.hostVersion);
@@ -156,6 +183,7 @@ function verdictLines(report: ProveReport): string[] {
         ...sentences(
           `VERIFIED. This shows that the hook line \`stroq init\` writes, run by ${host}, stopped a command your policy denies, and that the same command runs when the hook is out of the way.`,
         ),
+        ...sentences(`Proved by: ${listed(provedBy(report.probes))}.`),
         ...sentences(
           `It does not show that your own settings file is loaded, or that other versions of ${hostName(report.agent)} or other hosts behave the same.`,
         ),
@@ -248,7 +276,11 @@ export function dryRunText(facts: DryRunFacts): string[] {
     `Using the policy: ${outsideLine(facts.policy)}`,
     '',
     'Probes, in this order (one that your policy does not deny is skipped):',
-    ...['allow', 'secret-egress', 'deny'].map((id) => `  - ${probeName(id)}`),
+    ...['allow', 'deny', 'secret-egress'].map((id) => `  - ${probeName(id)}`),
     'A probe that is stopped is run again with the hook out of the way, to show the host would have run it.',
+    ...wrapKeeping(
+      'The first two and the control run of the deny are the 3 requests of a default run. The last is optional: it takes more requests (--max-requests), and the model itself may decline it.',
+      WIDTH,
+    ),
   ];
 }

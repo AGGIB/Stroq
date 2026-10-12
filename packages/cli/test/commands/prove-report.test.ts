@@ -35,14 +35,14 @@ const not = (
   evidence: { E1: null, E2: null, E3: null, E4: null },
 });
 
-/** allow + the made-up key probe + its control: the three requests of a default run. */
+/** allow + the deny probe + its control: the three requests of a default run; the last probe is left. */
 const verified = (over: Partial<HostResult> = {}): HostResult =>
   resultOf('verified', {
     probes: [
       passedProbe(),
-      ok('secret-egress', 'secret-egress', 'blocked'),
-      armedControl('secret-egress', 'secret-egress'),
-      not('deny', 'deny', 'not-attempted', REASONS.maxRequests),
+      ok('deny', 'deny', 'blocked'),
+      armedControl('deny', 'deny'),
+      not('secret-egress', 'secret-egress', 'not-attempted', REASONS.maxRequests),
     ],
     ...over,
   });
@@ -60,9 +60,9 @@ describe('reportOf', () => {
     });
     expect(report.probes.map((p) => p.id)).toEqual([
       'allow',
-      'secret-egress',
-      'secret-egress:control',
       'deny',
+      'deny:control',
+      'secret-egress',
     ]);
   });
 
@@ -183,6 +183,44 @@ describe('adviceFor', () => {
       not('allow', 'allow', 'inconclusive', REASONS.limit),
     ]);
     expect(lines[0]).toMatch(/usage|limit|reset/i);
+  });
+
+  describe('when the model declines the secret-egress probe', () => {
+    const declined = not('secret-egress', 'secret-egress', 'not-issued', REASONS.notIssued);
+    const withDeclined = (state: 'verified' | 'inconclusive', probes: ProbeResult[]): string[] =>
+      adviceFor(reportOf(resultOf(state, { probes: [...probes, declined] })));
+    const proved = [passedProbe(), ok('deny', 'deny', 'blocked'), armedControl('deny', 'deny')];
+
+    it('says, for a host the other probes verified, that the model itself declined it and that it is optional', () => {
+      const lines = withDeclined('verified', proved);
+      const flat = lines.join(' ');
+      expect(flat).toMatch(/model itself declined/i);
+      expect(flat).toMatch(/secret-egress/);
+      expect(flat).toMatch(/optional/i);
+      expect(flat).toMatch(/no action/i);
+      // The advice a verified host always has is still there.
+      expect(flat).toMatch(/stroq doctor/);
+      expect(lines.length).toBeLessThanOrEqual(3);
+    });
+
+    it('does not tell the person to run it again for a probe that is optional', () => {
+      expect(withDeclined('verified', proved).join(' ')).not.toMatch(/run stroq prove again/i);
+    });
+
+    it('does not hide what really blocks a host that is not verified', () => {
+      const lines = withDeclined('inconclusive', [
+        not('allow', 'allow', 'inconclusive', REASONS.limit),
+      ]);
+      expect(lines[0]).toMatch(/usage|limit|reset/i);
+      expect(lines.join(' ')).toMatch(/model itself declined/i);
+      expect(lines.length).toBeLessThanOrEqual(3);
+    });
+
+    it('keeps the plain advice for a command the model did not issue in any other probe', () => {
+      const lines = adviceOf([not('deny', 'deny', 'not-issued', REASONS.notIssued)]);
+      expect(lines.join(' ')).toMatch(/did not issue/);
+      expect(lines.join(' ')).not.toMatch(/optional/i);
+    });
   });
 
   it('has something to say for a reason it does not know', () => {

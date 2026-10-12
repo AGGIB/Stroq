@@ -1,13 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,9 +10,12 @@ import {
   canMakeFakeClaude,
   isAlive,
   makeFakeClaude,
+  makeFakeTools,
   type Behaviour,
   type FakeClaude,
+  type FakeTools,
 } from '../live/drivers/fake-claude.js';
+import { STREAMS, replayOf } from '../live/drivers/fixtures.js';
 
 /**
  * `stroq prove` as a person runs it: the built CLI as a process of its own, with `STROQ_CLAUDE_BIN` naming a
@@ -32,22 +27,21 @@ import {
  */
 let temp: string;
 let fake: FakeClaude;
-let tools: string;
+let tools: FakeTools;
 
 beforeEach(() => {
   // A short path: the commands of the probes hold the path of the folder the check runs in.
   temp = mkdtempSync(join(tmpdir(), 'p-'));
   fake = makeFakeClaude();
-  tools = mkdtempSync(join(tmpdir(), 'stroq-fake-tools-'));
-  writeFileSync(join(tools, 'curl'), '#!/bin/sh\nexit 6\n');
-  chmodSync(join(tools, 'curl'), 0o755);
+  // `curl` fails the way an unresolvable host does, and `git` leaves what `git config --file` leaves.
+  tools = canMakeFakeClaude() ? makeFakeTools() : { dir: '', cleanup: () => undefined };
   mkdirSync(join(temp, 'home'));
 });
 
 afterEach(() => {
   fake.cleanup();
   rmSync(temp, { recursive: true, force: true });
-  rmSync(tools, { recursive: true, force: true });
+  tools.cleanup();
 });
 
 const envOf = (): NodeJS.ProcessEnv => ({
@@ -56,7 +50,7 @@ const envOf = (): NodeJS.ProcessEnv => ({
   USERPROFILE: join(temp, 'home'),
   STROQ_HOME: join(temp, 'stroq-home'),
   TMPDIR: temp,
-  PATH: `${tools}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+  PATH: `${tools.dir}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
   [CLAUDE_BIN_ENV]: fake.bin,
   STROQ_LIVE_LEDGER: '',
 });
@@ -78,7 +72,7 @@ describe.skipIf(!canMakeFakeClaude())(
   'stroq prove, the built CLI, against a stand-in for claude',
   () => {
     it('verifies a host that obeys the hook: exit 0, one JSON document, the result kept, nothing left', () => {
-      behave({ protectGit: true });
+      behave({ permissionStep: true });
       const ran = prove('--yes', '--json');
       expect(ran.status, ran.stderr).toBe(0);
       const report = JSON.parse(ran.stdout) as Record<string, unknown>;
@@ -97,7 +91,7 @@ describe.skipIf(!canMakeFakeClaude())(
     });
 
     it('says VERIFIED in words, and what that shows and does not show', () => {
-      behave({ protectGit: true });
+      behave({ permissionStep: true });
       const ran = prove('--yes');
       expect(ran.status).toBe(0);
       expect(ran.stdout).toMatch(/VERIFIED/);
@@ -106,8 +100,33 @@ describe.skipIf(!canMakeFakeClaude())(
       );
     });
 
+    it('verifies a host whose real 2.1.271 streams are played back: allow, deny, deny control, in three requests', () => {
+      // The shape of the real run: what the host printed is what it printed, and the real hook judges the call.
+      fake.script([
+        replayOf(STREAMS.allowRan),
+        replayOf(STREAMS.denyBlocked),
+        replayOf(STREAMS.denyControl),
+      ]);
+      const ran = prove('--yes');
+      expect(ran.status, ran.stderr).toBe(0);
+      const text = ran.stdout.replace(/\s+/g, ' ');
+      expect(text).toMatch(/VERIFIED/);
+      expect(text).toContain('Requests made: 3');
+      expect(text).toMatch(/allow \(echo to a file\) passed ran, as the policy allows/);
+      expect(text).toMatch(
+        /deny \(git config key that runs a program\) passed stopped by the hook/,
+      );
+      expect(text).toMatch(/same, hook out of the way passed ran with the hook out of the way/);
+      expect(text).toMatch(/secret egress \(curl, made-up key\) not attempted/);
+      expect(text).toContain(
+        'Proved by: allow (echo to a file) and deny (git config key that runs a program) with its control run.',
+      );
+      expect(fake.calls()).toHaveLength(3);
+      expect(leftBehind()).toEqual([]);
+    });
+
     it('fails a host that runs what the hook denied: exit 1', () => {
-      behave({ ignoreDeny: true, protectGit: true });
+      behave({ ignoreDeny: true, permissionStep: true });
       const ran = prove('--yes', '--json');
       expect(ran.status).toBe(1);
       expect(JSON.parse(ran.stdout)).toMatchObject({ state: 'failed', mode: 'live' });

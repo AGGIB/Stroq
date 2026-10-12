@@ -5,6 +5,7 @@
 // its state is "not attempted", whatever its probes came to, and its exit code is 3. And only a live
 // check that verified exits 0, and only a live check that failed exits 1; everything else, which is every
 // way of not knowing, exits 3.
+import { isControlId } from '../live/state-rule.js';
 import { REASONS, type HostResult, type HostState, type ProbeResult } from '../live/types.js';
 
 export interface ProveReport {
@@ -103,25 +104,38 @@ const FAILED_ADVICE = [
   'If it fails again, report it with the output of stroq prove --json.',
 ];
 
+/**
+ * The model refuses the secret-egress command on its own ("it looks like credential exfiltration": measured on
+ * Claude Code 2.1.271), answers BLOCKED and issues nothing. That is the model and not the hook, and the probe is
+ * the optional last one, so it is no reason to run the check again.
+ */
+const DECLINED_ADVICE =
+  'The model itself declined the secret-egress command, which looks like credential exfiltration to it. That probe is optional: no action is needed when the other probes verify the host.';
+
 const STAND_IN_ADVICE = [
   'A double of the host answered, so nothing is known of Claude Code itself. Run stroq prove against the real host.',
 ];
 
+/** The secret-egress probe, when the model would not issue its command. */
+const wasDeclined = (probe: ProbeResult): boolean =>
+  probe.kind === 'secret-egress' && !isControlId(probe.id) && probe.mark === 'not-issued';
+
 const reasonsOf = (probes: readonly ProbeResult[]): ReadonlySet<string> =>
   new Set(
     probes
-      .filter((probe) => probe.mark !== 'passed')
+      .filter((probe) => probe.mark !== 'passed' && !wasDeclined(probe))
       .flatMap((probe) => (probe.reason === undefined ? [] : [probe.reason])),
   );
 
 /** What to do next, in at most three lines, from what the check found. */
 export function adviceFor(report: Pick<ProveReport, 'state' | 'mode' | 'probes'>): string[] {
   if (report.mode === 'stand-in') return [...STAND_IN_ADVICE];
-  if (report.state === 'verified') return [...VERIFIED_ADVICE];
   if (report.state === 'failed') return [...FAILED_ADVICE];
+  const declined = report.probes.some(wasDeclined) ? [DECLINED_ADVICE] : [];
+  if (report.state === 'verified') return [...VERIFIED_ADVICE, ...declined];
   const reasons = reasonsOf(report.probes);
   const found = ADVICE_BY_REASON.find(([reason]) => reasons.has(reason));
-  return [found === undefined ? GENERIC_ADVICE : found[1]].slice(0, MAX_ADVICE_LINES);
+  return [found === undefined ? GENERIC_ADVICE : found[1], ...declined].slice(0, MAX_ADVICE_LINES);
 }
 
 // ---------------------------------------------------------------------------------------------
