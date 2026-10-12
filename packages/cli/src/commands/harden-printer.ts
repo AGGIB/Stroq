@@ -17,6 +17,7 @@ export type OutcomeStatus =
   | 'declined'
   | 'applied'
   | 'undone'
+  | 'status'
   | 'failed';
 
 export interface Outcome {

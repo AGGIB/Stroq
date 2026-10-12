@@ -4,6 +4,7 @@ import { failureOf } from './harden-errors.js';
 import { contextOf, type HardenContext, type HardenDeps } from './harden-deps.js';
 import type { HardenFlags } from './harden-flags.js';
 import { planCommand } from './harden-plan.js';
+import { statusCommand } from './harden-status.js';
 import { undoCommand } from './harden-undo.js';
 import { makePrinter, type Printer } from './harden-printer.js';
 import {
@@ -97,6 +98,7 @@ async function dispatch(
   try {
     if (subcommand === 'apply') return await applyCommand(ctx, recipe, scope, flags, printer);
     if (subcommand === 'undo') return await undoCommand(ctx, recipe, scope, flags, printer);
+    if (subcommand === 'status') return statusCommand(ctx, printer);
     return planCommand(ctx, recipe, scope, flags, printer);
   } catch (err) {
     const { code, outcome } = failureOf(err);
