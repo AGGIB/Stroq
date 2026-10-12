@@ -44,7 +44,7 @@ export function highThreshold(policy: Policy): readonly HighThreshold[] {
       message:
         `threshold is ${policy.threshold}, the default policy's is ${baseline}: a tool result must score ` +
         `${policy.threshold} before it is flagged and taints the session, so less of what is injected is caught`,
-      fix: `set threshold: ${baseline} (or lower), or run stroq attack --fuzz with ${policy.threshold} first to see what it lets through`,
+      fix: `set threshold: ${baseline} (or lower), or run stroq policy test on this file to see what ${policy.threshold} lets through`,
     },
   ];
 }

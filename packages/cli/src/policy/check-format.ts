@@ -43,8 +43,8 @@ function summaryLine(report: CheckReport): string {
   const { policy } = report;
   if (policy === null) {
     return (
-      'Stroq cannot use this file. The hook fails closed while it is in place: it denies Bash, ' +
-      'edits, fetches and MCP calls until the file loads.'
+      'Stroq cannot use this file. While it is in place the hook fails closed (for Claude Code, ' +
+      'Bash, edits, fetches and MCP calls are denied) until the file loads.'
     );
   }
   return `${plural(policy.rules, 'rule')}, default: ${policy.default}, threshold: ${policy.threshold}`;

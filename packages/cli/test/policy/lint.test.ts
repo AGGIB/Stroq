@@ -335,6 +335,22 @@ describe('lint: shadowed rule', () => {
     expect(found.map((f) => f.rule.id)).toEqual(['b']);
   });
 
+  it('keeps a rule id with a line break, a quote or an emoji on one line', () => {
+    const smiling = String.fromCodePoint(0x1f600);
+    const found = shadowed(
+      lintPolicy(
+        base([
+          rule('first', 'allow', ['mcp.call']),
+          rule(`two\nlines "quoted" \\ and ${smiling}`, 'deny', ['mcp.call']),
+        ]),
+      ),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.message).not.toContain('\n');
+    expect(found[0]?.message).toContain('two\\nlines');
+    expect(found[0]?.message).toContain(smiling);
+  });
+
   it('numbers rules from one, by position, so that two rules with one id are told apart', () => {
     const found = shadowed(
       lintPolicy(base([rule('same', 'allow', ['mcp.call']), rule('same', 'deny', ['mcp.call'])])),
