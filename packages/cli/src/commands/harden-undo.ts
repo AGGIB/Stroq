@@ -147,5 +147,15 @@ export function undoCommand(
   flags: HardenFlags,
   printer: Printer,
 ): Promise<number> {
-  return undoTarget(ctx, recipe.target({ cwd: ctx.cwd, home: ctx.home, scope }), flags, printer);
+  return undoTarget(
+    ctx,
+    recipe.target({
+      cwd: ctx.cwd,
+      home: ctx.home,
+      scope,
+      claudeConfigDir: ctx.claudeConfigDir,
+    }),
+    flags,
+    printer,
+  );
 }

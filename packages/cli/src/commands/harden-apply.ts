@@ -195,5 +195,15 @@ export function applyCommand(
   flags: HardenFlags,
   printer: Printer,
 ): Promise<number> {
-  return applyTarget(ctx, recipe.target({ cwd: ctx.cwd, home: ctx.home, scope }), flags, printer);
+  return applyTarget(
+    ctx,
+    recipe.target({
+      cwd: ctx.cwd,
+      home: ctx.home,
+      scope,
+      claudeConfigDir: ctx.claudeConfigDir,
+    }),
+    flags,
+    printer,
+  );
 }

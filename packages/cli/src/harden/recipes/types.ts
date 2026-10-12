@@ -17,6 +17,8 @@ export interface RecipeContext {
   readonly cwd: string;
   readonly home: string;
   readonly scope: HardenScope;
+  /** `CLAUDE_CONFIG_DIR` where it is set: Claude Code may keep its user settings there. */
+  readonly claudeConfigDir?: string | undefined;
 }
 
 /** What a recipe wants of a file. */

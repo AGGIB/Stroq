@@ -32,6 +32,15 @@ const LIMITS: readonly string[] = [
   'Rules the file already has are kept as they are, and undo never removes one of them.',
 ];
 
+/**
+ * Said at the user scope when `CLAUDE_CONFIG_DIR` is set. Claude Code may then keep its user settings
+ * there, and `~/.claude/settings.json` (where `stroq init` writes the hook too) would be a file it does
+ * not read. Stroq has not checked what Claude Code does, so the sentence says "may" and does not move
+ * the file.
+ */
+const CONFIG_DIR_NOTE =
+  'CLAUDE_CONFIG_DIR is set here, so Claude Code may read its user settings from that folder and not from ~/.claude; Stroq edits ~/.claude/settings.json.';
+
 /** The lines to add by hand, as a fragment that fits inside the braces of a settings file. */
 const SNIPPET = [
   '"permissions": {',
@@ -66,7 +75,7 @@ function target(context: RecipeContext): RecipeTarget {
     },
     change: { kind: 'json', edits: EDITS, snippet: SNIPPET },
     newFileMode: NEW_SETTINGS_MODE,
-    limits: LIMITS,
+    limits: user && context.claudeConfigDir ? [...LIMITS, CONFIG_DIR_NOTE] : LIMITS,
     unverified: null,
   };
 }

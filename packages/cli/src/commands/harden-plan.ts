@@ -24,7 +24,12 @@ export function prepare(
   scope: HardenScope,
   acknowledgeLink: boolean,
 ): Prepared {
-  const target = recipe.target({ cwd: ctx.cwd, home: ctx.home, scope });
+  const target = recipe.target({
+    cwd: ctx.cwd,
+    home: ctx.home,
+    scope,
+    claudeConfigDir: ctx.claudeConfigDir,
+  });
   const plan = makePlan(target, acknowledgeLink);
   return { target, plan, view: viewOf(target, plan) };
 }

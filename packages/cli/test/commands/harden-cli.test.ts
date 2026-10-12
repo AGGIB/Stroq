@@ -30,6 +30,7 @@ function world() {
         HOME: home,
         USERPROFILE: home,
         STROQ_HOME: stroqHome,
+        CLAUDE_CONFIG_DIR: '',
         CI: '',
         TERM: 'xterm',
       },

@@ -71,6 +71,8 @@ export function hardenWorld(overrides: Partial<HardenDeps> = {}): HardenWorld {
     stroqHome,
     now: env.now,
     version: '0.0.0-test',
+    // Whatever the developer's own shell says, a test is not about it.
+    claudeConfigDir: '',
     ...overrides,
   };
   const run = (args: readonly string[], extra: Partial<HardenDeps> = {}): Promise<Run> =>

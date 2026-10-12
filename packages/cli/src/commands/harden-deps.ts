@@ -17,6 +17,8 @@ export interface HardenDeps {
   readonly stroqHome?: string;
   readonly now?: () => Date;
   readonly version?: string;
+  /** `CLAUDE_CONFIG_DIR`; without one, the process's own environment says. */
+  readonly claudeConfigDir?: string;
   /** The file system the engine writes with; a test makes one of its calls fail or interfere. */
   readonly fs?: Fs;
   /** A terminal for the question; without one the process's own is used when a person is at it. */
@@ -26,6 +28,8 @@ export interface HardenDeps {
 export interface HardenContext {
   readonly cwd: string;
   readonly home: string;
+  /** Where Claude Code is told to keep its configuration, when it is told. */
+  readonly claudeConfigDir: string | undefined;
   /** What the engine is given: the Stroq home, the clock and the version it records. */
   readonly env: HardenEnv;
   /** The terminal a person can answer on, or `null` when none can (a pipe, a script, CI). */
@@ -44,10 +48,15 @@ async function processTerminal(): Promise<Terminal | null> {
   return terminal.interactive ? terminal : null;
 }
 
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value === undefined || value === '' ? undefined : value;
+
 export function contextOf(deps: HardenDeps): HardenContext {
   return {
     cwd: deps.cwd ?? process.cwd(),
     home: deps.home ?? homedir(),
+    // An empty variable is not a folder.
+    claudeConfigDir: nonEmpty(deps.claudeConfigDir ?? process.env['CLAUDE_CONFIG_DIR']),
     env: {
       home: deps.stroqHome ?? stroqHome(),
       now: deps.now ?? (() => new Date()),

@@ -165,6 +165,32 @@ describe('stroq harden (plan)', () => {
     expect(readFileSync(world.inProject('.cursorignore'), 'utf8')).toBe('dist/\n');
   });
 
+  describe('when Claude Code is told to keep its configuration somewhere else', () => {
+    const SAID =
+      'CLAUDE_CONFIG_DIR is set here, so Claude Code may read its user settings from that folder and not from ~/.claude; Stroq edits ~/.claude/settings.json.';
+
+    it('says so at the user scope, where the settings file is the one it would miss', async () => {
+      const world = hardenWorld();
+
+      const run = await world.run([], { claudeConfigDir: '/somewhere/else' });
+
+      expect(run.code).toBe(0);
+      expect(run.out).toContain(`  - ${SAID}`);
+    });
+
+    it('says nothing about it at the project scope, or when it is not set', async () => {
+      const world = hardenWorld();
+
+      const project = await world.run(['--scope', 'project'], {
+        claudeConfigDir: '/somewhere/else',
+      });
+      const plain = await world.run([]);
+
+      expect(project.out).not.toContain('CLAUDE_CONFIG_DIR');
+      expect(plain.out).not.toContain('CLAUDE_CONFIG_DIR');
+    });
+  });
+
   describe('a settings file with comments', () => {
     it('writes nothing, says why, and prints the exact lines to add by hand', async () => {
       const world = hardenWorld();
