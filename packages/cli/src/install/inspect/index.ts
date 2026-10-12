@@ -25,6 +25,8 @@ import { identify } from './identity.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
 import { buildInput } from './input.js';
 import { ShellQueue } from './shell-queue.js';
+import { addShellLines } from './shell-lines.js';
+import { queueMarkdownShell, queueScriptShell } from './shell-sources.js';
 
 export interface InspectContext {
   /** What kind of artifact it is, or `auto` to tell from the files (a kind that cannot be told is an error). */
@@ -104,6 +106,9 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
 
   const shell = new ShellQueue();
   const declared = inspectFrontmatter(input, findings, shell);
+  queueMarkdownShell(input, findings, shell);
+  queueScriptShell(input, shell);
+  addShellLines(shell, findings);
 
   const identity = identify(kind, input, context.source, declared);
   const found = findings.result();

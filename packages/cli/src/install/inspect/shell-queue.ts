@@ -10,6 +10,8 @@ export type SnippetOrigin =
   | 'doc'
   /** A hook a skill or plugin declares, which the host runs. */
   | 'hook'
+  /** A command written inline in a skill (`!` and backticks), which the host runs when it loads the skill. */
+  | 'inline'
   /** A file of shell, or a script a package runs. */
   | 'script'
   /** A script of a package that is not run when it is installed. */
@@ -22,11 +24,18 @@ export interface ShellSnippet {
   readonly origin: SnippetOrigin;
 }
 
+/** The most places shell text is kept for; a document of a hundred thousand tiny blocks is not read block by block. */
+const QUEUE_MAX = 5000;
+
 export class ShellQueue {
   private readonly queued: ShellSnippet[] = [];
+  /** How many pieces were left out of the queue because it was full. */
+  dropped = 0;
 
   add(snippet: ShellSnippet): void {
-    if (snippet.text.trim() !== '') this.queued.push(snippet);
+    if (snippet.text.trim() === '') return;
+    if (this.queued.length >= QUEUE_MAX) this.dropped += 1;
+    else this.queued.push(snippet);
   }
 
   /** What was queued, in an order that does not depend on the order it was found in. */

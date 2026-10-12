@@ -9,6 +9,15 @@
 export const MAX_LINES = 500;
 /** The most places a line lists. */
 export const MAX_PLACES = 20;
+/** The most of one piece of shell text that is read; the rest is a blind spot. */
+export const SHELL_SNIPPET_MAX = 64 * 1024;
+/** The most shell text one artifact is read for, and the most pieces of it. */
+export const SHELL_TOTAL_MAX = 256 * 1024;
+/** The longest all the reading of shell text may take, in milliseconds; what is left after it is a blind spot. */
+export const SHELL_TOTAL_MS = 6000;
+export const SHELL_SNIPPET_COUNT_MAX = 300;
+/** The most places that read shell text is put in a passport for: the same text in more places is listed for the first ones. */
+export const SHELL_PLACEMENT_MAX = 1000;
 /** How much of a file is read for inspection; the rest of a longer file is a blind spot. */
 export const READ_CAP_BYTES = 1024 * 1024;
 /** How much front matter is read. */
