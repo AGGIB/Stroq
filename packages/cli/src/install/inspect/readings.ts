@@ -10,7 +10,7 @@
 import type { ReadingName } from './blind-spots.js';
 import type { Findings } from './findings.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
-import type { Identity } from './identity.js';
+import type { DeclaredHint } from './identity.js';
 import type { InspectInput } from './input.js';
 import { inspectManifests } from './manifest-lines.js';
 import { inspectNativeCode } from './native-code.js';
@@ -28,7 +28,7 @@ export interface ReadContext {
   readonly input: InspectInput;
   readonly findings: Findings;
   readonly shell: ShellQueue;
-  declared: Partial<Identity>;
+  declared: DeclaredHint;
 }
 
 export interface NamedReading {

@@ -10,7 +10,7 @@ import {
 } from './blind-spots.js';
 import type { Findings } from './findings.js';
 import { readFrontmatter } from './frontmatter.js';
-import type { Identity } from './identity.js';
+import type { DeclaredHint } from './identity.js';
 import type { InspectInput } from './input.js';
 import { addHookLines } from './hook-lines.js';
 import { own, ownObject, ownString, type JsonObject } from './json.js';
@@ -82,8 +82,8 @@ export function inspectFrontmatter(
   input: InspectInput,
   findings: Findings,
   shell: ShellQueue,
-): Partial<Identity> {
-  let identity: Partial<Identity> = {};
+): DeclaredHint {
+  let identity: DeclaredHint = {};
   let read = 0;
   let bytes = 0;
   for (const file of input.texts) {
@@ -125,6 +125,7 @@ export function inspectFrontmatter(
       identity = {
         ...(name === null ? {} : { name }),
         ...(version === null ? {} : { version }),
+        file: file.path,
       };
     }
   }

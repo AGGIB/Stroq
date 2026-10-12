@@ -4,6 +4,10 @@ import { lineOf, linesOf, passportOf, subjectsOf, type Files } from '../../helpe
 const server = (manifest: object, extra: Files = {}) =>
   passportOf({ 'package.json': JSON.stringify(manifest, null, 2), ...extra }, { kind: 'mcp' });
 
+/** The signals about dependencies, apart from the one that shows what the package calls itself. */
+const dependencySignals = (passport: ReturnType<typeof server>) =>
+  linesOf(passport, 'signal').filter((line) => line.subject.startsWith('non-registry-dependency'));
+
 describe('package.json: what it launches', () => {
   it('makes an exec line for each bin, declared, and one for main that is not sensitive', () => {
     const passport = server({
@@ -180,7 +184,7 @@ describe('package.json: dependencies that are not from a registry', () => {
     expect(
       passport.signals.filter((signal) => signal.ruleId === 'non-registry-dependency'),
     ).toHaveLength(1);
-    expect(subjectsOf(passport, 'signal')).toHaveLength(4);
+    expect(dependencySignals(passport)).toHaveLength(4);
   });
 
   it('makes the signal sensitive and a net line for the host of an address', () => {
@@ -189,7 +193,7 @@ describe('package.json: dependencies that are not from a registry', () => {
       dependencies: { dep: 'https://user:token@host.example/d.tgz' },
     });
 
-    expect(linesOf(passport, 'signal')[0]).toMatchObject({ sensitive: true, basis: 'declared' });
+    expect(dependencySignals(passport)[0]).toMatchObject({ sensitive: true, basis: 'declared' });
     expect(lineOf(passport, 'net', 'host.example')).toMatchObject({
       sensitive: true,
       basis: 'declared',
@@ -226,7 +230,7 @@ describe('package.json: dependencies that are not from a registry', () => {
       devDependencies: { a: 5 },
     });
 
-    expect(linesOf(passport, 'signal')).toEqual([]);
+    expect(dependencySignals(passport)).toEqual([]);
   });
 });
 

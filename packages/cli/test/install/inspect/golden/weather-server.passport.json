@@ -132,6 +132,19 @@
     },
     {
       "kind": "signal",
+      "subject": "declared-name: @acme/weather-mcp 1.2.0",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "package.json",
+          "line": null
+        }
+      ],
+      "detector": "the name and version the artifact gives itself, in its own files; they have not been checked against anything, and the title of this passport is not taken from them where the source names the artifact"
+    },
+    {
+      "kind": "signal",
       "subject": "non-registry-dependency: left-pad-fork (github, github:acme/left-pad-fork#v2)",
       "basis": "declared",
       "sensitive": true,

@@ -179,6 +179,19 @@
     },
     {
       "kind": "signal",
+      "subject": "declared-name: pdf-forms 1.2.0",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": null
+        }
+      ],
+      "detector": "the name and version the artifact gives itself, in its own files; they have not been checked against anything, and the title of this passport is not taken from them where the source names the artifact"
+    },
+    {
+      "kind": "signal",
       "subject": "process-spawn: subprocess",
       "basis": "observed",
       "sensitive": true,

@@ -21,7 +21,8 @@ import {
 } from '../types.js';
 import { detectKind } from './detect-kind.js';
 import { Findings } from './findings.js';
-import { identify } from './identity.js';
+import { declaredIdentity, identify } from './identity.js';
+import { addIdentityLines } from './identity-lines.js';
 import { buildInput, type InspectInput } from './input.js';
 import { READINGS, runReadings, type NamedReading } from './readings.js';
 import { ShellQueue } from './shell-queue.js';
@@ -127,7 +128,11 @@ export function inspectWithReadings(
   const read = { input, findings, shell: new ShellQueue(), declared: {} };
   runReadings(read, readings);
 
-  const identity = identify(kind, input, context.source, read.declared);
+  // What the artifact says it is called is a declaration, shown as one; the title is the source's name
+  // wherever the source names the artifact (see `identity.ts`).
+  const declared = declaredIdentity(kind, input, read.declared);
+  addIdentityLines(findings, context.source, declared);
+  const identity = identify(context.source, declared);
   const found = findings.result();
   const stats = treeStats(tree);
   const parsed = PassportSchema.safeParse({

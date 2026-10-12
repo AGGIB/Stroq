@@ -108,18 +108,26 @@ describe('inspectTree: the name and version', () => {
     expect(passport.artifact.version).toBe('0.9');
   });
 
-  it.each<[string, SourceRef, string]>([
-    ['a folder', { type: 'dir', label: 'my-skill' }, 'my-skill'],
-    ['a tarball', { type: 'tarball', label: 'pack.tgz' }, 'pack.tgz'],
-    ['a package', { type: 'npm', name: '@scope/pkg', version: '1.0.0' }, '@scope/pkg'],
-    ['a repository', { type: 'github', owner: 'o', repo: 'the-repo', ref: 'main' }, 'the-repo'],
-    ['an address', { type: 'url', host: 'files.example.com' }, 'files.example.com'],
-  ])('falls back to the name of the source for %s', (_what, source, expected) => {
-    const passport = passportOf({ 'SKILL.md': '# s\n' }, { source });
+  it.each<[string, SourceRef, string, string | null]>([
+    ['a folder', { type: 'dir', label: 'my-skill' }, 'my-skill', null],
+    ['a tarball', { type: 'tarball', label: 'pack.tgz' }, 'pack.tgz', null],
+    ['a package', { type: 'npm', name: '@scope/pkg', version: '1.0.0' }, '@scope/pkg', '1.0.0'],
+    [
+      'a repository',
+      { type: 'github', owner: 'o', repo: 'the-repo', ref: 'main' },
+      'o/the-repo',
+      null,
+    ],
+    ['an address', { type: 'url', host: 'files.example.com' }, 'files.example.com', null],
+  ])(
+    'is named for the source when the artifact says nothing, for %s',
+    (_what, source, name, version) => {
+      const passport = passportOf({ 'SKILL.md': '# s\n' }, { source });
 
-    expect(passport.artifact.name).toBe(expected);
-    expect(passport.artifact.version).toBeNull();
-  });
+      expect(passport.artifact.name).toBe(name);
+      expect(passport.artifact.version).toBe(version);
+    },
+  );
 
   it('makes a name from the artifact safe to show, and cuts it', () => {
     const passport = passportOf(
