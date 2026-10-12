@@ -44,7 +44,9 @@ describe('cleanFixture', () => {
   it('puts the project of the capture at the fixed path, in either spelling of the temp directory', () => {
     const plain = RAW_PROJECT;
     const real = `/private${RAW_PROJECT}`;
-    const out = parsedLines(cleanFixture(`${rawLine({ cwd: plain })}\n${rawLine({ cwd: real })}\n`));
+    const out = parsedLines(
+      cleanFixture(`${rawLine({ cwd: plain })}\n${rawLine({ cwd: real })}\n`),
+    );
     expect(out.map((line) => line['cwd'])).toEqual([FIXTURE_PROJECT, FIXTURE_PROJECT]);
   });
 
@@ -70,13 +72,26 @@ describe('cleanFixture', () => {
       cleanFixture(`${JSON.stringify({ message: { content: [thinking, other] } })}\n`),
     );
     expect(line).toEqual({
-      message: { content: [{ type: 'thinking', thinking: '' }, { type: 'tool_use', signature: 'kept' }] },
+      message: {
+        content: [
+          { type: 'thinking', thinking: '' },
+          { type: 'tool_use', signature: 'kept' },
+        ],
+      },
     });
   });
 
   it('numbers ids in the order they appear, so a call and its result still name each other', () => {
-    const call = JSON.stringify({ id: 'toolu_01AAA', session_id: SESSION, request_id: 'req_01XYZ' });
-    const result = JSON.stringify({ tool_use_id: 'toolu_01AAA', other: 'toolu_01BBB', msg: 'msg_01Q' });
+    const call = JSON.stringify({
+      id: 'toolu_01AAA',
+      session_id: SESSION,
+      request_id: 'req_01XYZ',
+    });
+    const result = JSON.stringify({
+      tool_use_id: 'toolu_01AAA',
+      other: 'toolu_01BBB',
+      msg: 'msg_01Q',
+    });
     const [first, second] = parsedLines(cleanFixture(`${call}\n${result}\n`));
     expect(first).toEqual({
       id: 'toolu_FIXTURE0001',
@@ -87,6 +102,17 @@ describe('cleanFixture', () => {
       tool_use_id: 'toolu_FIXTURE0001',
       other: 'toolu_FIXTURE0002',
       msg: 'msg_FIXTURE0001',
+    });
+  });
+
+  it('does not take a name that merely starts like an id for one (a capability is called msg_lifecycle_v1)', () => {
+    const line = JSON.stringify({
+      capabilities: ['msg_lifecycle_v1'],
+      id: 'msg_011CfxiBJmUTHMrcKRwV6jvV',
+    });
+    expect(parsedLines(cleanFixture(`${line}\n`))[0]).toEqual({
+      capabilities: ['msg_lifecycle_v1'],
+      id: 'msg_FIXTURE0001',
     });
   });
 
@@ -144,9 +170,9 @@ describe('leaksIn', () => {
   });
 
   it('finds nothing in the home the cleaner names', () => {
-    expect(leaksIn('/Users/fixture-user/x /home/fixture-user/y /tmp/stroq-live-fixture/project')).toEqual(
-      [],
-    );
+    expect(
+      leaksIn('/Users/fixture-user/x /home/fixture-user/y /tmp/stroq-live-fixture/project'),
+    ).toEqual([]);
   });
 });
 
@@ -167,7 +193,9 @@ describe('the committed fixtures', () => {
   });
 
   it.each(named)('%s is one JSON document on every line', (_name, file) => {
-    const lines = readFileSync(file, 'utf8').split('\n').filter((line) => line !== '');
+    const lines = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '');
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(() => JSON.parse(line)).not.toThrow();
   });

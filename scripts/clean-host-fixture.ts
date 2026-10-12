@@ -7,10 +7,7 @@
 // Nothing is written when the cleaned text still holds something of the machine it was captured on.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import {
-  cleanFixture,
-  leaksIn,
-} from '../packages/cli/test/live/drivers/clean-fixture.ts';
+import { cleanFixture, leaksIn } from '../packages/cli/test/live/drivers/clean-fixture.ts';
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),

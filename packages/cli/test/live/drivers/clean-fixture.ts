@@ -23,8 +23,10 @@ const DROPPED_KEYS: ReadonlySet<string> = new Set([
   'messaging_socket_path',
 ]);
 
-const UUID = /\b(?!00000000-0000-4000-8000-0000000000\d\d\b)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
-const PREFIXED_ID = /\b(msg|req|toolu)_(?!FIXTURE)[A-Za-z0-9]+/g;
+const UUID =
+  /\b(?!00000000-0000-4000-8000-0000000000\d\d\b)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+/** Ids are `msg_01...`: a long run of letters and digits, which tells them from a name like `msg_lifecycle_v1`. */
+const PREFIXED_ID = /\b(msg|req|toolu)_(?!FIXTURE)[A-Za-z0-9]{16,}\b/g;
 /** The throwaway project of a capture, under either spelling of the system temp directory. */
 const PROJECT = /(?:\/private)?\/[^"\\\s]*?\/stroq-capture-[A-Za-z0-9]+\/project/g;
 const HOME_DIR = /\/Users\/(?!fixture-user\b)[^/"\\\s]+/g;
@@ -80,8 +82,7 @@ export function cleanFixture(raw: string, options: CleanOptions = {}): string {
   const byPrefix = new Map<string, (id: string) => string>();
   const prefixed = (whole: string, prefix: string): string => {
     const make =
-      byPrefix.get(prefix) ??
-      numbered((n) => `${prefix}_FIXTURE${String(n).padStart(4, '0')}`);
+      byPrefix.get(prefix) ?? numbered((n) => `${prefix}_FIXTURE${String(n).padStart(4, '0')}`);
     byPrefix.set(prefix, make);
     return make(whole);
   };
