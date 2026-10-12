@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, type Policy } from '@stroq/core';
-import { buildProbes } from '../../src/live/probes.js';
+import { DENY_FILE, buildProbes } from '../../src/live/probes.js';
 import { writePolicy } from '../../src/live/policy-digest.js';
 import type { Probe } from '../../src/live/types.js';
 import { FakeHostDriver, type Fault } from './fake-driver.js';
@@ -97,7 +97,7 @@ describe('an honest host', () => {
   });
 
   it.each([
-    ['deny', '.git/hooks/pre-commit', 'deny-git-exec'],
+    ['deny', DENY_FILE, 'deny-git-exec'],
     ['secret-egress', 'stroq-live-egress.txt', 'deny-secret-egress'],
   ] as const)(
     'stops the %s probe: nothing is made, and the host passes on the hook words',
@@ -113,13 +113,19 @@ describe('an honest host', () => {
     },
   );
 
-  it.skipIf(process.platform === 'win32')(
-    'leaves the hook file it makes without the right to run',
-    async () => {
-      await run('honest', 'deny', { hookMode: 'noop' });
-      expect(statSync(join(rig.project, '.git', 'hooks', 'pre-commit')).mode & 0o111).toBe(0);
-    },
-  );
+  // The deny command is `git config --file <file> core.hooksPath <nonce>`, which makes a text file and
+  // nothing that can run. The double writes what git writes, so that a control run found the file the
+  // way the evidence reads it (`probes.test.ts` checks the same text against the real git).
+  it('writes into the deny file the git setting its command sets, and nothing else', async () => {
+    await run('honest', 'deny', { hookMode: 'noop' });
+    expect(readFileSync(join(rig.project, DENY_FILE), 'utf8')).toBe(
+      `${probe('deny').sentinel.holds}\n`,
+    );
+    expect(readFileSync(join(rig.project, DENY_FILE), 'utf8')).toBe(
+      `[core]\n\thooksPath = ${NONCE}\n`,
+    );
+    expect(exists('.git')).toBe(false);
+  });
 
   it('judges under the policy.yaml in the home it is given, as the hook does', async () => {
     const lax: Policy = {
@@ -128,7 +134,7 @@ describe('an honest host', () => {
     };
     writePolicy(rig.stroqHome, lax);
     await run('honest', 'deny');
-    expect(exists('.git/hooks/pre-commit')).toBe(true);
+    expect(exists(DENY_FILE)).toBe(true);
     expect((await rig.audit())[0]?.decision).toMatchObject({ effect: 'allow', ruleId: null });
   });
 
@@ -138,14 +144,14 @@ describe('an honest host', () => {
       hookPolicy: { ...DEFAULT_POLICY, rules: [] },
     });
     await driver.run(probe('deny'), rig.ctx());
-    expect(exists('.git/hooks/pre-commit')).toBe(true);
+    expect(exists(DENY_FILE)).toBe(true);
   });
 });
 
 describe('a host that does not do what the hook says', () => {
   it('ignores a deny: the hook says deny and the command runs', async () => {
     const result = await run('ignore-deny', 'deny');
-    expect(exists('.git/hooks/pre-commit')).toBe(true);
+    expect(exists(DENY_FILE)).toBe(true);
     expect((await rig.audit())[0]?.decision).toMatchObject({
       effect: 'deny',
       ruleId: 'deny-git-exec',
@@ -183,14 +189,14 @@ describe('a control run, where the hook allows everything', () => {
     'lets the command run whatever the hook faults are (%s), and records nothing',
     async (fault) => {
       await run(fault, 'deny', { hookMode: 'noop' });
-      expect(exists('.git/hooks/pre-commit')).toBe(true);
+      expect(exists(DENY_FILE)).toBe(true);
       expect(await rig.audit()).toEqual([]);
     },
   );
 
   it('is still blocked by a host that blocks everything, and still refused by a model that refuses', async () => {
     await run('host-blocks-all', 'deny', { hookMode: 'noop' });
-    expect(exists('.git/hooks/pre-commit')).toBe(false);
+    expect(exists(DENY_FILE)).toBe(false);
     expect(await rig.audit()).toEqual([]);
     const refused = await run('refusal', 'deny', { hookMode: 'noop' });
     expect(refused.stream.some((e) => e.type === 'tool_use')).toBe(false);

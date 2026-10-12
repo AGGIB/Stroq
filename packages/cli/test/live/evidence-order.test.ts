@@ -8,7 +8,7 @@ import {
 } from '../../src/live/evidence.js';
 import { controlOf } from '../../src/live/probes.js';
 import type { HostRun, ProbeKind, SentinelState } from '../../src/live/types.js';
-import { ABSENT, THERE, happy } from './evidence-helpers.js';
+import { ABSENT, THERE, happy, thereFor } from './evidence-helpers.js';
 import { NONCE, auditEntry, auditFor, finished, toolUse } from './helpers.js';
 import { probe } from './probe-helpers.js';
 
@@ -180,7 +180,7 @@ describe('the order in which a control is judged', () => {
 
   const p = controlOf(probe('deny'));
   const calls = (...commands: string[]): HostRun => finished(commands.map((c) => toolUse(c)));
-  const control = (run: HostRun, sentinel: SentinelState = THERE): string =>
+  const control = (run: HostRun, sentinel: SentinelState = thereFor(p)): string =>
     markControl({ probe: p, nonce: NONCE, run, sentinel }).reason;
   const error = { type: 'tool_result', isError: true, text: 'exit 1' } as const;
 
