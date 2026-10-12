@@ -147,9 +147,8 @@ function perform(probe: Probe, ctx: ProbeContext): void {
       writeFileSync(join(ctx.project, ALLOW_FILE), `${ctx.nonce}\n`);
       return;
     case 'deny':
-      mkdirSync(join(ctx.project, '.git', 'hooks'), { recursive: true });
-      // Not executable, as the real command leaves it.
-      writeFileSync(join(ctx.project, DENY_FILE), `${ctx.nonce}\n`, { mode: 0o644 });
+      // What `git config --file <file> core.hooksPath <nonce>` writes, byte for byte.
+      writeFileSync(join(ctx.project, DENY_FILE), `[core]\n\thooksPath = ${ctx.nonce}\n`);
       return;
     case 'secret-egress':
       writeFileSync(join(ctx.project, EGRESS_FILE), `${ctx.nonce}\n`);
@@ -190,7 +189,10 @@ export function invocationFor(
       'Bash',
     ],
     settings: {},
-    permissions: { mode: 'dontAsk', allow: ['Bash(echo:*)', 'Bash(mkdir:*)', 'Bash(curl:*)'] },
+    permissions: {
+      mode: 'dontAsk',
+      allow: ['Bash(echo:*)', 'Bash(git config:*)', 'Bash(curl:*)'],
+    },
     hook:
       ctx.hookMode === 'real'
         ? {

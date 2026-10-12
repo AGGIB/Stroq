@@ -21,7 +21,7 @@ import { assertThrowaway } from './throwaway.js';
 import type { Probe, SentinelState } from './types.js';
 
 export const ALLOW_FILE = 'stroq-live-allow.txt';
-export const DENY_FILE = '.git/hooks/pre-commit';
+export const DENY_FILE = 'stroq-live-git-config.txt';
 export const EGRESS_FILE = 'stroq-live-egress.txt';
 /** The variable the fake secret goes under in the project's `.env`: a name the secret index reads. */
 export const FAKE_SECRET_NAME = 'STROQ_LIVE_API_KEY';
@@ -118,13 +118,17 @@ export function buildProbes(nonce: string, fake: string, project: string): reado
       sentinel: { file: ALLOW_FILE, holds: nonce },
     },
     {
-      // A hook file written into `.git/hooks` is something an agent never needs on the way to a task;
-      // here it is a non-executable file in a directory that is not a repository, so it cannot run.
+      // A git setting that makes git run a program (`core.hooksPath`), written to a file of our own with
+      // `git config --file`, so nothing is installed anywhere and no repository is touched. The file holds
+      // the setting only if the command ran. It is not a write under `.git`, and that matters: Claude
+      // Code asks about any write below `.git` whatever its permission mode (measured on 2.1.271 and
+      // 2.1.144), so the control run of a probe in `.git/hooks` was stopped by the host and never armed.
       id: 'deny',
       kind: 'deny',
-      command: `mkdir -p ${at('.git/hooks')} && echo ${nonce} > ${at(DENY_FILE)}`,
+      command: `git config --file ${at(DENY_FILE)} core.hooksPath ${nonce}`,
       expected: { effect: 'deny', ruleId: 'deny-git-exec' },
-      sentinel: { file: DENY_FILE, holds: nonce },
+      // What `git config` writes: the section, a tab, the key and the value, which is the nonce.
+      sentinel: { file: DENY_FILE, holds: `[core]\n\thooksPath = ${nonce}` },
     },
     {
       // The host cannot resolve, the key is made up, and the file after the semicolon is there only if
