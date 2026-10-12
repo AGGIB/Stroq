@@ -166,12 +166,21 @@ const timed = (run: () => unknown): number => {
   return cpuNow() - started;
 };
 
-/** Fails if a time is both slow and more than `MAX_GROWTH` times the one before it. */
-function expectLinear(inputs: readonly string[], run: EntryPoint): void {
+/**
+ * Fails if a time is both slow and more than `MAX_GROWTH` times the one before it. `measure` is the
+ * processor time of a run, except in the test of the gate itself, which counts steps instead: a test of
+ * the gate that timed a quadratic reader was slow on a coverage runner (past its time limit) and too
+ * fast to cross the bound on another, and the gate's arithmetic is what that test is about.
+ */
+function expectLinear(
+  inputs: readonly string[],
+  run: EntryPoint,
+  measure: (run: () => unknown) => number = timed,
+): void {
   const times: number[] = [];
   for (const input of inputs) {
     const before = times[times.length - 1];
-    let took = timed(() => run(input));
+    let took = measure(() => run(input));
     for (
       let tries = 1;
       tries < TRIES && before !== undefined && took >= BOUND_MS && took >= MAX_GROWTH * before;
@@ -179,7 +188,7 @@ function expectLinear(inputs: readonly string[], run: EntryPoint): void {
     ) {
       took = Math.min(
         took,
-        timed(() => run(input)),
+        measure(() => run(input)),
       );
     }
     times.push(took);
@@ -194,34 +203,45 @@ function expectLinear(inputs: readonly string[], run: EntryPoint): void {
 
 describe('the gate itself', () => {
   // A gate that nothing fails proves nothing: this reader is quadratic on purpose, and must be caught.
+  // Its work is counted, a step being a millionth of a millisecond, so the test does not depend on how
+  // fast the machine is: the three sizes give 8, 33 and 131 ms of the linear work below, and 2, 34 and
+  // 537 ms of the quadratic work, the last of which is both over the bound and more than eleven times
+  // the one before it.
+  const STEP_MS = 1e-6;
+  const counted = (run: () => unknown): number => Number(run()) * STEP_MS;
+
   it('fails a reader whose work grows with the square of the text', () => {
-    const quadratic = (text: string): number => {
-      let total = 0;
-      for (let i = 0; i < text.length; i += 1) {
-        for (let j = 0; j < i / 64; j += 1) total += j;
-      }
-      return total;
-    };
+    const quadratic = (text: string): number => (text.length * text.length) / 128;
 
     expect(() =>
       expectLinear(
         SIZES.map((size) => 'a'.repeat(size)),
         quadratic,
+        counted,
       ),
     ).toThrow();
   });
 
   it('passes a reader whose work grows with the text', () => {
-    const linear = (text: string): number => {
-      let total = 0;
-      for (let i = 0; i < text.length; i += 1) total += text.charCodeAt(i);
-      return total;
-    };
+    const linear = (text: string): number => text.length * 500;
 
     expect(() =>
       expectLinear(
         SIZES.map((size) => 'a'.repeat(size)),
         linear,
+        counted,
+      ),
+    ).not.toThrow();
+  });
+
+  it('passes a reader that is fast at every size, whatever its growth', () => {
+    const quick = (text: string): number => text.length / 1000;
+
+    expect(() =>
+      expectLinear(
+        SIZES.map((size) => 'a'.repeat(size)),
+        quick,
+        counted,
       ),
     ).not.toThrow();
   });

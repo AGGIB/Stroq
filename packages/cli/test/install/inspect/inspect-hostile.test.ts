@@ -12,6 +12,13 @@ import { linesOf, passportOf, skillWith, type Files } from '../../helpers/inspec
 const MIB = 1024 * 1024;
 /** Many times what the reading of any of these needs on the machine the bounds were written on. */
 const BOUND_MS = 6000;
+/**
+ * Two thousand files of 16 KB each are 32 MB of text for every reader, and a runner with coverage on
+ * took 7 s of normalised processor time for them where a laptop takes about one: coverage slows the
+ * readers more than the fixed work `cpuNow` is normalised by. A reading that blew up on this shape would
+ * take minutes, which this bound still catches.
+ */
+const MANY_FILES_BOUND_MS = 20_000;
 
 const fill = (unit: string, bytes: number): string =>
   unit.repeat(Math.ceil(bytes / unit.length)).slice(0, bytes);
@@ -95,7 +102,7 @@ describe('many files', () => {
 
     const { ms, passport } = took(files);
 
-    expect(ms).toBeLessThan(BOUND_MS);
+    expect(ms).toBeLessThan(MANY_FILES_BOUND_MS);
     expect(
       passport.blindSpots.some((spot) =>
         spot.includes(
