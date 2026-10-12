@@ -57,7 +57,6 @@ export const TALLY_KEYS = [
   'dependencies',
   'symlink',
   'list-cut',
-  'reading-failed',
 ] as const;
 export type TallyKey = (typeof TALLY_KEYS)[number];
 
@@ -92,8 +91,6 @@ const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   dependencies: () => 'dependencies were not followed, fetched or read',
   symlink: (n) =>
     `${some(n, 'symbolic link was', 'symbolic links were')} recorded and not followed`,
-  'reading-failed': (n) =>
-    `${some(n, 'reading failed', 'readings failed')} on this tree, and what ${n === 1 ? 'it reads is' : 'they read is'} missing from this passport`,
   'list-cut': () => 'a list of tools, hooks or entries was cut at the number a reading takes',
 };
 
@@ -104,6 +101,32 @@ export function tallySpots(counts: Readonly<Partial<Record<TallyKey, number>>>):
     return count > 0 ? [SPOTS[key](count)] : [];
   });
 }
+
+/**
+ * The readings of a tree, by the fixed names a passport uses for them, and what each one reads in words.
+ * A reading that fails is named in a signal and a blind spot, and the name is one of these and never
+ * text of the artifact, so that a person and the next tool can tell which reading is missing.
+ */
+export const READING_PHRASES = {
+  frontmatter: 'the front matter of skills and commands',
+  markdown: 'shell blocks and inline commands in documents',
+  'script-files': 'files of shell and the files that run at the edge of a repository',
+  'package-json': 'package.json files',
+  manifests: 'MCP and plugin manifests',
+  python: 'Python requirements',
+  'native-code': 'native code',
+  source: 'JavaScript, TypeScript and Python source',
+  obfuscation: 'minified or obfuscated files',
+  'repo-files': 'files of a repository that run on their own',
+  'tree-entries': 'links, nested repositories, LFS pointers and executables',
+  shell: 'shell text',
+} as const;
+export type ReadingName = keyof typeof READING_PHRASES;
+export const READING_NAMES = Object.keys(READING_PHRASES) as readonly ReadingName[];
+
+/** What a passport says of a reading that failed: its name, what it reads, and that it is missing. */
+export const failedReadingSpot = (name: ReadingName): string =>
+  `the reading "${name}" (${READING_PHRASES[name]}) failed, and what it finds is missing from this passport`;
 
 /** What is said when more was found than a passport lists. */
 export const moreLinesSpot = (hidden: number): string =>

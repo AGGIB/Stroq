@@ -22,18 +22,13 @@ import {
 import { detectKind } from './detect-kind.js';
 import { Findings } from './findings.js';
 import { identify } from './identity.js';
-import { inspectFrontmatter } from './frontmatter-lines.js';
 import { buildInput, type InspectInput } from './input.js';
-import { inspectManifests } from './manifest-lines.js';
-import { inspectNativeCode } from './native-code.js';
-import { inspectPackages } from './package-lines.js';
-import { inspectPython } from './python-lines.js';
-import { inspectRepoFiles } from './repo-files.js';
-import { inspectObfuscation, inspectSource } from './source-lines.js';
-import { inspectTreeEntries } from './tree-checks.js';
+import { READINGS, runReadings, type NamedReading } from './readings.js';
 import { ShellQueue } from './shell-queue.js';
-import { addShellLines } from './shell-lines.js';
-import { queueMarkdownShell, queueScriptShell } from './shell-sources.js';
+
+export { READING_NAMES, type ReadingName } from './blind-spots.js';
+export { failedReadings, passportIsIncomplete } from './incomplete.js';
+export { READINGS, type NamedReading } from './readings.js';
 
 export interface InspectContext {
   /** What kind of artifact it is, or `auto` to tell from the files (a kind that cannot be told is an error). */
@@ -107,41 +102,21 @@ function kindOf(input: InspectInput, asked: ArtifactKind | 'auto'): ArtifactKind
   return detected.kind;
 }
 
-type Reading = (input: InspectInput, findings: Findings, shell: ShellQueue) => void;
-
-/** The readings of the files, in the order they are made. The shell text they queue is read last. */
-const READINGS: readonly Reading[] = [
-  (input, findings, shell) => queueMarkdownShell(input, findings, shell),
-  (input, _findings, shell) => queueScriptShell(input, shell),
-  inspectPackages,
-  inspectManifests,
-  (input, findings) => inspectPython(input, findings),
-  (input, findings) => inspectNativeCode(input, findings),
-  (input, findings) => inspectSource(input, findings),
-  (input, findings) => inspectObfuscation(input, findings),
-  (input, findings) => inspectRepoFiles(input, findings),
-  (input, findings) => inspectTreeEntries(input, findings),
-  (_input, findings, shell) => addShellLines(shell, findings),
-];
-
-/**
- * Runs one reading so that a fault in it cannot take the others with it, or the passport. A reading that
- * fails is a blind spot, said in words: the passport does not claim what the reading would have found.
- */
-function guarded<T>(findings: Findings, run: () => T, fallback: T): T {
-  try {
-    return run();
-  } catch {
-    findings.tally('reading-failed');
-    return fallback;
-  }
-}
-
 /**
  * The passport of a tree. Throws a `TreeError` for a tree that is not valid (its digest is taken here,
  * which checks every size and hash against the bytes), and an `InspectError` for the faults above.
+ * A reading that fails does not stop it: see `readings.ts` and `passportIsIncomplete`.
  */
 export function inspectTree(tree: Tree, context: InspectContext): Passport {
+  return inspectWithReadings(tree, context, READINGS);
+}
+
+/** `inspectTree` with the readings given, so that a test can make one of them fail. */
+export function inspectWithReadings(
+  tree: Tree,
+  context: InspectContext,
+  readings: readonly NamedReading[],
+): Passport {
   assertComplete(tree);
   const digest = treeDigest(tree);
   const findings = new Findings();
@@ -149,12 +124,10 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
   const input = buildInput(tree, findings);
   const kind = kindOf(input, context.kind);
 
-  const shell = new ShellQueue();
-  const declared = guarded(findings, () => inspectFrontmatter(input, findings, shell), {});
-  for (const reading of READINGS)
-    guarded(findings, () => reading(input, findings, shell), undefined);
+  const read = { input, findings, shell: new ShellQueue(), declared: {} };
+  runReadings(read, readings);
 
-  const identity = identify(kind, input, context.source, declared);
+  const identity = identify(kind, input, context.source, read.declared);
   const found = findings.result();
   const stats = treeStats(tree);
   const parsed = PassportSchema.safeParse({

@@ -7,11 +7,13 @@
 import type { Basis, CapKind, PassportLine } from '../types.js';
 import {
   ALWAYS_BLIND_SPOTS,
+  failedReadingSpot,
   MAX_LINES,
   MAX_PLACES,
   moreLinesSpot,
   morePlacesSpot,
   tallySpots,
+  type ReadingName,
   type TallyKey,
 } from './blind-spots.js';
 import { showable, showableWhere } from './safe-text.js';
@@ -113,6 +115,7 @@ export class Findings {
   private dropped = 0;
   private readonly signalEntries = new Map<string, { ruleId: string; file: string }>();
   private readonly spots = new Set<string>();
+  private readonly failed = new Set<ReadingName>();
   private readonly counts: Partial<Record<TallyKey, number>> = {};
 
   /** The safe form of a text, made once for the texts that come back often. */
@@ -176,6 +179,24 @@ export class Findings {
     });
   }
 
+  /**
+   * Records that a reading failed. The passport is still made, but it lacks what the reading finds,
+   * so the failure is a sensitive signal that names the reading (by one of the fixed names, never by
+   * text of the artifact) and a blind spot that names it too; `passportIsIncomplete` reads the signal.
+   */
+  failedReading(name: ReadingName): void {
+    this.failed.add(name);
+    this.signal({
+      ruleId: `reading-failed:${name}`,
+      file: '.',
+      line: null,
+      sensitive: true,
+      basis: 'unknown',
+      detector:
+        'a reading of the files failed on this tree, so what it finds is missing from this passport and the passport is not complete',
+    });
+  }
+
   blindSpot(text: string): void {
     const shown = showable(text, SINGLE_DETECTOR_MAX);
     if (shown !== '') this.spots.add(shown);
@@ -209,6 +230,7 @@ export class Findings {
       ...ALWAYS_BLIND_SPOTS,
       ...this.spots,
       ...tallySpots(this.counts),
+      ...[...this.failed].map(failedReadingSpot),
     ]);
     const hidden = all.length - kept.length + this.dropped;
     if (hidden > 0) spots.add(moreLinesSpot(hidden));
