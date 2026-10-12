@@ -284,6 +284,45 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--json', 'machine-readable output'],
     ],
   },
+  {
+    name: 'harden',
+    synopsis:
+      'harden [plan|apply|undo|status] [--agent <id>] [--scope user|project] [--recipe <name>] [--json] [--yes]',
+    about: [
+      "make the host's own protection of credential files stronger, and give it back. plan (the",
+      'default) shows exactly what would change and writes nothing; apply asks you, then changes the',
+      'file and keeps what undo needs; undo takes it back; status says what is in place. Recipes:',
+      "claude-read-deny (read rules in Claude Code's settings) and cursor-ignore (a block in",
+      '.cursorignore). A filter inside the host, a best effort and not a guarantee: a program that',
+      'reads the file itself is not covered, and only an OS sandbox covers that.',
+      'Exit codes: 0 done or nothing to do, 1 refused or failed, 2 wrong command line, 3 a flag is missing',
+    ],
+    flags: [
+      ['--agent <id>', 'claude-code (the default) or cursor'],
+      [
+        '--scope <user|project>',
+        "user: the person's own settings, ~/.claude/settings.json (the default for claude-code); project: this folder, .claude/settings.local.json, or .cursorignore for cursor (the only scope of cursor)",
+      ],
+      ['--recipe <name>', 'claude-read-deny or cursor-ignore; the agent follows from it'],
+      ['--json', 'machine-readable output, with plan, apply and status'],
+      [
+        '--yes',
+        'with apply and undo: answer the question yourself. On a terminal they ask first; anywhere else they do nothing without it',
+      ],
+      [
+        '--acknowledge-link',
+        'the path is a link and the change lands in the file it leads to. A plan hides its diff until it is given',
+      ],
+      [
+        '--acknowledge-credential-loss',
+        'apply may replace a value that looks like a credential; no copy of it is kept, so undo cannot put it back',
+      ],
+      [
+        '--acknowledge-reformat',
+        'apply may lay the whole file out again, not only the lines it adds',
+      ],
+    ],
+  },
 ];
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));

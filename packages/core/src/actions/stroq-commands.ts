@@ -104,6 +104,15 @@ export const STATE_VERBS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['permit', new Set(['extend', 'revoke'])],
 ]);
 
+/**
+ * `harden plan` only reads, and leaves out the diff of a file that a link leads to until the owner
+ * says they have seen the link (`--acknowledge-link`). Given to a plan, the flag makes it print that
+ * file, masked only where a line looks like a credential: a link is something a repository chooses, so
+ * the flag is the owner's to give and not an agent's, in `plan` as much as in `apply`.
+ */
+const isAcknowledgeLinkFlag = (word: string): boolean =>
+  word === '--acknowledge-link' || word.startsWith('--acknowledge-link=');
+
 /** `vet` reads a directory; `vet --online` also goes to the network, and is the form that is denied. */
 const isOnlineFlag = (word: string): boolean => word === '--online' || word.startsWith('--online=');
 
@@ -119,7 +128,12 @@ export function subcommandChangesState(sub: string, args: readonly string[]): bo
   if (STATE_COMMANDS.has(sub)) return true;
   const after = args.slice(args.indexOf(sub) + 1);
   const verbs = STATE_VERBS.get(sub);
-  if (verbs !== undefined) return after.some((word) => verbs.has(word));
+  if (verbs !== undefined) {
+    return (
+      after.some((word) => verbs.has(word)) ||
+      (sub === 'harden' && after.some(isAcknowledgeLinkFlag))
+    );
+  }
   if (sub === 'vet') return args.some(isOnlineFlag);
   if (sub === 'exposure') return args.some(isProbeFlag);
   if (sub !== 'trust') return false;

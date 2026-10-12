@@ -24,6 +24,14 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   exposure: ['stroq exposure --probe', 'stroq exposure --json --probe'],
   // Plants a file with a first line it chooses, wherever it chooses, and adds a canary to the secret index.
   canary: ['stroq canary', 'stroq canary --file ~/.zprofile --name x'],
+  // Edits an agent's settings or ignore file, and takes the change back. `plan` and `status` only read.
+  harden: [
+    'stroq harden apply',
+    'stroq harden apply --yes',
+    'stroq harden --scope user apply',
+    'stroq harden undo --agent cursor --yes',
+    'stroq harden forget',
+  ],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */
@@ -109,5 +117,45 @@ describe('every command of the CLI is judged by the state gate, or listed as one
   it('keeps open the forms that must stay open: stroq exposure, stroq exposure --json, stroq canary --help', () => {
     for (const form of ['stroq exposure', 'stroq exposure --json', 'stroq canary --help'])
       expect(isDenied(form), form).toBe(false);
+  });
+});
+
+/**
+ * `stroq harden` is the one command whose reading forms and writing forms are one command line apart,
+ * and the writing forms are a person's: an agent that could run `stroq harden undo --yes` could take
+ * the protections off again, or `stroq harden apply --yes` could write into a settings file of its
+ * choosing. The command itself cannot tell an agent from a person (a shell is a shell), so the gate is
+ * what stops it, and these are the forms that matter most.
+ */
+describe('stroq harden and the state gate', () => {
+  it.each([
+    'stroq harden',
+    'stroq harden plan',
+    'stroq harden plan --agent cursor --json',
+    'stroq harden --scope project',
+    'stroq harden status',
+    'stroq harden status --json',
+    'stroq harden apply --help',
+    'stroq harden undo -h',
+  ])('leaves %s open: it only reads', (form) => {
+    expect(isDenied(form), form).toBe(false);
+  });
+
+  it.each([
+    'stroq harden apply --yes --acknowledge-link',
+    // A plan that is given the flag prints the file a link leads to: that is the owner's to ask for.
+    'stroq harden plan --acknowledge-link',
+    'stroq harden --scope project --acknowledge-link',
+    'stroq harden --yes apply',
+    'stroq harden --agent claude-code --scope user undo --yes',
+    'npx @stroq/cli harden apply --yes',
+    'npx -y @stroq/cli harden undo --yes',
+    'stroq run -- stroq harden apply --yes',
+    'FOO=1 stroq harden undo --yes',
+    'env stroq harden undo --yes',
+    'sh -c "stroq harden apply --yes"',
+    'node packages/cli/dist/index.js harden apply --yes',
+  ])('denies %s: it writes', (form) => {
+    expect(isDenied(form), form).toBe(true);
   });
 });

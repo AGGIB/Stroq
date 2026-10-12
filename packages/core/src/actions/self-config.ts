@@ -105,6 +105,11 @@ import { commandWord } from './shell-segments.js';
  * SECURITY.md; they are asked about by `INSTRUCTION_FILE` and `agent-config.ts`, and a
  * check that protects only the wrapped entries is the follow-up.
  *
+ * `.cursorignore` is protected as a file, whole: it is what keeps `.env` and keys out of what Cursor sends to a
+ * model, `stroq harden` writes a block into it, and an agent that can edit it can take that block out again.
+ * It is a path segment of its own (`my.cursorignore` and `.cursorignore.bak` are somebody's other files), so
+ * the lookbehind and lookahead are those of `.mcp.json` in `INSTRUCTION_FILE`.
+ *
  * Every separator below is `[/\\]+` rather than `\/`, which is the convention this
  * whole file now follows. On Windows each of these paths arrives spelled with
  * backslashes — from an agent's `file_path`, from `%USERPROFILE%`, from a PowerShell
@@ -136,7 +141,7 @@ import { commandWord } from './shell-segments.js';
  * everywhere else.
  */
 export const SELF_CONFIG_FILE =
-  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.devin|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]etc[/\\]+(?:windsurf|devin)[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|(?<![\w-])ProgramData[%}]?[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.claude[/\\]+plugins[/\\]+(?:cache[/\\]+(?:stroq|[^/\\\s"']+[/\\]+stroq)|marketplaces[/\\]+(?:stroq|[^/\\\s"']+[/\\]+plugins[/\\]+stroq))(?![\w.-])|\.stroq([/\\]+|\b))/i;
+  /(\.claude[/\\]+settings(\.local)?\.json|\.cursor[/\\]+hooks\.json|(?<![\w.-])\.cursorignore(?![\w-]|\.+[\w-])|\.codex[/\\]+(hooks\.json|config\.toml)|\.github[/\\]+(hooks(?![\w.-])|copilot[/\\]+settings(\.local)?\.json)|\.copilot[/\\]+(hooks(?![\w.-])|settings\.json|config\.json)|\.openclaw[/\\]+(openclaw\.json|plugins(?![\w.-])|extensions(?![\w.-]))|(\.windsurf|\.devin|\.codeium([/\\]+windsurf)?)[/\\]+hooks\.json|(?<![\w.-])[/\\]etc[/\\]+(?:windsurf|devin)[/\\]+hooks\.json|Application(?:\\ | )Support[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|(?<![\w-])ProgramData[%}]?[/\\]+(?:Windsurf|Devin)[/\\]+hooks\.json|\.agents[/\\]+hooks\.json|\.gemini[/\\]+(config[/\\]+hooks\.json|antigravity-cli[/\\]+settings\.json)|(?<![\w.-])claude_desktop_config\.json|(?<![\w.-])mcp_config\.json|\.claude[/\\]+plugins[/\\]+(?:cache[/\\]+(?:stroq|[^/\\\s"']+[/\\]+stroq)|marketplaces[/\\]+(?:stroq|[^/\\\s"']+[/\\]+plugins[/\\]+stroq))(?![\w.-])|\.stroq([/\\]+|\b))/i;
 
 /**
  * Bare protected directories (`.claude`, `.cursor`, `.stroq`) as their own

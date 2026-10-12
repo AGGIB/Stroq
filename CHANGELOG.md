@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq harden` makes the host refuse to read your credential files, and takes it back.** `stroq harden` shows what it would change and writes nothing; `stroq harden apply` asks you (on a terminal; elsewhere it needs `--yes`) and writes it through the reversible edit engine, with a copy of the file; `stroq harden undo` gives the file back and keeps anything you changed since; `stroq harden status` says what is still in place. The first recipe adds `Read(...)` rules for the usual credential files (`.env`, `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.kube`, `~/.docker/config.json`, `~/.npmrc`, `~/.netrc`, `~/.pgpass`, `~/.git-credentials`, `~/.gnupg`) to `permissions.deny` of Claude Code's settings (`--scope user`, or `--scope project` for `.claude/settings.local.json`). Measured on Claude Code 2.1.271: the Read tool and a plain `cat` through Bash are refused. It is a filter inside the host and a best effort, not a guarantee: a program that reads the file itself (`python -c`) is not covered, and only `stroq run --sandbox` is. A second recipe writes a marked block into `.cursorignore` for Cursor; it could not be tested here and says so. A settings file with comments is not rewritten: the command prints the lines to add by hand. An agent cannot run `harden apply`, `harden undo`, or `harden --acknowledge-link`.
+
+### Changed
+
+- **`.cursorignore` is protected like the other files that switch a protection off.** An agent can no longer write it (`config.self`), because `stroq harden` puts a block in it that keeps `.env` and keys out of what Cursor sends to a model.
+
 ### Fixed
 
 - **The live-check library reads a stored result only from the file of its kind.** Still a library: no command uses it. A stand-in result moved into the live file is no result, a result dated more than a few minutes ahead of the clock is none either (with a clock set back it would have outlived every install), and the environment the driver is handed no longer carries `STROQ_*` or `CLAUDE_CONFIG_DIR`, which the model's shell inherits (a ledger path it could delete, a home that sends the hook to the real settings). The store says that its file is tamper-evident and not tamper-proof.
