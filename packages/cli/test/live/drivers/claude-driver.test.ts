@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createClaudeDriver } from '../../../src/live/drivers/claude.js';
 import { claudeArgv } from '../../../src/live/drivers/claude-argv.js';
+import { controlOf } from '../../../src/live/probes.js';
 import { runProblem } from '../../../src/live/run-problem.js';
 import { REASONS, type HostDriver, type HostRun } from '../../../src/live/types.js';
 import { NONCE, SESSION } from '../helpers.js';
@@ -38,6 +39,13 @@ const ctxFor = (over: Parameters<Rig['ctx']>[0] = {}): ReturnType<Rig['ctx']> =>
   rig.ctx({ sessionId: SESSION, nonce: NONCE, env: ENV, deadlineMs: 20_000, ...over });
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The deadline of a request in a test of a host that never ends. It has to be long enough for the stand-in to
+ * start, print and start a child of its own on a machine that is busy (a process of Node takes a second or two
+ * to start then), and it is what a test of the deadline waits for in full.
+ */
+const SLOW_START_MS = 3_000;
 
 async function untilDead(pid: number): Promise<boolean> {
   for (let tries = 0; tries < 200; tries += 1) {
@@ -197,6 +205,18 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
       expect(result?.text).toContain('Stroq blocked this action (deny-secret-egress)');
     });
 
+    it("hands over the host's own words for a call its permission step stopped, which are not the hook's", async () => {
+      fake.script([{ lines: lines('denyControl') }]);
+      const run = await driverOf().run(
+        controlOf(probe('deny', NONCE, rig.project)),
+        ctxFor({ hookMode: 'noop' }),
+      );
+      const result = run.stream.find((event) => event.type === 'tool_result');
+      expect(result).toMatchObject({ isError: true });
+      expect(result?.text).toMatch(/^This Bash command contains multiple operations/);
+      expect(result?.text).not.toContain('Stroq blocked this action');
+    });
+
     it('hands over the host exit code when it is not 0', async () => {
       fake.script([{ lines: lines('allowRan'), exit: 3 }]);
       const run = await driverOf().run(probe('allow', NONCE, rig.project), ctxFor());
@@ -315,7 +335,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
       fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: 700 }),
+        ctxFor({ deadlineMs: SLOW_START_MS }),
       );
       expect(run.timedOut).toBe(true);
       expect(run.exitCode).toBeNull();
@@ -331,7 +351,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
       fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true, ignoreTerm: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: 700 }),
+        ctxFor({ deadlineMs: SLOW_START_MS }),
       );
       expect(run.timedOut).toBe(true);
       expect(await untilDead(fake.calls()[0]?.pid ?? 0)).toBe(true);
@@ -342,7 +362,7 @@ describe.skipIf(!canMakeFakeClaude())('the Claude driver', () => {
       fake.script([{ lines: lines('allowRan').slice(0, 4), hang: true }]);
       const run = await driverOf().run(
         probe('allow', NONCE, rig.project),
-        ctxFor({ deadlineMs: 700 }),
+        ctxFor({ deadlineMs: SLOW_START_MS }),
       );
       expect(run.stream.map((event) => event.type)).toEqual(['init', 'tool_use']);
     });

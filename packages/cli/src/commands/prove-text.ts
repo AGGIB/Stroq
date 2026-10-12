@@ -223,7 +223,7 @@ export function noticeText(facts: NoticeFacts): string[] {
       "They count against your subscription usage. The login is your subscription's, never an API key; Stroq stops the host at once if it sees one.",
     ),
     ...bullet(
-      'Everything happens in a temporary folder that is removed afterwards. It does not change any file of yours.',
+      'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Claude Code notes the run in its own files, as it does for any run.',
     ),
     ...bullet(
       "The model is asked to run three harmless commands, one per request; Stroq's hook decides whether each one runs.",

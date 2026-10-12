@@ -156,9 +156,19 @@ describe('the proof on the line of a whole install', () => {
 });
 
 describe('where there is no proof to show', () => {
-  it('says nothing for an agent that has no driver', async () => {
+  it('says a host with no headless mode is unsupported, in the words of the table of hosts', async () => {
     installCursorHooks(cursorHooksPath('project', cwd), `${STROQ} hook cursor`);
-    expect(await detailOf('cursor hooks')).not.toContain('proof:');
+    expect(await detailOf('cursor hooks')).toContain(
+      ' · proof: unsupported (no verified headless hook mode)',
+    );
+  });
+
+  it('says a host that could be driven and has no driver yet is not available, not "no live check yet"', () => {
+    const check = { name: 'codex hooks', ok: true, detail: 'project: installed' };
+    const shown = withProof(check, 'codex', { installed: true, changed: false }, NOW);
+    expect(shown.detail).toBe(
+      'project: installed · proof: not available yet (stroq prove has no driver for codex)',
+    );
   });
 
   it('says nothing for an install that is not whole', async () => {

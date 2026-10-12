@@ -216,6 +216,8 @@ describe('the notice of what a run costs', () => {
     expect(flat).toMatch(/temporary folder/);
     expect(flat).toMatch(/removed/);
     expect(flat).toMatch(/does not change any file of yours/);
+    // Claude Code keeps its own record of a run, and the notice does not claim that it does not.
+    expect(flat).toMatch(/Claude Code notes the run in its own files/);
   });
 
   it('counts the requests the run is allowed', () => {

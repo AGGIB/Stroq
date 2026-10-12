@@ -32,6 +32,8 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
     'stroq harden undo --agent cursor --yes',
     'stroq harden forget',
   ],
+  // Starts the host on the owner's login and spends their requests, and writes the result `doctor` reads.
+  prove: ['stroq prove', 'stroq prove --yes --max-requests 6'],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */

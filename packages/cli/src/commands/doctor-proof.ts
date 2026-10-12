@@ -58,6 +58,17 @@ function proofText(agent: string, installed: InstallStatus, now: number): string
   return `${shown.state} (${shown.reason}${note})`;
 }
 
+/** The row of the MCP proxy: a check of it needs no host, and is not `stroq prove`'s yet. */
+const MCP_ROW_ID = 'mcp';
+
+/** Why there is no proof for an agent there is no driver for: what the table of hosts says, or that it is not there yet. */
+function unavailableText(agent: string): string {
+  const capability = capabilitiesFor(agent);
+  if (capability !== undefined && !capability.headless)
+    return `unsupported (${plainText(capability.reason ?? 'no headless mode', 80)})`;
+  return `not available yet (stroq prove has no driver for ${plainText(agent, 32)})`;
+}
+
 /** The line of an install that is whole, with what the last live check found on the end of it. */
 export function withProof<T extends { readonly ok: boolean; readonly detail: string }>(
   check: T,
@@ -65,6 +76,9 @@ export function withProof<T extends { readonly ok: boolean; readonly detail: str
   installed: InstallStatus,
   now: number,
 ): T {
-  if (!DRIVEN_AGENTS.includes(agent) || !installed.installed || !check.ok) return check;
-  return { ...check, detail: `${check.detail} · proof: ${proofText(agent, installed, now)}` };
+  if (agent === MCP_ROW_ID || !installed.installed || !check.ok) return check;
+  const text = DRIVEN_AGENTS.includes(agent)
+    ? proofText(agent, installed, now)
+    : unavailableText(agent);
+  return { ...check, detail: `${check.detail} · proof: ${text}` };
 }
