@@ -26,6 +26,7 @@ const COMMANDS: Readonly<Record<string, string>> = {
   run: 'run',
   mcp: 'mcp',
   doctor: 'doctor',
+  prove: 'prove',
   log: 'log',
   verify: 'verify',
   untaint: 'untaint',

@@ -126,6 +126,24 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [['--all', 'list every agent and scope, installed or not']],
   },
   {
+    name: 'prove',
+    synopsis: 'prove [--agent <id>] [--yes] [--dry-run] [--json] [--max-requests <n>]',
+    about: [
+      'run the live protection check: ask the real host to run three harmless commands with',
+      "Stroq's hook in place, and show from evidence the model does not write that a command",
+      'your policy denies did not happen, and that the same command runs when the hook is out',
+      'of the way. It makes up to 3 short requests on your own login (subscription usage, never',
+      'an API key), says so, and asks first. Exit 0 verified, 1 failed, 3 anything else',
+    ],
+    flags: [
+      ['--agent <id>', 'the agent to check; claude-code (the default) is the only one yet'],
+      ['--yes', 'make the requests without asking; needed where there is no terminal to ask on'],
+      ['--dry-run', 'say what would be done, make no request and write nothing'],
+      ['--json', 'machine-readable output (version 1)'],
+      ['--max-requests <n>', 'the most requests to make, 1 to 6 (default 3)'],
+    ],
+  },
+  {
     name: 'log',
     synopsis: 'log [--count 20] [--json]',
     about: ['show recent audit entries'],

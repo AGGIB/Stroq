@@ -58,7 +58,7 @@ const ADVICE_BY_REASON: ReadonlyArray<readonly [reason: string, line: string]> =
   ],
   [
     REASONS.billingUnknown,
-    'This version of Claude Code did not say how it is paid for. Update Claude Code (the check needs a version that does), then run stroq prove again.',
+    'This version of Claude Code did not say how it is paid for (2.1.271 does, 2.1.144 does not). Update Claude Code, then run stroq prove again.',
   ],
   [
     REASONS.budget,

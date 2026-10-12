@@ -49,6 +49,7 @@ import {
   openclawPluginDir,
 } from './openclaw-plugin.js';
 import { withLiveness } from './doctor-liveness.js';
+import { withProof } from './doctor-proof.js';
 import { stroqVersion } from '../version.js';
 import {
   installDrift,
@@ -799,8 +800,16 @@ export async function doctorReport(
       agent.scopes,
       statuses.filter((_, j) => j !== i),
     );
-    // A whole install also says when the host last called it (see `doctor-liveness.ts`).
-    return withLiveness(check, agent.id, statuses[i]?.installed === true, now);
+    // A whole install also says what the last live check found (see `doctor-proof.ts`), and when the host
+    // last called it (see `doctor-liveness.ts`), which stays the end of the line.
+    const installed = statuses[i]?.installed === true;
+    const proved = withProof(
+      check,
+      agent.id,
+      { installed, changed: agent.scopes.some((s) => s.drift === 'changed') },
+      now,
+    );
+    return withLiveness(proved, agent.id, installed, now);
   });
   const detectedHere = detectedAgents(cwd);
   const collapsed: DoctorCheck = {

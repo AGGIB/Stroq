@@ -23,16 +23,16 @@ The version is in the first line of each stream (`claude_code_version`) and the 
 
 ## Files
 
-| File | What it is |
-|---|---|
-| `2.1.271/plain.jsonl` | no tools; init, rate limit event, two assistant messages, result |
-| `2.1.144/allow.real.acceptEdits.jsonl` | the allow probe, Stroq hook in place: it ran |
-| `2.1.144/allow.real.dontAsk.jsonl` | the allow probe under `--permission-mode dontAsk`: the HOST's own rules blocked it (the reason `acceptEdits` is used) |
-| `2.1.144/secret-egress.real.acceptEdits.jsonl` | the made-up key probe, Stroq hook in place: blocked by the hook (`Stroq blocked this action (deny-secret-egress)`) |
-| `2.1.144/secret-egress.control.acceptEdits.jsonl` | the same command with a hook that does nothing: it ran (the control is armed) |
-| `2.1.144/deny.real.acceptEdits.jsonl` | the git-hook probe, Stroq hook in place: blocked by the hook (`deny-git-exec`) |
-| `2.1.144/deny.control.acceptEdits.jsonl` | the same command with a hook that does nothing: the HOST's own permission step blocked it (the host protects `.git`), so the control is not armed |
-| `2.1.144/*.audit.jsonl` | what the Stroq hook wrote to its audit log during the matching real run |
+| File                                              | What it is                                                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `2.1.271/plain.jsonl`                             | no tools; init, rate limit event, two assistant messages, result                                                                                  |
+| `2.1.144/allow.real.acceptEdits.jsonl`            | the allow probe, Stroq hook in place: it ran                                                                                                      |
+| `2.1.144/allow.real.dontAsk.jsonl`                | the allow probe under `--permission-mode dontAsk`: the HOST's own rules blocked it (the reason `acceptEdits` is used)                             |
+| `2.1.144/secret-egress.real.acceptEdits.jsonl`    | the made-up key probe, Stroq hook in place: blocked by the hook (`Stroq blocked this action (deny-secret-egress)`)                                |
+| `2.1.144/secret-egress.control.acceptEdits.jsonl` | the same command with a hook that does nothing: it ran (the control is armed)                                                                     |
+| `2.1.144/deny.real.acceptEdits.jsonl`             | the git-hook probe, Stroq hook in place: blocked by the hook (`deny-git-exec`)                                                                    |
+| `2.1.144/deny.control.acceptEdits.jsonl`          | the same command with a hook that does nothing: the HOST's own permission step blocked it (the host protects `.git`), so the control is not armed |
+| `2.1.144/*.audit.jsonl`                           | what the Stroq hook wrote to its audit log during the matching real run                                                                           |
 
 `permission_denials` in a result line lists the calls the Stroq hook denied as well as the host's own
 refusals: it does not say who denied. The words of the tool result do.
