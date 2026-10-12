@@ -384,3 +384,64 @@ describe('reading what is not a result', () => {
     expect(readHostResult(notADirectory, 'claude-code').result).toBeNull();
   });
 });
+
+describe('a file in the place of another kind of result', () => {
+  const writeTo = (file: string, text: string): void => {
+    mkdirSync(liveDirIn(home), { recursive: true });
+    writeFileSync(file, text);
+  };
+  const json = (over: Parameters<typeof validResult>[0] = {}): string =>
+    `${JSON.stringify(validResult(over), null, 2)}\n`;
+
+  it('is not a result when a stand-in result lies in the file of the live one', () => {
+    writeTo(fileOf(), json({ mode: 'stand-in' }));
+    const read = readHostResult(home, 'claude-code');
+    expect(read.result).toBeNull();
+    expect(read.problem).toMatch(/place/);
+  });
+
+  it('is not a result when a live verified result lies in the file of a stand-in', () => {
+    writeTo(liveStandInFileIn(home, 'claude-code'), json());
+    const read = readDiagnosticResult(home, 'claude-code', 'stand-in');
+    expect(read.result).toBeNull();
+    expect(read.problem).toMatch(/place/);
+  });
+
+  it('is not a result when one that could not tell lies in the file of the live one', () => {
+    writeTo(fileOf(), json({ state: 'inconclusive' }));
+    expect(readHostResult(home, 'claude-code').result).toBeNull();
+  });
+
+  it('is not a result when a verified one lies in the file of the ones that could not tell', () => {
+    writeTo(liveLastFileIn(home, 'claude-code'), json());
+    expect(readDiagnosticResult(home, 'claude-code', 'last').result).toBeNull();
+  });
+
+  it('still reads what the writer put in each file', () => {
+    writeHostResult(home, validResult({ state: 'inconclusive' }));
+    writeHostResult(home, validResult({ mode: 'stand-in' }));
+    expect(readDiagnosticResult(home, 'claude-code', 'last').result?.state).toBe('inconclusive');
+    expect(readDiagnosticResult(home, 'claude-code', 'stand-in').result?.mode).toBe('stand-in');
+  });
+});
+
+describe('a result dated in the future', () => {
+  const NOW = new Date('2026-10-10T12:00:00.000Z');
+
+  it('is not a result: a clock that was set back would show it as fresh for ever', () => {
+    writeHostResult(home, validResult({ at: '2031-10-10T12:00:00.000Z' }));
+    const read = readHostResult(home, 'claude-code', NOW);
+    expect(read.result).toBeNull();
+    expect(read.problem).toMatch(/future/);
+  });
+
+  it('allows a few minutes, for two clocks that differ a little', () => {
+    writeHostResult(home, validResult({ at: '2026-10-10T12:03:00.000Z' }));
+    expect(readHostResult(home, 'claude-code', NOW).result).not.toBeNull();
+  });
+
+  it('is read as it was when its date is in the past', () => {
+    writeHostResult(home, validResult({ at: '2026-10-09T12:00:00.000Z' }));
+    expect(readHostResult(home, 'claude-code', NOW).result).not.toBeNull();
+  });
+});
