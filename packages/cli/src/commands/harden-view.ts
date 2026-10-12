@@ -115,11 +115,12 @@ function itemsOf(target: RecipeTarget, plan: Plan): readonly PlanItem[] {
 
 function refusalOf(target: RecipeTarget, plan: Plan): PlanRefusalView | null {
   if (plan.refused === undefined) return null;
-  const byHand = CAN_BE_DONE_BY_HAND.includes(plan.refused) && target.change.kind === 'json';
+  const { change } = target;
+  const byHand = change.kind === 'json' && CAN_BE_DONE_BY_HAND.includes(plan.refused);
   return {
     reason: plan.refused,
     detail: outsideLine(plan.refusedDetail ?? plan.refused),
-    snippet: byHand && target.change.kind === 'json' ? target.change.snippet : null,
+    snippet: byHand ? change.snippet : null,
   };
 }
 

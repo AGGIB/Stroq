@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { applyCommand } from './harden-apply.js';
 import { failureOf } from './harden-errors.js';
-import { contextOf, type HardenContext, type HardenDeps } from './harden-deps.js';
+import { contextOf, type HardenDeps } from './harden-deps.js';
 import type { HardenFlags } from './harden-flags.js';
 import { planCommand } from './harden-plan.js';
 import { statusCommand } from './harden-status.js';
@@ -79,7 +79,7 @@ export async function runHarden(args: readonly string[], deps: HardenDeps = {}):
       ? usageError(selection.message)
       : refused(chosen.subcommand, flags, selection.message);
   }
-  return dispatch(chosen.subcommand, contextOf(deps), selection.recipe, selection.scope, flags);
+  return dispatch(chosen.subcommand, deps, selection.recipe, selection.scope, flags);
 }
 
 /** A command line that is well formed and cannot be done, answered in the form the command prints in. */
@@ -89,13 +89,15 @@ function refused(subcommand: Subcommand, flags: HardenFlags, message: string): n
 
 async function dispatch(
   subcommand: Subcommand,
-  ctx: HardenContext,
+  deps: HardenDeps,
   recipe: Recipe,
   scope: HardenScope,
   flags: HardenFlags,
 ): Promise<number> {
   const printer: Printer = makePrinter(flags.json, subcommand);
   try {
+    // Inside the try: a folder that has been deleted under the command fails `process.cwd()`.
+    const ctx = contextOf(deps);
     if (subcommand === 'apply') return await applyCommand(ctx, recipe, scope, flags, printer);
     if (subcommand === 'undo') return await undoCommand(ctx, recipe, scope, flags, printer);
     if (subcommand === 'status') return statusCommand(ctx, printer);

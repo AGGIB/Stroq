@@ -1,9 +1,13 @@
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyTarget } from '../../src/commands/harden-apply.js';
+import { contextOf } from '../../src/commands/harden-deps.js';
+import { makePrinter } from '../../src/commands/harden-printer.js';
+import type { RecipeTarget } from '../../src/harden/recipes/index.js';
 import { removeTempDirs } from '../harden/helpers.js';
 import { bytesOf, settingsText } from '../helpers/harden-fixtures.js';
-import { hardenWorld, treeHash, type HardenWorld } from '../helpers/harden-world.js';
+import { captured, hardenWorld, treeHash, type HardenWorld } from '../helpers/harden-world.js';
 
 afterEach(removeTempDirs);
 
@@ -30,6 +34,26 @@ interface StatusFile {
   readonly pathNow: string;
   readonly notices: string[];
 }
+
+/** A target that sets one value, which no recipe does yet; status has to be able to read what one records. */
+const setMode = (file: string, root: string): RecipeTarget => ({
+  recipe: 'test-set',
+  agent: 'claude-code',
+  scope: 'project',
+  summary: 'Set the mode.',
+  file,
+  root,
+  items: ['mode'],
+  words: { adds: 'Sets:', there: 'Set already:', alreadyDone: 'Nothing to change.', done: 'Done.' },
+  change: {
+    kind: 'json',
+    edits: [{ kind: 'json-set', path: ['mode'], value: 'strict' }],
+    snippet: '',
+  },
+  newFileMode: 0o600,
+  limits: [],
+  unverified: null,
+});
 
 async function statusJson(world: HardenWorld): Promise<StatusFile[]> {
   const run = await world.run(['status', '--json']);
@@ -150,6 +174,40 @@ describe('stroq harden status', () => {
     expect(run.out).toContain('State: Stroq cannot check the file: it is not plain JSON now');
     expect(run.out).not.toContain('PLANTED-NOTE');
     expect((await statusJson(world))[0]).toMatchObject({ state: 'unreadable' });
+  });
+
+  it('reports a file that is not valid UTF-8 as one it cannot check, in the engine`s words', async () => {
+    const { world, file } = await appliedOverOwners();
+    writeFileSync(file, Buffer.from([0x7b, 0xff, 0xfe, 0x7d]));
+
+    const run = await world.run(['status']);
+
+    expect(run.out).toContain('State: Stroq cannot check the file:');
+    expect(run.out).toContain('is not valid UTF-8');
+    expect((await statusJson(world))[0]).toMatchObject({ state: 'unreadable' });
+  });
+
+  it('reports a value that was set, and whether it still holds', async () => {
+    const world = hardenWorld();
+    const file = world.inProject('settings.json');
+    writeFileSync(file, settingsText({ mode: 'loose' }));
+    const target = setMode(file, world.project);
+    const ctx = contextOf(world.deps);
+    const flags = {
+      json: false,
+      yes: true,
+      acknowledgeLink: false,
+      acknowledgeCredentialLoss: false,
+      acknowledgeReformat: false,
+    };
+    await captured(() => applyTarget(ctx, target, flags, makePrinter(false, 'apply')));
+
+    const [held] = await statusJson(world);
+    writeFileSync(file, settingsText({ mode: 'changed by hand' }));
+    const [changed] = await statusJson(world);
+
+    expect(held?.items).toEqual([{ text: 'mode', state: 'present' }]);
+    expect(changed).toMatchObject({ state: 'partial', items: [{ text: 'mode', state: 'edited' }] });
   });
 
   it('says when the copy is gone', async () => {
