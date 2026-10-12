@@ -120,9 +120,20 @@ describe('stroq harden (plan)', () => {
     const run = await world.run([]);
 
     expect(run.code).toBe(0);
-    expect(run.out).toContain('Nothing to change: every rule is already in place.');
-    expect(run.out).not.toContain('The change:');
-    expect(run.out).not.toContain('To apply it');
+    expect(run.out).toBe(
+      [
+        'stroq harden: claude-read-deny (claude-code, user scope)',
+        'Ask Claude Code to refuse to read credential files.',
+        '',
+        `File: ${world.inHome('.claude', 'settings.json')}`,
+        '',
+        'These rules are already in permissions.deny:',
+        ...CLAUDE_READ_DENY_RULES.map((rule) => `  = ${rule}`),
+        '',
+        'Nothing to change: every rule is already in place.',
+        '',
+      ].join('\n'),
+    );
   });
 
   it('plans the project`s local settings at project scope', async () => {

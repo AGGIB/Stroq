@@ -50,7 +50,7 @@ type Current =
 
 function parsed(text: string): JsonObject | null {
   try {
-    const value: unknown = JSON.parse(text.startsWith('﻿') ? text.slice(1) : text);
+    const value: unknown = JSON.parse(text.startsWith('\uFEFF') ? text.slice(1) : text);
     return isObject(value) ? value : null;
   } catch {
     return null;

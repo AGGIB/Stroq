@@ -170,7 +170,12 @@ describe('stroq harden apply: what has to be acknowledged', () => {
       file,
       root,
       items: ['env.API_TOKEN'],
-      words: { adds: 'Sets:', alreadyDone: 'Nothing to change.', done: 'Done.' },
+      words: {
+        adds: 'Sets:',
+        there: 'Set already:',
+        alreadyDone: 'Nothing to change.',
+        done: 'Done.',
+      },
       change: {
         kind: 'json',
         edits: [{ kind: 'json-set', path: ['env', 'API_TOKEN'], value: 'new-value' }],

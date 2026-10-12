@@ -50,6 +50,8 @@ export interface RecipeTarget {
   readonly words: {
     /** The line above the items: what is added, and where. */
     readonly adds: string;
+    /** The line above the items when everything is there already. */
+    readonly there: string;
     /** Said instead of the change when everything is there already. */
     readonly alreadyDone: string;
     /** Said after the change is made: what it does now, and that it is not more than that. */

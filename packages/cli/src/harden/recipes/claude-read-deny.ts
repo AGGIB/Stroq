@@ -70,6 +70,7 @@ function target(context: RecipeContext): RecipeTarget {
     items: CLAUDE_READ_DENY_RULES,
     words: {
       adds: 'Adds these rules to permissions.deny:',
+      there: 'These rules are already in permissions.deny:',
       alreadyDone: 'Nothing to change: every rule is already in place.',
       done: 'Claude Code will now refuse its Read tool and the simple shell readers it recognises for these files. This is a best-effort filter, not a guarantee.',
     },

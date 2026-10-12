@@ -41,6 +41,13 @@ export function flagsFor(needs: Needs): readonly string[] {
 const bullets = (lines: readonly string[]): string[] => lines.map((line) => `  - ${line}`);
 
 function itemLines(view: PlanView, target: RecipeTarget): string[] {
+  // When there is nothing to add, every item is the owner's already and the list says so once.
+  if (!view.changed) {
+    return [
+      target.words.there,
+      ...view.items.map((item) => `  ${MARKS[item.status]} ${item.text}`),
+    ];
+  }
   return [
     target.words.adds,
     ...view.items.map((item) =>
@@ -104,8 +111,9 @@ export function renderPlan(view: PlanView, target: RecipeTarget): string {
       ? [...section(itemLines(view, target)), ...section(view.changed ? changeLines(view) : [])]
       : section(refusalLines(view));
   const notes = view.refused === null ? section(noteLines(view)) : [];
+  // What a change does and does not do is said about a change; there is none to say it about otherwise.
   const limits =
-    view.refused === null
+    view.refused === null && view.changed
       ? section(['What this does, and what it does not:', ...bullets(view.limits)])
       : [];
   return `${[...header, ...body, ...notes, ...limits].join('\n')}\n`;
