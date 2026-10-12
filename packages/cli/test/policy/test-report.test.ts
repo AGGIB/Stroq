@@ -228,7 +228,7 @@ describe('buildTestReport: the person’s own expectations', () => {
     });
     const r = report([benign('b', 'allow', 'allow')], [bad]);
     expect(r.violations).toEqual([]);
-    expect(r.notJudged).toEqual([{ suite: 'cases', id: 'b', why: 'candidate' }]);
+    expect(r.notJudged).toEqual([{ suite: 'cases', id: 'b', why: 'candidate', cause: 'timeout' }]);
   });
 
   it('judges the expectations of the corpus and the benchmark by nothing: only cases have them', () => {
@@ -245,7 +245,9 @@ describe('buildTestReport: what cannot be judged', () => {
     const good = scenario('ordinary', 'o1', [step(1, 'allow')]);
     const r = report([good], [bad]);
     expect(r.ok).toBe(false);
-    expect(r.notJudged).toEqual([{ suite: 'ordinary', id: 'o1', why: 'candidate' }]);
+    expect(r.notJudged).toEqual([
+      { suite: 'ordinary', id: 'o1', why: 'candidate', cause: 'error' },
+    ]);
     expect(r.failures).toEqual(['1 scenario could not be judged']);
   });
 

@@ -43,7 +43,16 @@ const violationRow = (v: Violation): string =>
 const WHICH = { baseline: 'the baseline run', candidate: 'the candidate run', both: 'both runs' };
 const SUITE = { attack: 'attack corpus', ordinary: 'ordinary-work corpus', cases: 'your cases' };
 
-const notJudgedRow = (n: NotJudged): string => `${idOf(n.id)}: ${SUITE[n.suite]}, ${WHICH[n.why]}`;
+const CAUSE = {
+  timeout: 'a step ran out of its time budget',
+  error: 'a step could not be run',
+  setup: 'the case could not be set up',
+  missing: 'the scenario was not replayed',
+  'steps-differ': 'the two runs replayed different steps',
+};
+
+const notJudgedRow = (n: NotJudged): string =>
+  `${idOf(n.id)}: ${SUITE[n.suite]}, ${WHICH[n.why]} (${CAUSE[n.cause]})`;
 
 function header(report: TestReport): string[] {
   const ref = (p: TestReport['candidate']): string =>

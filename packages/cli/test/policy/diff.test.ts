@@ -131,7 +131,7 @@ describe('compare: what cannot be judged', () => {
     ];
     expect(compare(base, cand)).toEqual({
       changes: [],
-      notJudged: [{ suite: 'attack', id: 'a', why: 'candidate' }],
+      notJudged: [{ suite: 'attack', id: 'a', why: 'candidate', cause: 'timeout' }],
     });
   });
 
@@ -140,12 +140,16 @@ describe('compare: what cannot be judged', () => {
       scenario('attack', 'a', [step(1, null, { kind: 'error' })], { inconclusive: true }),
     ];
     const cand = [scenario('attack', 'a', [step(1, 'deny')])];
-    expect(compare(base, cand).notJudged).toEqual([{ suite: 'attack', id: 'a', why: 'baseline' }]);
+    expect(compare(base, cand).notJudged).toEqual([
+      { suite: 'attack', id: 'a', why: 'baseline', cause: 'error' },
+    ]);
   });
 
   it('names both when neither could be judged', () => {
     const bad = scenario('attack', 'a', [step(1, null, { kind: 'error' })], { inconclusive: true });
-    expect(compare([bad], [bad]).notJudged).toEqual([{ suite: 'attack', id: 'a', why: 'both' }]);
+    expect(compare([bad], [bad]).notJudged).toEqual([
+      { suite: 'attack', id: 'a', why: 'both', cause: 'error' },
+    ]);
   });
 
   it('leaves out even a clear change in a scenario that was not judged as a whole', () => {
@@ -166,8 +170,12 @@ describe('compare: what cannot be judged', () => {
 
   it('counts a scenario one side lacks as not judged', () => {
     const base = [scenario('attack', 'a', [step(1, 'deny')])];
-    expect(compare(base, []).notJudged).toEqual([{ suite: 'attack', id: 'a', why: 'candidate' }]);
-    expect(compare([], base).notJudged).toEqual([{ suite: 'attack', id: 'a', why: 'baseline' }]);
+    expect(compare(base, []).notJudged).toEqual([
+      { suite: 'attack', id: 'a', why: 'candidate', cause: 'missing' },
+    ]);
+    expect(compare([], base).notJudged).toEqual([
+      { suite: 'attack', id: 'a', why: 'baseline', cause: 'missing' },
+    ]);
   });
 
   it('counts a scenario whose runs have a different number of steps as not judged', () => {
@@ -175,7 +183,17 @@ describe('compare: what cannot be judged', () => {
     const cand = [scenario('attack', 'a', [step(1, 'allow')])];
     const result = compare(base, cand);
     expect(result.changes).toEqual([]);
-    expect(result.notJudged).toHaveLength(1);
+    expect(result.notJudged).toEqual([
+      { suite: 'attack', id: 'a', why: 'both', cause: 'steps-differ' },
+    ]);
+  });
+
+  it('says a scenario that could not be set up could not be set up', () => {
+    const unsettable = scenario('cases', 'a', [], { inconclusive: true });
+    const fine = scenario('cases', 'a', [step(1, 'allow')]);
+    expect(compare([fine], [unsettable]).notJudged).toEqual([
+      { suite: 'cases', id: 'a', why: 'candidate', cause: 'setup' },
+    ]);
   });
 
   it('judges a step that was asked at a limit like any other ask', () => {

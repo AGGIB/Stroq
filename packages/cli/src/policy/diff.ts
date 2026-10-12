@@ -23,10 +23,14 @@ export interface Change {
 /** Which side made a scenario impossible to judge. */
 export type Blame = 'baseline' | 'candidate' | 'both';
 
+/** What kept a scenario from being judged. */
+export type Cause = 'timeout' | 'error' | 'setup' | 'missing' | 'steps-differ';
+
 export interface NotJudged {
   readonly suite: Suite;
   readonly id: string;
   readonly why: Blame;
+  readonly cause: Cause;
 }
 
 export interface Comparison {
@@ -68,11 +72,20 @@ function changeOf(suite: Suite, id: string, base: StepRecord, cand: StepRecord):
   };
 }
 
-function blame(base: ScenarioRecord, cand: ScenarioRecord): Blame | null {
-  if (base.inconclusive && cand.inconclusive) return 'both';
-  if (base.inconclusive) return 'baseline';
-  if (cand.inconclusive) return 'candidate';
-  return base.steps.length === cand.steps.length ? null : 'both';
+/** Why a run could not judge a scenario: it could not be set up, a step ran out of time, or a step threw. */
+function causeOf(record: ScenarioRecord): Cause {
+  if (record.steps.length === 0) return 'setup';
+  return record.steps.some((step) => step.kind === 'timeout') ? 'timeout' : 'error';
+}
+
+function judgement(
+  base: ScenarioRecord,
+  cand: ScenarioRecord,
+): { readonly why: Blame; readonly cause: Cause } | null {
+  if (cand.inconclusive)
+    return { why: base.inconclusive ? 'both' : 'candidate', cause: causeOf(cand) };
+  if (base.inconclusive) return { why: 'baseline', cause: causeOf(base) };
+  return base.steps.length === cand.steps.length ? null : { why: 'both', cause: 'steps-differ' };
 }
 
 /**
@@ -93,12 +106,12 @@ export function compare(
     const cand = candidates.get(keyOf(base));
     candidates.delete(keyOf(base));
     if (cand === undefined) {
-      notJudged.push({ suite: base.suite, id: base.id, why: 'candidate' });
+      notJudged.push({ suite: base.suite, id: base.id, why: 'candidate', cause: 'missing' });
       continue;
     }
-    const why = blame(base, cand);
-    if (why !== null) {
-      notJudged.push({ suite: base.suite, id: base.id, why });
+    const unjudged = judgement(base, cand);
+    if (unjudged !== null) {
+      notJudged.push({ suite: base.suite, id: base.id, ...unjudged });
       continue;
     }
     base.steps.forEach((step, index) => {
@@ -108,7 +121,7 @@ export function compare(
     });
   }
   for (const lone of candidates.values()) {
-    notJudged.push({ suite: lone.suite, id: lone.id, why: 'baseline' });
+    notJudged.push({ suite: lone.suite, id: lone.id, why: 'baseline', cause: 'missing' });
   }
   return { changes, notJudged };
 }

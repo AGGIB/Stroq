@@ -343,7 +343,9 @@ describe('stroq policy test: what cannot be judged', () => {
         null,
       );
       expect(report.ok).toBe(false);
-      expect(report.notJudged).toEqual([{ suite: 'cases', id: 'big-read-then-ls', why: 'both' }]);
+      expect(report.notJudged).toEqual([
+        { suite: 'cases', id: 'big-read-then-ls', why: 'both', cause: 'timeout' },
+      ]);
       expect(report.violations).toEqual([]);
       expect(report.failures).toEqual(['1 scenario could not be judged']);
     } finally {
@@ -362,11 +364,22 @@ describe('stroq policy test: what cannot be judged', () => {
       { id: 'fine', steps: [{ event: bash('npm test') }], expect: 'allow' },
     ]);
     if (!parsed.ok) throw new Error('did not parse');
-    const records = await replay(DEFAULT_POLICY, { attack: [], ordinary: [], cases: parsed.cases });
+    const suites = { attack: [], ordinary: [], cases: parsed.cases };
+    const records = await replay(DEFAULT_POLICY, suites);
     expect(records.map((r) => [r.id, r.inconclusive])).toEqual([
       ['unsettable', true],
       ['fine', false],
     ]);
+    // It is reported as what it is, and the run fails, rather than the case counting as a block.
+    const side = { policy: DEFAULT_POLICY, source: 'default' };
+    const report = await testPolicies(side, side, suites, null);
+    expect(report.notJudged).toEqual([
+      { suite: 'cases', id: 'unsettable', why: 'both', cause: 'setup' },
+    ]);
+    expect(report.ok).toBe(false);
+    expect(formatTest(report)).toContain(
+      'unsettable: your cases, both runs (the case could not be set up)',
+    );
   }, 120_000);
 });
 

@@ -213,10 +213,34 @@ describe('parseCases: cases that are not valid', () => {
 
   it('refuses a link inside another link, which would write through it', () => {
     const faults = faultsOf(
-      parseCases([attackCase('a', { links: { dir: '/tmp', 'dir/inner': '/etc' } })]),
+      parseCases([attackCase('a', { links: { dir: '__HOME__/x', 'dir/inner': '__HOME__/y' } })]),
     );
     expect(faults.some((f) => f.path.startsWith('cases.0.links'))).toBe(true);
+    // The same two links, side by side, are fine: only the nesting was the fault.
+    expect(
+      parseCases([attackCase('b', { links: { one: '__HOME__/x', two: '__HOME__/y' } })]).ok,
+    ).toBe(true);
   });
+
+  it.each([
+    ['a file of yours', '/etc/passwd'],
+    ['a file under your home', '~/.ssh/id_ed25519'],
+    ['a way up out of the throwaway home', '__HOME__/../../etc/passwd'],
+    ['a way up out of the project', '__CWD__/../x'],
+    ['a placeholder that is not at the start', '/x/__HOME__/y'],
+    ['a name that only begins like the placeholder', '__HOMEWORK__/x'],
+    ['a control character', '__HOME__/a\u001bb'],
+  ])('refuses a link to %s', (_name, target) => {
+    const faults = faultsOf(parseCases([attackCase('a', { links: { l: target } })]));
+    expect(faults.some((f) => f.path.startsWith('cases.0.links'))).toBe(true);
+  });
+
+  it.each(['__HOME__/.ssh/authorized_keys', '__CWD__/README.md', '__HOME__'])(
+    'accepts a link to %s',
+    (target) => {
+      expect(parseCases([attackCase('a', { links: { l: target } })]).ok).toBe(true);
+    },
+  );
 
   it('names the fault of each case, not only the first', () => {
     const faults = faultsOf(
