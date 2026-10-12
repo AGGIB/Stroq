@@ -14,6 +14,8 @@ export type SnippetOrigin =
   | 'inline'
   /** A file of shell, or a script a package runs. */
   | 'script'
+  /** The command a manifest declares to start a server. */
+  | 'launch'
   /** A script of a package that is not run when it is installed. */
   | 'package-script';
 

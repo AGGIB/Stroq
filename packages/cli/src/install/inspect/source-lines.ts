@@ -5,6 +5,7 @@
 // runs from text. All of it is `observed` and none of it is a verdict: it is a reading of text, which
 // sees what is written and not what is computed. A name built at run time, or code in another
 // language, does not appear, and the blind spots say so.
+import { looksLikeCredential } from './credential-names.js';
 import type { Findings } from './findings.js';
 import type { InspectInput } from './input.js';
 import { obfuscationReasons } from './obfuscation.js';
@@ -54,12 +55,6 @@ export function languageOf(file: TextFile): Language | null {
   if (JS_INTERPRETERS.has(interpreter)) return 'js';
   return /^python[\d.]*$/.test(interpreter) ? 'py' : null;
 }
-
-/** Names that are credentials, or very likely carry one. */
-const CREDENTIAL_WORDS = /key|token|secret|password|passwd|credential/i;
-const CREDENTIAL_PREFIX = /^(?:aws_|github_|openai_|anthropic_)/i;
-export const looksLikeCredential = (name: string): boolean =>
-  CREDENTIAL_WORDS.test(name) || CREDENTIAL_PREFIX.test(name);
 
 /** Hosts that name this machine or a place documentation points at, which are listed and not sensitive. */
 const BENIGN_HOSTS: ReadonlySet<string> = new Set([

@@ -24,6 +24,7 @@ import { Findings } from './findings.js';
 import { identify } from './identity.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
 import { buildInput } from './input.js';
+import { inspectManifests } from './manifest-lines.js';
 import { inspectNativeCode } from './native-code.js';
 import { inspectPackages } from './package-lines.js';
 import { inspectPython } from './python-lines.js';
@@ -115,6 +116,7 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
   queueMarkdownShell(input, findings, shell);
   queueScriptShell(input, shell);
   inspectPackages(input, findings, shell);
+  inspectManifests(input, findings, shell);
   inspectPython(input, findings);
   inspectNativeCode(input, findings);
   inspectSource(input, findings);

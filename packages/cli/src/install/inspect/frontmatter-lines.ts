@@ -7,56 +7,22 @@ import type { Findings } from './findings.js';
 import { readFrontmatter } from './frontmatter.js';
 import type { Identity } from './identity.js';
 import type { InspectInput } from './input.js';
-import { entriesOf, isObject, own, ownObject, ownString, type JsonObject } from './json.js';
+import { addHookLines } from './hook-lines.js';
+import { own, ownObject, ownString, type JsonObject } from './json.js';
 import type { ShellQueue } from './shell-queue.js';
 import type { TextFile } from './text-files.js';
 import { splitToolList, toolIsSensitive } from './tool-spec.js';
 
 const TOOLS_DETECTOR =
   'allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it';
-const HOOK_DETECTOR =
-  'hooks in front matter: a command the host runs on an event while the skill is active, as the skill declares it';
 const UNREADABLE_DETECTOR =
   'the front matter could not be read, so what it declares (allowed-tools, hooks) is not known; a signal to look at, not a verdict';
-
-/** The most hooks one front matter is read for. */
-const MAX_HOOKS = 100;
 
 /** Whether a file has front matter that declares things: a SKILL.md anywhere, or a command of a plugin. */
 export function hasDeclaringFrontmatter(path: string): boolean {
   return (
     path === 'SKILL.md' || path.endsWith('/SKILL.md') || /(?:^|\/)commands\/[^/]+\.md$/.test(path)
   );
-}
-
-interface HookFound {
-  readonly event: string;
-  readonly command: string | null;
-  readonly type: string;
-}
-
-/** The hooks a `hooks` value declares, or null when it is not shaped like hooks. */
-export function hooksOf(value: unknown): HookFound[] | null {
-  if (!isObject(value)) return null;
-  const found: HookFound[] = [];
-  for (const [event, groups] of entriesOf(value)) {
-    if (!Array.isArray(groups)) return null;
-    for (const group of groups as unknown[]) {
-      if (!isObject(group)) return null;
-      const inner: unknown = own(group, 'hooks');
-      const hooks: unknown[] = Array.isArray(inner) ? (inner as unknown[]) : [group];
-      for (const hook of hooks) {
-        if (!isObject(hook)) return null;
-        found.push({
-          event,
-          command: ownString(hook, 'command'),
-          type: ownString(hook, 'type') ?? 'command',
-        });
-        if (found.length > MAX_HOOKS) return found;
-      }
-    }
-  }
-  return found;
 }
 
 function toolLines(file: TextFile, value: unknown, line: number, findings: Findings): boolean {
@@ -78,43 +44,6 @@ function toolLines(file: TextFile, value: unknown, line: number, findings: Findi
     }
   }
   return true;
-}
-
-function hookLines(
-  file: TextFile,
-  value: unknown,
-  line: number,
-  findings: Findings,
-  shell: ShellQueue,
-): void {
-  const hooks = isObject(value) && Object.keys(value).length === 0 ? [] : hooksOf(value);
-  if (hooks === null) {
-    findings.line({
-      kind: 'hook',
-      subject: 'hooks declared (shape not understood)',
-      basis: 'unknown',
-      sensitive: true,
-      file: file.path,
-      line,
-      detector: HOOK_DETECTOR,
-    });
-    return;
-  }
-  if (hooks.length > MAX_HOOKS) findings.tally('list-cut');
-  for (const hook of hooks.slice(0, MAX_HOOKS)) {
-    findings.line({
-      kind: 'hook',
-      subject: `${hook.event}: ${hook.command ?? `${hook.type} hook`}`,
-      basis: 'declared',
-      sensitive: true,
-      file: file.path,
-      line,
-      detector: HOOK_DETECTOR,
-    });
-    if (hook.command !== null) {
-      shell.add({ file: file.path, line, text: hook.command, origin: 'hook' });
-    }
-  }
 }
 
 function unreadable(file: TextFile, reason: string, tooLong: boolean, findings: Findings): void {
@@ -172,7 +101,7 @@ export function inspectFrontmatter(
     }
     const hooks = own(data, 'hooks');
     if (hooks !== undefined && hooks !== null) {
-      hookLines(file, hooks, keyLines.get('hooks') ?? 1, findings, shell);
+      addHookLines(file.path, hooks, keyLines.get('hooks') ?? 1, 'front matter', findings, shell);
     }
     if (file.path === 'SKILL.md') {
       const name = ownString(data, 'name');

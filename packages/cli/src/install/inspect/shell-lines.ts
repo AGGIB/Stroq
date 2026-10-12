@@ -29,6 +29,7 @@ const ORIGIN_NOTE: Readonly<Record<SnippetOrigin, string>> = {
   doc: 'shell text in a document, an example that may be run',
   hook: 'a hook the artifact declares, which the host runs',
   inline: 'an inline command that the host runs when it loads the skill',
+  launch: 'a command the artifact declares to start a server',
   script: 'a script of the artifact',
   'package-script': 'a script of a package that is run on request',
 };
@@ -165,7 +166,10 @@ function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void
   emitUnread(snippet, reading, note, findings);
   // The scripts of a package that run only on request (`test`, `build`) are mostly its own tools: they
   // are read for addresses and dangers, and not listed program by program.
-  if (snippet.origin !== 'package-script') emitPrograms(snippet, reading, note, findings, at);
+  // A launch command is already an exec line of its own, declared by the manifest.
+  if (snippet.origin !== 'package-script' && snippet.origin !== 'launch') {
+    emitPrograms(snippet, reading, note, findings, at);
+  }
 }
 
 function emitPrograms(
