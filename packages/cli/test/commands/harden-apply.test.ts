@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CLAUDE_READ_DENY_RULES } from '../../src/harden/recipes/credential-paths.js';
 import { FAKE_SECRET } from '../harden/manifest-fixtures.js';
 import { removeTempDirs } from '../harden/helpers.js';
-import { GOLDEN_SETTINGS, bytesOf, recordsFor, settingsText } from '../helpers/harden-fixtures.js';
+import {
+  GOLDEN_SETTINGS,
+  bytesOf,
+  diffLabel,
+  recordsFor,
+  settingsText,
+} from '../helpers/harden-fixtures.js';
 import { askingTerminal, hardenWorld, treeHash } from '../helpers/harden-world.js';
 
 afterEach(removeTempDirs);
@@ -25,7 +31,7 @@ describe('stroq harden apply: asking a person', () => {
     expect(run.prompts[0]).toContain('y/N');
     // The plan is shown first: the owner answers about what they have seen.
     expect(run.out).toContain('Adds these rules to permissions.deny:');
-    expect(run.out).toContain(`+++ b${file}`);
+    expect(run.out).toContain(`+++ b/${diffLabel(file)}`);
     expect(run.out).toContain(`Applied to ${file}: 12 added.`);
     expect(run.out).toContain('The file did not exist; undo removes it.');
     expect(run.out).toContain(

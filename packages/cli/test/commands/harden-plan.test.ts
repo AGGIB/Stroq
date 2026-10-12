@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLAUDE_READ_DENY_RULES } from '../../src/harden/recipes/credential-paths.js';
 import { removeTempDirs } from '../harden/helpers.js';
+import { diffLabel } from '../helpers/harden-fixtures.js';
 import { hardenWorld, treeHash } from '../helpers/harden-world.js';
 
 afterEach(removeTempDirs);
@@ -22,7 +23,7 @@ describe('stroq harden (plan)', () => {
     expect(run.out).toContain(`File: ${file}`);
     expect(run.out).toContain('does not exist yet; applying would create it');
     for (const rule of CLAUDE_READ_DENY_RULES) expect(run.out).toContain(`  + ${rule}\n`);
-    expect(run.out).toContain(`+++ b${file}`);
+    expect(run.out).toContain(`+++ b/${diffLabel(file)}`);
     expect(run.out).toContain('+      "Read(./.env)",');
     expect(run.out).toContain('Nothing was written.');
     expect(run.out).toContain('stroq harden apply --agent claude-code --scope user');
@@ -47,7 +48,7 @@ describe('stroq harden (plan)', () => {
         '',
         'The change:',
         '--- /dev/null',
-        `+++ b${file}`,
+        `+++ b/${diffLabel(file)}`,
         '@@ -0,0 +1,18 @@',
         '+{',
         '+  "permissions": {',

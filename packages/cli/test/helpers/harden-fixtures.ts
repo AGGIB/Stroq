@@ -14,6 +14,12 @@ ${CLAUDE_READ_DENY_RULES.map((rule) => `      ${JSON.stringify(rule)}`).join(',\
 }
 `;
 
+/**
+ * The path as the diff header writes it: slashes for separators and no slash in front, so that the line
+ * is `+++ b/` and this, on every platform (`/tmp/x` gives `tmp/x`, `C:\\Users\\x` gives `C:/Users/x`).
+ */
+export const diffLabel = (path: string): string => path.replace(/\\/g, '/').replace(/^\/+/, '');
+
 /** A JSON settings file as an editor writes it. */
 export const settingsText = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 

@@ -316,7 +316,7 @@ describe('stroq harden undo: what it will not do', () => {
     const stranger = tempDir('stranger');
     writeFileSync(
       join(world.stroqHome, 'harden', 'manifest.json'),
-      `{"version": 1, "files": "PLANTED-TEXT ${stranger}"}`,
+      JSON.stringify({ version: 1, files: `PLANTED-TEXT ${stranger}` }),
     );
 
     const run = await world.runPiped(['undo', '--yes']);

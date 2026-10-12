@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { removeTempDirs, tempDir } from '../harden/helpers.js';
+import { diffLabel } from '../helpers/harden-fixtures.js';
 import { hardenWorld, treeHash } from '../helpers/harden-world.js';
 
 afterEach(removeTempDirs);
@@ -129,7 +130,7 @@ describe('stroq harden (plan): files and paths it refuses, and names that cannot
         const run = await world.run(['--acknowledge-link']);
 
         expect(run.code).toBe(0);
-        expect(run.out).toContain(`+++ b${world.inHome('dotfiles', 'claude.json')}`);
+        expect(run.out).toContain(`+++ b/${diffLabel(world.inHome('dotfiles', 'claude.json'))}`);
         expect(run.out).toContain('+      "Read(./.env)",');
         expect(run.out).toContain('this path is a link');
       },

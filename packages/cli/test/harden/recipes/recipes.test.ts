@@ -75,7 +75,7 @@ describe('claude-read-deny', () => {
 
   it('edits the user settings file at user scope, inside the home', () => {
     const target = claudeReadDeny.target({ cwd: '/work/app', home: '/home/me', scope: 'user' });
-    expect(target.file).toBe('/home/me/.claude/settings.json');
+    expect(target.file).toBe(join('/home/me', '.claude', 'settings.json'));
     expect(target.root).toBe('/home/me');
     expect(target.scope).toBe('user');
     expect(target.agent).toBe('claude-code');
@@ -84,7 +84,7 @@ describe('claude-read-deny', () => {
 
   it('edits the local project settings file at project scope, inside the project', () => {
     const target = claudeReadDeny.target({ cwd: '/work/app', home: '/home/me', scope: 'project' });
-    expect(target.file).toBe('/work/app/.claude/settings.local.json');
+    expect(target.file).toBe(join('/work/app', '.claude', 'settings.local.json'));
     expect(target.root).toBe('/work/app');
     expect(target.scope).toBe('project');
   });
@@ -171,7 +171,7 @@ describe('cursor-ignore', () => {
 
   it('writes a block into .cursorignore in the project', () => {
     const target = cursorIgnore.target({ cwd: '/work/app', home: '/home/me', scope: 'project' });
-    expect(target.file).toBe('/work/app/.cursorignore');
+    expect(target.file).toBe(join('/work/app', '.cursorignore'));
     expect(target.root).toBe('/work/app');
     expect(blockChange(target)).toEqual({
       kind: 'text-block',

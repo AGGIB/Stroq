@@ -38,7 +38,7 @@ describe('the project secret files', () => {
     expect(PROJECT_SECRET_FILES).toEqual(['.env', '.env.*']);
   });
 
-  it.each(PROJECT_SECRET_FILES.map((name) => [name.replace('*', 'local')]))(
+  it.each(PROJECT_SECRET_FILES.map((name) => [name.split('*').join('local')]))(
     'the classifier calls a project file like %s a secret',
     (name) => {
       expect(isSecretToTheClassifier(`/work/project/${name}`)).toBe(true);

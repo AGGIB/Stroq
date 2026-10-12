@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { vi } from 'vitest';
 import { runHarden } from '../../src/commands/harden.js';
@@ -113,17 +113,30 @@ export function askingTerminal(
  */
 export function treeHash(dir: string): string {
   const hash = createHash('sha256');
+  // What a directory holds is read once, with the kind of each entry, so that no name is looked at and
+  // then opened as if it were still what it was; a file is opened and read through the one descriptor.
   const walk = (path: string, label: string): void => {
-    const stats = lstatSync(path);
-    if (stats.isSymbolicLink()) hash.update(`link ${label} -> ${readlinkSync(path)}\n`);
-    else if (stats.isDirectory()) {
-      hash.update(`dir ${label}\n`);
-      for (const name of readdirSync(path).sort()) walk(join(path, name), `${label}/${name}`);
-    } else {
-      hash.update(`file ${label} ${stats.mode & 0o777}\n`);
-      hash.update(readFileSync(path));
+    for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
+      a.name < b.name ? -1 : 1,
+    )) {
+      const here = join(path, entry.name);
+      const name = `${label}/${entry.name}`;
+      if (entry.isSymbolicLink()) hash.update(`link ${name} -> ${readlinkSync(here)}\n`);
+      else if (entry.isDirectory()) {
+        hash.update(`dir ${name}\n`);
+        walk(here, name);
+      } else {
+        const fd = openSync(here, 'r');
+        try {
+          hash.update(`file ${name} ${fstatSync(fd).mode & 0o777}\n`);
+          hash.update(readFileSync(fd));
+        } finally {
+          closeSync(fd);
+        }
+      }
     }
   };
+  hash.update('dir \n');
   walk(dir, '');
   return hash.digest('hex');
 }
