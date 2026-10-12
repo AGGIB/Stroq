@@ -17,8 +17,14 @@ import {
 import { showable, showableWhere } from './safe-text.js';
 
 const SUBJECT_MAX = 200;
-const DETECTOR_MAX = 300;
+/** Several readings may find the same thing, and all of them are named, so a detector may be long. */
+const DETECTOR_MAX = 600;
+const SINGLE_DETECTOR_MAX = 300;
 const RULE_MAX = 80;
+/** The most distinct findings kept before the passport is cut to its lines; the rest are counted. */
+const MAX_DRAFTS = 20_000;
+/** The most strings whose safe form is remembered: the same few subjects and detectors come back thousands of times. */
+const MAX_REMEMBERED = 5000;
 
 export interface LineInput {
   readonly kind: CapKind;
@@ -57,7 +63,7 @@ interface Draft {
   readonly subject: string;
   readonly basis: Basis;
   readonly sensitive: boolean;
-  readonly detector: string;
+  readonly detectors: Set<string>;
   readonly places: Map<string, Place>;
 }
 
@@ -66,11 +72,6 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 const compareLine = (a: number | null, b: number | null): number => (a ?? 0) - (b ?? 0);
 const comparePlace = (a: Place, b: Place): number =>
   compareText(a.file, b.file) || compareLine(a.line, b.line);
-
-const nonEmptyText = (text: string, max: number, fallback: string): string => {
-  const shown = showable(text, max);
-  return shown === '' ? fallback : shown;
-};
 
 const firstPlace = (line: PassportLine): Place => line.where[0] ?? { file: '', line: null };
 
@@ -95,28 +96,52 @@ const compareForKeeping = (a: PassportLine, b: PassportLine): number =>
 
 export class Findings {
   private readonly drafts = new Map<string, Draft>();
+  private readonly remembered = new Map<string, string>();
+  /** Findings that were not kept because there were too many different ones. */
+  private dropped = 0;
   private readonly signalEntries = new Map<string, { ruleId: string; file: string }>();
   private readonly spots = new Set<string>();
   private readonly counts: Partial<Record<TallyKey, number>> = {};
 
-  /** Records one finding in one place. The same finding in another place is added to the same line. */
+  /** The safe form of a text, made once for the texts that come back often. */
+  private safe(text: string, max: number, fallback: string): string {
+    const memo = `${max}\u0000${text}`;
+    const known = this.remembered.get(memo);
+    if (known !== undefined) return known;
+    const shown = showable(text, max);
+    const result = shown === '' ? fallback : shown;
+    if (this.remembered.size < MAX_REMEMBERED && text.length <= 1000)
+      this.remembered.set(memo, result);
+    return result;
+  }
+
+  /**
+   * Records one finding in one place. The same finding in another place is added to the same line, and
+   * the same finding made by another reading keeps the line and adds the reading to its detector.
+   */
   line(input: LineInput): void {
-    const subject = nonEmptyText(input.subject, SUBJECT_MAX, '(no text)');
-    const detector = nonEmptyText(input.detector, DETECTOR_MAX, '(no reading named)');
+    const subject = this.safe(input.subject, SUBJECT_MAX, '(no text)');
+    const detector = this.safe(input.detector, SINGLE_DETECTOR_MAX, '(no reading named)');
     const place = showableWhere(input.file, input.line);
-    const key = [input.kind, subject, input.basis, input.sensitive ? 1 : 0, detector].join(
-      '\u0000',
-    );
-    const draft = this.drafts.get(key) ?? {
-      kind: input.kind,
-      subject,
-      basis: input.basis,
-      sensitive: input.sensitive,
-      detector,
-      places: new Map<string, Place>(),
-    };
+    const key = [input.kind, subject, input.basis, input.sensitive ? 1 : 0].join('\u0000');
+    let draft = this.drafts.get(key);
+    if (draft === undefined) {
+      if (this.drafts.size >= MAX_DRAFTS) {
+        this.dropped += 1;
+        return;
+      }
+      draft = {
+        kind: input.kind,
+        subject,
+        basis: input.basis,
+        sensitive: input.sensitive,
+        detectors: new Set<string>(),
+        places: new Map<string, Place>(),
+      };
+      this.drafts.set(key, draft);
+    }
+    draft.detectors.add(detector);
     draft.places.set(`${place.file}\u0000${place.line ?? 0}`, place);
-    this.drafts.set(key, draft);
   }
 
   /**
@@ -124,7 +149,7 @@ export class Findings {
    * matched and where, and an entry in `signals`, which is what is counted and listed by file.
    */
   signal(input: SignalInput): void {
-    const ruleId = nonEmptyText(input.ruleId, RULE_MAX, '(no rule)');
+    const ruleId = this.safe(input.ruleId, RULE_MAX, '(no rule)');
     const place = showableWhere(input.file, input.line);
     this.signalEntries.set(`${ruleId}\u0000${place.file}`, { ruleId, file: place.file });
     const detail = input.detail === undefined ? '' : showable(input.detail, SUBJECT_MAX);
@@ -140,7 +165,7 @@ export class Findings {
   }
 
   blindSpot(text: string): void {
-    const shown = showable(text, DETECTOR_MAX);
+    const shown = showable(text, SINGLE_DETECTOR_MAX);
     if (shown !== '') this.spots.add(shown);
   }
 
@@ -161,7 +186,7 @@ export class Findings {
         basis: draft.basis,
         sensitive: draft.sensitive,
         where: Object.freeze(places.slice(0, MAX_PLACES).map((place) => Object.freeze(place))),
-        detector: draft.detector,
+        detector: showable([...draft.detectors].sort(compareText).join('; '), DETECTOR_MAX),
       });
     });
     const kept =
@@ -173,7 +198,8 @@ export class Findings {
       ...this.spots,
       ...tallySpots(this.counts),
     ]);
-    if (all.length > kept.length) spots.add(moreLinesSpot(all.length - kept.length));
+    const hidden = all.length - kept.length + this.dropped;
+    if (hidden > 0) spots.add(moreLinesSpot(hidden));
     if (placesCut) spots.add(morePlacesSpot);
 
     const signals = [...this.signalEntries.values()]

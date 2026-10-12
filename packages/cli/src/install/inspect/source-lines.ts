@@ -5,6 +5,7 @@
 // runs from text. All of it is `observed` and none of it is a verdict: it is a reading of text, which
 // sees what is written and not what is computed. A name built at run time, or code in another
 // language, does not appear, and the blind spots say so.
+import { SOURCE_MATCHES_MAX } from './blind-spots.js';
 import { looksLikeCredential } from './credential-names.js';
 import type { Findings } from './findings.js';
 import type { InspectInput } from './input.js';
@@ -91,6 +92,8 @@ function hostOfLiteral(literal: string): string {
 }
 
 interface Scan {
+  /** What is left of the matches that are followed in all the files of the tree. */
+  readonly budget: { left: number };
   readonly file: TextFile;
   readonly language: Language;
   readonly comments: CommentLines;
@@ -106,12 +109,13 @@ function* matchesOf(
   for (const match of scan.file.text.matchAll(pattern)) {
     const index = match.index;
     if (index === undefined) continue;
-    if (seen >= MAX_MATCHES) {
+    if (seen >= MAX_MATCHES || scan.budget.left <= 0) {
       scan.findings.tally('list-cut');
       return;
     }
     if (!scan.comments.isComment(index)) {
       seen += 1;
+      scan.budget.left -= 1;
       yield { match, index };
     }
   }
@@ -205,10 +209,12 @@ function execLines(scan: Scan): void {
 
 /** Reads the source files of the tree. */
 export function inspectSource(input: InspectInput, findings: Findings): void {
+  const budget = { left: SOURCE_MATCHES_MAX };
   for (const file of input.texts) {
     const language = languageOf(file);
     if (language === null) continue;
     const scan: Scan = {
+      budget,
       file,
       language,
       comments: new CommentLines(file.text, file.lines, language),

@@ -60,8 +60,14 @@ export function queueMarkdownShell(
   findings: Findings,
   shell: ShellQueue,
 ): void {
+  let prose = false;
   for (const file of input.texts) {
     if (!MARKDOWN.test(file.path)) continue;
+    // Said once, however many documents there are: the words do not count them.
+    if (!prose) {
+      prose = true;
+      findings.tally('prose');
+    }
     const found = readMarkdownShell(file.text);
     if (found.untagged > 0) findings.tally('untagged-fence', found.untagged);
     for (const block of found.blocks) {

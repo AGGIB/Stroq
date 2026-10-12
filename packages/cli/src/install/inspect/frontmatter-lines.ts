@@ -3,6 +3,11 @@
 // `allowed-tools` becomes a line per tool and `hooks` a line per hook, all of them `declared`: the
 // artifact says so about itself. The text of a hook is also put to the shell reader, which says what
 // the command would do. A front matter that cannot be read is a signal.
+import {
+  FRONTMATTER_CAP_BYTES,
+  FRONTMATTER_FILES_MAX,
+  FRONTMATTER_TOTAL_MAX,
+} from './blind-spots.js';
 import type { Findings } from './findings.js';
 import { readFrontmatter } from './frontmatter.js';
 import type { Identity } from './identity.js';
@@ -15,6 +20,8 @@ import { splitToolList, toolIsSensitive } from './tool-spec.js';
 
 const TOOLS_DETECTOR =
   'allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it';
+/** A file that begins with the delimiter of front matter, after a byte order mark if there is one. */
+const OPENS_FRONT_MATTER = /^\ufeff?---/;
 const UNREADABLE_DETECTOR =
   'the front matter could not be read, so what it declares (allowed-tools, hooks) is not known; a signal to look at, not a verdict';
 
@@ -78,8 +85,18 @@ export function inspectFrontmatter(
   shell: ShellQueue,
 ): Partial<Identity> {
   let identity: Partial<Identity> = {};
+  let read = 0;
+  let bytes = 0;
   for (const file of input.texts) {
     if (!hasDeclaringFrontmatter(file.path)) continue;
+    if (!OPENS_FRONT_MATTER.test(file.text.slice(0, 8))) continue;
+    // Parsing is the dearest thing done to a file, and a tree can hold thousands of skills.
+    if (read >= FRONTMATTER_FILES_MAX || bytes >= FRONTMATTER_TOTAL_MAX) {
+      findings.tally('frontmatter-over-budget');
+      continue;
+    }
+    read += 1;
+    bytes += Math.min(file.size, FRONTMATTER_CAP_BYTES);
     const front = readFrontmatter(file);
     if (front.status === 'absent') continue;
     if (front.status === 'broken') {

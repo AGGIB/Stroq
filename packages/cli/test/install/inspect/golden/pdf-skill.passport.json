@@ -1,0 +1,216 @@
+{
+  "schema": "stroq-passport/1",
+  "artifact": {
+    "kind": "skill",
+    "name": "pdf-forms",
+    "version": "1.2.0",
+    "source": {
+      "type": "dir",
+      "label": "fixture"
+    },
+    "digest": "32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6",
+    "files": 4,
+    "bytes": 945
+  },
+  "lines": [
+    {
+      "kind": "allowed-tools",
+      "subject": "Bash(python3:*)",
+      "basis": "declared",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 5
+        }
+      ],
+      "detector": "allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it"
+    },
+    {
+      "kind": "allowed-tools",
+      "subject": "Grep",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 5
+        }
+      ],
+      "detector": "allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it"
+    },
+    {
+      "kind": "allowed-tools",
+      "subject": "Read",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 5
+        }
+      ],
+      "detector": "allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it"
+    },
+    {
+      "kind": "allowed-tools",
+      "subject": "WebFetch",
+      "basis": "declared",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 5
+        }
+      ],
+      "detector": "allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it"
+    },
+    {
+      "kind": "allowed-tools",
+      "subject": "Write(forms/**)",
+      "basis": "declared",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 5
+        }
+      ],
+      "detector": "allowed-tools in front matter: what the skill asks to be allowed to use without asking, as the skill declares it"
+    },
+    {
+      "kind": "cred.env",
+      "subject": "PDF_API_KEY",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "scripts/fill.py",
+          "line": 5
+        }
+      ],
+      "detector": "an environment variable read in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "cred.env",
+      "subject": "PDF_REGION",
+      "basis": "observed",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "scripts/fill.py",
+          "line": 6
+        }
+      ],
+      "detector": "an environment variable read in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "curl",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 20
+        }
+      ],
+      "detector": "a command in shell text in a document, an example that may be run, read by Stroq's shell reader; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "pip",
+      "basis": "observed",
+      "sensitive": false,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 13
+        }
+      ],
+      "detector": "a command in shell text in a document, an example that may be run, read by Stroq's shell reader; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "python3",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 19
+        }
+      ],
+      "detector": "a command in shell text in a document, an example that may be run, read by Stroq's shell reader; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "exec",
+      "subject": "subprocess",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "scripts/fill.py",
+          "line": 2
+        },
+        {
+          "file": "scripts/fill.py",
+          "line": 11
+        }
+      ],
+      "detector": "a use of a program or of code run from text, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "net",
+      "subject": "api.pdf-tools.example",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "SKILL.md",
+          "line": 20
+        },
+        {
+          "file": "scripts/fill.py",
+          "line": 10
+        }
+      ],
+      "detector": "an address in shell text in a document, an example that may be run, read by Stroq's shell reader; a signal to look at, not a verdict; a command that talks to the network was recognised; an address written as a string in source, found by reading the text; a signal to look at, not a verdict"
+    },
+    {
+      "kind": "signal",
+      "subject": "process-spawn: subprocess",
+      "basis": "observed",
+      "sensitive": true,
+      "where": [
+        {
+          "file": "scripts/fill.py",
+          "line": 2
+        },
+        {
+          "file": "scripts/fill.py",
+          "line": 11
+        }
+      ],
+      "detector": "a use of a program or of code run from text, found by reading the text; a signal to look at, not a verdict"
+    }
+  ],
+  "blindSpots": [
+    "1 code block in markdown without a language tag was not read as shell",
+    "anything the program fetches, builds or decides at run time was not looked at",
+    "code in languages other than JavaScript, TypeScript, Python and shell was not read",
+    "nothing was run: this is a reading of the files, and what the program does when it runs was not observed",
+    "the prose of documents was not read, only their shell blocks and inline commands"
+  ],
+  "signals": [
+    {
+      "ruleId": "process-spawn",
+      "file": "scripts/fill.py"
+    }
+  ],
+  "imported": [],
+  "analysis": {
+    "stroq": "0.0.0-test",
+    "rules": "test-rules/1"
+  }
+}

@@ -61,16 +61,44 @@ describe('Findings: lines', () => {
     ]);
   });
 
-  it('keeps findings that differ in subject, basis, sensitivity or detector apart', () => {
+  it('keeps findings that differ in kind, subject, basis or sensitivity apart', () => {
     const findings = new Findings();
 
     findings.line(base);
     findings.line({ ...base, subject: 'other.example' });
     findings.line({ ...base, basis: 'declared' });
     findings.line({ ...base, sensitive: false });
-    findings.line({ ...base, detector: 'another reading' });
+    findings.line({ ...base, kind: 'exec' });
 
     expect(findings.result().lines).toHaveLength(5);
+  });
+
+  it('joins the same finding made by two readings into one line that names both, in a fixed order', () => {
+    const forward = new Findings();
+    const backward = new Findings();
+
+    forward.line({ ...base, detector: 'reading b' });
+    forward.line({ ...base, detector: 'reading a', file: 'src/a.js' });
+    backward.line({ ...base, detector: 'reading a', file: 'src/a.js' });
+    backward.line({ ...base, detector: 'reading b' });
+
+    expect(forward.result().lines).toHaveLength(1);
+    expect(forward.result().lines[0]?.detector).toBe('reading a; reading b');
+    expect(JSON.stringify(forward.result())).toBe(JSON.stringify(backward.result()));
+  });
+
+  it('keeps a bounded number of different findings, and counts the ones it let go', () => {
+    const findings = new Findings();
+
+    for (let i = 0; i < 20_050; i += 1) findings.line({ ...base, subject: `h${i}.example` });
+    const result = findings.result();
+
+    expect(result.lines).toHaveLength(MAX_LINES);
+    expect(
+      result.blindSpots.some((spot) =>
+        spot.startsWith(`${20_050 - MAX_LINES} more findings were found`),
+      ),
+    ).toBe(true);
   });
 
   it('puts the lines in an order that does not depend on the order they were found in', () => {
