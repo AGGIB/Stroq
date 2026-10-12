@@ -115,6 +115,22 @@ describe('stroq harden undo: giving the file back', () => {
     expect(run.out).not.toContain('Bash(ls)');
   });
 
+  it('clears the record of a file the owner has deleted, and says that is all there was to do', async () => {
+    const { world, file } = withOwnersFile();
+    await world.runPiped(['apply', '--yes']);
+    rmSync(file);
+
+    const run = await world.runAsking(['undo'], ['y']);
+
+    expect(run.code).toBe(0);
+    expect(run.out).toContain('The file is not there now, so undo has nothing to take out of it');
+    expect(run.out).toContain(
+      "Nothing of Stroq's was left in the file, so only its record is cleared.",
+    );
+    expect(existsSync(file)).toBe(false);
+    expect(recordsFor(world.stroqHome, file)).toEqual([]);
+  });
+
   it('says there is nothing to undo when nothing was recorded, and writes nothing', async () => {
     const world = hardenWorld();
     const before = [treeHash(world.home), treeHash(world.stroqHome)];
