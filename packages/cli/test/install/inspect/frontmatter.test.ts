@@ -93,7 +93,7 @@ describe('front matter: allowed-tools', () => {
     expect(toolsOf('name: demo\ndescription: x')).toEqual([]);
   });
 
-  it('does not take an allowed-tools nested under another key for the skill’s own', () => {
+  it('does not take an allowed-tools nested under another key for the own list of the skill', () => {
     expect(toolsOf('metadata:\n  allowed-tools: Bash')).toEqual([]);
   });
 

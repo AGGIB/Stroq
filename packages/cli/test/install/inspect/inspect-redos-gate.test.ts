@@ -109,7 +109,7 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['a long url', (size) => `https://${'a'.repeat(size)}`],
   ['a long url in brackets', (size) => `https://[${'a'.repeat(size)}`],
   ['a long braces list', (size) => `const {${'A,'.repeat(size / 2)}`],
-  ['unicode marks', repeat('é̖')],
+  ['unicode marks', repeat('e\u0301\u0316')],
   ['astral characters', repeat('\u{1f600}')],
   ['lone surrogates', repeat('\ud800')],
   ['controls', repeat('\u0001\u001b')],

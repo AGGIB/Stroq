@@ -34,7 +34,7 @@ const YAML_OPTIONS: ParseOptions & DocumentOptions & SchemaOptions = {
 };
 
 const DELIMITER = '---';
-const BYTE_ORDER_MARK = '﻿';
+const BYTE_ORDER_MARK = '\ufeff';
 
 const broken = (reason: string, tooLong = false): Frontmatter => ({
   status: 'broken',

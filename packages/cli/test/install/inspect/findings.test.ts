@@ -145,7 +145,7 @@ describe('Findings: lines', () => {
   it('writes out a character the schema would refuse, in a subject and in a place', () => {
     const findings = new Findings();
 
-    findings.line({ ...base, subject: 'evil‮host', file: 'a\u001bb' });
+    findings.line({ ...base, subject: 'evil\u202ehost', file: 'a\u001bb' });
     const { lines } = findings.result();
 
     expect(PassportLineSchema.safeParse(lines[0]).success).toBe(true);

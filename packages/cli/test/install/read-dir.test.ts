@@ -47,7 +47,7 @@ describe('readDirTree: a plain folder', () => {
       'lib-x': 'x\n',
       'lib.js': 'js\n',
       'lib/a.js': 'a\n',
-      'café.txt': 'accent',
+      'caf\u00e9.txt': 'accent',
     };
     const forward = tempRoot('forward');
     const backward = tempRoot('backward');
@@ -197,11 +197,11 @@ describe('readDirTree: links are recorded and never followed', () => {
 
   linkTest('hashes the target text of a link as the contract says', async () => {
     const root = tempRoot();
-    symlinkSync('docs/é.md', join(root, 'lnk'));
+    symlinkSync('docs/\u00e9.md', join(root, 'lnk'));
 
     const { tree } = await readDirTree(root);
 
-    const expected = symlinkEntry('lnk', 'docs/é.md');
+    const expected = symlinkEntry('lnk', 'docs/\u00e9.md');
     expect(entryAt(tree, 'lnk')?.size).toBe(expected.size);
     expect(entryAt(tree, 'lnk')?.sha256).toBe(expected.sha256);
   });

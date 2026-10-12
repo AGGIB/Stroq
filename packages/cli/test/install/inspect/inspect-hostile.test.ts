@@ -213,7 +213,7 @@ describe('text that is not text', () => {
   });
 
   it('reads files with names and contents full of characters a passport cannot hold', () => {
-    const nasty = 'a‮b​c\u0001d\ud800e';
+    const nasty = 'a\u202eb\u200bc\u0001d\ud800e';
     const { passport } = took({
       'dir/$(id)/odd name.js': `process.env.${'X'.repeat(200)};\n// ${nasty}\nfetch("https://${nasty}.example/")\n`,
       [`${'long'.repeat(55)}.js`]: 'eval(x);\n',
@@ -222,7 +222,7 @@ describe('text that is not text', () => {
       }),
     });
 
-    expect(JSON.stringify(passport)).not.toMatch(/[‮​\u0001]/);
+    expect(JSON.stringify(passport)).not.toMatch(/[\u202e\u200b\u0001]/);
     expect(passport.lines.length).toBeGreaterThan(0);
   });
 });

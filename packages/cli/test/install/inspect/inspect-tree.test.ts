@@ -123,11 +123,11 @@ describe('inspectTree: the name and version', () => {
 
   it('makes a name from the artifact safe to show, and cuts it', () => {
     const passport = passportOf(
-      { 'package.json': JSON.stringify({ name: `evil‮${'x'.repeat(300)}`, main: 'i.js' }) },
+      { 'package.json': JSON.stringify({ name: `evil\u202e${'x'.repeat(300)}`, main: 'i.js' }) },
       { kind: 'mcp' },
     );
 
-    expect(passport.artifact.name).not.toContain('‮');
+    expect(passport.artifact.name).not.toContain('\u202e');
     expect(Array.from(passport.artifact.name).length).toBeLessThanOrEqual(100);
   });
 

@@ -176,12 +176,12 @@ describe('readDirTree: names are checked by the tree, and are never echoed raw',
 
   nameTest('refuses a name with a direction override and does not print it', async () => {
     const root = tempRoot();
-    writeFiles(root, { 'evil‮txt.exe': 'x' });
+    writeFiles(root, { 'evil\u202etxt.exe': 'x' });
 
     const error = await refusal(() => readDirTree(root));
 
     expect(error.treeCode).toBe('bad-path');
-    expect(error.message).not.toContain('‮');
+    expect(error.message).not.toContain('\u202e');
   });
 
   nameTest('refuses a name longer than a path may be, and clips it in the message', async () => {

@@ -8,7 +8,7 @@
 // by the artifact.
 import { hasUnshowableCharacter } from '../safe-path.js';
 
-const ELLIPSIS = '…';
+const ELLIPSIS = '\u2026';
 /** A run of blanks, newlines and tabs: shown as one space. */
 const BLANKS = /\s+/g;
 /** How many characters of the input are looked at for each one that may be kept. */

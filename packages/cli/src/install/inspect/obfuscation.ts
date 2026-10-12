@@ -2,8 +2,8 @@
 //
 // A reading of text cannot say what a file does when the text was made not to be read, so such a file
 // is a signal and a blind spot. The five signs are the ones that tools which hide code leave: a line
-// of thousands of characters, text made mostly of punctuation, a long run of `\x41` or `A`
-// escapes, a long run of base64, and identifiers of the form `_0x1a2b` that one obfuscator makes. The
+// of thousands of characters, text made mostly of punctuation, a long run of `\x41` or of the same
+// letter as a four-digit unicode escape, a long run of base64, and identifiers of the form `_0x1a2b` that one obfuscator makes. The
 // limits were set against about nine thousand files of JavaScript, TypeScript and Python (their
 // hand-written code and their bundles) so that hand-written code is not named: the 99th percentile
 // of the longest line there is 16,624 characters, of the share of punctuation 0.44, of a base64 run
@@ -15,9 +15,9 @@
 export const LONG_LINE = 4000;
 /** The share of non-blank characters that are not letters, digits or underscores; hand-written code is under 0.45. */
 export const PUNCTUATION_SHARE = 0.5;
-/** A run of this many escapes in a row (`\x41`, `A`) is a string that hides its letters. */
+/** A run of this many escapes in a row (`\x41`, or a four-digit unicode escape) is a string that hides its letters. */
 export const ESCAPE_RUN = 16;
-/** A run of this many base64 characters is a blob and not a word or a path. */
+/** A run of more than this many base64 characters is a blob and not a word or a path. */
 export const BASE64_RUN = 200;
 /** This many identifiers of the form `_0x1a2b` are the mark of one obfuscator. */
 export const HEX_NAMES = 20;
@@ -77,7 +77,7 @@ export function obfuscationReasons(text: string): string[] {
     else if (++lineLength > LONG_LINE) reasons.add('a line of thousands of characters');
 
     base64Run = isBase64(c) ? base64Run + 1 : 0;
-    if (base64Run >= BASE64_RUN) reasons.add('a long run of base64');
+    if (base64Run > BASE64_RUN) reasons.add('a long run of base64');
 
     if (c === 0x5c) {
       const length = escapeAt(text, at);

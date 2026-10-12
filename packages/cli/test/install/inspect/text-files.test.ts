@@ -14,20 +14,20 @@ const load = (entries: Parameters<typeof buildTree>[0]) => {
 
 describe('loadTexts', () => {
   it('decodes a text file and keeps its path, its size and whether it is executable', () => {
-    const { files } = load([fileEntry('bin/run.sh', '#!/bin/sh\necho hé\n', true)]);
+    const { files } = load([fileEntry('bin/run.sh', '#!/bin/sh\necho h\u00e9\n', true)]);
 
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({
       path: 'bin/run.sh',
-      text: '#!/bin/sh\necho hé\n',
+      text: '#!/bin/sh\necho h\u00e9\n',
       exec: true,
       truncated: false,
     });
-    expect(files[0]?.size).toBe(Buffer.byteLength('#!/bin/sh\necho hé\n'));
+    expect(files[0]?.size).toBe(Buffer.byteLength('#!/bin/sh\necho h\u00e9\n'));
   });
 
   it('takes the byte order mark off the front', () => {
-    const { files } = load([fileEntry('a.md', '﻿# title')]);
+    const { files } = load([fileEntry('a.md', '\ufeff# title')]);
 
     expect(files[0]?.text).toBe('# title');
   });
@@ -84,7 +84,7 @@ describe('loadTexts', () => {
   });
 
   it('does not take a cut through the middle of a character for bad text', () => {
-    const text = `${'a'.repeat(READ_CAP_BYTES - 1)}étail`;
+    const text = `${'a'.repeat(READ_CAP_BYTES - 1)}\u00e9tail`;
     const { files, blindSpots } = load([fileEntry('cut.txt', text)]);
 
     expect(files).toHaveLength(1);

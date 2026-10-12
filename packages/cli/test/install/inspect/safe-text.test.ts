@@ -26,14 +26,14 @@ describe('showable', () => {
   });
 
   it.each([
-    ['a zero-width space', 'a​b'],
-    ['a direction override', 'a‮b'],
-    ['a soft hyphen', 'a­b'],
-    ['a byte order mark', 'a﻿b'],
+    ['a zero-width space', 'a\u200bb'],
+    ['a direction override', 'a\u202eb'],
+    ['a soft hyphen', 'a\u00adb'],
+    ['a byte order mark', 'a\ufeffb'],
     ['a tag character', 'a\u{e0041}b'],
-    ['a line separator', 'a b'],
+    ['a line separator', 'a\u2028b'],
     ['a lone surrogate', 'a\ud800b'],
-    ['a replacement character', 'a�b'],
+    ['a replacement character', 'a\ufffdb'],
     ['NUL', 'a\u0000b'],
     ['a C1 control', 'a\u009bb'],
   ])('makes %s visible, so the schema accepts it', (_what, input) => {
@@ -51,7 +51,7 @@ describe('showable', () => {
     const text = showable('x'.repeat(500), 20);
 
     expect(Array.from(text)).toHaveLength(20);
-    expect(text.endsWith('…')).toBe(true);
+    expect(text.endsWith('\u2026')).toBe(true);
   });
 
   it('does not cut text of exactly the length given', () => {
@@ -62,7 +62,7 @@ describe('showable', () => {
     const text = showable('\u{1f600}'.repeat(50), 10);
 
     expect(Array.from(text)).toHaveLength(10);
-    expect(text.includes('\ud83d…')).toBe(false);
+    expect(text.includes('\ud83d\u2026')).toBe(false);
   });
 
   it('trims the blanks at either end', () => {
@@ -70,7 +70,7 @@ describe('showable', () => {
   });
 
   it('answers a megabyte of text in a time that does not depend on its length', () => {
-    const big = 'a‮'.repeat(512 * 1024);
+    const big = 'a\u202e'.repeat(512 * 1024);
     const started = cpuNow();
 
     const text = showable(big, 100);

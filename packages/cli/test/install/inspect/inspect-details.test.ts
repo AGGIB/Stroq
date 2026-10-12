@@ -114,15 +114,15 @@ describe('showable', () => {
     const text = showable('word '.repeat(100_000), 20);
 
     expect(Array.from(text).length).toBeLessThanOrEqual(20);
-    expect(text.endsWith('…')).toBe(true);
+    expect(text.endsWith('\u2026')).toBe(true);
   });
 
   it('makes room for the mark when text of escapes is cut', () => {
-    const text = showable('​'.repeat(100), 20);
+    const text = showable('\u200b'.repeat(100), 20);
 
     expect(Array.from(text).length).toBeLessThanOrEqual(20);
     expect(text).toContain('\\u200b');
-    expect(text.endsWith('…')).toBe(true);
+    expect(text.endsWith('\u2026')).toBe(true);
   });
 
   it('counts a character outside the BMP as one and an escape of it by its length', () => {

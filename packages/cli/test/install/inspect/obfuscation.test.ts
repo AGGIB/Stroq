@@ -72,8 +72,11 @@ describe('obfuscationReasons', () => {
     ).toContain('a long run of base64');
   });
 
-  it('does not name a run of base64 that is one short of the limit', () => {
-    expect(obfuscationReasons(`const blob = "${'Q'.repeat(BASE64_RUN - 1)}";`)).toEqual([]);
+  it('names a run of base64 of more than 200 characters, and not one of 200', () => {
+    const blob = (length: number) => `const blob = "${'Q'.repeat(length)}";`;
+
+    expect(obfuscationReasons(blob(BASE64_RUN))).toEqual([]);
+    expect(obfuscationReasons(blob(BASE64_RUN + 1))).toContain('a long run of base64');
   });
 
   it('names the identifiers one obfuscator makes', () => {
