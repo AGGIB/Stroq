@@ -1,0 +1,25 @@
+skill pdf-forms 1.2.0 (name and version declared by the artifact, not checked)
+stroq-tree/1 sha256:32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6  4 files, 945 bytes
+SENSITIVE (8)
+  [declared] allowed-tools  Bash(python3:*)            SKILL.md:5
+  [declared] allowed-tools  WebFetch                   SKILL.md:5
+  [observed] cred.env       PDF_API_KEY                scripts/fill.py:5
+  [observed] exec           curl                       SKILL.md:20
+  [observed] exec           python3                    SKILL.md:19
+  [observed] exec           subprocess                 scripts/fill.py:2 (+1 more)
+  [observed] net            api.pdf-tools.example      SKILL.md:20 (+1 more)
+  [observed] signal         process-spawn: subprocess  scripts/fill.py:2 (+1 more)
+OTHER (6)
+  [declared] allowed-tools  Grep                       SKILL.md:5
+  [declared] allowed-tools  Read                       SKILL.md:5
+  and 4 more lines not shown; stroq vet --json lists all of them
+SIGNALS (1): process-spawn
+BLIND SPOTS (6), what was not looked at
+  - 1 code block in markdown without a language tag was not read as shell
+  - anything the program fetches, builds or decides at run time was not looked at
+  - code in languages other than JavaScript, TypeScript, Python and shell was not read
+  - front matter was read with one YAML reader, and the host that runs the skill may read it differently
+  - nothing was run: this is a reading of the files, and what the program does when it runs was not observed
+  - the prose of documents was not read, only their shell blocks and inline commands
+
+This is a reading of the files, not a security certificate: an absent line means nothing was seen, not that nothing is there.

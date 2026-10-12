@@ -21,6 +21,7 @@ import { runTrust } from './commands/trust.js';
 import { runUninstall } from './commands/uninstall.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
+import { runVet } from './commands/vet.js';
 import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
 import {
@@ -58,6 +59,7 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   bench: runBenchCommand,
   coverage: runCoverageCommand,
   harden: runHarden,
+  vet: runVet,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {

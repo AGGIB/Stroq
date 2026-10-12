@@ -372,6 +372,42 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
     ],
   },
+  {
+    name: 'vet',
+    synopsis:
+      'vet --from <dir> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+    about: [
+      'read a skill, an MCP server or a plugin folder BEFORE you add it, and show its passport: what it asks',
+      'for or can do, each line marked declared, observed, limited or unknown, the rules that matched, and',
+      'every blind spot. The files are read and none of them is run. A reading, not a security certificate:',
+      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is',
+      'complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the files cannot be',
+      'read as an artifact',
+    ],
+    flags: [
+      [
+        '--from <dir>',
+        'the folder to read (required). .git and node_modules are left out, and it says so',
+      ],
+      [
+        '--kind <skill|mcp|plugin>',
+        'what the folder is, when its files do not say (or say two things)',
+      ],
+      [
+        '--json',
+        'the passport itself, in a canonical form: the same bytes for the same files, so that an author can commit it',
+      ],
+      [
+        '--expect <sha256>',
+        'exit 1 unless the digest of the files is this one (64 hex digits, bare or as sha256:<hex>). Not on Windows, where a folder has no executable bit and its digest depends on the platform',
+      ],
+      [
+        '--card',
+        'a Markdown snippet for a README: the name, the digest, the counts and the command that reproduces it, and nothing else from the artifact',
+      ],
+      ['--out <file>', 'write the output to a file that does not exist yet, never over one'],
+    ],
+  },
 ];
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
