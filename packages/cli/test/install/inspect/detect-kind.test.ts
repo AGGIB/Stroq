@@ -19,6 +19,10 @@ describe('kind detection', () => {
     expect(auto({ 'SKILL.md': '# s\n' }).artifact.kind).toBe('skill');
   });
 
+  it('takes a skill.md written in lower case for a skill, as a disk that ignores case does', () => {
+    expect(auto({ 'skill.md': '# s\n' }).artifact.kind).toBe('skill');
+  });
+
   it('takes a package with a bin and a dependency on the MCP SDK for a server', () => {
     const passport = auto({
       'package.json': JSON.stringify({

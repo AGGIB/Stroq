@@ -7,6 +7,7 @@
 // guessed at: the person who vets it says which it is.
 import type { ArtifactKind } from '../types.js';
 import type { InspectInput } from './input.js';
+import { isRootSkillFile } from './skill-files.js';
 import { own, ownObject, ownString, parseJsonObject, type JsonObject } from './json.js';
 
 const MCP_SCOPE = '@modelcontextprotocol/';
@@ -41,7 +42,7 @@ function isPythonMcp(input: InspectInput): boolean {
 /** The kinds a tree could be, in the order skill, mcp, plugin. */
 export function candidateKinds(input: InspectInput): ArtifactKind[] {
   const kinds: ArtifactKind[] = [];
-  if (input.paths.has('SKILL.md')) kinds.push('skill');
+  if ([...input.paths].some(isRootSkillFile)) kinds.push('skill');
   const manifest = input.byPath.get('package.json');
   if (
     input.paths.has('.mcp.json') ||

@@ -284,6 +284,37 @@ describe('front matter: broken, long and in other places', () => {
   });
 });
 
+describe('front matter: the reader and the host', () => {
+  it('says the front matter was read with one YAML reader, which the host may not agree with', () => {
+    const passport = passportOf({ 'SKILL.md': skillWith('name: x') });
+
+    expect(
+      passport.blindSpots.some((spot) =>
+        spot.startsWith('front matter was read with one YAML reader'),
+      ),
+    ).toBe(true);
+  });
+
+  it('says nothing of it when there is no front matter to read', () => {
+    const passport = passportOf({ 'SKILL.md': '# no front matter\n' });
+
+    expect(passport.blindSpots.some((spot) => spot.includes('YAML reader'))).toBe(false);
+  });
+
+  it('reads the file of a skill whatever the case of its name, as a disk that ignores case opens it', () => {
+    const passport = passportOf({
+      'skill.md': skillWith('name: lower\nallowed-tools: WebFetch'),
+      'sub/Skill.MD': skillWith('allowed-tools: Bash'),
+    });
+
+    expect(passport.artifact.name).toBe('lower');
+    expect(linesOf(passport, 'allowed-tools').map((line) => line.subject)).toEqual([
+      'Bash',
+      'WebFetch',
+    ]);
+  });
+});
+
 describe('front matter: hostile input', () => {
   const bounded = (frontMatter: string) => {
     const started = cpuNow();

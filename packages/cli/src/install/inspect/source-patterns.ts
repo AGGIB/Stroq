@@ -126,11 +126,14 @@ export const EXEC_PATTERNS: Readonly<Record<Language, readonly ExecPattern[]>> =
 // Comments
 // ---------------------------------------------------------------------------------------------
 
-/**
- * Whether a place in a text is on a line that is a comment: the first thing on the line is `//`,
- * `/*` or a star for JavaScript, `#` for Python. A mention in a comment is documentation and not a use.
- * The answer is kept for each line, so a line with many places on it is looked at once.
- */
+// Whether a place in a text is on a line that is a comment, by the one rule that cannot be turned
+// against the reading: the first thing on the line is two slashes (JavaScript) or a hash (Python),
+// so the whole line is a comment and no code can be on it. A mention there is documentation and not a
+// use. Block comments are not skipped: a line that begins with a block comment may go on with code, and
+// a line that begins with a star may be a product continued from the line before, so a rule that
+// skipped them would be a way to hide a use from the passport. The price is that the addresses in the
+// comments of a header are listed. The answer is kept for each line, so a line with many places on it
+// is looked at once.
 export class CommentLines {
   private readonly known = new Map<number, boolean>();
 
@@ -157,12 +160,7 @@ export class CommentLines {
     ) {
       at += 1;
     }
-    const first = this.text.charAt(at);
-    if (this.language === 'py') return first === '#';
-    const second = this.text.charAt(at + 1);
-    return (
-      (first === '/' && (second === '/' || second === '*')) ||
-      (first === '*' && (second === ' ' || second === '/' || second === '' || second === '\n'))
-    );
+    if (this.language === 'py') return this.text.charAt(at) === '#';
+    return this.text.charAt(at) === '/' && this.text.charAt(at + 1) === '/';
   }
 }

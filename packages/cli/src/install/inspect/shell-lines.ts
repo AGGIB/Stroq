@@ -34,7 +34,9 @@ const ORIGIN_NOTE: Readonly<Record<SnippetOrigin, string>> = {
   'package-script': 'a script of a package that is run on request',
 };
 
-const READING = "read by Stroq's shell reader; a signal to look at, not a verdict";
+const READING = "read by Stroq's shell reader";
+/** Every reading ends in this, which is said once when several readings find the same thing (see `findings.ts`). */
+const NOT_A_VERDICT = '; a signal to look at, not a verdict';
 
 /** Programs that run other programs, reach the network, or fetch and run a package. */
 const RISKY_PROGRAMS: ReadonlySet<string> = new Set([
@@ -133,7 +135,7 @@ function emitHosts({ snippet, reading, note, findings, at }: Emitting): void {
       basis: found.host === null ? 'unknown' : 'observed',
       sensitive: reading.talksToNetwork,
       line: at(found.url),
-      detector: `an address in ${note}, ${READING}; ${how}`,
+      detector: `an address in ${note}, ${READING} (${how})${NOT_A_VERDICT}`,
     });
   }
   if (reading.talksToNetwork && reading.hosts.length === 0) {
@@ -144,7 +146,7 @@ function emitHosts({ snippet, reading, note, findings, at }: Emitting): void {
       basis: 'unknown',
       sensitive: true,
       line: snippet.line,
-      detector: `a command that talks to the network in ${note} with an address that is not written out, ${READING}`,
+      detector: `a command that talks to the network in ${note} with an address that is not written out, ${READING}${NOT_A_VERDICT}`,
     });
   }
 }
@@ -160,7 +162,7 @@ function emitCredentials({ snippet, reading, note, findings, at }: Emitting): vo
       basis: 'observed',
       sensitive: true,
       line: at(named ? file : null),
-      detector: `a credential file named in ${note}, ${READING}`,
+      detector: `a credential file named in ${note}, ${READING}${NOT_A_VERDICT}`,
     });
   }
 }
@@ -173,7 +175,7 @@ function emitClasses({ snippet, reading, note, findings }: Emitting): void {
       line: snippet.line,
       sensitive: true,
       detail: found.ids.slice(0, 3).join(', '),
-      detector: `${found.action} in ${note}, ${READING}`,
+      detector: `${found.action} in ${note}, ${READING}${NOT_A_VERDICT}`,
     });
   }
 }
@@ -206,7 +208,7 @@ function emitPrograms({ snippet, reading, note, findings, at }: Emitting): void 
       basis: 'observed',
       sensitive: RISKY_PROGRAMS.has(basename(program)),
       line: at(program),
-      detector: `a command in ${note}, ${READING}`,
+      detector: `a command in ${note}, ${READING}${NOT_A_VERDICT}`,
     });
   }
   if (reading.dynamicProgram) {
@@ -217,7 +219,7 @@ function emitPrograms({ snippet, reading, note, findings, at }: Emitting): void 
       basis: 'unknown',
       sensitive: true,
       line: snippet.line,
-      detector: `a command word made by a variable or a substitution in ${note}, ${READING}`,
+      detector: `a command word made by a variable or a substitution in ${note}, ${READING}${NOT_A_VERDICT}`,
     });
   }
 }
@@ -239,7 +241,7 @@ function emitUnread({ snippet, reading, note, findings }: Emitting): void {
     subject: ids === '' ? what : `${what} (${ids})`,
     basis: 'unknown',
     sensitive: true,
-    detector: `what the text runs could not be told, in ${note}, ${READING}`,
+    detector: `what the text runs could not be told, in ${note}, ${READING}${NOT_A_VERDICT}`,
   });
 }
 

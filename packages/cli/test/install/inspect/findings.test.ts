@@ -87,6 +87,23 @@ describe('Findings: lines', () => {
     expect(JSON.stringify(forward.result())).toBe(JSON.stringify(backward.result()));
   });
 
+  it('says once at the end that no reading is a verdict, when the readings that are joined each end that way', () => {
+    const findings = new Findings();
+
+    findings.line({
+      ...base,
+      detector: 'an address in shell text; a signal to look at, not a verdict',
+    });
+    findings.line({
+      ...base,
+      detector: 'an address in source; a signal to look at, not a verdict',
+    });
+
+    expect(findings.result().lines[0]?.detector).toBe(
+      'an address in shell text; an address in source; a signal to look at, not a verdict',
+    );
+  });
+
   it('keeps a bounded number of different findings, and counts the ones it let go', () => {
     const findings = new Findings();
 

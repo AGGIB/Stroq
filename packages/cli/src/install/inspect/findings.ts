@@ -21,6 +21,8 @@ const SUBJECT_MAX = 200;
 const DETECTOR_MAX = 600;
 const SINGLE_DETECTOR_MAX = 300;
 const RULE_MAX = 80;
+/** How the detectors of the readings that look at text end; said once when several of them are joined. */
+const VERDICT_NOTE = '; a signal to look at, not a verdict';
 /** The most distinct findings kept before the passport is cut to its lines; the rest are counted. */
 const MAX_DRAFTS = 20_000;
 /** The most strings whose safe form is remembered: the same few subjects and detectors come back thousands of times. */
@@ -65,6 +67,16 @@ interface Draft {
   readonly sensitive: boolean;
   readonly detectors: Set<string>;
   readonly places: Map<string, Place>;
+}
+
+/** The detectors of several readings as one text: in order, each once, and the note that none is a verdict once at the end. */
+function joinDetectors(detectors: ReadonlySet<string>): string {
+  const sorted = [...detectors].sort(compareText);
+  const noted = sorted.filter((text) => text.endsWith(VERDICT_NOTE));
+  const stems = sorted.map((text) =>
+    text.endsWith(VERDICT_NOTE) ? text.slice(0, -VERDICT_NOTE.length) : text,
+  );
+  return `${stems.join('; ')}${noted.length > 0 ? VERDICT_NOTE : ''}`;
 }
 
 /** Text compared by its UTF-16 units: the same answer on every machine, which `localeCompare` is not. */
@@ -186,7 +198,7 @@ export class Findings {
         basis: draft.basis,
         sensitive: draft.sensitive,
         where: Object.freeze(places.slice(0, MAX_PLACES).map((place) => Object.freeze(place))),
-        detector: showable([...draft.detectors].sort(compareText).join('; '), DETECTOR_MAX),
+        detector: showable(joinDetectors(draft.detectors), DETECTOR_MAX),
       });
     });
     const kept =

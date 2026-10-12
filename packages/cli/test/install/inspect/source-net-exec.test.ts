@@ -48,12 +48,12 @@ describe('source heuristics: addresses', () => {
     expect(line?.sensitive).toBe(false);
   });
 
-  it('does not list a URL in a comment', () => {
+  it('does not list a URL on a line that is a comment, and does list one in a block comment', () => {
     const passport = js(
       '// see https://docs.example.org/guide\n/* https://block.example/x */\nconst x = 1;\n',
     );
 
-    expect(subjectsOf(passport, 'net')).toEqual([]);
+    expect(subjectsOf(passport, 'net')).toEqual(['block.example']);
   });
 
   it('makes a net line of unknown host for an address built from a variable', () => {
@@ -170,12 +170,10 @@ describe('source heuristics: running programs and code', () => {
     expect(passport.signals).toEqual([]);
   });
 
-  it('does not read a mention in a comment', () => {
-    const passport = js(
-      '// uses child_process and eval(x)\n# not a comment in js: nothing\n/* exec(y) */\n',
-    );
+  it('does not read a mention on a line that is a comment, and reads one that follows a block comment', () => {
+    const passport = js('// uses child_process and eval(x)\n/* note */ exec(y);\n');
 
-    expect(linesOf(passport, 'exec')).toEqual([]);
+    expect(subjectsOf(passport, 'exec')).toEqual(['exec()']);
   });
 
   it('points at the line of the use', () => {

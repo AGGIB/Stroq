@@ -44,6 +44,7 @@ export const TALLY_KEYS = [
   'partial-file',
   'frontmatter-too-long',
   'frontmatter-over-budget',
+  'frontmatter-reader',
   'obfuscated-file',
   'shell-over-budget',
   'shell-text-cut',
@@ -68,6 +69,8 @@ const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
     `${some(n, 'front matter block was', 'front matter blocks were')} not read, because ${n === 1 ? 'it is' : 'they are'} longer than ${FRONTMATTER_CAP_BYTES / 1024} KiB or never closed`,
   'frontmatter-over-budget': (n) =>
     `${some(n, 'front matter block was', 'front matter blocks were')} not read, because the reading of front matter has a limit`,
+  'frontmatter-reader': () =>
+    'front matter was read with one YAML reader, and the host that runs the skill may read it differently',
   prose: () => 'the prose of documents was not read, only their shell blocks and inline commands',
   'obfuscated-file': (n) =>
     `${some(n, 'file looks', 'files look')} minified or obfuscated, so what ${n === 1 ? 'it does is' : 'they do is'} not understood`,

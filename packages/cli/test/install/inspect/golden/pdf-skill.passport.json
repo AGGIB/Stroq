@@ -175,7 +175,7 @@
           "line": 10
         }
       ],
-      "detector": "an address in shell text in a document, an example that may be run, read by Stroq's shell reader; a signal to look at, not a verdict; a command that talks to the network was recognised; an address written as a string in source, found by reading the text; a signal to look at, not a verdict"
+      "detector": "an address in shell text in a document, an example that may be run, read by Stroq's shell reader (a command that talks to the network was recognised); an address written as a string in source, found by reading the text; a signal to look at, not a verdict"
     },
     {
       "kind": "signal",
@@ -199,6 +199,7 @@
     "1 code block in markdown without a language tag was not read as shell",
     "anything the program fetches, builds or decides at run time was not looked at",
     "code in languages other than JavaScript, TypeScript, Python and shell was not read",
+    "front matter was read with one YAML reader, and the host that runs the skill may read it differently",
     "nothing was run: this is a reading of the files, and what the program does when it runs was not observed",
     "the prose of documents was not read, only their shell blocks and inline commands"
   ],

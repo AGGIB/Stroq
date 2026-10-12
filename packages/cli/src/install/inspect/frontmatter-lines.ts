@@ -15,6 +15,7 @@ import type { InspectInput } from './input.js';
 import { addHookLines } from './hook-lines.js';
 import { own, ownObject, ownString, type JsonObject } from './json.js';
 import type { ShellQueue } from './shell-queue.js';
+import { isRootSkillFile, isSkillFile } from './skill-files.js';
 import type { TextFile } from './text-files.js';
 import { splitToolList, toolIsSensitive } from './tool-spec.js';
 
@@ -27,9 +28,7 @@ const UNREADABLE_DETECTOR =
 
 /** Whether a file has front matter that declares things: a SKILL.md anywhere, or a command of a plugin. */
 export function hasDeclaringFrontmatter(path: string): boolean {
-  return (
-    path === 'SKILL.md' || path.endsWith('/SKILL.md') || /(?:^|\/)commands\/[^/]+\.md$/.test(path)
-  );
+  return isSkillFile(path) || /(?:^|\/)commands\/[^/]+\.md$/.test(path);
 }
 
 function toolLines(file: TextFile, value: unknown, line: number, findings: Findings): boolean {
@@ -120,7 +119,7 @@ export function inspectFrontmatter(
     if (hooks !== undefined && hooks !== null) {
       addHookLines(file.path, hooks, keyLines.get('hooks') ?? 1, 'front matter', findings, shell);
     }
-    if (file.path === 'SKILL.md') {
+    if (isRootSkillFile(file.path)) {
       const name = ownString(data, 'name');
       const version = versionOf(data);
       identity = {
@@ -129,5 +128,6 @@ export function inspectFrontmatter(
       };
     }
   }
+  if (read > 0) findings.tally('frontmatter-reader');
   return identity;
 }

@@ -112,13 +112,30 @@ describe('source heuristics: environment variables', () => {
     expect(line?.detector).toContain('not a verdict');
   });
 
-  it('does not read a mention in a comment', () => {
+  it('does not read a mention on a line that is a comment from its first character', () => {
     const passport = js(
-      '// set process.env.COMMENTED_KEY first\n/* process.env.BLOCK_KEY */\n * process.env.STAR_KEY\nconst x = 1;\n',
+      '// set process.env.COMMENTED_KEY first\n   // and process.env.INDENTED_KEY\nconst x = 1;\n',
     );
 
     expect(subjectsOf(passport, 'cred.env')).toEqual([]);
     expect(subjectsOf(py('# os.environ["HASHED"]\nx = 1\n'), 'cred.env')).toEqual([]);
+  });
+
+  // A rule that skipped block comments would be a way to hide a use from the passport.
+  it('reads a use that is put after a block comment on the same line, or on a line that starts with a star', () => {
+    const passport = js(
+      '/* note */ const a = process.env.AFTER_BLOCK;\nconst b = 2\n  * process.env.STAR_LINE_KEY;\n/* open\n * process.env.INSIDE_BLOCK\n */\n',
+    );
+
+    expect(subjectsOf(passport, 'cred.env')).toEqual([
+      'AFTER_BLOCK',
+      'INSIDE_BLOCK',
+      'STAR_LINE_KEY',
+    ]);
+  });
+
+  it('reads a hash line of JavaScript, which is not a comment there', () => {
+    expect(subjectsOf(js('# process.env.NOT_A_COMMENT\n'), 'cred.env')).toEqual(['NOT_A_COMMENT']);
   });
 
   it('does not read a name that is not a name', () => {
