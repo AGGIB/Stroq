@@ -121,7 +121,8 @@ export const HOME_PLACEHOLDER = '__HOME__';
 export const SYNTHETIC_SECRET_PREFIX = 'stroq_attack_';
 export const SESSION_ID = 'stroq-attack';
 
-const StepExpectationSchema = z.enum(['deny', 'ask', 'allow', 'suspect', 'clean']);
+/** Exported so that `stroq policy test --cases` reads an expectation exactly as the corpus does. */
+export const StepExpectationSchema = z.enum(['deny', 'ask', 'allow', 'suspect', 'clean']);
 
 const AtlasIdSchema = z
   .string()

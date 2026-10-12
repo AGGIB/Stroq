@@ -24,6 +24,7 @@ const KINDS: Readonly<Record<string, string>> = {
   too_small: 'a value that is empty or too small',
   invalid_format: 'a value that is not written as it should be',
   custom: 'a value that breaks a rule of the record',
+  invalid_key: 'a name that is not allowed here',
 };
 
 /** One fault: where it is, as a dotted path of the fields (empty for the record itself), and what kind. */
