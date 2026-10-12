@@ -11,6 +11,7 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Policy } from '@stroq/core';
 import { hookCommand } from './hook-command.js';
+import { definedEnv } from '../live/drivers/host-process.js';
 import { LiveCheckError } from '../live/errors.js';
 import type { Ledger } from '../live/budget.js';
 import { writeHostResult, type StoredSlot } from '../live/store.js';
@@ -37,14 +38,6 @@ export function defaultHookLine(agent: string): string {
   }
   return hookCommand(process.execPath, entry, agent);
 }
-
-/** The environment as the plain record a child process takes. */
-export const stringsOf = (
-  env: Readonly<Record<string, string | undefined>>,
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  );
 
 /** The signals that end a process without running a `finally`. */
 const ENDING_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
@@ -121,7 +114,7 @@ export async function runCheck(input: CheckInput): Promise<HostResult> {
         project: made.project,
         stroqHome: made.stroqHome,
         home: made.home,
-        env: stringsOf(input.env),
+        env: definedEnv(input.env),
         deadlineMs: REQUEST_DEADLINE_MS,
       },
       {

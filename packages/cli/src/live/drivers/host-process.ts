@@ -85,6 +85,14 @@ export interface Supervised {
   readonly interrupted: boolean;
 }
 
+/** The variables of an environment that have a value, as the plain record a child process takes. */
+export const definedEnv = (
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+
 const describe = (err: unknown): string =>
   plainText(err instanceof Error ? err.message : String(err), MAX_REASON_CHARS);
 

@@ -21,7 +21,13 @@ import {
   type ParsedStream,
   type StreamLimits,
 } from './claude-stream.js';
-import { realSpawn, superviseHost, type HostSpawn, type Supervised } from './host-process.js';
+import {
+  definedEnv,
+  realSpawn,
+  superviseHost,
+  type HostSpawn,
+  type Supervised,
+} from './host-process.js';
 
 /** The program, when nothing says otherwise: `claude`, found on the PATH. */
 export const DEFAULT_CLAUDE_BIN = 'claude';
@@ -98,7 +104,7 @@ export function createClaudeDriver(options: ClaudeDriverOptions): HostDriver {
       file: bin,
       args: ['--version'],
       cwd: tmpdir(),
-      env: stringsOf(options.env ?? process.env),
+      env: definedEnv(options.env ?? process.env),
       deadlineMs: options.detectTimeoutMs ?? DEFAULT_DETECT_TIMEOUT_MS,
       killGraceMs,
       spawn,
@@ -136,13 +142,6 @@ export function createClaudeDriver(options: ClaudeDriverOptions): HostDriver {
   }
 
   return { detect, run, mode: 'live' };
-}
-
-/** The variables of an environment that have a value, as the plain record a child process takes. */
-function stringsOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  );
 }
 
 /** What `claude --version` came to, as an answer to "is the host there, and which". */
