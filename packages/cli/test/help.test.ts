@@ -35,6 +35,7 @@ const COMMANDS: Readonly<Record<string, string>> = {
   sent: 'sent',
   canary: 'canary',
   attack: 'attack',
+  policy: 'policy',
   exposure: 'exposure',
   inspect: 'inspect',
   trust: 'trust',
