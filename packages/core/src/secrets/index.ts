@@ -93,7 +93,17 @@ export const MAX_SOURCE_BYTES = 262_144;
 export const MAX_ENTRIES = 2000;
 /** Cap on project `.env*` files read, sorted by name; home sources are never dropped. */
 export const MAX_PROJECT_ENV_FILES = 32;
-const HOME_SOURCES = ['.aws/credentials', '.npmrc', '.netrc', '.docker/config.json'];
+/**
+ * The files in the home directory whose values the index reads. Exported because other code asks the
+ * same question ("which of this user's files hold credentials?") and must not keep a second list:
+ * `stroq harden` holds its rules to it.
+ */
+export const HOME_SECRET_SOURCES: readonly string[] = [
+  '.aws/credentials',
+  '.npmrc',
+  '.netrc',
+  '.docker/config.json',
+];
 const PROJECT_ENV = /^\.env(\.[\w-]+)?$/;
 const EXAMPLE_ENV = /\.(example|sample|template|dist)$/;
 const PRIVATE_FILE_MODE = 0o600;
@@ -200,7 +210,7 @@ export class FileSecretIndex implements SecretIndex {
   ) {}
 
   private sources(cwd: string): { readonly list: IndexedSource[]; readonly truncated: boolean } {
-    const homeFiles = HOME_SOURCES.map((rel) => join(this.home, rel));
+    const homeFiles = HOME_SECRET_SOURCES.map((rel) => join(this.home, rel));
     const projects = [...new Set([cwd, ...this.extraProjectDirs])].map(projectEnvFiles);
     return {
       list: statSources([...homeFiles, ...projects.flatMap((project) => project.files)]),
