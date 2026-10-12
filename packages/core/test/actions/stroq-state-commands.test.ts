@@ -32,6 +32,12 @@ const CHANGING: ReadonlyArray<readonly string[]> = [
   ['harden', '--scope', 'user', 'apply'],
   ['harden', 'undo'],
   ['harden', 'forget'],
+  // Without it a plan withholds the diff of a file that a link leads to; with it the plan prints that
+  // file, so the flag is the owner's to give, and giving it to a plan is not a reading.
+  ['harden', 'plan', '--acknowledge-link'],
+  ['harden', '--acknowledge-link'],
+  ['harden', '--scope', 'project', '--acknowledge-link'],
+  ['harden', '--acknowledge-link=true'],
   ['prove'],
   ['prove', 'claude-code'],
   ['prove', '--agent', 'claude-code'],
@@ -66,6 +72,9 @@ const READING: ReadonlyArray<readonly string[]> = [
   ['harden', 'status'],
   ['harden', 'plan'],
   ['harden', '--scope', 'user', 'status'],
+  ['harden', 'plan', '--json'],
+  ['harden', '--agent', 'cursor'],
+  ['harden', 'plan', '--acknowledge-link', '--help'],
   ['permit'],
   ['permit', 'list'],
   ['permit', 'list', '--json'],

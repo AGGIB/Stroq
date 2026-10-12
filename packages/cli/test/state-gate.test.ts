@@ -143,6 +143,9 @@ describe('stroq harden and the state gate', () => {
 
   it.each([
     'stroq harden apply --yes --acknowledge-link',
+    // A plan that is given the flag prints the file a link leads to: that is the owner's to ask for.
+    'stroq harden plan --acknowledge-link',
+    'stroq harden --scope project --acknowledge-link',
     'stroq harden --yes apply',
     'stroq harden --agent claude-code --scope user undo --yes',
     'npx @stroq/cli harden apply --yes',

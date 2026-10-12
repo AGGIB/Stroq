@@ -53,7 +53,8 @@ import { REDIRECT, resolve, type Word } from './shell-words.js';
  * settings, `prove` runs the live check, `add` and `remove` change what is installed,
  * `vet --online` goes to the network for a package, `task` starts a run under a permit,
  * and `permit extend|revoke` widen or end one. Their reading forms stay open (`harden`
- * alone or with `status`, `permit list`, `permit show`, `vet` without `--online`), and
+ * alone or with `status`, `permit list`, `permit show`, `vet` without `--online`; but not a `harden`
+ * plan given `--acknowledge-link`, which prints the file a link leads to), and
  * so does any subcommand not named here: this is a list of what is denied, not of what
  * is allowed. Two that exist are listed with them, for what they do and not for what
  * they change in Stroq: `canary` creates the file it is given, with a first line it
