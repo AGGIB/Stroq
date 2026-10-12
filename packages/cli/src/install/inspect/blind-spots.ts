@@ -39,7 +39,7 @@ export const TALLY_KEYS = [
   'unreadable-manifest',
   'dependencies',
   'symlink',
-  'too-many-tools',
+  'list-cut',
 ] as const;
 export type TallyKey = (typeof TALLY_KEYS)[number];
 
@@ -69,7 +69,7 @@ const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   dependencies: () => 'dependencies were not followed, fetched or read',
   symlink: (n) =>
     `${some(n, 'symbolic link was', 'symbolic links were')} recorded and not followed`,
-  'too-many-tools': () => 'a list of tools was cut at the number a reading takes',
+  'list-cut': () => 'a list of tools, hooks or entries was cut at the number a reading takes',
 };
 
 /** The blind spots for the counts of a reading, in a fixed order. */

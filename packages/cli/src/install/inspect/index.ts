@@ -22,7 +22,9 @@ import {
 import { detectKind } from './detect-kind.js';
 import { Findings } from './findings.js';
 import { identify } from './identity.js';
+import { inspectFrontmatter } from './frontmatter-lines.js';
 import { buildInput } from './input.js';
+import { ShellQueue } from './shell-queue.js';
 
 export interface InspectContext {
   /** What kind of artifact it is, or `auto` to tell from the files (a kind that cannot be told is an error). */
@@ -100,7 +102,10 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
     kind = context.kind;
   }
 
-  const identity = identify(kind, input, context.source);
+  const shell = new ShellQueue();
+  const declared = inspectFrontmatter(input, findings, shell);
+
+  const identity = identify(kind, input, context.source, declared);
   const found = findings.result();
   const stats = treeStats(tree);
   const parsed = PassportSchema.safeParse({
