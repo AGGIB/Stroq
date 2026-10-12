@@ -71,10 +71,6 @@ export interface UnknownField extends Base {
 }
 
 export type Finding =
-  | ShadowedRule
-  | DroppedProtection
-  | LooseDefault
-  | HighThreshold
-  | UnknownField;
+  ShadowedRule | DroppedProtection | LooseDefault | HighThreshold | UnknownField;
 
 export type FindingKind = Finding['kind'];

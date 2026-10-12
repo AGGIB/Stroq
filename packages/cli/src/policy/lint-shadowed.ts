@@ -33,7 +33,11 @@ function statesOf(rule: Rule): readonly { cls: ActionClass; taint: TaintLevel | 
   return states;
 }
 
-function shadowedMessage(rule: RuleRef, effect: Rule['effect'], by: readonly RefAndEffect[]): string {
+function shadowedMessage(
+  rule: RuleRef,
+  effect: Rule['effect'],
+  by: readonly RefAndEffect[],
+): string {
   const hidden = by.map((b) => `${b.position} ${quotePath(b.id)} (${b.effect})`).join(', ');
   const plural = by.length === 1 ? 'rule' : 'rules';
   return (

@@ -15,10 +15,11 @@ import type { DroppedProtection, Held, Situation } from './findings.js';
 const STRICTNESS: Readonly<Record<Effect, number>> = { allow: 0, ask: 1, deny: 2 };
 
 /** The states of a session a class can be met in, as the evaluator is asked about them. */
-const STATES: readonly { readonly name: 'none' | 'suspect'; readonly taint: TaintLevel | null }[] = [
-  { name: 'none', taint: null },
-  { name: 'suspect', taint: 'suspect' },
-];
+const STATES: readonly { readonly name: 'none' | 'suspect'; readonly taint: TaintLevel | null }[] =
+  [
+    { name: 'none', taint: null },
+    { name: 'suspect', taint: 'suspect' },
+  ];
 
 const held = (decision: Decision): Held => ({ effect: decision.effect, ruleId: decision.ruleId });
 

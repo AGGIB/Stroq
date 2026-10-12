@@ -162,7 +162,11 @@ describe('lint: dropped protection', () => {
 
   it('reports every protection when a leading allow-all rule hides the rest, naming that rule', () => {
     const allowAll = policyOf([
-      rule('allow-everything', 'allow', DEFAULT_POLICY.rules.flatMap((r) => r.when.classes)),
+      rule(
+        'allow-everything',
+        'allow',
+        DEFAULT_POLICY.rules.flatMap((r) => r.when.classes),
+      ),
       ...DEFAULT_POLICY.rules,
     ]);
     const found = dropped(lintPolicy(allowAll));
@@ -242,10 +246,7 @@ describe('lint: shadowed rule', () => {
   it('reports a clean-session rule that an earlier clean-session rule covers', () => {
     const found = shadowed(
       lintPolicy(
-        base([
-          rule('a', 'ask', ['fs.secrets'], 'none'),
-          rule('b', 'deny', ['fs.secrets'], 'none'),
-        ]),
+        base([rule('a', 'ask', ['fs.secrets'], 'none'), rule('b', 'deny', ['fs.secrets'], 'none')]),
       ),
     );
     expect(found.map((f) => f.rule.id)).toEqual(['b']);
@@ -335,9 +336,7 @@ describe('lint: shadowed rule', () => {
 
   it('numbers rules from one, by position, so that two rules with one id are told apart', () => {
     const found = shadowed(
-      lintPolicy(
-        base([rule('same', 'allow', ['mcp.call']), rule('same', 'deny', ['mcp.call'])]),
-      ),
+      lintPolicy(base([rule('same', 'allow', ['mcp.call']), rule('same', 'deny', ['mcp.call'])])),
     );
     expect(found).toHaveLength(1);
     expect(found[0]?.rule).toEqual({ position: 2, id: 'same' });

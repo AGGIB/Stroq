@@ -26,15 +26,30 @@ const KINDS: Readonly<Record<string, string>> = {
   custom: 'a value that breaks a rule of the record',
 };
 
-function where(path: readonly PropertyKey[]): string {
-  return path.length === 0 ? 'the record' : quotePath(path.map(String).join('.'));
+/** One fault: where it is, as a dotted path of the fields (empty for the record itself), and what kind. */
+export interface SchemaFault {
+  readonly path: string;
+  readonly kind: string;
+}
+
+/** The fault a zod issue stands for, from its path and its code and nothing else it carries. */
+export function faultOf(path: readonly PropertyKey[], code: string): SchemaFault {
+  return { path: path.map(String).join('.'), kind: KINDS[code] ?? 'a value that is not valid' };
+}
+
+/** Every fault of a record, in the order zod found them. */
+export function schemaFaults(error: ZodError): readonly SchemaFault[] {
+  return error.issues.map((issue) => faultOf(issue.path, issue.code));
+}
+
+/** A path written out as the path of a file is, so that it cannot act on a terminal. */
+export function whereOf(fault: SchemaFault): string {
+  return fault.path === '' ? 'the record' : quotePath(fault.path);
 }
 
 export function schemaFault(error: ZodError): string {
-  const faults = error.issues.slice(0, MAX_FAULTS).map((issue) => {
-    const kind = KINDS[issue.code] ?? 'a value that is not valid';
-    return `${where(issue.path)}: ${kind}`;
-  });
-  const more = error.issues.length - faults.length;
+  const all = schemaFaults(error);
+  const faults = all.slice(0, MAX_FAULTS).map((fault) => `${whereOf(fault)}: ${fault.kind}`);
+  const more = all.length - faults.length;
   return `${faults.join('; ')}${more > 0 ? `; and ${more} more` : ''}`;
 }
