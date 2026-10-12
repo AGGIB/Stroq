@@ -19,7 +19,7 @@
 // permission layer behave as the faults below assume: all of that is what the double is told, and what
 // it is told is the author's reading of those hosts. A result produced with this double is labelled
 // `stand-in`, and the state rule does not count it for the host (`states.ts`).
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_POLICY, loadPolicyFile, type Policy } from '@stroq/core';
 import { handleClaudeHook } from '../../src/adapters/claude-code.js';

@@ -21,9 +21,9 @@ vi.mock('../../src/live/probes.js', async (importOriginal) => {
   return {
     ...real,
     buildProbes: (...args: Parameters<typeof real.buildProbes>) =>
-      real.buildProbes(...args).map((p) =>
-        p.kind === 'deny' ? { ...p, sentinel: { ...p.sentinel, file: NESTED } } : p,
-      ),
+      real
+        .buildProbes(...args)
+        .map((p) => (p.kind === 'deny' ? { ...p, sentinel: { ...p.sentinel, file: NESTED } } : p)),
   };
 });
 
@@ -39,7 +39,10 @@ afterEach(() => {
 });
 
 /** A driver that is the stand-in host, and plants a link at `sub` once the request `after` has been made. */
-function planting(inner: FakeHostDriver, after: (kind: string, hook: string) => boolean): HostDriver {
+function planting(
+  inner: FakeHostDriver,
+  after: (kind: string, hook: string) => boolean,
+): HostDriver {
   return {
     detect: () => inner.detect(),
     run: async (probe, ctx) => {
@@ -50,43 +53,50 @@ function planting(inner: FakeHostDriver, after: (kind: string, hook: string) => 
   };
 }
 
-describe.skipIf(process.platform === 'win32')('a run that finds a link in the way of a probe file', () => {
-  // The model has the run of the project while a request is made. A link left where a directory of the next
-  // probe's way should be makes the file unsafe to clear, and that is a thing for the result to say: the
-  // requests before it are paid for and kept, and the run ends there, not with an exception.
-  it('stops before a request that would clear through it, and keeps the earlier evidence', async () => {
-    const inner = new FakeHostDriver({ fault: 'honest' });
-    const ledger = openLedger({ memory: true, limit: 30 });
-    const result = await verify(rig, planting(inner, (kind) => kind === 'allow'), {
-      ledger,
-      maxRequests: 3,
+describe.skipIf(process.platform === 'win32')(
+  'a run that finds a link in the way of a probe file',
+  () => {
+    // The model has the run of the project while a request is made. A link left where a directory of the next
+    // probe's way should be makes the file unsafe to clear, and that is a thing for the result to say: the
+    // requests before it are paid for and kept, and the run ends there, not with an exception.
+    it('stops before a request that would clear through it, and keeps the earlier evidence', async () => {
+      const inner = new FakeHostDriver({ fault: 'honest' });
+      const ledger = openLedger({ memory: true, limit: 30 });
+      const result = await verify(
+        rig,
+        planting(inner, (kind) => kind === 'allow'),
+        {
+          ledger,
+          maxRequests: 3,
+        },
+      );
+      expect(result.state).toBe('inconclusive');
+      expect(marksOf(result)).toEqual({
+        allow: 'passed:ran',
+        deny: 'not-attempted:unsafe-directory',
+        'secret-egress': 'not-attempted:unsafe-directory',
+      });
+      expect(inner.calls).toHaveLength(1);
+      expect(await ledger.peek()).toMatchObject({ used: 1 });
+      expect(existsSync(join(elsewhere, 'dir'))).toBe(false);
     });
-    expect(result.state).toBe('inconclusive');
-    expect(marksOf(result)).toEqual({
-      allow: 'passed:ran',
-      deny: 'not-attempted:unsafe-directory',
-      'secret-egress': 'not-attempted:unsafe-directory',
-    });
-    expect(inner.calls).toHaveLength(1);
-    expect(await ledger.peek()).toMatchObject({ used: 1 });
-    expect(existsSync(join(elsewhere, 'dir'))).toBe(false);
-  });
 
-  it('ends the run at the control, and keeps what the requests before it found', async () => {
-    mkdirSync(join(elsewhere, 'dir'));
-    const inner = new FakeHostDriver({ fault: 'honest' });
-    const ledger = openLedger({ memory: true, limit: 30 });
-    const driver = planting(inner, (kind, hook) => kind === 'deny' && hook === 'real');
-    const result = await verify(rig, driver, { ledger });
-    expect(marksOf(result)).toEqual({
-      allow: 'passed:ran',
-      deny: 'inconclusive:control-inconclusive',
-      'deny:control': 'not-attempted:unsafe-directory',
-      'secret-egress': 'not-attempted:unsafe-directory',
+    it('ends the run at the control, and keeps what the requests before it found', async () => {
+      mkdirSync(join(elsewhere, 'dir'));
+      const inner = new FakeHostDriver({ fault: 'honest' });
+      const ledger = openLedger({ memory: true, limit: 30 });
+      const driver = planting(inner, (kind, hook) => kind === 'deny' && hook === 'real');
+      const result = await verify(rig, driver, { ledger });
+      expect(marksOf(result)).toEqual({
+        allow: 'passed:ran',
+        deny: 'inconclusive:control-inconclusive',
+        'deny:control': 'not-attempted:unsafe-directory',
+        'secret-egress': 'not-attempted:unsafe-directory',
+      });
+      expect(result.state).toBe('inconclusive');
+      // Two requests were made and paid for; the third was never taken from the ledger.
+      expect(await ledger.peek()).toMatchObject({ used: 2 });
+      expect(existsSync(join(elsewhere, 'dir', 'marker.txt'))).toBe(false);
     });
-    expect(result.state).toBe('inconclusive');
-    // Two requests were made and paid for; the third was never taken from the ledger.
-    expect(await ledger.peek()).toMatchObject({ used: 2 });
-    expect(existsSync(join(elsewhere, 'dir', 'marker.txt'))).toBe(false);
-  });
-});
+  },
+);
