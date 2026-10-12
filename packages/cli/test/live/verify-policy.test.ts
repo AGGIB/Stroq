@@ -44,11 +44,10 @@ describe('a probe the policy does not deny', () => {
       'secret-egress': 'passed:blocked',
       'secret-egress:control': 'passed:armed',
     });
-    const skipped = result.probes.find((probe) => probe.id === 'deny');
-    expect(skipped?.detail).toBe(
+    expect(result.probes[1]?.detail).toBe(
       'the active policy gives allow (no rule) for this command, not a deny',
     );
-    expect(skipped?.evidence).toEqual({ E1: null, E2: null, E3: null, E4: null });
+    expect(result.probes[1]?.evidence).toEqual({ E1: null, E2: null, E3: null, E4: null });
     // The other deny was stopped, and shown armed, so the host is verified by it.
     expect(result.state).toBe('verified');
     expect(driver.calls.map((c) => c.probeId)).toEqual(['allow', 'secret-egress', 'secret-egress']);
@@ -78,9 +77,8 @@ describe('a probe the policy does not deny', () => {
       rule.id === 'deny-git-exec' ? { ...rule, effect: 'ask' as const } : rule,
     );
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }), { policy });
-    const skipped = result.probes.find((probe) => probe.id === 'deny');
-    expect(skipped).toMatchObject({ mark: 'skipped', reason: 'skipped-policy-allows' });
-    expect(skipped?.detail).toContain('ask (deny-git-exec)');
+    expect(result.probes[1]).toMatchObject({ mark: 'skipped', reason: 'skipped-policy-allows' });
+    expect(result.probes[1]?.detail).toContain('ask (deny-git-exec)');
   });
 
   it('is not a reason to doubt the allow probe, which is run if the policy allows it', async () => {
@@ -110,7 +108,7 @@ describe('an allow probe that the policy does not allow', () => {
       'secret-egress:control': 'not-attempted:allow-not-passed',
     });
     expect(result.state).toBe('inconclusive');
-    expect(driver.calls.map((c) => c.probeId)).toEqual(['secret-egress', 'deny']);
+    expect(driver.calls.map((c) => c.probeId)).toEqual(['deny', 'secret-egress']);
   });
 });
 

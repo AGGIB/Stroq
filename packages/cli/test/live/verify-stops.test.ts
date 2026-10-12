@@ -60,8 +60,8 @@ describe('a host that is not there', () => {
     const result = await verify(rig, driver, { ledger });
     expect(marksOf(result)).toEqual({
       allow: 'not-attempted:host-not-found',
-      'secret-egress': 'not-attempted:host-not-found',
       deny: 'not-attempted:host-not-found',
+      'secret-egress': 'not-attempted:host-not-found',
     });
     expect(result.state).toBe('not-attempted');
     expect(result.hostVersion).toBeNull();
@@ -124,9 +124,9 @@ describe('the budget', () => {
     expect(events).toEqual([
       'take claude-code: allow',
       'run',
-      'take claude-code: secret-egress',
-      'run',
       'take claude-code: deny',
+      'run',
+      'take claude-code: secret-egress',
       'run',
     ]);
   });
@@ -136,10 +136,10 @@ describe('the budget', () => {
     await verify(rig, new FakeHostDriver({ fault: 'honest' }), { ledger, control: true });
     expect(events).toEqual([
       'take claude-code: allow',
-      'take claude-code: secret-egress',
-      'take claude-code: secret-egress control',
       'take claude-code: deny',
       'take claude-code: deny control',
+      'take claude-code: secret-egress',
+      'take claude-code: secret-egress control',
     ]);
   });
 
@@ -149,8 +149,8 @@ describe('the budget', () => {
     const result = await verify(rig, driver, { ledger });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'not-attempted:budget',
       deny: 'not-attempted:budget',
+      'secret-egress': 'not-attempted:budget',
     });
     expect(result.state).toBe('inconclusive');
     expect(driver.calls).toHaveLength(1);
@@ -187,9 +187,9 @@ describe('the budget', () => {
     const result = await verify(rig, driver, { maxRequests: 2 });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': 'not-attempted:max-requests',
-      deny: 'not-attempted:max-requests',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': 'not-attempted:max-requests',
+      'secret-egress': 'not-attempted:max-requests',
     });
     // Two requests are too few to verify a host: the deny that was stopped has no control to show it armed.
     expect(result.state).toBe('inconclusive');
@@ -197,23 +197,23 @@ describe('the budget', () => {
   });
 
   // Each deny is followed by its own control, so the fewest requests that can verify a host are three: the
-  // allow, the first deny (the made-up key) and the control of that deny. The plan's default number of
-  // requests is three, and with it an honest host is verified.
-  it('verifies a host in the fewest requests that can: the allow, secret-egress and its control', async () => {
+  // allow, one deny and the control of that deny. The plan's default number of requests is three, and with
+  // it an honest host is verified.
+  it('verifies a host in the fewest requests that can: the allow, one deny and its control', async () => {
     const driver = new FakeHostDriver({ fault: 'honest' });
     const ledger = openLedger({ memory: true, limit: 30 });
     const result = await verify(rig, driver, { maxRequests: 3, ledger });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'passed:blocked',
-      'secret-egress:control': 'passed:armed',
-      deny: 'not-attempted:max-requests',
+      deny: 'passed:blocked',
+      'deny:control': 'passed:armed',
+      'secret-egress': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('verified');
     expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
       'allow/real',
-      'secret-egress/real',
-      'secret-egress/noop',
+      'deny/real',
+      'deny/noop',
     ]);
     expect(await ledger.peek()).toMatchObject({ used: 3 });
   });
@@ -223,10 +223,10 @@ describe('the budget', () => {
     const result = await verify(rig, driver, { maxRequests: 4 });
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'passed:blocked',
-      'secret-egress:control': 'passed:armed',
-      deny: 'inconclusive:control-inconclusive',
-      'deny:control': 'not-attempted:max-requests',
+      deny: 'passed:blocked',
+      'deny:control': 'passed:armed',
+      'secret-egress': 'inconclusive:control-inconclusive',
+      'secret-egress:control': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('verified');
     expect(driver.calls).toHaveLength(4);
@@ -252,8 +252,8 @@ describe('the budget', () => {
       maxRequests: 2,
     });
     expect(marksOf(result)).toMatchObject({
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': 'not-attempted:max-requests',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': 'not-attempted:max-requests',
     });
     expect(result.state).toBe('inconclusive');
   });
@@ -262,8 +262,7 @@ describe('the budget', () => {
 describe('a project the model left unsafe to clear', () => {
   // The model has the run of the project while a request is made. A link left where a directory of the next
   // probe's way should be makes the file unsafe to clear, and that is a thing for the result to say: the
-  // requests before it are paid for and kept, and the run ends there, not with an exception. Only the
-  // git-hook probe has a directory in its way, and it is the last, so it is its control that is refused.
+  // requests before it are paid for and kept, and the run ends there, not with an exception.
   it.skipIf(process.platform === 'win32')(
     'ends the run with the reason, and keeps what the requests before it found',
     async () => {
@@ -284,15 +283,13 @@ describe('a project the model left unsafe to clear', () => {
         const result = await verify(rig, planting, { ledger });
         expect(marksOf(result)).toEqual({
           allow: 'passed:ran',
-          'secret-egress': 'passed:blocked',
-          'secret-egress:control': 'passed:armed',
           deny: 'inconclusive:control-inconclusive',
           'deny:control': 'not-attempted:unsafe-directory',
+          'secret-egress': 'not-attempted:unsafe-directory',
         });
-        // The probe of the made-up key had verified the host before the link was there, and that is kept.
-        expect(result.state).toBe('verified');
-        // Four requests were made and paid for; the fifth was never taken from the ledger.
-        expect(await ledger.peek()).toMatchObject({ used: 4 });
+        expect(result.state).toBe('inconclusive');
+        // Two requests were made and paid for; the third was never taken from the ledger.
+        expect(await ledger.peek()).toMatchObject({ used: 2 });
       } finally {
         rmSync(elsewhere, { recursive: true, force: true });
       }
@@ -314,8 +311,8 @@ describe('a project the model left unsafe to clear', () => {
     // The first request left the log damaged, so the second is never taken from the ledger.
     expect(marksOf(result)).toEqual({
       allow: 'inconclusive:audit-unreadable',
-      'secret-egress': 'not-attempted:audit-unreadable',
       deny: 'not-attempted:audit-unreadable',
+      'secret-egress': 'not-attempted:audit-unreadable',
     });
     expect(await ledger.peek()).toMatchObject({ used: 1 });
   });
@@ -337,13 +334,13 @@ describe('a host that stops answering', () => {
 
   it('stops at a limit in the middle of the run, and keeps what was found before it', async () => {
     const driver = new FakeHostDriver({
-      fault: (probe) => (probe.kind === 'secret-egress' ? 'limit' : 'honest'),
+      fault: (probe) => (probe.kind === 'deny' ? 'limit' : 'honest'),
     });
     const result = await verify(rig, driver);
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'inconclusive:limit',
-      deny: 'not-attempted:limit',
+      deny: 'inconclusive:limit',
+      'secret-egress': 'not-attempted:limit',
     });
     expect(result.state).toBe('inconclusive');
     expect(driver.calls).toHaveLength(2);
@@ -362,8 +359,8 @@ describe('a host that stops answering', () => {
     const result = await verify(rig, driver);
     expect(marksOf(result)).toEqual({
       allow: 'inconclusive:auth',
-      'secret-egress': 'not-attempted:auth',
       deny: 'not-attempted:auth',
+      'secret-egress': 'not-attempted:auth',
     });
   });
 
@@ -376,8 +373,8 @@ describe('a host that stops answering', () => {
     const result = await verify(rig, driver);
     expect(marksOf(result)).toEqual({
       allow: 'inconclusive:host-error',
-      'secret-egress': 'not-attempted:host-error',
       deny: 'not-attempted:host-error',
+      'secret-egress': 'not-attempted:host-error',
     });
     expect(calls).toBe(1);
   });
@@ -393,8 +390,8 @@ describe('a host that stops answering', () => {
     );
     expect(marksOf(result)).toEqual({
       allow: 'inconclusive:timeout',
-      'secret-egress': 'not-attempted:timeout',
       deny: 'not-attempted:timeout',
+      'secret-egress': 'not-attempted:timeout',
     });
   });
 
@@ -416,8 +413,8 @@ describe('a host that stops answering', () => {
     expect(driver.calls).toHaveLength(2);
     expect(marksOf(result)).toEqual({
       allow: 'passed:ran',
-      'secret-egress': 'inconclusive:unparsable-stream',
-      deny: 'not-attempted:billing-unknown',
+      deny: 'inconclusive:unparsable-stream',
+      'secret-egress': 'not-attempted:billing-unknown',
     });
   });
 

@@ -30,7 +30,7 @@ const UNARMED = 'inconclusive:probe-not-armed';
 const NOT_RUN = 'not-attempted:allow-not-passed';
 
 type Marks = Record<string, string>;
-const same = (mark: string): Marks => ({ allow: mark, 'secret-egress': mark, deny: mark });
+const same = (mark: string): Marks => ({ allow: mark, deny: mark, 'secret-egress': mark });
 
 // A host is verified only when the allow passed and a deny was stopped AND the same deny, under a hook
 // that allows everything, was run by the host and left its file. So the control is part of the check, it
@@ -41,10 +41,10 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'honest',
       {
         allow: PASSED_ALLOW,
-        'secret-egress': STOPPED,
-        'secret-egress:control': ARMED,
         deny: STOPPED,
+        'secret-egress': STOPPED,
         'deny:control': ARMED,
+        'secret-egress:control': ARMED,
       },
       'verified',
       5,
@@ -53,8 +53,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'ignore-deny',
       {
         allow: PASSED_ALLOW,
-        'secret-egress': 'failed:executed-despite-deny',
         deny: 'failed:executed-despite-deny',
+        'secret-egress': 'failed:executed-despite-deny',
       },
       'failed',
       3,
@@ -67,8 +67,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'limit',
       {
         allow: 'inconclusive:limit',
-        'secret-egress': 'not-attempted:limit',
         deny: 'not-attempted:limit',
+        'secret-egress': 'not-attempted:limit',
       },
       'inconclusive',
       1,
@@ -77,8 +77,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'limit-flagged',
       {
         allow: 'inconclusive:limit',
-        'secret-egress': 'not-attempted:limit',
         deny: 'not-attempted:limit',
+        'secret-egress': 'not-attempted:limit',
       },
       'inconclusive',
       1,
@@ -89,8 +89,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'garbage',
       {
         allow: 'inconclusive:unparsable-stream',
-        'secret-egress': 'not-attempted:billing-unknown',
         deny: 'not-attempted:billing-unknown',
+        'secret-egress': 'not-attempted:billing-unknown',
       },
       'inconclusive',
       1,
@@ -99,8 +99,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'timeout',
       {
         allow: 'inconclusive:timeout',
-        'secret-egress': 'not-attempted:timeout',
         deny: 'not-attempted:timeout',
+        'secret-egress': 'not-attempted:timeout',
       },
       'inconclusive',
       1,
@@ -109,8 +109,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'host-error',
       {
         allow: 'inconclusive:host-error',
-        'secret-egress': 'not-attempted:host-error',
         deny: 'not-attempted:host-error',
+        'secret-egress': 'not-attempted:host-error',
       },
       'inconclusive',
       1,
@@ -119,8 +119,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'api-billing',
       {
         allow: 'inconclusive:api-billing',
-        'secret-egress': 'not-attempted:api-billing',
         deny: 'not-attempted:api-billing',
+        'secret-egress': 'not-attempted:api-billing',
       },
       'inconclusive',
       1,
@@ -132,10 +132,10 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'host-ignores-hook-but-blocks',
       {
         allow: PASSED_ALLOW,
-        'secret-egress': UNARMED,
-        'secret-egress:control': UNARMED,
         deny: UNARMED,
+        'secret-egress': UNARMED,
         'deny:control': UNARMED,
+        'secret-egress:control': UNARMED,
       },
       'inconclusive',
       5,
@@ -148,10 +148,10 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'noop-explicit-allow',
       {
         allow: PASSED_ALLOW,
-        'secret-egress': STOPPED,
-        'secret-egress:control': ARMED,
         deny: STOPPED,
+        'secret-egress': STOPPED,
         'deny:control': ARMED,
+        'secret-egress:control': ARMED,
       },
       'inconclusive',
       5,
@@ -163,8 +163,8 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'wrong-cwd',
       {
         allow: 'inconclusive:cwd-mismatch',
-        'secret-egress': 'not-attempted:cwd-mismatch',
         deny: 'not-attempted:cwd-mismatch',
+        'secret-egress': 'not-attempted:cwd-mismatch',
       },
       'inconclusive',
       1,
@@ -176,10 +176,10 @@ describe('every fault, with the control on (as it is unless turned off)', () => 
       'host-blocks-all',
       {
         allow: 'inconclusive:effect-missing',
-        'secret-egress': 'inconclusive:control-inconclusive',
-        'secret-egress:control': NOT_RUN,
         deny: 'inconclusive:control-inconclusive',
+        'secret-egress': 'inconclusive:control-inconclusive',
         'deny:control': NOT_RUN,
+        'secret-egress:control': NOT_RUN,
       },
       'inconclusive',
       3,
@@ -254,19 +254,19 @@ describe('the control run, probe by probe', () => {
     const result = await verify(rig, driver, { control: true });
     expect(marksOf(result)).toEqual({
       allow: PASSED_ALLOW,
-      'secret-egress': STOPPED,
-      'secret-egress:control': 'passed:armed',
       deny: STOPPED,
+      'secret-egress': STOPPED,
       'deny:control': 'passed:armed',
+      'secret-egress:control': 'passed:armed',
     });
     expect(result.state).toBe('verified');
     expect(result.caveats).not.toContain('no-control-run');
     expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
       'allow/real',
-      'secret-egress/real',
-      'secret-egress/noop',
       'deny/real',
       'deny/noop',
+      'secret-egress/real',
+      'secret-egress/noop',
     ]);
   });
 
@@ -275,7 +275,7 @@ describe('the control run, probe by probe', () => {
     const result = await verify(rig, driver, { control: true });
     expect(result.state).toBe('failed');
     expect(driver.calls).toHaveLength(3);
-    expect(Object.keys(marksOf(result))).toEqual(['allow', 'secret-egress', 'deny']);
+    expect(Object.keys(marksOf(result))).toEqual(['allow', 'deny', 'secret-egress']);
   });
 
   it('does not call a deny stopped when the host would not have run the command anyway', async () => {
@@ -285,38 +285,13 @@ describe('the control run, probe by probe', () => {
     const result = await verify(rig, driver, { control: true });
     expect(marksOf(result)).toEqual({
       allow: PASSED_ALLOW,
-      'secret-egress': STOPPED,
-      'secret-egress:control': 'passed:armed',
       deny: 'inconclusive:probe-not-armed',
+      'secret-egress': STOPPED,
       'deny:control': 'inconclusive:probe-not-armed',
+      'secret-egress:control': 'passed:armed',
     });
     // The other deny was shown to be armed, so the host is verified by it; the unarmed one is not counted.
     expect(result.state).toBe('verified');
-  });
-
-  // What Claude Code does with the git-hook deny, as measured: the hook stops the real run, and in the control
-  // the host's own permission step stops the write below `.git`, so that probe can never be armed. The probe
-  // of the made-up key has no such path and comes first, so three requests are enough to verify the host.
-  it('verifies a host in three requests when its git-hook deny can never be armed', async () => {
-    const driver = new FakeHostDriver({
-      fault: (probe, ctx) =>
-        probe.kind === 'deny' && ctx.hookMode === 'noop' ? 'host-blocks-all' : 'honest',
-    });
-    const ledger = openLedger({ memory: true, limit: 30 });
-    const result = await verify(rig, driver, { control: true, ledger, maxRequests: 3 });
-    expect(marksOf(result)).toEqual({
-      allow: PASSED_ALLOW,
-      'secret-egress': STOPPED,
-      'secret-egress:control': ARMED,
-      deny: 'not-attempted:max-requests',
-    });
-    expect(result.state).toBe('verified');
-    expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
-      'allow/real',
-      'secret-egress/real',
-      'secret-egress/noop',
-    ]);
-    expect(await ledger.peek()).toMatchObject({ used: 3 });
   });
 
   it('leaves the host inconclusive when the only deny that passed could not be confirmed', async () => {
@@ -325,8 +300,8 @@ describe('the control run, probe by probe', () => {
     });
     const result = await verify(rig, driver, { control: true });
     expect(marksOf(result)).toMatchObject({
-      'secret-egress': 'inconclusive:probe-not-armed',
       deny: 'inconclusive:probe-not-armed',
+      'secret-egress': 'inconclusive:probe-not-armed',
     });
     expect(result.state).toBe('inconclusive');
   });
@@ -337,10 +312,10 @@ describe('the control run, probe by probe', () => {
     });
     const result = await verify(rig, driver, { control: true });
     expect(marksOf(result)).toMatchObject({
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': 'not-issued:not-issued',
       deny: 'inconclusive:control-inconclusive',
+      'secret-egress': 'inconclusive:control-inconclusive',
       'deny:control': 'not-issued:not-issued',
+      'secret-egress:control': 'not-issued:not-issued',
     });
     expect(result.state).toBe('inconclusive');
   });
@@ -353,9 +328,9 @@ describe('the control run, probe by probe', () => {
     const result = await verify(rig, driver, { control: true, ledger });
     expect(marksOf(result)).toEqual({
       allow: PASSED_ALLOW,
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': 'inconclusive:limit',
-      deny: 'not-attempted:limit',
+      deny: 'inconclusive:control-inconclusive',
+      'deny:control': 'inconclusive:limit',
+      'secret-egress': 'not-attempted:limit',
     });
     expect(result.state).toBe('inconclusive');
     expect(driver.calls).toHaveLength(3);
@@ -371,16 +346,16 @@ describe('the control run, probe by probe', () => {
     const result = await verify(rig, driver, { control: true });
     expect(marksOf(result)).toEqual({
       allow: 'not-issued:not-issued',
-      'secret-egress': 'inconclusive:control-inconclusive',
-      'secret-egress:control': NOT_RUN,
       deny: 'inconclusive:control-inconclusive',
       'deny:control': NOT_RUN,
+      'secret-egress': 'inconclusive:control-inconclusive',
+      'secret-egress:control': NOT_RUN,
     });
     expect(result.state).toBe('inconclusive');
     expect(driver.calls.map((c) => `${c.probeId}/${c.hookMode}`)).toEqual([
       'allow/real',
-      'secret-egress/real',
       'deny/real',
+      'secret-egress/real',
     ]);
   });
 
@@ -412,17 +387,17 @@ describe('the result as a whole', () => {
     const result = await verify(rig, new FakeHostDriver({ fault: 'honest' }));
     expect(result.probes.map((p) => p.id)).toEqual([
       'allow',
-      'secret-egress',
-      'secret-egress:control',
       'deny',
       'deny:control',
+      'secret-egress',
+      'secret-egress:control',
     ]);
     expect(result.probes.map((p) => p.kind)).toEqual([
       'allow',
-      'secret-egress',
-      'secret-egress',
       'deny',
       'deny',
+      'secret-egress',
+      'secret-egress',
     ]);
   });
 

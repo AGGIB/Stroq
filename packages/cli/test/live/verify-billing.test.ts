@@ -111,8 +111,8 @@ describe('a host that does not say how it is paid for', () => {
     const result = await verify(rig, driver);
     expect(driver.seen).toBe(2);
     expect(marksOf(result)).toMatchObject({
-      'secret-egress': 'inconclusive:billing-unknown',
-      deny: 'not-attempted:billing-unknown',
+      deny: 'inconclusive:billing-unknown',
+      'secret-egress': 'not-attempted:billing-unknown',
     });
   });
 
