@@ -24,6 +24,9 @@ import { Findings } from './findings.js';
 import { identify } from './identity.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
 import { buildInput } from './input.js';
+import { inspectNativeCode } from './native-code.js';
+import { inspectPackages } from './package-lines.js';
+import { inspectPython } from './python-lines.js';
 import { ShellQueue } from './shell-queue.js';
 import { addShellLines } from './shell-lines.js';
 import { queueMarkdownShell, queueScriptShell } from './shell-sources.js';
@@ -108,6 +111,9 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
   const declared = inspectFrontmatter(input, findings, shell);
   queueMarkdownShell(input, findings, shell);
   queueScriptShell(input, shell);
+  inspectPackages(input, findings, shell);
+  inspectPython(input, findings);
+  inspectNativeCode(input, findings);
   addShellLines(shell, findings);
 
   const identity = identify(kind, input, context.source, declared);

@@ -171,6 +171,21 @@ describe('Findings: signals', () => {
     });
   });
 
+  it('says a signal rests on what the artifact declares, when it is told', () => {
+    const findings = new Findings();
+
+    findings.signal({
+      ruleId: 'non-registry-dependency',
+      file: 'package.json',
+      line: 3,
+      sensitive: true,
+      basis: 'declared',
+      detector: 'x',
+    });
+
+    expect(findings.result().lines[0]?.basis).toBe('declared');
+  });
+
   it('names a signal by its rule alone when there is no detail', () => {
     const findings = new Findings();
 

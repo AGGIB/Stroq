@@ -163,11 +163,24 @@ function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void
     });
   }
   emitUnread(snippet, reading, note, findings);
+  // The scripts of a package that run only on request (`test`, `build`) are mostly its own tools: they
+  // are read for addresses and dangers, and not listed program by program.
+  if (snippet.origin !== 'package-script') emitPrograms(snippet, reading, note, findings, at);
+}
+
+function emitPrograms(
+  snippet: ShellSnippet,
+  reading: Reading,
+  note: string,
+  findings: Findings,
+  at: (token: string | null) => number,
+): void {
   for (const program of reading.programs) {
     findings.line({
-      ...base,
+      file: snippet.file,
       kind: 'exec',
       subject: program,
+      basis: 'observed',
       sensitive: RISKY_PROGRAMS.has(basename(program)),
       line: at(program),
       detector: `a command in ${note}, ${READING}`,
@@ -175,7 +188,7 @@ function emit(snippet: ShellSnippet, reading: Reading, findings: Findings): void
   }
   if (reading.dynamicProgram) {
     findings.line({
-      ...base,
+      file: snippet.file,
       kind: 'exec',
       subject: 'a command named at run time',
       basis: 'unknown',

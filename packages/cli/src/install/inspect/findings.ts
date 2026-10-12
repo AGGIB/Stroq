@@ -39,6 +39,8 @@ export interface SignalInput {
   readonly sensitive: boolean;
   /** What the rule matched on, when that helps a person find it. */
   readonly detail?: string;
+  /** What the signal rests on; a reading found it unless the artifact says so about itself. */
+  readonly basis?: Basis;
   readonly detector: string;
 }
 
@@ -129,7 +131,7 @@ export class Findings {
     this.line({
       kind: 'signal',
       subject: detail === '' ? ruleId : `${ruleId}: ${detail}`,
-      basis: 'observed',
+      basis: input.basis ?? 'observed',
       sensitive: input.sensitive,
       file: input.file,
       line: input.line,
