@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The live-check library reads a stored result only from the file of its kind.** Still a library: no command uses it. A stand-in result moved into the live file is no result, a result dated more than a few minutes ahead of the clock is none either (with a clock set back it would have outlived every install), and the environment the driver is handed no longer carries `STROQ_*` or `CLAUDE_CONFIG_DIR`, which the model's shell inherits (a ledger path it could delete, a home that sends the hook to the real settings). The store says that its file is tamper-evident and not tamper-proof.
 - **The Safe Install contract refuses more names that are one name on some disk or another.** Still a library: no command uses it. Found by a review of 0.24.0. A path component that a program which narrows names would turn into a separator (`U+FF0F`, `U+FF3C`), any `~` and a digit (an NTFS short name), a look-alike space, and the combining mark U+0345 that NTFS upper-cases are refused; a symlink target may not hold a control, an invisible character or U+FFFD; the parts of an npm or GitHub source have the lengths npm and GitHub allow; `buildTree` takes `{ complete: true }` to refuse an entry with no content, and no longer believes the length a byte array reports of itself; `schemaFault` describes a record's faults without quoting its text.
 
 ## [0.24.0] - 2026-10-11
