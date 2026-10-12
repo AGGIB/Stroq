@@ -83,14 +83,14 @@ describe('cleanFixture', () => {
 
   it('numbers ids in the order they appear, so a call and its result still name each other', () => {
     const call = JSON.stringify({
-      id: 'toolu_01AAA',
+      id: 'toolu_01ScfjnzHC2Ytg2ik3CmApxq',
       session_id: SESSION,
-      request_id: 'req_01XYZ',
+      request_id: 'req_011CfxgUzg4YX7SjBbtsFaz4',
     });
     const result = JSON.stringify({
-      tool_use_id: 'toolu_01AAA',
-      other: 'toolu_01BBB',
-      msg: 'msg_01Q',
+      tool_use_id: 'toolu_01ScfjnzHC2Ytg2ik3CmApxq',
+      other: 'toolu_016EjzbE2FjhqkdkeLS14hvY',
+      msg: 'msg_011CfxiBJmUTHMrcKRwV6jvV',
     });
     const [first, second] = parsedLines(cleanFixture(`${call}\n${result}\n`));
     expect(first).toEqual({
@@ -118,7 +118,9 @@ describe('cleanFixture', () => {
 
   it('numbers the ids that are the keys of an object as well as the ones that are values', () => {
     const [line] = parsedLines(
-      cleanFixture(`${JSON.stringify({ id: 'toolu_01AAA', wire: { toolu_01AAA: { a: 1 } } })}\n`),
+      cleanFixture(
+        `${JSON.stringify({ id: 'toolu_01ScfjnzHC2Ytg2ik3CmApxq', wire: { toolu_01ScfjnzHC2Ytg2ik3CmApxq: { a: 1 } } })}\n`,
+      ),
     );
     expect(line).toEqual({ id: 'toolu_FIXTURE0001', wire: { toolu_FIXTURE0001: { a: 1 } } });
   });
@@ -146,7 +148,7 @@ describe('cleanFixture', () => {
   });
 
   it('is a fixed point: cleaning a cleaned file changes nothing', () => {
-    const raw = `${rawLine({ id: 'toolu_01AAA', u: 'e21089da-2314-4444-8847-6c3310595392' })}\n`;
+    const raw = `${rawLine({ id: 'toolu_01ScfjnzHC2Ytg2ik3CmApxq', u: 'e21089da-2314-4444-8847-6c3310595392' })}\n`;
     const once = cleanFixture(raw);
     expect(cleanFixture(once)).toBe(once);
   });
