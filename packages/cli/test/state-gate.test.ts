@@ -46,6 +46,8 @@ const READS_ONLY: Readonly<Record<string, string>> = {
   replay: 'rebuilds a recorded session; --out only creates a page where no file exists',
   sent: 'lists by name the credentials a recorded session saw; --out only creates a card where no file exists',
   attack: 'replays recorded attacks against the policy, in memory',
+  policy:
+    'checks a policy file and replays the attack and ordinary-work corpora under it, in memory; opens only the files it is named',
   inspect: 'reads a repository and prints what it would run',
   bench: 'measures the rules on a corpus and prints the result',
   coverage: 'prints the control mapping',
@@ -159,5 +161,33 @@ describe('stroq harden and the state gate', () => {
     'node packages/cli/dist/index.js harden apply --yes',
   ])('denies %s: it writes', (form) => {
     expect(isDenied(form), form).toBe(true);
+  });
+});
+
+/**
+ * `stroq policy check` and `stroq policy test` only read: they open the policy and the cases they are
+ * named, run the engine in memory against throwaway folders, and write nothing, so an agent may run
+ * them, as it may run `stroq attack`. This holds the reading forms open, so that a change to the gate
+ * that caught `policy` by mistake (or a new flag of it that writes) is noticed here.
+ */
+describe('stroq policy and the state gate', () => {
+  it.each([
+    'stroq policy',
+    'stroq policy check',
+    'stroq policy check --json',
+    'stroq policy check ./candidate.yaml',
+    'stroq policy check ./candidate.yaml --json',
+    'stroq policy test',
+    'stroq policy test --json',
+    'stroq policy test --policy ./candidate.yaml',
+    'stroq policy test --policy ./candidate.yaml --baseline default --cases ./cases.yaml',
+    'stroq policy test --policy ./candidate.yaml --max-new-interruptions 3 --json',
+    'npx @stroq/cli policy check',
+    'npx -y @stroq/cli policy test --json',
+    'node packages/cli/dist/index.js policy test',
+    'stroq policy --help',
+    'stroq policy check -h',
+  ])('leaves %s open: it only reads', (form) => {
+    expect(isDenied(form), form).toBe(false);
   });
 });

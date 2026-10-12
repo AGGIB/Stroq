@@ -246,6 +246,37 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
   },
   {
+    name: 'policy',
+    synopsis:
+      'policy check [<file>] [--json] | policy test [--policy <file>] [--baseline <default|file>] [--cases <file>] [--max-new-interruptions <n>] [--json]',
+    about: [
+      'see what an edit to your policy.yaml does before you rely on it; both only read. check',
+      'loads a file as the hook does and lists what is wrong: faults by field, a rule that can',
+      'never be the first match, a protection of the default policy the file quietly drops,',
+      'default: allow, a high threshold; exit 1 on a finding. test replays the attack corpus,',
+      'the ordinary-work benchmark and your own cases under the policy and under a baseline,',
+      'and prints every step whose decision changed; exit 1 if an attack gets through, a case',
+      'is not met, something could not be judged, or ordinary work is newly interrupted more',
+      'than --max-new-interruptions allows. Exit 2: wrong command line or an unreadable file',
+    ],
+    flags: [
+      ['--policy <file>', 'test: the policy to try (default: the policy in force)'],
+      [
+        '--baseline <default|file>',
+        'test: what to compare it with (default: the built-in default policy)',
+      ],
+      [
+        '--cases <file>',
+        'test: your own cases, YAML or JSON, up to 256 KiB and 200 cases: attacks that must not pass, and ordinary work with the answer you expect (allow, ask or deny)',
+      ],
+      [
+        '--max-new-interruptions <n>',
+        'test: fail when more steps of ordinary work than this newly ask or deny',
+      ],
+      ['--json', 'machine-readable output (version 1)'],
+    ],
+  },
+  {
     name: 'exposure',
     synopsis: 'exposure [--probe] [--share] [--json] [--verbose]',
     about: ["map this machine's agent surface and report what reaches you; exit 1 on a finding"],

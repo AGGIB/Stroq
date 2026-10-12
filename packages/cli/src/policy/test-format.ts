@@ -26,9 +26,12 @@ function section(title: string, rows: readonly string[]): string[] {
 const changeRow = (c: Change): string =>
   `${idOf(c.id)}/${c.step}: ${c.baseline} -> ${c.candidate} (${c.direction})`;
 
-const passRow = (p: AttackPass): string =>
-  `${idOf(p.id)}/${p.step}${p.suite === 'cases' ? ' (your case)' : ''} ` +
-  (p.new ? '(new: the baseline does not let it through)' : '(the baseline lets it through too)');
+const passRow = (p: AttackPass): string => {
+  const baseline = p.new
+    ? 'new: the baseline does not let it through'
+    : 'the baseline lets it through too';
+  return `${idOf(p.id)}/${p.step} (${p.suite === 'cases' ? `your case, ${baseline}` : baseline})`;
+};
 
 const interruptionRow = (i: Interruption): string =>
   `${idOf(i.id)}/${i.step}: ${i.baseline} -> ${i.candidate} (${ruleOf(i.ruleId)})` +

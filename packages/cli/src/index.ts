@@ -10,6 +10,7 @@ import { runInitCommand } from './commands/init-agent.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { runPolicy } from './commands/policy.js';
 import { runProve } from './commands/prove.js';
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { handleStdoutError } from './stdout-errors.js';
@@ -51,6 +52,7 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   sent: runSent,
   canary: runCanary,
   attack: runAttackCommand,
+  policy: runPolicy,
   exposure: runExposure,
   bench: runBenchCommand,
   coverage: runCoverageCommand,
