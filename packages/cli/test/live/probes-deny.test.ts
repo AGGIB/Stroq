@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { markControl } from '../../src/live/evidence.js';
-import { DENY_FILE, controlOf, readSentinel, shellWord } from '../../src/live/probes.js';
+import { DENY_FILE, controlOf, posixPath, readSentinel, shellWord } from '../../src/live/probes.js';
 import { createThrowawayRoot, removeThrowawayRoot } from '../../src/live/throwaway.js';
 import { NONCE, finished, toolUse } from './helpers.js';
 import { PROJECT, probe } from './probe-helpers.js';
@@ -68,7 +68,7 @@ describe.skipIf(!gitIsThere)('the file of the deny probe, against the real git',
   it('holds, once the command has run, exactly the text git writes, and a line end after it', () => {
     const deny = probe('deny', NONCE, project);
     expect(deny.command).toBe(
-      `git config --file ${shellWord(join(project, DENY_FILE))} core.hooksPath ${NONCE}`,
+      `git config --file ${shellWord(posixPath(join(project, DENY_FILE)))} core.hooksPath ${NONCE}`,
     );
     runGit(join(project, deny.sentinel.file));
     const written = readFileSync(join(project, deny.sentinel.file), 'utf8');
