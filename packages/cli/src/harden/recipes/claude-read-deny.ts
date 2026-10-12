@@ -19,6 +19,7 @@ import type { Recipe, RecipeContext, RecipeTarget } from './types.js';
  * protection and not a change to what the repository tells everyone else's Claude Code to do.
  */
 
+const SUMMARY = 'Ask Claude Code to refuse to read credential files.';
 const DENY_PATH = ['permissions', 'deny'] as const;
 const NEW_SETTINGS_MODE = 0o600;
 
@@ -52,11 +53,16 @@ function target(context: RecipeContext): RecipeTarget {
     recipe: 'claude-read-deny',
     agent: 'claude-code',
     scope: context.scope,
+    summary: SUMMARY,
     file: user
       ? join(context.home, '.claude', 'settings.json')
       : join(context.cwd, '.claude', 'settings.local.json'),
     root: user ? context.home : context.cwd,
     items: CLAUDE_READ_DENY_RULES,
+    words: {
+      adds: 'Adds these rules to permissions.deny:',
+      alreadyDone: 'Nothing to change: every rule is already in place.',
+    },
     change: { kind: 'json', edits: EDITS, snippet: SNIPPET },
     newFileMode: NEW_SETTINGS_MODE,
     limits: LIMITS,
@@ -69,6 +75,6 @@ export const claudeReadDeny: Recipe = {
   agent: 'claude-code',
   scopes: ['user', 'project'],
   defaultScope: 'user',
-  summary: 'ask Claude Code to refuse to read credential files',
+  summary: SUMMARY,
   target,
 };

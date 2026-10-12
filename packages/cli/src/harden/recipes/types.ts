@@ -36,12 +36,21 @@ export interface RecipeTarget {
   readonly recipe: string;
   readonly agent: HardenAgent;
   readonly scope: HardenScope;
+  /** One sentence, for the top of its plan. */
+  readonly summary: string;
   /** The file to change, as a path: it may be a link; the engine follows it. */
   readonly file: string;
   /** The folder the file must stay inside: the home for the user's files, the project for the project's. */
   readonly root: string;
   /** The rules or lines the recipe adds, in the order they are shown. */
   readonly items: readonly string[];
+  /** The words of its plan around the items. */
+  readonly words: {
+    /** The line above the items: what is added, and where. */
+    readonly adds: string;
+    /** Said instead of the change when everything is there already. */
+    readonly alreadyDone: string;
+  };
   readonly change: RecipeChange;
   /** The mode of the file if the recipe has to make it. */
   readonly newFileMode: number;
@@ -57,7 +66,7 @@ export interface Recipe {
   /** The scopes it works in; the first is not necessarily the default. */
   readonly scopes: readonly HardenScope[];
   readonly defaultScope: HardenScope;
-  /** One line, for the first line of its plan. */
+  /** One sentence, for the top of its plan. */
   readonly summary: string;
   target(context: RecipeContext): RecipeTarget;
 }

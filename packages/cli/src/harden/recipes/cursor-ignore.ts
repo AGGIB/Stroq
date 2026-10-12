@@ -13,6 +13,7 @@ import type { Recipe, RecipeContext, RecipeTarget } from './types.js';
  */
 
 const BLOCK_ID = 'cursor-ignore';
+const SUMMARY = 'Ask Cursor to leave the secret files of this project out of what it sends.';
 /** A `.cursorignore` is normally committed with the project, so it is made readable like any other file. */
 const NEW_IGNORE_MODE = 0o644;
 
@@ -29,9 +30,14 @@ function target(context: RecipeContext): RecipeTarget {
     recipe: 'cursor-ignore',
     agent: 'cursor',
     scope: 'project',
+    summary: SUMMARY,
     file: join(context.cwd, '.cursorignore'),
     root: context.cwd,
     items: PROJECT_SECRET_FILES,
+    words: {
+      adds: 'Adds this block to the file, between two marker lines:',
+      alreadyDone: 'Nothing to change: the block is already in place.',
+    },
     change: { kind: 'text-block', id: BLOCK_ID, lines: PROJECT_SECRET_FILES },
     newFileMode: NEW_IGNORE_MODE,
     limits: LIMITS,
@@ -44,6 +50,6 @@ export const cursorIgnore: Recipe = {
   agent: 'cursor',
   scopes: ['project'],
   defaultScope: 'project',
-  summary: 'ask Cursor to leave the secret files of this project out of what it sends',
+  summary: SUMMARY,
   target,
 };
