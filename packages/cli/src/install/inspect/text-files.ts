@@ -38,6 +38,12 @@ export class LineIndex {
     return starts;
   }
 
+  /** The index of the first character of line `line` (from 1); the start of the text for a line before the first. */
+  lineStart(line: number): number {
+    const starts = this.build();
+    return starts[Math.min(Math.max(line, 1), starts.length) - 1] ?? 0;
+  }
+
   /** The line (from 1) that the character at `index` is on. A place outside the text is on its first or last line. */
   lineAt(index: number): number {
     const starts = this.build();

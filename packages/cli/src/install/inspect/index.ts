@@ -27,6 +27,9 @@ import { buildInput } from './input.js';
 import { inspectNativeCode } from './native-code.js';
 import { inspectPackages } from './package-lines.js';
 import { inspectPython } from './python-lines.js';
+import { inspectRepoFiles } from './repo-files.js';
+import { inspectObfuscation, inspectSource } from './source-lines.js';
+import { inspectTreeEntries } from './tree-checks.js';
 import { ShellQueue } from './shell-queue.js';
 import { addShellLines } from './shell-lines.js';
 import { queueMarkdownShell, queueScriptShell } from './shell-sources.js';
@@ -114,6 +117,10 @@ export function inspectTree(tree: Tree, context: InspectContext): Passport {
   inspectPackages(input, findings, shell);
   inspectPython(input, findings);
   inspectNativeCode(input, findings);
+  inspectSource(input, findings);
+  inspectObfuscation(input, findings);
+  inspectRepoFiles(input, findings);
+  inspectTreeEntries(input, findings);
   addShellLines(shell, findings);
 
   const identity = identify(kind, input, context.source, declared);
