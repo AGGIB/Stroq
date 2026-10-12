@@ -2,8 +2,7 @@ import { applyPlan, undoFile } from '../harden/index.js';
 import type { ApplyOptions } from '../harden/index.js';
 import type { BackupPlan, Plan } from '../harden/types.js';
 import type { HardenScope, Recipe, RecipeTarget } from '../harden/recipes/index.js';
-import { confirm } from '../ui/prompt.js';
-import { styleFor } from '../ui/style.js';
+import { askPerson, notAsked } from './harden-ask.js';
 import type { HardenContext } from './harden-deps.js';
 import { failureOf } from './harden-errors.js';
 import type { HardenFlags } from './harden-flags.js';
@@ -26,9 +25,6 @@ import { makePlan, viewOf, type Needs, type PlanView } from './harden-view.js';
  */
 
 const QUESTION = 'Apply this change?';
-const PLAIN = styleFor({ color: false, color256: false });
-
-type Answer = 'yes' | 'no' | 'nobody';
 
 /** Why each acknowledgement is asked for, in the words of the refusal that names its flag. */
 const WHY: Readonly<Record<keyof Needs, readonly [flag: string, why: string]>> = {
@@ -87,19 +83,6 @@ function stoppedBeforeAsking(
   const missing = missingFor(view.needs, flags);
   return missing.length === 0 ? null : missingVerdict(missing);
 }
-
-async function answerOf(ctx: HardenContext, flags: HardenFlags): Promise<Answer> {
-  if (flags.yes) return 'yes';
-  const terminal = await ctx.askable();
-  if (terminal === null) return 'nobody';
-  return (await confirm(terminal, PLAIN, QUESTION, false)) ? 'yes' : 'no';
-}
-
-const NOT_ASKED: Readonly<Record<Exclude<Answer, 'yes'>, string>> = {
-  no: 'not applied; nothing was written',
-  nobody:
-    'nothing was written: apply needs a person to answer on a terminal, or --yes where there is none',
-};
 
 /** Whether the file now holds what the recipe wants: a new plan of it finds nothing left to do. */
 function holdsTheChange(target: RecipeTarget): boolean {
@@ -197,10 +180,10 @@ export async function applyTarget(
   printer.show(renderPlan(view, target));
   const stopped = stoppedBeforeAsking(view, target, flags);
   if (stopped !== null) return printer.finish(stopped.code, stopped.outcome, view);
-  const answer = await answerOf(ctx, flags);
+  const answer = await askPerson(ctx, flags, QUESTION);
   if (answer !== 'yes') {
     const status = answer === 'no' ? 'declined' : 'refused';
-    return printer.finish(1, { status, message: NOT_ASKED[answer] }, view);
+    return printer.finish(1, { status, message: notAsked(answer, 'apply') }, view);
   }
   return perform(ctx, target, plan, view, flags, printer);
 }
