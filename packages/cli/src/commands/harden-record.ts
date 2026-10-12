@@ -38,10 +38,14 @@ type ArrayAdd = Extract<RecordedJsonEdit, { kind: 'json-array-add' }>;
 
 /** The array edits of one entry, grouped by the list they went to, in the order they were made. */
 function groupedByPath(edits: readonly ArrayAdd[]): readonly (readonly [string, ArrayAdd[]])[] {
+  // Built by pushing into the group of its list: copying a group for each edit would be quadratic in
+  // the number of edits, and a record can hold thousands.
   const groups = new Map<string, ArrayAdd[]>();
   for (const edit of edits) {
     const key = edit.path.join('.');
-    groups.set(key, [...(groups.get(key) ?? []), edit]);
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [edit]);
+    else group.push(edit);
   }
   return [...groups];
 }
