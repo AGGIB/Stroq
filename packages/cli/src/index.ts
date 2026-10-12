@@ -25,6 +25,7 @@ import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
 import {
   commandHelp,
+  commandHint,
   parseArgsProblem,
   suggestCommand,
   unknownOption,
@@ -145,6 +146,11 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
 }
 
 function unknownCommand(typed: string): number {
+  const hint = commandHint(typed);
+  if (hint !== null) {
+    process.stderr.write(`${hint}\n`);
+    return 1;
+  }
   const suggestion = suggestCommand(typed);
   process.stderr.write(
     `stroq: unknown command "${typed}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}\n` +

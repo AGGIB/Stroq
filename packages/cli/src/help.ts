@@ -482,8 +482,29 @@ export function parseArgsProblem(err: unknown): string | null {
   return first.replace(/\.$/, '');
 }
 
-/** The closest command to a typo, or null when nothing is close. */
+/**
+ * Words that are not commands of Stroq but that a person will type, and what to say to them. A Map and
+ * not an object, so that `constructor` and `__proto__` are words with no hint and not properties.
+ */
+const HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    'install',
+    'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+  ],
+]);
+
+/** What to say to a word that is not a command, in one line, or null when there is nothing special to say. */
+export function commandHint(typed: string): string | null {
+  return HINTS.get(typed.toLowerCase()) ?? null;
+}
+
+/**
+ * The closest command to a typo, or null when nothing is close. A word that has a hint gets none: "install"
+ * is two letters from "uninstall", the one command that takes Stroq out, which is the opposite of what the
+ * person who typed it wants.
+ */
 export function suggestCommand(typed: string): string | null {
+  if (commandHint(typed) !== null) return null;
   let best: string | null = null;
   let bestDistance = 3;
   for (const { name } of COMMANDS) {
