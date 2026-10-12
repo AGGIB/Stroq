@@ -42,6 +42,7 @@ const COMMANDS: Readonly<Record<string, string>> = {
   bench: 'bench',
   coverage: 'coverage',
   harden: 'harden',
+  vet: 'vet',
 };
 
 /** The flags a command's source accepts: `parseArgs` options, flag sets, `argv.includes`. */

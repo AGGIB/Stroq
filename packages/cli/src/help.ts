@@ -372,6 +372,45 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
     ],
   },
+  {
+    name: 'vet',
+    synopsis:
+      'vet --from <dir> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+    about: [
+      'read a skill, an MCP server or a plugin folder before you add it, and show its passport: what it asks',
+      'for or can do, each line marked declared, observed, limited or unknown, the rules that matched, and',
+      'every blind spot. The files are read and none of them is run. A reading, not a security certificate:',
+      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is',
+      'complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the files cannot be',
+      'read as an artifact',
+    ],
+    flags: [
+      [
+        '--from <dir>',
+        'the folder to read (required). .git and node_modules are left out, and it says so',
+      ],
+      [
+        '--kind <skill|mcp|plugin>',
+        'what the folder is, when its files do not say (or say two things)',
+      ],
+      [
+        '--json',
+        'the passport itself, in a canonical form: the same bytes for the same files, so that an author can commit it',
+      ],
+      [
+        '--expect <sha256>',
+        'exit 1 unless the digest of the files is this one (64 hex digits, bare or as sha256:<hex>). Not on Windows, where a folder has no executable bit and its digest depends on the platform',
+      ],
+      [
+        '--card',
+        'a Markdown snippet for a README: the name, the digest, the counts and the command that reproduces it, and nothing else from the artifact',
+      ],
+      [
+        '--out <file>',
+        "write the output to a file that does not exist yet, never over one. Write it outside the folder it describes: inside, it is one of that folder's files and changes its digest",
+      ],
+    ],
+  },
 ];
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
@@ -482,8 +521,29 @@ export function parseArgsProblem(err: unknown): string | null {
   return first.replace(/\.$/, '');
 }
 
-/** The closest command to a typo, or null when nothing is close. */
+/**
+ * Words that are not commands of Stroq but that a person will type, and what to say to them. A Map and
+ * not an object, so that `constructor` and `__proto__` are words with no hint and not properties.
+ */
+const HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    'install',
+    'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+  ],
+]);
+
+/** What to say to a word that is not a command, in one line, or null when there is nothing special to say. */
+export function commandHint(typed: string): string | null {
+  return HINTS.get(typed.toLowerCase()) ?? null;
+}
+
+/**
+ * The closest command to a typo, or null when nothing is close. A word that has a hint gets none: "install"
+ * is two letters from "uninstall", the one command that takes Stroq out, which is the opposite of what the
+ * person who typed it wants.
+ */
 export function suggestCommand(typed: string): string | null {
+  if (commandHint(typed) !== null) return null;
   let best: string | null = null;
   let bestDistance = 3;
   for (const { name } of COMMANDS) {

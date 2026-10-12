@@ -34,6 +34,9 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   ],
   // Starts the host on the owner's login and spends their requests, and writes the result `doctor` reads.
   prove: ['stroq prove', 'stroq prove --yes --max-requests 6'],
+  // Reads a folder, and with --online goes to the network for a package: that form is a person's. The
+  // form that only reads is open, and `stroq vet and the state gate` below holds both.
+  vet: ['stroq vet --online', 'stroq vet --from x --online'],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */
@@ -189,5 +192,41 @@ describe('stroq policy and the state gate', () => {
     'stroq policy check -h',
   ])('leaves %s open: it only reads', (form) => {
     expect(isDenied(form), form).toBe(false);
+  });
+});
+
+/**
+ * `stroq vet` is the command an agent is most likely to be told to run on something it was just handed: a
+ * skill that a repository ships, a server a page recommends. Reading a folder is what it is for and stays
+ * open; the form that goes to the network for a package is a person's, and is listed in the gate before the
+ * code that has it, so that there is no release in which an agent could run it.
+ */
+describe('stroq vet and the state gate', () => {
+  it.each([
+    'stroq vet --from x',
+    'stroq vet --from ./skills/pdf-forms --json',
+    'stroq vet --from x --kind mcp',
+    'stroq vet --from x --card',
+    `stroq vet --from x --expect sha256:${'a'.repeat(64)}`,
+    'stroq vet --from x --json --out passport.json',
+    'npx @stroq/cli vet --from x',
+    'stroq vet --help',
+    'stroq vet -h',
+  ])('leaves %s open: it reads a folder', (form) => {
+    expect(isDenied(form), form).toBe(false);
+  });
+
+  it.each([
+    'stroq vet --online',
+    'stroq vet --from x --online',
+    'stroq vet --online --from x',
+    'stroq vet --from x --online=true',
+    'npx @stroq/cli vet --from x --online',
+    'stroq run -- stroq vet --online',
+    'FOO=1 stroq vet --online',
+    'sh -c "stroq vet --from x --online"',
+    'node packages/cli/dist/index.js vet --from x --online',
+  ])('denies %s: it goes to the network', (form) => {
+    expect(isDenied(form), form).toBe(true);
   });
 });
