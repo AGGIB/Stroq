@@ -26,3 +26,29 @@ const FALLBACK = 'correct the field named above, then run stroq policy check aga
 export function fixForField(path: string): string {
   return HINTS.find(([pattern]) => pattern.test(path))?.[1] ?? FALLBACK;
 }
+
+/** The same for the fields of a file of cases (`stroq policy test --cases`). */
+const CASE_HINTS: readonly (readonly [pattern: RegExp, fix: string])[] = [
+  [/^cases$/, 'put at least one case in the file'],
+  [/^cases\.\d+$/, 'a case has id, steps and, for ordinary work, expect; remove any other field'],
+  [/\.id$/, 'give each case an id of its own, 1 to 120 characters'],
+  [
+    /\.expect$/,
+    'a tool call expects allow, ask or deny, a tool result clean or suspect, and the attack at the end is never allowed',
+  ],
+  [
+    /\.event$/,
+    'an event needs session_id, hook_event_name, tool_name and tool_input, as in corpus.json',
+  ],
+  [/\.steps$/, 'a case needs at least one step, and the last one is a tool call (PreToolUse)'],
+  [
+    /\.(?:files|links)$/,
+    'paths are relative to the project folder, with no ..; a link points to __HOME__/... or __CWD__/...',
+  ],
+];
+
+const CASE_FALLBACK = 'correct the field named, then run the command again';
+
+export function fixForCaseField(path: string): string {
+  return CASE_HINTS.find(([pattern]) => pattern.test(path))?.[1] ?? CASE_FALLBACK;
+}

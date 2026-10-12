@@ -53,7 +53,7 @@ const summaryOf = (policy: Policy): PolicySummary => ({
   sha256: policySha256(policy),
 });
 
-function faultsOf(read: Exclude<Loaded, { readonly ok: true }>): readonly Fault[] {
+export function faultsOf(read: Exclude<Loaded, { readonly ok: true }>): readonly Fault[] {
   if (read.problem === 'yaml') {
     const { what, line, code } = read.fault;
     const where = [line === null ? '' : `line ${line}`, code ?? ''].filter((s) => s !== '');

@@ -4,18 +4,12 @@ import { neutralizeControls } from '../terminal-safe.js';
 import { outsideLine } from '../ui/layout.js';
 import { BUILT_IN_READ, checkReport, type CheckReport } from './check.js';
 import { formatCheck } from './check-format.js';
-import { MAX_POLICY_BYTES, readPolicyFile, type Unreadable } from './load.js';
+import { MAX_POLICY_BYTES, readPolicyFile } from './load.js';
+import { describeUnreadable } from './read-text.js';
 
 /** Exit codes: 0 nothing needs attention, 1 a finding or a fault, 2 the file could not be read. */
 const EXIT_FINDINGS = 1;
 const EXIT_UNREADABLE = 2;
-
-const WHY: Readonly<Record<Unreadable, string>> = {
-  missing: 'no such file',
-  'not-a-file': 'not a regular file',
-  'too-large': `is more than ${MAX_POLICY_BYTES / (1024 * 1024)} MiB, more than a policy file is; not read`,
-  unreadable: 'cannot be opened',
-};
 
 /**
  * Whatever reaches the terminal passes through here, even though the program's own output is
@@ -52,7 +46,10 @@ export function runCheckCommand(file: string | undefined, json: boolean): number
       show(report, json, shown);
       return report.ok ? 0 : EXIT_FINDINGS;
     }
-    write(process.stderr, `stroq policy check: ${shown}: ${WHY[read.why]}\n`);
+    write(
+      process.stderr,
+      `stroq policy check: ${shown}: ${describeUnreadable(read.why, MAX_POLICY_BYTES)}\n`,
+    );
     return EXIT_UNREADABLE;
   }
   const report = checkReport({ source: 'file', file: target }, read);

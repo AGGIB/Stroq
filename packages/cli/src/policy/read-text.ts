@@ -31,3 +31,25 @@ export function readBoundedText(
     return { why: unreadableBecause(err) };
   }
 }
+
+const KIB = 1024;
+const MIB = KIB * KIB;
+
+/** `1 MiB`, `256 KiB`: a bound in the unit a person would say it in. */
+export function sizeWords(bytes: number): string {
+  return bytes % MIB === 0 ? `${bytes / MIB} MiB` : `${Math.round(bytes / KIB)} KiB`;
+}
+
+/** Why a file could not be read, in a phrase that follows its path: `<path>: <phrase>`. */
+export function describeUnreadable(why: Unreadable, maxBytes: number): string {
+  switch (why) {
+    case 'missing':
+      return 'no such file';
+    case 'not-a-file':
+      return 'not a regular file';
+    case 'too-large':
+      return `is more than ${sizeWords(maxBytes)}, more than a file of this kind is; not read`;
+    case 'unreadable':
+      return 'cannot be opened';
+  }
+}

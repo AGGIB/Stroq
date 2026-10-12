@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { runCheckCommand } from '../policy/check-command.js';
+import { runTestCommand } from '../policy/test-command.js';
 import { outsideLine } from '../ui/layout.js';
 
 /**
@@ -57,5 +58,13 @@ export async function runPolicy(args: readonly string[]): Promise<number> {
     if (rest.length > 1) return usageError('check takes one file at most');
     return runCheckCommand(rest[0], values.json === true);
   }
-  return usageError('test is not available yet');
+  if (rest.length > 0)
+    return usageError('test takes no file; name the policy with --policy <file>');
+  return runTestCommand({
+    policy: values.policy,
+    baseline: values.baseline,
+    cases: values.cases,
+    maxNewInterruptions: values['max-new-interruptions'],
+    json: values.json === true,
+  });
 }
