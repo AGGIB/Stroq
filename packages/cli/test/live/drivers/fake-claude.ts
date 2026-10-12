@@ -8,6 +8,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EMULATOR_SOURCE } from './fake-claude-emulator.js';
 
 /** What the fake does on one run (the n-th call of the test; the last behaviour repeats). */
 export interface Behaviour {
@@ -25,6 +26,17 @@ export interface Behaviour {
   readonly ignoreTerm?: boolean;
   /** Print this many bytes of junk lines, for ever, until killed. */
   readonly flood?: boolean;
+  /**
+   * Behave as a host with a hook: run the hook command of the settings it was given, and obey it.
+   * `apiKeySource` is what its first message says; `ignoreDeny` runs a command the hook denied;
+   * `protectGit` has its own permission step stop a command that writes below `.git`.
+   */
+  readonly emulate?: {
+    readonly apiKeySource?: string;
+    readonly ignoreDeny?: boolean;
+    readonly protectGit?: boolean;
+    readonly pauseAfterInitMs?: number;
+  };
 }
 
 export interface RecordedCall {
@@ -65,6 +77,11 @@ appendFileSync(
 const index = readFileSync(dir + 'calls.jsonl', 'utf8').split('\\n').filter(Boolean).length - 1;
 const b = scenario.behaviours[Math.min(index, scenario.behaviours.length - 1)] ?? {};
 if (b.ignoreTerm) process.on('SIGTERM', () => undefined);
+if (b.emulate) {
+  const { emulate } = await import('./emulator.mjs');
+  emulate(args, b.emulate);
+  process.exit(0);
+}
 
 const lines = b.lines ?? [];
 for (let i = 0; i < lines.length; i += 1) {
@@ -132,6 +149,7 @@ export function makeFakeClaude(): FakeClaude {
   // An .mjs next to it cannot be: the file is `claude`, and Node reads a file with no extension as
   // CommonJS unless told otherwise, so the package type is told.
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  writeFileSync(join(dir, 'emulator.mjs'), EMULATOR_SOURCE);
   const fake: FakeClaude = {
     dir,
     bin,
