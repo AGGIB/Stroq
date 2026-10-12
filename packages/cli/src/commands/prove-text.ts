@@ -38,7 +38,7 @@ const PROBE_NAMES: Readonly<Record<string, string>> = {
 const baseIdOf = (id: string): string =>
   isControlId(id) ? id.slice(0, id.length - CONTROL_SUFFIX.length) : id;
 
-const probeName = (id: string): string => {
+export const probeName = (id: string): string => {
   const base = baseIdOf(id);
   return Object.hasOwn(PROBE_NAMES, base) ? (PROBE_NAMES[base] ?? '') : outsideLine(base);
 };

@@ -166,6 +166,51 @@ export function notRunReport(
   };
 }
 
+const adviceFor1 = (reason: string): string[] => {
+  const found = ADVICE_BY_REASON.find(([each]) => each === reason);
+  return found === undefined ? [] : [found[1]];
+};
+
+/** An agent there is no driver for: the table's reason, if it gives one, and what can be checked. */
+export function unsupportedReport(
+  agent: string,
+  reason: string | undefined,
+  supported: readonly string[],
+): ProveReport {
+  return notRunReport(
+    agent,
+    'unsupported',
+    null,
+    `there is no live check for ${agent} yet${reason === undefined ? '' : ` (${reason})`}`,
+    [`Only ${supported.join(', ')} can be checked today.`],
+  );
+}
+
+export const windowsReport = (agent: string): ProveReport =>
+  notRunReport(agent, 'unsupported', null, 'the live check does not run on Windows yet', [
+    'Run it on macOS or Linux; Windows is not covered yet.',
+  ]);
+
+/** The host is not there: what the driver said, and how to get it. */
+export const hostNotFoundReport = (agent: string, note: string | undefined): ProveReport =>
+  notRunReport(
+    agent,
+    'not-attempted',
+    null,
+    note ?? 'the host was not found',
+    adviceFor1(REASONS.hostNotFound),
+  );
+
+export const declinedReport = (agent: string, hostVersion: string | null): ProveReport =>
+  notRunReport(agent, 'not-attempted', hostVersion, 'you did not agree to the requests', [
+    'Nothing was done.',
+  ]);
+
+export const dryRunReport = (agent: string, hostVersion: string | null): ProveReport =>
+  notRunReport(agent, 'not-attempted', hostVersion, 'dry run: no request was made', [
+    'Run stroq prove --yes to make the check.',
+  ]);
+
 /** 0 for a live check that verified, 1 for one that failed, 3 for every other way of not knowing. */
 export function exitCodeOf(report: ProveReport): number {
   if (report.mode !== 'live') return EXIT_NOT_VERIFIED;
