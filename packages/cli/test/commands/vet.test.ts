@@ -3,7 +3,14 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PassportSchema, type Passport } from '../../src/install/types.js';
 import { removeTempRoots, tempRoot, writeFiles } from '../helpers/install-dir.js';
-import { folder, mcpFolder, pluginFolder, skillFolder, vet } from '../helpers/vet-world.js';
+import {
+  folder,
+  mcpFolder,
+  PLATFORM_NOTE,
+  pluginFolder,
+  skillFolder,
+  vet,
+} from '../helpers/vet-world.js';
 
 afterEach(removeTempRoots);
 
@@ -28,7 +35,9 @@ describe('stroq vet --from <skill folder>', () => {
     expect(lines[0]).toBe(
       'skill pdf-forms 1.2.0 (name and version declared by the artifact, not checked)',
     );
-    expect(lines[1]).toBe(`stroq-tree/1 sha256:${SKILL_DIGEST}  4 files, 945 bytes`);
+    expect(lines[1]).toBe(
+      `stroq-tree/1 sha256:${SKILL_DIGEST}  4 files, 945 bytes${PLATFORM_NOTE}`,
+    );
   });
 
   it('puts the lines that are sensitive first, each with its basis, kind, subject and first place', async () => {
@@ -84,12 +93,23 @@ describe('stroq vet --from <skill folder>', () => {
     expect(run.stdout).not.toContain(dirname(dir));
   });
 
-  it('prints the same lines as a golden file, for the folder of the inspector tests', async () => {
+  // The golden screen is one of a platform that has the executable bit: Windows adds a note and a blind spot.
+  it.skipIf(process.platform === 'win32')(
+    'prints the same lines as a golden file, for the folder of the inspector tests',
+    async () => {
+      const golden = readFileSync(new URL('./golden/vet-pdf-skill.txt', import.meta.url), 'utf8');
+
+      const run = await vet(['--from', skillFolder()]);
+
+      expect(run.stdout).toBe(golden);
+    },
+  );
+
+  it('is the screen that the guide shows for it, so that the guide cannot drift from the command', () => {
     const golden = readFileSync(new URL('./golden/vet-pdf-skill.txt', import.meta.url), 'utf8');
+    const guide = readFileSync(new URL('../../../../docs/GUIDE.md', import.meta.url), 'utf8');
 
-    const run = await vet(['--from', skillFolder()]);
-
-    expect(run.stdout).toBe(golden);
+    expect(guide).toContain(`\`\`\`text\n${golden}\`\`\``);
   });
 
   it('names the folder when the artifact does not name itself', async () => {

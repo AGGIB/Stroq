@@ -32,7 +32,7 @@ describe('the built CLI: stroq vet', () => {
     expect(lines[0]).toBe(
       'skill pdf-forms 1.2.0 (name and version declared by the artifact, not checked)',
     );
-    expect(lines[1]).toMatch(/^stroq-tree\/1 sha256:[0-9a-f]{64} {2}4 files, 945 bytes$/);
+    expect(lines[1]).toMatch(/^stroq-tree\/1 sha256:[0-9a-f]{64} {2}4 files, 945 bytes( \(.*\))?$/);
     expect(lines.at(-2)).toBe(
       'This is a reading of the files, not a security certificate: an absent line means nothing was seen, not that nothing is there.',
     );

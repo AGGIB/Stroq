@@ -369,7 +369,7 @@ SENSITIVE (8)
 OTHER (6)
   [declared] allowed-tools  Grep                       SKILL.md:5
   [declared] allowed-tools  Read                       SKILL.md:5
-  and 4 more lines not shown; stroq vet --json lists all of them
+  and 4 more lines not shown (4 other); stroq vet --json lists all of them
 SIGNALS (1): process-spawn
 BLIND SPOTS (6), what was not looked at
   - 1 code block in markdown without a language tag was not read as shell

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { stableStringify } from '@stroq/core';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -96,7 +96,8 @@ describe('stroq vet --json', () => {
   });
 });
 
-describe('stroq vet --expect', () => {
+// `--expect` is refused on Windows for a folder, so the cases that expect it to work are for the other platforms.
+describe.skipIf(process.platform === 'win32')('stroq vet --expect', () => {
   it('exits 0 when the digest is the one of the files, bare or written as sha256:<hex>, and says so on the digest line', async () => {
     const dir = skillFolder();
     const bare = await vet(['--from', dir, '--expect', SKILL_DIGEST]);
@@ -143,11 +144,14 @@ describe('stroq vet --expect', () => {
     expect(run.code).toBe(1);
     expect(await vet(['--from', skillFolder(), '--json', '--out', out])).toMatchObject({ code: 0 });
   });
+});
 
+describe('stroq vet --expect, where it is refused or not understood', () => {
   it('exits 2 on Windows, before it reads anything, and says why', async () => {
-    const run = await vet(['--from', skillFolder(), '--expect', SKILL_DIGEST], {
-      platform: 'win32',
-    });
+    // A folder that is not there would be exit 3 if it were read first.
+    const missing = join(tempRoot('empty'), 'not-there');
+
+    const run = await vet(['--from', missing, '--expect', SKILL_DIGEST], { platform: 'win32' });
 
     expect(run.code).toBe(2);
     expect(run.stdout).toBe('');
@@ -162,12 +166,29 @@ describe('stroq vet --expect', () => {
     expect(run.stderr).toContain('--expect');
   });
 
-  it('judges the digest of a folder read as Windows reads it, which has no executable bit, as another digest, and says so', async () => {
-    const dir = skillFolder();
-    const asWindows = await vet(['--from', dir], { platform: 'win32' });
+  it('says a folder read as Windows reads it has a digest that depends on the platform', async () => {
+    const asWindows = await vet(['--from', skillFolder()], { platform: 'win32' });
 
     expect(asWindows.code).toBe(0);
     expect(asWindows.stdout.split('\n')[1]).toContain('(platform-dependent: no executable bit)');
     expect(asWindows.stdout).toContain('executable bit not available on this platform');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'gives another digest for a folder with a program in it when it is read without the executable bit, which is why --expect is refused there',
+    async () => {
+      const dir = skillFolder();
+      chmodSync(join(dir, 'scripts', 'fill.py'), 0o755);
+      const digestOf = async (platform?: NodeJS.Platform) =>
+        PassportSchema.parse(
+          JSON.parse((await vet(['--from', dir, '--json'], platform ? { platform } : {})).stdout),
+        ).artifact.digest;
+
+      const here = await digestOf();
+      const asWindows = await digestOf('win32');
+
+      expect(here).not.toBe(SKILL_DIGEST);
+      expect(asWindows).toBe(SKILL_DIGEST);
+    },
+  );
 });

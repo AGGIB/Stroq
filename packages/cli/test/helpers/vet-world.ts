@@ -72,3 +72,11 @@ export const pluginFolder = (name = 'formatter-fixture'): string =>
  */
 export const RAW_UNSAFE =
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
+
+/**
+ * What the digest line carries where a folder is read without an executable bit (Windows): the tests that
+ * run on every platform expect it there and not elsewhere. The ones that compare a whole screen with a
+ * file, or use `--expect`, are for the platforms that have the bit.
+ */
+export const PLATFORM_NOTE =
+  process.platform === 'win32' ? ' (platform-dependent: no executable bit)' : '';

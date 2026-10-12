@@ -15,23 +15,27 @@ async function passportOf(dir: string): Promise<Passport> {
 }
 
 describe('stroq vet --card', () => {
-  it('prints a snippet for a README: the name, the digest, the counts, the command that reproduces it', async () => {
-    const dir = skillFolder();
-    const passport = await passportOf(dir);
-    const run = await vet(['--from', dir, '--card']);
-    const sensitive = passport.lines.filter((line) => line.sensitive).length;
+  // Reproducing needs `--expect`, which a folder read on Windows cannot have (the test below holds that case).
+  it.skipIf(process.platform === 'win32')(
+    'prints a snippet for a README: the name, the digest, the counts, the command that reproduces it',
+    async () => {
+      const dir = skillFolder();
+      const passport = await passportOf(dir);
+      const run = await vet(['--from', dir, '--card']);
+      const sensitive = passport.lines.filter((line) => line.sensitive).length;
 
-    expect(run.code, run.stderr).toBe(0);
-    expect(run.stdout).toContain('`pdf-forms`');
-    expect(run.stdout).toContain(`\`stroq-tree/1 sha256:${SKILL_DIGEST}\``);
-    expect(run.stdout).toContain(`${sensitive} sensitive lines of ${passport.lines.length}`);
-    expect(run.stdout).toContain(`${passport.signals.length} signal`);
-    expect(run.stdout).toContain(`${passport.blindSpots.length} blind spots`);
-    expect(run.stdout).toContain(
-      `Reproduce: \`stroq vet --from <dir> --expect sha256:${SKILL_DIGEST}\``,
-    );
-    expect(run.stdout.trimEnd().endsWith('Not a security certificate.')).toBe(true);
-  });
+      expect(run.code, run.stderr).toBe(0);
+      expect(run.stdout).toContain('`pdf-forms`');
+      expect(run.stdout).toContain(`\`stroq-tree/1 sha256:${SKILL_DIGEST}\``);
+      expect(run.stdout).toContain(`${sensitive} sensitive lines of ${passport.lines.length}`);
+      expect(run.stdout).toContain(`${passport.signals.length} signal`);
+      expect(run.stdout).toContain(`${passport.blindSpots.length} blind spots`);
+      expect(run.stdout).toContain(
+        `Reproduce: \`stroq vet --from <dir> --expect sha256:${SKILL_DIGEST}\``,
+      );
+      expect(run.stdout.trimEnd().endsWith('Not a security certificate.')).toBe(true);
+    },
+  );
 
   it('holds nothing of the artifact beyond its name and the counts: no subject, no place, no detector, no blind spot', async () => {
     const dir = skillFolder();

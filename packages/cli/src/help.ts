@@ -377,7 +377,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     synopsis:
       'vet --from <dir> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
     about: [
-      'read a skill, an MCP server or a plugin folder BEFORE you add it, and show its passport: what it asks',
+      'read a skill, an MCP server or a plugin folder before you add it, and show its passport: what it asks',
       'for or can do, each line marked declared, observed, limited or unknown, the rules that matched, and',
       'every blind spot. The files are read and none of them is run. A reading, not a security certificate:',
       'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is',

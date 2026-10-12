@@ -124,11 +124,14 @@ function aligned(rows: readonly Row[]): string[] {
   );
 }
 
-/** The plural-aware words for what was left out, with how many of it was sensitive. */
+/** What was left out, and how much of it was sensitive: the one place a screen says it is not the whole passport. */
 function moreLine(hidden: readonly PassportLine[]): string {
   const sensitive = hidden.filter((line) => line.sensitive).length;
-  const of = sensitive > 0 ? ` (${sensitive} of them sensitive)` : '';
-  return `  and ${count(hidden.length, 'more line')} not shown${of}; stroq vet --json lists all of them`;
+  const kinds = [
+    ...(sensitive > 0 ? [`${sensitive} sensitive`] : []),
+    ...(hidden.length > sensitive ? [`${hidden.length - sensitive} other`] : []),
+  ];
+  return `  and ${count(hidden.length, 'more line')} not shown (${kinds.join(', ')}); stroq vet --json lists all of them`;
 }
 
 function signalsLine(passport: Passport): string {
@@ -173,7 +176,8 @@ export function renderPassport(passport: Passport, options: RenderOptions = {}):
   const inSensitive = Math.min(shown, sensitive.length);
   if (sensitive.length > 0)
     body.push(`SENSITIVE (${sensitive.length})`, ...rows.slice(0, inSensitive));
-  if (plain.length > 0) body.push(`OTHER (${plain.length})`, ...rows.slice(inSensitive));
+  // A group none of whose lines fit has no heading above nothing: the line about what was left out says it.
+  if (shown > sensitive.length) body.push(`OTHER (${plain.length})`, ...rows.slice(inSensitive));
   if (shown < ordered.length) body.push(moreLine(ordered.slice(shown)));
   return [...head, ...body, ...tail].join('\n') + '\n';
 }
