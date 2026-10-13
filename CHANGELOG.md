@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Six commands the classifier let through are caught, from the first outside contribution (thanks, @Nari-Ab, #147).** `rm -rf .*` and `rm -rf ./.*` delete every dotfile of the folder (`.git`, `.env`, the agent's settings) and had no class; they are a dangerous delete now. PowerShell takes `/` as well as `-` before a flag, so `powershell /EncodedCommand …`, `certutil /urlcache` and `bitsadmin -transfer` are read as the encoded execution and the download they are. On a server reached by `ssh`, `docker compose down --volumes` is destructive like `-v`, and a bare `cd` goes back to the login directory, so a relative `rm -rf` after it is judged there. A working tree given with a trailing slash no longer makes every path in it look outside, and a working tree of `/` (or none) holds no absolute path, so `rm -rf /etc` from `/` stays dangerous.
+
 ## [0.25.0] - 2026-10-13
 
 ### Added
