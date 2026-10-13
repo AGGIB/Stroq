@@ -49,7 +49,11 @@ const LockSchema = PassportLockSchema.extend({
 });
 const OPAQUE_MCP = Symbol('opaque MCP JSON');
 export type Passports = z.infer<typeof LockSchema> & {
-  readonly [OPAQUE_MCP]?: { json: string; parsed: string };
+  readonly [OPAQUE_MCP]?: {
+    json: string;
+    parsed: string;
+    value: z.infer<typeof LockSchema>['mcp'];
+  };
 };
 
 /** An invalid lock never becomes an empty lock: that would discard the owner's confirmations. */
@@ -69,7 +73,11 @@ export async function readPassports(home: string): Promise<Passports> {
     const json = rawMember(read.text, 'mcp');
     if (raw.mcp !== undefined && json !== undefined) {
       // Preserve the original object too: z.record does not retain an own __proto__ key.
-      return { ...checked, mcp: raw.mcp, [OPAQUE_MCP]: { json, parsed: JSON.stringify(raw.mcp) } };
+      return {
+        ...checked,
+        mcp: raw.mcp,
+        [OPAQUE_MCP]: { json, parsed: JSON.stringify(raw.mcp), value: raw.mcp },
+      };
     }
     return checked;
   } catch {
@@ -81,7 +89,7 @@ export async function writePassports(home: string, lock: Passports): Promise<voi
   const checked = LockSchema.parse(lock);
   const opaque = lock[OPAQUE_MCP];
   const mcp =
-    opaque !== undefined && JSON.stringify(lock.mcp) === opaque.parsed
+    opaque !== undefined && lock.mcp === opaque.value && JSON.stringify(lock.mcp) === opaque.parsed
       ? opaque.json
       : JSON.stringify(lock.mcp ?? {});
   const text = `{\n  "v": 1,\n  "skills": ${JSON.stringify(checked.skills, null, 2)},\n  "mcp": ${mcp}\n}\n`;

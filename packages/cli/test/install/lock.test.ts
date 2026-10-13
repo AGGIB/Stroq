@@ -60,4 +60,13 @@ describe('versioned passports lock', () => {
       writePassports(f.home, { ...lock, mcp: { huge: 'x'.repeat(MAX_PASSPORT_LOCK_BYTES) } }),
     ).rejects.toThrow(/read limit/);
   });
+
+  it('reserializes an explicitly replaced map even when JS serialization aliases numeric values', async () => {
+    const f = await fixture();
+    await writeFile(f.file, '{"v":1,"mcp":{"old":1e999}}');
+    const lock = await readPassports(f.home);
+    await writePassports(f.home, { ...lock, mcp: { old: null } });
+    expect(await readFile(f.file, 'utf8')).not.toContain('1e999');
+    expect(JSON.parse(await readFile(f.file, 'utf8')).mcp).toEqual({ old: null });
+  });
 });
