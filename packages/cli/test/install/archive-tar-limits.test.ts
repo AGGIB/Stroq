@@ -205,3 +205,62 @@ describe('the extended headers', () => {
     expect(refusal(tarOf([blocks])).code).toBe('limit');
   });
 });
+
+describe('the time it takes grows with the size of the archive and no faster', () => {
+  /**
+   * Each shape is read at a quarter of the entries a tree may have and at all of them, in processor time (never
+   * the wall clock), the least of three tries each, because noise only adds. Linear work takes about four
+   * times as long for four times the entries and quadratic work sixteen; only a time that is both slow and
+   * growing faster than that fails, since a time alone does not work on a shared runner.
+   */
+  const SMALL = LIMITS.maxEntries / 4;
+  const BOUND_MS = 500;
+  const MAX_GROWTH = 11;
+  const TRIES = 3;
+
+  const SHAPES: readonly (readonly [string, (count: number) => TarEntry[]])[] = [
+    ['files of no size', (count) => empties(count)],
+    [
+      'files with names near the longest, in pax records',
+      (count) =>
+        Array.from({ length: count }, (_, i) => ({
+          name: `pkg/${'n'.repeat(200)}${i}.txt`,
+          via: 'pax' as const,
+        })),
+    ],
+    [
+      'files with a little data in each',
+      (count) =>
+        Array.from({ length: count }, (_, i) => ({
+          name: `pkg/f${i}.txt`,
+          data: 'x'.repeat(1000),
+        })),
+    ],
+    [
+      'folders, which are counted and not kept',
+      (count) => [
+        ...Array.from({ length: count }, (_, i) => ({ name: `pkg/d${i}/`, typeflag: '5' })),
+        { name: 'pkg/a.txt', data: 'x' },
+      ],
+    ],
+  ];
+
+  function leastTime(bytes: Uint8Array): number {
+    let least = Infinity;
+    for (let tries = 0; tries < TRIES; tries += 1) {
+      const started = cpuNow();
+      readTarArchive(bytes);
+      least = Math.min(least, cpuNow() - started);
+    }
+    return least;
+  }
+
+  it.each(SHAPES)('does not slow down faster than it grows: %s', (_label, shape) => {
+    const small = leastTime(tarOf(shape(SMALL)));
+    const large = leastTime(tarOf(shape(LIMITS.maxEntries)));
+
+    expect(large > BOUND_MS && large > MAX_GROWTH * small, `${small} ms then ${large} ms`).toBe(
+      false,
+    );
+  });
+});

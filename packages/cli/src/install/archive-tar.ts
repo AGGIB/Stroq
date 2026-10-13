@@ -131,12 +131,24 @@ function takePending(walk: Walk): Pending | null {
   return pending;
 }
 
+/** How many components a name has, counted without splitting it. */
+function depthOf(path: string): number {
+  let depth = 1;
+  for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) depth += 1;
+  return depth;
+}
+
 function addFile(walk: Walk, header: TarHeader): void {
   const pending = takePending(walk);
   const path = pending?.path ?? decodeName(header.nameBytes);
   const size = pending?.size ?? header.size;
   if (path.endsWith('/'))
     throw new ArchiveError('refused', 'a file in the archive has a trailing slash in its name');
+  // The wrapping folder is not known yet, and takes one component off: past that many a path is too deep
+  // whatever is taken off it. The exact depth is the tree's to judge.
+  if (depthOf(path) > LIMITS.maxDepth + 1) {
+    throw overLimit(`a path in the archive is deeper than ${LIMITS.maxDepth} components`);
+  }
   const { limits } = walk;
   if (walk.files.length >= limits.maxEntries) {
     throw overLimit(`the archive has more than ${limits.maxEntries} files`);
