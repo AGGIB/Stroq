@@ -156,7 +156,7 @@ const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants
 const OWNER_EXECUTE = 0o100;
 
 const where = (rel: string): string => (rel === '' ? 'the folder' : quotePath(rel));
-const errnoOf = (error: unknown): string => {
+export const errnoOf = (error: unknown): string => {
   const code = (error as { code?: unknown } | null)?.code;
   // Only a code written like an errno is repeated: the rest of an error may hold a path.
   return typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,15}$/.test(code) ? code : 'ERR';

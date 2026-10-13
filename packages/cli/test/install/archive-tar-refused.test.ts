@@ -37,9 +37,17 @@ const rawNamed = (name: Uint8Array, data = ''): Uint8Array =>
 
 describe('an archive that is not a tar archive', () => {
   it.each([
-    ['a zip file', concat([new Uint8Array([0x50, 0x4b, 0x03, 0x04]), new Uint8Array(600).fill(7)]), /zip/],
+    [
+      'a zip file',
+      concat([new Uint8Array([0x50, 0x4b, 0x03, 0x04]), new Uint8Array(600).fill(7)]),
+      /zip/,
+    ],
     ['a short zip file', new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]), /zip/],
-    ['an xz file', concat([new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]), new Uint8Array(600)]), /xz/],
+    [
+      'an xz file',
+      concat([new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]), new Uint8Array(600)]),
+      /xz/,
+    ],
     ['text', text('hello world, this is not an archive. '.repeat(30)), /not a tar archive/],
     ['a few bytes', text('hello'), /not a tar archive/],
     ['bytes that are all ones', new Uint8Array(1024).fill(0xff), /not a tar archive/],
@@ -68,7 +76,13 @@ describe('an archive with no files', () => {
   it.each([
     ['no bytes at all', new Uint8Array(0)],
     ['nothing but the end marker', tarOf([])],
-    ['only folders', tarOf([{ name: 'pkg/', typeflag: '5' }, { name: 'pkg/empty/', typeflag: '5' }])],
+    [
+      'only folders',
+      tarOf([
+        { name: 'pkg/', typeflag: '5' },
+        { name: 'pkg/empty/', typeflag: '5' },
+      ]),
+    ],
     ['a gzip of nothing', gzip(new Uint8Array(0))],
     ['a gzip of the end marker', tgzOf([])],
   ])('says it has no files: %s', (_label, bytes) => {
@@ -133,7 +147,11 @@ describe('a header that does not hold together', () => {
   });
 
   it('refuses data after the end of the archive, however little', () => {
-    for (const tail of [[1], [0, 0, 1], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]]) {
+    for (const tail of [
+      [1],
+      [0, 0, 1],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+    ]) {
       const bytes = tarOf([GOOD], { after: concat([new Uint8Array(1000), new Uint8Array(tail)]) });
 
       const error = refusal(bytes);
@@ -165,7 +183,10 @@ describe('a header that does not hold together', () => {
 
 describe('data that is cut short', () => {
   it('refuses a file whose data ends before its size says', () => {
-    const bytes = concat([headerBlock({ name: 'pkg/a.txt', size: 1000 }), new Uint8Array(600).fill(0x61)]);
+    const bytes = concat([
+      headerBlock({ name: 'pkg/a.txt', size: 1000 }),
+      new Uint8Array(600).fill(0x61),
+    ]);
 
     const error = refusal(bytes);
 
@@ -174,7 +195,10 @@ describe('data that is cut short', () => {
   });
 
   it('refuses a file whose data is all there and whose padding is not', () => {
-    const bytes = concat([headerBlock({ name: 'pkg/a.txt', size: 600 }), new Uint8Array(600).fill(0x61)]);
+    const bytes = concat([
+      headerBlock({ name: 'pkg/a.txt', size: 600 }),
+      new Uint8Array(600).fill(0x61),
+    ]);
 
     expect(refusal(bytes).message).toMatch(/ends inside the data of a file/);
   });
@@ -249,7 +273,7 @@ describe('what an extended header may say', () => {
     ['a record with no newline', '9 path=ab'],
     ['a record with no length', 'path=a\n'],
     ['a record with no key', '6 =ab\n'],
-    ['padding after the last record', '12 path=a.txt\n\0\0'],
+    ['padding after the last record', '14 path=a.txt\n\0\0'],
     ['a length with too many digits', '00000000000012 path=a\n'],
   ])('refuses %s', (_label, records) => {
     const bytes = tarOf([concat(paxBlocks(text(records))), { name: 'x', data: 'x' }]);
@@ -369,7 +393,12 @@ describe('a name that is not safe', () => {
   });
 
   it('refuses a name that is a ../ below the folder that is taken off', () => {
-    const error = refusal(tarOf([{ name: 'pkg/ok.txt', data: 'x' }, { name: 'pkg/../escape.txt', data: 'x' }]));
+    const error = refusal(
+      tarOf([
+        { name: 'pkg/ok.txt', data: 'x' },
+        { name: 'pkg/../escape.txt', data: 'x' },
+      ]),
+    );
 
     expect(error.message).toMatch(/'\.' or '\.\.' component/);
   });
@@ -387,11 +416,19 @@ describe('a name that is not safe', () => {
     expect(error.message).toContain('\\u202e');
   });
 
-  it('refuses a name with a trailing slash on a file', () => {
-    const error = refusal(tarOf([{ name: 'pkg/dir/', data: 'x' }]));
+  it('refuses a name with a trailing slash on a file, with data or without', () => {
+    // Without data this is how the v7 format writes a folder, which has no type of its own: it is refused too.
+    for (const data of ['x', '']) {
+      const error = refusal(
+        tarOf([
+          { name: 'pkg/dir/', data },
+          { name: 'pkg/ok.txt', data: 'y' },
+        ]),
+      );
 
-    expect(error.code).toBe('refused');
-    expect(error.message).toMatch(/trailing slash/);
+      expect(error.code, JSON.stringify(data)).toBe('refused');
+      expect(error.message, JSON.stringify(data)).toMatch(/trailing slash/);
+    }
   });
 
   it.each([
@@ -406,12 +443,18 @@ describe('a name that is not safe', () => {
       rawNamed(named, 'x'),
       concat(paxBlocks(paxRecord('path', named))),
       concat([
-        headerBlock({ name: '././@LongLink', typeflag: 'L', size: named.length + 1, format: 'gnu' }),
+        headerBlock({
+          name: '././@LongLink',
+          typeflag: 'L',
+          size: named.length + 1,
+          format: 'gnu',
+        }),
         dataBlocks(concat([named, new Uint8Array(1)])),
       ]),
     ];
     for (const [at, carrier] of carriers.entries()) {
-      const entries = at === 0 ? [carrier] : [carrier, { name: 'placeholder', data: 'x' } as TarEntry];
+      const entries =
+        at === 0 ? [carrier] : [carrier, { name: 'placeholder', data: 'x' } as TarEntry];
 
       const error = refusal(tarOf(entries));
 
@@ -441,7 +484,9 @@ describe('a name that is not safe', () => {
   it('refuses a path deeper than the tree allows', () => {
     const deep = `${Array.from({ length: 24 }, (_, i) => `d${i}`).join('/')}/f.txt`;
 
-    expect(refusal(tarOf([{ name: deep, data: 'x', via: 'pax' }])).message).toMatch(/deeper than 20/);
+    expect(refusal(tarOf([{ name: deep, data: 'x', via: 'pax' }])).message).toMatch(
+      /deeper than 20/,
+    );
   });
 
   it('refuses a GNU long name of 100 KiB as over the limit, without reading it', () => {
@@ -463,7 +508,12 @@ describe('a name that is not safe', () => {
 
 describe('names that are not names of different files', () => {
   it('refuses a path that is given twice, and says it once, with the name quoted', () => {
-    const error = refusal(tarOf([{ name: 'pkg/a.txt', data: 'one' }, { name: 'pkg/a.txt', data: 'two' }]));
+    const error = refusal(
+      tarOf([
+        { name: 'pkg/a.txt', data: 'one' },
+        { name: 'pkg/a.txt', data: 'two' },
+      ]),
+    );
 
     expect(error.code).toBe('refused');
     expect(error.treeCode).toBe('duplicate-path');
@@ -473,7 +523,10 @@ describe('names that are not names of different files', () => {
 
   it('refuses a path given twice when the second is written another way', () => {
     const error = refusal(
-      tarOf([{ name: 'pkg/a.txt', data: 'one' }, { name: 'ignored', data: 'two', via: 'pax', pax: { path: 'pkg/a.txt' } }]),
+      tarOf([
+        { name: 'pkg/a.txt', data: 'one' },
+        { name: 'ignored', data: 'two', pax: { path: 'pkg/a.txt' } },
+      ]),
     );
 
     expect(error.message).toMatch(/twice/);
@@ -484,23 +537,39 @@ describe('names that are not names of different files', () => {
     ['a composed and a decomposed letter', 'pkg/\u00e9.md', 'pkg/e\u0301.md'],
     ['two folders spelled two ways', 'pkg/Docs/a.md', 'pkg/docs/b.md'],
   ])('refuses %s, because a disk that ignores them would merge the two', (_label, one, two) => {
-    const error = refusal(tarOf([{ name: one, data: '1' }, { name: two, data: '2' }]));
+    const error = refusal(
+      tarOf([
+        { name: one, data: '1' },
+        { name: two, data: '2' },
+      ]),
+    );
 
     expect(error.code).toBe('refused');
     expect(error.treeCode).toBe('path-collision');
-    expect(error.message).toMatch(/one name on a filesystem that ignores letter case or Unicode form/);
+    expect(error.message).toMatch(
+      /one name on a filesystem that ignores letter case or Unicode form/,
+    );
     expect(error.message).not.toContain('README');
   });
 
   it('refuses a file that is also the folder of another', () => {
-    const error = refusal(tarOf([{ name: 'a', data: '1' }, { name: 'a/b', data: '2' }]));
+    const error = refusal(
+      tarOf([
+        { name: 'a', data: '1' },
+        { name: 'a/b', data: '2' },
+      ]),
+    );
 
     expect(error.code).toBe('refused');
     expect(error.treeCode).toBe('path-conflict');
   });
 
   it('takes a folder entry for a folder, and refuses the file of the same name beside it', () => {
-    const bytes = tarOf([{ name: 'pkg/a/', typeflag: '5' }, { name: 'pkg/a/b.txt', data: 'x' }, { name: 'pkg/a', data: 'y' }]);
+    const bytes = tarOf([
+      { name: 'pkg/a/', typeflag: '5' },
+      { name: 'pkg/a/b.txt', data: 'x' },
+      { name: 'pkg/a', data: 'y' },
+    ]);
 
     expect(refusal(bytes).treeCode).toMatch(/path-conflict|path-collision/);
   });

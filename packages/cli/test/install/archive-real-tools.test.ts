@@ -31,6 +31,7 @@ function runs(command: string, args: readonly string[]): boolean {
 
 const hasNpm = !isWindows && runs('npm', ['--version']);
 const hasGit = !isWindows && runs('git', ['--version']);
+const hasPython = !isWindows && runs('python3', ['-I', '--version']);
 const tarVersion = isWindows
   ? ''
   : (spawnSync('tar', ['--version'], { encoding: 'utf8' }).stdout ?? '');
@@ -69,13 +70,18 @@ function run(command: string, args: readonly string[], cwd: string, home: string
 // The folder every tool is given
 // ---------------------------------------------------------------------------------------------
 
+/** A folder and a file with letters outside ASCII in their names, made from code points. */
+const UNICODE_FOLDER = `${String.fromCodePoint(0xfc)}ber`;
+const UNICODE_FILE = `docs/${UNICODE_FOLDER}/caf${String.fromCodePoint(0xe9)}.md`;
+
 const SHORT = {
-  'package.json': '{\n  "name": "fixture-skill",\n  "version": "1.0.0",\n  "bin": { "run": "bin/run.sh" }\n}\n',
+  'package.json':
+    '{\n  "name": "fixture-skill",\n  "version": "1.0.0",\n  "bin": { "run": "bin/run.sh" }\n}\n',
   'README.md': '# fixture\n\nA skill for the tests of the archive reader.\n',
   'index.js': 'module.exports = 1;\n',
   'bin/run.sh': '#!/bin/sh\necho hi\n',
   'docs/guide.md': 'guide\n',
-  'docs/über/café.md': 'unicode names are bytes\n',
+  [UNICODE_FILE]: 'unicode names are bytes\n',
   'data/empty.txt': '',
 };
 const DEEP = `${'folder-with-a-longish-name/'.repeat(5)}deep.txt`;
@@ -99,9 +105,9 @@ async function expectSameAsFolder(archive: string, folder: string, top?: string)
   const read = await readArchiveFile(archive);
   const expected = await folderTree(folder);
 
-  expect(read.tree.entries.map((entry) => [entry.path, entry.kind, entry.exec, entry.size])).toEqual(
-    expected.entries.map((entry) => [entry.path, entry.kind, entry.exec, entry.size]),
-  );
+  expect(
+    read.tree.entries.map((entry) => [entry.path, entry.kind, entry.exec, entry.size]),
+  ).toEqual(expected.entries.map((entry) => [entry.path, entry.kind, entry.exec, entry.size]));
   expect(treeDigest(read.tree)).toBe(treeDigest(expected));
   expect(read.blindSpots).toEqual([]);
   if (top !== undefined) expect(read.topFolder).toBe(top);
@@ -153,7 +159,10 @@ describe.skipIf(!hasGit)('an archive from git archive', () => {
       [LONG_BASENAME]: 'a name too long for the header, which git writes as a pax record\n',
     });
     const home = tempRoot('git-home');
-    writeFileSync(join(home, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n');
+    writeFileSync(
+      join(home, 'gitconfig'),
+      '[user]\n\tname = Test\n\temail = test@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n',
+    );
     run('git', ['init', '--quiet'], work, home);
     run('git', ['add', '--all'], work, home);
     run('git', ['commit', '--quiet', '--message', 'fixture'], work, home);
@@ -163,35 +172,58 @@ describe.skipIf(!hasGit)('an archive from git archive', () => {
   it.each([
     ['tar.gz', 'archive.tgz'],
     ['tar', 'archive.tar'],
-  ])('gives the digest of the work tree for --format=%s, and the folder the commit is wrapped in', async (format, name) => {
-    const { work, home } = repository();
-    const out = join(tempRoot('git-out'), name);
+  ])(
+    'gives the digest of the work tree for --format=%s, and the folder the commit is wrapped in',
+    async (format, name) => {
+      const { work, home } = repository();
+      const out = join(tempRoot('git-out'), name);
 
-    run('git', ['archive', `--format=${format}`, `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD'], work, home);
+      run(
+        'git',
+        ['archive', `--format=${format}`, `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD'],
+        work,
+        home,
+      );
 
-    await expectSameAsFolder(out, work, COMMIT_PREFIX.slice(0, -1));
-  });
+      await expectSameAsFolder(out, work, COMMIT_PREFIX.slice(0, -1));
+    },
+  );
 
   it('reads the global header that git writes, which holds the commit, and keeps nothing of it', async () => {
     const { work, home } = repository();
     const out = join(tempRoot('git-out'), 'archive.tar');
-    run('git', ['archive', '--format=tar', `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD'], work, home);
+    run(
+      'git',
+      ['archive', '--format=tar', `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD'],
+      work,
+      home,
+    );
 
     const bytes = new Uint8Array(readFileSync(out));
     const text = new TextDecoder('latin1').decode(bytes.subarray(0, 2048));
 
     expect(text).toMatch(/comment=[0-9a-f]{40}/);
-    expect(readTarArchive(bytes).tree.entries.map((entry) => entry.path)).not.toContain('pax_global_header');
+    expect(readTarArchive(bytes).tree.entries.map((entry) => entry.path)).not.toContain(
+      'pax_global_header',
+    );
   });
 
   it('reads an archive of a subdirectory, where the prefix is the only wrapper', async () => {
     const { work, home } = repository();
     const out = join(tempRoot('git-out'), 'docs.tgz');
 
-    run('git', ['archive', '--format=tar.gz', `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD:docs'], work, home);
+    run(
+      'git',
+      ['archive', '--format=tar.gz', `--prefix=${COMMIT_PREFIX}`, `--output=${out}`, 'HEAD:docs'],
+      work,
+      home,
+    );
 
     const read = await readArchiveFile(out);
-    expect(read.tree.entries.map((entry) => entry.path)).toEqual(['guide.md', 'über/café.md']);
+    expect(read.tree.entries.map((entry) => entry.path)).toEqual([
+      'guide.md',
+      UNICODE_FILE.slice('docs/'.length),
+    ]);
   });
 });
 
@@ -206,35 +238,70 @@ interface TarFormat {
   readonly longNames: boolean;
 }
 
+// The v7 format is left out on purpose: it has no type for a folder, so its tools write a folder as a file
+// with a slash at the end of its name, which this reader refuses (`archive-tar-refused.test.ts` holds that).
 const GNU_FORMATS: readonly TarFormat[] = [
   { id: 'gnu', flags: ['--format=gnu'], longNames: true },
   { id: 'oldgnu', flags: ['--format=oldgnu'], longNames: true },
   { id: 'pax', flags: ['--format=pax'], longNames: true },
   { id: 'ustar', flags: ['--format=ustar'], longNames: false },
-  { id: 'v7', flags: ['--format=v7'], longNames: false },
 ];
 const BSD_FORMATS: readonly TarFormat[] = [
   { id: 'pax', flags: ['--format', 'pax'], longNames: true },
   { id: 'ustar', flags: ['--format', 'ustar'], longNames: false },
   { id: 'gnutar', flags: ['--format', 'gnutar'], longNames: true },
-  { id: 'v7tar', flags: ['--format', 'v7tar'], longNames: false },
 ];
 const FORMATS = tarKind === 'gnu' ? GNU_FORMATS : tarKind === 'bsd' ? BSD_FORMATS : [];
 
-/** v7 has no prefix, so only names that fit its 100 bytes can be put in one. */
-const hasDeepNames = (format: TarFormat): boolean => format.id !== 'v7' && format.id !== 'v7tar';
+// ---------------------------------------------------------------------------------------------
+// Python's tarfile: a writer that shares nothing with the tar program, and writes the GNU format
+// ---------------------------------------------------------------------------------------------
+
+/** Writes the folder as `fixture/` in the format given. Run with -I: it reads no site or user code. */
+const PYTHON_WRITER = [
+  'import sys, tarfile',
+  "formats = {'gnu': tarfile.GNU_FORMAT, 'pax': tarfile.PAX_FORMAT, 'ustar': tarfile.USTAR_FORMAT}",
+  "with tarfile.open(sys.argv[2], 'w', format=formats[sys.argv[1]], encoding='utf-8') as archive:",
+  "    archive.add(sys.argv[3], arcname='fixture')",
+].join('\n');
+
+describe.skipIf(!hasPython)('an archive from the tarfile module of Python', () => {
+  it.each([
+    ['gnu', true],
+    ['pax', true],
+    ['ustar', false],
+  ] as const)(
+    'gives the digest of the folder it was made from, in the %s format',
+    async (format, longNames) => {
+      const folder = fixtureFolder({
+        [DEEP]: 'deep\n',
+        ...(longNames ? { [LONG_BASENAME]: 'a long name\n' } : {}),
+      });
+      const out = join(tempRoot('py-out'), 'archive.tar');
+
+      run('python3', ['-I', '-c', PYTHON_WRITER, format, out, folder], folder, tempRoot('py-home'));
+
+      await expectSameAsFolder(out, folder, 'fixture');
+    },
+  );
+});
 
 describe.skipIf(tarKind === null)('an archive from the tar of this machine', () => {
   it.each(FORMATS.map((format) => [format.id, format] as const))(
     'gives the digest of the folder it was made from, in the %s format',
     async (_id, format) => {
       const folder = fixtureFolder({
-        ...(hasDeepNames(format) ? { [DEEP]: 'deep\n' } : {}),
+        [DEEP]: 'deep\n',
         ...(format.longNames ? { [LONG_BASENAME]: 'a long name\n' } : {}),
       });
       const out = join(tempRoot('tar-out'), 'archive.tar');
 
-      run('tar', ['-c', ...format.flags, '-f', out, '-C', join(folder, '..'), 'fixture'], folder, tempRoot('tar-home'));
+      run(
+        'tar',
+        ['-c', ...format.flags, '-f', out, '-C', join(folder, '..'), 'fixture'],
+        folder,
+        tempRoot('tar-home'),
+      );
 
       await expectSameAsFolder(out, folder, 'fixture');
     },
@@ -245,15 +312,23 @@ describe.skipIf(tarKind === null)('an archive from the tar of this machine', () 
     const out = tempRoot('tar-out');
     const home = tempRoot('tar-home');
 
-    run('tar', ['-czf', join(out, 'by-tar.tgz'), '-C', join(folder, '..'), 'fixture'], folder, home);
+    run(
+      'tar',
+      ['-czf', join(out, 'by-tar.tgz'), '-C', join(folder, '..'), 'fixture'],
+      folder,
+      home,
+    );
     run('tar', ['-cf', join(out, 'plain.tar'), '-C', join(folder, '..'), 'fixture'], folder, home);
-    writeFileSync(join(out, 'by-test.tgz'), gzip(new Uint8Array(readFileSync(join(out, 'plain.tar')))));
+    writeFileSync(
+      join(out, 'by-test.tgz'),
+      gzip(new Uint8Array(readFileSync(join(out, 'plain.tar')))),
+    );
 
     await expectSameAsFolder(join(out, 'by-tar.tgz'), folder, 'fixture');
     await expectSameAsFolder(join(out, 'by-test.tgz'), folder, 'fixture');
   });
 
-  it('refuses an archive of this machine\'s tar that holds a link, though the files in it are fine', async () => {
+  it("refuses an archive of this machine's tar that holds a link, though the files in it are fine", async () => {
     const folder = fixtureFolder();
     spawnSync('ln', ['-s', 'README.md', join(folder, 'link-to-readme')]);
     const out = join(tempRoot('tar-out'), 'with-link.tar');
@@ -266,7 +341,7 @@ describe.skipIf(tarKind === null)('an archive from the tar of this machine', () 
     });
   });
 
-  it('refuses an archive made with the folder\'s own name as dot, which tar writes as ./ for every path', async () => {
+  it("refuses an archive made with the folder's own name as dot, which tar writes as ./ for every path", async () => {
     const folder = fixtureFolder();
     const out = join(tempRoot('tar-out'), 'dot.tar');
 

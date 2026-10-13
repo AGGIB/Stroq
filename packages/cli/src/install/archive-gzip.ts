@@ -36,7 +36,11 @@ const NOT_READ = 'is not read: give a tar archive, plain or gzipped (.tar, .tar.
  * A zip is the usual mistake, so it is said by name; the rest are the compressions a tar travels in.
  */
 export function foreignFormat(bytes: Uint8Array): string | null {
-  const zip = [[0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06], [0x50, 0x4b, 0x07, 0x08]];
+  const zip = [
+    [0x50, 0x4b, 0x03, 0x04],
+    [0x50, 0x4b, 0x05, 0x06],
+    [0x50, 0x4b, 0x07, 0x08],
+  ];
   if (zip.some((magic) => startsWith(bytes, magic))) return `a zip file ${NOT_READ}`;
   if (startsWith(bytes, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00])) return `an xz file ${NOT_READ}`;
   // "BZh", a level from 1 to 9 and the magic of the first block: a name that starts with BZh is not enough.
@@ -81,7 +85,8 @@ const CRC_TABLE = ((): Uint32Array => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
     let value = n;
-    for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    for (let bit = 0; bit < 8; bit += 1)
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
     table[n] = value >>> 0;
   }
   return table;

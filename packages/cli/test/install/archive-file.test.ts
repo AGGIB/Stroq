@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, ftruncateSync, mkdirSync, openSync, closeSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ArchiveError } from '../../src/install/archive-error.js';
@@ -93,23 +101,29 @@ describe('readArchiveFile', () => {
     expect(error.code).toBe('not-a-file');
   });
 
-  it.skipIf(isWindows)('does not open a FIFO to wait for a writer, and says it is not a file', async () => {
-    const root = tempRoot('archive');
-    execFileSync('mkfifo', [join(root, 'pipe.tgz')]);
+  it.skipIf(isWindows)(
+    'does not open a FIFO to wait for a writer, and says it is not a file',
+    async () => {
+      const root = tempRoot('archive');
+      execFileSync('mkfifo', [join(root, 'pipe.tgz')]);
 
-    const error = await refusal(() => readArchiveFile(join(root, 'pipe.tgz')));
+      const error = await refusal(() => readArchiveFile(join(root, 'pipe.tgz')));
 
-    expect(error.code).toBe('not-a-file');
-  });
+      expect(error.code).toBe('not-a-file');
+    },
+  );
 
-  it.skipIf(isWindows)('reads through a link to a file, as the folder reader does through a link to a folder', async () => {
-    const { file, root } = fileWith('real.tgz', tgzOf(FILES));
-    symlinkSync(file, join(root, 'link.tgz'));
+  it.skipIf(isWindows)(
+    'reads through a link to a file, as the folder reader does through a link to a folder',
+    async () => {
+      const { file, root } = fileWith('real.tgz', tgzOf(FILES));
+      symlinkSync(file, join(root, 'link.tgz'));
 
-    const read = await readArchiveFile(join(root, 'link.tgz'));
+      const read = await readArchiveFile(join(root, 'link.tgz'));
 
-    expect(read.tree.entries).toHaveLength(2);
-  });
+      expect(read.tree.entries).toHaveLength(2);
+    },
+  );
 
   it('refuses a file that is too big for its kind without reading it', async () => {
     const root = tempRoot('archive');
@@ -130,13 +144,19 @@ describe('readArchiveFile', () => {
     const zipped = fileWith('a.tgz', tgzOf(FILES)).file;
     const plain = fileWith('a.tar', tarOf(FILES)).file;
 
-    expect((await refusal(() => readArchiveFile(zipped, { limits: { maxCompressed: 20 } }))).message).toMatch(/compressed/);
-    expect((await refusal(() => readArchiveFile(plain, { limits: { maxExpanded: 2000 } }))).code).toBe('limit');
+    expect(
+      (await refusal(() => readArchiveFile(zipped, { limits: { maxCompressed: 20 } }))).message,
+    ).toMatch(/compressed/);
+    expect(
+      (await refusal(() => readArchiveFile(plain, { limits: { maxExpanded: 2000 } }))).code,
+    ).toBe('limit');
     // The plain one is not held to the size of a download, nor the gzip one to that of an expanded archive.
-    expect((await readArchiveFile(plain, { limits: { maxCompressed: 20 } })).tree.entries).toHaveLength(2);
+    expect(
+      (await readArchiveFile(plain, { limits: { maxCompressed: 20 } })).tree.entries,
+    ).toHaveLength(2);
   });
 
-  it('refuses a file that is not an archive with the reader\'s phrase, not a system error', async () => {
+  it("refuses a file that is not an archive with the reader's phrase, not a system error", async () => {
     const { file } = fileWith('notes.txt', 'just some notes\n'.repeat(60));
 
     const error = await refusal(() => readArchiveFile(file));
@@ -154,21 +174,26 @@ describe('readArchiveFile', () => {
   });
 
   it('reads an empty file as an archive with nothing in it', async () => {
-    const error = await refusal(() => readArchiveFile(fileWith('empty.tgz', new Uint8Array(0)).file));
+    const error = await refusal(() =>
+      readArchiveFile(fileWith('empty.tgz', new Uint8Array(0)).file),
+    );
 
     expect(error.code).toBe('empty');
   });
 
-  it.skipIf(isWindows || isRoot)('says a file it may not read is unreadable, with the errno and without the path', async () => {
-    const { file, root } = fileWith('locked.tgz', tgzOf(FILES));
-    chmodSync(file, 0o000);
+  it.skipIf(isWindows || isRoot)(
+    'says a file it may not read is unreadable, with the errno and without the path',
+    async () => {
+      const { file, root } = fileWith('locked.tgz', tgzOf(FILES));
+      chmodSync(file, 0o000);
 
-    const error = await refusal(() => readArchiveFile(file));
+      const error = await refusal(() => readArchiveFile(file));
 
-    expect(error.code).toBe('unreadable');
-    expect(error.message).toContain('EACCES');
-    expect(error.message).not.toContain(root);
-  });
+      expect(error.code).toBe('unreadable');
+      expect(error.message).toContain('EACCES');
+      expect(error.message).not.toContain(root);
+    },
+  );
 
   it('passes the typed error of the reader on, and a gzip that is damaged is one', async () => {
     const whole = gzip(tarOf(FILES));
@@ -201,14 +226,17 @@ describe('sourceTypeOf', () => {
     }
   });
 
-  it.skipIf(isWindows)('follows a link once, as the folder reader does, and says what is at the end', async () => {
-    const { file, root } = fileWith('skill.tgz', tgzOf(FILES));
-    symlinkSync(file, join(root, 'file-link'));
-    symlinkSync(root, join(root, 'dir-link'));
+  it.skipIf(isWindows)(
+    'follows a link once, as the folder reader does, and says what is at the end',
+    async () => {
+      const { file, root } = fileWith('skill.tgz', tgzOf(FILES));
+      symlinkSync(file, join(root, 'file-link'));
+      symlinkSync(root, join(root, 'dir-link'));
 
-    expect(await sourceTypeOf(join(root, 'file-link'))).toBe('tarball');
-    expect(await sourceTypeOf(join(root, 'dir-link'))).toBe('dir');
-  });
+      expect(await sourceTypeOf(join(root, 'file-link'))).toBe('tarball');
+      expect(await sourceTypeOf(join(root, 'dir-link'))).toBe('dir');
+    },
+  );
 
   it.skipIf(isWindows)('refuses a FIFO, which is neither, and does not open it', async () => {
     const root = tempRoot('archive');

@@ -124,7 +124,8 @@ export function dataBlocks(data: string | Uint8Array): Uint8Array {
 export function paxRecord(key: string, value: string | Uint8Array): Uint8Array {
   const body = concat([encoder.encode(` ${key}=`), bytesOf(value), encoder.encode('\n')]);
   let length = body.length + 1;
-  while (String(length).length + body.length !== length) length = String(length).length + body.length;
+  while (String(length).length + body.length !== length)
+    length = String(length).length + body.length;
   return concat([encoder.encode(String(length)), body]);
 }
 

@@ -47,7 +47,9 @@ function readOrRefuse(bytes: Uint8Array): Outcome {
 // What is written is read back
 // ---------------------------------------------------------------------------------------------
 
-const LETTERS = [...'abcdefghijklmnopqrstuvwxyz0123456789_', 'é', '日', '\u{1f600}'];
+/** Letters outside ASCII are made from code points, so that no tool turns an escape in this file into the character. */
+const OUTSIDE_ASCII = [0xe9, 0x65e5, 0x1f600].map((code) => String.fromCodePoint(code));
+const LETTERS = [...'abcdefghijklmnopqrstuvwxyz0123456789_', ...OUTSIDE_ASCII];
 const tail = fc.string({ unit: fc.constantFrom(...LETTERS), minLength: 0, maxLength: 10 });
 /** Folders start with d and files with f, so that no path is a file and also the folder of another. */
 const folderName = tail.map((rest) => `d${rest}`);
@@ -140,23 +142,26 @@ describe('what is written is read back as the same tree', () => {
 
   it('holds with a file at the top, which keeps every path as it was written', () => {
     fc.assert(
-      fc.property(fc.uniqueArray(planned, { selector: (file) => file.path, maxLength: 8 }), (files) => {
-        const top: Planned = {
-          path: 'ftop.txt',
-          data: new Uint8Array([1, 2, 3]),
-          mode: 0o644,
-          wanted: 'header',
-          format: 'ustar',
-        };
-        const all = [top, ...files.filter((file) => file.path !== top.path)];
+      fc.property(
+        fc.uniqueArray(planned, { selector: (file) => file.path, maxLength: 8 }),
+        (files) => {
+          const top: Planned = {
+            path: 'ftop.txt',
+            data: new Uint8Array([1, 2, 3]),
+            mode: 0o644,
+            wanted: 'header',
+            format: 'ustar',
+          };
+          const all = [top, ...files.filter((file) => file.path !== top.path)];
 
-        const read = readTarArchive(tarOf(all.map((file) => entryFor(file.path, file))));
+          const read = readTarArchive(tarOf(all.map((file) => entryFor(file.path, file))));
 
-        expect(read.topFolder).toBeNull();
-        expect(read.tree.entries.map((entry) => entry.path).sort()).toEqual(
-          all.map((file) => file.path).sort(),
-        );
-      }),
+          expect(read.topFolder).toBeNull();
+          expect(read.tree.entries.map((entry) => entry.path).sort()).toEqual(
+            all.map((file) => file.path).sort(),
+          );
+        },
+      ),
       { numRuns: RUNS },
     );
   });
@@ -187,11 +192,27 @@ type Mutation =
   | { readonly kind: 'append'; readonly bytes: Uint8Array };
 
 const mutation = fc.oneof(
-  fc.record({ kind: fc.constant('flip' as const), at: fc.nat(), xor: fc.integer({ min: 1, max: 255 }) }),
-  fc.record({ kind: fc.constant('set' as const), at: fc.nat(), value: fc.integer({ min: 0, max: 255 }) }),
+  fc.record({
+    kind: fc.constant('flip' as const),
+    at: fc.nat(),
+    xor: fc.integer({ min: 1, max: 255 }),
+  }),
+  fc.record({
+    kind: fc.constant('set' as const),
+    at: fc.nat(),
+    value: fc.integer({ min: 0, max: 255 }),
+  }),
   fc.record({ kind: fc.constant('truncate' as const), at: fc.nat() }),
-  fc.record({ kind: fc.constant('insert' as const), at: fc.nat(), bytes: fc.uint8Array({ maxLength: 40 }) }),
-  fc.record({ kind: fc.constant('zero' as const), at: fc.nat(), length: fc.integer({ min: 1, max: 600 }) }),
+  fc.record({
+    kind: fc.constant('insert' as const),
+    at: fc.nat(),
+    bytes: fc.uint8Array({ maxLength: 40 }),
+  }),
+  fc.record({
+    kind: fc.constant('zero' as const),
+    at: fc.nat(),
+    length: fc.integer({ min: 1, max: 600 }),
+  }),
   fc.record({ kind: fc.constant('append' as const), bytes: fc.uint8Array({ maxLength: 700 }) }),
 );
 
@@ -286,8 +307,36 @@ describe('what is done to an archive ends in a tree or in the typed error', () =
 
   it('holds for headers that add up, whatever they say and wherever the data is', () => {
     const header = fc.record({
-      typeflag: fc.constantFrom('0', '\0', '1', '2', '3', '4', '5', '6', '7', 'x', 'g', 'L', 'K', 'S', 'V', 'Z'),
-      name: fc.constantFrom('a', 'pkg/b.txt', '../x', '/abs', 'pkg/c/d.txt', 'dup', 'dup', 'pkg/.git/x', 'A', 'a/b'),
+      typeflag: fc.constantFrom(
+        '0',
+        '\0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        'x',
+        'g',
+        'L',
+        'K',
+        'S',
+        'V',
+        'Z',
+      ),
+      name: fc.constantFrom(
+        'a',
+        'pkg/b.txt',
+        '../x',
+        '/abs',
+        'pkg/c/d.txt',
+        'dup',
+        'dup',
+        'pkg/.git/x',
+        'A',
+        'a/b',
+      ),
       size: fc.constantFrom(0, 1, 5, 511, 512, 513, 2000, 100_000),
       dataLength: fc.constantFrom(0, 1, 5, 511, 512, 513, 2000),
       mode: fc.constantFrom(0, 0o644, 0o755, 0o7777),
@@ -298,7 +347,13 @@ describe('what is done to an archive ends in a tree or in the typed error', () =
     fc.assert(
       fc.property(fc.array(header, { minLength: 1, maxLength: 8 }), ends, (headers, end) => {
         const parts = headers.flatMap((one) => [
-          headerBlock({ name: one.name, typeflag: one.typeflag, size: one.size, mode: one.mode, format: one.format }),
+          headerBlock({
+            name: one.name,
+            typeflag: one.typeflag,
+            size: one.size,
+            mode: one.mode,
+            format: one.format,
+          }),
           ...(one.dataLength > 0 ? [dataBlocks(new Uint8Array(one.dataLength).fill(0x61))] : []),
         ]);
 
@@ -310,23 +365,31 @@ describe('what is done to an archive ends in a tree or in the typed error', () =
 
   it('holds for pax records that are well formed or nearly', () => {
     const record = fc.oneof(
-      fc.constantFrom('path', 'size', 'mtime', 'linkpath', 'GNU.sparse.name', 'comment').chain((key) =>
-        fc.string({ maxLength: 20 }).map((value) => `${key}=${value}\n`),
-      ),
+      fc
+        .constantFrom('path', 'size', 'mtime', 'linkpath', 'GNU.sparse.name', 'comment')
+        .chain((key) => fc.string({ maxLength: 20 }).map((value) => `${key}=${value}\n`)),
       fc.string({ maxLength: 30 }),
     );
 
     fc.assert(
-      fc.property(fc.array(record, { maxLength: 5 }), fc.constantFrom<'x' | 'g'>('x', 'g'), (lines, typeflag) => {
-        // Each line gets a length that is right, or one that is a little wrong.
-        const body = lines.map((line) => {
-          const text = ` ${line}`;
-          return `${text.length + String(text.length).length}${text}`;
-        });
-        const records = new TextEncoder().encode(body.join(''));
+      fc.property(
+        fc.array(record, { maxLength: 5 }),
+        fc.constantFrom<'x' | 'g'>('x', 'g'),
+        (lines, typeflag) => {
+          // Each line gets a length that is right, or one that is a little wrong.
+          const body = lines.map((line) => {
+            const text = ` ${line}`;
+            return `${text.length + String(text.length).length}${text}`;
+          });
+          const records = new TextEncoder().encode(body.join(''));
 
-        expectSound(readOrRefuse(tarOf([concat(paxBlocks(records, typeflag)), { name: 'pkg/a.txt', data: 'x' }])));
-      }),
+          expectSound(
+            readOrRefuse(
+              tarOf([concat(paxBlocks(records, typeflag)), { name: 'pkg/a.txt', data: 'x' }]),
+            ),
+          );
+        },
+      ),
       { numRuns: RUNS * 2 },
     );
   });

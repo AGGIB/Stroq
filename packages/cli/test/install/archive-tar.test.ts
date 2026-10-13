@@ -75,14 +75,15 @@ describe('readTarArchive: files', () => {
 
   it('does not record a directory, so that an empty directory is not in the digest', () => {
     const withFolders = tarOf([
+      { name: 'README.md', data: 'r' },
       { name: 'docs/', typeflag: '5' },
       { name: 'docs/empty/', typeflag: '5' },
       { name: 'docs/a.md', data: 'a' },
     ]);
 
-    expect(pathsOf(withFolders)).toEqual(['docs/a.md']);
+    expect(pathsOf(withFolders)).toEqual(['README.md', 'docs/a.md']);
     expect(treeDigest(readTarArchive(withFolders).tree)).toBe(
-      treeDigest(treeOf({ 'docs/a.md': 'a' })),
+      treeDigest(treeOf({ 'README.md': 'r', 'docs/a.md': 'a' })),
     );
   });
 
@@ -99,14 +100,20 @@ describe('readTarArchive: files', () => {
   });
 
   it('reads UTF-8 names as they are spelled, with no normalisation', () => {
-    const composed = 'é.md';
+    // Built from code points, so that no editor or tool turns an escape in this file into the character.
+    const composed = `${String.fromCodePoint(0xe9)}.md`;
+    const decomposed = `e${String.fromCodePoint(0x301)}.txt`;
+    const japanese = `docs/${String.fromCodePoint(0x65e5, 0x672c)}.txt`;
+    const emoji = `emoji-${String.fromCodePoint(0x1f600)}.txt`;
     const bytes = tarOf([
       { name: composed, data: 'a' },
-      { name: 'docs/日本語.txt', data: 'b' },
-      { name: 'emoji-\u{1f600}.txt', data: 'c' },
+      { name: decomposed, data: 'b' },
+      { name: japanese, data: 'c' },
+      { name: emoji, data: 'd' },
     ]);
 
-    expect(pathsOf(bytes)).toEqual([composed, 'docs/日本語.txt', 'emoji-\u{1f600}.txt']);
+    // In the order of the bytes of the names: the decomposed letter starts with a plain e.
+    expect(pathsOf(bytes)).toEqual([japanese, emoji, decomposed, composed]);
   });
 });
 
@@ -147,29 +154,32 @@ describe('readTarArchive: the executable bit', () => {
 describe('readTarArchive: how a name is carried', () => {
   const LONG_DIR = 'a-directory-with-a-rather-long-name'.repeat(2);
   const LONG = `${LONG_DIR}/${'b'.repeat(40)}/file.txt`;
+  // A file at the top, beside the others, keeps the one wrapping folder from being taken off, so that the
+  // names are the ones that were written.
+  const TOP: TarEntry = { name: 'top.txt', data: 't' };
+  const namesOf = (entries: readonly (TarEntry | Uint8Array)[]): string[] =>
+    pathsOf(tarOf([...entries, TOP])).filter((path) => path !== TOP.name);
 
   it('joins the ustar prefix and the name', () => {
-    const bytes = tarOf([{ name: LONG, data: 'x', via: 'prefix' }]);
-
-    expect(pathsOf(bytes)).toEqual([LONG]);
+    expect(namesOf([{ name: LONG, data: 'x', via: 'prefix' }])).toEqual([LONG]);
   });
 
   it('reads a GNU long name from the block before the entry', () => {
-    const bytes = tarOf([{ name: LONG, data: 'x', via: 'gnu' }]);
-
-    expect(pathsOf(bytes)).toEqual([LONG]);
+    expect(namesOf([{ name: LONG, data: 'x', via: 'gnu' }])).toEqual([LONG]);
   });
 
   it('reads a pax path, which wins over the name in the header', () => {
-    const bytes = tarOf([{ name: LONG, data: 'x', via: 'pax' }]);
-
-    expect(pathsOf(bytes)).toEqual([LONG]);
+    expect(namesOf([{ name: LONG, data: 'x', via: 'pax' }])).toEqual([LONG]);
   });
 
   it('takes the pax path for a name that the header could hold too', () => {
-    const bytes = tarOf([{ name: 'short-name-in-header', data: 'x', pax: { path: 'from/pax.txt' } }]);
+    const entry: TarEntry = {
+      name: 'short-name-in-header',
+      data: 'x',
+      pax: { path: 'from/pax.txt' },
+    };
 
-    expect(pathsOf(bytes)).toEqual(['from/pax.txt']);
+    expect(namesOf([entry])).toEqual(['from/pax.txt']);
   });
 
   it('takes a GNU long name over the name in the header', () => {
@@ -182,30 +192,32 @@ describe('readTarArchive: how a name is carried', () => {
       dataBlocks('x'),
     ];
 
-    expect(pathsOf(tarOf(gnu))).toEqual(['from/gnu.txt']);
+    expect(namesOf([concat(gnu)])).toEqual(['from/gnu.txt']);
   });
 
   it('does not read the bytes at 345 as a prefix when the header is GNU or v7, where they are other fields', () => {
     for (const format of ['gnu', 'v7'] as const) {
-      const bytes = tarOf([
-        { name: 'real.txt', data: 'x', header: { format, prefix: 'atime-and-ctime-bytes' } },
-      ]);
+      const entry: TarEntry = {
+        name: 'real.txt',
+        data: 'x',
+        header: { format, prefix: 'atime-and-ctime-bytes' },
+      };
 
-      expect(pathsOf(bytes), format).toEqual(['real.txt']);
+      expect(namesOf([entry]), format).toEqual(['real.txt']);
     }
   });
 
   it('does read them as a prefix when the header is ustar', () => {
-    const bytes = tarOf([{ name: 'real.txt', data: 'x', header: { prefix: 'some/folder' } }]);
+    const entry: TarEntry = { name: 'real.txt', data: 'x', header: { prefix: 'some/folder' } };
 
-    expect(pathsOf(bytes)).toEqual(['some/folder/real.txt']);
+    expect(namesOf([entry])).toEqual(['some/folder/real.txt']);
   });
 
   it('reads a name that fills all 100 bytes of the field, with no NUL to end it', () => {
     const name = `${'d'.repeat(49)}/${'f'.repeat(50)}`;
 
     expect(name.length).toBe(100);
-    expect(pathsOf(tarOf([{ name, data: 'x' }]))).toEqual([name]);
+    expect(namesOf([{ name, data: 'x' }])).toEqual([name]);
   });
 });
 
@@ -285,7 +297,8 @@ describe('readTarArchive: sizes and extended headers', () => {
 
 describe('readTarArchive: the header checksum', () => {
   it('accepts the sum of the bytes as unsigned and as signed, which tar programs both write', () => {
-    const name = 'café-über.md';
+    // Bytes above 127 in the name: the two sums differ only for these.
+    const name = `caf${String.fromCodePoint(0xe9)}-${String.fromCodePoint(0xfc)}ber.md`;
     for (const checksum of ['unsigned', 'signed'] as const) {
       const bytes = tarOf([{ name, data: 'x', header: { checksum } }]);
 
@@ -339,21 +352,36 @@ describe('readTarArchive: the folder an archive is wrapped in', () => {
   });
 
   it('takes off exactly one folder, and not the one below it', () => {
-    const read = readTarArchive(tarOf([{ name: 'pkg/sub/a.txt', data: 'x' }, { name: 'pkg/sub/b.txt', data: 'y' }]));
+    const read = readTarArchive(
+      tarOf([
+        { name: 'pkg/sub/a.txt', data: 'x' },
+        { name: 'pkg/sub/b.txt', data: 'y' },
+      ]),
+    );
 
     expect(read.tree.entries.map((entry) => entry.path)).toEqual(['sub/a.txt', 'sub/b.txt']);
     expect(read.topFolder).toBe('pkg');
   });
 
   it('takes nothing off when there are two folders', () => {
-    const read = readTarArchive(tarOf([{ name: 'a/x.txt', data: 'x' }, { name: 'b/y.txt', data: 'y' }]));
+    const read = readTarArchive(
+      tarOf([
+        { name: 'a/x.txt', data: 'x' },
+        { name: 'b/y.txt', data: 'y' },
+      ]),
+    );
 
     expect(read.tree.entries.map((entry) => entry.path)).toEqual(['a/x.txt', 'b/y.txt']);
     expect(read.topFolder).toBeNull();
   });
 
   it('takes nothing off when a file is at the top, beside the folder', () => {
-    const read = readTarArchive(tarOf([{ name: 'README.md', data: 'r' }, { name: 'pkg/y.txt', data: 'y' }]));
+    const read = readTarArchive(
+      tarOf([
+        { name: 'README.md', data: 'r' },
+        { name: 'pkg/y.txt', data: 'y' },
+      ]),
+    );
 
     expect(read.tree.entries.map((entry) => entry.path)).toEqual(['README.md', 'pkg/y.txt']);
     expect(read.topFolder).toBeNull();
@@ -367,7 +395,8 @@ describe('readTarArchive: the folder an archive is wrapped in', () => {
   });
 
   it('gives the digest of the folder it was made from, whatever the wrapping folder is called', () => {
-    const wrapped = (top: string) => tarOf(FILES.map((file) => ({ ...file, name: `${top}/${file.name}` })));
+    const wrapped = (top: string) =>
+      tarOf(FILES.map((file) => ({ ...file, name: `${top}/${file.name}` })));
 
     expect(treeDigest(readTarArchive(wrapped('package')).tree)).toBe(treeDigest(EXPECTED));
     expect(treeDigest(readTarArchive(wrapped('x-y-1a2b3c4')).tree)).toBe(treeDigest(EXPECTED));

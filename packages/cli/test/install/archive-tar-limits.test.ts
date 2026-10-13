@@ -38,7 +38,9 @@ describe('the size of one file', () => {
     const error = refusal(bytes);
 
     expect(error.code).toBe('limit');
-    expect(error.message).toBe(`a file in the archive is over the ${LIMITS.maxFileBytes} bytes a file may be`);
+    expect(error.message).toBe(
+      `a file in the archive is over the ${LIMITS.maxFileBytes} bytes a file may be`,
+    );
   });
 
   it('refuses a header that claims 8 GiB in an archive of 1 MiB, and allocates nothing for it', () => {
@@ -55,7 +57,10 @@ describe('the size of one file', () => {
   });
 
   it('refuses the largest size the octal field holds, and a pax size of 8 GiB, the same way', () => {
-    const octalMax = concat([headerBlock({ name: 'a', size: '77777777777\0' }), new Uint8Array(1024)]);
+    const octalMax = concat([
+      headerBlock({ name: 'a', size: '77777777777\0' }),
+      new Uint8Array(1024),
+    ]);
     const viaPax = tarOf([
       { name: 'a', pax: { size: String(8 * 1024 * 1024 * 1024) }, header: { size: 0 } },
     ]);
@@ -79,7 +84,9 @@ describe('the size of one file', () => {
     const read = readTarArchive(exactly);
 
     expect(read.tree.entries[0]?.size).toBe(LIMITS.maxFileBytes);
-    expect(refusal(tarOf([{ name: 'pkg/max.bin', data: new Uint8Array(LIMITS.maxFileBytes + 1) }])).code).toBe('limit');
+    expect(
+      refusal(tarOf([{ name: 'pkg/max.bin', data: new Uint8Array(LIMITS.maxFileBytes + 1) }])).code,
+    ).toBe('limit');
   });
 
   it('can be asked for less than the contract allows, and never for more', () => {
@@ -94,7 +101,7 @@ describe('the size of one file', () => {
 
 describe('the size of everything', () => {
   it('refuses a plain archive over the size of an expanded one', () => {
-    const files = tarOf([{ name: 'a', data: new Uint8Array(3000) }]);
+    const files = tarOf([{ name: 'a', data: new Uint8Array(6000) }]);
 
     const error = refusal(files, { limits: { maxExpanded: 5000 } });
 
@@ -118,7 +125,9 @@ describe('the size of everything', () => {
 
     expect(error.code).toBe('limit');
     expect(error.message).toMatch(/compressed/);
-    expect(readTarArchive(bytes, { limits: { maxCompressed: bytes.length } }).tree.entries).toHaveLength(50);
+    expect(
+      readTarArchive(bytes, { limits: { maxCompressed: bytes.length } }).tree.entries,
+    ).toHaveLength(50);
   });
 
   it('reads files that add up to a good part of what is allowed, once, in the time that takes', () => {
@@ -155,7 +164,9 @@ describe('the number of entries', () => {
   });
 
   it('can be asked for fewer', () => {
-    expect(readTarArchive(tarOf(empties(3)), { limits: { maxEntries: 3 } }).tree.entries).toHaveLength(3);
+    expect(
+      readTarArchive(tarOf(empties(3)), { limits: { maxEntries: 3 } }).tree.entries,
+    ).toHaveLength(3);
     expect(refusal(tarOf(empties(3)), { limits: { maxEntries: 2 } }).code).toBe('limit');
   });
 
@@ -176,7 +187,9 @@ describe('the number of entries', () => {
 
 describe('the extended headers', () => {
   it('refuses a pax header of more than 64 KiB, without reading it', () => {
-    const error = refusal(tarOf([concat(paxBlocks(new Uint8Array(70_000))), { name: 'a', data: 'x' }]));
+    const error = refusal(
+      tarOf([concat(paxBlocks(new Uint8Array(70_000))), { name: 'a', data: 'x' }]),
+    );
 
     expect(error.code).toBe('limit');
     expect(error.message).toMatch(/extended header/);

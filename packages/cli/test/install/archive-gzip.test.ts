@@ -37,7 +37,10 @@ function member(
   const optional: Uint8Array[] = [];
   if (extras.extra !== undefined) {
     flags |= 4;
-    optional.push(new Uint8Array([extras.extra.length & 255, extras.extra.length >> 8]), extras.extra);
+    optional.push(
+      new Uint8Array([extras.extra.length & 255, extras.extra.length >> 8]),
+      extras.extra,
+    );
   }
   if (extras.name !== undefined) {
     flags |= 8;
@@ -118,7 +121,9 @@ describe('gunzipOnce', () => {
 
   describe('refuses', () => {
     it('data after the member, and says it is after the stream', () => {
-      const error = refusal(() => gunzipOnce(concat([gz(text('abc')), text('trailing garbage')]), MiB));
+      const error = refusal(() =>
+        gunzipOnce(concat([gz(text('abc')), text('trailing garbage')]), MiB),
+      );
 
       expect(error.code).toBe('bad-gzip');
       expect(error.message).toMatch(/after the gzip data/);
@@ -132,7 +137,9 @@ describe('gunzipOnce', () => {
     });
 
     it('an empty member put in front of a real one, which would pass a check of the last trailer alone', () => {
-      const error = refusal(() => gunzipOnce(concat([gz(new Uint8Array(0)), gz(text('abc'))]), MiB));
+      const error = refusal(() =>
+        gunzipOnce(concat([gz(new Uint8Array(0)), gz(text('abc'))]), MiB),
+      );
 
       expect(error.message).toMatch(/more than one gzip member/);
     });
