@@ -39,7 +39,8 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
     if (words.length !== 1 || words[0] !== t)
       return words.some((word) => isDangerousRmTarget(word, cwd));
   }
-  if (['/', '/*', '.', './', '*', './*'].includes(t)) return true;
+  // `.*` and `./.*` are every dotfile of the directory: `.git`, `.env`, the agent's own settings.
+  if (['/', '/*', '.', './', '*', './*', '.*', './.*'].includes(t)) return true;
   // `~`, `~/…` and `~user/…` expand to a home directory, which is never inside a
   // project checkout; `$VAR` is unknown and `..` points upward — all treated as
   // outside the working tree. `$` also covers PowerShell's `$env:USERPROFILE`,
@@ -61,5 +62,8 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
   }
   if (!t.startsWith('/')) return false;
   const normalized = withoutTrailingSlashes(t);
-  return !normalized.startsWith(`${cwd}/`);
+  // `cwd` is compared without its trailing slashes, so `/repo/` holds `/repo/build`. A working tree
+  // at `/` (or none) would then hold every path: none is inside it, for a recursive delete.
+  const root = withoutTrailingSlashes(cwd);
+  return root === '' || !normalized.startsWith(`${root}/`);
 }

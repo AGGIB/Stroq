@@ -135,7 +135,7 @@ function remoteCommands(command: string, segments: readonly string[]): RemoteCom
  */
 const REMOTE_DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
   [
-    /\bdocker(?:-compose)?\s+(?:rmi|system\s+prune|volume\s+(?:rm|prune)|(?:container|image)\s+(?:rm|prune)|compose\s+down\s+(?:\S+\s+)*-v)\b/,
+    /\bdocker(?:-compose)?\s+(?:rmi|system\s+prune|volume\s+(?:rm|prune)|(?:container|image)\s+(?:rm|prune)|compose\s+down\s+(?:\S+\s+)*(?:-v|--volumes))\b/,
     'remote-destructive',
   ],
 ];
@@ -184,7 +184,8 @@ function remoteDirectoryAfter(segment: string, directory: string | null): string
     .slice(1)
     .find((w) => w !== '' && !w.startsWith('-'))
     ?.replace(/["']/g, '');
-  if (target === undefined) return directory;
+  // A bare `cd` goes back to the login directory, wherever the command was before.
+  if (target === undefined) return '~';
   if (/^[/~$]/.test(target)) return target;
   return directory === null ? null : `${directory}/${target}`;
 }
