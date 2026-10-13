@@ -7,8 +7,8 @@
 <meta name="description" content="Install Stroq for AI coding agents, scan recorded Claude Code, Codex CLI and Cursor sessions for known secrets, and understand prompt-injection guards, policies and limits.">
 <link rel="canonical" href="https://stroq.dev/docs/">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f3ee">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e0f12">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f2f0">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0e10">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Stroq">
 <meta property="og:url" content="https://stroq.dev/docs/">
@@ -25,7 +25,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&amp;family=Martian+Mono:wdth,wght@75..112.5,400..700&amp;display=swap">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/docs/docs.css">
 <script src="/main.js" defer></script>
@@ -157,7 +157,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <p><code>init</code> writes hooks into the project's <code>.claude/settings.json</code> by default; pass <code>--user</code> to install into <code>~/.claude/settings.json</code> instead, or <code>--dry-run</code> to preview the change without writing anything.</p>
   <p>Prefer a persistent install? <code>npm install -g @stroq/cli</code> installs the <code>stroq</code> command globally — then run <code>stroq init</code> and <code>stroq doctor</code> directly.</p>
   <h3>Coverage by agent</h3>
-  <div class="docs-table-wrap">
+  <div class="docs-table-wrap" tabindex="0" role="region" aria-label="Coverage by agent, scrolls sideways on small screens">
     <table class="docs-table">
       <caption>What each host lets Stroq do. Full event tables and every documented limit are in the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md">per-agent reference on GitHub</a>.</caption>
       <thead>
@@ -245,7 +245,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
   <p>Copy <a href="https://github.com/AGGIB/Stroq/blob/main/policies/default.yaml"><code>policies/default.yaml</code></a> to <code>~/.stroq/policy.yaml</code> and edit it — rules are evaluated in order, the first match wins, and anything unmatched falls through to <code>default</code>. A custom policy replaces the default wholesale, so provenance and the secret egress guard are enforced only if you keep their rules (<code>deny-origin-suspect</code>, <code>ask-origin-untrusted</code>, <code>deny-secret-egress</code>, <code>deny-secret-unscannable</code>) — ahead of the <code>ask-*</code> rules. <code>threshold</code> (0–1) is the minimum scan score before a result taints a session as <code>suspect</code>. Set <code>STROQ_HOME</code> to relocate all state to a different directory.</p>
   <h3>Default policy</h3>
   <p>Generated from <code>policies/default.yaml</code>; evaluated top to bottom, first match wins.</p>
-  <div class="docs-table-wrap">
+  <div class="docs-table-wrap" tabindex="0" role="region" aria-label="Default policy rules, scrolls sideways on small screens">
     <table class="docs-table">
       <thead><tr><th>Rule id</th><th>Effect</th><th>When</th></tr></thead>
       <tbody>
@@ -297,7 +297,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 
 <section class="docs-section" id="commands" aria-labelledby="commands-title">
   <h2 id="commands-title">Commands</h2>
-  <div class="docs-table-wrap">
+  <div class="docs-table-wrap" tabindex="0" role="region" aria-label="Commands, scrolls sideways on small screens">
     <table class="docs-table">
       <thead><tr><th>Command</th><th>What it does</th></tr></thead>
       <tbody>

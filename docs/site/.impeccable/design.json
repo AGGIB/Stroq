@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-13T00:00:00Z",
+  "title": "Design System: Stroq",
+  "extensions": {
+    "colorMeta": {
+      "paper": { "role": "neutral", "displayName": "Cold Paper", "canonical": "#f1f2f0", "tonalRamp": ["#0d0e10", "#2a2c30", "#464a50", "#7c8087", "#aeb3bb", "#cdd0cc", "#e5e7e3", "#f1f2f0"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#0d0e10", "tonalRamp": ["#0d0e10", "#1c1d20", "#2a2c30", "#464a50", "#686c73", "#8a8e95", "#aeb3bb", "#d2d5d9"] },
+      "signal": { "role": "primary", "displayName": "Signal Orange", "canonical": "#fe4813", "tonalRamp": ["#5c1503", "#8a2007", "#b3290a", "#e03a0d", "#fe4813", "#ff7647", "#ffa381", "#ffd0bf"] }
+    },
+    "typographyMeta": {
+      "h1": { "displayName": "Display", "purpose": "Hero only, Archivo 800 at width 78%." },
+      "data": { "displayName": "Data", "purpose": "Martian Mono at width 80% for code, counts, axes and tallies." }
+    },
+    "shadows": [
+      { "name": "term", "value": "0 1px 2px rgba(13,14,16,.12), 0 18px 40px -22px rgba(13,14,16,.5)", "purpose": "Real CLI output panel only." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(.16, 1, .3, 1)", "purpose": "Thread draw, wall fill, marker landing." },
+      { "name": "dur-fast", "value": "150ms", "purpose": "Colour and lift on hover." },
+      { "name": "dur", "value": "320ms", "purpose": "Nav underline, chevron rotation." },
+      { "name": "thread-draw", "value": "1.1s stroke-dashoffset 1 to 0, delays .15s and .3s", "purpose": "Armed by main.js; skipped under reduced motion or without JS." }
+    ],
+    "breakpoints": [
+      { "name": "wide-meta", "value": "1180px" },
+      { "name": "stack", "value": "1000px" },
+      { "name": "flow-compact", "value": "860px" },
+      { "name": "narrow", "value": "700px" },
+      { "name": "phone", "value": "480px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button", "kind": "button", "refersTo": "button-primary",
+      "description": "Ink fill, turns signal orange on hover.",
+      "html": "<button class=\"ds-btn-primary\">Scan my sessions</button>",
+      "css": ".ds-btn-primary{min-height:46px;padding:.65rem 1.2rem;border:1.5px solid #0d0e10;border-radius:2px;background:#0d0e10;color:#f1f2f0;font:700 .95rem/1 Archivo,Arial,sans-serif;font-stretch:92%;cursor:pointer}.ds-btn-primary:hover{background:#fe4813;color:#0d0e10}.ds-btn-primary:focus-visible{outline:2px solid #0d0e10;outline-offset:3px}"
+    },
+    {
+      "name": "Ghost Button", "kind": "button", "refersTo": "button",
+      "description": "Transparent, inverts to ink on hover.",
+      "html": "<button class=\"ds-btn\">Read the docs</button>",
+      "css": ".ds-btn{min-height:46px;padding:.65rem 1.2rem;border:1.5px solid #0d0e10;border-radius:2px;background:transparent;color:#0d0e10;font:700 .95rem/1 Archivo,Arial,sans-serif;font-stretch:92%;cursor:pointer}.ds-btn:hover{background:#0d0e10;color:#f1f2f0}"
+    },
+    {
+      "name": "Install Pill", "kind": "custom", "refersTo": "install-pill",
+      "description": "Mono command with an ink copy button.",
+      "html": "<span class=\"ds-pill\"><code>npx @stroq/cli sent --last</code><button class=\"ds-copy\">Copy</button></span>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:.75rem;padding:.25rem .25rem .25rem 1rem;border:1.5px solid #0d0e10;border-radius:999px;background:#f1f2f0}.ds-pill code{font:500 .9rem/1.35 'Martian Mono',monospace;font-stretch:80%}.ds-copy{min-height:42px;padding:0 .95rem;border:0;border-radius:999px;background:#0d0e10;color:#f1f2f0;font:700 .88rem Archivo,Arial,sans-serif;cursor:pointer}.ds-copy:hover{background:#fe4813;color:#0d0e10}"
+    },
+    {
+      "name": "Verdict Chips", "kind": "chip", "refersTo": "chip-deny",
+      "description": "Blocked is solid ink; asked is hatched ink.",
+      "html": "<span class=\"ds-chip ds-deny\">blocked</span> <span class=\"ds-chip ds-ask\">asked</span>",
+      "css": ".ds-chip{display:inline-flex;padding:.24rem .55rem;border:1.5px solid #0d0e10;border-radius:2px;font:700 .7rem/1 'Martian Mono',monospace;font-stretch:85%;letter-spacing:.05em;text-transform:uppercase}.ds-deny{background:#0d0e10;color:#f1f2f0}.ds-ask{background:repeating-linear-gradient(135deg,transparent 0 4px,rgba(13,14,16,.38) 4px 5px),#f1f2f0;color:#0d0e10}"
+    },
+    {
+      "name": "Wall Tiles", "kind": "custom", "refersTo": "chip-deny",
+      "description": "One square per incident; selected tile gets an orange inset ring.",
+      "html": "<div class=\"ds-wall\"><button class=\"ds-tile ds-t-deny\">1</button><button class=\"ds-tile ds-t-ask\">2</button><button class=\"ds-tile ds-t-deny ds-sel\">3</button></div>",
+      "css": ".ds-wall{display:grid;grid-template-columns:repeat(3,48px);gap:6px}.ds-tile{aspect-ratio:1;border:1.5px solid #0d0e10;border-radius:2px;font:700 .9rem 'Martian Mono',monospace;cursor:pointer}.ds-t-deny{background:#0d0e10;color:#f1f2f0}.ds-t-ask{background:repeating-linear-gradient(135deg,transparent 0 5px,rgba(13,14,16,.38) 5px 6px),#f1f2f0;color:#0d0e10}.ds-sel{box-shadow:inset 0 0 0 4px #fe4813}.ds-tile:hover{transform:translateY(-2px)}"
+    },
+    {
+      "name": "Chapter Disclosure", "kind": "custom", "refersTo": "viewer",
+      "description": "Native details with a border-built chevron.",
+      "html": "<details class=\"ds-all\"><summary>All 36 attacks</summary><p>List</p></details>",
+      "css": ".ds-all{border-top:2px solid #0d0e10;border-bottom:2px solid #0d0e10}.ds-all summary{display:flex;align-items:center;gap:.8rem;padding-block:1.3rem;font:700 1.2rem Archivo,Arial,sans-serif;font-stretch:94%;cursor:pointer;list-style:none}.ds-all summary::before{content:'';width:9px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .32s cubic-bezier(.16,1,.3,1)}.ds-all[open] summary::before{transform:rotate(45deg)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Chain of Custody",
+    "overview": "The page is a piece of evidence with one visible thread: cold light ground, black ink, one signal orange that connects the text an agent read to the action it took. Flat, ruled, no cards; verdicts are shapes, not colours.",
+    "keyCharacteristics": ["Cold paper, near-black ink, one orange", "Verdicts are solid (blocked) and hatched (asked) ink", "Archivo width axis for hierarchy, Martian Mono for data only", "2px corners, 2px chapter rules, no cards", "One motion idea: the thread draws once"],
+    "rules": [
+      { "name": "The Thread Rule", "body": "Signal orange marks the link from source to action and nothing else.", "section": "colors" },
+      { "name": "The Shape-Not-Colour Rule", "body": "Landing-page verdicts are solid or hatched ink, never green/amber/red.", "section": "colors" },
+      { "name": "The Orange Text Rule", "body": "Orange text uses the signal-text value.", "section": "colors" },
+      { "name": "The One Field Rule", "body": "The install chapter is the only full orange field.", "section": "colors" },
+      { "name": "The Width-Axis Rule", "body": "Hierarchy comes from font-stretch stops: 78, 88-94, 100, mono 80.", "section": "typography" },
+      { "name": "The Mono-Is-Data Rule", "body": "Martian Mono only for code, counts, axes, tallies, chips.", "section": "typography" },
+      { "name": "The Flat-Content Rule", "body": "No shadowed cards; the code panel shadow is the single exception.", "section": "elevation" }
+    ],
+    "dos": ["Do use ink for everything and orange only for threads, rules, evidence highlights, the selected ring and the install field.", "Do draw verdicts as solid ink (blocked) and hatched ink (asked).", "Do keep hidden starting states under .js plus .is-armed.", "Do carry dynamic values with classes, never inline styles."],
+    "donts": ["Don't put orange on body text.", "Don't reintroduce green/amber/red verdicts on the landing page.", "Don't wrap content in shadowed cards.", "Don't add style attributes or style blocks (CSP)."]
+  }
+}

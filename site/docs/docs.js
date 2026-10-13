@@ -1,5 +1,5 @@
 /* Stroq docs — scroll-spy for the side nav only. Everything else on this page
-   (menu toggle, copy buttons, the header install pill, scroll reveals) is
+   (menu toggle, copy buttons, the header install pill) is
    handled by /main.js, which this page also loads. */
 (function () {
   'use strict';
