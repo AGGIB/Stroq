@@ -80,16 +80,13 @@ describe('stroq vet --online', () => {
       const integrity = sha512Of(tarball);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/my-skill': {
+        'https://registry.npmjs.org/my-skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.0.0.tgz',
-                  integrity,
-                },
-              },
+            name: 'my-skill',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.0.0.tgz',
+              integrity,
             },
           }),
         },
@@ -113,6 +110,37 @@ describe('stroq vet --online', () => {
       });
     });
 
+    it('vets package with uppercase name such as JSONStream', async () => {
+      const tarball = makeTarball([
+        {
+          name: 'SKILL.md',
+          content: '---\nname: JSONStream\ndescription: json stream demo\n---\n# JSONStream\n',
+        },
+      ]);
+      const integrity = sha512Of(tarball);
+
+      const transport = createMockTransport({
+        'https://registry.npmjs.org/JSONStream/latest': {
+          body: JSON.stringify({
+            name: 'JSONStream',
+            version: '1.3.5',
+            dist: {
+              tarball: 'https://registry.npmjs.org/JSONStream/-/JSONStream-1.3.5.tgz',
+              integrity,
+            },
+          }),
+        },
+        'https://registry.npmjs.org/JSONStream/-/JSONStream-1.3.5.tgz': {
+          body: tarball,
+        },
+      });
+
+      const run = await vet(['--online', 'npm:JSONStream', '--json'], { transport });
+      expect(run.code).toBe(0);
+      const passport: Passport = PassportSchema.parse(JSON.parse(run.stdout));
+      expect(passport.artifact.name).toBe('JSONStream');
+    });
+
     it('renders a markdown card with online reproduction command', async () => {
       const tarball = makeTarball([
         {
@@ -123,16 +151,13 @@ describe('stroq vet --online', () => {
       const integrity = sha512Of(tarball);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/my-skill': {
+        'https://registry.npmjs.org/my-skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.0.0.tgz',
-                  integrity,
-                },
-              },
+            name: 'my-skill',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.0.0.tgz',
+              integrity,
             },
           }),
         },
@@ -268,16 +293,13 @@ describe('stroq vet --online', () => {
       const integrity = sha512Of(tarball);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/expect-skill': {
+        'https://registry.npmjs.org/expect-skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/expect-skill/-/expect-skill-1.0.0.tgz',
-                  integrity,
-                },
-              },
+            name: 'expect-skill',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/expect-skill/-/expect-skill-1.0.0.tgz',
+              integrity,
             },
           }),
         },
@@ -306,16 +328,13 @@ describe('stroq vet --online', () => {
       const integrity = sha512Of(tarball);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/expect-skill': {
+        'https://registry.npmjs.org/expect-skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/expect-skill/-/expect-skill-1.0.0.tgz',
-                  integrity,
-                },
-              },
+            name: 'expect-skill',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/expect-skill/-/expect-skill-1.0.0.tgz',
+              integrity,
             },
           }),
         },
@@ -354,16 +373,13 @@ describe('stroq vet --online', () => {
         'sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/skill': {
+        'https://registry.npmjs.org/skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/skill/-/skill-1.0.0.tgz',
-                  integrity: fakeIntegrity,
-                },
-              },
+            name: 'skill',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/skill/-/skill-1.0.0.tgz',
+              integrity: fakeIntegrity,
             },
           }),
         },

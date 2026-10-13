@@ -7,7 +7,7 @@
 //
 // The parsing holds every part to its length and shape before any network call is made.
 import { checkEntryPath } from './safe-path.js';
-import { LIMITS } from './types.js';
+import { COMMIT_HEX, isHostName as schemaIsHostName, LIMITS, SOURCE_PART_MAX } from './types.js';
 
 export interface NpmSource {
   readonly type: 'npm';
@@ -39,30 +39,13 @@ export class SourceSyntaxError extends Error {
   }
 }
 
-const SOURCE_PART_MAX = {
-  npmName: 214,
-  version: 256,
-  owner: 39,
-  repo: 100,
-  ref: 255,
-} as const;
-
-const HOST_MAX = 253;
-const HOST_LABEL_MAX = 63;
-const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-const NUMBER = /^(?:[0-9]+|0x[0-9a-f]*)$/i;
-const COMMIT_HEX = /^[0-9a-f]{40}$/;
-
 export function isHostName(text: string): boolean {
-  if (text.length > HOST_MAX || text === 'localhost') return false;
-  const labels = text.split('.');
-  const last = labels[labels.length - 1] ?? '';
-  if (NUMBER.test(last)) return false;
-  return labels.every((part) => part.length <= HOST_LABEL_MAX && HOST_LABEL.test(part));
+  if (text === 'localhost') return false;
+  return schemaIsHostName(text);
 }
 
-const NPM_UNSCOPED = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
-const NPM_SCOPE = /^@[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+const NPM_UNSCOPED = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+const NPM_SCOPE = /^@[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
 const NPM_VERSION_OR_TAG = /^[a-zA-Z0-9_.-]+$/;
 
 function parseNpmSource(spec: string): NpmSource {
@@ -78,7 +61,7 @@ function parseNpmSource(spec: string): NpmSource {
       throw new SourceSyntaxError(`scoped npm package name is missing '/': ${spec}`);
     }
     const scope = spec.slice(0, slash);
-    if (!NPM_SCOPE.test(scope)) {
+    if (!NPM_SCOPE.test(scope) || scope.includes('..')) {
       throw new SourceSyntaxError(`invalid npm package scope: ${scope}`);
     }
     const rest = spec.slice(slash + 1);
@@ -86,13 +69,13 @@ function parseNpmSource(spec: string): NpmSource {
     if (at === -1) {
       name = `${scope}/${rest}`;
       const pkgPart = rest;
-      if (!NPM_UNSCOPED.test(pkgPart)) {
+      if (!NPM_UNSCOPED.test(pkgPart) || pkgPart.includes('..')) {
         throw new SourceSyntaxError(`invalid npm package name: ${name}`);
       }
     } else {
       const pkgPart = rest.slice(0, at);
       name = `${scope}/${pkgPart}`;
-      if (!NPM_UNSCOPED.test(pkgPart)) {
+      if (!NPM_UNSCOPED.test(pkgPart) || pkgPart.includes('..')) {
         throw new SourceSyntaxError(`invalid npm package name: ${name}`);
       }
       version = rest.slice(at + 1);
@@ -105,7 +88,7 @@ function parseNpmSource(spec: string): NpmSource {
       name = spec.slice(0, at);
       version = spec.slice(at + 1);
     }
-    if (!NPM_UNSCOPED.test(name)) {
+    if (!NPM_UNSCOPED.test(name) || name.includes('..')) {
       throw new SourceSyntaxError(`invalid npm package name: ${name}`);
     }
   }

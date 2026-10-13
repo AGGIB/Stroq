@@ -101,10 +101,10 @@ type Made =
   | { readonly usage: string; readonly failure?: undefined };
 
 /** The tree of what `--from` names: a folder is walked, and a file is read as an archive. */
-function readSource(type: SourceType, options: VetOptions, deps: VetDeps) {
+function readSource(type: SourceType, from: string, deps: VetDeps) {
   return type === 'dir'
-    ? readDirTree(options.from!, deps.platform === undefined ? {} : { platform: deps.platform })
-    : readArchiveFile(options.from!);
+    ? readDirTree(from, deps.platform === undefined ? {} : { platform: deps.platform })
+    : readArchiveFile(from);
 }
 
 async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
@@ -138,7 +138,7 @@ async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
       return { passport };
     }
 
-    const from = options.from!;
+    const from = options.from;
     const type = await sourceTypeOf(from);
     // A folder read on Windows has no executable bit, so its digest is not that of the same files anywhere
     // else, and a bare digest cannot say so. An archive carries its own bits and has no such trouble.
@@ -149,7 +149,7 @@ async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
     ) {
       return { usage: EXPECT_ON_WINDOWS };
     }
-    const { tree, blindSpots } = await readSource(type, options, deps);
+    const { tree, blindSpots } = await readSource(type, from, deps);
     const context = {
       kind: options.kind,
       source: { type, label: labelOf(from, type) },

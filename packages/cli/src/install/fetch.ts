@@ -72,6 +72,9 @@ const NPM_REGISTRY_HOST = 'registry.npmjs.org';
 const GITHUB_CODELOAD_HOST = 'codeload.github.com';
 
 export const defaultTransport: Transport = async (url, options) => {
+  if (options.signal?.aborted) {
+    throw options.signal.reason ?? new DOMException('This operation was aborted', 'AbortError');
+  }
   const init: RequestInit = {
     method: 'GET',
     redirect: 'manual',
@@ -98,18 +101,27 @@ export const defaultTransport: Transport = async (url, options) => {
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
     let received = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.length;
-      if (received > LIMITS.maxCompressed) {
-        await reader.cancel();
-        throw new FetchError(
-          'limit',
-          `the compressed archive is over ${LIMITS.maxCompressed} bytes`,
-        );
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.length;
+        if (received > LIMITS.maxCompressed) {
+          await reader.cancel();
+          throw new FetchError(
+            'limit',
+            `the compressed archive is over ${LIMITS.maxCompressed} bytes`,
+          );
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore secondary cancel error
+      }
+      throw err;
     }
     const body = new Uint8Array(received);
     let offset = 0;
@@ -153,10 +165,11 @@ function checkHostSafety(host: string, allowlist: readonly string[]): void {
     );
   }
   if (!allowlist.includes(host)) {
-    throw new FetchError(
-      'forbidden-host',
-      `host "${host}" is not in the source allowlist (${allowlist.join(', ')})`,
-    );
+    let message = `host "${host}" is not in the source allowlist (${allowlist.join(', ')})`;
+    if (host === 'codeload.github.com') {
+      message += '; for GitHub repositories use the github:<owner>/<repo>[#<ref>][:subdir] format';
+    }
+    throw new FetchError('forbidden-host', message);
   }
 }
 
@@ -169,7 +182,7 @@ async function requestWithPolicy(
   let currentUrl = initialUrl;
   let redirects = 0;
 
-  while (true) {
+  for (;;) {
     if (currentUrl.protocol !== 'https:') {
       throw new FetchError('https-only', 'https only: non-https URLs are refused');
     }
@@ -178,6 +191,12 @@ async function requestWithPolicy(
     if (!state.reportedHosts.has(currentUrl.hostname)) {
       state.reportedHosts.add(currentUrl.hostname);
       state.onHost?.(currentUrl.hostname);
+    }
+
+    if (state.customSignal?.aborted) {
+      throw (
+        state.customSignal.reason ?? new DOMException('This operation was aborted', 'AbortError')
+      );
     }
 
     const elapsedTotal = Date.now() - state.startedAt;
@@ -189,10 +208,14 @@ async function requestWithPolicy(
       );
     }
 
+    const isTotalCap = remainingTotal <= LIMITS.perRequestMs;
     const timeoutMs = Math.min(LIMITS.perRequestMs, remainingTotal);
+    const timeoutMessage = isTotalCap
+      ? `fetch timed out: exceeded total limit of ${LIMITS.totalMs / 1000} s`
+      : `request timed out after ${timeoutMs / 1000} s`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      controller.abort(new FetchError('timeout', `request timed out after ${timeoutMs / 1000} s`));
+      controller.abort(new FetchError('timeout', timeoutMessage));
     }, timeoutMs);
 
     const onCustomAbort = () => {
@@ -215,8 +238,13 @@ async function requestWithPolicy(
       });
     } catch (err) {
       if (err instanceof FetchError) throw err;
+      if (state.customSignal?.aborted) {
+        throw (
+          state.customSignal.reason ?? new DOMException('This operation was aborted', 'AbortError')
+        );
+      }
       if (controller.signal.aborted) {
-        throw new FetchError('timeout', `request timed out after ${timeoutMs / 1000} s`);
+        throw new FetchError('timeout', timeoutMessage);
       }
       throw new FetchError(
         'unreadable',
@@ -289,7 +317,9 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
   const encodedName = source.name.startsWith('@')
     ? `@${encodeURIComponent(source.name.slice(1))}`
     : encodeURIComponent(source.name);
-  const metadataUrl = new URL(`https://${NPM_REGISTRY_HOST}/${encodedName}`);
+  const metadataUrl = new URL(
+    `https://${NPM_REGISTRY_HOST}/${encodedName}/${encodeURIComponent(source.version)}`,
+  );
 
   const metadataRes = await requestWithPolicy(
     metadataUrl,
@@ -309,28 +339,8 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
     );
   }
 
-  const distTags = (doc['dist-tags'] ?? {}) as Record<string, string>;
-  const versions = (doc['versions'] ?? {}) as Record<string, Record<string, unknown>>;
-
-  let resolvedVersion = source.version;
-  if (distTags[source.version] !== undefined) {
-    resolvedVersion = distTags[source.version] ?? source.version;
-  } else if (versions[source.version] === undefined) {
-    throw new FetchError(
-      'not-found',
-      `package "${source.name}" has no version or tag "${source.version}" in the registry`,
-    );
-  }
-
-  const versionEntry = versions[resolvedVersion];
-  if (!versionEntry || typeof versionEntry !== 'object') {
-    throw new FetchError(
-      'not-found',
-      `package "${source.name}" version "${resolvedVersion}" has no metadata entry`,
-    );
-  }
-
-  const dist = (versionEntry['dist'] ?? {}) as Record<string, unknown>;
+  const resolvedVersion = typeof doc['version'] === 'string' ? doc['version'] : source.version;
+  const dist = (doc['dist'] ?? {}) as Record<string, unknown>;
   const tarballUrlStr = dist['tarball'];
   const integrity = dist['integrity'];
 
@@ -397,7 +407,14 @@ async function fetchGitHub(source: GitHubSource, state: FetchState): Promise<Fet
 
   const archiveRead = readTarArchive(tarballRes.body);
 
-  const commit = source.commit ?? archiveRead.commit ?? undefined;
+  if (source.commit && archiveRead.commit && source.commit !== archiveRead.commit) {
+    throw new FetchError(
+      'bad-source',
+      `commit mismatch for github:${source.owner}/${source.repo}#${source.ref}: requested ${source.commit} but server claimed ${archiveRead.commit}`,
+    );
+  }
+
+  const commit = archiveRead.commit ?? source.commit ?? undefined;
 
   let tree = archiveRead.tree;
   if (source.subdir) {

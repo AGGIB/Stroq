@@ -36,15 +36,17 @@ describe('network call boundary', () => {
     // Forbids raw fetch( calls
     expect(content, `${relative} must not call fetch()`).not.toMatch(/\bfetch\s*\(/);
 
-    // Forbids http.request
-    expect(content, `${relative} must not use http.request`).not.toMatch(/\bhttp\.request\b/);
+    // Forbids http.request / http.get
+    expect(content, `${relative} must not use http.request or http.get`).not.toMatch(
+      /\bhttp\.(?:request|get)\b/,
+    );
 
     // Forbids https. (https.request, https.get, etc.)
     expect(content, `${relative} must not use https.`).not.toMatch(/\bhttps\./);
 
-    // Forbids importing node:http or node:https directly
-    expect(content, `${relative} must not import http or https`).not.toMatch(
-      /from\s+['"]node:https?['"]/,
+    // Forbids static and dynamic importing or requiring of network modules
+    expect(content, `${relative} must not import or require network modules`).not.toMatch(
+      /(?:from\s+|(?:import|require)\s*\(\s*)['"](?:node:)?(?:https?|http2|net|tls|dns|dgram|undici)['"]/,
     );
   });
 });

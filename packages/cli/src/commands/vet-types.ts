@@ -2,12 +2,7 @@ import type { Transport } from '../install/fetch.js';
 import type { NamedReading } from '../install/inspect/index.js';
 import type { ArtifactKind } from '../install/types.js';
 
-/** The command line of `stroq vet`, read and checked. */
-export interface VetOptions {
-  /** The folder or archive file to read, or null when reading online. */
-  readonly from: string | null;
-  /** The online package or address to read, or null when reading from disk. */
-  readonly online: string | null;
+interface VetCommonOptions {
   /** What the artifact is, or `auto` to tell from its files. */
   readonly kind: ArtifactKind | 'auto';
   readonly json: boolean;
@@ -17,6 +12,19 @@ export interface VetOptions {
   /** A file to write the output to. It must not exist yet. */
   readonly out: string | null;
 }
+
+/** The command line of `stroq vet`, read and checked: either local with --from or online with --online. */
+export type VetOptions =
+  | (VetCommonOptions & {
+      /** The folder or archive file to read. */
+      readonly from: string;
+      readonly online: null;
+    })
+  | (VetCommonOptions & {
+      readonly from: null;
+      /** The online package or address to read. */
+      readonly online: string;
+    });
 
 /**
  * What a test may replace. The streams, so that the output can be read; the platform, so that Windows can be

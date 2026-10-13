@@ -200,7 +200,7 @@ function takeExtended(walk: Walk, header: TarHeader, isGlobal: boolean): void {
   }
   const pax = parsePax(takeData(walk, header.size), isGlobal);
   if (!isGlobal) walk.pending = pax;
-  else if (pax.comment) walk.globalCommit = pax.comment;
+  else if (pax.comment && walk.records === 1) walk.globalCommit = pax.comment;
 }
 
 /** A GNU long name: the data is the name of the next entry, with a NUL at the end. */

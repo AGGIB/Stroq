@@ -64,11 +64,33 @@ describe('parseOnlineSource', () => {
       });
     });
 
+    it('parses packages with uppercase letters such as JSONStream', () => {
+      expect(parseOnlineSource('npm:JSONStream')).toEqual({
+        type: 'npm',
+        name: 'JSONStream',
+        version: 'latest',
+      });
+      expect(parseOnlineSource('npm:JSONStream@1.3.5')).toEqual({
+        type: 'npm',
+        name: 'JSONStream',
+        version: '1.3.5',
+      });
+      expect(parseOnlineSource('npm:@Scope/Package@1.0.0')).toEqual({
+        type: 'npm',
+        name: '@Scope/Package',
+        version: '1.0.0',
+      });
+    });
+
     it('refuses malformed npm package names and versions', () => {
       expect(() => parseOnlineSource('npm:')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:@types')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:../bad')).toThrow(SourceSyntaxError);
-      expect(() => parseOnlineSource('npm:INVALID_CAPS')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:a..b')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:@scope/a..b')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:@..scope/pkg')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:pkg with space')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:pkg/nested/slash')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:pkg@')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:pkg@1.0/2')).toThrow(SourceSyntaxError);
     });

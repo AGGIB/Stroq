@@ -134,17 +134,20 @@ export function parseVetArgs(args: readonly string[]): Parsed {
   if (values.out === '') return refuse('--out needs the name of a file that does not exist yet');
   const expected = values.expect === undefined ? null : digestOf(values.expect);
   if (values.expect !== undefined && expected === null) return refuse(EXPECT_SYNTAX);
+  const common = {
+    kind,
+    json: values.json === true,
+    card: values.card === true,
+    expect: expected,
+    out: values.out ?? null,
+  };
+  const options: VetOptions =
+    values.from !== undefined
+      ? { ...common, from: values.from, online: null }
+      : { ...common, from: null, online: values.online! };
   return {
     ok: true,
-    options: {
-      from: values.from ?? null,
-      online: values.online ?? null,
-      kind,
-      json: values.json === true,
-      card: values.card === true,
-      expect: expected,
-      out: values.out ?? null,
-    },
+    options,
   };
 }
 

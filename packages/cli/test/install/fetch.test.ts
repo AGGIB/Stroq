@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  defaultTransport,
   FetchError,
   fetchSourceTree,
   type FetchOptions,
@@ -82,16 +83,13 @@ describe('fetchSourceTree', () => {
       const reportedHosts: string[] = [];
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/my-skill': {
+        'https://registry.npmjs.org/my-skill/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.2.0' },
-            versions: {
-              '1.2.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.2.0.tgz',
-                  integrity,
-                },
-              },
+            name: 'my-skill',
+            version: '1.2.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/my-skill/-/my-skill-1.2.0.tgz',
+              integrity,
             },
           }),
         },
@@ -120,16 +118,13 @@ describe('fetchSourceTree', () => {
       const integrity = sha512Of(tarball);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/@acme%2Fserver': {
+        'https://registry.npmjs.org/@acme%2Fserver/next': {
           body: JSON.stringify({
-            'dist-tags': { next: '2.0.0-beta.1' },
-            versions: {
-              '2.0.0-beta.1': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/@acme/server/-/server-2.0.0-beta.1.tgz',
-                  integrity,
-                },
-              },
+            name: '@acme/server',
+            version: '2.0.0-beta.1',
+            dist: {
+              tarball: 'https://registry.npmjs.org/@acme/server/-/server-2.0.0-beta.1.tgz',
+              integrity,
             },
           }),
         },
@@ -154,16 +149,13 @@ describe('fetchSourceTree', () => {
       const tarball = makeTarball([{ name: 'SKILL.md' }]);
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/no-sha': {
+        'https://registry.npmjs.org/no-sha/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/no-sha/-/no-sha-1.0.0.tgz',
-                  shasum: '1234567890abcdef', // only legacy sha1
-                },
-              },
+            name: 'no-sha',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/no-sha/-/no-sha-1.0.0.tgz',
+              shasum: '1234567890abcdef', // only legacy sha1
             },
           }),
         },
@@ -179,16 +171,13 @@ describe('fetchSourceTree', () => {
       const bogusIntegrity = `sha512-${'B'.repeat(86)}==`;
 
       const transport = createMockTransport({
-        'https://registry.npmjs.org/tampered': {
+        'https://registry.npmjs.org/tampered/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://registry.npmjs.org/tampered/-/tampered-1.0.0.tgz',
-                  integrity: bogusIntegrity,
-                },
-              },
+            name: 'tampered',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://registry.npmjs.org/tampered/-/tampered-1.0.0.tgz',
+              integrity: bogusIntegrity,
             },
           }),
         },
@@ -204,16 +193,13 @@ describe('fetchSourceTree', () => {
 
     it('refuses when tarball origin does not match npm registry', async () => {
       const transport = createMockTransport({
-        'https://registry.npmjs.org/bad-origin': {
+        'https://registry.npmjs.org/bad-origin/latest': {
           body: JSON.stringify({
-            'dist-tags': { latest: '1.0.0' },
-            versions: {
-              '1.0.0': {
-                dist: {
-                  tarball: 'https://evil.example.com/bad-origin.tgz',
-                  integrity: `sha512-${'A'.repeat(86)}==`,
-                },
-              },
+            name: 'bad-origin',
+            version: '1.0.0',
+            dist: {
+              tarball: 'https://evil.example.com/bad-origin.tgz',
+              integrity: `sha512-${'A'.repeat(86)}==`,
             },
           }),
         },
@@ -282,6 +268,46 @@ describe('fetchSourceTree', () => {
         repo: 'react',
         ref: 'main',
         commit: commitFromPax,
+      });
+    });
+
+    it('cross-checks user commit ref against pax header and refuses on mismatch', async () => {
+      const userCommit = '0123456789abcdef0123456789abcdef01234567';
+      const claimedCommit = 'ffffffffffffffffffffffffffffffffffffffff';
+      const tarball = makeTarball([{ name: 'SKILL.md' }], { globalComment: claimedCommit });
+
+      const transport = createMockTransport({
+        [`https://codeload.github.com/org/repo/tar.gz/${userCommit}`]: {
+          body: tarball,
+        },
+      });
+
+      await expect(
+        fetchSourceTree(parseOnlineSource(`github:org/repo#${userCommit}`), { transport }),
+      ).rejects.toThrow(
+        /commit mismatch for github:org\/repo#0123456789abcdef0123456789abcdef01234567/,
+      );
+    });
+
+    it('records commit when user commit ref matches pax header claim', async () => {
+      const commit = '0123456789abcdef0123456789abcdef01234567';
+      const tarball = makeTarball([{ name: 'SKILL.md' }], { globalComment: commit });
+
+      const transport = createMockTransport({
+        [`https://codeload.github.com/org/repo/tar.gz/${commit}`]: {
+          body: tarball,
+        },
+      });
+
+      const res = await fetchSourceTree(parseOnlineSource(`github:org/repo#${commit}`), {
+        transport,
+      });
+      expect(res.sourceRef).toEqual({
+        type: 'github',
+        owner: 'org',
+        repo: 'repo',
+        ref: commit,
+        commit,
       });
     });
 
@@ -449,6 +475,190 @@ describe('fetchSourceTree', () => {
       await expect(
         fetchSourceTree(parseOnlineSource('https://example.com/huge.tgz'), { transport }),
       ).rejects.toThrow(/compressed archive is over 20971520 bytes/);
+    });
+  });
+
+  describe('defaultTransport', () => {
+    it('cancels reader and throws limit error when ReadableStream exceeds 20 MiB', async () => {
+      let cancelled = false;
+      const chunk = new Uint8Array(1024 * 1024); // 1 MiB chunk
+      const infiniteStream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+
+      const mockResponse = new Response(infiniteStream, {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+      try {
+        await expect(
+          defaultTransport(new URL('https://example.com/stream.tgz'), {}),
+        ).rejects.toThrow(FetchError);
+        expect(cancelled).toBe(true);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('throws limit error before reading stream when Content-Length exceeds 20 MiB', async () => {
+      const mockResponse = new Response('too large', {
+        status: 200,
+        headers: { 'content-length': String(LIMITS.maxCompressed + 1) },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+      try {
+        await expect(
+          defaultTransport(new URL('https://example.com/oversized.tgz'), {}),
+        ).rejects.toThrow(/the compressed archive is over 20971520 bytes/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('hands back 302 redirect without following it (redirect: manual)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://example.com/target.tgz' },
+        }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        const res = await defaultTransport(new URL('https://example.com/start.tgz'), {});
+        expect(res.status).toBe(302);
+        expect(res.headers.get('location')).toBe('https://example.com/target.tgz');
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.any(URL),
+          expect.objectContaining({ redirect: 'manual' }),
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('rejects when signal is aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        defaultTransport(new URL('https://example.com/test.tgz'), { signal: controller.signal }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('network timeouts and protocol errors', () => {
+    it('times out when single request exceeds per-request 20 s limit', async () => {
+      vi.useFakeTimers();
+      const hangingFetch = vi.fn().mockImplementation(
+        (_url, { signal }: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal.reason));
+          }),
+      );
+      vi.stubGlobal('fetch', hangingFetch);
+
+      try {
+        const promise = fetchSourceTree(parseOnlineSource('https://example.com/slow.tgz'));
+        vi.advanceTimersByTime(21_000);
+        await expect(promise).rejects.toThrow(/request timed out after 20 s/);
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('times out when cumulative requests exceed total 60 s limit', async () => {
+      vi.useFakeTimers();
+      let time = 0;
+      const fetchMock = vi.fn().mockImplementation(async () => {
+        time += 21_000;
+        vi.setSystemTime(Date.now() + 21_000);
+        return new Response(null, {
+          status: 302,
+          headers: { location: `https://example.com/hop-${time}.tgz` },
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        const promise = fetchSourceTree(parseOnlineSource('https://example.com/start.tgz'));
+        await expect(promise).rejects.toThrow(/exceeded total limit of 60 s/);
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('refuses redirect response missing Location header', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(null, {
+            status: 302,
+          }),
+        ),
+      );
+
+      try {
+        await expect(
+          fetchSourceTree(parseOnlineSource('https://example.com/start.tgz')),
+        ).rejects.toThrow(/redirect response missing Location header/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('refuses HTTP error status other than 404 as bad-status', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response('Service Unavailable', {
+            status: 503,
+            statusText: 'Service Unavailable',
+          }),
+        ),
+      );
+
+      try {
+        await expect(
+          fetchSourceTree(parseOnlineSource('https://example.com/broken.tgz')),
+        ).rejects.toThrow(/server returned HTTP 503 Service Unavailable/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('refuses github.com tarball redirecting to codeload with helpful hint', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(null, {
+            status: 302,
+            headers: { location: 'https://codeload.github.com/org/repo/tar.gz/v1.0.0' },
+          }),
+        ),
+      );
+
+      try {
+        await expect(
+          fetchSourceTree(
+            parseOnlineSource('https://github.com/org/repo/archive/refs/tags/v1.0.0.tar.gz'),
+          ),
+        ).rejects.toThrow(
+          /for GitHub repositories use the github:<owner>\/<repo>\[#<ref>\]\[:subdir\] format/,
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 });
