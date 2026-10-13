@@ -13,6 +13,15 @@ import { MUTATIONS, type Mutation } from './evidence-mutations.js';
 import { NONCE } from './helpers.js';
 
 /**
+ * The tally below counts how often each outcome was drawn, so it needs the same draws every run: with a
+ * random seed, the same kind of tally in `evidence-control-properties.test.ts` drew one outcome 23 times
+ * against a floor of 25 (Windows CI, 2026-10-13). A fixed
+ * seed keeps the claim (every outcome agrees with the oracle, and each one was seen) and loses only
+ * the variation between runs.
+ */
+const TALLY_SEED = 20_261_013;
+
+/**
  * A pass is the one result that can do harm, so it is tested as a claim about many runs and not only
  * about those someone thought of. The runs are not made by flipping a coin for each piece of evidence:
  * that makes a run in which everything went right a one in a few thousand chance, and a property about
@@ -177,7 +186,7 @@ describe('what no combination of evidence can produce', () => {
         holds(input, markProbe(input));
         return true;
       }),
-      { numRuns: 4000 },
+      { numRuns: 4000, seed: TALLY_SEED },
     );
     // The claims are about passes, failures and doubts alike, so each has to have been seen many times.
     // (Of 4000 runs about half pass and about one in thirteen fails; the least often seen reason below

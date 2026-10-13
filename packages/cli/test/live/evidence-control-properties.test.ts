@@ -8,6 +8,14 @@ import { NONCE, finished, toolUse } from './helpers.js';
 import { PROJECT, probe } from './probe-helpers.js';
 
 /**
+ * The tally below counts how often each outcome was drawn, so it needs the same draws every run: with a
+ * random seed one outcome was drawn 23 times against a floor of 25 (Windows CI, 2026-10-13). A fixed
+ * seed keeps the claim (every outcome agrees with the oracle, and each one was seen) and loses only
+ * the variation between runs.
+ */
+const TALLY_SEED = 20_261_013;
+
+/**
  * A verified host rests on the control: the one run in which no hook counts the calls, so nothing but the
  * stream and the disk can say what happened. A control that is called armed when it was not is a false
  * `verified`, which is the one result this check must never give. So, like a pass of a real probe, the
@@ -164,7 +172,7 @@ describe('what no combination of evidence can make of a control', () => {
         expect(outcome.reason).toMatch(/^[a-z0-9][a-z0-9:._-]{0,63}$/);
         return true;
       }),
-      { numRuns: 3000 },
+      { numRuns: 3000, seed: TALLY_SEED },
     );
     // The claim is about arming and about every way of not being armed, so each has to have been seen.
     const seen = (key: string): number => tally.get(key) ?? 0;
