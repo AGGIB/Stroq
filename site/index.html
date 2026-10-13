@@ -1016,7 +1016,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
       <h2 id="colophon-title">Built in the open, by one developer.</h2>
       <div class="colophon-body">
         <p>I'm Agybay, a developer from Kazakhstan. I built Stroq because I let agents run in my own repositories and could not find a guard that looked at <em>where an instruction came from</em> rather than what it said.</p>
-        <p>Every number on this page is measured, not claimed, and you can re-run each one: <code>stroq bench</code> for the false-positive rate, <code>stroq attack</code> for the incidents, <code>pnpm test</code> for the suite. When a gate rejects one of our own rules, the count on this page goes down.</p>
+        <p>The counts on this page come from commands you can re-run: <code>stroq bench</code> for the false-positive rate, <code>stroq attack</code> for the incidents, <code>pnpm test</code> for the suite. When a gate rejects one of our own rules, the count goes down. The one figure that is an estimate and not a measurement, the cost of a hook call, is marked so in the docs.</p>
         <p>The honest limit: the content scan is regex over normalized text, not a model, so it is bypassable by construction. That is exactly why enforcement happens at the <em>action</em> — the provenance link and the policy decision are what stop an attack, not the scanner alone. What it still does not catch is written down.</p>
         <p class="colophon-links">
           <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">What Stroq does not catch <svg class="ic ic-ext" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
