@@ -78,6 +78,7 @@ export interface StatLike {
   /** Milliseconds since the epoch. */
   readonly mtimeMs: number;
   isFile(): boolean;
+  isDirectory(): boolean;
 }
 
 /** The part of a file handle an atomic write uses. `fs.promises.FileHandle` satisfies it. */

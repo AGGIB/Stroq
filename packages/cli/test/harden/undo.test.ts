@@ -31,10 +31,30 @@ describe('undoFile: nothing has changed since', () => {
     const result = await undo(e, real);
 
     expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('.claude'))).toBe(false);
     expect(result.status).toBe('restored');
     expect(result.diff).toBe(unifiedDiff(plan.after, '', { path: real, newMissing: true }));
     expect(result.diff).toContain('+++ /dev/null');
     expect(readManifest(e.env).files).toEqual({});
+  });
+
+  it('removes nested empty folders apply made, but leaves folders with other files', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'nested/sub/.claude/settings.json', null, [
+      addDeny('a'),
+    ]);
+    expect(existsSync(path)).toBe(true);
+    expect(existsSync(e.file('nested/sub/.claude'))).toBe(true);
+
+    writeFileSync(e.file('nested/readme.txt'), 'hello');
+
+    await undo(e, real);
+
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('nested/sub/.claude'))).toBe(false);
+    expect(existsSync(e.file('nested/sub'))).toBe(false);
+    expect(existsSync(e.file('nested'))).toBe(true);
+    expect(existsSync(e.file('nested/readme.txt'))).toBe(true);
   });
 
   it('takes a block out of a line-oriented file and gives back the same bytes', async () => {

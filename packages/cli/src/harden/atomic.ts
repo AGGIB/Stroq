@@ -124,13 +124,30 @@ export function assertWriteAllowed(target: string, rules: WriteRules = {}): stri
   return real;
 }
 
-async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined> {
+export async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined> {
   try {
     return await fs.stat(path);
   } catch (err) {
     if (isMissing(err)) return undefined;
     throw err;
   }
+}
+
+/**
+ * The directories leading to `dir` (and `dir` itself) that do not exist yet, innermost first.
+ */
+export async function missingDirsTo(fs: Fs, dir: string): Promise<string[]> {
+  const missing: string[] = [];
+  let current = dir;
+  while (true) {
+    const existing = await statIfPresent(fs, current);
+    if (existing !== undefined) break;
+    missing.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return missing;
 }
 
 /**
@@ -243,4 +260,29 @@ export async function removeFile(
   await options.beforeRemove?.();
   await fs.unlink(real);
   return true;
+}
+
+/**
+ * Removes directories in `dirs` (deepest first) if they exist and are completely empty.
+ * Never removes a directory that has anything in it or violates write rules.
+ */
+export async function removeEmptyDirs(
+  dirs: readonly string[],
+  options: WriteRules & { readonly fs?: Fs | undefined } = {},
+): Promise<void> {
+  const fs = options.fs ?? nodeFs;
+  const ordered = [...new Set(dirs)].sort((a, b) => b.length - a.length || b.localeCompare(a));
+  for (const dir of ordered) {
+    try {
+      const real = assertWriteAllowed(dir, options);
+      const stat = await statIfPresent(fs, real);
+      if (stat === undefined || !stat.isDirectory()) continue;
+      const list = await fs.readdir(real);
+      if (list.length === 0) {
+        await fs.rmdir(real);
+      }
+    } catch {
+      // Best-effort cleanup: never let directory cleanup failure hide or break the caller
+    }
+  }
 }

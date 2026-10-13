@@ -1,4 +1,13 @@
-import { assertWriteAllowed, resolveRealPath, writeFileAtomic, type WriteRules } from './atomic.js';
+import { dirname } from 'node:path';
+import {
+  assertWriteAllowed,
+  missingDirsTo,
+  nodeFs,
+  removeEmptyDirs,
+  resolveRealPath,
+  writeFileAtomic,
+  type WriteRules,
+} from './atomic.js';
 import {
   backupFile,
   newBackupId,
@@ -10,6 +19,7 @@ import { replacesCredential } from './json-edit.js';
 import {
   entriesFor,
   readManifest,
+  removeManifest,
   withManifestLock,
   writeManifest,
   type Manifest,
@@ -139,10 +149,12 @@ const withEntry = (manifest: Manifest, real: string, entry: ManifestEntry): Mani
 async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
   const now = env.now();
   const bytes = currentBytes(plan);
+  const fs = env.fs ?? nodeFs;
   // Read first: a manifest that cannot be trusted must stop this before anything is written.
   const manifest = readManifest(env);
   let backup: BackupResult | null = null;
   let recorded = false;
+  const createdDirs = plan.existed ? [] : await missingDirsTo(fs, dirname(plan.real));
   try {
     // The copy is of the bytes just read, and the last look below compares with those same bytes:
     // what is kept is what is replaced, or nothing is replaced.
@@ -153,6 +165,7 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
     const entry: ManifestEntry = {
       recipe: plan.recipe,
       created: !plan.existed,
+      createdDirs,
       real: plan.real,
       root: plan.root === undefined ? null : resolveRealPath(plan.root),
       edits: plan.edits,
@@ -178,9 +191,18 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
     return { changed: true, real: plan.real, diff: plan.diff, backup, entry };
   } catch (err) {
     // Take back what was done, and never let a failure to do so hide the failure that matters.
-    if (recorded) await writeManifest(env, manifest).catch(() => undefined);
+    if (recorded) {
+      if (Object.keys(manifest.files).length === 0) {
+        await removeManifest(env).catch(() => undefined);
+      } else {
+        await writeManifest(env, manifest).catch(() => undefined);
+      }
+    }
     if (backup?.stored === true)
       await removeBackup(env, plan.real, backup.id).catch(() => undefined);
+    if (createdDirs.length > 0) {
+      await removeEmptyDirs(createdDirs, { ...rulesOf(plan.root), fs });
+    }
     throw err;
   }
 }

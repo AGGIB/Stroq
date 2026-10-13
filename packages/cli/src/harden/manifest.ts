@@ -3,7 +3,13 @@ import { isAbsolute, join } from 'node:path';
 import { withLock } from '@stroq/core';
 import { z } from 'zod';
 import { hardenDirIn, hardenManifestFileIn } from '../paths.js';
-import { assertWriteAllowed, makePrivateDir, nodeFs, writeFileAtomic } from './atomic.js';
+import {
+  assertWriteAllowed,
+  makePrivateDir,
+  nodeFs,
+  removeFile,
+  writeFileAtomic,
+} from './atomic.js';
 import { HardenError, ID_PATTERN, type HardenEnv, type RecordedEdit } from './types.js';
 
 /**
@@ -41,6 +47,8 @@ export interface ManifestEntry {
   readonly recipe: string;
   /** The file did not exist before this apply: undo removes it if it is still only Stroq's. */
   readonly created: boolean;
+  /** The directories this apply created because they did not exist, innermost first. */
+  readonly createdDirs?: readonly string[];
   /**
    * The real path of the file when it was changed, links followed. It is also the key the entry is
    * filed under; undo refuses to act on a path that no longer leads to it.
@@ -142,6 +150,7 @@ const absolutePath = z.string().refine((path) => isAbsolute(path), 'a path is ab
 const entrySchema = z.strictObject({
   recipe: z.string().min(1).max(128),
   created: z.boolean(),
+  createdDirs: z.array(absolutePath).default([]),
   real: absolutePath,
   root: absolutePath.nullable(),
   edits: z.array(editSchema),
@@ -315,6 +324,17 @@ export async function writeManifest(env: HardenEnv, manifest: Manifest): Promise
   assertWriteAllowed(file, rules);
   await makePrivateDir(fs, hardenDirIn(env.home));
   await writeFileAtomic(file, text, { ...rules, mode: MANIFEST_MODE, fs });
+}
+
+/**
+ * Removes the manifest file, when there are no entries left to keep or an apply is taken back.
+ */
+export async function removeManifest(env: HardenEnv): Promise<void> {
+  const fs = env.fs ?? nodeFs;
+  const file = hardenManifestFileIn(env.home);
+  const rules = { root: env.home, initRule: false } as const;
+  assertWriteAllowed(file, rules);
+  await removeFile(file, { ...rules, fs });
 }
 
 /**

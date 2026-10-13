@@ -52,7 +52,7 @@ describe('applyPlan: a manifest it cannot trust', () => {
 
 describe('applyPlan: when something fails', () => {
   it('leaves the file as it was, with no temporary file and no entry, when the rename fails', async () => {
-    const { env, file, project, planJson } = engine();
+    const { env, file, home, project, planJson } = engine();
     const before = jsonText({ a: 1 });
     writeFileSync(file('settings.json'), before);
     const plan = planJson('settings.json', [addDeny('x')]);
@@ -64,6 +64,7 @@ describe('applyPlan: when something fails', () => {
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
     expect(leftovers(project)).toEqual([]);
     expect(readManifest(env).files).toEqual({});
+    expect(existsSync(join(home, 'harden', 'manifest.json'))).toBe(false);
   });
 
   it('leaves the file alone when it cannot record what it is about to do', async () => {

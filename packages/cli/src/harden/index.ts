@@ -72,6 +72,7 @@ export {
   emptyManifest,
   entriesFor,
   readManifest,
+  removeManifest,
   withManifestLock,
   writeManifest,
   type Manifest,

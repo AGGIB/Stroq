@@ -10,6 +10,7 @@ export const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
 export const entry = (overrides: Partial<ManifestEntry> = {}): ManifestEntry => ({
   recipe: 'claude-deny-read',
   created: false,
+  createdDirs: [],
   real: join(tmpdir(), 'stroq-fixture', 'settings.json'),
   root: null,
   edits: [

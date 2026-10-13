@@ -317,6 +317,7 @@ describe('undoFile: a record of a change that never happened', () => {
       ...nodeFs,
       rename: (from, to) =>
         (renames += 1) <= 2 ? nodeFs.rename(from, to) : Promise.reject(new Error('simulated')),
+      unlink: () => Promise.reject(new Error('simulated')),
     };
     await expect(applyPlan(plan, { ...e.env, fs })).rejects.toThrow(/simulated/);
     expect(readManifest(e.env).files[plan.real]).toHaveLength(1);

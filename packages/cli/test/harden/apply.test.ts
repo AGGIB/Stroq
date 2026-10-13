@@ -41,6 +41,7 @@ describe('applyPlan: making the change', () => {
     expect(entries?.[0]).toEqual({
       recipe: 'test-recipe',
       created: false,
+      createdDirs: [],
       real: file('settings.json'),
       root: project,
       edits: plan.edits,
