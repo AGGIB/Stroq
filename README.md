@@ -46,7 +46,7 @@ NEXT
 
 - **Looks back.** `stroq sent` reads local Claude Code, Codex CLI and Cursor records, including sessions from before Stroq was installed. It matches known values in available tool arguments and results, and reports names and sources, not values. It reads local credential files to build the comparison index; old, rotated or unknown values may be missed.
 - **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties some later actions to earlier tool output. Coverage depends on the host, version and channel.
-- **Local.** No network calls from the hooks, no telemetry. Apache-2.0.
+- **Local.** No outbound network calls from the hooks; Task Lock hooks speak only to their local parent controller. No telemetry. Apache-2.0.
 
 Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
 

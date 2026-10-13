@@ -15,6 +15,7 @@ import { logError } from '../log.js';
 
 export const ClaudeHookInputSchema = z.looseObject({
   session_id: z.string().min(1),
+  tool_use_id: z.string().min(1).optional(),
   hook_event_name: z.enum(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']),
   tool_name: z.string().min(1),
   tool_input: z.record(z.string(), z.unknown()).default({}),
@@ -166,6 +167,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     toolName: input.tool_name,
     toolInput: input.tool_input,
     cwd,
+    ...(input.tool_use_id === undefined ? {} : { callId: input.tool_use_id }),
   };
   if (input.hook_event_name === 'PreToolUse') {
     const { decision, provenance, secrets } = await engine.pre(base);
@@ -193,6 +195,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
   const result = await engine.post({
     ...base,
+    ...(failed ? { resultFailed: true as const } : {}),
     toolResultText: toolResultToText(response),
     // No result field at all is not an empty result: it is a payload shape this
     // adapter does not know, and the audit says so instead of recording a clean scan.

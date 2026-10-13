@@ -72,6 +72,8 @@ export function exitCodeFor(
 }
 
 export interface LaunchOptions {
+  /** A task's remaining lifetime. Omitted by ordinary `stroq run`. */
+  readonly timeoutMs?: number;
   readonly command: string;
   readonly args: readonly string[];
   /** The full environment for the child, hardening included; not merged with anything here. */
@@ -105,6 +107,14 @@ export async function launch(options: LaunchOptions): Promise<number> {
 
   const relays = RELAYED.map((signal) => ({ signal, listener: () => kill(child, signal) }));
   for (const { signal, listener } of relays) signals.on(signal, listener);
+  let forceTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadline =
+    options.timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          kill(child, 'SIGTERM');
+          forceTimer = setTimeout(() => kill(child, 'SIGKILL'), 2_000);
+        }, options.timeoutMs);
 
   try {
     return await new Promise<number>((resolve) => {
@@ -122,6 +132,8 @@ export async function launch(options: LaunchOptions): Promise<number> {
       child.on('close', (code, signal) => resolve(exitCodeFor(code, signal, plat)));
     });
   } finally {
+    clearTimeout(deadline);
+    clearTimeout(forceTimer);
     // Leaving a relay registered would keep this process reachable by signals it no
     // longer has anything to do with, and hold a reference to a child that is gone.
     for (const { signal, listener } of relays) signals.off(signal, listener);

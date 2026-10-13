@@ -16,6 +16,9 @@ import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { handleStdoutError } from './stdout-errors.js';
 import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
+import { runTask } from './commands/task.js';
+import { runPermit } from './commands/permit.js';
+import { runTaskHookCommand } from './task/broker.js';
 import { runSent } from './commands/sent.js';
 import { runTrust } from './commands/trust.js';
 import { runUninstall } from './commands/uninstall.js';
@@ -43,6 +46,8 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   init: runInitCommand,
   uninstall: runUninstall,
   run: runRun,
+  task: runTask,
+  permit: runPermit,
   doctor: runDoctor,
   prove: runProve,
   log: runLog,
@@ -65,6 +70,11 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
 export async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
+    case 'task-hook': {
+      const out = await runTaskHookCommand();
+      process.stdout.write(out.stdout);
+      return out.exitCode;
+    }
     case 'hook': {
       // Asked for help, or run with no agent at all: no agent invokes it that way, so
       // it is a person, and a person should not be left waiting on stdin.

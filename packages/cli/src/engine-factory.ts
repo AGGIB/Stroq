@@ -12,6 +12,7 @@ import {
   loadBundledRules,
   loadPolicyFile,
   type Policy,
+  type ScopeGate,
 } from '@stroq/core';
 import {
   auditFileIn,
@@ -35,6 +36,9 @@ export function policySource(): string {
 }
 
 export interface EngineLocation {
+  readonly scope?: ScopeGate;
+  /** Keep the task project's credential sources indexed when an event runs in a subdirectory. */
+  readonly projectRoot?: string;
   /** The Stroq home: sessions, provenance, audit log, secret index. */
   readonly home: string;
   /** The user's home directory, where credential files are indexed from. */
@@ -59,6 +63,7 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
   return new StroqEngine({
     rules: loadBundledRules(),
     policy: location.policy,
+    ...(location.scope === undefined ? {} : { scope: location.scope }),
     // Spread rather than `now` so the key is absent when the caller gave none:
     // under exactOptionalPropertyTypes an explicit `undefined` is not the same as
     // leaving an optional property off.
@@ -70,6 +75,8 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
       secretsFileIn(location.home),
       location.userHome,
       location.env ?? process.env,
+      undefined,
+      location.projectRoot === undefined ? [] : [location.projectRoot],
     ),
     // `stroq attack` builds its engine at a throwaway home, so a scenario can never
     // be waived by an entry the operator added to their own list.
