@@ -286,3 +286,120 @@ describe('findCredentialShape: what it says it does not read', () => {
     expect(findCredentialShape('docker run -u app:appgroup image\n')).toBe('named-secret');
   });
 });
+
+describe('findCredentialShape: single-dash password flags for specific commands', () => {
+  it.each([
+    ['mysql with glued -p', 'mysql -uroot -pSecret123 db'],
+    ['mysql with glued -p and quotes', "mysql -uroot -p'Secret123' db"],
+    ['mysql with glued numeric password', 'mysql -p8080 db'],
+    ['sshpass with numeric password', 'sshpass -p 8080 ssh me@host'],
+    ['redis-cli with numeric password', 'redis-cli -a 8080 ping'],
+    ['mysql with glued -p=', 'mysql -uroot -p=Secret123 db'],
+    ['mariadb with glued -p', 'mariadb -pSecret123'],
+    ['mysqldump with glued -p', 'mysqldump -pSecret123 mydb'],
+    ['docker login with -p', 'docker login -u me -p Secret123 ghcr.io'],
+    ['docker login with glued -p', 'docker login -pSecret123 ghcr.io'],
+    ['docker login with -p=', 'docker login -p=Secret123 ghcr.io'],
+    ['podman login with -p', 'podman login -p Secret123'],
+    ['sshpass with -p', 'sshpass -p Secret123 ssh me@host'],
+    ['sshpass with glued -p', 'sshpass -pSecret123 ssh me@host'],
+    ['redis-cli with -a', 'redis-cli -a Secret123 ping'],
+    ['redis-cli with -a=', 'redis-cli -a=Secret123 ping'],
+    ['sudo mysql', 'sudo mysql -pSecret123 db'],
+    ['path to mysql', '/usr/bin/mysql -pSecret123 db'],
+    ['env with mysql', 'env NAME=x mysql -pSecret123 db'],
+    ['chained command with mysql', 'cd /tmp && mysql -pSecret123 db'],
+    ['indented line with mysql', '  mysql -pSecret123 db'],
+    ['commented line with mysql', '# mysql -pSecret123 db'],
+    ['docker exec with mysql', 'docker exec db mysql -uroot -pSecret123'],
+    ['mysql.cmd in plain text', 'C:\\bin\\mysql.cmd -pSecret123 db'],
+    ['mysql.bat in plain text', 'C:\\bin\\mysql.bat -pSecret123 db'],
+    ['MYSQL.EXE in plain text', 'C:\\bin\\MYSQL.EXE -pSecret123 db'],
+  ])('finds %s in plain text', (_name, cmd) => {
+    expect(findCredentialShape(`${cmd}\n`)).toBe('named-secret');
+  });
+
+  it.each([
+    ['mysql in Claude allow rule', 'Bash(mysql -uroot -pSecret123 db:*)'],
+    ['docker login in Claude allow rule', 'Bash(docker login -u me -p Secret123 ghcr.io:*)'],
+    ['docker login with glued -p in rule', 'Bash(docker login -pSecret123:*)'],
+    ['sshpass in Claude allow rule', 'Bash(sshpass -p Secret123 ssh me@host:*)'],
+    ['redis-cli in Claude allow rule', 'Bash(redis-cli -a Secret123 ping:*)'],
+    ['Windows path mysql.exe in rule', 'Bash(C:\\\\bin\\\\mysql.exe -pSecret123:*)'],
+    ['Windows path with single backslash in rule', 'Bash(C:\\bin\\mysql.exe -pSecret123:*)'],
+    ['Windows path MYSQL.EXE in rule', 'Bash(C:\\\\bin\\\\MYSQL.EXE -pSecret123:*)'],
+    ['Windows path mysql.cmd in rule', 'Bash(C:\\\\bin\\\\mysql.cmd -pSecret123:*)'],
+    ['Windows path mysql.bat in rule', 'Bash(C:\\\\bin\\\\mysql.bat -pSecret123:*)'],
+    ['sudo mysql in rule', 'Bash(sudo mysql -pSecret123:*)'],
+    ['path to mysql in rule', 'Bash(/usr/bin/mysql -pSecret123 db:*)'],
+    ['env with mysql in rule', 'Bash(env NAME=x mysql -pSecret123 db:*)'],
+    ['chained command with mysql in rule', 'Bash(cd /tmp && mysql -pSecret123 db:*)'],
+    ['mysql with glued -p and quotes in rule', "Bash(mysql -uroot -p'Secret123' db:*)"],
+  ])('finds %s in a JSON permission rule', (_name, rule) => {
+    expect(findCredentialShape(json({ permissions: { allow: [rule] } }))).toBe('named-secret');
+  });
+
+  it.each([
+    ['nc with port -p', 'nc -p 8080 host'],
+    ['ssh with port -p', 'ssh -p 2222 host'],
+    ['docker run with port -p', 'docker run -p 8080:80 nginx'],
+    ['docker compose run with service named login', 'docker compose run -p 8080:80 login'],
+    ['docker compose run with login before port', 'docker compose run login -p 8080:80'],
+    ['docker run with rm and login before port', 'docker run --rm login -p 8080:80'],
+    [
+      'docker login chained with docker run and port',
+      'docker login ghcr.io && docker run -p 8080:80 nginx',
+    ],
+    ['docker run with name mysql and port mapping', 'docker run --name mysql -p3306:3306 mysql:8'],
+    [
+      'docker run with network mysql and port mapping',
+      'docker run --network mysql -p8080:80 nginx',
+    ],
+    ['sshpass with quoted variable and ssh port', 'sshpass -p "$SSHPASS" ssh -p 2222 me@host'],
+    ['sshpass with file and ssh port', 'sshpass -f ~/.pw ssh -p 2222 me@host'],
+    ['sshpass with env flag and ssh port', 'sshpass -e ssh -p 2222 me@host'],
+    ['mysql with bare -p (interactive prompt)', 'mysql -u root -p db'],
+    ['mysql with empty -p', "mysql -p'' db"],
+    ['redis-cli with bare -a', 'redis-cli -a'],
+    ['sshpass with placeholder variable', 'sshpass -p "$SSHPASS" ssh me@host'],
+  ])('does not take %s for a password in plain text', (_name, cmd) => {
+    expect(findCredentialShape(`${cmd}\n`)).toBeNull();
+  });
+
+  it.each([
+    ['docker login with no password flag', 'Bash(docker login:*)'],
+    ['mysql with bare -p', 'Bash(mysql -p:*)'],
+    ['mysql with -u and bare -p', 'Bash(mysql -u root -p:*)'],
+    ['mysql with empty -p', "Bash(mysql -p'':*)"],
+    ['redis-cli with bare -a', 'Bash(redis-cli -a:*)'],
+    ['redis-cli with placeholder variable', 'Bash(redis-cli -a $REDIS_PASSWORD ping:*)'],
+    ['sshpass with quoted placeholder variable', 'Bash(sshpass -p "$SSHPASS" ssh me@host:*)'],
+    ['mysql with glued placeholder variable', 'Bash(mysql -p$MYSQL_PWD db:*)'],
+    ['nc with port -p', 'Bash(nc -p 8080 host:*)'],
+    ['ssh with port -p', 'Bash(ssh -p 2222 host:*)'],
+    ['docker run with port -p', 'Bash(docker run -p 8080:80 nginx:*)'],
+    ['docker compose run with service named login', 'Bash(docker compose run -p 8080:80 login:*)'],
+    ['docker compose run with login before port', 'Bash(docker compose run login -p 8080:80:*)'],
+    ['docker run with rm and login before port', 'Bash(docker run --rm login -p 8080:80:*)'],
+    [
+      'docker login chained with docker run and port',
+      'Bash(docker login ghcr.io && docker run -p 8080:80 nginx:*)',
+    ],
+    [
+      'docker run with name mysql and port mapping',
+      'Bash(docker run --name mysql -p3306:3306 mysql:8:*)',
+    ],
+    [
+      'docker run with network mysql and port mapping',
+      'Bash(docker run --network mysql -p8080:80 nginx:*)',
+    ],
+    [
+      'sshpass with quoted variable and ssh port',
+      'Bash(sshpass -p "$SSHPASS" ssh -p 2222 me@host:*)',
+    ],
+    ['sshpass with file and ssh port', 'Bash(sshpass -f ~/.pw ssh -p 2222 me@host:*)'],
+    ['sshpass with env flag and ssh port', 'Bash(sshpass -e ssh -p 2222 me@host:*)'],
+  ])('does not take %s for a password in a JSON rule', (_name, rule) => {
+    expect(findCredentialShape(json({ permissions: { allow: [rule] } }))).toBeNull();
+  });
+});
