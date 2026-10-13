@@ -38,7 +38,7 @@ const SkillSchema = z
 export type SkillRecord = z.infer<typeof SkillSchema>;
 const LockSchema = z.strictObject({
   v: z.literal(1),
-  skills: z.record(z.string().regex(SKILL_NAME), SkillSchema),
+  skills: z.record(z.string().regex(SKILL_NAME), SkillSchema).default({}),
   // MCP owns its record schema. Skill operations preserve it without granting a pin from it.
   mcp: z.exactOptional(z.record(z.string().min(1).max(128), z.json())),
 });

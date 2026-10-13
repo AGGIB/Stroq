@@ -196,7 +196,7 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
       }
     : await inspectSource(source);
   const name = nameOf(installed === undefined ? made.passport.artifact.name : sourceOrName);
-  const prior = initial.skills[name];
+  const prior = Object.hasOwn(initial.skills, name) ? initial.skills[name] : undefined;
   const previous = prior?.status === 'revoked' ? undefined : prior;
   const target = targetOf(name, options, previous);
   if (previous === undefined && (await assertPlainDirectory(target.path)))
@@ -254,7 +254,7 @@ export async function removeSkill(name: string, options: SkillOptions): Promise<
   requirePerson(options);
   nameOf(name);
   return withPassports(options.stroqHome, async (lock) => {
-    const previous = lock.skills[name];
+    const previous = Object.hasOwn(lock.skills, name) ? lock.skills[name] : undefined;
     if (previous === undefined || previous.status === 'revoked')
       throw new Error('the skill is not installed');
     const target = targetOf(name, options, previous);

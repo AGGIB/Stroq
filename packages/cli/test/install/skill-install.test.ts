@@ -50,6 +50,33 @@ async function setup() {
 }
 
 describe('confirmed skill install', () => {
+  it('lock compatibility: adds a skill to an MCP-only lock without discarding its confirmation', async () => {
+    const f = await setup();
+    const mcp = { server: { kind: 'mcp', status: 'confirmed', digest: 'a'.repeat(64) } };
+    await mkdir(f.options.stroqHome);
+    await writeFile(join(f.options.stroqHome, 'passports.json'), JSON.stringify({ v: 1, mcp }));
+    await addSkill(f.source, f.options);
+    const lock = await readPassports(f.options.stroqHome);
+    expect(lock.mcp).toEqual(mcp);
+    expect(lock.skills.demo?.status).toBe('confirmed');
+  });
+
+  it('lock compatibility: installs and removes constructor without inherited record lookups', async () => {
+    const f = await setup();
+    await expect(removeSkill('constructor', f.options)).rejects.toThrow(/not installed/);
+    await writeFile(
+      join(f.source, 'SKILL.md'),
+      '---\nname: constructor\ndescription: a demo\n---\n# Demo\nRead the project.\n',
+    );
+    const added = await addSkill(f.source, f.options);
+    expect(added.status).toBe('confirmed');
+    await addSkill('constructor', f.options);
+    await removeSkill('constructor', f.options);
+    expect((await readPassports(f.options.stroqHome)).skills['constructor']?.status).toBe(
+      'revoked',
+    );
+  });
+
   it('shows the inspected digest, copies the bytes, locks the passport and receipts an undo', async () => {
     const f = await setup();
     const added = await addSkill(f.source, f.options);
