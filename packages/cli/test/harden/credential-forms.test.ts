@@ -286,3 +286,42 @@ describe('findCredentialShape: what it says it does not read', () => {
     expect(findCredentialShape('docker run -u app:appgroup image\n')).toBe('named-secret');
   });
 });
+
+describe('findCredentialShape: single-dash password flags for specific commands', () => {
+  it.each([
+    ['mysql with glued -p', 'mysql -uroot -pSecret123 db'],
+    ['mysql with glued -p=', 'mysql -uroot -p=Secret123 db'],
+    ['mariadb with glued -p', 'mariadb -pSecret123'],
+    ['mysqldump with glued -p', 'mysqldump -pSecret123 mydb'],
+    ['docker login with -p', 'docker login -u me -p Secret123 ghcr.io'],
+    ['docker login with -p=', 'docker login -p=Secret123 ghcr.io'],
+    ['podman login with -p', 'podman login -p Secret123'],
+    ['sshpass with -p', 'sshpass -p Secret123 ssh me@host'],
+    ['sshpass with glued -p', 'sshpass -pSecret123 ssh me@host'],
+    ['redis-cli with -a', 'redis-cli -a Secret123 ping'],
+    ['redis-cli with -a=', 'redis-cli -a=Secret123 ping'],
+  ])('finds %s in plain text', (_name, cmd) => {
+    expect(findCredentialShape(`${cmd}\n`)).toBe('named-secret');
+  });
+
+  it.each([
+    ['mysql in Claude allow rule', 'Bash(mysql -uroot -pSecret123 db:*)'],
+    ['docker login in Claude allow rule', 'Bash(docker login -u me -p Secret123 ghcr.io:*)'],
+    ['sshpass in Claude allow rule', 'Bash(sshpass -p Secret123 ssh me@host:*)'],
+    ['redis-cli in Claude allow rule', 'Bash(redis-cli -a Secret123 ping:*)'],
+  ])('finds %s in a JSON permission rule', (_name, rule) => {
+    expect(findCredentialShape(json({ permissions: { allow: [rule] } }))).toBe('named-secret');
+  });
+
+  it.each([
+    ['nc with port -p', 'nc -p 8080 host'],
+    ['ssh with port -p', 'ssh -p 2222 host'],
+    ['docker run with port -p', 'docker run -p 8080:80 nginx'],
+    ['mysql with bare -p (interactive prompt)', 'mysql -u root -p db'],
+    ['mysql with numeric port -p8080', 'mysql -p8080 db'],
+    ['sshpass with numeric -p 8080', 'sshpass -p 8080 ssh me@host'],
+    ['redis-cli with numeric -a 8080', 'redis-cli -a 8080 ping'],
+  ])('does not take %s for a password', (_name, cmd) => {
+    expect(findCredentialShape(`${cmd}\n`)).toBeNull();
+  });
+});
