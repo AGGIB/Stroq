@@ -1,22 +1,13 @@
 import { readRegularFile } from '@stroq/core';
 import { lstatSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { z } from 'zod';
+import { McpPinSchema, readPassportLock } from '../install/lock-reader.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
 import { passportsFileIn, storeDirIn, stroqHome } from '../paths.js';
 import { MCP_PIN } from './pin-argument.js';
-
-const Confirmation = z.object({
-  kind: z.literal('mcp'),
-  status: z.literal('confirmed'),
-  digest: z.string().regex(/^[0-9a-f]{64}$/),
-  grant: z.object({ pin: z.string().regex(MCP_PIN) }),
-});
-const Lock = z.object({ v: z.literal(1), mcp: z.record(z.string(), z.unknown()) });
 
 export interface PinOptions {
   readonly server: string;
@@ -44,13 +35,18 @@ function confirm(options: PinOptions, home: string): string {
     throw new Error('invalid pin: expected sha256:<64 lowercase hex>');
   let lock;
   try {
-    lock = Lock.parse(jsonFile(passportsFileIn(home)));
-  } catch {
+    lock = readPassportLock(passportsFileIn(home));
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'the local confirmation lock exceeds the size limit'
+    )
+      throw error;
     throw new Error('the local MCP confirmation lock is missing or invalid');
   }
   // Own-property lookup: a server called __proto__ never selects an inherited object.
   const raw = Object.hasOwn(lock.mcp, options.server) ? lock.mcp[options.server] : undefined;
-  const record = Confirmation.safeParse(raw);
+  const record = McpPinSchema.safeParse(raw);
   const digest = options.pin.slice(7);
   if (!record.success || record.data.digest !== digest || record.data.grant.pin !== options.pin)
     throw new Error('this server and digest are not confirmed on this machine');
@@ -100,11 +96,52 @@ function entrypoint(options: PinOptions, root: string, tree: Tree): string {
   return rel;
 }
 
-async function checked(options: PinOptions): Promise<{ tree: Tree; entry: string }> {
+function treeArgument(arg: string, root: string, tree: Tree): string | null {
+  const rel = isAbsolute(arg) ? relative(root, arg) : null;
+  if (rel !== null && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+    const path = rel.split(sep).join('/');
+    if (
+      path === '' ||
+      tree.entries.some((entry) => entry.path === path || entry.path.startsWith(`${path}/`))
+    )
+      return path;
+    throw new Error('a pinned argument does not name a confirmed tree file or directory');
+  }
+  // Embedded references cannot safely be rewritten: argv is not a known syntax.
+  const normalized = arg.replaceAll('\\', '/');
+  const storeRoot = root.replaceAll('\\', '/');
+  if (
+    (process.platform === 'win32' ? normalized.toLowerCase() : normalized).includes(
+      process.platform === 'win32' ? storeRoot.toLowerCase() : storeRoot,
+    )
+  )
+    throw new Error('a pinned argument contains an embedded store tree reference');
+  return null;
+}
+
+async function checked(
+  options: PinOptions,
+): Promise<{ tree: Tree; args: readonly (string | null)[]; home: string }> {
   const home = options.home ?? stroqHome();
   const digest = confirm(options, home);
   const { tree, root } = await verifiedTree(home, digest);
-  return { tree, entry: entrypoint(options, root, tree) };
+  entrypoint(options, root, tree);
+  return { tree, args: options.args.map((arg) => treeArgument(arg, root, tree)), home };
+}
+
+async function privateRunDir(home: string): Promise<string> {
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  await plainFolder(home);
+  const run = join(home, 'run');
+  await mkdir(run, { recursive: true, mode: 0o700 });
+  await plainFolder(run);
+  for (const folder of [home, run]) {
+    const info = await lstat(folder);
+    if (process.getuid !== undefined && info.uid !== process.getuid())
+      throw new Error('cannot use a runtime folder owned by another user');
+    await chmod(folder, 0o700);
+  }
+  return run;
 }
 
 async function copyEntry(folder: string, entry: TreeEntry): Promise<void> {
@@ -115,21 +152,23 @@ async function copyEntry(folder: string, entry: TreeEntry): Promise<void> {
 
 /** The verified code is never started from a mutable store path. */
 export async function preparePin(options: PinOptions): Promise<PinnedLaunch> {
-  const { tree, entry } = await checked(options);
-  const folder = await mkdtemp(join(tmpdir(), 'stroq-mcp-pin-'));
+  const { tree, args, home } = await checked(options);
+  const folder = await mkdtemp(join(await privateRunDir(home), 'stroq-mcp-pin-'));
   const cleanup = async (): Promise<void> => {
-    await rm(folder, { recursive: true, force: true });
+    await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   };
   try {
     for (const file of tree.entries) await copyEntry(folder, file);
     return {
       command: process.execPath,
-      args: [join(folder, ...entry.split('/')), ...options.args.slice(1)],
+      args: options.args.map((arg, i) =>
+        args[i] === null ? arg : join(folder, ...args[i]!.split('/')),
+      ),
       cwd: folder,
       cleanup,
     };
   } catch (error) {
-    await cleanup();
+    await cleanup().catch(() => undefined);
     throw error;
   }
 }

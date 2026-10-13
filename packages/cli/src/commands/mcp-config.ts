@@ -131,7 +131,11 @@ export function wrapperPinArgs(args: readonly unknown[]): readonly string[] {
   const at = wrapperIndex(args);
   const before = at === null ? [] : args.slice(at, args.indexOf('--', at));
   return before.flatMap((value, i) =>
-    value === '--pin' ? ['--pin', String(before[i + 1] ?? '')] : [],
+    value === '--pin'
+      ? ['--pin', String(before[i + 1] ?? '')]
+      : typeof value === 'string' && value.startsWith('--pin=')
+        ? [value]
+        : [],
   );
 }
 

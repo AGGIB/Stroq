@@ -17,6 +17,7 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
   }
   if (servers === null || typeof servers !== 'object' || Array.isArray(servers)) return [];
   const statuses: PinStatus[] = [];
+  const { quotePath } = await import('../install/safe-path.js');
   for (const [name, entry] of Object.entries(servers)) {
     if (
       entry === null ||
@@ -27,10 +28,12 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
       continue;
     const at = wrapperIndex(entry.args);
     if (at === null) continue;
-    const args = entry.args.slice(at + 1).map(String);
-    if (!args.slice(0, args.indexOf('--')).includes('--pin')) continue;
+    const args: string[] = entry.args.slice(at + 1).map(String);
+    if (
+      !args.slice(0, args.indexOf('--')).some((arg) => arg === '--pin' || arg.startsWith('--pin='))
+    )
+      continue;
     const parsed = parseMcpArgv(args);
-    const { quotePath } = await import('../install/safe-path.js');
     const result =
       parsed.ok && parsed.invocation.pin !== undefined
         ? await (

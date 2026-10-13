@@ -99,17 +99,21 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 
 The corpus `stroq bench` measures against ships with this repository, not with the npm package; on an installed CLI, point it at your own documentation with `stroq bench --corpus <dir>` — the published number in [`docs/BENCH.md`](https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md) is exactly that command run against the vendored corpus.
 
+## MCP runtime pins
+
+`stroq mcp --server <name> --client <client> --pin sha256:<64 lowercase hex> -- node <absolute store entrypoint> [server arguments]` refuses to start unless the same server name and digest are confirmed in this machine's `passports.json`. It checks every stored file against the `stroq-tree/1` manifest, reads the source bytes once, and launches those bytes from a fresh private directory under `<STROQ_HOME>/run` (owned by the current user, mode 0700 on POSIX). The copy is normally removed after the server exits, including shutdown through SIGINT, SIGTERM or SIGHUP; SIGKILL, a crash during preparation, or a filesystem cleanup error can leave a copy there. Remove leftovers only after their servers have stopped. Windows relies on the user's home-directory ACL; POSIX mode bits do not establish Windows ACL isolation.
+
+The server's working directory is the private copy, so relative paths refer to the confirmed tree rather than the project. `--cwd` selects the project for Stroq's decisions only. Every whole absolute argument inside the store tree is relocated to the corresponding file or directory in the copy; embedded references such as `--config=<store tree>/config.json` are refused, so pass the path as a separate argument. The Node runtime is the one running Stroq; Node loader flags before the entrypoint, package runners such as `npx`, and entrypoints outside the store are refused. Pinned wrappers with no environment record use the filtered infrastructure environment. Repeated `--pin` flags and malformed pins are usage errors.
+
+`stroq init --agent mcp` preserves existing `--pin` flags when it rewrites a wrapper, including invalid pins which must keep failing closed. Rewriters that use `wrapMcpConfig` inherit that behavior. `--unwrap` removes the pin along with the wrapper and prints a notice. `stroq doctor` checks each configured pin offline, and `stroq exposure` reports a changed or unverifiable pinned server as `mcp-pin-drifted`. Neither check starts the server.
+
+The shared lock layout is `{ "v": 1, "skills": {}, "mcp": { "<server name>": { "kind": "mcp", "status": "confirmed", "digest": "<64 lowercase hex>", "grant": { "pin": "sha256:<same digest>" } } } }`. The `skills` and `mcp` buckets are intentional: their writers must preserve each other's records. The schema lives in `install/passports-schema.ts`, read through `install/lock-reader.ts` and shared with install writers; the lock reader refuses files over 4 MiB with a distinct size-limit diagnostic.
+
+This is **tamper-evident, not tamper-proof**: the same user can change the store, lock or private copy. The pin covers the shipped tree of a self-contained Node server; a package absent from that tree can still be resolved from an ancestor's `node_modules` and is not covered by the pin. The private runtime folder prevents a module planted above a shared temporary copy from being used, but does not sandbox package resolution or the server, attest the Node executable, or cover code fetched at runtime. The pin itself is a flag in the client config: an agent able to edit `.mcp.json` or `.cursor/mcp.json` can remove it, and offline diagnostics inspect only entries that still carry a pin. The plain lock records neither who confirmed nor a signature. No Stroq command in this runtime implementation writes an MCP confirmation yet; a user must currently write that record by hand. MCP installation and its human-confirmation flow are a separate Safe Install task. A wrapper without `--pin` retains its existing behavior.
+
 ## Learn more
 
 - Full documentation, architecture, and the demo: [github.com/AGGIB/Stroq](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md)
 - Report a security issue or a bypass: [SECURITY.md](https://github.com/AGGIB/Stroq/blob/main/SECURITY.md)
 
 License: Apache-2.0.
-
-### MCP runtime pins
-
-`stroq mcp --server <name> --client <client> --pin sha256:<64 lowercase hex> -- node <absolute store entrypoint> [server arguments]` refuses to start unless the same server name and digest are confirmed in this machine's `passports.json`. It checks every stored file against the `stroq-tree/1` manifest, reads the source bytes once, and launches those bytes from a fresh private directory. That copy is removed after the server exits. The Node runtime is the one running Stroq; Node loader flags before the entrypoint, package runners such as `npx`, and entrypoints outside the store are refused. Pinned wrappers with no environment record use the filtered infrastructure environment.
-
-`stroq init --agent mcp` preserves an existing `--pin` when it rewrites a wrapper, including invalid pins which must keep failing closed. Rewriters that use `wrapMcpConfig` inherit that behavior. `stroq doctor` checks each configured pin offline, and `stroq exposure` reports a changed or unverifiable pinned server as `mcp-pin-drifted`. Neither check starts the server.
-
-This is **tamper-evident, not tamper-proof**: the same user can change the store, lock or private copy. The pin covers the shipped tree of a self-contained Node server; it does not sandbox the server, attest the Node executable, or cover code fetched at runtime. MCP installation and its human-confirmation flow are a separate Safe Install task; this runtime command cannot create confirmations. A wrapper without `--pin` retains its existing behavior.

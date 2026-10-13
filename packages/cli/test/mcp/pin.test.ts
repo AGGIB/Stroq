@@ -1,8 +1,7 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile, readFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { buildTree, fileDigestOf, treeDigest } from '../../src/install/tree.js';
+import { describe, expect, it, vi } from 'vitest';
+import { fixture } from './pin-fixture.js';
 import { preparePin, inspectPin } from '../../src/mcp/pin.js';
 import { parseMcpArgv } from '../../src/commands/mcp.js';
 import { wrapMcpConfig } from '../../src/commands/mcp-config.js';
@@ -12,49 +11,6 @@ import { createEngine } from '../../src/engine-factory.js';
 import { PassThrough } from 'node:stream';
 import { doctorReport } from '../../src/commands/doctor.js';
 import { buildExposureReport } from '../../src/commands/exposure.js';
-
-const roots: string[] = [];
-afterEach(async () => {
-  for (const root of roots) await rm(root, { recursive: true, force: true });
-  roots.length = 0;
-});
-
-async function fixture(exec = false, code = 'console.log("checked");\n') {
-  const home = await mkdtemp(join(tmpdir(), 'stroq-pin-test-'));
-  roots.push(home);
-  const bytes = Buffer.from(code);
-  const tree = buildTree([
-    {
-      path: 'server.mjs',
-      kind: 'file',
-      exec,
-      size: bytes.length,
-      sha256: fileDigestOf(bytes),
-      bytes,
-    },
-  ]);
-  const digest = treeDigest(tree);
-  const store = join(home, 'store', `sha256-${digest.slice(0, 32)}`);
-  await mkdir(join(store, 'tree'), { recursive: true });
-  await writeFile(join(store, 'tree', 'server.mjs'), bytes, { mode: 0o600 });
-  await writeFile(
-    join(store, 'manifest.json'),
-    JSON.stringify({ entries: tree.entries.map(({ bytes: _bytes, ...entry }) => entry) }),
-  );
-  const record = { kind: 'mcp', status: 'confirmed', digest, grant: { pin: `sha256:${digest}` } };
-  await writeFile(
-    join(home, 'passports.json'),
-    JSON.stringify({ v: 1, skills: {}, mcp: { demo: record } }),
-  );
-  const options = {
-    home,
-    server: 'demo',
-    pin: `sha256:${digest}`,
-    command: process.execPath,
-    args: [join(store, 'tree', 'server.mjs'), '--data'],
-  };
-  return { home, bytes, digest, store, options, record };
-}
 
 describe('runtime pin', () => {
   it('runs an isolated copy of the exact confirmed bytes, restoring manifest execute metadata', async () => {
@@ -161,9 +117,10 @@ describe('pin startup and diagnostics', () => {
   it('starts a real node child from the private copy and removes it after exit', async () => {
     const f = await fixture(
       false,
-      'console.log(JSON.stringify({jsonrpc:"2.0",method:"location",params:{url:import.meta.url,cwd:process.cwd(),injected:process.env.NODE_OPTIONS??null}}));',
+      'import {realpathSync} from "node:fs";import {dirname} from "node:path";import {fileURLToPath} from "node:url";console.log(JSON.stringify({jsonrpc:"2.0",method:"location",params:{url:import.meta.url,entryDir:realpathSync(dirname(fileURLToPath(import.meta.url))),cwd:realpathSync(process.cwd()),injected:process.env.NODE_OPTIONS??null}}));',
     );
-    process.env['STROQ_HOME'] = f.home;
+    vi.stubEnv('STROQ_HOME', f.home);
+    vi.stubEnv('NODE_OPTIONS', '--title=stroq-unverified-parent');
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -182,15 +139,18 @@ describe('pin startup and diagnostics', () => {
       stderr,
     });
     expect(exit).toBe(0);
-    const message = JSON.parse(text) as { params: { url: string; cwd: string; injected: unknown } };
+    const message = JSON.parse(text) as {
+      params: { url: string; entryDir: string; cwd: string; injected: unknown };
+    };
     expect(message.params.url).toContain('stroq-mcp-pin-');
     expect(message.params.injected).toBeNull();
+    expect(message.params.cwd).toBe(message.params.entryDir);
     await expect(readFile(join(message.params.cwd, 'server.mjs'))).rejects.toThrow();
   });
 
   it('refuses a drifted child before it can write a marker', async () => {
     const f = await fixture();
-    process.env['STROQ_HOME'] = f.home;
+    vi.stubEnv('STROQ_HOME', f.home);
     const marker = join(f.home, 'executed');
     await writeFile(
       f.options.args[0]!,
@@ -221,7 +181,7 @@ describe('pin startup and diagnostics', () => {
 
   it('checks wrappers offline and reports invalid pins and drift', async () => {
     const f = await fixture();
-    process.env['STROQ_HOME'] = f.home;
+    vi.stubEnv('STROQ_HOME', f.home);
     const file = join(f.home, 'mcp.json');
     const args = [
       '/stroq/dist/index.js',
@@ -291,7 +251,7 @@ describe('pin startup and diagnostics', () => {
 
   it('reports changed pinned files through doctor and exposure', async () => {
     const f = await fixture();
-    process.env['STROQ_HOME'] = f.home;
+    vi.stubEnv('STROQ_HOME', f.home);
     const config = {
       mcpServers: {
         demo: {
@@ -331,10 +291,53 @@ it('parses and validates --pin before starting any child', () => {
   expect(
     parseMcpArgv(['--server', 'demo', '--pin', pin, '--', 'node', '/server.mjs']),
   ).toMatchObject({ ok: true, invocation: { pin } });
+  for (const invalid of ['invalid', '', `SHA256:${'a'.repeat(64)}`, `sha256:${'A'.repeat(64)}`]) {
+    expect(
+      parseMcpArgv(['--server', 'demo', '--pin', invalid, '--', 'node', '/server.mjs']),
+    ).toMatchObject({ ok: false });
+  }
   expect(
-    parseMcpArgv(['--server', 'demo', '--pin', 'invalid', '--', 'node', '/server.mjs']),
+    parseMcpArgv(['--server', 'demo', `--pin=${pin}`, '--', 'node', '/server.mjs']),
+  ).toMatchObject({ ok: false });
+  expect(
+    parseMcpArgv(['--server', 'demo', '--pin', pin, '--pin', pin, '--', 'node', '/server.mjs']),
   ).toMatchObject({ ok: false });
 });
+
+it.each([['--pin', 'bad'], ['--pin'], ['--pin=bad']])(
+  'preserves malformed wrapper pin %j through rewrites',
+  (...pins) => {
+    const opts = {
+      node: '/usr/bin/node',
+      entryArgv: ['/stroq/dist/index.js'],
+      client: 'cursor',
+      cwd: '/project',
+    };
+    const config = {
+      mcpServers: {
+        demo: {
+          command: 'node',
+          args: [
+            '/stroq/dist/index.js',
+            'mcp',
+            '--server',
+            'demo',
+            '--client',
+            'cursor',
+            ...pins,
+            '--',
+            'node',
+            '/server.mjs',
+          ],
+        },
+      },
+    };
+    const wrapped = wrapMcpConfig(config, opts).config;
+    const args = (wrapped.mcpServers as { demo: { args: string[] } }).demo.args;
+    expect(parseMcpArgv(args.slice(args.indexOf('mcp') + 1))).toMatchObject({ ok: false });
+    expect(wrapMcpConfig(wrapped, opts).config).toEqual(wrapped);
+  },
+);
 
 it('preserves the pin through repeated wrapper rewrites, never taking the server argv pin', () => {
   const pin = `sha256:${'a'.repeat(64)}`;

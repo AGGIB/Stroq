@@ -91,6 +91,7 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     if (token === '--session') session = value;
     if (token === '--pass-env') passEnv = parsePassEnv(value);
     if (token === '--pin') {
+      if (pin !== undefined) return { ok: false, error: '--pin may be supplied only once' };
       if (!MCP_PIN.test(value))
         return { ok: false, error: '--pin needs sha256:<64 lowercase hex>' };
       pin = value;
