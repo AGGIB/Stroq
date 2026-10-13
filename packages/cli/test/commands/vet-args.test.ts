@@ -5,14 +5,14 @@ import { vet } from '../helpers/vet-world.js';
 
 const HEX = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
-function problemOf(args: readonly string[], platform: NodeJS.Platform = 'linux'): string {
-  const parsed = parseVetArgs(args, platform);
+function problemOf(args: readonly string[]): string {
+  const parsed = parseVetArgs(args);
   if (parsed.ok) throw new Error(`expected a usage problem, got ${JSON.stringify(parsed.options)}`);
   return parsed.error;
 }
 
-function optionsOf(args: readonly string[], platform: NodeJS.Platform = 'linux') {
-  const parsed = parseVetArgs(args, platform);
+function optionsOf(args: readonly string[]) {
+  const parsed = parseVetArgs(args);
   if (!parsed.ok) throw new Error(`expected options, got "${parsed.error}"`);
   return parsed.options;
 }
@@ -22,7 +22,7 @@ describe('the command line of stroq vet', () => {
     expect([...VET_KINDS]).toEqual([...ARTIFACT_KINDS]);
   });
 
-  it('reads a folder, and leaves everything else off', () => {
+  it('reads a folder or an archive, and leaves everything else off', () => {
     expect(optionsOf(['--from', 'some/dir'])).toEqual({
       from: 'some/dir',
       kind: 'auto',
@@ -33,13 +33,13 @@ describe('the command line of stroq vet', () => {
     });
   });
 
-  it('needs a folder to read, and says how to give it', () => {
-    expect(problemOf([])).toContain('--from <dir>');
-    expect(problemOf(['--json'])).toContain('--from <dir>');
+  it('needs a folder or an archive to read, and says how to give it', () => {
+    expect(problemOf([])).toContain('--from <dir or .tgz>');
+    expect(problemOf(['--json'])).toContain('--from <dir or .tgz>');
     expect(problemOf(['--from', ''])).toContain('--from');
   });
 
-  it('takes the folder only after --from, because a bare word could be a package or an address', () => {
+  it('takes the path only after --from, because a bare word could be a package or an address', () => {
     expect(problemOf(['./pdf-forms'])).toContain('--from');
     expect(problemOf(['npm:some-package'])).toContain('--from');
     expect(problemOf(['--from', 'a', 'b'])).toContain('--from');
@@ -96,18 +96,15 @@ describe('--expect', () => {
     expect(problem).toContain('64');
   });
 
-  it('is refused on Windows for a folder, with the reason, because a folder read there has no executable bit', () => {
-    const problem = problemOf(['--from', 'd', '--expect', HEX], 'win32');
-    expect(problem).toContain('--expect');
-    expect(problem).toContain('Windows');
-    expect(problem).toContain('executable bit');
-    for (const platform of ['linux', 'darwin'] as const) {
-      expect(parseVetArgs(['--from', 'd', '--expect', HEX], platform).ok, platform).toBe(true);
-    }
+  // A folder read on Windows has no executable bit and an archive has its own, so the refusal on Windows
+  // belongs to what the path turns out to be (`vet-archive.test.ts` and `vet-json-expect.test.ts`), not to the
+  // words of the command line, which are the same for both.
+  it('is not judged by the platform when the command line is read, because only the path says if it is a folder', () => {
+    expect(parseVetArgs(['--from', 'd', '--expect', HEX]).ok).toBe(true);
   });
 
-  it('is judged for its syntax before its platform, so that a typo is told as a typo', () => {
-    expect(problemOf(['--from', 'd', '--expect', 'nope'], 'win32')).toContain('64');
+  it('is judged for its syntax, so that a typo is told as a typo whatever the path is', () => {
+    expect(problemOf(['--from', 'd', '--expect', 'nope'])).toContain('64');
   });
 });
 
@@ -117,7 +114,7 @@ describe('the usage problems as the command prints them', () => {
 
     expect(run.code).toBe(2);
     expect(run.stdout).toBe('');
-    expect(run.stderr).toMatch(/^stroq vet: .*--from <dir>/);
+    expect(run.stderr).toMatch(/^stroq vet: .*--from <dir or \.tgz>/);
     expect(run.stderr).toContain('Run "stroq vet --help" to see its options.');
   });
 

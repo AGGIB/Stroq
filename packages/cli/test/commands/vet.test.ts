@@ -180,14 +180,15 @@ describe('a folder that cannot be read as an artifact', () => {
     expect(run.stderr).toContain('more than one kind');
   });
 
-  it('exits 3 for a path that is a file, and for one that is nothing, and prints neither path', async () => {
+  // A file is read as an archive now, so a file that is not one is told as that (see vet-archive.test.ts).
+  it('exits 3 for a path that is a file but no archive, and for one that is nothing, and prints neither path', async () => {
     const root = tempRoot('vet');
     writeFiles(root, { 'a-file.txt': 'x' });
     const file = await vet(['--from', join(root, 'a-file.txt')]);
     const nothing = await vet(['--from', join(root, 'not-there')]);
 
     expect(file.code).toBe(3);
-    expect(file.stderr).toContain('the path is not a folder');
+    expect(file.stderr).toContain('not a tar archive');
     expect(nothing.code).toBe(3);
     expect(nothing.stderr).toContain('there is nothing at the path to read');
     for (const run of [file, nothing]) {
