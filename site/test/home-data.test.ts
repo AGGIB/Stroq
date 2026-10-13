@@ -225,8 +225,10 @@ describe('the page stays short and readable', () => {
   function visibleWords(): number {
     let page = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
     page = page.replace(/<!--[\s\S]*?-->/g, ' ');
-    page = page.replace(/<script[\s\S]*?<\/script\s*>/gi, ' ');
-    page = page.replace(/<svg[\s\S]*?<\/svg\s*>/gi, ' ');
+    // <main> carries no script of its own (they are in <head> and after </main>);
+    // say so rather than strip them with a pattern that can never match every end tag.
+    expect(page, 'a <script> inside <main> would be counted as words').not.toMatch(/<script/i);
+    page = page.replace(/<svg[\s\S]*?<\/svg[^>]*>/gi, ' ');
     // Keep a <details>' own <summary>; drop what sits behind it. Innermost first, so
     // a closed group inside a closed list is removed before the list's own body is.
     const innermost = /(<details\b[^>]*>\s*<summary[\s\S]*?<\/summary>)(?:(?!<details\b)[\s\S])*?<\/details>/g;
