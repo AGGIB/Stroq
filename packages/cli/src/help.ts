@@ -312,14 +312,19 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'bench',
-    synopsis: 'bench [--corpus <dir> | --actions] [--json] [--verbose]',
+    synopsis:
+      'bench [--corpus <dir> | --actions | --latency] [--n <count>] [--warmup <count>] [--json] [--verbose]',
     about: [
       'measure how much benign developer text the rule set flags,',
-      'or (--actions) how much ordinary agent work your policy interrupts',
+      '(--actions) how much ordinary agent work your policy interrupts,',
+      'or (--latency) what a hook call costs in processor and wall time (p50/p95/p99)',
     ],
     flags: [
       ['--corpus <dir>', 'measure your own files instead of the shipped corpus'],
       ['--actions', 'replay 75 scenarios of ordinary agent work against your policy'],
+      ['--latency', 'measure hook invocation processor and wall time on claude-code'],
+      ['--n <count>', 'number of measured runs per event (default 100)'],
+      ['--warmup <count>', 'number of warmup runs per event (default 5)'],
       ['--json', 'machine-readable output'],
       ['--verbose', 'list the flagged files'],
     ],
