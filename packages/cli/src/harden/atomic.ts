@@ -124,7 +124,7 @@ export function assertWriteAllowed(target: string, rules: WriteRules = {}): stri
   return real;
 }
 
-export async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined> {
+async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined> {
   try {
     return await fs.stat(path);
   } catch (err) {
@@ -139,7 +139,7 @@ export async function statIfPresent(fs: Fs, path: string): Promise<StatLike | un
 export async function missingDirsTo(fs: Fs, dir: string): Promise<string[]> {
   const missing: string[] = [];
   let current = dir;
-  while (true) {
+  for (;;) {
     const existing = await statIfPresent(fs, current);
     if (existing !== undefined) break;
     missing.push(current);
@@ -268,21 +268,26 @@ export async function removeFile(
  */
 export async function removeEmptyDirs(
   dirs: readonly string[],
-  options: WriteRules & { readonly fs?: Fs | undefined } = {},
+  options: WriteRules & {
+    readonly fs?: Fs | undefined;
+    readonly roots?: readonly string[] | undefined;
+  } = {},
 ): Promise<void> {
   const fs = options.fs ?? nodeFs;
   const ordered = [...new Set(dirs)].sort((a, b) => b.length - a.length || b.localeCompare(a));
   for (const dir of ordered) {
     try {
-      const real = assertWriteAllowed(dir, options);
-      const stat = await statIfPresent(fs, real);
-      if (stat === undefined || !stat.isDirectory()) continue;
-      const list = await fs.readdir(real);
-      if (list.length === 0) {
-        await fs.rmdir(real);
+      if (resolveRealPath(dir) !== dir) continue;
+      if (options.roots !== undefined) {
+        for (const root of options.roots) {
+          assertWriteAllowed(dir, { ...options, root });
+        }
+      } else {
+        assertWriteAllowed(dir, options);
       }
+      await fs.rmdir(dir);
     } catch {
-      // Best-effort cleanup: never let directory cleanup failure hide or break the caller
+      // Best-effort cleanup: never let directory cleanup failure hide or break the caller.
     }
   }
 }

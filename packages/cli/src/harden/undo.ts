@@ -302,8 +302,11 @@ async function undoLocked(
   if (text === null) {
     const createdDirs = entries.flatMap((entry) => entry.createdDirs ?? []);
     if (createdDirs.length > 0) {
+      const roots = new Set<string>();
+      if (options.root !== undefined) roots.add(options.root);
+      for (const entry of entries) if (entry.root !== null) roots.add(entry.root);
       await removeEmptyDirs(createdDirs, {
-        ...rulesOf(options.root),
+        ...(roots.size === 0 ? {} : { roots: [...roots] }),
         ...(env.fs === undefined ? {} : { fs: env.fs }),
       });
     }

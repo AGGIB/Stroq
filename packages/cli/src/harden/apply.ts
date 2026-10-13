@@ -165,7 +165,7 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
     const entry: ManifestEntry = {
       recipe: plan.recipe,
       created: !plan.existed,
-      createdDirs,
+      ...(createdDirs.length === 0 ? {} : { createdDirs }),
       real: plan.real,
       root: plan.root === undefined ? null : resolveRealPath(plan.root),
       edits: plan.edits,

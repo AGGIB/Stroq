@@ -108,6 +108,7 @@ describe('applyPlan: when something fails', () => {
         (renames += 1) <= 2
           ? nodeFs.rename(from, to)
           : Promise.reject(new Error('simulated trouble')),
+      unlink: () => Promise.reject(new Error('simulated trouble')),
     };
 
     await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated trouble/);
@@ -117,6 +118,24 @@ describe('applyPlan: when something fails', () => {
     const undone = await undoFile(env, file('settings.json'));
     expect(undone.status).toBe('already-undone');
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
+  });
+
+  it('removes directories created for a new file when the file write fails', async () => {
+    const { env, file, planJson } = engine();
+    const plan = planJson('deep/nested/sub/settings.json', [addDeny('x')]);
+    const fs: Fs = {
+      ...nodeFs,
+      rename: (from, to) =>
+        to.endsWith('settings.json')
+          ? Promise.reject(new Error('simulated disk failure'))
+          : nodeFs.rename(from, to),
+    };
+
+    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated disk failure/);
+
+    expect(existsSync(file('deep/nested/sub'))).toBe(false);
+    expect(existsSync(file('deep/nested'))).toBe(false);
+    expect(existsSync(file('deep'))).toBe(false);
   });
 
   it.skipIf(onWindows)(

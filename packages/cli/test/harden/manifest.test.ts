@@ -52,6 +52,44 @@ describe('readManifest', () => {
 
     expect(readManifest(env).files[file]).toEqual([made]);
   });
+
+  it('reads a manifest without createdDirs', () => {
+    const { env, file, manifestFile } = setup();
+    const older = entry({ created: true });
+    plant(manifestFile, { version: 1, files: { [file]: [older] } });
+
+    const manifest = readManifest(env);
+    expect(manifest.files[file]?.[0]?.createdDirs).toBeUndefined();
+  });
+
+  it('refuses a manifest where createdDirs is present but created is false', () => {
+    const { env, file, manifestFile } = setup();
+    const bad = entry({ created: false, createdDirs: [join(file, '..')] });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs contains a path that is not above the file', () => {
+    const { env, file, manifestFile } = setup();
+    const bad = entry({ created: true, createdDirs: ['/completely/unrelated/path'] });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs contains a path outside the recorded root', () => {
+    const { env, file, manifestFile } = setup();
+    const projectDir = join(file, '..');
+    const bad = entry({
+      created: true,
+      root: projectDir,
+      createdDirs: [join(projectDir, '..')],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
 });
 
 describe('writeManifest', () => {
