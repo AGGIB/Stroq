@@ -116,6 +116,7 @@ interface Walk {
   expanded: number;
   specialModeBits: boolean;
   pending: Pending | null;
+  globalCommit: string | null;
 }
 
 /** The data of an entry, a view into the archive, and the position moved past it and its padding. */
@@ -199,6 +200,7 @@ function takeExtended(walk: Walk, header: TarHeader, isGlobal: boolean): void {
   }
   const pax = parsePax(takeData(walk, header.size), isGlobal);
   if (!isGlobal) walk.pending = pax;
+  else if (pax.comment) walk.globalCommit = pax.comment;
 }
 
 /** A GNU long name: the data is the name of the next entry, with a NUL at the end. */
@@ -305,8 +307,10 @@ export function readTarArchive(input: Uint8Array, options: ArchiveOptions = {}):
     expanded: 0,
     specialModeBits: false,
     pending: null,
+    globalCommit: null,
   };
   walkArchive(walk);
   const blindSpots = walk.specialModeBits ? [ARCHIVE_BLIND_SPOTS.specialModeBits] : [];
-  return treeOfFiles(walk.files, blindSpots);
+  const read = treeOfFiles(walk.files, blindSpots);
+  return Object.freeze({ ...read, commit: walk.globalCommit });
 }

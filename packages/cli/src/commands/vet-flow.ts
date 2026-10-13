@@ -4,6 +4,7 @@ import { stableStringify } from '@stroq/core';
 import { usageError } from '../help.js';
 import { ArchiveError } from '../install/archive-error.js';
 import { readArchiveFile } from '../install/archive-file.js';
+import { FetchError, fetchSourceTree } from '../install/fetch.js';
 import {
   READING_PHRASES,
   failedReadingSpot,
@@ -20,6 +21,7 @@ import {
 import { showable } from '../install/inspect/safe-text.js';
 import { ReadDirError, readDirTree } from '../install/read-dir.js';
 import { sourceTypeOf, type SourceType } from '../install/read-source.js';
+import { parseOnlineSource, SourceSyntaxError } from '../install/source.js';
 import { TreeError } from '../install/tree.js';
 import { SourceRefSchema, type Passport } from '../install/types.js';
 import { neutralizeControls } from '../terminal-safe.js';
@@ -85,7 +87,8 @@ function unreadableBecause(error: unknown): string | null {
   if (
     error instanceof ReadDirError ||
     error instanceof ArchiveError ||
-    error instanceof TreeError
+    error instanceof TreeError ||
+    error instanceof FetchError
   ) {
     return error.message;
   }
@@ -100,13 +103,43 @@ type Made =
 /** The tree of what `--from` names: a folder is walked, and a file is read as an archive. */
 function readSource(type: SourceType, options: VetOptions, deps: VetDeps) {
   return type === 'dir'
-    ? readDirTree(options.from, deps.platform === undefined ? {} : { platform: deps.platform })
-    : readArchiveFile(options.from);
+    ? readDirTree(options.from!, deps.platform === undefined ? {} : { platform: deps.platform })
+    : readArchiveFile(options.from!);
 }
 
 async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
   try {
-    const type = await sourceTypeOf(options.from);
+    if (options.online !== null) {
+      const io = streamsOf(deps);
+      let onlineSource;
+      try {
+        onlineSource = parseOnlineSource(options.online);
+      } catch (err) {
+        if (err instanceof SourceSyntaxError) {
+          return { usage: err.message };
+        }
+        throw err;
+      }
+      const fetched = await fetchSourceTree(onlineSource, {
+        ...(deps.transport ? { transport: deps.transport } : {}),
+        onHost: (host) => io.err(`${host}\n`),
+      });
+      const context = {
+        kind: options.kind,
+        source: fetched.sourceRef,
+        extraBlindSpots: fetched.blindSpots,
+        stroqVersion: deps.stroqVersion ?? stroqVersion(),
+        rulesId: INSPECT_RULES_ID,
+      };
+      const passport =
+        deps.readings === undefined
+          ? inspectTree(fetched.tree, context)
+          : inspectWithReadings(fetched.tree, context, deps.readings);
+      return { passport };
+    }
+
+    const from = options.from!;
+    const type = await sourceTypeOf(from);
     // A folder read on Windows has no executable bit, so its digest is not that of the same files anywhere
     // else, and a bare digest cannot say so. An archive carries its own bits and has no such trouble.
     if (
@@ -119,7 +152,7 @@ async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
     const { tree, blindSpots } = await readSource(type, options, deps);
     const context = {
       kind: options.kind,
-      source: { type, label: labelOf(options.from, type) },
+      source: { type, label: labelOf(from, type) },
       extraBlindSpots: blindSpots,
       stroqVersion: deps.stroqVersion ?? stroqVersion(),
       rulesId: INSPECT_RULES_ID,
@@ -177,7 +210,7 @@ function writeNew(options: VetOptions, path: string, text: string, io: Streams):
   }
   io.out(`wrote ${outsideLine(path)}\n`);
   // A passport kept beside the files it describes is one of them the next time: it is said once, and not refused.
-  if (isInside(options.from, path)) io.err(INSIDE_NOTE);
+  if (options.from !== null && isInside(options.from, path)) io.err(INSIDE_NOTE);
   return 0;
 }
 
