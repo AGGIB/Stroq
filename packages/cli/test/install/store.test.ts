@@ -7,6 +7,7 @@ import {
   readStoredTree,
   storePath,
   assertWritableTree,
+  assertInstallablePlatform,
 } from '../../src/install/store.js';
 import { treeDigest } from '../../src/install/tree.js';
 import { treeOf } from '../helpers/install-tree.js';
@@ -28,6 +29,14 @@ async function setup() {
 }
 
 describe('confirmed bytes in the content-addressed store', () => {
+  it('refuses executable metadata on Windows on every host', () => {
+    const executable = treeOf({ 'run.sh': { text: 'echo hi', exec: true } });
+    expect(() => assertInstallablePlatform(executable, 'win32')).toThrow(/Windows cannot preserve/);
+    expect(() => assertInstallablePlatform(executable, 'linux')).not.toThrow();
+    expect(() =>
+      assertInstallablePlatform(treeOf({ 'SKILL.md': '# demo' }), 'win32'),
+    ).not.toThrow();
+  });
   it('keeps exec metadata without executable store files and reuses only a verified store', async () => {
     const f = await setup();
     expect(f.folder).toBe(join(f.home, 'store', `sha256-${f.digest.slice(0, 32)}`));

@@ -23,6 +23,26 @@ const line = (changes: Partial<PassportLine> = {}): PassportLine => ({
 const withLines = (...lines: PassportLine[]): Passport => ({ ...base, lines });
 
 describe('material skill updates', () => {
+  it('uses tree metadata for executable changes and accepts only documentation differences', () => {
+    const before = treeOf({ 'SKILL.md': '# demo', 'run.txt': 'echo hi', 'code.rb': 'first' });
+    const docs = treeOf({ 'SKILL.md': '# demo 2', 'run.txt': 'echo hi', 'code.rb': 'first' });
+    expect(materialChange(base, base, { before, after: docs })).toBe(false);
+    const executable = treeOf({
+      'SKILL.md': '# demo',
+      'run.txt': { text: 'echo hi', exec: true },
+      'code.rb': 'first',
+    });
+    expect(materialChange(base, base, { before, after: executable })).toBe(true);
+    const removedCode = treeOf({ 'SKILL.md': '# demo', 'run.txt': 'echo hi' });
+    expect(materialChange(base, base, { before, after: removedCode })).toBe(true);
+    const addedDoc = treeOf({
+      'SKILL.md': '# demo',
+      'run.txt': 'echo hi',
+      'code.rb': 'first',
+      'notes.txt': 'docs',
+    });
+    expect(materialChange(base, base, { before, after: addedDoc })).toBe(false);
+  });
   it('ignores version, byte digest and source-location-only changes', () => {
     const before = withLines(line());
     const after = {

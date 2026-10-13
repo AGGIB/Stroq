@@ -11,6 +11,7 @@ import {
   liveDirIn,
   openclawPluginDirIn,
   passportsFileIn,
+  passportsLockDirIn,
   pluginCliDirIn,
   policyFileIn,
   secretsFileIn,
@@ -245,6 +246,7 @@ const protectedState = (home: string): readonly string[] => [
   backupsDirIn(home),
   storeDirIn(home),
   passportsFileIn(home),
+  passportsLockDirIn(home),
   tasksDirIn(home),
   bindingsFileIn(home),
 ];

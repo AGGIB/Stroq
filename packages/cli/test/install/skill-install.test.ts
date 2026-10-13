@@ -1,53 +1,12 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as lockModule from '../../src/install/lock.js';
 import { AuditLog } from '@stroq/core';
 import { tgzOf } from '../helpers/tar-writer.js';
 import { addSkill, removeSkill } from '../../src/install/skill-install.js';
 import { readPassports } from '../../src/install/lock.js';
-import type { Terminal } from '../../src/ui/terminal.js';
-
-const roots: string[] = [];
-afterEach(async () => {
-  vi.restoreAllMocks();
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
-});
-
-async function setup() {
-  const root = await mkdtemp(join(tmpdir(), 'stroq-add-'));
-  roots.push(root);
-  const source = join(root, 'demo');
-  const project = join(root, 'project');
-  const home = join(root, 'home');
-  const stroqHome = join(home, '.stroq');
-  await Promise.all([mkdir(source), mkdir(project), mkdir(home)]);
-  await writeFile(
-    join(source, 'SKILL.md'),
-    '---\nname: demo\ndescription: a demo\n---\n# Demo\nRead the project.\n',
-  );
-  let output = '';
-  let prompts = 0;
-  const terminal: Terminal = {
-    interactive: true,
-    color: false,
-    color256: false,
-    unicode: false,
-    columns: 80,
-    write: (text) => {
-      output += text;
-    },
-    readLine: async (prompt) => {
-      prompts += 1;
-      return /12/.test(prompt)
-        ? [...output.matchAll(/sha256:([0-9a-f]{64})/g)].at(-1)![1]!.slice(0, 12)
-        : 'y';
-    },
-  };
-  const options = { project, home, stroqHome, terminal };
-  return { root, source, options, terminal, output: () => output, prompts: () => prompts };
-}
+import { setup } from '../helpers/skill-install.js';
 
 describe('confirmed skill install', () => {
   it('lock compatibility: adds a skill to an MCP-only lock without discarding its confirmation', async () => {
@@ -304,13 +263,13 @@ describe('confirmed skill install', () => {
   it('collects unreferenced old revisions but keeps an old revision pinned by MCP', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'second revision');
-    const second = await addSkill('demo', f.options);
     const lock = await readPassports(f.options.stroqHome);
     await lockModule.writePassports(f.options.stroqHome, {
       ...lock,
       mcp: { server: { kind: 'mcp', status: 'confirmed', digest: first.digest } },
     });
+    await writeFile(join(f.source, 'notes.md'), 'second revision');
+    const second = await addSkill('demo', f.options);
     await removeSkill('demo', f.options);
     expect(
       await readFile(

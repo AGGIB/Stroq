@@ -100,6 +100,8 @@ export interface ReadDirOptions {
   readonly limits?: ReadDirLimits;
   /** The platform to read as; `win32` has no executable bit. Only the tests need to say. */
   readonly platform?: NodeJS.Platform;
+  /** Installing must not silently omit a repository nested inside the source. */
+  readonly rejectNestedRepositories?: boolean;
 }
 
 export interface DirRead {
@@ -139,6 +141,7 @@ const held = (limits: ReadDirLimits = {}): Held => {
 interface Walk {
   readonly limits: Held;
   readonly canExec: boolean;
+  readonly rejectNestedRepositories: boolean;
   readonly entries: TreeEntry[];
   visited: number;
   expanded: number;
@@ -301,6 +304,8 @@ async function symlinkEntry(abs: string, rel: string): Promise<TreeEntry> {
 async function visitName(abs: string, rel: string, depth: number, walk: Walk): Promise<void> {
   const name = rel.slice(rel.lastIndexOf('/') + 1);
   if (isGitName(name)) {
+    if (walk.rejectNestedRepositories && rel.includes('/'))
+      throw new ReadDirError('refused', 'a source with nested repositories cannot be installed');
     walk.gitLeftOut = true;
     return;
   }
@@ -389,6 +394,7 @@ export async function readDirTree(dir: string, options: ReadDirOptions = {}): Pr
   const walk: Walk = {
     limits: held(options.limits),
     canExec: (options.platform ?? process.platform) !== 'win32',
+    rejectNestedRepositories: options.rejectNestedRepositories === true,
     entries: [],
     visited: 0,
     expanded: 0,

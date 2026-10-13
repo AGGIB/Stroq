@@ -2,13 +2,14 @@ import { mkdir, mkdtemp, rename, rm, writeFile, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
+import { storeDirIn } from '../paths.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from './read-dir.js';
 import { buildTree, treeDigest } from './tree.js';
 import type { Tree, TreeEntry } from './types.js';
 
 export function storePath(home: string, digest: string): string {
   if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('invalid store digest');
-  return join(home, 'store', `sha256-${digest.slice(0, 32)}`);
+  return join(storeDirIn(home), `sha256-${digest.slice(0, 32)}`);
 }
 
 /** A directory link is never a tree to replace or remove, even when --force was given. */
@@ -30,6 +31,14 @@ export function assertWritableTree(tree: Tree, digest: string): void {
   if (treeDigest(tree) !== digest) throw new Error('the inspected bytes changed before writing');
   if (tree.entries.some((entry) => entry.kind !== 'file' || entry.bytes === undefined))
     throw new Error('a skill with links, nested repositories or missing bytes cannot be installed');
+}
+
+/** Explicit platform input keeps the Windows refusal covered on every test runner. */
+export function assertInstallablePlatform(tree: Tree, platform: NodeJS.Platform): void {
+  if (platform === 'win32' && tree.entries.some((entry) => entry.exec))
+    throw new Error(
+      'Windows cannot preserve executable bits in an installed skill; use Linux or macOS for this archive',
+    );
 }
 
 export async function writeTree(
