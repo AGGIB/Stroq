@@ -3,9 +3,7 @@ import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { childEnv } from '../mcp/child-env.js';
-import { onInterrupt } from '../ui/cleanup.js';
 import { summarizeMetric, type MetricSummary } from './latency-math.js';
 
 export const OUTLIER_THRESHOLD_MS = 10_000;
@@ -133,28 +131,17 @@ export function resolveCliEntry(custom?: string): string {
     return realpathSync(resolve(custom));
   }
 
-  const launched = process.argv[1] ? resolve(process.argv[1]) : '';
+  const launched = resolve(process.argv[1] ?? '');
   let candidate = launched;
   try {
     candidate = realpathSync(launched);
   } catch {}
-  if (
-    candidate &&
-    existsSync(candidate) &&
-    !candidate.includes('vitest') &&
-    (candidate.endsWith('.js') || candidate.endsWith('/stroq'))
-  ) {
+
+  if (candidate && existsSync(candidate)) {
     return candidate;
   }
 
-  const distCandidate = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
-  if (existsSync(distCandidate)) {
-    return realpathSync(distCandidate);
-  }
-
-  throw new Error(
-    'stroq bench: CLI bundle not found. Please build the packages with "pnpm build" first.',
-  );
+  throw new Error('CLI bundle not found. Please build the packages with "pnpm build" first.');
 }
 
 const RECORDER_SCRIPT_SOURCE = `
@@ -227,16 +214,9 @@ export async function runLatencyBench(
   const entry = resolveCliEntry(options.cliEntry);
 
   let workDir = '';
-  let cancelInterrupt: (() => void) | undefined;
 
   try {
     workDir = await mkdtemp(join(tmpdir(), 'stroq-bench-latency-'));
-    cancelInterrupt = onInterrupt(() => {
-      try {
-        rmSync(workDir, { recursive: true, force: true });
-      } catch {}
-    });
-
     const recorderScript = join(workDir, 'recorder.cjs');
     await writeFile(recorderScript, RECORDER_SCRIPT_SOURCE, 'utf8');
 
@@ -315,12 +295,23 @@ export async function runLatencyBench(
           throw new Error(`Audit log was not created for scenario "${scenario.id}"`);
         }
         const auditContent = await readFile(auditLogPath, 'utf8');
-        if (auditContent.length === 0) {
-          throw new Error(`Audit log is unexpectedly empty for scenario "${scenario.id}"`);
+        const auditLines = auditContent.trim().split('\n').filter(Boolean);
+        const expectedCount = warmup + n;
+        if (auditLines.length !== expectedCount) {
+          throw new Error(
+            `Audit log entry count mismatch for "${scenario.id}": expected ${expectedCount}, got ${auditLines.length}`,
+          );
         }
-        if (scenario.id === 'post-tool-use-heavy') {
-          if (!auditContent.includes('"phase":"post"') || !auditContent.includes('"scan"')) {
-            throw new Error(`Audit log missing post scan entry for scenario "${scenario.id}"`);
+        for (const line of auditLines) {
+          const auditEntry = JSON.parse(line);
+          if (scenario.id === 'pre-tool-use-bash') {
+            if (auditEntry.phase !== 'pre') {
+              throw new Error(`Audit log entry missing pre phase for scenario "${scenario.id}"`);
+            }
+          } else {
+            if (auditEntry.phase !== 'post' || !auditEntry.scan) {
+              throw new Error(`Audit log entry missing post scan for scenario "${scenario.id}"`);
+            }
           }
         }
       }
@@ -365,7 +356,6 @@ export async function runLatencyBench(
       results: enrichedResults,
     };
   } finally {
-    cancelInterrupt?.();
     if (workDir) {
       try {
         await rm(workDir, { recursive: true, force: true });
@@ -413,10 +403,15 @@ export function formatLatencyBench(report: LatencyBenchReport): string {
 
   const baseline = report.results.find((r) => r.id === 'bare-node');
   const preBash = report.results.find((r) => r.id === 'pre-tool-use-bash');
-  if (baseline && preBash && preBash.overhead?.wallP50 !== null) {
+  if (
+    baseline &&
+    preBash &&
+    typeof preBash.overhead?.wallP50 === 'number' &&
+    typeof preBash.overhead?.processorP50 === 'number'
+  ) {
     lines.push('');
     lines.push(
-      `Stroq overhead on PreToolUse vs bare node: ~${preBash.overhead?.processorP50} ms processor, ~${preBash.overhead?.wallP50} ms wall (p50).`,
+      `Stroq overhead on PreToolUse vs bare node: ~${preBash.overhead.processorP50} ms processor, ~${preBash.overhead.wallP50} ms wall (p50).`,
     );
   }
 

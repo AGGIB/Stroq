@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { formatLatencyBench, runLatencyBench, type ChildRunFn } from '../../src/bench/latency.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
@@ -124,5 +127,62 @@ describe('latency benchmark engine', () => {
 
     const formatted = formatLatencyBench(report);
     expect(formatted).toContain('n/a');
+  });
+
+  it('fails with child stderr when real child process exits with non-zero code', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'stroq-bench-test-'));
+    try {
+      const exitScript = join(tmp, 'exit3.js');
+      await writeFile(exitScript, 'console.error("boom from entry"); process.exit(3);', 'utf8');
+      await expect(
+        runLatencyBench({
+          n: 1,
+          warmup: 0,
+          cliEntry: exitScript,
+        }),
+      ).rejects.toThrow(/exited with code 3: boom from entry/);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('isolates child environment from NODE_OPTIONS and STROQ_* and sets cwd to temp folder', async () => {
+    vi.stubEnv('NODE_OPTIONS', '--max-old-space-size=4096');
+    vi.stubEnv('STROQ_CUSTOM_VAR', 'leaked_value');
+
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    let capturedCwd: string | undefined;
+    let capturedInput: string | undefined;
+
+    const mockRunner: ChildRunFn = (_execPath, _args, input, env, cwd) => {
+      if (input.length > 0) {
+        capturedEnv = env;
+        capturedCwd = cwd;
+        capturedInput = input;
+      }
+      return { wallMs: 10, cpuMs: 5 };
+    };
+
+    try {
+      await runLatencyBench({
+        n: 1,
+        warmup: 0,
+        cliEntry: CLI_ENTRY,
+        runner: mockRunner,
+      });
+
+      expect(capturedEnv).toBeDefined();
+      expect(capturedEnv?.NODE_OPTIONS).toBeUndefined();
+      expect(capturedEnv?.STROQ_CUSTOM_VAR).toBeUndefined();
+
+      expect(capturedCwd).toBeDefined();
+      expect(capturedCwd).toContain('project');
+
+      expect(capturedInput).toBeDefined();
+      const parsedEvent = JSON.parse(capturedInput!);
+      expect(parsedEvent.cwd).toBe(capturedCwd);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
