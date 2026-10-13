@@ -148,6 +148,8 @@ export interface PreToolEvent {
 }
 
 export interface PostToolEvent extends PreToolEvent {
+  /** The host reported a failed execution, as distinct from a successful result. */
+  readonly resultFailed?: true;
   readonly toolResultText: string;
   /**
    * Set by an adapter when the host's event carried none of the fields the result is

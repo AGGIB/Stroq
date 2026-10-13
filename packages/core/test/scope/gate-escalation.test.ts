@@ -11,7 +11,7 @@ import { MINUTE, NOW, NONCE, iso } from './helpers.js';
 const README = '/work/project/README.md';
 const writeReadme = () =>
   callOf('Write', { file_path: README }, { resources: resourcesOf([['write', README]]) });
-const WRITE_FP = fingerprintOf('Write', 'file:write', README);
+const WRITE_FP = wholeCallFingerprint(writeReadme());
 
 describe('escalation: a signed extension lifts one refusal, once', () => {
   it('lifts a path refusal for exactly the fingerprint it was signed for', async () => {
@@ -132,7 +132,7 @@ describe('escalation: a signed extension lifts one refusal, once', () => {
     expect((await verdictOf(f, ask)).decision.effect).toBe('deny');
   });
 
-  it('needs an escalation for every refused path of a call, and uses them all up together', async () => {
+  it('binds one edit extension to every argument and resource in the whole call', async () => {
     const f = gateFixture();
     const a = '/work/project/a.md';
     const b = '/work/project/b.md';
@@ -148,7 +148,7 @@ describe('escalation: a signed extension lifts one refusal, once', () => {
     );
     f.escalate(fingerprintOf('Edit', 'file:edit', a));
     expect((await verdictOf(f, call)).decision.effect).toBe('deny');
-    f.escalate(fingerprintOf('Edit', 'file:edit', b));
+    f.escalate(wholeCallFingerprint(call));
     expect((await verdictOf(f, call)).decision.effect).toBe('allow');
     expect((await verdictOf(f, call)).decision.effect).toBe('deny');
   });

@@ -80,6 +80,72 @@ describe('exitCodeFor', () => {
 });
 
 describe('launch', () => {
+  it('stops the child tree when its task controller aborts and removes the listener after close', async () => {
+    const h = harness();
+    const controller = new AbortController();
+    const kill = vi.fn();
+    const result = launch({
+      ...h,
+      command: 'claude',
+      args: [],
+      env: {},
+      stopSignal: controller.signal,
+      kill,
+    });
+    controller.abort();
+    expect(kill).toHaveBeenCalledWith(h.child, 'SIGTERM');
+    h.child.emit('close', 1, null);
+    expect(await result).toBe(1);
+    expect(
+      await launch({ ...h, command: 'claude', args: [], env: {}, stopSignal: controller.signal }),
+    ).toBe(1);
+  });
+  it('force-stops a task that ignores the expiry signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      const kill = vi.fn();
+      const done = launch({
+        command: 'claude',
+        args: [],
+        env: {},
+        spawnFn: h.spawnFn,
+        signals: h.signals,
+        kill,
+        timeoutMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(kill.mock.calls.map((call) => call[1])).toEqual(['SIGTERM', 'SIGKILL']);
+      h.child.emit('close', 1, null);
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('terminates the run at its task deadline and clears the deadline on exit', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      const kill = vi.fn();
+      const done = launch({
+        command: 'claude',
+        args: [],
+        env: {},
+        spawnFn: h.spawnFn,
+        signals: h.signals,
+        kill,
+        timeoutMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(kill).toHaveBeenCalledWith(h.child, 'SIGTERM');
+      h.child.emit('close', 0, null);
+      await done;
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kill).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('hands the agent its own argv, the environment it was given, and the terminal', async () => {
     const h = harness();
     const done = launch({

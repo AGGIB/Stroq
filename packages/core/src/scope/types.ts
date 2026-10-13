@@ -112,6 +112,8 @@ export const PermitBodySchema = z.strictObject({
   nonce: NonceSchema,
   host: z.literal('claude-code'),
   profile: z.string().regex(SLUG),
+  // Older core permits have no recorded mode. New task launches always sign one.
+  mode: z.enum(['srt', 'hook-only']).optional(),
   projectRoot: z
     .string()
     .min(1)

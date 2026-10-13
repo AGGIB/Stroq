@@ -124,6 +124,29 @@ export const COMMANDS: readonly CommandHelp[] = [
     passThrough: true,
   },
   {
+    name: 'task',
+    synopsis:
+      'task [--profile repo-edit-and-test] [--read <glob>] [--write <glob>] [--ttl 30m] -- "<task>"',
+    about: [
+      'preview and confirm a signed Claude Code task; srt is required by default',
+      'The parent controller judges hooks; --hook-only is advisory without OS isolation.',
+    ],
+    flags: [
+      ['--profile <name>', 'repo-edit-and-test'],
+      ['--read <glob>', 'read allowlist; repeat; default project/**'],
+      ['--write <glob>', 'write allowlist; repeat; default project/**'],
+      ['--ttl <duration>', '1m through 24h, default 30m'],
+      ['--hook-only', 'explicit advisory mode without a sandbox'],
+    ],
+    passThrough: true,
+  },
+  {
+    name: 'permit',
+    synopsis: 'permit list | show <task> | extend <task> <fingerprint> | revoke <task>',
+    about: ['inspect signed tasks, confirm a refused exact operation once, or revoke a task'],
+    flags: [],
+  },
+  {
     name: 'mcp',
     synopsis: 'mcp --server <name> [--pin sha256:<digest>] [--cloak] -- <command> …',
     about: [

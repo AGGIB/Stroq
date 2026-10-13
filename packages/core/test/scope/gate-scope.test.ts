@@ -91,7 +91,7 @@ describe('step 3: the scope refuses', () => {
       expect((await verdictOf(f, read)).decision.effect).toBe('allow');
       const refused = await verdictOf(f, write);
       expect(refused.decision.ruleId).toBe('task-scope-path');
-      expect(fpOf(refused.decision.reason)).toBe(fingerprintOf('Write', 'file:write', readme));
+      expect(fpOf(refused.decision.reason)).toBe(wholeCallFingerprint(write));
     });
 
     it('holds the real path to the same rules: a link inside the root that leads out is outside', async () => {

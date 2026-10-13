@@ -72,6 +72,10 @@ export function exitCodeFor(
 }
 
 export interface LaunchOptions {
+  /** A task's remaining lifetime. Omitted by ordinary `stroq run`. */
+  readonly timeoutMs?: number;
+  /** The parent task controller has observed terminal revocation or invalid state. */
+  readonly stopSignal?: AbortSignal;
   readonly command: string;
   readonly args: readonly string[];
   /** The full environment for the child, hardening included; not merged with anything here. */
@@ -87,6 +91,7 @@ export interface LaunchOptions {
 }
 
 export async function launch(options: LaunchOptions): Promise<number> {
+  if (options.stopSignal?.aborted) return 1;
   const plat = options.plat ?? process.platform;
   const spawnFn = options.spawnFn ?? (spawn as unknown as LaunchSpawn);
   const signals = options.signals ?? process;
@@ -105,6 +110,14 @@ export async function launch(options: LaunchOptions): Promise<number> {
 
   const relays = RELAYED.map((signal) => ({ signal, listener: () => kill(child, signal) }));
   for (const { signal, listener } of relays) signals.on(signal, listener);
+  let forceTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopChild = () => {
+    kill(child, 'SIGTERM');
+    forceTimer ??= setTimeout(() => kill(child, 'SIGKILL'), 2_000);
+  };
+  options.stopSignal?.addEventListener('abort', stopChild, { once: true });
+  const deadline =
+    options.timeoutMs === undefined ? undefined : setTimeout(stopChild, options.timeoutMs);
 
   try {
     return await new Promise<number>((resolve) => {
@@ -122,6 +135,9 @@ export async function launch(options: LaunchOptions): Promise<number> {
       child.on('close', (code, signal) => resolve(exitCodeFor(code, signal, plat)));
     });
   } finally {
+    clearTimeout(deadline);
+    clearTimeout(forceTimer);
+    options.stopSignal?.removeEventListener('abort', stopChild);
     // Leaving a relay registered would keep this process reachable by signals it no
     // longer has anything to do with, and hold a reference to a child that is gone.
     for (const { signal, listener } of relays) signals.off(signal, listener);
