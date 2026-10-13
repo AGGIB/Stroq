@@ -1,0 +1,33 @@
+name: Documentation
+description: Something in the README, the guide or the site is wrong, unclear or missing
+title: '[Docs]: '
+labels: ['documentation']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping the docs. A command that behaves differently from what the docs
+        say may be a bug in the code rather than in the text: say what you ran and what you saw.
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The page and section, or the file and heading (for example docs/GUIDE.md, "Read a skill before you add it").
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong, unclear or missing?
+      description: Quote the sentence if it is there. If it is missing, say what you looked for.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What should it say? (optional)
+  - type: input
+    id: version
+    attributes:
+      label: Stroq version (optional)
+      placeholder: 'output of `stroq --version`'

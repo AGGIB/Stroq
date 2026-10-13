@@ -64,7 +64,20 @@ If you find a way past the action classifier or the policy engine (a command tha
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `type: short description`, for example `fix: classify sudo -u as a wrapped command` or `feat: add ask-network-fetch policy rule`. Common types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`.
 
+## Issues
+
+Work is tracked in [GitHub issues](https://github.com/AGGIB/Stroq/issues). Pick a form when you open one: bug, false positive (Stroq stopped something harmless), classification gap, feature request, documentation, or question. Labels say what an issue is and who it suits:
+
+- `bug`, `enhancement`, `documentation`, `question`, `false-positive`, `classification-gap`: the kind.
+- `good first issue`: small, local and testable, with no security weight; a good way to start.
+- `help wanted`: the maintainers would welcome a pull request for it.
+- `needs-info`: waiting for the reporter; `triaged`: checked against the code by a maintainer.
+
+**A way around one of Stroq's protections is not a public issue.** Report it privately through a [security advisory](https://github.com/AGGIB/Stroq/security/advisories/new), as [SECURITY.md](SECURITY.md) explains.
+
 ## Pull Requests
+
+Link the issue a pull request settles with `Closes #<number>` in its description, so that the issue closes when it is merged and the history shows why a change was made.
 
 Before opening a pull request:
 
