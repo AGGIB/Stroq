@@ -170,10 +170,11 @@ const createdDirsValid = (entry: {
 }): boolean => {
   if (entry.createdDirs === undefined || entry.createdDirs.length === 0) return true;
   if (!entry.created) return false;
+  if (entry.root === null) return false;
   const ancestors = strictAncestorsOf(entry.real);
   for (const dir of entry.createdDirs) {
     if (!ancestors.has(dir)) return false;
-    if (entry.root !== null && !within(dir, entry.root)) return false;
+    if (dir === entry.root || !within(dir, entry.root)) return false;
   }
   return true;
 };

@@ -107,11 +107,12 @@ describe('applyPlan: when something fails', () => {
       rename: (from, to) =>
         (renames += 1) <= 2
           ? nodeFs.rename(from, to)
-          : Promise.reject(new Error('simulated trouble')),
-      unlink: () => Promise.reject(new Error('simulated trouble')),
+          : Promise.reject(new Error('simulated write failure')),
+      unlink: () => Promise.reject(new Error('simulated manifest rollback failure')),
     };
 
-    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated trouble/);
+    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated write failure/);
+    expect(readManifest(env).files[plan.real]).toHaveLength(1);
 
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
     // The entry could not be taken back, and undo says there was nothing to take out.
