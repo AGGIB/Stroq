@@ -277,6 +277,7 @@ describe('task command', () => {
       await runTask(['--hook-only', '--', 'fix'], temp(), {
         home: temp(),
         env: { PATH: temp() },
+        managed: () => false,
         confirm,
       }),
     ).toBe(1);
@@ -286,15 +287,17 @@ describe('task command', () => {
     const home = temp();
     const launch = vi.fn();
     vi.spyOn(process.stdout, 'write').mockReturnValue(true);
-    const options = { home, claude: process.execPath, launch };
+    const options = { home, claude: process.execPath, managed: () => false, launch };
     expect(await runTask(['--hook-only', '--', 'fix'], temp(), options)).toBe(1);
+    const confirm = vi.fn(async () => true);
     await expect(
       runTask(['--hook-only', '--', 'fix'], temp(), {
         ...options,
         now: () => new Date(Date.now() - 31 * 60_000),
-        confirm: async () => true,
+        confirm,
       }),
     ).rejects.toThrow('preview expired');
+    expect(confirm).toHaveBeenCalledOnce();
     expect(launch).not.toHaveBeenCalled();
     expect(existsSync(join(home, 'tasks'))).toBe(false);
   });
@@ -311,8 +314,10 @@ describe('task command', () => {
         confirm,
         launch,
         claude: process.execPath,
+        managed: () => false,
       }),
     ).toBe(1);
+    expect(confirm).toHaveBeenCalledOnce();
     expect(launch).not.toHaveBeenCalled();
   });
   it('pins the permit and uses a fake home and a receipt even when launch throws', async () => {
@@ -336,6 +341,7 @@ describe('task command', () => {
         taskId: () => 'test-task',
         entry: CLI_ENTRY,
         claude: process.execPath,
+        managed: () => false,
       }),
     ).rejects.toThrow('launch failed');
     expect(
@@ -403,6 +409,7 @@ describe('task command', () => {
         taskId: () => 'test-task',
         entry: CLI_ENTRY,
         claude: process.execPath,
+        managed: () => false,
       }),
     ).toBe(0);
     expect(
