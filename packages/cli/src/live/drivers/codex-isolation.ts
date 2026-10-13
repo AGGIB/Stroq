@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 const canonical = (path: string): string => {
@@ -44,6 +44,7 @@ export function codexHookSources(
       : '/etc/codex';
   const sources = [
     join(codexHome, 'hooks.json'),
+    join(codexHome, 'managed_config.toml'),
     ...['hooks.json', 'config.toml', 'requirements.toml', 'managed_config.toml'].map((file) =>
       join(system, file),
     ),
@@ -51,6 +52,7 @@ export function codexHookSources(
   if (platform === 'darwin')
     sources.push(
       '/Library/Managed Preferences/com.openai.codex.plist',
+      join('/Library/Managed Preferences', userInfo().username, 'com.openai.codex.plist'),
       join(home, 'Library', 'Managed Preferences', 'com.openai.codex.plist'),
     );
   return [

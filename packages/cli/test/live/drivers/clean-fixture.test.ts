@@ -165,6 +165,9 @@ describe('leaksIn', () => {
     ['a capture directory', 'stroq-capture-AbC123'],
     ['the home of a person', '/Users/somebody/.claude'],
     ['a home on Linux', '/home/somebody/.claude'],
+    ['a home on Windows', 'C:\\Users\\somebody\\.codex'],
+    ['an escaped Windows home', 'C:\\\\Users\\\\somebody\\\\.codex'],
+    ['Windows application data', 'D:/Users/somebody/AppData/Local/Temp'],
     ['a list of slash commands', '"slash_commands":["x"]'],
     ['a signature', '"signature":"AbCd"'],
   ])('finds %s', (_name, text) => {

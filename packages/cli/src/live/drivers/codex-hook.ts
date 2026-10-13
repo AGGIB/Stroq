@@ -1,4 +1,5 @@
-import { lstatSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { windowsHookCommands } from '../../commands/hook-command.js';
 import { shellWord } from '../probes.js';
@@ -9,23 +10,25 @@ import type { ProbeContext } from '../types.js';
 export function codexHookCommand(ctx: ProbeContext, hookLine: string): string {
   if (ctx.hookMode === 'noop') return 'node -e 0';
   assertThrowaway(ctx.home);
-  const script = join(ctx.home, 'codex-stroq-hook.cjs');
-  try {
-    if (!lstatSync(script).isFile())
-      throw new Error('the Codex hook wrapper is not a regular file');
-    rmSync(script);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
+  // Never check then replace a path: an exclusive new file avoids a filesystem race.
+  const script = join(ctx.home, `codex-stroq-hook-${randomUUID()}.cjs`);
   const source = [
     "const { spawnSync } = require('node:child_process');",
     "const { readFileSync } = require('node:fs');",
+    'try {',
     `const env = {...process.env, HOME: ${JSON.stringify(ctx.home)}, USERPROFILE: ${JSON.stringify(ctx.home)}, STROQ_HOME: ${JSON.stringify(ctx.stroqHome)}};`,
     `const child = spawnSync(${JSON.stringify(hookLine)}, {shell: true, env, input: readFileSync(0), stdio: ['pipe', 'inherit', 'inherit'], windowsHide: true});`,
     'process.exit(child.status ?? 2);',
+    '} catch { process.exit(2); }',
   ].join('\n');
   writeFileSync(script, source, { flag: 'wx', mode: 0o600 });
-  return process.platform === 'win32'
-    ? windowsHookCommands(process.execPath, script, 'codex')[0]!
-    : `${shellWord(process.execPath)} ${shellWord(script)}`;
+  const command =
+    process.platform === 'win32'
+      ? windowsHookCommands(process.execPath, script, 'codex')[0]!
+      : `${shellWord(process.execPath)} ${shellWord(script)}`;
+  if (process.platform === 'win32' && /["']/.test(command))
+    throw new Error(
+      'Codex hook needs quote-free Windows paths; use a short temporary directory with 8.3 names enabled',
+    );
+  return command;
 }

@@ -24,6 +24,7 @@ import {
   dryRunReport,
   exitCodeOf,
   hostNotFoundReport,
+  notRunReport,
   reportOf,
   unsupportedReport,
   windowsReport,
@@ -49,6 +50,14 @@ type Env = Readonly<Record<string, string | undefined>>;
 function gateReport(agent: string, platform: NodeJS.Platform): ProveReport | null {
   if (!DRIVEN_AGENTS.includes(agent))
     return unsupportedReport(agent, capabilitiesFor(agent)?.reason, DRIVEN_AGENTS);
+  if (agent === 'codex' && platform !== 'win32')
+    return notRunReport(
+      agent,
+      'unsupported',
+      null,
+      'Codex live protection is measured on Windows only; this platform is unmeasured',
+      ['Use Windows with the measured Codex CLI version. No inference request was made.'],
+    );
   return platform === 'win32' && agent !== 'codex' ? windowsReport(agent) : null;
 }
 

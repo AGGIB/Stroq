@@ -63,6 +63,10 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'api-billing': 'the host is paid for by an API key or a cloud',
   timeout: 'the host did not answer in time',
   'host-error': 'the host failed',
+  'host-not-isolated': 'Codex could not be isolated from other hook or managed settings',
+  'login-unconfirmed': 'Codex ChatGPT login could not be confirmed',
+  'model-unavailable': 'the selected Codex model is unavailable for this account',
+  'host-unmeasured': 'this Codex platform or version has not been measured',
   'unparsable-stream': 'the output of the host could not be read',
   'command-altered': 'the model changed the command',
   'extra-activity': 'the host did more than the one command',
@@ -223,6 +227,8 @@ export function renderReport(report: ProveReport): string {
   lines.push(`Requests made: ${report.requestsMade}`);
   if (report.mode === 'live' && report.caveats.length > 0)
     lines.push(`Caveats: ${report.caveats.map(outsideLine).join(', ')}`);
+  if (report.caveats.includes('sandbox-disabled'))
+    lines.push('Codex ran without its sandbox; hook trust was bypassed for these fixed probes.');
   if (report.advice.length > 0) {
     lines.push('', 'Advice');
     for (const line of report.advice) lines.push(...bullet(outsideLine(line)));
@@ -258,7 +264,7 @@ export function noticeText(facts: NoticeFacts): string[] {
     ),
     ...(facts.agent === 'codex'
       ? bullet(
-          'Codex runs these fixed probes without its sandbox and bypasses hook trust. The real run and control use the same permissions.',
+          'Codex runs these fixed probes without its sandbox and bypasses hook trust. The real run and control use the same permissions. Pay-as-you-go plan credits are not detected; user instructions or skills may still reach the host.',
         )
       : []),
     ...bullet(

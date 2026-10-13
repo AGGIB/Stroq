@@ -96,11 +96,20 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq harden [plan\|apply\|undo\|status] [--json]`     | Strengthen Claude Code's or Cursor's own protection of credential files, and undo it exactly. `plan` (default) writes nothing; `apply` and `undo` ask, or need `--yes` off a terminal. A filter in the agent, not a guarantee                |
 
 `stroq prove --agent codex` uses the existing ChatGPT login and `gpt-5.6-luna` (measured
-with Codex CLI 0.162.1 on Windows). It runs the fixed probes without Codex's sandbox and
+with Codex CLI 0.162.1 on Windows; other platforms and versions are refused). It runs the fixed probes without Codex's sandbox and
 bypasses hook trust for this invocation, with identical permissions in the control.
 Existing user hooks or local managed hook sources cause a refusal before inference.
+This includes `stroq init --agent codex --user`, which writes `~/.codex/hooks.json`.
+Back up and temporarily move that file aside yourself for the check, then restore it;
+Stroq never disables it automatically. Refused isolation/login preflights report zero
+requests. A ledger slot reserved before a refused preflight stays reserved conservatively.
+The hook under test is Stroq's line started through a private wrapper that supplies the
+temporary policy/audit home. Codex keeps its authentication home. The driver cannot
+detect a plan's pay-as-you-go credits; reported billing and cwd come from login preflight,
+forced configuration and spawn options rather than independent host stream fields.
 The driver starts a native executable directly; for npm Windows installations, set
-`STROQ_CODEX_BIN` to the package's native `codex.exe`. See the
+`STROQ_CODEX_BIN` to the absolute path of the package's native `codex.exe`. The executable
+is resolved once and reused for version, login and inference. See the
 [recorded fixtures and limitations](https://github.com/AGGIB/Stroq/blob/main/packages/cli/test/fixtures/hosts/codex/README.md).
 
 `stroq exposure` reads files only. `--probe` is the one flag that starts a process: it launches each configured stdio MCP server, asks once for `tools/list`, scans the tool descriptions and shuts the server down — no tool is ever called. Without it, tool-description poisoning is not covered by the run, and the report says so. `--share` prints a redacted summary built from a whitelist, locally; nothing is transmitted.

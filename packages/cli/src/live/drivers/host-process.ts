@@ -15,6 +15,11 @@ import { spawn } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { killTree } from '../../commands/process-tree.js';
 import { plainText } from '../plain-text.js';
+import type { HostRun } from '../types.js';
+import type { ParsedStream } from './claude-stream.js';
+
+export const DEFAULT_DETECT_TIMEOUT_MS = 5_000;
+export const DEFAULT_KILL_GRACE_MS = 2_000;
 
 /** The longest end of the error stream that is kept. */
 export const STDERR_TAIL_CHARS = 4096;
@@ -85,6 +90,22 @@ export interface Supervised {
   readonly stoppedByReader: boolean;
   /** The check was interrupted. */
   readonly interrupted: boolean;
+}
+
+/** Combine parsed host facts with the outcome of the supervised process. */
+export function hostRunOf(parsed: ParsedStream, ended: Supervised): HostRun {
+  const interrupted = 'stopped: the check was interrupted';
+  return {
+    stream: parsed.stream,
+    exitCode: ended.exitCode,
+    timedOut: ended.timedOut,
+    stderrTail: ended.interrupted ? `${interrupted}\n${ended.stderrTail}`.trim() : ended.stderrTail,
+    ...(parsed.limitHit === undefined ? {} : { limitHit: parsed.limitHit }),
+    ...(parsed.apiProvider === undefined ? {} : { apiProvider: parsed.apiProvider }),
+    ...(parsed.apiKeySource === undefined ? {} : { apiKeySource: parsed.apiKeySource }),
+    ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
+    unparsedLines: parsed.unparsedLines,
+  };
 }
 
 /** The variables of an environment that have a value, as the plain record a child process takes. */

@@ -30,6 +30,7 @@ const STOPS: ReadonlySet<string> = new Set([
   REASONS.apiBilling,
   REASONS.timeout,
   REASONS.hostError,
+  REASONS.modelUnavailable,
 ]);
 
 const DEFAULT_GRACE_MS = 5_000;

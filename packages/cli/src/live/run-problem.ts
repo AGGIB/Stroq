@@ -63,6 +63,8 @@ export function isWellFormedRun(run: unknown): run is HostRun {
     isOptional(run['apiProvider'], 'string') &&
     isOptional(run['apiKeySource'], 'string') &&
     isOptional(run['cwd'], 'string') &&
+    isOptional(run['notStartedReason'], 'string') &&
+    isOptional(run['failureReason'], 'string') &&
     (run['unparsedLines'] === undefined ||
       (typeof run['unparsedLines'] === 'number' && Number.isFinite(run['unparsedLines'])))
   );
@@ -97,6 +99,7 @@ export function runProblem(run: HostRun): RunProblem | null {
       'the answer of the host is not in a shape that can be read',
     );
   if (run.limitHit !== undefined) return problem(REASONS.limit, `the host said: ${run.limitHit}`);
+  if (run.failureReason !== undefined) return problem(run.failureReason, run.stderrTail);
   if (run.apiProvider !== undefined && run.apiProvider !== 'firstParty')
     return problem(REASONS.apiBilling, `the host is not first party (${run.apiProvider})`);
   if (run.apiKeySource !== undefined && !isSubscriptionKeySource(run.apiKeySource))

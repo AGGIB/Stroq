@@ -136,7 +136,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       'an API key), says so, and asks first. Exit 0 verified, 1 failed, 3 anything else',
     ],
     flags: [
-      ['--agent <id>', 'the agent to check; claude-code (the default) is the only one yet'],
+      [
+        '--agent <id>',
+        'claude-code (default, macOS/Linux) or codex (Windows, measured CLI 0.162.1 only)',
+      ],
       ['--yes', 'make the requests without asking; needed where there is no terminal to ask on'],
       ['--dry-run', 'say what would be done, make no request and write nothing'],
       ['--json', 'machine-readable output (version 1)'],

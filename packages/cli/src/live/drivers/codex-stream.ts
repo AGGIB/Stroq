@@ -166,6 +166,7 @@ export class CodexStreamParser extends ClaudeStreamParser {
         line,
       );
     if (denied !== null) {
+      // The Command tail is model-chosen text; the independent audit entry anchors E2.
       this.stderrEvents.push(
         { type: 'tool_use', name: 'Bash', input: { command: denied[2]!.trimEnd() } },
         { type: 'tool_result', text: cap(denied[1]!), isError: true },

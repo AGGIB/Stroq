@@ -45,6 +45,18 @@ const MAX_ADVICE_LINES = 3;
 /** What to do about the reason a probe did not pass, most blocking first (the first that is found is said). */
 const ADVICE_BY_REASON: ReadonlyArray<readonly [reason: string, line: string]> = [
   [
+    REASONS.hostNotIsolated,
+    'Another hook or managed configuration blocks isolation. A user-level Stroq install writes ~/.codex/hooks.json: back it up and temporarily move it aside yourself, then restore it after the check. Managed settings need an unmanaged host.',
+  ],
+  [
+    REASONS.loginUnconfirmed,
+    'Run codex login with your ChatGPT subscription and verify codex login status prints only Logged in using ChatGPT.',
+  ],
+  [
+    REASONS.modelUnavailable,
+    'The fixed Codex model is unavailable on this account. Check the model access in Codex; this driver cannot prove protection with a different model yet.',
+  ],
+  [
     REASONS.hostNotFound,
     'Install the agent CLI and make sure its executable is on your PATH, then run stroq prove again.',
   ],

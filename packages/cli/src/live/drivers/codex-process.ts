@@ -26,11 +26,15 @@ export function killCodexChild(
 
 export const codexSpawn: HostSpawn = (file, args, options) => {
   const child = realSpawn(file, args, options);
+  let closed = false;
+  child.on('close', () => {
+    closed = true;
+  });
   return {
     pid: child.pid,
     stdout: child.stdout,
     stderr: child.stderr,
     on: child.on.bind(child),
-    kill: (signal = 'SIGTERM') => killCodexChild(child, signal),
+    kill: (signal = 'SIGTERM') => (closed ? false : killCodexChild(child, signal)),
   };
 };

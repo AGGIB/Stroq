@@ -108,6 +108,18 @@ describe('a host it cannot check', () => {
     expect(ran.out).toContain('gpt-5.6-luna');
     expect(ran.driver?.calls).toEqual([]);
   });
+  it.each(['darwin', 'linux'] as const)(
+    'refuses the unmeasured Codex driver on %s before detection',
+    async (platform) => {
+      const makeDriver = (): never => {
+        throw new Error('must not create a driver');
+      };
+      const ran = await prove(['--agent', 'codex', '--yes'], { platform, makeDriver });
+      expect(ran.code).toBe(3);
+      expect(ran.out).toContain('Windows');
+      expect(ran.out).toContain('unmeasured');
+    },
+  );
 
   it.skipIf(!RUNS_HERE)(
     'says the host is not there, makes no request, writes nothing and exits 3',

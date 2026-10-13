@@ -35,9 +35,10 @@ tool call.
 A hook-denied command is **absent from `codex exec --json`** in this version. Its only host
 record is stderr's `ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook:`
 diagnostic, ending in `Command: <exact command>`. The driver reads that diagnostic while the
-process runs. Model text saying `BLOCKED`, a tool printing a similar phrase, and an audit
-entry alone cannot substitute for it. If Codex changes that diagnostic, the check cannot
-verify the deny. Both streams are bounded by the same total and line limits.
+process runs. A completed command's output also contributes tool-result text, so a similar
+phrase there can supply E4 wording. A pass still requires the exact command, matching
+independent audit entry, absent sentinel and successful control; wording alone never
+verifies a deny. Both streams are bounded by the same total and line limits.
 
 JSONL does not state the authentication method or provider. Before **each** inference
 process, the driver requires the host's exact successful `codex login status` answer
@@ -46,13 +47,15 @@ process, the driver requires the host's exact successful `codex login status` an
 and never reads, copies or relocates authentication files. A host billing signal in its
 error stream stops the process immediately; a model/tool mention of API billing does not.
 Billing claims in `HostRun` come from this host preflight and forced configuration, not
-from `thread.started` or from an inference made by the model.
+from `thread.started` or from an inference made by the model. The cwd claim comes from
+the spawn options, not from the host stream. Plan pay-as-you-go credits are not detected.
 
 The check runs fixed inert probes with `approval_policy="never"` and
 `sandbox="danger-full-access"` in both real and control runs. Windows' workspace-write
 sandbox rejected even the allow probe before the hook during development, so it could not
 arm a control. This check therefore does not establish sandbox protection. Hook trust is
 bypassed for this invocation; results retain `hook-trust-bypassed` and `sandbox-disabled`.
+The CLI refuses other platforms and versions until they have their own measured capture.
 
 Only the inline Stroq pre-tool hook is supplied. The control changes its command to
 `node -e 0`, which prints nothing and makes no explicit allow decision. The host keeps
@@ -83,13 +86,17 @@ pnpm exec tsx scripts/clean-codex-fixture.ts /absolute/private/raw-output packag
 throwaway directory for disk/audit inspection and records its location privately. Remove
 that marked temporary directory after inspection; it is not part of the committed fixtures.
 
-Cleaning replaces the temporary root with `/tmp/stroq-live-fixture`, the user's shell
-executable path with `/usr/bin/pwsh`, UUIDs with numbered fixture IDs, and random test
+Cleaning replaces the temporary root with `/tmp/stroq-live-fixture`, user names with
+`fixture-user`, UUIDs with numbered fixture IDs, and random test
 nonces/credentials with the shared fixture values. It retains only the hook-denial router
 line from stderr; unrelated shell-snapshot and plugin-cache diagnostics are omitted.
 Audit captures are cumulative, so cleaning selects entries carrying that request's nonce.
 Audit hashes were computed over the original text and are not recomputed or verified after
 cleaning. Paths in the fixture are replacements; they do not claim the run was on Linux.
+The historical 0.162.1 shell path was normalized to `/usr/bin/pwsh`; new captures retain
+the host's quoting and executable spelling. The cleaner refuses remaining Windows or
+POSIX home paths and AppData references. Tests scan every committed JSON/JSONL file and
+reproduce each recorded argv plus the version/login preflights.
 
 Development made 24 inference attempts through `codex exec`: one unsupported-model failure without
 reported usage and 23 completed turns, including unarmed/no-hook experiments. Those turns

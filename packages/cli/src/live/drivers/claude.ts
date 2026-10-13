@@ -15,14 +15,12 @@ import { tmpdir } from 'node:os';
 import { plainText } from '../plain-text.js';
 import type { HostDriver, HostRun, Probe, ProbeContext } from '../types.js';
 import { claudeArgv } from './claude-argv.js';
-import {
-  ClaudeStreamParser,
-  DEFAULT_STREAM_LIMITS,
-  type ParsedStream,
-  type StreamLimits,
-} from './claude-stream.js';
+import { ClaudeStreamParser, DEFAULT_STREAM_LIMITS, type StreamLimits } from './claude-stream.js';
 import {
   definedEnv,
+  DEFAULT_DETECT_TIMEOUT_MS,
+  DEFAULT_KILL_GRACE_MS,
+  hostRunOf,
   realSpawn,
   superviseHost,
   type HostSpawn,
@@ -32,10 +30,7 @@ import {
 /** The program, when nothing says otherwise: `claude`, found on the PATH. */
 export const DEFAULT_CLAUDE_BIN = 'claude';
 
-/** `claude --version` prints a line and ends; a host that takes longer than this is not answering. */
-export const DEFAULT_DETECT_TIMEOUT_MS = 5_000;
-/** How long a process that was asked to stop is given before it is killed. */
-export const DEFAULT_KILL_GRACE_MS = 2_000;
+export { DEFAULT_DETECT_TIMEOUT_MS, DEFAULT_KILL_GRACE_MS, hostRunOf } from './host-process.js';
 
 const WINDOWS_NOTE = 'the live check does not run on Windows yet';
 
@@ -74,22 +69,6 @@ const didNotRun = (why: string): HostRun => ({
   stderrTail: plainText(why, 200),
   unparsedLines: 0,
 });
-
-/** What was said on the way, together with how the process ended: the run a verdict is made of. */
-export function hostRunOf(parsed: ParsedStream, ended: Supervised): HostRun {
-  const interrupted = 'stopped: the check was interrupted';
-  return {
-    stream: parsed.stream,
-    exitCode: ended.exitCode,
-    timedOut: ended.timedOut,
-    stderrTail: ended.interrupted ? `${interrupted}\n${ended.stderrTail}`.trim() : ended.stderrTail,
-    ...(parsed.limitHit === undefined ? {} : { limitHit: parsed.limitHit }),
-    ...(parsed.apiProvider === undefined ? {} : { apiProvider: parsed.apiProvider }),
-    ...(parsed.apiKeySource === undefined ? {} : { apiKeySource: parsed.apiKeySource }),
-    ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
-    unparsedLines: parsed.unparsedLines,
-  };
-}
 
 export function createClaudeDriver(options: ClaudeDriverOptions): HostDriver {
   const bin = options.bin ?? DEFAULT_CLAUDE_BIN;

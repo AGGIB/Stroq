@@ -50,6 +50,7 @@ describe('Codex process cleanup', () => {
     });
     await new Promise<void>((done) => host.on('close', () => done()));
     expect(output).toBe('ready');
+    expect(host.kill('SIGKILL')).toBe(false);
   });
   it.skipIf(process.platform !== 'win32')(
     'terminates an actual Windows child and its descendant',

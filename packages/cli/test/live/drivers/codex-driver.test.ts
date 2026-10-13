@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCodexDriver } from '../../../src/live/drivers/codex.js';
@@ -15,6 +15,9 @@ import { controlBreaches, type Invocation } from '../driver-contract.js';
 import { makeRig, type Rig } from '../rig.js';
 import { probe } from '../probe-helpers.js';
 import { NONCE } from '../helpers.js';
+import { verify } from '../verify-harness.js';
+import { reportOf } from '../../../src/commands/prove-report.js';
+import { renderReport } from '../../../src/commands/prove-text.js';
 
 interface Reply {
   out?: string;
@@ -54,6 +57,8 @@ const setup = (replies: Reply[] = []) => {
     return child;
   };
   const driver = createCodexDriver({
+    platform: 'win32',
+    bin: process.execPath,
     hookLine: 'node /hook.js hook codex',
     spawn,
     detectTimeoutMs: 20,
@@ -63,13 +68,59 @@ const setup = (replies: Reply[] = []) => {
   });
   return { rig, driver, calls, kills, spawn };
 };
-const login: Reply = { err: 'Logged in using ChatGPT\n' };
+const recorded = (name: string): { stdout: string; stderr: string; exitCode: number } =>
+  JSON.parse(
+    readFileSync(
+      new URL(`../../fixtures/hosts/codex/0.162.1/${name}.json`, import.meta.url),
+      'utf8',
+    ),
+  );
+const recordedLogin = recorded('login');
+const login: Reply = {
+  out: recordedLogin.stdout,
+  err: recordedLogin.stderr,
+  code: recordedLogin.exitCode,
+};
 
 describe('Codex driver', () => {
   it('detects the version without making an inference request', async () => {
-    const { driver, calls } = setup([{ out: 'codex-cli 0.162.1\n' }]);
+    const version = recorded('version');
+    const { driver, calls } = setup([
+      { out: version.stdout, err: version.stderr, code: version.exitCode },
+    ]);
     expect(await driver.detect()).toEqual({ available: true, version: '0.162.1' });
     expect(calls[0]?.args).toEqual(['--version']);
+  });
+  it('refuses an unmeasured host version without inference', async () => {
+    const { driver, calls } = setup([{ out: 'codex-cli 9.9.9' }]);
+    expect(await driver.detect()).toMatchObject({
+      available: false,
+      note: expect.stringContaining('0.162.1'),
+    });
+    expect(calls).toHaveLength(1);
+  });
+  it('requires an absolute explicit executable', async () => {
+    const { spawn, calls } = setup();
+    const driver = createCodexDriver({
+      platform: 'win32',
+      hookLine: 'hook',
+      spawn,
+      bin: 'relative/codex.exe',
+    });
+    expect(await driver.detect()).toMatchObject({
+      available: false,
+      note: expect.stringContaining('absolute'),
+    });
+    expect(calls).toHaveLength(0);
+  });
+  it.each(['darwin', 'linux'] as const)('refuses direct driver use on %s', async (platform) => {
+    const { rig, spawn, calls } = setup();
+    const driver = createCodexDriver({ hookLine: 'hook', spawn, platform });
+    expect(await driver.detect()).toMatchObject({ available: false });
+    expect(await driver.run(probe('allow', NONCE, rig.project), rig.ctx())).toMatchObject({
+      notStartedReason: 'host-unmeasured',
+    });
+    expect(calls).toHaveLength(0);
   });
   it.each([{ out: 'wrong' }, { out: 'codex-cli 0.162.1', code: 1 }, { hang: true }])(
     'refuses an unavailable or unreadable host: %j',
@@ -87,6 +138,8 @@ describe('Codex driver', () => {
   it('refuses a user hooks.json even though the base user config is ignored', async () => {
     const { rig, spawn, calls } = setup([login]);
     const driver = createCodexDriver({
+      platform: 'win32',
+      bin: process.execPath,
       hookLine: 'hook',
       spawn,
       isolationCheck: codexIsolationProblem,
@@ -119,6 +172,7 @@ describe('Codex driver', () => {
           CODEX_API_KEY: 'not-a-real-key',
           OPENAI_BASE_URL: 'https://invalid',
           CODEX_ACCESS_TOKEN: 'not-a-token',
+          CODEX_HOME_X: 'must-not-reach-host',
         },
       }),
     );
@@ -131,12 +185,70 @@ describe('Codex driver', () => {
     expect(calls).toHaveLength(2);
     expect(calls.map((call) => call.options.env)).toEqual([{ PATH: '/bin' }, { PATH: '/bin' }]);
     expect(calls[1]?.options.cwd).toBe(rig.project);
+    expect(calls[0]?.file).toBe(calls[1]?.file);
+    expect(calls[1]?.file).toBe(process.execPath);
+  });
+  it.each([
+    [
+      'host-not-isolated',
+      'Codex has another hook or managed configuration source; it cannot be isolated safely, so no inference request was made',
+    ],
+    ['login-unconfirmed', null],
+  ] as const)('reports %s in visible words with zero requests', async (reason, isolation) => {
+    const { rig, spawn, calls } = setup([
+      { out: 'codex-cli 0.162.1' },
+      { err: 'Logged in using ChatGPT\nextra line' },
+    ]);
+    const driver = createCodexDriver({
+      platform: 'win32',
+      bin: process.execPath,
+      hookLine: 'hook',
+      spawn,
+      isolationCheck: () => isolation,
+    });
+    const report = reportOf(await verify(rig, driver, { agent: 'codex' }));
+    expect(report.requestsMade).toBe(0);
+    expect(report.probes[0]).toMatchObject({ mark: 'not-attempted', reason });
+    expect(renderReport(report)).toContain(
+      reason === 'host-not-isolated' ? 'could not be isolated' : 'login could not be confirmed',
+    );
+    expect(report.advice.join(' ')).toContain(
+      reason === 'host-not-isolated' ? 'hooks.json' : 'codex login',
+    );
+    expect(calls.filter((call) => call.args[0] === 'exec')).toHaveLength(0);
+  });
+  it('gives an unavailable model its own reason and visible advice', async () => {
+    const { rig, spawn } = setup([
+      { out: 'codex-cli 0.162.1' },
+      login,
+      {
+        out: '{"type":"error","message":"The model gpt-5.6-luna is not supported for this account"}\n',
+        code: 1,
+      },
+    ]);
+    const driver = createCodexDriver({
+      platform: 'win32',
+      bin: process.execPath,
+      hookLine: 'hook',
+      spawn,
+      isolationCheck: () => null,
+    });
+    const report = reportOf(await verify(rig, driver, { agent: 'codex' }));
+    expect(report.probes[0]?.reason).toBe('model-unavailable');
+    expect(renderReport(report)).toContain('model is unavailable');
+    expect(report.advice.join(' ')).toContain('model');
   });
   it('aborts before starting a host when interrupted', async () => {
     const { rig, spawn, calls } = setup();
     const controller = new AbortController();
     controller.abort();
-    const driver = createCodexDriver({ hookLine: 'hook', spawn, signal: controller.signal });
+    const driver = createCodexDriver({
+      platform: 'win32',
+      bin: process.execPath,
+      hookLine: 'hook',
+      spawn,
+      signal: controller.signal,
+    });
     expect((await driver.run(probe('allow', NONCE, rig.project), rig.ctx())).stderrTail).toContain(
       'interrupted',
     );
@@ -160,6 +272,8 @@ describe('Codex driver', () => {
       return child;
     };
     const driver = createCodexDriver({
+      platform: 'win32',
+      bin: process.execPath,
       hookLine: 'hook',
       spawn: interrupting,
       signal: controller.signal,

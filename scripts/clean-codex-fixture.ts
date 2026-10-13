@@ -1,7 +1,7 @@
 // Clean a real capture directory. Authentication files are neither read nor copied.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanFixture } from '../packages/cli/test/live/drivers/clean-fixture.js';
+import { cleanFixture, leaksIn } from '../packages/cli/test/live/drivers/clean-fixture.js';
 
 const [input, output] = process.argv.slice(2);
 if (input === undefined || output === undefined)
@@ -17,17 +17,21 @@ const cleanPaths = (value: unknown): unknown => {
     .replaceAll(location.root.replaceAll('\\', '/'), fixtureRoot)
     .replaceAll(location.root.replaceAll('\\', '\\\\'), fixtureRoot)
     .replaceAll(location.root, fixtureRoot)
-    .replace(/"[A-Za-z]:\\+Users\\+[^"\n]+\\+pwsh\.exe"/g, '/usr/bin/pwsh')
     .replace(/(?:[A-Za-z]:)?(?:\\+|\/)Users(?:\\+|\/)[^\\/\s"']+/g, 'C:/Users/fixture-user');
 };
-const cleaned = (text: string): string =>
-  cleanFixture(
+const cleaned = (text: string): string => {
+  const result = cleanFixture(
     text
       .split('\n')
       .filter((line) => line.trim() !== '')
       .map((line) => JSON.stringify(cleanPaths(JSON.parse(line))))
       .join('\n'),
   );
+  const leaks = leaksIn(result);
+  if (leaks.length > 0)
+    throw new Error(`not written: cleaned text still matches ${leaks.join(', ')}`);
+  return result;
+};
 mkdirSync(output, { recursive: true });
 for (const name of ['version', 'login']) {
   const text = cleaned(readFileSync(join(input, `${name}.json`), 'utf8'));

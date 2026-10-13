@@ -1,6 +1,6 @@
-import { join } from 'node:path';
-import { mkdirSync, symlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { mkdirSync, realpathSync, symlinkSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { makeRig } from '../rig.js';
 import { describe, expect, it } from 'vitest';
 import {
@@ -18,10 +18,15 @@ describe('Codex hook isolation preflight', () => {
         platform,
       );
       expect(sources.some((path) => path.endsWith(join('codex', 'hooks.json')))).toBe(true);
+      expect(sources).toContain(join(resolve('/fake/codex'), 'managed_config.toml'));
       expect(sources.some((path) => path.endsWith('requirements.toml'))).toBe(true);
       expect(sources.some((path) => path.endsWith(join('.codex', 'config.toml')))).toBe(true);
-      if (platform === 'darwin')
+      if (platform === 'darwin') {
         expect(sources).toContain('/Library/Managed Preferences/com.openai.codex.plist');
+        expect(sources).toContain(
+          join('/Library/Managed Preferences', userInfo().username, 'com.openai.codex.plist'),
+        );
+      }
     },
   );
   it('proceeds only when all candidate sources are absent', () => {
@@ -66,7 +71,7 @@ describe('Codex hook isolation preflight', () => {
         process.platform === 'win32' ? 'junction' : 'dir',
       );
       expect(codexHookSources({ CODEX_HOME: rig.home }, alias)).toContain(
-        join(physical, '.codex', 'config.toml'),
+        join(realpathSync.native(physical), '.codex', 'config.toml'),
       );
     } finally {
       rig.cleanup();
