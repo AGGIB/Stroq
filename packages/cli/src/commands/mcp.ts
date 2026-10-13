@@ -1,9 +1,10 @@
 import { resolve } from 'node:path';
 import { createEngine } from '../engine-factory.js';
 import { runMcpProxy } from '../mcp/proxy.js';
+import { MCP_PIN } from '../mcp/pin-argument.js';
 
 export const MCP_USAGE =
-  'usage: stroq mcp --server <name> [--client <name>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] -- <command> [args...]\n';
+  'usage: stroq mcp --server <name> [--client <name>] [--pin sha256:<digest>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] -- <command> [args...]\n';
 
 /** What `--client` becomes when the flag is absent; `init` always writes it. */
 export const DEFAULT_MCP_CLIENT = 'unknown';
@@ -25,6 +26,7 @@ export interface McpInvocation {
    * before the model reads them, and back in on the way out. Off unless asked for.
    */
   readonly cloak: boolean;
+  readonly pin?: string;
   readonly command: string;
   readonly args: readonly string[];
 }
@@ -33,7 +35,7 @@ export type McpArgvResult =
   | { readonly ok: true; readonly invocation: McpInvocation }
   | { readonly ok: false; readonly error: string };
 
-const OPTIONS = new Set(['--server', '--client', '--cwd', '--session', '--pass-env']);
+const OPTIONS = new Set(['--server', '--client', '--cwd', '--session', '--pass-env', '--pin']);
 /** Flags that take no value; kept separate so the "needs a value" check stays exact. */
 const FLAGS = new Set(['--cloak']);
 
@@ -63,6 +65,7 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   let cwd: string | null = null;
   let passEnv: readonly string[] | null = null;
   let cloak = false;
+  let pin: string | undefined;
   let rest: readonly string[] | null = null;
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i] ?? '';
@@ -87,6 +90,12 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     if (token === '--cwd') cwd = value;
     if (token === '--session') session = value;
     if (token === '--pass-env') passEnv = parsePassEnv(value);
+    if (token === '--pin') {
+      if (pin !== undefined) return { ok: false, error: '--pin may be supplied only once' };
+      if (!MCP_PIN.test(value))
+        return { ok: false, error: '--pin needs sha256:<64 lowercase hex>' };
+      pin = value;
+    }
     i += 1;
   }
   if (server === '') return { ok: false, error: '--server is required' };
@@ -94,7 +103,20 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   const [command, ...args] = rest;
   if (command === undefined || command === '')
     return { ok: false, error: 'the server command must follow "--"' };
-  return { ok: true, invocation: { server, client, session, cwd, passEnv, cloak, command, args } };
+  return {
+    ok: true,
+    invocation: {
+      server,
+      client,
+      session,
+      cwd,
+      passEnv,
+      cloak,
+      command,
+      args,
+      ...(pin === undefined ? {} : { pin }),
+    },
+  };
 }
 
 /**
@@ -133,7 +155,8 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     return 2;
   }
   const { invocation } = parsed;
-  if (invocation.passEnv === null) process.stderr.write(LEGACY_ENV_WARNING);
+  if (invocation.passEnv === null && invocation.pin === undefined)
+    process.stderr.write(LEGACY_ENV_WARNING);
   return runMcpProxy({
     engine: createEngine(),
     // One session per CLIENT, not per server: a poisoned result from server A must
@@ -147,6 +170,7 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     cloak: invocation.cloak,
     command: invocation.command,
     args: invocation.args,
+    ...(invocation.pin === undefined ? {} : { pin: invocation.pin }),
     stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
