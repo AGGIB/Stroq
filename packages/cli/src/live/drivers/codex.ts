@@ -44,9 +44,10 @@ const noRun = (
 });
 const safeEnv = (env: Readonly<Record<string, string | undefined>>): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(scrubbedEnv(definedEnv(env))).filter(
-      ([key]) => !/^CODEX_/i.test(key) || key === 'CODEX_HOME',
-    ),
+    Object.entries(scrubbedEnv(definedEnv(env)))
+      .filter(([key]) => !/^CODEX_/i.test(key) || key.toUpperCase() === 'CODEX_HOME')
+      // Windows retains environment key spelling; the isolation reader needs one canonical key.
+      .map(([key, value]) => [key.toUpperCase() === 'CODEX_HOME' ? 'CODEX_HOME' : key, value]),
   );
 
 /** One preflight and one fresh, ephemeral process per request. Authentication is never copied. */

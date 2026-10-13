@@ -188,6 +188,30 @@ describe('Codex driver', () => {
     expect(calls[0]?.file).toBe(calls[1]?.file);
     expect(calls[1]?.file).toBe(process.execPath);
   });
+  it.each(['codex_home', 'CoDeX_HoMe'])(
+    'canonicalizes the Windows %s name for isolation, login and exec',
+    async (homeName) => {
+      const { rig, spawn, calls } = setup([login]);
+      const isolationCheck = vi.fn((_env: Record<string, string>, _project: string) => null);
+      const driver = createCodexDriver({
+        platform: 'win32',
+        bin: process.execPath,
+        hookLine: 'hook',
+        spawn,
+        isolationCheck,
+      });
+      const run = await driver.run(
+        probe('allow', NONCE, rig.project),
+        rig.ctx({
+          env: { PATH: '/bin', [homeName]: rig.home, cOdEx_OTHER: 'must-not-reach-host' },
+        }),
+      );
+      const canonicalEnv = { PATH: '/bin', CODEX_HOME: rig.home };
+      expect(run.exitCode).toBe(0);
+      expect(isolationCheck).toHaveBeenCalledWith(canonicalEnv, rig.project);
+      expect(calls.map((call) => call.options.env)).toEqual([canonicalEnv, canonicalEnv]);
+    },
+  );
   it.each([
     [
       'host-not-isolated',
