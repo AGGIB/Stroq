@@ -75,6 +75,24 @@ describe('a name that is not safe', () => {
     expect(error.message).toMatch(/'\.' or '\.\.' component/);
   });
 
+  it('tells how to make the archive again when every name starts with ./, as a tar made inside a folder writes them', () => {
+    const error = refusal(
+      tarOf([
+        { name: './', typeflag: '5' },
+        { name: './SKILL.md', data: 's' },
+        { name: './scripts/run.sh', data: 'r' },
+      ]),
+    );
+
+    expect(error.code).toBe('refused');
+    expect(error.message).toMatch(/path refused: '\.' or '\.\.' component/);
+    expect(error.message).toMatch(/make the archive from the folder above it/);
+    // A name that merely starts with a dot is not that case, and gets no advice about it.
+    expect(refusal(tarOf([{ name: '../x.txt', data: 'x' }, GOOD])).message).not.toMatch(
+      /folder above/,
+    );
+  });
+
   it('writes a control character of a name out, and never repeats it', () => {
     const error = refusal(tarOf(carried('pkg/a\u001b[2Jb.txt')));
 
