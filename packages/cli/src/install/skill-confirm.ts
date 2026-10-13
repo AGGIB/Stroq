@@ -32,7 +32,7 @@ export async function confirmSkill(terminal: Terminal, prepared: SkillConfirmati
     const oldLines = new Set(previous.passport.lines.map((line) => JSON.stringify(line)));
     for (const line of passport.lines.filter((line) => !oldLines.has(JSON.stringify(line))))
       terminal.write(
-        `  new passport line: ${line.kind} ${JSON.stringify(line.subject)} (${line.basis})\n`,
+        `  new passport line: ${line.kind} ${outsideLine(JSON.stringify(line.subject))} (${line.basis})\n`,
       );
   }
   if (restoring)
