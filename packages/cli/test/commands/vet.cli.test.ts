@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PassportSchema } from '../../src/install/types.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 import { removeTempRoots, tempRoot } from '../helpers/install-dir.js';
-import { folder, HOSTILE_SKILL, RAW_UNSAFE, skillFolder } from '../helpers/vet-world.js';
+import {
+  archive,
+  folder,
+  HOSTILE_SKILL,
+  RAW_UNSAFE,
+  skillArchive,
+  skillFolder,
+} from '../helpers/vet-world.js';
 
 afterEach(removeTempRoots);
 
@@ -21,6 +28,41 @@ function stroq(...args: string[]) {
     env: { ...process.env, HOME: home, USERPROFILE: home, STROQ_HOME: join(home, '.stroq') },
   });
 }
+
+describe('the built CLI: stroq vet, with an archive', () => {
+  it('reads a .tgz: exit 0, the same digest as the folder it was made from, no note of the platform', () => {
+    const run = stroq('vet', '--from', skillArchive());
+    const lines = run.stdout.split('\n');
+
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stderr).toBe('');
+    expect(lines[1]).toBe(
+      'stroq-tree/1 sha256:32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6  4 files, 945 bytes',
+    );
+  });
+
+  it('exits 3 for an archive that holds a link, in a fixed phrase and without the path', () => {
+    const file = archive('with-link.tgz', [
+      { name: 'package/SKILL.md', data: '# s\n' },
+      { name: 'package/link', typeflag: '2', linkname: '/etc/passwd' },
+    ]);
+
+    const run = stroq('vet', '--from', file);
+
+    expect(run.status).toBe(3);
+    expect(run.stdout).toBe('');
+    expect(run.stderr).toContain('an archive with a link is not read');
+    expect(run.stderr).not.toContain(file);
+    expect(RAW_UNSAFE.test(run.stderr)).toBe(false);
+  });
+
+  it('takes --expect for an archive and exits 1, with both digests, on a digest that is not its own', () => {
+    const run = stroq('vet', '--from', skillArchive(), '--expect', 'a'.repeat(64));
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(`expected: sha256:${'a'.repeat(64)}`);
+  });
+});
 
 describe('the built CLI: stroq vet', () => {
   it('reads a skill folder: exit 0, the kind and the name first, then the digest', () => {
@@ -70,7 +112,7 @@ describe('the built CLI: stroq vet', () => {
     const online = stroq('vet', '--from', skillFolder(), '--online');
 
     expect(none.status).toBe(2);
-    expect(none.stderr).toContain('--from <dir>');
+    expect(none.stderr).toContain('--from <dir or .tgz>');
     expect(online.status).toBe(2);
     expect(online.stderr).toContain('unknown option --online');
   });
@@ -88,10 +130,10 @@ describe('the built CLI: stroq vet', () => {
     const list = stroq('--help');
 
     expect(help.status).toBe(0);
-    expect(help.stdout).toMatch(/^stroq vet --from <dir>/);
+    expect(help.stdout).toMatch(/^stroq vet --from <dir or \.tgz>/);
     for (const flag of ['--from', '--kind', '--json', '--expect', '--card', '--out'])
       expect(help.stdout, flag).toContain(flag);
-    expect(list.stdout).toMatch(/^ {2}vet --from <dir>/m);
+    expect(list.stdout).toMatch(/^ {2}vet --from <dir or \.tgz>/m);
   });
 });
 
