@@ -48,7 +48,7 @@ NEXT
 - **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties some later actions to earlier tool output. Coverage depends on the host, version and channel.
 - **Local.** No network calls from the hooks, no telemetry. Apache-2.0.
 
-Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
+Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) (no session yet? [try it with a made-up key](https://stroq.dev/session-secret-scan/#try-it)) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
 
 ## Docs
 

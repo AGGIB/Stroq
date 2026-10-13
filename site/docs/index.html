@@ -315,6 +315,11 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
         <tr><td>stroq sent</td><td>Find known credentials in a recorded agent session's tool arguments and available results; reads this machine's credential files to match values and reports names and sources, not values. Provider delivery is not established by the transcript alone.</td></tr>
         <tr><td>stroq canary</td><td>Print a canary secret to plant; its outbound use is denied and taints the session</td></tr>
         <tr><td>stroq attack</td><td>Replay 36 attack scenarios (26 from public reports, 10 synthetic) against your policy; exit 1 if any gets through</td></tr>
+        <tr><td>stroq prove</td><td>Ask Claude Code itself (up to three short requests on your own login, never an API key) to run a harmless command your policy allows and one it denies, and check the hook really stopped the second</td></tr>
+        <tr><td>stroq vet</td><td>Read a skill, MCP server or plugin folder or archive before you add it and print what it asks for or can do, with file and line. Nothing is run; it is a reading, not a certificate</td></tr>
+        <tr><td>stroq harden</td><td>Show, apply and undo the host's own refusal to read your credential files (<code>harden apply</code>, <code>harden undo</code>, <code>harden status</code>)</td></tr>
+        <tr><td>stroq policy</td><td><code>check</code> a policy file for faults and loosened protections; <code>test</code> replays the attack and ordinary-work scenarios under it and prints every decision that changed</td></tr>
+        <tr><td>stroq bench</td><td>False-positive rate on the documentation corpus; <code>--actions</code> counts what Stroq does to 75 scenarios of ordinary work</td></tr>
         <tr><td>stroq exposure</td><td>Map this machine's agent surface and report what reaches you</td></tr>
         <tr><td>stroq inspect</td><td>Read what a repository runs when you open it, before you point an agent at it</td></tr>
       </tbody>
@@ -370,7 +375,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
     <li><strong><code>stroq doctor</code> checks that the hook is still Stroq's</strong>, not just that one is there — a config rewritten to point at a different binary with the same command tail fails the check.</li>
     <li><strong>Every adapter's hook contract is narrower than Claude Code's</strong>, in its own way — see <a href="#agents">per-agent notes</a> above and the full detail in <a href="https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md">docs/AGENTS.md</a>.</li>
     <li><strong>Hooks are not an enforcement boundary.</strong> They can be turned off or bypassed by the agent's own settings. Stroq raises the cost of an attack and makes it auditable — it doesn't make an agent immune. Run <code>stroq exposure</code> to see what's actually enforced on your machine.</li>
-    <li><strong>Latency:</strong> roughly 100–250&nbsp;ms per hook invocation, dominated by Node process start-up rather than the scan itself.</li>
+    <li><strong>Latency:</strong> roughly 100–250&nbsp;ms per hook invocation, dominated by Node process start-up rather than the scan itself. This is an estimate, not a measurement; <a href="https://github.com/AGGIB/Stroq/issues/184"><code>bench --latency</code></a> is the open task to measure it.</li>
     <li><strong>Regex denial-of-service is mitigated, not eliminated:</strong> a build-time performance gate keeps known-slow patterns out of the shipped rule set; a scan that still runs past budget at runtime fails closed rather than returning clean.</li>
     <li><strong>Shell quote-splicing evasions are known</strong> (for example <code>c"u"rl</code>) — see <a href="https://github.com/AGGIB/Stroq/blob/main/SECURITY.md">SECURITY.md</a> for the current out-of-scope list.</li>
   </ul>
