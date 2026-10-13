@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +28,27 @@ const temp = () => {
 };
 
 describe('task command', () => {
+  it('refuses project-local host executables before asking or signing', async () => {
+    const launch = vi.fn();
+    const confirm = vi.fn();
+    const home = temp();
+    const options = { home, srt: () => '/trusted/srt', managed: () => false, launch, confirm };
+    await expect(
+      runTask(['--', 'fix'], dirname(process.execPath), {
+        ...options,
+        claude: process.execPath,
+      }),
+    ).rejects.toThrow(/Node executable/);
+    const cwd = temp();
+    const agent = join(cwd, 'claude');
+    writeFileSync(agent, 'test fixture');
+    await expect(runTask(['--', 'fix'], cwd, { ...options, claude: agent })).rejects.toThrow(
+      /agent runtime/,
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(launch).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
+  });
   it('refuses a pre-existing linked runtime directory', () => {
     const home = temp();
     symlinkSync(temp(), join(home, 'task-runs'), process.platform === 'win32' ? 'junction' : 'dir');

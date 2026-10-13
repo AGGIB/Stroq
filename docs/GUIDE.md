@@ -680,6 +680,8 @@ stroq permit extend <task> <fingerprint>
 stroq permit revoke <task>
 ```
 
+Isolated mode refuses projects containing the hook's Node executable or the Claude Code runtime directory. Install these outside the writable project so an ancestor rename cannot replace the programs used by hooks.
+
 Claude Code **2.1.248 or later** is required for [`--restricted`](https://code.claude.com/docs/en/tools-reference): the launcher always passes this flag, an explicit signed tool list, an empty ordinary settings-source list and an empty MCP configuration. Older hosts receive no compatibility fallback. The copied hook runtime and explicit settings live under protected `STROQ_HOME/task-runs`, separate from the writable temporary home; linked runtime directories are refused. Standard local managed-settings files, macOS managed preferences and Windows Claude policy registry entries cause the isolated launch to refuse, because managed policy can override explicit hooks. Remote organization-managed settings cannot be preflighted here: organization-managed accounts are unsupported in this release, even when the local check finds no files.
 
 `task` prints the tools, paths, network/MCP scope and expiry before asking on a terminal. A pipe or a declined answer starts nothing. `repo-edit-and-test` allows the listed file tools and Bash, denies tool network access and all MCP tools, and defaults read/write to the project tree. Repeated `--read` or `--write` replaces that default with an allowlist inside the project; paths containing `..` are refused. A permit can narrow policy, never lift a policy deny or a hard-set class. `--ttl` accepts minutes or hours, from `1m` to `24h` (default `30m`). The launcher stops the agent at expiry.

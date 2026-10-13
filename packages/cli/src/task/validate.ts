@@ -19,6 +19,18 @@ export function canonicalTaskHome(path: string): string {
   return join(realpathSync(head), ...suffix);
 }
 
+/** Project writes must not replace a hook executable through an editable ancestor. */
+export function validateTaskExecutables(root: string, node: string, agent: string): void {
+  if (inside(root, realpathSync(node)))
+    throw new Error(
+      'the project contains the hook Node executable; use an external Node installation',
+    );
+  if (inside(root, dirname(realpathSync(agent))))
+    throw new Error(
+      'the project contains the agent runtime; use an external Claude Code installation',
+    );
+}
+
 /** A filesystem carve-out must never re-open the signing key through an ancestor or an alias. */
 export function validateTaskPaths(body: PermitBody, home: string, hookOnly: boolean): void {
   if (hookOnly) return;

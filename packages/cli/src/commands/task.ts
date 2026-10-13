@@ -17,7 +17,7 @@ import { parseTaskArgv } from '../task/args.js';
 import { taskContract } from '../task/contract.js';
 import { launchTask } from '../task/launch.js';
 import { hasManagedTaskPolicy } from '../task/managed.js';
-import { canonicalTaskHome, validateTaskPaths } from '../task/validate.js';
+import { canonicalTaskHome, validateTaskExecutables, validateTaskPaths } from '../task/validate.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
 import { currentTerminal } from '../ui/terminal.js';
@@ -83,6 +83,7 @@ export async function runTask(
     now: (deps.now ?? (() => new Date()))(),
     policyDigest: policySha256(policy),
   });
+  if (!args.hookOnly) validateTaskExecutables(body.projectRoot, process.execPath, agentPath);
   validateTaskPaths(body, home, args.hookOnly);
   process.stdout.write(`${screen}\n`);
   if (!(await (deps.confirm ?? confirmTask)())) return 1;
