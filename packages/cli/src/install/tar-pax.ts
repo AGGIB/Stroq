@@ -28,6 +28,8 @@ export interface Pax {
   readonly path: string | null;
   /** The size of the next entry, or null. */
   readonly size: number | null;
+  /** A 40-hex commit hash from a comment record, if one was present. */
+  readonly comment?: string | null;
 }
 
 const malformed = (): ArchiveError =>
@@ -67,6 +69,20 @@ const keyText = (bytes: Uint8Array): string => Buffer.from(bytes).toString('lati
 const isSparseKey = (key: string): boolean =>
   key.startsWith('GNU.sparse') || key === 'SCHILY.realsize';
 
+function isHex40(bytes: Uint8Array): string | null {
+  let start = 0;
+  let end = bytes.length;
+  while (start < end && bytes[start]! <= 0x20) start += 1;
+  while (end > start && bytes[end - 1]! <= 0x20) end -= 1;
+  if (end - start !== 40) return null;
+  for (let i = start; i < end; i += 1) {
+    const b = bytes[i]!;
+    const isHex = (b >= 0x30 && b <= 0x39) || (b >= 0x61 && b <= 0x66);
+    if (!isHex) return null;
+  }
+  return Buffer.from(bytes.subarray(start, end)).toString('latin1');
+}
+
 /**
  * The `path` and `size` of a pax header. A global header may carry neither, nor a link path: it would
  * apply to every entry after it. Throws an ArchiveError for a record that is malformed, a sparse record,
@@ -75,6 +91,7 @@ const isSparseKey = (key: string): boolean =>
 export function parsePax(data: Uint8Array, isGlobal: boolean): Pax {
   let path: string | null = null;
   let size: number | null = null;
+  let comment: string | null = null;
   for (let at = 0; at < data.length;) {
     const { digits, end } = recordEnd(data, at);
     const record = data.subarray(at + digits + 1, end - 1);
@@ -92,7 +109,11 @@ export function parsePax(data: Uint8Array, isGlobal: boolean): Pax {
     }
     if (key === 'path') path = decodeName(value);
     if (key === 'size') size = sizeOf(value);
+    if (key === 'comment') {
+      const hex = isHex40(value);
+      if (hex !== null) comment = hex;
+    }
     at = end;
   }
-  return { path, size };
+  return { path, size, comment };
 }
