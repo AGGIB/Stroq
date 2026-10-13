@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { CLAUDE_READ_DENY_RULES } from '../../src/harden/recipes/credential-paths.js';
 import { removeTempDirs, tempDir } from '../harden/helpers.js';
 import { bytesOf, recordsFor, settingsText } from '../helpers/harden-fixtures.js';
 import {
@@ -204,7 +205,9 @@ describe('stroq harden undo: before it does anything', () => {
 
     expect(run.out).toContain('stroq harden: undo claude-read-deny (claude-code, user scope)');
     expect(run.out).toContain('Stroq recorded 1 change to it.');
-    expect(run.out).toContain('Added 11 rules to permissions.deny');
+    expect(run.out).toContain(
+      `Added ${CLAUDE_READ_DENY_RULES.length - 1} rules to permissions.deny`,
+    );
     expect(run.out).toContain('  - Read(./.env)');
     expect(run.out).toContain('1 rule was already there and is not touched: Read(~/.npmrc)');
     expect(run.out).toContain(

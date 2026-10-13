@@ -4,12 +4,14 @@
  *
  * This is not a new opinion about what is secret. Stroq already holds two: the classifier that gives a
  * path the class `fs.secrets` (`classify-tool.ts` in core: `.env` and its variants, `.ssh`, `.aws`,
- * `.kube`, `.config/gcloud`, `.npmrc`, `.netrc`, `.pgpass`, `.git-credentials`) and the secret index that
- * reads values out of a few files of the home (`HOME_SECRET_SOURCES` in core). The tests in
- * `credential-paths.test.ts` hold this list to both, so that it cannot fall behind them. Two entries are
- * the design's own and are not known to the classifier yet (`.docker/config.json` is read into the
- * index but not classified, `.gnupg` is in neither): the test names them, so that adding another is a
- * decision and not an accident.
+ * `.kube`, `.config/gcloud`, `.config/gh/hosts.yml` (the GitHub CLI's token file), `.npmrc`, `.netrc`,
+ * `.pgpass`, `.git-credentials`) and the secret index that reads values out of a few files of the home
+ * (`HOME_SECRET_SOURCES` in core). The tests in `credential-paths.test.ts` hold this list to both, so
+ * that it cannot fall behind them. Two entries are the design's own and are not known to the
+ * classifier yet (`.docker/config.json` is read into the index but not classified, `.gnupg` is in
+ * neither): the test names them, so that adding another is a decision and not an accident. The GitHub
+ * CLI's file is the other way round: classified and listed here, and not yet read into the index,
+ * which has no reader for the `oauth_token: <value>` lines of a YAML file.
  */
 
 /**
@@ -27,6 +29,11 @@ export const HOME_CREDENTIAL_PATHS: readonly string[] = [
   '.ssh/**',
   '.aws/**',
   '.config/gcloud/**',
+  // The GitHub CLI's OAuth token, when it is not in the OS keyring. The file alone: the rest of the
+  // folder (`config.yml`, `state.yml`) holds preferences, and a rule on `.config/gh/**` would cost the
+  // agent files it is allowed to read. The Windows spelling (`%AppData%\GitHub CLI\hosts.yml`) is not
+  // here: a rule names a path under the home as `~/…`, and AppData is not under that name.
+  '.config/gh/hosts.yml',
   '.kube/**',
   '.docker/config.json',
   '.npmrc',

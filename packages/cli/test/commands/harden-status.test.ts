@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { applyTarget } from '../../src/commands/harden-apply.js';
 import { contextOf } from '../../src/commands/harden-deps.js';
 import { makePrinter } from '../../src/commands/harden-printer.js';
+import { CLAUDE_READ_DENY_RULES } from '../../src/harden/recipes/credential-paths.js';
 import type { RecipeTarget } from '../../src/harden/recipes/index.js';
 import { removeTempDirs } from '../harden/helpers.js';
 import { bytesOf, settingsText } from '../helpers/harden-fixtures.js';
@@ -61,6 +62,9 @@ async function statusJson(world: HardenWorld): Promise<StatusFile[]> {
   return (JSON.parse(run.out) as { files: StatusFile[] }).files;
 }
 
+/** What the recipe adds over a file that already holds one of its rules (`Read(~/.npmrc)`). */
+const ADDED_OVER_OWNERS = CLAUDE_READ_DENY_RULES.length - 1;
+
 /** A world where Claude Code's user settings had settings and a rule of their own, and the recipe was applied. */
 async function appliedOverOwners(): Promise<{ world: HardenWorld; file: string }> {
   const world = hardenWorld();
@@ -104,7 +108,9 @@ describe('stroq harden status', () => {
     expect(run.code).toBe(0);
     expect(run.out).toContain(`${file}\n`);
     expect(run.out).toContain('Applied by claude-read-deny, 1 change, the last on');
-    expect(run.out).toContain('State: everything Stroq added is in place (11 of 11).');
+    expect(run.out).toContain(
+      `State: everything Stroq added is in place (${ADDED_OVER_OWNERS} of ${ADDED_OVER_OWNERS}).`,
+    );
     expect(run.out).toContain('Copy: a byte copy of the file as it was is kept.');
     expect(run.out).toContain('The file has not been edited since.');
     const [report] = await statusJson(world);
@@ -120,7 +126,9 @@ describe('stroq harden status', () => {
       notices: [],
     });
     expect(report?.items.find((item) => item.text === 'Read(~/.npmrc)')?.state).toBe('yours');
-    expect(report?.items.filter((item) => item.state === 'present')).toHaveLength(11);
+    expect(report?.items.filter((item) => item.state === 'present')).toHaveLength(
+      ADDED_OVER_OWNERS,
+    );
   });
 
   it('reports a rule the owner took out, by name, and that the file was edited since', async () => {
@@ -133,7 +141,9 @@ describe('stroq harden status', () => {
 
     const run = await world.run(['status']);
 
-    expect(run.out).toContain('State: only part of what Stroq added is in place (9 of 11).');
+    expect(run.out).toContain(
+      `State: only part of what Stroq added is in place (${ADDED_OVER_OWNERS - 2} of ${ADDED_OVER_OWNERS}).`,
+    );
     expect(run.out).toContain('Missing: Read(~/.ssh/**), Read(~/.aws/**)');
     expect(run.out).toContain('The file has been edited since Stroq last changed it.');
     const [report] = await statusJson(world);

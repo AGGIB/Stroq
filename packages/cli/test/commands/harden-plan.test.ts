@@ -49,7 +49,8 @@ describe('stroq harden (plan)', () => {
         'The change:',
         '--- /dev/null',
         `+++ b/${diffLabel(file)}`,
-        '@@ -0,0 +1,18 @@',
+        // The six lines around the rules: `{`, `permissions`, `deny`, and the three closers.
+        `@@ -0,0 +1,${CLAUDE_READ_DENY_RULES.length + 6} @@`,
         '+{',
         '+  "permissions": {',
         '+    "deny": [',
