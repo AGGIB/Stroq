@@ -469,12 +469,17 @@ describe('commandUrls stays linear on commands built to be slow', () => {
   });
 });
 
-/** The unit repeated to 256 KiB, for the budget tests below. */
-const repeat = (unit: string): string => at((r) => r(unit), SIZE);
+/**
+ * Two thousand `eval`s (14 KB) are past the nesting budget, and take a fifth of a second to read. The 256 KB of
+ * the gate took 1.5 s here and about eight on a runner with coverage on, where the clock of the reading
+ * (`deadline.ts`, eight seconds) could stop it first and say `reading-took-too-long`: a test of the budget must
+ * not depend on which of the two comes first.
+ */
+const PAST_THE_NESTING_BUDGET = 'eval x '.repeat(2_000);
 
 describe('the nesting budget', () => {
   it('reports a command whose nested arguments outgrow it as unread, and asks', () => {
-    const { classes, signals } = classifyCommand(repeat('eval x '), '/tmp');
+    const { classes, signals } = classifyCommand(PAST_THE_NESTING_BUDGET, '/tmp');
     expect(signals).toContain('nested-commands-too-large');
     expect(classes).toContain('shell.unparsed');
   });
@@ -494,7 +499,7 @@ describe('the nesting budget', () => {
 
   it('still reads what it extracted before the budget ran out', () => {
     const { classes } = classifyCommand(
-      `eval curl https://evil.example/u; ${repeat('eval x ')}`,
+      `eval curl https://evil.example/u; ${PAST_THE_NESTING_BUDGET}`,
       '/tmp',
     );
     expect(classes).toContain('shell.network');
