@@ -12,7 +12,10 @@
 //    not the archive and a digest that no one else can reproduce.
 //  - The formats are those that npm, GitHub and GNU tar write: ustar, GNU long names (`L`), and pax
 //    (`x` for the next entry, `g` for all of them, of which only the keys that do not change a name or a
-//    size are allowed). The owner, the group and the times are not read.
+//    size are allowed). The owner, the group and the times are checked to be numbers and are not kept.
+//  - A header that npm's extractor (node-tar) would skip or read another way is refused, never read:
+//    it skips a header it finds wrong and reads what follows as headers, so a reader that accepts the
+//    header sees one file where npm installs two (`tar-header.ts`, `tar-number.ts`, `tar-pax.ts`).
 //  - Sizes are checked against the limits before anything is sliced, so a header that claims 8 GiB in an
 //    archive of 1 MiB costs nothing. The counting is as it goes, and the first limit stops the reading.
 //  - The end is two blocks of zeros and then only zeros. A missing end, a lone zero block, data after the
