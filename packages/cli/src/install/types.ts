@@ -153,7 +153,13 @@ const label = relativeName.max(LABEL_MAX, {
  * ref. A record that comes from outside (a README, a lock) has no business with more, and printing
  * a name of five million characters is a way to bury what is around it.
  */
-const SOURCE_PART_MAX = { npmName: 214, version: 256, owner: 39, repo: 100, ref: 255 } as const;
+export const SOURCE_PART_MAX = {
+  npmName: 214,
+  version: 256,
+  owner: 39,
+  repo: 100,
+  ref: 255,
+} as const;
 const part = (max: number, what: string) =>
   shown.max(max, { message: `${what} is at most ${max} characters` });
 const subdirectory = relativeName.max(LIMITS.maxPathBytes, {
@@ -169,11 +175,11 @@ const subdirectory = relativeName.max(LIMITS.maxPathBytes, {
  * decimal digits, or `0x` and any hexadecimal digits, so `0x7f000001` is 127.0.0.1.
  * Checked a label at a time, with the length first, so that it is linear in a hostile string.
  */
-const HOST_MAX = 253;
-const HOST_LABEL_MAX = 63;
-const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-const NUMBER = /^(?:[0-9]+|0x[0-9a-f]*)$/i;
-function isHostName(text: string): boolean {
+export const HOST_MAX = 253;
+export const HOST_LABEL_MAX = 63;
+export const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+export const NUMBER = /^(?:[0-9]+|0x[0-9a-f]*)$/i;
+export function isHostName(text: string): boolean {
   if (text.length > HOST_MAX) return false;
   const labels = text.split('.');
   const last = labels[labels.length - 1] ?? '';
@@ -189,7 +195,8 @@ const INTEGRITY = z.string().regex(/^sha512-[A-Za-z0-9+/]+={0,2}$/, {
   message: 'an integrity is sha512- and base64',
 });
 /** A commit of GitHub: 40 lower-case hexadecimal digits. */
-const COMMIT = z.string().regex(/^[0-9a-f]{40}$/, {
+export const COMMIT_HEX = /^[0-9a-f]{40}$/;
+const COMMIT = z.string().regex(COMMIT_HEX, {
   message: 'a commit is 40 lower-case hexadecimal digits',
 });
 

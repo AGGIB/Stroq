@@ -22,6 +22,8 @@ npx @stroq/cli sent --last   # scan the latest recorded session; no hook setup n
 npx @stroq/cli init          # hook into your agent and guard the next session
 ```
 
+Needs Node.js 22 or newer.
+
 What a finding looks like (a synthetic session, trimmed):
 
 ```text
@@ -48,7 +50,7 @@ NEXT
 - **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties some later actions to earlier tool output. Coverage depends on the host, version and channel.
 - **Local.** No outbound network calls from the hooks; Task Lock hooks speak only to their local parent controller. No telemetry. Apache-2.0.
 
-Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
+Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) (no session yet? [try it with a made-up key](https://stroq.dev/session-secret-scan/#try-it)) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
 
 ## Docs
 

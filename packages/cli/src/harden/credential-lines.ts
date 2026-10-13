@@ -15,10 +15,11 @@ import { isSpace, opaque } from './credential-values.js';
  * the `NAME=VALUE` pattern core uses for `.env` files is quadratic on exactly that, which is why
  * it is not used here. Plain scans and anchored, unambiguous patterns.
  *
- * The readers live in four files. `credential-pairs.ts` reads a name and the value written next to
+ * The readers live in five files. `credential-pairs.ts` reads a name and the value written next to
  * it (`NAME=VALUE`, `name: value`, the parameters of a URL), `credential-flags.ts` reads a command
- * line (`--password x`, `-u user:pass`, `-H 'X-Key: x'`), and this file reads what has a shape of
- * its own: an Authorization header, the front of a URL, a PEM private key. `credential-values.ts`
+ * line (`--password x`, `-u user:pass`, `-H 'X-Key: x'`), `credential-commands.ts` reads single-dash
+ * command passwords (mysql, docker login, sshpass, redis-cli), and this file reads what has a shape
+ * of its own: an Authorization header, the front of a URL, a PEM private key. `credential-values.ts`
  * says what stands in for a value, and `credential-names.ts` what a name says.
  *
  * "Credential-shaped" is a heuristic that leans toward yes: a false alarm costs a byte copy, and a
