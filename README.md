@@ -22,6 +22,8 @@ npx @stroq/cli sent --last   # scan the latest recorded session; no hook setup n
 npx @stroq/cli init          # hook into your agent and guard the next session
 ```
 
+Needs Node.js 22 or newer.
+
 What a finding looks like (a synthetic session, trimmed):
 
 ```text
