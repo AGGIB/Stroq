@@ -6,7 +6,10 @@ const read = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
 
 const html = read('index.html');
-const css = read('styles.css');
+// The landing page's rules live in home.css and the shared ones in styles.css; the
+// checks below hold for both, so they read the two as one.
+const cssFiles = ['styles.css', 'home.css'];
+const css = cssFiles.map(read).join('\n');
 const vercel = JSON.parse(read('vercel.json')) as {
   headers?: { headers?: { key: string; value: string }[] }[];
 };
@@ -73,6 +76,15 @@ describe('the site survives its own Content-Security-Policy', () => {
     }
   });
 
+  it('parses as stylesheets with every brace closed', () => {
+    for (const file of cssFiles) {
+      const text = read(file);
+      const opens = (text.match(/\{/g) ?? []).length;
+      const closes = (text.match(/\}/g) ?? []).length;
+      expect(opens, `${file}: ${opens} "{" but ${closes} "}"`).toBe(closes);
+    }
+  });
+
   it('parses as one stylesheet, with every brace closed', () => {
     // An orphaned `}` is not a syntax error the browser reports: CSS error
     // recovery swallows whatever follows it up to the next balanced block, which
@@ -96,11 +108,30 @@ describe('the site survives its own Content-Security-Policy', () => {
   it('animates only elements the markup actually ships', () => {
     // A rule that animates a class no longer in the HTML is dead motion, and the
     // reverse — markup expecting an animation that was deleted — is a frozen hero.
-    const animated = [...css.matchAll(/^\s*\.([\w-]+)[^{\n]*\{[^}]*animation:/gm)].map(
-      (m) => m[1],
-    );
-    for (const cls of new Set(animated)) {
-      expect(html, `.${cls} is animated but never used in the markup`).toContain(cls);
+    // Every class in an animated selector is checked, not only the first, except the
+    // state classes a script adds (`js`, `is-*`).
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    let checked = 0;
+    for (const [, selector, body] of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/(^|[\s;])animation:/.test(body)) continue;
+      for (const [, cls] of selector.matchAll(/\.([\w-]+)/g)) {
+        if (cls === 'js' || cls.startsWith('is-')) continue;
+        checked += 1;
+        expect(html, `.${cls} is animated but never used in the markup`).toMatch(
+          new RegExp(`class="[^"]*\\b${cls}\\b`),
+        );
+      }
+    }
+    expect(checked, 'no animated selector was checked').toBeGreaterThan(0);
+  });
+
+  it('declares every custom property any rule reads', () => {
+    // Under this policy there is nowhere but the stylesheet to set a variable, so a
+    // `var(--x)` with no `--x:` anywhere is a silent fallback to nothing.
+    const used = new Set([...css.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]));
+    expect(used.size).toBeGreaterThan(10);
+    for (const prop of used) {
+      expect(new RegExp(`${prop}\\s*:`).test(css), `${prop} is read but never declared`).toBe(true);
     }
   });
 
