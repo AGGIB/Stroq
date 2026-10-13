@@ -19,9 +19,14 @@ describe('Claude task version preflight', () => {
   );
   it('probes only --version with bounded output/time and a filtered environment', () => {
     probe.mockReturnValue({ status: 0, stdout: '2.1.271 (Claude Code)\n' });
-    expect(readClaudeVersion('/trusted/claude', { PATH: '/bin', NODE_OPTIONS: 'evil' })).toBe(
-      '2.1.271 (Claude Code)',
-    );
+    expect(
+      readClaudeVersion('/trusted/claude', {
+        PATH: '/bin',
+        NODE_OPTIONS: 'evil',
+        ANTHROPIC_API_KEY: 'private',
+        claude_code_oauth_token: 'private-token',
+      }),
+    ).toBe('2.1.271 (Claude Code)');
     expect(probe).toHaveBeenCalledWith(
       '/trusted/claude',
       ['--version'],

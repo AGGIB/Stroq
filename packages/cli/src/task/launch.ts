@@ -55,6 +55,7 @@ export async function launchTask(input: TaskLaunch): Promise<number> {
     broker = await startTaskBroker(engine, randomBytes(24).toString('hex'), {
       cwd: body.projectRoot,
       sessionId: body.sessionId as string,
+      onEventLimit: () => stop.abort(),
     });
     prepared = prepareTask(home, body.taskId, deps.entry ?? (process.argv[1] as string));
     configureSandbox(input, prepared, broker.url);

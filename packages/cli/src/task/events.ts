@@ -1,7 +1,16 @@
 import type { ClaudeHookInput, HookOutput } from '../adapters/claude-code.js';
 
 /** A lifetime bound on audit-producing events, independent of connection/request sizes. */
-export const MAX_TASK_EVENTS = 1024;
+export const MAX_TASK_EVENTS = 65_536;
+
+export const TASK_EVENT_LIMIT_REASON =
+  'Task Lock: task audit event limit reached; further tools are refused. Start a new task.';
+
+export class TaskEventLimitError extends Error {
+  constructor() {
+    super(TASK_EVENT_LIMIT_REASON);
+  }
+}
 
 /** Hook-shaped input can be forged by the child. Keep it from replacing existing observations. */
 export function taskEvents(limit = MAX_TASK_EVENTS) {
@@ -14,7 +23,8 @@ export function taskEvents(limit = MAX_TASK_EVENTS) {
   return {
     claim(input: ClaudeHookInput): void {
       const id = input.tool_use_id;
-      if (id === undefined || count >= cap) throw new Error('task event limit or missing call id');
+      if (count >= cap) throw new TaskEventLimitError();
+      if (id === undefined) throw new Error('missing call id');
       if (input.hook_event_name === 'PreToolUse') {
         if (calls.has(id)) throw new Error('duplicate pre event');
         calls.set(id, { tool: input.tool_name, state: 'pending' });

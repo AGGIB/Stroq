@@ -9,7 +9,11 @@ export function readClaudeVersion(agent: string, env: NodeJS.ProcessEnv): string
       timeout: 5000,
       maxBuffer: 4096,
       windowsHide: true,
-      env: taskEnvironment(env),
+      env: Object.fromEntries(
+        Object.entries(taskEnvironment(env)).filter(
+          ([name]) => name !== 'ANTHROPIC_API_KEY' && name !== 'CLAUDE_CODE_OAUTH_TOKEN',
+        ),
+      ),
     });
     return result.status === 0 ? result.stdout.trim() : null;
   } catch {

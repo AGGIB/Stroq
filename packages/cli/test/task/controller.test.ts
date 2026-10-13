@@ -335,10 +335,13 @@ describe('parent task controller', () => {
   });
   it('caps audit-producing events over the task lifetime', async () => {
     const w = world();
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const onEventLimit = vi.fn();
     const broker = await startTaskBroker(w.engine, 'token', {
       cwd: w.cwd,
       sessionId: w.body.sessionId as string,
       maxEvents: 2,
+      onEventLimit,
     });
     try {
       const env = { STROQ_TASK_BROKER: broker.url };
@@ -346,9 +349,14 @@ describe('parent task controller', () => {
         expect((await taskHook(JSON.stringify({ ...w.event, tool_use_id: id }), env)).stdout).toBe(
           '',
         );
-      expect(
-        (await taskHook(JSON.stringify({ ...w.event, tool_use_id: 'three' }), env)).stdout,
-      ).toContain('deny');
+      for (const id of ['three', 'four']) {
+        const out = (await taskHook(JSON.stringify({ ...w.event, tool_use_id: id }), env)).stdout;
+        expect(out).toContain('task audit event limit reached');
+        expect(out).not.toContain('controller is unavailable');
+      }
+      expect(stderr.mock.calls.flat().join('')).toContain('task audit event limit reached');
+      expect(stderr).toHaveBeenCalledOnce();
+      expect(onEventLimit).toHaveBeenCalledOnce();
       expect(await new AuditLog(join(w.home, 'audit.jsonl')).readAll()).toHaveLength(2);
     } finally {
       await broker.close();

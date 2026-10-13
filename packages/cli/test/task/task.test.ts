@@ -17,6 +17,8 @@ import { parseTaskArgv } from '../../src/task/args.js';
 import { runTask } from '../../src/commands/task.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 import { prepareTask } from '../../src/task/prepare.js';
+import { FilePermitStore } from '@stroq/core';
+import * as taskBroker from '../../src/task/broker.js';
 
 vi.mock('../../src/task/version.js', async (original) => ({
   ...(await original<typeof import('../../src/task/version.js')>()),
@@ -36,6 +38,73 @@ const temp = () => {
 };
 
 describe('task command', () => {
+  it.each(['revocation', 'event budget'] as const)(
+    'wires %s to the child stop signal and prints the advisory exit',
+    async (reason) => {
+      const home = temp();
+      const cwd = temp();
+      const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+      const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const realBroker = taskBroker.startTaskBroker;
+      if (reason === 'event budget')
+        vi.spyOn(taskBroker, 'startTaskBroker').mockImplementation((engine, token, context) =>
+          realBroker(engine, token, { ...context, maxEvents: 2 }),
+        );
+      const launch = vi.fn(
+        async ({
+          env,
+          args,
+          stopSignal,
+        }: {
+          env: NodeJS.ProcessEnv;
+          args: readonly string[];
+          stopSignal?: AbortSignal;
+        }) => {
+          expect(stopSignal).toBeInstanceOf(AbortSignal);
+          expect(stopSignal?.aborted).toBe(false);
+          const event = {
+            hook_event_name: 'PreToolUse',
+            cwd,
+            session_id: args[args.indexOf('--session-id') + 1],
+            tool_name: 'Read',
+            tool_input: { file_path: join(cwd, 'src', 'a.ts') },
+          };
+          if (reason === 'revocation') new FilePermitStore({ home }).revoke('wired-stop');
+          else
+            for (const id of ['one', 'two']) {
+              expect(
+                (await taskBroker.taskHook(JSON.stringify({ ...event, tool_use_id: id }), env))
+                  .stdout,
+              ).toBe('');
+            }
+          expect(
+            (await taskBroker.taskHook(JSON.stringify({ ...event, tool_use_id: 'stop' }), env))
+              .stdout,
+          ).toContain('deny');
+          expect(stopSignal?.aborted).toBe(true);
+          return 1;
+        },
+      );
+      expect(
+        await runTask(['--hook-only', '--', 'fix'], cwd, {
+          home,
+          claude: process.execPath,
+          managed: () => false,
+          confirm: async () => true,
+          taskId: () => 'wired-stop',
+          entry: CLI_ENTRY,
+          launch,
+        }),
+      ).toBe(1);
+      expect(launch).toHaveBeenCalledOnce();
+      expect(stdout.mock.calls.flat().join('')).toContain(
+        'ADVISORY: this run used --hook-only without OS isolation.',
+      );
+      expect(stderr.mock.calls.flat().join('')).toContain(
+        reason === 'revocation' ? 'task-void:revoked' : 'task audit event limit reached',
+      );
+    },
+  );
   it('refuses an old Claude version and a project-local sandbox runtime before confirmation', async () => {
     const home = temp();
     const cwd = temp();

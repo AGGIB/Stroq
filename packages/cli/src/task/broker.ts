@@ -9,7 +9,7 @@ import {
   type HookOutput,
 } from '../adapters/claude-code.js';
 import { withDeadline } from '../commands/hook.js';
-import { taskEvents } from './events.js';
+import { taskEvents, TaskEventLimitError, TASK_EVENT_LIMIT_REASON } from './events.js';
 
 const MAX_BYTES = 1_048_576;
 const FAILURE = 'Task Lock: the parent controller is unavailable; every tool is refused.';
@@ -18,9 +18,15 @@ const FAILURE = 'Task Lock: the parent controller is unavailable; every tool is 
 export async function startTaskBroker(
   engine: StroqEngine,
   token: string,
-  context: { readonly cwd: string; readonly sessionId: string; readonly maxEvents?: number },
+  context: {
+    readonly cwd: string;
+    readonly sessionId: string;
+    readonly maxEvents?: number;
+    readonly onEventLimit?: () => void;
+  },
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
   const events = taskEvents(context.maxEvents);
+  let limitReported = false;
   const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     try {
@@ -48,8 +54,17 @@ export async function startTaskBroker(
       );
       events.complete(input, out);
       res.end(JSON.stringify(out));
-    } catch {
-      res.end(JSON.stringify(denyOutput(FAILURE)));
+    } catch (error) {
+      if (error instanceof TaskEventLimitError && !limitReported) {
+        limitReported = true;
+        process.stderr.write(`stroq task: ${TASK_EVENT_LIMIT_REASON}\n`);
+        context.onEventLimit?.();
+      }
+      res.end(
+        JSON.stringify(
+          denyOutput(error instanceof TaskEventLimitError ? TASK_EVENT_LIMIT_REASON : FAILURE),
+        ),
+      );
     }
   });
   server.requestTimeout = 15_000;

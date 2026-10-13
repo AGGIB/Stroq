@@ -57,6 +57,7 @@ import {
   type ShellInput,
 } from './shell-input.js';
 import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
+import { scpRemotes } from './scp-remotes.js';
 import { jobStages, persistenceSignals } from './persistence.js';
 
 const SHELLS = new Set([
@@ -805,7 +806,7 @@ function hostOfUrl(url: string): string {
 }
 
 /**
- * The addresses a command names: HTTP(S), SSH and Git URLs, scp-style `host:path`, and `user@host`
+ * The addresses a command names: HTTP(S), SSH and Git URLs, and `user@host`
  * target, with its text as written. A sibling of `hostsOf`, which keeps only the host and is
  * what the policy reads; this is for a task's scope and for egress binding, which need the
  * address.
@@ -821,10 +822,12 @@ function hostOfUrl(url: string): string {
  * is cut at `MAX_URL_CHARS`, only the first `MAX_URL_SCAN_CHARS` of the command are read, and a
  * command that repeats one address is given up on after a few times `limit` occurrences.
  * Wherever a bound cut something, `capped` is true: the list is then not the whole of it.
+ * `taskRemotes` adds scp-style references for task resources only, never the install reader.
  */
 export function commandUrls(
   command: string,
   limit: number,
+  options: { readonly taskRemotes?: boolean } = {},
 ): { readonly urls: readonly CommandUrl[]; readonly capped: boolean } {
   const text = command.length > MAX_URL_SCAN_CHARS ? command.slice(0, MAX_URL_SCAN_CHARS) : command;
   const found = new Map<string, CommandUrl>();
@@ -864,20 +867,9 @@ export function commandUrls(
   for (const [target, host] of text.matchAll(SSH_TARGET)) {
     if (!keep(target, () => host ?? '')) break;
   }
-  // Require a word boundary and at least two host characters so a Windows drive is
-  // never an scp remote. This intentionally counts printed addresses under a task.
-  const scp = /(?:^|[\s"'`])((?:[\w.-]+@)?([\w][\w.-]+):(?!\/\/)[^\s"'`;|&<>()]+)/g;
-  const remoteCommand = /\b(?:git\s+(?:fetch|clone|ls-remote|push)|scp|rsync)\b/.test(text);
-  for (const [, target, host] of text.matchAll(scp)) {
-    // Preserve existing user@dotted-host address/fingerprint semantics and do not
-    // spend the address budget twice on a target SSH_TARGET already recognized.
-    if (target?.includes('@') && /^[\w-]+(?:\.[\w-]+)+$/.test(host ?? '')) continue;
-    // Bare URI names such as node:fs and data:text are not network addresses.
-    // Dotted hosts, localhost and explicit user@host remain addresses anywhere;
-    // short host:path names are remotes only in a transfer command.
-    if (!remoteCommand && !host?.includes('.') && host !== 'localhost' && !target?.includes('@'))
-      continue;
-    if (!keep((target ?? '').slice(0, MAX_URL_CHARS), () => (host ?? '').toLowerCase())) break;
+  for (const { url, host } of options.taskRemotes ? scpRemotes(text) : []) {
+    if (url.length > MAX_URL_CHARS) capped = true;
+    if (!keep(url.slice(0, MAX_URL_CHARS), () => host)) break;
   }
   return { urls: [...found.values()], capped };
 }
