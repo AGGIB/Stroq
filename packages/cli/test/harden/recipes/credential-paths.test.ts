@@ -74,6 +74,7 @@ describe('the home credential stores', () => {
         '.ssh/**',
         '.aws/**',
         '.config/gcloud/**',
+        '.config/gh/hosts.yml',
         '.kube/**',
         '.docker/config.json',
         '.npmrc',
@@ -82,6 +83,15 @@ describe('the home credential stores', () => {
         '.gnupg/**',
       ]),
     );
+  });
+
+  it('names the GitHub CLI token file alone, not the rest of its folder', () => {
+    // `.config/gh` also holds `config.yml` and `state.yml`, which hold no credential.
+    expect(HOME_CREDENTIAL_PATHS).toContain('.config/gh/hosts.yml');
+    expect(HOME_CREDENTIAL_PATHS).not.toContain('.config/gh/**');
+    expect(ruleCovers('.config/gh/hosts.yml', '.config/gh/hosts.yml')).toBe(true);
+    expect(ruleCovers('.config/gh/hosts.yml', '.config/gh/config.yml')).toBe(false);
+    expect(homeReadRule('.config/gh/hosts.yml')).toBe('Read(~/.config/gh/hosts.yml)');
   });
 
   it('has no path twice', () => {

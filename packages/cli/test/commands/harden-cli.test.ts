@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { CLAUDE_READ_DENY_RULES } from '../../src/harden/recipes/credential-paths.js';
 import { removeTempDirs, tempDir } from '../harden/helpers.js';
 import { GOLDEN_SETTINGS, settingsText } from '../helpers/harden-fixtures.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
@@ -66,7 +67,9 @@ describe('stroq harden, as a command', () => {
 
     const status = run(['status']);
     expect(status.code).toBe(0);
-    expect(status.out).toContain('State: everything Stroq added is in place (12 of 12).');
+    expect(status.out).toContain(
+      `State: everything Stroq added is in place (${CLAUDE_READ_DENY_RULES.length} of ${CLAUDE_READ_DENY_RULES.length}).`,
+    );
 
     const undone = run(['undo', '--scope', 'project']);
     expect(undone.code).toBe(1);

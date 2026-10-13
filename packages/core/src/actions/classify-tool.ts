@@ -46,6 +46,15 @@ export interface ToolClassification extends CommandClassification {
  */
 const SECRET_PATH =
   /((^|[/\\])\.ssh([/\\]|$)|\bid_(rsa|ed25519|ecdsa|dsa)\b|(^|[/\\])\.aws([/\\]|$)|(^|[/\\])\.env(?!\.(?:example|sample|template|dist)$)(\.[\w-]+)?$|\.(pem|p12|pfx|key)$|[/\\]\.(npmrc|netrc|pgpass|git-credentials)$|[/\\]\.kube([/\\]config$|$)|[/\\]\.config[/\\]gcloud([/\\]|$)|\/etc\/(shadow|passwd)$)/;
+/**
+ * The GitHub CLI's token file, `~/.config/gh/hosts.yml` or `%AppData%\GitHub CLI\hosts.yml`: where
+ * its OAuth token is kept when it is not in the OS keyring. Its own pattern, with the `i` flag,
+ * because the folder of the Windows spelling is mixed case and `SECRET_PATH` is not folded; the
+ * path arrives lowercased from `normalizePathForMatch`, but this does not rely on that. The file is
+ * named whole, so `/etc/hosts`, an inventory called `hosts.yml` and the CLI's `config.yml` are not
+ * caught. A start of string counts as the separator, for the relative `.config/gh/hosts.yml`.
+ */
+const GH_TOKEN_FILE = /(?:^|[/\\])(?:\.config[/\\]gh|GitHub CLI)[/\\]hosts\.yml$/i;
 const SIDE_EFFECT_TOOL =
   /(send|post|publish|upload|email|mail|message|notify|pay|transfer|purchase|delete|remove|drop|deploy|execute|exec|run|shell|write|update|create|comment|merge|push)/i;
 // `config.self` on an MCP call requires BOTH a write-shaped tool name and the
@@ -308,7 +317,7 @@ function classifyOnePath(rawPath: string, write: boolean): ToolClassification {
     classes.push('config.persistence');
     signals.push('persistence-file-write');
   }
-  if (SECRET_PATH.test(path)) {
+  if (SECRET_PATH.test(path) || GH_TOKEN_FILE.test(path)) {
     classes.push('fs.secrets');
     signals.push('secret-path');
   }

@@ -32,7 +32,7 @@ describe('stroq harden apply: asking a person', () => {
     // The plan is shown first: the owner answers about what they have seen.
     expect(run.out).toContain('Adds these rules to permissions.deny:');
     expect(run.out).toContain(`+++ b/${diffLabel(file)}`);
-    expect(run.out).toContain(`Applied to ${file}: 12 added.`);
+    expect(run.out).toContain(`Applied to ${file}: ${CLAUDE_READ_DENY_RULES.length} added.`);
     expect(run.out).toContain('The file did not exist; undo removes it.');
     expect(run.out).toContain(
       'To take it back: stroq harden undo --agent claude-code --scope user',
@@ -156,7 +156,9 @@ describe('stroq harden apply: what it records and what it keeps', () => {
     expect(run.out).toContain(
       'A byte copy of the file as it was is kept; undo puts it back exactly.',
     );
-    expect(run.out).toContain('11 added, 1 already there and left as it is.');
+    expect(run.out).toContain(
+      `${CLAUDE_READ_DENY_RULES.length - 1} added, 1 already there and left as it is.`,
+    );
     const doc = JSON.parse(bytesOf(file)) as { model: string };
     expect(doc.model).toBe('opus');
   });

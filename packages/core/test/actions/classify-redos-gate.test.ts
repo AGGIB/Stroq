@@ -124,6 +124,11 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['redirects to startup files', (r) => r('echo x >> ~/.zshrc; ')],
   ['startup file names', (r) => `cat x >> ${r('.zshrc/')}`],
   ['ssh authorized_keys paths', (r) => `cp k ${r('.ssh/')}`],
+  // The GitHub CLI token file among the secret paths: its folder names, run on end.
+  ['gh folder names', (r) => `cat ${r('.config/gh/')}x`],
+  ['gh token file names', (r) => `cat ${r('.config/gh/hosts.yml ')}`],
+  ['GitHub CLI folder words', (r) => `cat ${r('GitHub CLI ')}x`],
+  ['escaped GitHub CLI folder words', (r) => `cat ${r('GitHub\\ GitHub\\ ')}x`],
   ['sed -i', (r) => r('sed -i x ')],
   ['crontab', (r) => r('crontab ')],
   ['schtasks', (r) => r('schtasks /create ')],

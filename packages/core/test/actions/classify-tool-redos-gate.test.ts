@@ -104,6 +104,17 @@ describe('the text a Write carries stays linear', () => {
   }
 });
 
+describe('a long path given to a file tool stays linear', () => {
+  const paths: ReadonlyArray<readonly [string, Build]> = [
+    ['repeated gh folders', repeated('/.config/gh')],
+    ['repeated gh token file names', repeated('/.config/gh/hosts.yml')],
+    ['repeated GitHub CLI folders', repeated('\\GitHub CLI')],
+  ];
+  for (const [name, build] of paths) {
+    holds(name, (size) => classifyTool('Read', { file_path: build(size) }, cwd));
+  }
+});
+
 describe('the text an MCP call carries stays linear', () => {
   holds('a long list of strings beside a path', (size) =>
     classifyTool(
@@ -193,6 +204,12 @@ const COMMANDS: ReadonlyArray<readonly [string, Build]> = [
   ['interpreter options', repeated('node --a ')],
   ['startup file names in prose', repeated('.zshrc and ')],
   ['dotfile slashes', repeated('.config/////')],
+  // The GitHub CLI token file (`SECRET_PATTERNS`): the folder names it is read by, run on end.
+  ['gh folder names', repeated('.config/gh/')],
+  ['gh token file names', repeated('.config/gh/hosts.yml ')],
+  ['GitHub CLI folder words', repeated('GitHub CLI ')],
+  ['escaped GitHub CLI folder words', repeated('GitHub\\ GitHub\\ ')],
+  ['GitHub CLI folders with backslashes', repeated('GitHub CLI\\hosts.yml\\')],
   ['cd chains', repeated('cd a && ')],
   ['pushd chains', repeated('pushd a; ')],
   ['braces', repeated('{a,b}')],
