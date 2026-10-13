@@ -185,7 +185,7 @@ describe('data that is cut short', () => {
     expect(refusal(bytes).code).toBe('corrupt');
   });
 
-  it('refuses a pax size that is less than the data, because the data would then be read as headers', () => {
+  it('refuses a pax size below the size in the header, whose rest a program that believes it reads as headers', () => {
     const bytes = tarOf([
       { name: 'pkg/a.txt', data: 'a'.repeat(1000), pax: { size: '3' }, header: { size: 1000 } },
     ]);

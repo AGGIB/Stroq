@@ -43,8 +43,14 @@ export interface HeaderFields {
   readonly format: Format;
   /** Bytes put at 345, which a ustar reader reads as the prefix of the name and a GNU reader does not. */
   readonly prefix: string | Uint8Array;
-  /** `unsigned` and `signed` are the two sums a reader accepts; `wrong` is one more than the right sum. */
-  readonly checksum: 'unsigned' | 'signed' | 'wrong' | string;
+  /** `unsigned` is the sum a reader accepts; `signed` is the other sum some old writers wrote, and `wrong` is one more than the right sum. */
+  readonly checksum: 'unsigned' | 'signed' | 'wrong' | string | Uint8Array;
+  /**
+   * Bytes put at an offset of the block, after every field and before the checksum is worked out: the
+   * way to spell a field this writer has no option for (the owner, the times, the device numbers, the
+   * version, a byte in the middle of the link name).
+   */
+  readonly patches: Readonly<Record<number, string | Uint8Array>>;
 }
 
 const SIZE_AT = 124;
@@ -79,6 +85,7 @@ export function headerBlock(given: Partial<HeaderFields> = {}): Uint8Array {
     format: 'ustar',
     prefix: '',
     checksum: 'unsigned',
+    patches: {},
     ...given,
   };
   const block = new Uint8Array(BLOCK);
@@ -98,16 +105,23 @@ export function headerBlock(given: Partial<HeaderFields> = {}): Uint8Array {
   put(block, 257, 6, FORMATS[fields.format].magic);
   put(block, 263, 2, FORMATS[fields.format].version);
   put(block, 345, 155, fields.prefix);
+  for (const [at, value] of Object.entries(fields.patches)) {
+    const raw = bytesOf(value);
+    if (Number(at) + raw.length > BLOCK) throw new Error(`a patch at ${at} is past the block`);
+    block.set(raw, Number(at));
+  }
   const unsigned = sumOf(block, false);
   const text = fields.checksum;
   const stored =
-    text === 'unsigned'
-      ? `${unsigned.toString(8).padStart(6, '0')}\0 `
-      : text === 'signed'
-        ? `${sumOf(block, true).toString(8).padStart(6, '0')}\0 `
-        : text === 'wrong'
-          ? `${(unsigned + 1).toString(8).padStart(6, '0')}\0 `
-          : text;
+    text instanceof Uint8Array
+      ? text
+      : text === 'unsigned'
+        ? `${unsigned.toString(8).padStart(6, '0')}\0 `
+        : text === 'signed'
+          ? `${sumOf(block, true).toString(8).padStart(6, '0')}\0 `
+          : text === 'wrong'
+            ? `${(unsigned + 1).toString(8).padStart(6, '0')}\0 `
+            : text;
   put(block, CHECKSUM_AT, 8, stored);
   return block;
 }

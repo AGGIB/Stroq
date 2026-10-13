@@ -63,24 +63,6 @@ function afterTerminated(bytes: Uint8Array, at: number): number {
   return end + 1;
 }
 
-/** Where the deflate data starts: after the fixed header and the optional fields its flags announce. */
-function bodyStart(bytes: Uint8Array): number {
-  if (bytes.length < HEADER_BYTES + TRAILER_BYTES) throw damaged(CUT_SHORT);
-  if (bytes[2] !== METHOD_DEFLATE) throw damaged('the gzip data is not compressed with deflate');
-  const flags = bytes[3] ?? 0;
-  if ((flags & FLAGS_RESERVED) !== 0) throw damaged('the gzip header uses flags that are reserved');
-  let at = HEADER_BYTES;
-  if ((flags & FLAG_EXTRA) !== 0) {
-    if (at + 2 > bytes.length) throw damaged('the gzip header is cut short');
-    at += 2 + ((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8));
-  }
-  if ((flags & FLAG_NAME) !== 0) at = afterTerminated(bytes, at);
-  if ((flags & FLAG_COMMENT) !== 0) at = afterTerminated(bytes, at);
-  if ((flags & FLAG_HEADER_CRC) !== 0) at += 2;
-  if (at > bytes.length) throw damaged('the gzip header is cut short');
-  return at;
-}
-
 const CRC_TABLE = ((): Uint32Array => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
@@ -99,6 +81,33 @@ function crc32(bytes: Uint8Array): number {
     crc = (CRC_TABLE[(crc ^ (bytes[at] ?? 0)) & 0xff] ?? 0) ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Where the deflate data starts: after the fixed header and the optional fields its flags announce. */
+function bodyStart(bytes: Uint8Array): number {
+  if (bytes.length < HEADER_BYTES + TRAILER_BYTES) throw damaged(CUT_SHORT);
+  if (bytes[2] !== METHOD_DEFLATE) throw damaged('the gzip data is not compressed with deflate');
+  const flags = bytes[3] ?? 0;
+  if ((flags & FLAGS_RESERVED) !== 0) throw damaged('the gzip header uses flags that are reserved');
+  let at = HEADER_BYTES;
+  if ((flags & FLAG_EXTRA) !== 0) {
+    if (at + 2 > bytes.length) throw damaged('the gzip header is cut short');
+    at += 2 + ((bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8));
+  }
+  if ((flags & FLAG_NAME) !== 0) at = afterTerminated(bytes, at);
+  if ((flags & FLAG_COMMENT) !== 0) at = afterTerminated(bytes, at);
+  if ((flags & FLAG_HEADER_CRC) !== 0) {
+    if (at + 2 > bytes.length) throw damaged('the gzip header is cut short');
+    // The low 16 bits of the CRC-32 of every header byte before the field. zlib, and so npm, refuses a
+    // header that does not match, so an archive with one is not one that will be installed as it is read.
+    const stored = (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8);
+    if (stored !== (crc32(bytes.subarray(0, at)) & 0xffff)) {
+      throw damaged('the gzip header checksum does not match');
+    }
+    at += 2;
+  }
+  if (at > bytes.length) throw damaged('the gzip header is cut short');
+  return at;
 }
 
 interface Inflated {

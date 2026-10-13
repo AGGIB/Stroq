@@ -24,6 +24,7 @@ const IN_MEMORY = [
   'archive-tar.ts',
   'archive-tree.ts',
   'tar-header.ts',
+  'tar-number.ts',
   'tar-pax.ts',
 ];
 const FORBIDDEN =
@@ -69,7 +70,13 @@ describe('the files that read an archive in memory', () => {
   it('use no regular expression on text that comes out of an archive, so that none can run long on it', () => {
     // The names go through the path rules, which have their own gate (safe-path-redos-gate.test.ts); the
     // reader itself reads bytes by position.
-    for (const name of ['archive-tar.ts', 'archive-tree.ts', 'tar-header.ts', 'tar-pax.ts']) {
+    for (const name of [
+      'archive-tar.ts',
+      'archive-tree.ts',
+      'tar-header.ts',
+      'tar-number.ts',
+      'tar-pax.ts',
+    ]) {
       expect(source(name), name).not.toMatch(
         /\.(?:match|matchAll|exec|test|replace|replaceAll|search)\(|RegExp/,
       );

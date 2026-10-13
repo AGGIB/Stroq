@@ -1,12 +1,24 @@
 // One 512-byte tar header, read as hostile bytes.
 //
-// Nothing in a header is believed until the checksum adds up, and then only the fields this reader
-// needs are read: the name (with the ustar prefix when the header is the kind that has one), the type,
-// the mode and the size. The owner, the group and the times are not read at all: they are things a tar
-// program does to a disk, and this reader never writes one. A number is read strictly (octal digits and
-// then only spaces or NULs, or the GNU base-256 form), and a size that is more than any limit is
-// returned as Infinity so that the caller's limit check refuses it before a byte is sliced.
+// Nothing in a header is believed until the checksum adds up, and then every field that npm's extractor
+// reads is checked, though only a few are used: the name (with the ustar prefix when the header is the
+// kind that has one), the type, the mode and the size are. The owner, the group, the time and the device
+// numbers are checked to be numbers and are not kept: they are things a tar program does to a disk, and
+// this reader never writes one. The checks are there because the program that installs the archive
+// afterwards (npm, with node-tar) skips a header it finds wrong and reads the 512 bytes after it as a
+// header, so a header that is wrong to npm and right here is a way to put a file in the install that was
+// not in the tree that was looked at. What a header may be is therefore narrower here than anywhere:
+//
+//  - the checksum is the unsigned sum, in octal digits and a NUL or a space (`tar-number.ts`);
+//  - every number is octal or base-256 and nothing else (`tar-number.ts`);
+//  - a file, a folder and a long name have an empty link name;
+//  - a ustar header has the version 00, and a header that is not ustar has no prefix bytes;
+//  - a name and a prefix end at the first NUL, and nothing but NULs follows.
+//
+// A size that is more than any limit is returned as Infinity so that the caller's limit check refuses
+// it before a byte is sliced.
 import { ArchiveError } from './archive-error.js';
+import { readNumber } from './tar-number.js';
 import { LIMITS } from './types.js';
 
 export const BLOCK = 512;
@@ -57,101 +69,76 @@ export function isZeroBlock(block: Uint8Array): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Numbers
-// ---------------------------------------------------------------------------------------------
-
-/** More than a file can be and less than a double can hold exactly: past this a field is "too big". */
-const TOO_BIG = 2 ** 40;
-
-/** The GNU form for numbers that do not fit octal: the high bit set, then big-endian. A set sign bit is a negative number. */
-function base256(field: Uint8Array, what: string): number {
-  const first = field[0] ?? 0;
-  if ((first & 0x40) !== 0) throw corrupt(`the ${what} field of a header is negative`);
-  let value = first & 0x3f;
-  for (let at = 1; at < field.length; at += 1) {
-    value = value * 256 + (field[at] ?? 0);
-    if (value > TOO_BIG) return Infinity;
-  }
-  return value;
-}
-
-/** Octal digits between spaces and NULs, or base-256. A blank field is 0 only where the caller says so. */
-function numberField(field: Uint8Array, what: string, blankIsZero = false): number {
-  if (((field[0] ?? 0) & 0x80) !== 0) return base256(field, what);
-  const notANumber = corrupt(`the ${what} field of a header is not a number`);
-  let at = 0;
-  while (at < field.length && field[at] === 0x20) at += 1;
-  let value = 0;
-  let digits = 0;
-  for (; at < field.length; at += 1) {
-    const digit = (field[at] ?? 0) - 0x30;
-    if (digit < 0 || digit > 7) break;
-    value = value * 8 + digit;
-    digits += 1;
-  }
-  for (; at < field.length; at += 1) {
-    if (field[at] !== 0 && field[at] !== 0x20) throw notANumber;
-  }
-  if (digits === 0 && !blankIsZero) throw notANumber;
-  return value;
-}
-
-// ---------------------------------------------------------------------------------------------
 // The checksum
 // ---------------------------------------------------------------------------------------------
 
 const CHECKSUM_AT = 148;
 const CHECKSUM_END = 156;
 
-/** The sum of all the bytes with the checksum field counted as spaces, as unsigned and as signed bytes. */
-function sums(block: Uint8Array): { unsigned: number; signed: number } {
-  let unsigned = 0;
-  let signed = 0;
+/** The sum of all the bytes as unsigned bytes, with the checksum field counted as spaces. */
+function unsignedSum(block: Uint8Array): number {
+  let sum = 0;
   for (let at = 0; at < BLOCK; at += 1) {
-    const byte = at >= CHECKSUM_AT && at < CHECKSUM_END ? 0x20 : (block[at] ?? 0);
-    unsigned += byte;
-    signed += byte > 127 ? byte - 256 : byte;
+    sum += at >= CHECKSUM_AT && at < CHECKSUM_END ? 0x20 : (block[at] ?? 0);
   }
-  return { unsigned, signed };
+  return sum;
 }
 
 /**
- * Whether the checksum field is a number and is the sum of the block. Both sums are accepted, because
- * tar programs that disagreed about whether a byte is signed both exist, and both are still a check:
- * a block that is not a header does not add up either way.
+ * Whether the checksum field is octal digits and a NUL or a space, and is the unsigned sum of the
+ * block. The signed sum that some old programs wrote is not accepted: npm does not accept it, and an
+ * archive that is a header to this reader and not to npm is two archives (see the top of this file).
  */
 export function hasValidChecksum(block: Uint8Array): boolean {
-  let stored: number;
   try {
-    stored = numberField(block.subarray(CHECKSUM_AT, CHECKSUM_END), 'checksum');
+    const stored = readNumber(block.subarray(CHECKSUM_AT, CHECKSUM_END), 'checksum', {
+      checksum: true,
+    });
+    return stored === unsignedSum(block);
   } catch {
     return false;
   }
-  const { unsigned, signed } = sums(block);
-  return stored === unsigned || stored === signed;
 }
 
 // ---------------------------------------------------------------------------------------------
 // The fields
 // ---------------------------------------------------------------------------------------------
 
-const cString = (bytes: Uint8Array): Uint8Array => {
+/** A text field: the bytes up to the first NUL. Nothing but NULs may follow it, or npm reads another name. */
+function cString(bytes: Uint8Array, what: string): Uint8Array {
   const end = bytes.indexOf(0);
-  return end === -1 ? bytes : bytes.subarray(0, end);
-};
+  if (end === -1) return bytes;
+  for (let at = end + 1; at < bytes.length; at += 1) {
+    if (bytes[at] !== 0) throw corrupt(`the ${what} field of a header has bytes after its end`);
+  }
+  return bytes.subarray(0, end);
+}
 
-/** `ustar` and a NUL: the POSIX format, whose bytes at 345 are the prefix of the name. GNU's `ustar  ` is not. */
-const isPosixUstar = (block: Uint8Array): boolean =>
-  block[257] === 0x75 &&
-  block[258] === 0x73 &&
-  block[259] === 0x74 &&
-  block[260] === 0x61 &&
-  block[261] === 0x72 &&
-  block[262] === 0;
+const isMagic = (block: Uint8Array, magic: string, at = 257): boolean =>
+  [...magic].every((letter, index) => block[at + index] === letter.charCodeAt(0));
 
-function nameOf(block: Uint8Array): Uint8Array {
-  const name = cString(block.subarray(0, 100));
-  const prefix = isPosixUstar(block) ? cString(block.subarray(345, 500)) : new Uint8Array(0);
+/**
+ * Whether the header has a prefix: `ustar` and a NUL is the POSIX format, whose bytes at 345 are the
+ * prefix of the name. GNU's `ustar  ` is not. A header with this magic has the version `00`, or it is
+ * refused: npm reads a prefix only from `ustar\0` and `00`, so with any other version it is a header
+ * with no prefix to npm and one with a prefix to every other program.
+ */
+function hasPrefix(block: Uint8Array): boolean {
+  if (!isMagic(block, 'ustar\0')) return false;
+  if (block[263] !== 0x30 || block[264] !== 0x30) {
+    throw corrupt('a ustar header has a version that is not 00');
+  }
+  return true;
+}
+
+const PREFIX_AT = 345;
+const PREFIX_END = 500;
+
+function nameOf(block: Uint8Array, withPrefix: boolean): Uint8Array {
+  const name = cString(block.subarray(0, 100), 'name');
+  const prefix = withPrefix
+    ? cString(block.subarray(PREFIX_AT, PREFIX_END), 'prefix')
+    : new Uint8Array(0);
   if (prefix.length === 0) return name;
   const joined = new Uint8Array(prefix.length + 1 + name.length);
   joined.set(prefix);
@@ -160,15 +147,67 @@ function nameOf(block: Uint8Array): Uint8Array {
   return joined;
 }
 
+/** A header that has no prefix has nothing at 345 to 499: those bytes are other fields, or are not there. */
+function checkNoPrefix(block: Uint8Array): void {
+  for (let at = PREFIX_AT; at < PREFIX_END; at += 1) {
+    if (block[at] !== 0) {
+      throw corrupt(
+        'a header that is not ustar has bytes at 345 to 499, where ustar keeps a prefix',
+      );
+    }
+  }
+}
+
+/** The numbers that are checked and not kept: the owner, the group and the time; the device numbers of ustar. */
+const NOT_KEPT = [
+  { what: 'user id', from: 108, to: 116 },
+  { what: 'group id', from: 116, to: 124 },
+  { what: 'modification time', from: 136, to: 148 },
+] as const;
+const DEVICE_NUMBERS = [
+  { what: 'device major', from: 329, to: 337 },
+  { what: 'device minor', from: 337, to: 345 },
+] as const;
+
+/**
+ * The types that cannot have a link name, because npm skips a header of these types that has one. A pax
+ * header may have bytes there and npm does not mind; the other types are links and kinds that are refused.
+ */
+const NO_LINK_NAME: ReadonlySet<number> = new Set([
+  TYPE.oldFile,
+  TYPE.file,
+  TYPE.directory,
+  TYPE.gnuLongName,
+]);
+
+function checkNumbersNotKept(block: Uint8Array): void {
+  const fields = isMagic(block, 'ustar') ? [...NOT_KEPT, ...DEVICE_NUMBERS] : NOT_KEPT;
+  for (const { what, from, to } of fields) {
+    readNumber(block.subarray(from, to), what, { blank: true, negative: true });
+  }
+}
+
+function checkLinkName(block: Uint8Array, type: number): void {
+  if (!NO_LINK_NAME.has(type)) return;
+  for (let at = 157; at < 257; at += 1) {
+    if (block[at] !== 0) {
+      throw corrupt('a file, a folder or a long name in the archive has a link name');
+    }
+  }
+}
+
 /** The fields of a block whose checksum has been checked. */
 export function readHeader(block: Uint8Array): TarHeader {
-  const mode = numberField(block.subarray(100, 108), 'mode', true);
-  if (!Number.isFinite(mode)) throw corrupt('the mode field of a header is not a number');
+  const type = block[156] ?? 0;
+  const withPrefix = hasPrefix(block);
+  if (!withPrefix) checkNoPrefix(block);
+  checkLinkName(block, type);
+  checkNumbersNotKept(block);
   return {
-    nameBytes: nameOf(block),
-    type: block[156] ?? 0,
-    mode,
-    size: numberField(block.subarray(124, 136), 'size'),
+    nameBytes: nameOf(block, withPrefix),
+    type,
+    mode: readNumber(block.subarray(100, 108), 'mode', { blank: true }),
+    size: readNumber(block.subarray(124, 136), 'size', { huge: true }),
   };
 }
 

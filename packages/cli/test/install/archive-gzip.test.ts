@@ -21,14 +21,30 @@ function refusal(run: () => unknown): ArchiveError {
 
 const codeOf = (run: () => unknown): ArchiveErrorCode => refusal(run).code;
 
+/** The CRC-32 of gzip, bit by bit: the reader has a table, and this shares nothing with it. */
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 /**
  * A gzip member with fields in its header that `gzip` the program writes (the name of the file) and
  * that other writers do (extra data, a comment, a header checksum), built from the output of Node's own
- * gzip so that the deflate stream and the trailer are real.
+ * gzip so that the deflate stream and the trailer are real. `headerCrc: true` is the right CRC-16 of the
+ * header, and `'wrong'` is the next number after it.
  */
 function member(
   data: Uint8Array,
-  extras: { name?: string; extra?: Uint8Array; comment?: string; headerCrc?: boolean } = {},
+  extras: {
+    name?: string;
+    extra?: Uint8Array;
+    comment?: string;
+    headerCrc?: boolean | 'wrong';
+  } = {},
 ): Uint8Array {
   const whole = gz(data);
   const body = whole.subarray(10, whole.length - 8);
@@ -50,12 +66,16 @@ function member(
     flags |= 16;
     optional.push(text(extras.comment), new Uint8Array(1));
   }
-  if (extras.headerCrc === true) {
+  if (extras.headerCrc !== undefined && extras.headerCrc !== false) {
     flags |= 2;
-    optional.push(new Uint8Array(2));
   }
   const header = new Uint8Array([0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3]);
-  return concat([header, ...optional, body, trailer]);
+  const before = concat([header, ...optional]);
+  if ((flags & 2) !== 0) {
+    const crc = (crc32(before) + (extras.headerCrc === 'wrong' ? 1 : 0)) & 0xffff;
+    return concat([before, new Uint8Array([crc & 255, crc >> 8]), body, trailer]);
+  }
+  return concat([before, body, trailer]);
 }
 
 describe('isGzip', () => {
@@ -110,6 +130,12 @@ describe('gunzipOnce', () => {
     expect(gunzipOnce(bytes, 1 * MiB)).toEqual(data);
   });
 
+  it('reads a member with a header checksum and nothing else in the header', () => {
+    const data = text('only the checksum');
+
+    expect(gunzipOnce(member(data, { headerCrc: true }), 1 * MiB)).toEqual(data);
+  });
+
   it('reads a member of no data', () => {
     expect(gunzipOnce(gz(new Uint8Array(0)), 1 * MiB)).toEqual(new Uint8Array(0));
   });
@@ -120,6 +146,26 @@ describe('gunzipOnce', () => {
   });
 
   describe('refuses', () => {
+    it('a header checksum that is not the checksum of the header, which zlib (and so npm) refuses too', () => {
+      for (const extras of [
+        { headerCrc: 'wrong' as const },
+        { headerCrc: 'wrong' as const, name: 'skill.tar', comment: 'by hand' },
+      ]) {
+        const error = refusal(() => gunzipOnce(member(text('some data'), extras), MiB));
+
+        expect(error.code).toBe('bad-gzip');
+        expect(error.message).toMatch(/header checksum/);
+      }
+    });
+
+    it('a header checksum of zero, which is what a writer that does not work it out leaves there', () => {
+      const bytes = member(text('some data'), { headerCrc: true });
+      const zeroed = Uint8Array.from(bytes);
+      zeroed.fill(0, 10, 12);
+
+      expect(codeOf(() => gunzipOnce(zeroed, MiB))).toBe('bad-gzip');
+    });
+
     it('data after the member, and says it is after the stream', () => {
       const error = refusal(() =>
         gunzipOnce(concat([gz(text('abc')), text('trailing garbage')]), MiB),

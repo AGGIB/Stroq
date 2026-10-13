@@ -195,19 +195,7 @@ describe('readTarArchive: how a name is carried', () => {
     expect(namesOf([concat(gnu)])).toEqual(['from/gnu.txt']);
   });
 
-  it('does not read the bytes at 345 as a prefix when the header is GNU or v7, where they are other fields', () => {
-    for (const format of ['gnu', 'v7'] as const) {
-      const entry: TarEntry = {
-        name: 'real.txt',
-        data: 'x',
-        header: { format, prefix: 'atime-and-ctime-bytes' },
-      };
-
-      expect(namesOf([entry]), format).toEqual(['real.txt']);
-    }
-  });
-
-  it('does read them as a prefix when the header is ustar', () => {
+  it('reads the bytes at 345 as a prefix when the header is ustar', () => {
     const entry: TarEntry = { name: 'real.txt', data: 'x', header: { prefix: 'some/folder' } };
 
     expect(namesOf([entry])).toEqual(['some/folder/real.txt']);
@@ -222,9 +210,9 @@ describe('readTarArchive: how a name is carried', () => {
 });
 
 describe('readTarArchive: sizes and extended headers', () => {
-  it('takes the size of a pax record over the size in the header', () => {
+  it('reads a pax size that is the size in the header, and takes the pax size as the size', () => {
     const bytes = tarOf([
-      { name: 'big.txt', data: 'hello', pax: { size: '5' }, header: { size: 0 } },
+      { name: 'big.txt', data: 'hello', pax: { size: '5' } },
       { name: 'next.txt', data: 'after' },
     ]);
 
@@ -296,14 +284,11 @@ describe('readTarArchive: sizes and extended headers', () => {
 });
 
 describe('readTarArchive: the header checksum', () => {
-  it('accepts the sum of the bytes as unsigned and as signed, which tar programs both write', () => {
-    // Bytes above 127 in the name: the two sums differ only for these.
+  it('is the sum of the bytes as unsigned, whatever the bytes are (the signed sum is refused: see archive-tar-numbers)', () => {
+    // Bytes above 127 in the name: the signed and the unsigned sum differ only for these.
     const name = `caf${String.fromCodePoint(0xe9)}-${String.fromCodePoint(0xfc)}ber.md`;
-    for (const checksum of ['unsigned', 'signed'] as const) {
-      const bytes = tarOf([{ name, data: 'x', header: { checksum } }]);
 
-      expect(pathsOf(bytes), checksum).toEqual([name]);
-    }
+    expect(pathsOf(tarOf([{ name, data: 'x', header: { checksum: 'unsigned' } }]))).toEqual([name]);
     // The two sums differ for this name, or the case would prove nothing.
     expect(headerBlock({ name, checksum: 'signed' })).not.toEqual(
       headerBlock({ name, checksum: 'unsigned' }),

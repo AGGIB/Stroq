@@ -138,6 +138,21 @@ function depthOf(path: string): number {
   return depth;
 }
 
+const PAX_SIZE =
+  'an extended header of the archive gives a size that is not the size in the header';
+
+/**
+ * A pax size has to be the size in the header. It is only needed for a file of 8 GiB or more, which is
+ * over the limits anyway, and where the two differ, programs read different files: a reader that takes
+ * the pax size reads the data of the entry as that long, and one that takes the header's reads what is
+ * left as headers.
+ */
+function checkPaxSize(pending: Pending | null, header: TarHeader): void {
+  if (pending !== null && pending.size !== null && pending.size !== header.size) {
+    throw corrupt(PAX_SIZE);
+  }
+}
+
 function addFile(walk: Walk, header: TarHeader): void {
   const pending = takePending(walk);
   const path = pending?.path ?? decodeName(header.nameBytes);
@@ -159,6 +174,7 @@ function addFile(walk: Walk, header: TarHeader): void {
   if (walk.expanded + size > limits.maxExpanded) {
     throw overLimit(`the files in the archive are over ${limits.maxExpanded} bytes in all`);
   }
+  checkPaxSize(pending, header);
   const bytes = takeData(walk, size);
   walk.expanded += size;
   walk.specialModeBits ||= (header.mode & SPECIAL_MODE_BITS) !== 0;
@@ -169,6 +185,7 @@ function addFile(walk: Walk, header: TarHeader): void {
 function addFolder(walk: Walk, header: TarHeader): void {
   const pending = takePending(walk);
   if ((pending?.path ?? null) === null) decodeName(header.nameBytes);
+  checkPaxSize(pending, header);
   if ((pending?.size ?? header.size) !== 0) throw corrupt('a folder in the archive has data in it');
 }
 
