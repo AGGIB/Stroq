@@ -7,7 +7,12 @@
 // stored as it is described, the sparse ones, are refused, as a sparse file is.
 //
 // The length at the front of a record counts the length itself, so a record is cut out by that number
-// and checked, not searched for: a newline inside a value is part of the value.
+// and checked, not searched for. But npm's extractor (node-tar) does not read them that way: it splits the
+// text at every newline, keeps a line whose number is its length, and cuts the key off after the number
+// written again without its leading zeros. So a record with a newline inside it is several records to
+// npm (one can be a `path` that this reader never saw, or a global `size`), and a record whose length
+// starts with a zero is one it reads with the wrong key. Both are refused, and the two readings agree on
+// every record that is left.
 import { ArchiveError } from './archive-error.js';
 import { decodeName } from './tar-header.js';
 
@@ -41,6 +46,7 @@ function recordEnd(data: Uint8Array, at: number): { digits: number; end: number 
     if (cursor - at > MAX_LENGTH_DIGITS) throw malformed();
   }
   const digits = cursor - at;
+  if (data[at] === 0x30) throw malformed();
   // A record is at least the digits, a space, a one-byte key, an equals sign and a newline.
   if (digits === 0 || data[cursor] !== 0x20 || length < digits + 4) throw malformed();
   if (at + length > data.length || data[at + length - 1] !== 0x0a) throw malformed();
@@ -73,7 +79,7 @@ export function parsePax(data: Uint8Array, isGlobal: boolean): Pax {
     const { digits, end } = recordEnd(data, at);
     const record = data.subarray(at + digits + 1, end - 1);
     const equals = record.indexOf(0x3d);
-    if (equals < 1) throw malformed();
+    if (equals < 1 || record.indexOf(0x0a) !== -1) throw malformed();
     const key = keyText(record.subarray(0, equals));
     const value = record.subarray(equals + 1);
     if (isSparseKey(key))

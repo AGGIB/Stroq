@@ -196,6 +196,9 @@ function checkLinkName(block: Uint8Array, type: number): void {
   }
 }
 
+/** The headers that describe the entry after them. */
+const DESCRIBES_NEXT: ReadonlySet<number> = new Set([TYPE.pax, TYPE.globalPax, TYPE.gnuLongName]);
+
 /** The fields of a block whose checksum has been checked. */
 export function readHeader(block: Uint8Array): TarHeader {
   const type = block[156] ?? 0;
@@ -203,8 +206,14 @@ export function readHeader(block: Uint8Array): TarHeader {
   if (!withPrefix) checkNoPrefix(block);
   checkLinkName(block, type);
   checkNumbersNotKept(block);
+  const nameBytes = nameOf(block, withPrefix);
+  // npm skips a header with no path, whatever its type, and then reads the data after it as headers.
+  // A file or a folder with no name is refused or is nothing; these carry the name of another entry.
+  if (nameBytes.length === 0 && DESCRIBES_NEXT.has(type)) {
+    throw corrupt('an extended header or a long name header in the archive has no name');
+  }
   return {
-    nameBytes: nameOf(block, withPrefix),
+    nameBytes,
     type,
     mode: readNumber(block.subarray(100, 108), 'mode', { blank: true }),
     size: readNumber(block.subarray(124, 136), 'size', { huge: true }),

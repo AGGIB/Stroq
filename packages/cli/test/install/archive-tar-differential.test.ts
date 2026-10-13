@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { refusal } from '../helpers/archive-refusal.js';
 import { bytesOfText, field, hiding, pathsOf } from '../helpers/tar-differential.js';
-import { concat, dataBlocks, headerBlock, tarOf, type Format } from '../helpers/tar-writer.js';
+import {
+  concat,
+  dataBlocks,
+  headerBlock,
+  paxRecords,
+  tarOf,
+  type Format,
+} from '../helpers/tar-writer.js';
 
 /**
  * Headers that are valid to a lax reader and that npm's extractor (node-tar) reads another way: the
@@ -81,6 +88,57 @@ describe('the link name of a header that is not a link', () => {
 
     expect(pathsOf(withLongName({}))).toHaveLength(1);
     expectLinkRefused(withLongName({ [offset]: 'x' }));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// A header that carries a name or attributes, with no name of its own
+// ---------------------------------------------------------------------------------------------
+
+describe('an extended or long-name header with an empty name', () => {
+  /** The blocks that make the next entry `package/renamed.txt`, written by the header named `name`. */
+  const carried = (typeflag: 'x' | 'g' | 'L', name: string): Uint8Array => {
+    const long = concat([bytesOfText('package/renamed.txt'), new Uint8Array(1)]);
+    const data =
+      typeflag === 'L'
+        ? long
+        : paxRecords(typeflag === 'x' ? { path: 'package/renamed.txt' } : { comment: 'c' });
+    const format = typeflag === 'L' ? 'gnu' : 'ustar';
+    return tarOf([
+      concat([
+        headerBlock({ name, typeflag, size: data.length, format }),
+        dataBlocks(data),
+        headerBlock({ name: 'package/ignored.txt', size: 1 }),
+        dataBlocks('x'),
+      ]),
+    ]);
+  };
+
+  it.each([
+    ['a pax header', 'x', 'renamed.txt'],
+    ['a global pax header', 'g', 'ignored.txt'],
+    ['a GNU long name header', 'L', 'renamed.txt'],
+  ] as const)('refuses %s, which npm skips for having no path', (_what, typeflag, name) => {
+    expect(pathsOf(carried(typeflag, 'PaxHeader'))).toEqual([name]);
+
+    const error = refusal(carried(typeflag, ''));
+
+    expect(error.code).toBe('corrupt');
+    expect(error.message).toMatch(/has no name/);
+  });
+
+  it('reads one whose name is empty and whose prefix is not, which npm reads as the prefix and a slash', () => {
+    const data = paxRecords({ path: 'package/renamed.txt' });
+    const bytes = tarOf([
+      concat([
+        headerBlock({ name: '', prefix: 'PaxHeader', typeflag: 'x', size: data.length }),
+        dataBlocks(data),
+        headerBlock({ name: 'package/ignored.txt', size: 1 }),
+        dataBlocks('x'),
+      ]),
+    ]);
+
+    expect(pathsOf(bytes)).toEqual(['renamed.txt']);
   });
 });
 
