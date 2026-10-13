@@ -1,0 +1,63 @@
+name: Feature request
+description: Something Stroq should do that it does not do yet
+title: '[Feature]: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please check the [open issues](../../issues) and the
+        [changelog](../../blob/main/CHANGELOG.md) first: it may be planned or done.
+        If Stroq let through something its documentation says it stops, that is a
+        security report: use the private process in [SECURITY.md](../../SECURITY.md),
+        not this form.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: What you were doing, with which agent, and what got in the way or was missing.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Stroq to do?
+      description: The behaviour you have in mind. A command line, an example output or a policy snippet helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Agents and hooks (init, doctor, a new host)
+        - Policy and rules
+        - Secrets and egress
+        - Checking skills and MCP servers (vet)
+        - Live check (prove)
+        - Hardening host settings (harden)
+        - MCP proxy
+        - Reports, attack and bench
+        - Documentation or site
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
+      description: A workaround, another tool, or nothing. Optional.
+  - type: input
+    id: context
+    attributes:
+      label: Agent, OS and Stroq version (optional)
+      placeholder: 'e.g. Claude Code 2.1.271, macOS 15, stroq 0.25.0'
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open issues and did not find this one.
+          required: true
+        - label: It holds no secret, token or private path.
+          required: true
