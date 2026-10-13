@@ -19,6 +19,7 @@ import {
 import { formatExposure, type ExposureReport } from '../exposure/report.js';
 import { inventoryFile } from '../paths.js';
 import { agentFindings, agentSurface } from '../exposure/surface.js';
+import { configPinStatus } from '../mcp/pin-status.js';
 
 export async function buildExposureReport(
   cwd: string,
@@ -33,9 +34,18 @@ export async function buildExposureReport(
   const attack = await runAttack(SCENARIOS, loadPolicy(), policySource());
   const reach = reachFrom(attack, agents);
   const probes = opts.probe === true ? await probeServers(mcp) : [];
+  const pins = (await Promise.all(mcp.map((surface) => configPinStatus(surface.file)))).flat();
   const findings: readonly Finding[] = [
     ...agentFindings(agents),
     ...mcpFindings(mcp),
+    ...pins
+      .filter((pin) => !pin.ok)
+      .map((pin): Finding => ({
+        class: 'mcp-pin-drifted',
+        severity: 'high',
+        detail: `${pin.name}: ${pin.detail}`,
+        fix: null,
+      })),
     ...contextFindings(context),
     ...privilegeFindings(privilege),
     ...repoFindings(repo),

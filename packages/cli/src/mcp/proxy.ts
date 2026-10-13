@@ -50,17 +50,42 @@ export interface McpProxyOptions {
    * dictionary to disk; both are decisions to be asked for, not defaults.
    */
   readonly cloak?: boolean;
+  readonly pin?: string;
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
+  if (options.pin === undefined) return runProxy(options);
+  let pinned;
+  try {
+    const { preparePin } = await import('./pin.js');
+    pinned = await preparePin({ ...options, pin: options.pin });
+  } catch {
+    options.stderr.write(
+      'stroq mcp: pinned server is not confirmed or its files changed; refusing to start\n',
+    );
+    return 1;
+  }
+  try {
+    return await runProxy(
+      { ...options, command: pinned.command, args: pinned.args, passEnv: options.passEnv ?? [] },
+      pinned.cwd,
+    );
+  } finally {
+    await pinned.cleanup();
+  }
+}
+
+async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<number> {
   const graceMs = options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
-  // No `cwd`: the server keeps the one the client gave the proxy. `inherit` on fd 2
+  // Unpinned servers keep the client's cwd; pinned servers run in the private copy.
+  // `inherit` on fd 2
   // hands the server the proxy's own stderr, so its logging reaches the client
   // untouched and is never parsed as a message. The environment is NOT inherited
   // whole — the proxy holds the user's entire shell, and a wrapped server gets only
   // what `childEnv` allows; a legacy wrapper (`passEnv === null`) is the one case
   // where it still does, because nothing recorded what that server actually needs.
   const child = spawn(options.command, [...options.args], {
+    ...(serverCwd === undefined ? {} : { cwd: serverCwd }),
     ...(options.passEnv === null ? {} : { env: childEnv(options.passEnv) }),
     stdio: ['pipe', 'pipe', 'inherit'],
   });

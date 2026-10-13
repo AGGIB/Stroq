@@ -101,7 +101,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'mcp',
-    synopsis: 'mcp --server <name> [--cloak] -- <command> …',
+    synopsis: 'mcp --server <name> [--pin sha256:<digest>] [--cloak] -- <command> …',
     about: [
       'the stdio MCP proxy `init --agent mcp` writes into a client config: judges every',
       'tools/call against your policy and scans every result on its way back',
@@ -112,6 +112,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--cwd <dir>', 'the project directory decisions are made for'],
       ['--session <id>', 'the session id; default mcp:<client>'],
       ['--pass-env <names>', 'comma-separated variables the server is started with'],
+      ['--pin sha256:<digest>', 'run only locally confirmed server bytes from a private copy'],
       ['--cloak', 'replace detected values in results before the model reads them'],
     ],
     passThrough: true,

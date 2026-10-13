@@ -2,6 +2,7 @@
 export type FindingClass =
   | 'agent-unprotected'
   | 'mcp-unwrapped'
+  | 'mcp-pin-drifted'
   | 'mcp-http-unreachable'
   | 'mcp-tool-description-flagged'
   | 'context-flagged'

@@ -126,6 +126,15 @@ export interface OriginalCommand {
  */
 const coerceArgs = (args: readonly unknown[]): readonly string[] => args.map((arg) => String(arg));
 
+/** Preserve even malformed pins: a rewrite must not silently remove a runtime check. */
+export function wrapperPinArgs(args: readonly unknown[]): readonly string[] {
+  const at = wrapperIndex(args);
+  const before = at === null ? [] : args.slice(at, args.indexOf('--', at));
+  return before.flatMap((value, i) =>
+    value === '--pin' ? ['--pin', String(before[i + 1] ?? '')] : [],
+  );
+}
+
 /** The command a wrapped entry wraps, read back from after the wrapper's own `--`. */
 export function unwrapArgs(args: readonly unknown[]): OriginalCommand | null {
   const at = wrapperIndex(args);
@@ -220,6 +229,7 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
     original?.command ?? (typeof entry['command'] === 'string' ? entry['command'] : '');
   if (command === '') return { entry, action: 'skipped (no command)' };
   const args = original?.args ?? coerceArgs(argsOf(entry));
+  const pins = wrapperPinArgs(argsOf(entry));
   return {
     action: original === null ? 'wrapped' : 'already wrapped',
     entry: {
@@ -232,6 +242,7 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
         name,
         '--client',
         opts.client,
+        ...pins,
         '--cwd',
         opts.cwd,
         // Always written, empty list and all: its PRESENCE is what tells the proxy

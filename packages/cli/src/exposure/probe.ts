@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { loadBundledRules, scanContent, scanFieldsForTool } from '@stroq/core';
-import { readMcpConfig, unwrapArgs } from '../commands/mcp-config.js';
+import { readMcpConfig, unwrapArgs, wrapperPinArgs } from '../commands/mcp-config.js';
 import { childEnv } from '../mcp/child-env.js';
 import { killChildTree } from '../mcp/kill-child.js';
 import type { Finding } from './findings.js';
@@ -42,8 +42,9 @@ function specsFrom(file: string): readonly ServerSpec[] {
     // HTTP entries name a URL rather than a command: there is no process to start.
     if (typeof entry['command'] !== 'string') continue;
     const args = Array.isArray(entry['args']) ? entry['args'] : [];
-    // Probe the real server, not a nested `stroq mcp` wrapper around it.
-    const unwrapped = unwrapArgs(args);
+    // A pin must run through its verifying proxy even during a probe. Unwrapping
+    // it here would start unchecked store bytes before exposure reports drift.
+    const unwrapped = wrapperPinArgs(args).length === 0 ? unwrapArgs(args) : null;
     specs.push({
       name,
       command: unwrapped ? unwrapped.command : entry['command'],
