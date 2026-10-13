@@ -1,8 +1,8 @@
-import { opaque, trimmed } from './credential-values.js';
+import { opaque, trimmed, USER_PASSWORD_MIN } from './credential-values.js';
 
 /**
  * Single-dash password flags and arguments for common CLI commands:
- * - `mysql`, `mariadb`, `mysqldump` with glued `-p<pass>` (e.g. `-pSecret`, `-p=Secret`)
+ * - `mysql`, `mariadb`, `mysqldump`, `mysqladmin`, etc. with glued `-p<pass>` (e.g. `-pSecret`, `-p=Secret`)
  * - `docker login`, `podman login` with `-p`
  * - `sshpass` with `-p`
  * - `redis-cli` with `-a`
@@ -12,9 +12,17 @@ import { opaque, trimmed } from './credential-values.js';
  * Bare `-p` (interactive prompt without value) stays null.
  */
 
-const USER_PASSWORD_MIN = 4;
+const MYSQL_COMMANDS: ReadonlySet<string> = new Set([
+  'mysql',
+  'mariadb',
+  'mysqldump',
+  'mysqladmin',
+  'mariadb-dump',
+  'mariadb-admin',
+  'mysqlcheck',
+  'mysqlimport',
+]);
 
-const MYSQL_COMMANDS: ReadonlySet<string> = new Set(['mysql', 'mariadb', 'mysqldump']);
 const WRAPPER_COMMANDS: ReadonlySet<string> = new Set([
   'sudo',
   'env',
@@ -63,6 +71,13 @@ function cleanPasswordValue(raw: string): string {
   return trimmed(s);
 }
 
+/** Whether a value matches a container port mapping like 3306:3306 or 8080:80. */
+function isPortMapping(val: string): boolean {
+  return /^(?:(?:\d{1,3}\.){3}\d{1,3}:)?\d+(?:-\d+)?:(?:\d+(?:-\d+)?)(?:\/(?:tcp|udp))?$/i.test(
+    val,
+  );
+}
+
 /** Whether a password value is opaque and meets minimum length. */
 function isPasswordValue(val: string): boolean {
   return opaque(val, USER_PASSWORD_MIN);
@@ -84,10 +99,29 @@ function extractFlagValue(
     return { found: true, value: cleanPasswordValue(word.slice(flag.length + 1)) };
   }
   if (word.startsWith(flag) && word.length > flag.length && word.charCodeAt(flag.length) !== 0x2d) {
-    const raw = word.startsWith(`${flag}=`) ? word.slice(flag.length + 1) : word.slice(flag.length);
+    const raw = word.slice(flag.length);
     return { found: true, value: cleanPasswordValue(raw) };
   }
   return { found: false, value: '' };
+}
+
+function checkMysql(word: string): boolean {
+  if (word.startsWith('-p') && word.length > 2 && word.charCodeAt(2) !== 0x2d) {
+    const rawVal = word.startsWith('-p=') ? word.slice(3) : word.slice(2);
+    const val = cleanPasswordValue(rawVal);
+    if (!isPortMapping(val) && isPasswordValue(val)) return true;
+  }
+  return false;
+}
+
+function checkDockerLogin(word: string, nextWord: string | undefined): boolean {
+  const { found, value } = extractFlagValue('-p', word, nextWord);
+  return found && isPasswordValue(value);
+}
+
+function checkRedisCli(word: string, nextWord: string | undefined): boolean {
+  const { found, value } = extractFlagValue('-a', word, nextWord);
+  return found && isPasswordValue(value);
 }
 
 /**
@@ -99,18 +133,24 @@ function extractFlagValue(
 export function singleDashPasswordInWords(words: readonly string[]): boolean {
   let currentCmd: string | null = null;
   let dockerIsLogin = false;
+  let sshpassExpectArg = false;
 
   for (let i = 0; i < words.length; i += 1) {
     const raw = words[i] ?? '';
     if (raw === '') continue;
 
     const isChainOp = raw === '&&' || raw === '||' || raw === '|' || raw === '&' || raw === ';';
-    const endsWithSep = raw.endsWith(';') || raw.endsWith('&');
-    let word = endsWithSep ? raw.replace(/[;&]+$/, '') : raw;
+    let end = raw.length;
+    while (end > 0 && (raw.charCodeAt(end - 1) === 0x3b || raw.charCodeAt(end - 1) === 0x26)) {
+      end -= 1;
+    }
+    const endsWithSep = end < raw.length;
+    let word = endsWithSep ? raw.slice(0, end) : raw;
 
     if (isChainOp) {
       currentCmd = null;
       dockerIsLogin = false;
+      sshpassExpectArg = false;
       continue;
     }
 
@@ -129,6 +169,7 @@ export function singleDashPasswordInWords(words: readonly string[]): boolean {
       }
       currentCmd = name;
       dockerIsLogin = false;
+      sshpassExpectArg = false;
       if (endsWithSep) {
         currentCmd = null;
       }
@@ -136,9 +177,17 @@ export function singleDashPasswordInWords(words: readonly string[]): boolean {
     }
 
     const name = commandNameOf(word);
-    if (MYSQL_COMMANDS.has(name) || name === 'sshpass' || name === 'redis-cli') {
+
+    // Only allow switching to mysql/redis-cli if not inside docker run or sshpass or other
+    if (
+      currentCmd !== 'docker-run' &&
+      currentCmd !== 'other' &&
+      currentCmd !== 'sshpass' &&
+      (MYSQL_COMMANDS.has(name) || name === 'sshpass' || name === 'redis-cli')
+    ) {
       currentCmd = name;
       dockerIsLogin = false;
+      sshpassExpectArg = false;
       if (endsWithSep) {
         currentCmd = null;
       }
@@ -146,35 +195,49 @@ export function singleDashPasswordInWords(words: readonly string[]): boolean {
     }
 
     if (MYSQL_COMMANDS.has(currentCmd)) {
-      if (word.startsWith('-p') && word.length > 2 && word.charCodeAt(2) !== 0x2d) {
-        const rawVal = word.startsWith('-p=') ? word.slice(3) : word.slice(2);
-        const val = cleanPasswordValue(rawVal);
-        if (isPasswordValue(val)) return true;
-      }
+      if (checkMysql(word)) return true;
     } else if (currentCmd === 'docker' || currentCmd === 'podman') {
       if (!dockerIsLogin) {
         if (!word.startsWith('-')) {
           if (name === 'login') {
             dockerIsLogin = true;
+          } else if (name === 'run') {
+            currentCmd = 'docker-run';
+          } else if (name === 'exec') {
+            currentCmd = 'exec';
           } else {
             currentCmd = 'other';
           }
         }
       } else {
-        const { found, value } = extractFlagValue('-p', word, words[i + 1]);
-        if (found && isPasswordValue(value)) return true;
+        if (checkDockerLogin(word, words[i + 1])) return true;
       }
     } else if (currentCmd === 'sshpass') {
-      const { found, value } = extractFlagValue('-p', word, words[i + 1]);
-      if (found && isPasswordValue(value)) return true;
+      if (sshpassExpectArg) {
+        sshpassExpectArg = false;
+      } else if (word === '-p') {
+        sshpassExpectArg = true;
+        const next = words[i + 1];
+        if (next !== undefined && isPasswordValue(cleanPasswordValue(next))) return true;
+      } else if (word.startsWith('-p') && word.charCodeAt(2) !== 0x2d) {
+        const raw = word.startsWith('-p=') ? word.slice(3) : word.slice(2);
+        if (isPasswordValue(cleanPasswordValue(raw))) return true;
+      } else if (word === '-f' || word === '-d' || word === '-P') {
+        sshpassExpectArg = true;
+      } else if (word.startsWith('-')) {
+        // Other option flag (e.g. -e, -v, glued -f..., -d..., -P...)
+      } else {
+        // Reached the command (ssh, scp, etc.)
+        currentCmd = 'other';
+      }
     } else if (currentCmd === 'redis-cli') {
-      const { found, value } = extractFlagValue('-a', word, words[i + 1]);
-      if (found && isPasswordValue(value)) return true;
+      if (checkRedisCli(word, words[i + 1])) return true;
     }
 
     if (endsWithSep) {
       currentCmd = null;
       dockerIsLogin = false;
+      sshpassExpectArg = false;
     }
   }
 

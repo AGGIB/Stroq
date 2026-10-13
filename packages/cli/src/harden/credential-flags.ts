@@ -1,6 +1,6 @@
 import { singleDashPasswordInWords } from './credential-commands.js';
 import { isPlainName, secretUnderPair } from './credential-pairs.js';
-import { isNumeric, isQuote, opaque, trimmed } from './credential-values.js';
+import { isNumeric, isQuote, opaque, trimmed, USER_PASSWORD_MIN } from './credential-values.js';
 
 /**
  * Secrets given on a command line: the value after a flag that says it is one (`--password
@@ -9,8 +9,6 @@ import { isNumeric, isQuote, opaque, trimmed } from './credential-values.js';
  */
 
 const FLAG_VALUE_MIN = 6;
-/** As for the password in the front of a URL. */
-const USER_PASSWORD_MIN = 4;
 /** More than any flag in the lists below is long; a longer word is not looked up in them. */
 const MAX_FLAG_CHARS = 32;
 
