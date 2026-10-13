@@ -262,6 +262,13 @@ export const DESTRUCTIVE: ReadonlyArray<readonly [TextTest, string]> = [
 // filenames beside them kept working. Half a credential list checking out is the
 // shape this whole pass exists to remove. The two `/proc` and `/etc` entries keep
 // their slashes: those name POSIX files that have no Windows counterpart.
+//
+// The GitHub CLI keeps its OAuth token in `hosts.yml` when it is not in the OS keyring:
+// `~/.config/gh/hosts.yml`, and `%AppData%\GitHub CLI\hosts.yml` on Windows (written in a
+// shell as `GitHub\ CLI` when the space is escaped). The file is named whole, so that an
+// inventory called `hosts.yml`, `/etc/hosts` and the CLI's own `config.yml` stay what they
+// are. Case is folded: the Windows folder is spelled however the agent likes, and macOS reads
+// `.CONFIG/GH/HOSTS.YML` as the same file.
 export const SECRET_PATTERNS: readonly PatternTest[] = [
   /(^|[\s"'/\\=])~?[/\\]?\.ssh([/\\]|\b)/,
   /\bid_(rsa|ed25519|ecdsa|dsa)\b/,
@@ -273,6 +280,8 @@ export const SECRET_PATTERNS: readonly PatternTest[] = [
   /\.(npmrc|netrc|pgpass|git-credentials)\b/,
   /\.kube[/\\]config\b/,
   /\.config[/\\]gcloud\b/,
+  /\.config[/\\]gh[/\\]hosts\.yml\b/i,
+  /\bGitHub(?:\\ | )CLI[/\\]hosts\.yml\b/i,
   /\/etc\/(shadow|passwd)\b/,
   /\bsecurity\s+find-(generic|internet)-password\b/,
   followedBy(/\/proc\//, /\/environ\b/, 'word'),
