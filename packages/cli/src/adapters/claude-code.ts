@@ -14,10 +14,23 @@ import { z } from 'zod';
 import { logError } from '../log.js';
 
 export const ClaudeHookInputSchema = z.looseObject({
-  session_id: z.string().min(1),
-  tool_use_id: z.string().min(1).optional(),
+  session_id: z
+    .string()
+    .min(1)
+    .max(256)
+    .refine((text) => Buffer.byteLength(text) <= 256),
+  tool_use_id: z
+    .string()
+    .min(1)
+    .max(256)
+    .refine((text) => Buffer.byteLength(text) <= 256)
+    .optional(),
   hook_event_name: z.enum(['PreToolUse', 'PostToolUse', 'PostToolUseFailure']),
-  tool_name: z.string().min(1),
+  tool_name: z
+    .string()
+    .min(1)
+    .max(256)
+    .refine((text) => Buffer.byteLength(text) <= 256),
   tool_input: z.record(z.string(), z.unknown()).default({}),
   cwd: z.string().default(''),
   tool_result: z.unknown().optional(),

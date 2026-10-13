@@ -2,8 +2,14 @@ import { createServer, request } from 'node:http';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import type { StroqEngine } from '@stroq/core';
-import { denyOutput, handleClaudeHook, type HookOutput } from '../adapters/claude-code.js';
+import {
+  ClaudeHookInputSchema,
+  denyOutput,
+  handleClaudeHook,
+  type HookOutput,
+} from '../adapters/claude-code.js';
 import { withDeadline } from '../commands/hook.js';
+import { taskEvents } from './events.js';
 
 const MAX_BYTES = 1_048_576;
 const FAILURE = 'Task Lock: the parent controller is unavailable; every tool is refused.';
@@ -12,8 +18,9 @@ const FAILURE = 'Task Lock: the parent controller is unavailable; every tool is 
 export async function startTaskBroker(
   engine: StroqEngine,
   token: string,
-  context: { readonly cwd: string; readonly sessionId: string },
+  context: { readonly cwd: string; readonly sessionId: string; readonly maxEvents?: number },
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
+  const events = taskEvents(context.maxEvents);
   const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     try {
@@ -26,16 +33,20 @@ export async function startTaskBroker(
         if (bytes > MAX_BYTES) throw new Error('oversize hook');
         text += String(chunk);
       }
-      const input = JSON.parse(text) as Record<string, unknown>;
+      // Unknown top-level keys are not audit metadata: a forged post must not turn
+      // megabytes of key names into an unbounded resultMissing diagnostic.
+      const input = ClaudeHookInputSchema.strip().parse(JSON.parse(text));
       if (
         typeof input['cwd'] !== 'string' ||
         !insideProject(input['cwd'], context.cwd) ||
         input['session_id'] !== context.sessionId
       )
         throw new Error('hook context differs from launch');
+      events.claim(input);
       const out = await withDeadline(handleClaudeHook(engine, input), 9_000, () =>
         denyOutput(FAILURE),
       );
+      events.complete(input, out);
       res.end(JSON.stringify(out));
     } catch {
       res.end(JSON.stringify(denyOutput(FAILURE)));

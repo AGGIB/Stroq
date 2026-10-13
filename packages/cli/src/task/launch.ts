@@ -40,12 +40,16 @@ export async function launchTask(input: TaskLaunch): Promise<number> {
   let broker: Awaited<ReturnType<typeof startTaskBroker>> | undefined;
   let prepared: ReturnType<typeof prepareTask> | undefined;
   let exitCode: number | null = null;
+  const stop = new AbortController();
   try {
     const engine = createEngineAt({
       home,
       userHome: homedir(),
       policy,
-      scope: taskGate(home, policy, pins),
+      scope: taskGate(home, policy, pins, (reason) => {
+        process.stderr.write(`stroq task: ${reason}; stopping the agent.\n`);
+        stop.abort();
+      }),
       projectRoot: body.projectRoot,
     });
     broker = await startTaskBroker(engine, randomBytes(24).toString('hex'), {
@@ -60,6 +64,7 @@ export async function launchTask(input: TaskLaunch): Promise<number> {
       args: srt === null ? claudeArgs : srtArgv(prepared.sandbox, agent, claudeArgs),
       env: taskChildEnvironment(input, prepared.fakeHome, broker.url, pins),
       timeoutMs: Math.max(1, Date.parse(body.expiresAt) - Date.now()),
+      stopSignal: stop.signal,
     });
     return exitCode;
   } finally {
@@ -69,7 +74,9 @@ export async function launchTask(input: TaskLaunch): Promise<number> {
       rmSync(prepared.fakeHome, { recursive: true, force: true });
       rmSync(prepared.dir, { recursive: true, force: true });
     }
-    await writeReceipt(home, body.taskId, exitCode);
+    await writeReceipt(home, body.taskId, exitCode, body.mode ?? 'unknown');
+    if (srt === null)
+      process.stdout.write('ADVISORY: this run used --hook-only without OS isolation.\n');
     process.stdout.write(`Receipt: ${join(home, 'tasks', body.taskId, 'receipt.json')}\n`);
   }
 }

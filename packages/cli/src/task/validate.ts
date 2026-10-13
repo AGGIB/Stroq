@@ -20,7 +20,12 @@ export function canonicalTaskHome(path: string): string {
 }
 
 /** Project writes must not replace a hook executable through an editable ancestor. */
-export function validateTaskExecutables(root: string, node: string, agent: string): void {
+export function validateTaskExecutables(
+  root: string,
+  node: string,
+  agent: string,
+  srt?: string,
+): void {
   if (inside(root, realpathSync(node)))
     throw new Error(
       'the project contains the hook Node executable; use an external Node installation',
@@ -29,6 +34,8 @@ export function validateTaskExecutables(root: string, node: string, agent: strin
     throw new Error(
       'the project contains the agent runtime; use an external Claude Code installation',
     );
+  if (srt !== undefined && inside(root, dirname(realpathSync(srt))))
+    throw new Error('the project contains the sandbox runtime; use an external srt installation');
 }
 
 /** A filesystem carve-out must never re-open the signing key through an ancestor or an alias. */

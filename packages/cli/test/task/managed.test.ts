@@ -7,6 +7,33 @@ vi.mock('node:child_process', () => ({ spawnSync: probe }));
 afterEach(() => vi.resetAllMocks());
 
 describe('managed task hosts', () => {
+  it('checks the per-user macOS managed preferences from os.userInfo', () => {
+    expect(
+      hasManagedTaskPolicy({
+        platform: 'darwin',
+        username: () => 'managed-user',
+        exists: (path) =>
+          path === '/Library/Managed Preferences/managed-user/com.anthropic.claudecode.plist',
+      }),
+    ).toBe(true);
+    expect(
+      hasManagedTaskPolicy({
+        platform: 'darwin',
+        username: () => {
+          throw new Error('unavailable user');
+        },
+        exists: () => false,
+      }),
+    ).toBe(true);
+  });
+  it('conservatively refuses WSL until Windows policy precedence is validated', () => {
+    expect(hasManagedTaskPolicy({ platform: 'linux', wsl: () => true, exists: () => false })).toBe(
+      true,
+    );
+    expect(hasManagedTaskPolicy({ platform: 'linux', wsl: () => false, exists: () => false })).toBe(
+      false,
+    );
+  });
   it('treats unreadable managed files as present while ignoring absent ones', () => {
     stat.mockImplementation(() => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' });

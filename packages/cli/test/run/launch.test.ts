@@ -80,6 +80,26 @@ describe('exitCodeFor', () => {
 });
 
 describe('launch', () => {
+  it('stops the child tree when its task controller aborts and removes the listener after close', async () => {
+    const h = harness();
+    const controller = new AbortController();
+    const kill = vi.fn();
+    const result = launch({
+      ...h,
+      command: 'claude',
+      args: [],
+      env: {},
+      stopSignal: controller.signal,
+      kill,
+    });
+    controller.abort();
+    expect(kill).toHaveBeenCalledWith(h.child, 'SIGTERM');
+    h.child.emit('close', 1, null);
+    expect(await result).toBe(1);
+    expect(
+      await launch({ ...h, command: 'claude', args: [], env: {}, stopSignal: controller.signal }),
+    ).toBe(1);
+  });
   it('force-stops a task that ignores the expiry signal', async () => {
     vi.useFakeTimers();
     try {

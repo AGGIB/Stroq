@@ -12,6 +12,12 @@ const parses = (value: unknown): boolean => PermitBodySchema.safeParse(value).su
 const bodyWith = (patch: Record<string, unknown>): unknown => ({ ...sampleBody(), ...patch });
 
 describe('PermitBodySchema', () => {
+  it('accepts recorded launch modes and preserves legacy permits with unknown mode', () => {
+    expect(parses(bodyWith({ mode: 'srt' }))).toBe(true);
+    expect(parses(bodyWith({ mode: 'hook-only' }))).toBe(true);
+    expect(parses(bodyWith({ mode: 'sandboxed' }))).toBe(false);
+    expect(parses(sampleBody())).toBe(true);
+  });
   it('accepts a complete body, with and without a session id', () => {
     expect(parses(sampleBody())).toBe(true);
     const { sessionId: _dropped, ...withoutSession } = sampleBody();

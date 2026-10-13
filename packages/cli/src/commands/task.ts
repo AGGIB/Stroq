@@ -18,6 +18,7 @@ import { taskContract } from '../task/contract.js';
 import { launchTask } from '../task/launch.js';
 import { hasManagedTaskPolicy } from '../task/managed.js';
 import { canonicalTaskHome, validateTaskExecutables, validateTaskPaths } from '../task/validate.js';
+import { readClaudeVersion, requireClaudeVersion } from '../task/version.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
 import { currentTerminal } from '../ui/terminal.js';
@@ -33,6 +34,7 @@ export interface TaskDeps {
   readonly entry?: string;
   readonly claude?: string;
   readonly managed?: () => boolean;
+  readonly version?: (agent: string, env: NodeJS.ProcessEnv) => string | null;
 }
 
 export async function confirmTask(): Promise<boolean> {
@@ -63,7 +65,7 @@ export async function runTask(
     return 1;
   }
   const home = canonicalTaskHome(deps.home ?? stroqHome());
-  if (!args.hookOnly && (deps.managed ?? hasManagedTaskPolicy)()) {
+  if ((deps.managed ?? hasManagedTaskPolicy)()) {
     process.stderr.write(
       'stroq task: managed Claude settings can override the task hooks; this host is unsupported. Nothing started.\n',
     );
@@ -83,8 +85,10 @@ export async function runTask(
     now: (deps.now ?? (() => new Date()))(),
     policyDigest: policySha256(policy),
   });
-  if (!args.hookOnly) validateTaskExecutables(body.projectRoot, process.execPath, agentPath);
+  if (!args.hookOnly)
+    validateTaskExecutables(body.projectRoot, process.execPath, agentPath, srt as string);
   validateTaskPaths(body, home, args.hookOnly);
+  requireClaudeVersion((deps.version ?? readClaudeVersion)(agentPath, env));
   process.stdout.write(`${screen}\n`);
   if (!(await (deps.confirm ?? confirmTask)())) return 1;
   if (Date.parse(body.expiresAt) <= Date.now())

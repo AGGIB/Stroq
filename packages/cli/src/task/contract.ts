@@ -45,7 +45,6 @@ export function taskContract(
       'MultiEdit',
       'NotebookEdit',
       'Bash',
-      'TodoRead',
       'TodoWrite',
       'ExitPlanMode',
     ],
@@ -62,7 +61,10 @@ export function taskContract(
     `Read: ${scope.read.allow.join(', ')}`,
     `Write: ${scope.write.allow.join(', ')}`,
     `Tools: ${scope.tools.join(', ')}`,
-    'Shell: allowed; tool network: none; MCP: none',
+    args.hookOnly
+      ? 'Shell: allowed; hook network checks addresses written in commands; commands that fetch implicitly can connect; MCP: none'
+      : 'Shell: allowed; tool network: none; MCP: none',
+    'Grep/Glob require exact-call extensions; their search roots do not enumerate all files.',
     'Sandbox runtime reads: system executables/libraries, the copied hook and the fake HOME.',
     `Expires: ${new Date(input.now.getTime() + args.ttlMs).toISOString()}`,
     args.hookOnly
@@ -75,6 +77,7 @@ export function taskContract(
     nonce: randomBytes(24).toString('base64url'),
     host: 'claude-code',
     profile: args.profile,
+    mode: args.hookOnly ? 'hook-only' : 'srt',
     projectRoot: root,
     sessionId: randomUUID(),
     issuedAt: input.now.toISOString(),

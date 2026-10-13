@@ -17,6 +17,11 @@ import { runTask } from '../../src/commands/task.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 import { prepareTask } from '../../src/task/prepare.js';
 
+vi.mock('../../src/task/version.js', async (original) => ({
+  ...(await original<typeof import('../../src/task/version.js')>()),
+  readClaudeVersion: () => '2.1.271 (Claude Code)',
+}));
+
 const dirs: string[] = [];
 afterEach(() => {
   dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true }));
@@ -29,6 +34,33 @@ const temp = () => {
 };
 
 describe('task command', () => {
+  it('refuses an old Claude version and a project-local sandbox runtime before confirmation', async () => {
+    const home = temp();
+    const cwd = temp();
+    const srt = join(cwd, 'srt');
+    writeFileSync(srt, 'test fixture');
+    const confirm = vi.fn();
+    await expect(
+      runTask(['--', 'fix'], cwd, {
+        home,
+        claude: process.execPath,
+        srt: () => srt,
+        managed: () => false,
+        confirm,
+      }),
+    ).rejects.toThrow('sandbox runtime');
+    await expect(
+      runTask(['--hook-only', '--', 'fix'], cwd, {
+        home,
+        claude: process.execPath,
+        version: () => '2.1.247',
+        managed: () => false,
+        confirm,
+      }),
+    ).rejects.toThrow('Claude Code 2.1.248');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
+  });
   it('removes protected runtime and temporary home when preparation fails', () => {
     const home = temp();
     const entry = join(temp(), 'source.ts');
@@ -44,7 +76,7 @@ describe('task command', () => {
     const launch = vi.fn();
     const confirm = vi.fn();
     const home = temp();
-    const options = { home, srt: () => '/trusted/srt', managed: () => false, launch, confirm };
+    const options = { home, srt: () => process.execPath, managed: () => false, launch, confirm };
     await expect(
       runTask(['--', 'fix'], dirname(process.execPath), {
         ...options,
@@ -66,23 +98,26 @@ describe('task command', () => {
     symlinkSync(temp(), join(home, 'task-runs'), process.platform === 'win32' ? 'junction' : 'dir');
     expect(() => prepareTask(home, 'linked-task', CLI_ENTRY)).toThrow(/linked|canonical/);
   });
-  it('refuses managed hosts before asking or launching', async () => {
-    const launch = vi.fn();
-    const confirm = vi.fn();
-    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    expect(
-      await runTask(['--', 'fix'], temp(), {
-        home: temp(),
-        srt: () => '/trusted/srt',
-        managed: () => true,
-        launch,
-        confirm,
-        claude: process.execPath,
-      }),
-    ).toBe(1);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(launch).not.toHaveBeenCalled();
-  });
+  it.each([{ mode: [] }, { mode: ['--hook-only'] }])(
+    'refuses managed hosts in either mode before asking or launching ($mode)',
+    async ({ mode }) => {
+      const launch = vi.fn();
+      const confirm = vi.fn();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      expect(
+        await runTask([...mode, '--', 'fix'], temp(), {
+          home: temp(),
+          srt: () => process.execPath,
+          managed: () => true,
+          launch,
+          confirm,
+          claude: process.execPath,
+        }),
+      ).toBe(1);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(launch).not.toHaveBeenCalled();
+    },
+  );
   it('launches through srt with protected state and a fresh immutable hook configuration', async () => {
     const home = temp();
     const cwd = temp();
@@ -97,7 +132,7 @@ describe('task command', () => {
         args: readonly string[];
         env: NodeJS.ProcessEnv;
       }) => {
-        expect(command).toBe('/trusted/srt');
+        expect(command).toBe(process.execPath);
         expect(args.slice(0, 3)).toEqual(['--settings', expect.any(String), '--']);
         expect(args[3]).toBe(process.execPath);
         const settings = JSON.parse(readFileSync(args[1] as string, 'utf8'));
@@ -112,7 +147,7 @@ describe('task command', () => {
     expect(
       await runTask(['--', 'fix'], cwd, {
         home,
-        srt: () => '/trusted/srt',
+        srt: () => process.execPath,
         claude: process.execPath,
         launch,
         confirm: async () => true,
@@ -234,7 +269,7 @@ describe('task command', () => {
     ).rejects.toThrow('launch failed');
     expect(
       JSON.parse(readFileSync(join(home, 'tasks/test-task/receipt.json'), 'utf8')),
-    ).toMatchObject({ taskId: 'test-task', calls: [] });
+    ).toMatchObject({ taskId: 'test-task', calls: [], mode: 'hook-only' });
   });
   it('runs the copied packaged hook against the parent without a real model', async () => {
     const home = join(temp(), "quoted' task");

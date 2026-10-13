@@ -782,9 +782,13 @@ function endsUrl(code: number): boolean {
   );
 }
 
-/** The index after `http://` or `https://`, in any case, if one starts at `at`; otherwise -1. */
+/** The index after a supported network scheme, in any case; otherwise -1. */
 function afterScheme(text: string, at: number): number {
   const lower = (offset: number): number => text.charCodeAt(at + offset) | 0x20;
+  if (lower(0) === 0x73 && lower(1) === 0x73 && lower(2) === 0x68 && text.startsWith('://', at + 3))
+    return at + 6;
+  if (lower(0) === 0x67 && lower(1) === 0x69 && lower(2) === 0x74 && text.startsWith('://', at + 3))
+    return at + 6;
   // `| 0x20` folds a capital letter to its small one, and maps no other character to a letter.
   if (lower(0) !== 0x68 || lower(1) !== 0x74 || lower(2) !== 0x74 || lower(3) !== 0x70) return -1;
   const next = lower(4) === 0x73 ? at + 5 : at + 4;
@@ -801,7 +805,7 @@ function hostOfUrl(url: string): string {
 }
 
 /**
- * The addresses a command names: each `http://` or `https://` address, and each `user@host`
+ * The addresses a command names: HTTP(S), SSH and Git URLs, scp-style `host:path`, and `user@host`
  * target, with its text as written. A sibling of `hostsOf`, which keeps only the host and is
  * what the policy reads; this is for a task's scope and for egress binding, which need the
  * address.
@@ -859,6 +863,18 @@ export function commandUrls(
   }
   for (const [target, host] of text.matchAll(SSH_TARGET)) {
     if (!keep(target, () => host ?? '')) break;
+  }
+  // Require a word boundary and at least two host characters so a Windows drive is
+  // never an scp remote. This intentionally counts printed addresses under a task.
+  const scp = /(?:^|[\s"'`])((?:[\w.-]+@)?([\w][\w.-]+):(?!\/\/)[^\s"'`;|&<>()]+)/g;
+  const remoteCommand = /\b(?:git\s+(?:fetch|clone|ls-remote|push)|scp|rsync)\b/.test(text);
+  for (const [, target, host] of text.matchAll(scp)) {
+    // Bare URI names such as node:fs and data:text are not network addresses.
+    // Dotted hosts, localhost and explicit user@host remain addresses anywhere;
+    // short host:path names are remotes only in a transfer command.
+    if (!remoteCommand && !host?.includes('.') && host !== 'localhost' && !target?.includes('@'))
+      continue;
+    if (!keep((target ?? '').slice(0, MAX_URL_CHARS), () => (host ?? '').toLowerCase())) break;
   }
   return { urls: [...found.values()], capped };
 }

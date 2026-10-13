@@ -22,9 +22,16 @@ export interface PermitDeps {
 }
 
 function readTask(home: string, taskId: string, now: Date, archived = false): SignedPermit {
-  const stored = archived
-    ? readRegularFile(join(home, 'tasks', taskId, 'permit.json'), 64 * 1024, { noFollow: true })
-    : null;
+  let stored: ReturnType<typeof readRegularFile> | null = null;
+  if (archived) {
+    try {
+      stored = readRegularFile(join(home, 'tasks', taskId, 'permit.json'), 64 * 1024, {
+        noFollow: true,
+      });
+    } catch {
+      /* The permit store supplies the fail-closed missing/unreadable reason below. */
+    }
+  }
   const found =
     stored?.kind === 'text'
       ? { kind: 'present' as const, text: stored.text }
@@ -61,7 +68,11 @@ export async function runPermit(argv: readonly string[], deps: PermitDeps = {}):
       'usage: stroq permit list | show <task> | extend <task> <fingerprint> | revoke <task>',
     );
   if (verb === 'revoke') {
+    readTask(home, taskId, now, true);
     new FilePermitStore({ home }).revoke(taskId);
+    process.stdout.write(
+      `Revoked task ${taskId}; further tools are denied and the launcher stops the agent when it observes revocation.\n`,
+    );
     return 0;
   }
   const signed = readTask(home, taskId, now, verb === 'show');

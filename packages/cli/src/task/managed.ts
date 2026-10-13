@@ -1,11 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { lstatSync } from 'node:fs';
+import { release, userInfo } from 'node:os';
 import { join } from 'node:path';
 
 interface ManagedHost {
   readonly platform?: NodeJS.Platform;
   readonly exists?: (path: string) => boolean;
   readonly registry?: () => boolean;
+  readonly username?: () => string;
+  readonly wsl?: () => boolean;
 }
 
 function present(path: string): boolean {
@@ -20,6 +23,9 @@ function present(path: string): boolean {
 /** Managed sources outrank --settings, so this release declines locally managed hosts. */
 export function hasManagedTaskPolicy(host: ManagedHost = {}): boolean {
   const platform = host.platform ?? process.platform;
+  // Claude may also read Windows policy sources under WSL. Until that precedence and
+  // registry access are validated, do not claim that our local file probe covers WSL.
+  if (platform === 'linux' && (host.wsl ?? (() => /microsoft/i.test(release())))()) return true;
   const base =
     platform === 'darwin'
       ? '/Library/Application Support/ClaudeCode'
@@ -29,8 +35,17 @@ export function hasManagedTaskPolicy(host: ManagedHost = {}): boolean {
   const paths = ['managed-settings.json', 'managed-settings.d', 'managed-mcp.json'].map(
     (name) => `${base}/${name}`,
   );
-  if (platform === 'darwin')
+  if (platform === 'darwin') {
     paths.push('/Library/Managed Preferences/com.anthropic.claudecode.plist');
+    try {
+      const username = (host.username ?? (() => userInfo().username))();
+      if (!username || username === '.' || username === '..' || /[\/\\\0]/.test(username))
+        return true;
+      paths.push(`/Library/Managed Preferences/${username}/com.anthropic.claudecode.plist`);
+    } catch {
+      return true;
+    }
+  }
   if (paths.some(host.exists ?? present)) return true;
   if (platform !== 'win32') return false;
   try {

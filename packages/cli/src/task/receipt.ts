@@ -3,7 +3,11 @@ import { join } from 'node:path';
 import { AuditLog, type AuditEntry } from '@stroq/core';
 
 /** Missing post events are explicitly unconfirmed: an allow is not evidence of execution. */
-export function taskReceipt(entries: readonly AuditEntry[], taskId: string) {
+export function taskReceipt(
+  entries: readonly AuditEntry[],
+  taskId: string,
+  mode: 'srt' | 'hook-only' | 'unknown' = 'unknown',
+) {
   const pres = entries.filter((entry) => entry.taskId === taskId && entry.phase === 'pre');
   const key = (entry: AuditEntry) => JSON.stringify([entry.sessionId, entry.callId, entry.tool]);
   const posts = new Map<string, { readonly entry: AuditEntry; readonly count: number }>();
@@ -14,6 +18,7 @@ export function taskReceipt(entries: readonly AuditEntry[], taskId: string) {
   return {
     v: 1,
     taskId,
+    mode,
     calls: pres.map((pre) => ({
       callId: pre.callId ?? null,
       tool: pre.tool,
@@ -38,6 +43,7 @@ export async function writeReceipt(
   home: string,
   taskId: string,
   exitCode: number | null = null,
+  mode: 'srt' | 'hook-only' | 'unknown' = 'unknown',
 ): Promise<void> {
   const audit = new AuditLog(join(home, 'audit.jsonl'));
   if (!(await audit.verify()).ok)
@@ -45,7 +51,7 @@ export async function writeReceipt(
   const entries = await audit.readAll();
   writeFileSync(
     join(home, 'tasks', taskId, 'receipt.json'),
-    `${JSON.stringify({ ...taskReceipt(entries, taskId), exitCode }, null, 2)}\n`,
+    `${JSON.stringify({ ...taskReceipt(entries, taskId, mode), exitCode }, null, 2)}\n`,
     { mode: 0o600, flag: 'wx' },
   );
 }
