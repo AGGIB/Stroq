@@ -368,6 +368,19 @@ describe('parent task controller', () => {
     await expect(
       runPermit(['extend', 'test-task', 'a'.repeat(64)], { home: w.home, confirm }),
     ).rejects.toThrow('no extendable');
+    await expect(
+      runPermit(['extend', 'test-task', fp], {
+        home: w.home,
+        confirm: async () => {
+          const changed = signPermit(
+            { ...w.body, screenDigest: 'a'.repeat(64) },
+            w.keys.privateKey,
+          );
+          writeFileSync(join(w.home, 'tasks/test-task/permit.json'), JSON.stringify(changed));
+          return true;
+        },
+      }),
+    ).rejects.toThrow('permit changed while asking');
   });
   it('supports listing/showing/revoking and refuses an unconfirmed extension', async () => {
     const w = world();

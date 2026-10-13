@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -28,6 +29,17 @@ const temp = () => {
 };
 
 describe('task command', () => {
+  it('removes protected runtime and temporary home when preparation fails', () => {
+    const home = temp();
+    const entry = join(temp(), 'source.ts');
+    writeFileSync(entry, 'test fixture');
+    const taskId = `cleanup-failure-${Date.now()}`;
+    expect(() => prepareTask(home, taskId, entry)).toThrow('built CLI');
+    expect(readdirSync(join(home, 'task-runs'))).toEqual([]);
+    expect(
+      readdirSync(tmpdir()).filter((name) => name.startsWith(`stroq-${taskId}-home-`)),
+    ).toEqual([]);
+  });
   it('refuses project-local host executables before asking or signing', async () => {
     const launch = vi.fn();
     const confirm = vi.fn();
@@ -147,8 +159,38 @@ describe('task command', () => {
   it('refuses to silently downgrade without srt', async () => {
     const launch = vi.fn();
     vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    expect(await runTask(['--', 'fix'], temp(), { home: temp(), srt: () => null, launch })).toBe(1);
+    expect(
+      await runTask(['--', 'fix'], temp(), { home: temp(), env: { PATH: temp() }, launch }),
+    ).toBe(1);
     expect(launch).not.toHaveBeenCalled();
+  });
+  it('refuses a missing Claude executable before confirmation', async () => {
+    const confirm = vi.fn();
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runTask(['--hook-only', '--', 'fix'], temp(), {
+        home: temp(),
+        env: { PATH: temp() },
+        confirm,
+      }),
+    ).toBe(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+  it('starts nothing without an interactive confirmation or after preview expiry', async () => {
+    const home = temp();
+    const launch = vi.fn();
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const options = { home, claude: process.execPath, launch };
+    expect(await runTask(['--hook-only', '--', 'fix'], temp(), options)).toBe(1);
+    await expect(
+      runTask(['--hook-only', '--', 'fix'], temp(), {
+        ...options,
+        now: () => new Date(Date.now() - 31 * 60_000),
+        confirm: async () => true,
+      }),
+    ).rejects.toThrow('preview expired');
+    expect(launch).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
   });
   it('shows scope before confirmation and writes nothing when declined', async () => {
     const out = vi.spyOn(process.stdout, 'write').mockReturnValue(true);

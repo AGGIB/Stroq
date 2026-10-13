@@ -1,7 +1,41 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { hasManagedTaskPolicy } from '../../src/task/managed.js';
 
+const { stat, probe } = vi.hoisted(() => ({ stat: vi.fn(), probe: vi.fn() }));
+vi.mock('node:fs', () => ({ lstatSync: stat }));
+vi.mock('node:child_process', () => ({ spawnSync: probe }));
+afterEach(() => vi.resetAllMocks());
+
 describe('managed task hosts', () => {
+  it('treats unreadable managed files as present while ignoring absent ones', () => {
+    stat.mockImplementation(() => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    });
+    expect(hasManagedTaskPolicy({ platform: 'linux' })).toBe(false);
+    stat.mockImplementation(() => {
+      throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    });
+    expect(hasManagedTaskPolicy({ platform: 'linux' })).toBe(true);
+    stat.mockReturnValue({});
+    expect(hasManagedTaskPolicy()).toBe(true);
+  });
+  it('bounds the registry probe and refuses policy presence or probe failure', () => {
+    const host = { platform: 'win32' as const, exists: () => false };
+    probe.mockReturnValue({ status: 0 });
+    expect(hasManagedTaskPolicy(host)).toBe(false);
+    const [exe, args, options] = probe.mock.calls[0] as [string, string[], object];
+    expect(exe.replaceAll('\\', '/')).toMatch(
+      /\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe$/,
+    );
+    expect(args).toContain('-NoProfile');
+    expect(args.at(-1)).toContain('Registry]::LocalMachine');
+    expect(args.at(-1)).toContain('Registry]::CurrentUser');
+    expect(options).toEqual({ stdio: 'ignore', windowsHide: true, timeout: 5000 });
+    for (const status of [1, 2, null]) {
+      probe.mockReturnValue({ status });
+      expect(hasManagedTaskPolicy(host)).toBe(true);
+    }
+  });
   it('checks the standard Linux and macOS policy sources', () => {
     expect(
       hasManagedTaskPolicy({
