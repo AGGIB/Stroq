@@ -869,6 +869,9 @@ export function commandUrls(
   const scp = /(?:^|[\s"'`])((?:[\w.-]+@)?([\w][\w.-]+):(?!\/\/)[^\s"'`;|&<>()]+)/g;
   const remoteCommand = /\b(?:git\s+(?:fetch|clone|ls-remote|push)|scp|rsync)\b/.test(text);
   for (const [, target, host] of text.matchAll(scp)) {
+    // Preserve existing user@dotted-host address/fingerprint semantics and do not
+    // spend the address budget twice on a target SSH_TARGET already recognized.
+    if (target?.includes('@') && /^[\w-]+(?:\.[\w-]+)+$/.test(host ?? '')) continue;
     // Bare URI names such as node:fs and data:text are not network addresses.
     // Dotted hosts, localhost and explicit user@host remain addresses anywhere;
     // short host:path names are remotes only in a transfer command.
