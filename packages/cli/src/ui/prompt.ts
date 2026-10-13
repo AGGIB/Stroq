@@ -7,6 +7,20 @@ const YES = /^(?:y|yes)$/i;
 const NO = /^(?:n|no)$/i;
 const ATTEMPTS = 3;
 
+/** A digest is accepted only from a person at a terminal; EOF and three misses are a refusal. */
+export async function confirmTyped(term: Terminal, digest: string): Promise<boolean> {
+  if (!term.interactive) return false;
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('invalid confirmation digest');
+  term.write(`  sha256:${digest}\n`);
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    const line = await term.readLine('  Type the first 12 hex characters to confirm: ');
+    if (line === null) return false;
+    if (line.trim().toLowerCase() === digest.slice(0, 12)) return true;
+    term.write('  The digest did not match.\n');
+  }
+  return false;
+}
+
 /**
  * Asks `question` and returns the answer. Enter takes the default. An answer that is neither yes nor
  * no is asked again, twice, and then is a no; so is the end of the input. Nothing is changed on a

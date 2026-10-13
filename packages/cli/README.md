@@ -90,6 +90,8 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq exposure [--probe] [--share] [--json]`           | Map this machine's agent surface and report what reaches you; exit 1 on any finding                                                                                                                                                          |
 | `stroq inspect [<dir>] [--json\|--sarif] [--env]`       | Read what a repository runs before you open it with an agent; exit 1 when something runs before you could approve it. `--sarif` writes SARIF 2.1.0 for code scanning, `--env` prints the git settings that neutralise it                     |
 | `stroq vet --from <dir or .tgz> [--json\|--card]`       | Read a skill, MCP server or plugin (folder or .tgz) before you add it, and print its passport: what it asks for or can do, and every blind spot. Reads, never runs. `--expect <sha256>` checks the digest. Not a security certificate        |
+| `stroq add <source or name> [--user] [--restore]`       | Read and confirm a local skill's digest before installing; update an installed name or restore its confirmed bytes from the store                                                                                                            |
+| `stroq remove <name> [--force]`                         | Remove an installed skill after a terminal confirmation; keep outside edits unless `--force` was given                                                                                                                                       |
 | `stroq bench [--corpus <dir>] [--json] [--verbose]`     | Measure the shipped rule set's false-positive rate against a corpus of benign developer documentation; `--verbose` lists the flagged files                                                                                                   |
 | `stroq bench --actions [--json]`                        | Replay 75 scenarios of ordinary agent work against your policy and count how many it interrupts                                                                                                                                              |
 | `stroq coverage [--format <table\|navigator>] [--json]` | Print the control mapping against MITRE ATLAS and OWASP ASI, built from the attack corpus's own scenario tags; `--format=navigator` emits an ATT&CK Navigator layer                                                                          |
@@ -98,6 +100,26 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 `stroq exposure` reads files only. `--probe` is the one flag that starts a process: it launches each configured stdio MCP server, asks once for `tools/list`, scans the tool descriptions and shuts the server down — no tool is ever called. Without it, tool-description poisoning is not covered by the run, and the report says so. `--share` prints a redacted summary built from a whitelist, locally; nothing is transmitted.
 
 The corpus `stroq bench` measures against ships with this repository, not with the npm package; on an installed CLI, point it at your own documentation with `stroq bench --corpus <dir>` — the published number in [`docs/BENCH.md`](https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md) is exactly that command run against the vendored corpus.
+
+## Adding and removing skills
+
+```bash
+stroq vet --from ./my-skill          # read first; runs none of the skill's code
+stroq add ./my-skill                 # local folder or .tgz; terminal confirmation required
+stroq add ./my-skill --user          # ~/.claude/skills instead of ./.claude/skills
+stroq add my-skill                   # update an installed name from its recorded local source
+stroq add my-skill --restore         # restore the confirmed bytes from the store
+stroq remove my-skill                # remove only when the installed digest still matches
+stroq remove my-skill --force        # also remove outside edits, after a terminal y/N question
+```
+
+`add` shows the passport and full SHA-256 digest before writing. A person types the first twelve hex digits for a new install, a restore, a changed source, a new sensitive capability, a weaker basis or a new blind spot. A documentation-only update asks y/N. There is no `--yes` or scripted digest flag: stdin and stdout must both be terminals, outside CI and `TERM=dumb`. This stops scripts, CI and an agent's direct calls; it does not stop an agent you have allowed to drive the terminal. The hook's state gate already denies agent calls to `add` and `remove`.
+
+The inspected buffers are rehashed before writing. The private store is `~/.stroq/store/sha256-<first 32 hex>/{manifest.json,tree/}`; the manifest carries the full digest's entry metadata and executable bits, while stored files have no executable bits. `~/.stroq/passports.json` keeps the confirmed passport, full local source path, installation path, status and receipts. The lock is updated atomically under a process lock, and successful operations also append to the audit chain. A foreign skill directory is never overwritten. An installed name always refers to its recorded installation directory. A skill changed outside Stroq is marked `drifted` when an update or removal checks it; `--restore` discards those outside edits after another digest confirmation. `remove` keeps outside edits unless `--force` was given.
+
+This command installs local skills only. Online fetching, MCP installation and plugin installation are separate features; use `vet` to read an MCP server or plugin. Links and nested repositories cannot be installed. On Windows, archives with executable files are refused because an installed directory cannot preserve their digest's executable bits; local directory digests are platform-dependent. A passport is a reading, not a security certificate, and the store is tamper-evident, not tamper-proof: the same user can edit it. Portable directory renames and path checks narrow concurrent-file-change windows, but do not provide an OS-level isolation boundary.
+
+The lock's receipt is authoritative. If the secondary audit append fails after a change commits, the command exits with an error that explicitly says the change committed and its receipt remains in `passports.json`.
 
 ## Learn more
 

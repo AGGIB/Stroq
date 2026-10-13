@@ -402,7 +402,15 @@ Exit codes: **0** the passport is complete; **1** `--expect` did not match, or a
 
 An agent can run `stroq vet --from` itself: it only reads. The form of `vet` that will go to the network for a package is held back from agents before it exists; this command does not have it yet.
 
-There is no `stroq install`. Typing it prints where to go: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.
+There is no `stroq install`. Typing it prints where to go: `stroq init` guards an agent, `stroq add` adds a local skill after a check.
+
+### Add a skill after reading it
+
+Run `stroq add ./skill-directory` (or give a local `.tgz`) to show its passport and full digest, then type the first twelve hex digits at the terminal to install those inspected bytes. By default it writes `.claude/skills/<name>` in this project; `--user` uses the home directory's `.claude/skills`. This adds local skills only; `vet` still reads MCP servers and plugins without installing them.
+
+`stroq add <installed-name>` updates from its recorded local source, keeping its original installation directory. A new sensitive capability, weaker basis, changed source or new blind spot needs another typed digest; a documentation-only update asks y/N. The old skill remains until confirmation. A directory created outside Stroq is never replaced. Outside changes mark an installed skill `drifted`; `stroq add <name> --restore` restores the previously confirmed store bytes after another typed confirmation. `stroq remove <name>` asks y/N and removes only an unchanged skill; `--force` also removes outside edits.
+
+The content-addressed store and `~/.stroq/passports.json` keep the confirmed bytes, passport, source, status and receipt history. Lock writes are atomic and serialized, and operations also enter the audit chain. The store is tamper-evident, not tamper-proof: its owner can edit it. Confirmation requires terminal stdin and stdout, outside CI and `TERM=dumb`, with no `--yes` or scripted digest flag. This stops scripts, CI and the agent's direct calls; it does not stop an agent you have allowed to drive the terminal. Links and nested repositories are refused for installation. Windows refuses archives whose executable bits cannot be preserved by an installed directory. See the [CLI skill workflow](../packages/cli/README.md#adding-and-removing-skills) for commands and filesystem limits.
 
 ## Or start the agent already confined
 
@@ -696,6 +704,8 @@ node packages/cli/dist/index.js doctor
 | `stroq bench [--corpus <dir> \| --actions] [--json] [--verbose]`                                                                                                              | Measure the shipped rule set's false-positive rate against a corpus of benign developer documentation (the vendored one, or your own with `--corpus <dir>`); `--verbose` lists the flagged files. `--actions` instead replays 75 scenarios of ordinary agent work against your policy and counts how many it interrupts                                                                                                                                              |
 | `stroq coverage [--format table\|navigator] [--json]`                                                                                                                         | Print the control mapping against MITRE ATLAS and OWASP ASI, built from the attack corpus's own scenario tags; `--format navigator` emits an ATT&CK Navigator layer                                                                                                                                                                                                                                                                                                  |
 | `stroq harden [plan\|apply\|undo\|status] [--agent <id>] [--scope user\|project] [--recipe <name>] [--json] [--yes] [--acknowledge-link]`                                     | Make Claude Code's or Cursor's own protection of credential files stronger, show exactly what changes, and undo it byte for byte. `plan` (the default) writes nothing; `apply` and `undo` ask first, or need `--yes` where there is no terminal. `claude-read-deny` adds read rules to `permissions.deny`; `cursor-ignore` adds a block to `.cursorignore`. A filter inside the agent, not a guarantee                                                               |
+| `stroq add <local-source or installed-name> [--user] [--restore]` | Show a local skill's passport and require its typed digest before installing. Update an installed name or restore its confirmed store bytes; no nonterminal confirmation bypass |
+| `stroq remove <name> [--force]` | Remove an unchanged skill after a terminal y/N question; `--force` also removes outside edits. Keep receipts in the lock and audit chain |
 
 ## Policy
 
