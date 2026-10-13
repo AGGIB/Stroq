@@ -101,19 +101,20 @@ describe('undoFile: nothing has changed since', () => {
   });
 
   it.skipIf(onWindows)(
-    'skips a recorded folder that is now a symlink and keeps its target',
+    'keeps an empty recorded folder reached through a symlink in its parent path',
     async () => {
       const e = engine();
-      const targetDir = tempDir('target-dir');
-      writeFileSync(join(targetDir, 'kept.txt'), 'keep me');
+      const targetDir = e.file('target-dir');
+      const targetSubdir = join(targetDir, 'sub');
+      mkdirSync(targetSubdir, { recursive: true });
       const symlinkDir = e.file('link-folder');
       symlinkSync(targetDir, symlinkDir);
 
-      await removeEmptyDirs([symlinkDir], { root: e.project });
+      await removeEmptyDirs([join(symlinkDir, 'sub')], { root: e.project });
 
       expect(existsSync(symlinkDir)).toBe(true);
       expect(existsSync(targetDir)).toBe(true);
-      expect(existsSync(join(targetDir, 'kept.txt'))).toBe(true);
+      expect(existsSync(targetSubdir)).toBe(true);
     },
   );
 

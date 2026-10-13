@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runBenchCommand } from '../../src/commands/bench.js';
 import { commandHelp } from '../../src/help.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
+import { stroqVersion } from '../../src/version.js';
 
 describe('bench command CLI', () => {
   it('documents --latency, --n, --warmup in help', () => {
@@ -101,7 +102,7 @@ describe('bench command CLI', () => {
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout);
     expect(parsed.version).toBe(1);
-    expect(parsed.stroqVersion).toBe('0.25.0');
+    expect(parsed.stroqVersion).toBe(stroqVersion());
     expect(parsed.n).toBe(1);
     expect(parsed.warmup).toBe(0);
     expect(parsed.results).toBeInstanceOf(Array);

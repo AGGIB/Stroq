@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { formatLatencyBench, runLatencyBench, type ChildRunFn } from '../../src/bench/latency.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
+import { stroqVersion } from '../../src/version.js';
 
 describe('latency benchmark engine', () => {
   it('runs real latency benchmark with n=1 and warmup=0, verifying execution and audit scan', async () => {
@@ -14,7 +15,7 @@ describe('latency benchmark engine', () => {
     });
 
     expect(report.version).toBe(1);
-    expect(report.stroqVersion).toBe('0.25.0');
+    expect(report.stroqVersion).toBe(stroqVersion());
     expect(report.unit).toBe('ms');
     expect(report.outlierThresholdMs).toBe(10_000);
     expect(report.n).toBe(1);
@@ -57,7 +58,7 @@ describe('latency benchmark engine', () => {
     const jsonStr = JSON.stringify(report);
     const parsed = JSON.parse(jsonStr);
     expect(parsed.version).toBe(1);
-    expect(parsed.stroqVersion).toBe('0.25.0');
+    expect(parsed.stroqVersion).toBe(stroqVersion());
     expect(parsed.results).toHaveLength(4);
   }, 30_000);
 

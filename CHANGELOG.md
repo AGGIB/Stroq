@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq vet --online` reads npm and GitHub packages before installation.** Downloads are bounded and checked against the requested source; package contents are inspected without running them. Thanks @kok-o (#193).
+- **`stroq prove --agent codex` checks the recorded Windows host contract.** The fixed allow, deny and control probes use the existing ChatGPT login after consent. The driver refuses unverified versions and platforms; its evidence concerns hooks, not sandbox isolation. Thanks @kok-o (#195).
+- **MCP runtime pins verify locally confirmed server bytes.** `stroq mcp --pin` checks the stored tree and runs a private copy; doctor and exposure report pin drift offline. Pins do not sandbox the server or cover dependencies outside the confirmed tree. Thanks @kok-o (#194).
+- **Local skill installation, update, restore and removal.** `stroq add` confirms the inspected digest before writing verified bytes; `stroq remove` confirms removal and preserves receipts. Changed executable content, expanded capabilities and restores require the typed digest. Thanks @kok-o (#196).
+- **Signed Claude Code tasks and explicit permit extensions.** `stroq task` previews a scope and starts a task with a parent-owned gate; `stroq permit` inspects, extends or revokes it. Isolation requires srt; `--hook-only` is explicitly advisory. Thanks @kok-o (#197).
+- **`stroq bench --latency` measures hook invocation cost.** Reports processor and wall-time percentiles beside a bare Node baseline, verifies that each scenario actually reaches its audit path, and reads the CLI version from the package manifest. Thanks @Nari-Ab (#191).
+
+### Fixed
+
+- **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).
+- **Harden recognizes single-dash password flags.** Credential-shaped values under those flags are masked instead of copied into diffs; the parser remains bounded on long input. Thanks @Nari-Ab (#190).
+
 ## [0.25.1] - 2026-10-13
 
 ### Added

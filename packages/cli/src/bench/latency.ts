@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { childEnv } from '../mcp/child-env.js';
+import { stroqVersion } from '../version.js';
 import { summarizeMetric, type MetricSummary } from './latency-math.js';
 
 export const OUTLIER_THRESHOLD_MS = 10_000;
 export const BENCH_TIMEOUT_MS = 20_000;
-export const STROQ_VERSION = '0.25.0';
 
 export type ChildRunFn = (
   execPath: string,
@@ -344,7 +344,7 @@ export async function runLatencyBench(
 
     return {
       version: 1,
-      stroqVersion: STROQ_VERSION,
+      stroqVersion: stroqVersion(),
       date: new Date().toISOString(),
       unit: 'ms',
       outlierThresholdMs: OUTLIER_THRESHOLD_MS,
