@@ -375,23 +375,23 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'vet',
     synopsis:
-      'vet --from <dir> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+      'vet --from <dir or .tgz> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
     about: [
-      'read a skill, an MCP server or a plugin folder before you add it, and show its passport: what it asks',
-      'for or can do, each line marked declared, observed, limited or unknown, the rules that matched, and',
-      'every blind spot. The files are read and none of them is run. A reading, not a security certificate:',
-      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is',
-      'complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the files cannot be',
-      'read as an artifact',
+      'read a skill, an MCP server or a plugin, from a folder or a tar archive, before you add it, and show its',
+      'passport: what it asks for or can do, each line marked declared, observed, limited or unknown, the rules',
+      'that matched, and every blind spot. The files are read and none of them is run. A reading, not a',
+      'security certificate: an absent line means nothing was seen, not that nothing is there. Exit codes: 0',
+      'the passport is complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the',
+      'files cannot be read as an artifact',
     ],
     flags: [
       [
-        '--from <dir>',
-        'the folder to read (required). .git and node_modules are left out, and it says so',
+        '--from <dir or .tgz>',
+        'the folder or the archive to read (required). An archive is a tar file, plain or gzipped (.tgz, .tar.gz, .tar), as npm pack and git archive write it: it is read in memory, never unpacked to a disk, and refused if it holds a link, a device, a sparse file or a path that climbs out. In a folder, .git and node_modules are left out, and it says so',
       ],
       [
         '--kind <skill|mcp|plugin>',
-        'what the folder is, when its files do not say (or say two things)',
+        'what the folder or archive is, when its files do not say (or say two things)',
       ],
       [
         '--json',
@@ -399,7 +399,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
       [
         '--expect <sha256>',
-        'exit 1 unless the digest of the files is this one (64 hex digits, bare or as sha256:<hex>). Not on Windows, where a folder has no executable bit and its digest depends on the platform',
+        'exit 1 unless the digest of the files is this one (64 hex digits, bare or as sha256:<hex>). Not for a folder on Windows, where it has no executable bit and its digest depends on the platform; an archive carries its own and works there',
       ],
       [
         '--card',

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq vet --from` reads an archive as well as a folder.** A `.tgz`, `.tar.gz` or `.tar` (told by its bytes, not its name) is read in memory by Stroq's own tar reader, without a dependency and without writing a file: one shared top folder (`package/`, `owner-repo-sha/`) is taken off, and the passport and the `stroq-tree/1` digest are those of the folder the archive was made from (checked against `npm pack`, `git archive`, bsdtar and Python's tarfile). Anything that is not plain files is refused, not skipped: links of either kind, devices, FIFOs, sparse files, unknown entry types, a path that the tree rules refuse, a name that is not UTF-8, data after the end, a second gzip member, a bad checksum, and an archive past the limits (5,000 files, 8 MiB a file, 32 MiB expanded, 20 MiB compressed), which is refused before anything that big is allocated. `--expect` works for an archive on every platform.
+
 ### Fixed
 
 - **Six commands the classifier let through are caught, from the first outside contribution (thanks, @Nari-Ab, #147).** `rm -rf .*` and `rm -rf ./.*` delete every dotfile of the folder (`.git`, `.env`, the agent's settings) and had no class; they are a dangerous delete now. PowerShell takes `/` as well as `-` before a flag, so `powershell /EncodedCommand …`, `certutil /urlcache` and `bitsadmin -transfer` are read as the encoded execution and the download they are. On a server reached by `ssh`, `docker compose down --volumes` is destructive like `-v`, and a bare `cd` goes back to the login directory, so a relative `rm -rf` after it is judged there. A working tree given with a trailing slash no longer makes every path in it look outside, and a working tree of `/` (or none) holds no absolute path, so `rm -rf /etc` from `/` stays dangerous.

@@ -1,8 +1,10 @@
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runVet, type VetDeps } from '../../src/commands/vet.js';
 import { PDF_SKILL, WEATHER_SERVER } from './inspect-fixtures.js';
 import type { Files } from './inspect.js';
 import { tempRoot, writeFiles } from './install-dir.js';
+import { tarOf, tgzOf, type TarEntry } from './tar-writer.js';
 
 /**
  * The world of the tests of `stroq vet`: folders on a disk that is a fresh temporary one, and the command run in this
@@ -48,8 +50,40 @@ export function folder(name: string, files: Readonly<Record<string, string | Uin
   return dir;
 }
 
+/**
+ * An archive file called `name`, under a root of its own, made of these entries: gzipped unless `zipped` is
+ * false. The entries are the writer's, so that every archive a test reads says what is in it.
+ */
+export function archive(
+  name: string,
+  entries: readonly (TarEntry | Uint8Array)[],
+  zipped = true,
+): string {
+  const file = join(tempRoot('vet'), name);
+  writeFileSync(file, zipped ? tgzOf(entries) : tarOf(entries));
+  return file;
+}
+
+/** The files of a spec as entries of an archive, under one folder as npm and GitHub wrap theirs. */
+export const entriesIn = (
+  top: string,
+  files: Readonly<Record<string, string | Uint8Array>>,
+  modes: Readonly<Record<string, number>> = {},
+): TarEntry[] =>
+  Object.entries(files).map(([path, data]) => ({
+    name: `${top}/${path}`,
+    data,
+    mode: modes[path] ?? 0o644,
+  }));
+
 /** The small skill of the inspector tests, as a folder. Its digest is the one in the golden passport. */
 export const skillFolder = (name = 'pdf-forms-fixture'): string => folder(name, textOf(PDF_SKILL));
+
+/** The same skill as an archive: the files of `skillFolder` under `package/`, with the modes of a folder. */
+export const skillArchive = (
+  name = 'pdf-forms-fixture.tgz',
+  modes: Readonly<Record<string, number>> = {},
+): string => archive(name, entriesIn('package', textOf(PDF_SKILL), modes));
 
 /** The small MCP server of the inspector tests (a postinstall script, a URL), as a folder. */
 export const mcpFolder = (name = 'weather-fixture'): string => folder(name, textOf(WEATHER_SERVER));

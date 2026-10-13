@@ -3,9 +3,9 @@ import type { ArtifactKind } from '../install/types.js';
 
 /** The command line of `stroq vet`, read and checked. */
 export interface VetOptions {
-  /** The folder to read. The user's own path: it is read, and never put in the passport. */
+  /** The folder or archive file to read. The user's own path: it is read, and never put in the passport. */
   readonly from: string;
-  /** What the folder is, or `auto` to tell from its files. */
+  /** What the artifact is, or `auto` to tell from its files. */
   readonly kind: ArtifactKind | 'auto';
   readonly json: boolean;
   readonly card: boolean;
@@ -17,7 +17,7 @@ export interface VetOptions {
 
 /**
  * What a test may replace. The streams, so that the output can be read; the platform, so that Windows can be
- * simulated (it has no executable bit, and `--expect` is refused there); the version of Stroq, so that a
+ * simulated (a folder has no executable bit there, and `--expect` is refused for one); the version of Stroq, so that a
  * passport does not change with each release; and the readings, so that one of them can be made to fail.
  */
 export interface VetDeps {

@@ -147,16 +147,22 @@ describe.skipIf(process.platform === 'win32')('stroq vet --expect', () => {
 });
 
 describe('stroq vet --expect, where it is refused or not understood', () => {
-  it('exits 2 on Windows, before it reads anything, and says why', async () => {
-    // A folder that is not there would be exit 3 if it were read first.
-    const missing = join(tempRoot('empty'), 'not-there');
+  it('exits 2 on Windows for a folder, before it reads it, and says why', async () => {
+    // A folder that cannot be read would be exit 3 if it were read first; this one is refused when it is
+    // known to be a folder and not before (an archive does not meet this refusal: see vet-archive.test.ts).
+    const dir = skillFolder();
+    chmodSync(join(dir, 'reference.md'), 0o000);
 
-    const run = await vet(['--from', missing, '--expect', SKILL_DIGEST], { platform: 'win32' });
+    try {
+      const run = await vet(['--from', dir, '--expect', SKILL_DIGEST], { platform: 'win32' });
 
-    expect(run.code).toBe(2);
-    expect(run.stdout).toBe('');
-    expect(run.stderr).toContain('Windows');
-    expect(run.stderr).toContain('executable bit');
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe('');
+      expect(run.stderr).toContain('Windows');
+      expect(run.stderr).toContain('executable bit');
+    } finally {
+      chmodSync(join(dir, 'reference.md'), 0o644);
+    }
   });
 
   it('exits 2 for a digest that is not written as one, whatever the files are', async () => {

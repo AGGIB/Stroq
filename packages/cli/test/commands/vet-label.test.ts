@@ -77,6 +77,34 @@ describe('the label of a folder', () => {
   );
 });
 
+describe('the label of an archive', () => {
+  const fitsArchive = (label: string): boolean =>
+    SourceRefSchema.safeParse({ type: 'tarball', label }).success;
+
+  it('is the base name of the file, with its extension, and nothing of where it is', () => {
+    const label = labelOf(join('some', 'where', 'pdf-forms-1.2.0.tgz'), 'tarball');
+
+    expect(label).toBe('pdf-forms-1.2.0.tgz');
+    expect(fitsArchive(label)).toBe(true);
+  });
+
+  it('is "archive" for a path with no name, and fits the schema as a tarball', () => {
+    expect(labelOf(parse(process.cwd()).root, 'tarball')).toBe('archive');
+  });
+
+  it('is cut, kept from looking like a drive and written without escapes, as the label of a folder is', () => {
+    const long = labelOf(join('x', `${'n'.repeat(500)}.tgz`), 'tarball');
+
+    expect([...long].length).toBeLessThanOrEqual(80);
+    expect(fitsArchive(long)).toBe(true);
+    expect(labelOf('~notes.tgz', 'tarball')).toBe('_~notes.tgz');
+  });
+
+  it('is the label of a folder when it is not told what it names', () => {
+    expect(labelOf(join('some', 'where', 'pdf-forms'))).toBe('pdf-forms');
+  });
+});
+
 describe('what the command loads when it is only asked to start', () => {
   const source = (name: string): string =>
     readFileSync(fileURLToPath(new URL(`../../src/commands/${name}`, import.meta.url)), 'utf8');

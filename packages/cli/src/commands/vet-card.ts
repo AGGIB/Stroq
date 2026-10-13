@@ -22,7 +22,8 @@ function reproduceLine(passport: Passport): string {
   if (isPlatformDependent(passport)) {
     return 'Reproduce: not available, because this folder was read where the executable bit is not known (Windows), so its digest depends on the platform.';
   }
-  return `Reproduce: ${code(`stroq vet --from <dir> --expect sha256:${passport.artifact.digest}`)}`;
+  const from = passport.artifact.source.type === 'tarball' ? '<archive>' : '<dir>';
+  return `Reproduce: ${code(`stroq vet --from ${from} --expect sha256:${passport.artifact.digest}`)}`;
 }
 
 export function renderCard(passport: Passport): string {
