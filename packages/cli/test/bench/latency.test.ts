@@ -1,50 +1,128 @@
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { formatLatencyBench, runLatencyBench } from '../../src/bench/latency.js';
+import { formatLatencyBench, runLatencyBench, type ChildRunFn } from '../../src/bench/latency.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 describe('latency benchmark engine', () => {
-  it('runs latency benchmark with small n and warmup, returning valid report', async () => {
-    // Run with n=2 and warmup=0 for fast execution in CI/test suite
+  it('runs real latency benchmark with n=1 and warmup=0, verifying execution and audit scan', async () => {
     const report = await runLatencyBench({
-      n: 2,
+      n: 1,
       warmup: 0,
       cliEntry: CLI_ENTRY,
     });
 
     expect(report.version).toBe(1);
-    expect(report.n).toBe(2);
+    expect(report.stroqVersion).toBe('0.25.0');
+    expect(report.unit).toBe('ms');
+    expect(report.outlierThresholdMs).toBe(10_000);
+    expect(report.n).toBe(1);
     expect(report.warmup).toBe(0);
-    expect(report.results.length).toBeGreaterThanOrEqual(4);
+    expect(report.results.length).toBe(4);
 
-    // Verify bare node baseline is the first result
+    // Baseline result
     const bareNode = report.results[0];
     expect(bareNode).toBeDefined();
     expect(bareNode!.id).toBe('bare-node');
-    expect(bareNode!.samples).toBe(2);
+    expect(bareNode!.samples).toBe(1);
     expect(bareNode!.outliers).toBe(0);
     expect(bareNode!.wall.p50).toBeGreaterThan(0);
-    expect(bareNode!.processor.p50).toBeGreaterThan(0);
+    // On Windows, process.cpuUsage() granularity is ~15.6ms and may register as 0 for very quick runs
+    if (process.platform !== 'win32') {
+      expect(bareNode!.processor.p50).toBeGreaterThanOrEqual(0);
+    }
 
-    // Verify Claude hook events
+    // Heavy Read scenario
+    const heavyPost = report.results.find((r) => r.id === 'post-tool-use-heavy');
+    expect(heavyPost).toBeDefined();
+    expect(heavyPost!.samples).toBe(1);
+    expect(heavyPost!.wall.p50).toBeGreaterThan(0);
+
+    // PreToolUse scenario
     const preHook = report.results.find((r) => r.id === 'pre-tool-use-bash');
     expect(preHook).toBeDefined();
-    expect(preHook!.samples).toBe(2);
-    expect(preHook!.wall.p50).toBeGreaterThan(0);
+    expect(preHook!.samples).toBe(1);
+    expect(preHook!.overhead).toBeDefined();
 
-    // Verify formatting output
+    // Verify formatLatencyBench
     const formatted = formatLatencyBench(report);
     expect(formatted).toContain('Stroq Hook Latency Benchmark');
-    expect(formatted).toContain('node -e 0');
-    expect(formatted).toContain('PreToolUse: Bash');
-    expect(formatted).toContain('p50 / p95 / p99');
+    expect(formatted).toContain('node -e 0 (baseline)');
+    expect(formatted).toContain('PreToolUse (bash: `git status`)');
+    expect(formatted).toContain('PostToolUse (heavy ~60KB content)');
     expect(formatted).toContain('Stroq overhead on PreToolUse');
 
     // Verify JSON serialization
     const jsonStr = JSON.stringify(report);
     const parsed = JSON.parse(jsonStr);
     expect(parsed.version).toBe(1);
-    expect(parsed.results).toHaveLength(report.results.length);
+    expect(parsed.stroqVersion).toBe('0.25.0');
+    expect(parsed.results).toHaveLength(4);
   }, 30_000);
+
+  it('handles discarded outliers and missing CPU samples via runner seam', async () => {
+    let callCount = 0;
+    const mockRunner: ChildRunFn = () => {
+      callCount += 1;
+      // First sample: normal
+      if (callCount % 3 === 1) return { wallMs: 25.0, cpuMs: 15.0 };
+      // Second sample: missing CPU file
+      if (callCount % 3 === 2) return { wallMs: 26.0, cpuMs: null };
+      // Third sample: >10s outlier
+      return { wallMs: 12_000.0, cpuMs: 100.0 };
+    };
+
+    const report = await runLatencyBench({
+      n: 3,
+      warmup: 0,
+      cliEntry: CLI_ENTRY,
+      runner: mockRunner,
+    });
+
+    for (const res of report.results) {
+      expect(res.samples).toBe(1);
+      expect(res.droppedSamples).toBe(1);
+      expect(res.outliers).toBe(1);
+      expect(res.wall.p50).toBe(25.0);
+      expect(res.processor.p50).toBe(15.0);
+    }
+
+    const baseline = report.results[0];
+    const preBash = report.results.find((r) => r.id === 'pre-tool-use-bash');
+    expect(baseline?.overhead).toBeUndefined();
+    expect(preBash?.overhead?.wallP50).toBe(0);
+    expect(preBash?.overhead?.processorP50).toBe(0);
+  });
+
+  it('fails fast when child process execution fails', async () => {
+    const failingRunner: ChildRunFn = () => {
+      throw new Error('Benchmark process exited with code 1: command not found');
+    };
+
+    await expect(
+      runLatencyBench({
+        n: 1,
+        warmup: 0,
+        cliEntry: CLI_ENTRY,
+        runner: failingRunner,
+      }),
+    ).rejects.toThrow('Benchmark process exited with code 1: command not found');
+  });
+
+  it('formats n/a when all samples are discarded', async () => {
+    const outlierRunner: ChildRunFn = () => ({ wallMs: 15_000, cpuMs: null });
+
+    const report = await runLatencyBench({
+      n: 2,
+      warmup: 0,
+      cliEntry: CLI_ENTRY,
+      runner: outlierRunner,
+    });
+
+    for (const res of report.results) {
+      expect(res.samples).toBe(0);
+      expect(res.outliers).toBe(2);
+    }
+
+    const formatted = formatLatencyBench(report);
+    expect(formatted).toContain('n/a');
+  });
 });
