@@ -164,10 +164,10 @@ describe('where there is no proof to show', () => {
   });
 
   it('says a host that could be driven and has no driver yet is not available, not "no live check yet"', () => {
-    const check = { name: 'codex hooks', ok: true, detail: 'project: installed' };
-    const shown = withProof(check, 'codex', { installed: true, changed: false }, NOW);
+    const check = { name: 'future hooks', ok: true, detail: 'project: installed' };
+    const shown = withProof(check, 'future', { installed: true, changed: false }, NOW);
     expect(shown.detail).toBe(
-      'project: installed · proof: not available yet (stroq prove has no driver for codex)',
+      'project: installed · proof: not available yet (stroq prove has no driver for future)',
     );
   });
 

@@ -31,4 +31,24 @@ describe('isSubscriptionKeySource', () => {
       expect(problem?.reason === REASONS.apiBilling, source).toBe(!isSubscriptionKeySource(source));
     }
   });
+  it.each([{ apiKeySource: 'api-key' }, { apiProvider: 'thirdParty' }])(
+    'gives billing evidence priority over a model-unavailable diagnosis: %j',
+    (billing) => {
+      expect(
+        runProblem(finished([], { ...billing, failureReason: REASONS.modelUnavailable }))?.reason,
+      ).toBe(REASONS.apiBilling);
+    },
+  );
+  it.each([
+    [{ limitHit: 'quota' }, REASONS.limit],
+    [{ timedOut: true }, REASONS.timeout],
+    [{ stderrTail: 'Not logged in' }, REASONS.auth],
+  ] as const)(
+    'keeps infrastructure failure priority over model diagnostics: %j',
+    (facts, reason) => {
+      expect(
+        runProblem(finished([], { ...facts, failureReason: REASONS.modelUnavailable }))?.reason,
+      ).toBe(reason);
+    },
+  );
 });

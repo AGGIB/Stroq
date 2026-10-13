@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/pwsh -Command 'git config --file /tmp/stroq-live-fixture/project/stroq-live-git-config.txt core.hooksPath stroq-live-0123456789abcdef'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/pwsh -Command 'git config --file /tmp/stroq-live-fixture/project/stroq-live-git-config.txt core.hooksPath stroq-live-0123456789abcdef'","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"DONE"}}
+{"type":"turn.completed","usage":{"input_tokens":20021,"cached_input_tokens":7936,"cache_write_input_tokens":0,"output_tokens":147,"reasoning_output_tokens":44}}

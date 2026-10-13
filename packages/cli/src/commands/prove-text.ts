@@ -12,16 +12,17 @@ import { outsideLine, wrapKeeping } from '../ui/layout.js';
 import type { ProbeResult } from '../live/types.js';
 import { isControlId, CONTROL_SUFFIX } from '../live/state-rule.js';
 import type { ProveReport } from './prove-report.js';
+import { CODEX_MODEL } from '../live/drivers/codex-argv.js';
 
 const WIDTH = 78;
 const NAME_WIDTH = 44;
 const MARK_WIDTH = 15;
 
-/** The model the check asks, which is the cheapest there is. */
+/** The Claude model the check asks. Codex uses its measured subscription model. */
 const MODEL_NAME = 'haiku';
 
 export const hostName = (agent: string): string =>
-  agent === 'claude-code' ? 'Claude Code' : outsideLine(agent);
+  agent === 'claude-code' ? 'Claude Code' : agent === 'codex' ? 'Codex CLI' : outsideLine(agent);
 
 const hostWithVersion = (agent: string, version: string | null): string =>
   version === null ? hostName(agent) : `${hostName(agent)} ${outsideLine(version)}`;
@@ -62,6 +63,10 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'api-billing': 'the host is paid for by an API key or a cloud',
   timeout: 'the host did not answer in time',
   'host-error': 'the host failed',
+  'host-not-isolated': 'Codex could not be isolated from other hook or managed settings',
+  'login-unconfirmed': 'Codex ChatGPT login could not be confirmed',
+  'model-unavailable': 'the selected Codex model is unavailable for this account',
+  'host-unmeasured': 'this Codex platform or version has not been measured',
   'unparsable-stream': 'the output of the host could not be read',
   'command-altered': 'the model changed the command',
   'extra-activity': 'the host did more than the one command',
@@ -222,6 +227,8 @@ export function renderReport(report: ProveReport): string {
   lines.push(`Requests made: ${report.requestsMade}`);
   if (report.mode === 'live' && report.caveats.length > 0)
     lines.push(`Caveats: ${report.caveats.map(outsideLine).join(', ')}`);
+  if (report.caveats.includes('sandbox-disabled'))
+    lines.push('Codex ran without its sandbox; hook trust was bypassed for these fixed probes.');
   if (report.advice.length > 0) {
     lines.push('', 'Advice');
     for (const line of report.advice) lines.push(...bullet(outsideLine(line)));
@@ -244,15 +251,22 @@ export function noticeText(facts: NoticeFacts): string[] {
   const requests = `${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'}`;
   return [
     ...wrapKeeping(
-      `stroq prove sends up to ${requests} to ${host} (model: ${MODEL_NAME}), with your own login.`,
+      `stroq prove sends up to ${requests} to ${host} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}), with your own login.`,
       WIDTH,
     ),
     ...bullet(
       "They count against your subscription usage. The login is your subscription's, never an API key; Stroq stops the host at once if it sees one.",
     ),
     ...bullet(
-      'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Claude Code notes the run in its own files, as it does for any run.',
+      facts.agent === 'codex'
+        ? 'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Codex uses ephemeral sessions and may update its own login and cache.'
+        : 'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Claude Code notes the run in its own files, as it does for any run.',
     ),
+    ...(facts.agent === 'codex'
+      ? bullet(
+          'Codex runs these fixed probes without its sandbox and bypasses hook trust. The real run and control use the same permissions. Pay-as-you-go plan credits are not detected; user instructions or skills may still reach the host.',
+        )
+      : []),
     ...bullet(
       "The model is asked to run three harmless commands, one per request; Stroq's hook decides whether each one runs.",
     ),
@@ -271,7 +285,7 @@ export function dryRunText(facts: DryRunFacts): string[] {
     'Dry run: nothing was done and no request was made.',
     '',
     `Would check:  ${hostWithVersion(facts.agent, facts.hostVersion)}`,
-    `Would make:   up to ${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'} (model: ${MODEL_NAME}, your own login)`,
+    `Would make:   up to ${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}, your own login)`,
     `Hook line:    ${outsideLine(facts.hookLine)}`,
     `Using the policy: ${outsideLine(facts.policy)}`,
     '',

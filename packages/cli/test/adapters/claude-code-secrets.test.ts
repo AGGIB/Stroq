@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleClaudeHook, withEvidence } from '../../src/adapters/claude-code.js';
@@ -43,8 +43,9 @@ describe('secret egress in the Claude Code adapter', () => {
     const index = JSON.parse(readFileSync(indexFile, 'utf8')) as {
       sources: readonly { path: string }[];
     };
-    const realHome = userInfo().homedir;
-    expect(index.sources.some((s) => s.path.startsWith(realHome))).toBe(false);
+    // Windows' temporary directory is inside the real home. The isolated project
+    // is an intended source there; assert its exact source instead of its ancestry.
+    expect(index.sources.map((source) => source.path)).toEqual([join(cwd, '.env')]);
   });
 
   it('allows the same command when the value is not a known secret', async () => {

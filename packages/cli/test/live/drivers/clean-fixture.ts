@@ -42,6 +42,8 @@ const LEAKS: readonly RegExp[] = [
   /stroq-capture-/,
   /\/Users\/(?!fixture-user\b)/,
   /\/home\/(?!fixture-user\b)/,
+  /(?:[A-Za-z]:)?\\+Users\\+(?!fixture-user\b)/i,
+  /\bAppData(?:\\+|\/)/i,
   /"(?:slash_commands|terminal_slash_commands|skills|plugins|agents|memory_paths|messaging_socket_path|signature)"/,
 ];
 
@@ -105,5 +107,6 @@ export function cleanFixture(raw: string, options: CleanOptions = {}): string {
 
 /** What is left in a text that a cleaned fixture must not hold, one description for each kind found. */
 export function leaksIn(text: string): string[] {
-  return LEAKS.filter((pattern) => pattern.test(text)).map((pattern) => pattern.source);
+  const checked = text.replaceAll('/tmp/stroq-live-fixture/home', '/FIXTURE_HOME');
+  return LEAKS.filter((pattern) => pattern.test(checked)).map((pattern) => pattern.source);
 }

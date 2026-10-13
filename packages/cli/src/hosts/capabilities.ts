@@ -3,11 +3,10 @@
 // "Headless" means a host can be started with a prompt and no person, with Stroq's hook in the loop,
 // and report what it did. Only then can a probe be handed to the model and the result read afterwards.
 //
-// WHAT THIS TABLE IS: assumptions, until a live run has measured them. No row below has been confirmed by
-// a run of `stroq prove` against the real host. `headless: true` says that the host is expected to be
-// drivable, and the reason given for each host that is not is what is believed of it. The one measured
-// fact in the table is the caveat of Codex (`hook-trust-bypassed`, see below). A row becomes a fact when
-// a live run has shown it, and its comment should say when and against what.
+// WHAT THIS TABLE IS: assumptions, until a live run has measured them. Recorded driver fixtures document
+// the measured versions: Claude Code 2.1.271 and Codex CLI 0.162.1. Other rows remain expectations,
+// and the reason given for a host that is not headless is what is believed of it. A measured version
+// does not establish the behavior of other versions or the loading of the user's installed hooks.
 //
 // The ids are the agent ids the rest of the code uses (`SELF_CHECK_AGENTS` in `init-selfcheck.ts` and the
 // rows of the hook section of `doctor.ts`); `capabilities.test.ts` fails when one of them is missing.
@@ -37,11 +36,10 @@ const entry = (capability: HostCapability): HostCapability =>
 
 export const HOST_CAPABILITIES: Readonly<Record<string, HostCapability>> = Object.freeze({
   'claude-code': entry({ headless: true, caveats: [] }),
-  // The caveat is MEASURED, on Codex 0.158.0-alpha.2 (2026-09-29, docs/AGENTS.md): `codex exec` ran a
-  // user-level hook only with --dangerously-bypass-hook-trust, and never a project hook. A check that has
-  // to be driven that way shows what Codex does with its hook-trust check switched off, and is labelled
-  // so. That `codex` can be driven at all is an assumption, like every other row.
-  codex: entry({ headless: true, caveats: ['hook-trust-bypassed'] }),
+  // MEASURED on Codex CLI 0.162.1, Windows (2026-10-13): three allow/deny/control requests verified
+  // the supplied inline hook. Hook trust and the sandbox were bypassed in both real and control runs;
+  // this establishes hook enforcement, not ordinary-session loading or sandbox protection.
+  codex: entry({ headless: true, caveats: ['hook-trust-bypassed', 'sandbox-disabled'] }),
   cursor: entry({ headless: false, reason: NO_HEADLESS_HOOKS, caveats: [] }),
   windsurf: entry({ headless: false, reason: NO_HEADLESS_HOOKS, caveats: [] }),
   antigravity: entry({ headless: false, reason: NO_HEADLESS_HOOKS, caveats: [] }),

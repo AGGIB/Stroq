@@ -10,7 +10,7 @@ describe('driverFor', () => {
     expect(driver?.mode).toBe('live');
   });
 
-  it.each(['codex', 'cursor', 'windsurf', 'antigravity', 'copilot', 'openclaw', 'mcp', '', 'x'])(
+  it.each(['cursor', 'windsurf', 'antigravity', 'copilot', 'openclaw', 'mcp', '', 'x'])(
     'has no driver for %j',
     (agent) => {
       expect(driverFor(agent, { hookLine: HOOK_LINE, env: {} })).toBeNull();
@@ -25,7 +25,7 @@ describe('driverFor', () => {
   );
 
   it('lists the agents it drives', () => {
-    expect(DRIVEN_AGENTS).toEqual(['claude-code']);
+    expect(DRIVEN_AGENTS).toEqual(['claude-code', 'codex']);
     for (const agent of DRIVEN_AGENTS)
       expect(driverFor(agent, { hookLine: HOOK_LINE, env: {} })).not.toBeNull();
   });

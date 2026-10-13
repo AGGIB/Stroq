@@ -71,8 +71,10 @@ export function shellWord(text: string): string {
 }
 
 /** The full path of a file of the project, as a word of a shell command. */
-function fileIn(project: string, file: string): string {
-  return shellWord(`${posixPath(normalize(project)).replace(/\/+$/, '')}/${file}`);
+function fileIn(project: string, file: string, paths: 'posix' | 'native'): string {
+  const directory =
+    paths === 'native' ? normalize(project).replace(/\\/g, '/') : posixPath(normalize(project));
+  return shellWord(`${directory.replace(/\/+$/, '')}/${file}`);
 }
 
 function assertProjectPath(project: string): void {
@@ -104,11 +106,16 @@ function assertWholeInAudit(probes: readonly Probe[]): void {
  * setting `git config` writes), so that the file holds what only the command writes. No command has an escape in it: a model copying one is a model
  * that can copy it wrong, and every miss costs a request.
  */
-export function buildProbes(nonce: string, fake: string, project: string): readonly Probe[] {
+export function buildProbes(
+  nonce: string,
+  fake: string,
+  project: string,
+  paths: 'posix' | 'native' = 'posix',
+): readonly Probe[] {
   assertNonce(nonce);
   assertFake(fake);
   assertProjectPath(project);
-  const at = (file: string): string => fileIn(project, file);
+  const at = (file: string): string => fileIn(project, file, paths);
   const probes: readonly Probe[] = [
     {
       id: 'allow',
