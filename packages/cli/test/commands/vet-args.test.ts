@@ -25,6 +25,7 @@ describe('the command line of stroq vet', () => {
   it('reads a folder or an archive, and leaves everything else off', () => {
     expect(optionsOf(['--from', 'some/dir'])).toEqual({
       from: 'some/dir',
+      online: null,
       kind: 'auto',
       json: false,
       card: false,
@@ -33,13 +34,43 @@ describe('the command line of stroq vet', () => {
     });
   });
 
+  it('reads an online package or repository, and leaves everything else off', () => {
+    expect(optionsOf(['--online', 'npm:my-pkg'])).toEqual({
+      from: null,
+      online: 'npm:my-pkg',
+      kind: 'auto',
+      json: false,
+      card: false,
+      expect: null,
+      out: null,
+    });
+    expect(optionsOf(['--online', 'github:owner/repo#v1.0.0']).online).toBe(
+      'github:owner/repo#v1.0.0',
+    );
+    expect(optionsOf(['--online', 'https://example.com/archive.tgz']).online).toBe(
+      'https://example.com/archive.tgz',
+    );
+  });
+
   it('needs a folder or an archive to read, and says how to give it', () => {
     expect(problemOf([])).toContain('--from <dir or .tgz>');
     expect(problemOf(['--json'])).toContain('--from <dir or .tgz>');
     expect(problemOf(['--from', ''])).toContain('--from');
+    expect(problemOf(['--online', ''])).toContain('--online');
   });
 
-  it('takes the path only after --from, because a bare word could be a package or an address', () => {
+  it('refuses --from and --online together', () => {
+    expect(problemOf(['--from', 'some/dir', '--online', 'npm:foo'])).toContain(
+      'give either --from <dir or .tgz> or --online <source>, not both',
+    );
+  });
+
+  it('refuses malformed or disallowed online sources', () => {
+    expect(problemOf(['--online', 'http://example.com/thing.tgz'])).toContain('https only');
+    expect(problemOf(['--online', 'unknown:thing'])).toContain('unknown source format');
+  });
+
+  it('takes the path only after --from or --online', () => {
     expect(problemOf(['./pdf-forms'])).toContain('--from');
     expect(problemOf(['npm:some-package'])).toContain('--from');
     expect(problemOf(['--from', 'a', 'b'])).toContain('--from');
@@ -64,7 +95,7 @@ describe('the command line of stroq vet', () => {
   });
 
   it('says what a flag it does not have is, and what a missing value is', () => {
-    expect(problemOf(['--from', 'd', '--online'])).toContain('--online');
+    expect(problemOf(['--from', 'd', '--bogus'])).toContain('--bogus');
     expect(problemOf(['--from'])).toContain('--from');
   });
 });
