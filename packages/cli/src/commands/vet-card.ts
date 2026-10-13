@@ -22,7 +22,18 @@ function reproduceLine(passport: Passport): string {
   if (isPlatformDependent(passport)) {
     return 'Reproduce: not available, because this folder was read where the executable bit is not known (Windows), so its digest depends on the platform.';
   }
-  const from = passport.artifact.source.type === 'tarball' ? '<archive>' : '<dir>';
+  const source = passport.artifact.source;
+  if (source.type === 'npm') {
+    return `Reproduce: ${code(`stroq vet --online npm:${source.name}@${source.version} --expect sha256:${passport.artifact.digest}`)}`;
+  }
+  if (source.type === 'github') {
+    const sub = source.subdir ? `:${source.subdir}` : '';
+    return `Reproduce: ${code(`stroq vet --online github:${source.owner}/${source.repo}#${source.commit ?? source.ref}${sub} --expect sha256:${passport.artifact.digest}`)}`;
+  }
+  if (source.type === 'url') {
+    return `Reproduce: ${code(`stroq vet --online <url> --expect sha256:${passport.artifact.digest}`)}`;
+  }
+  const from = source.type === 'tarball' ? '<archive>' : '<dir>';
   return `Reproduce: ${code(`stroq vet --from ${from} --expect sha256:${passport.artifact.digest}`)}`;
 }
 

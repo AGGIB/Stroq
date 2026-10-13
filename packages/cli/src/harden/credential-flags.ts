@@ -1,5 +1,6 @@
+import { singleDashPasswordInWords } from './credential-commands.js';
 import { isPlainName, secretUnderPair } from './credential-pairs.js';
-import { isNumeric, isQuote, opaque, trimmed } from './credential-values.js';
+import { isNumeric, isQuote, opaque, trimmed, USER_PASSWORD_MIN } from './credential-values.js';
 
 /**
  * Secrets given on a command line: the value after a flag that says it is one (`--password
@@ -8,8 +9,6 @@ import { isNumeric, isQuote, opaque, trimmed } from './credential-values.js';
  */
 
 const FLAG_VALUE_MIN = 6;
-/** As for the password in the front of a URL. */
-const USER_PASSWORD_MIN = 4;
 /** More than any flag in the lists below is long; a longer word is not looked up in them. */
 const MAX_FLAG_CHARS = 32;
 
@@ -87,9 +86,11 @@ export function headerSecret(first: string, second: string): boolean {
 /**
  * Whether the words of a line hold a secret given on a command line: a secret flag with a secret
  * value after it, as separate words (`--password hunter2`) or joined (`--token=abc123`), a user
- * flag with a password, or a header with a secret in it.
+ * flag with a password, a single-dash password flag (`mysql -p...`, `redis-cli -a...`, `sshpass -p...`,
+ * `docker/podman login -p...`), or a header with a secret in it.
  */
 export function flagSecretInText(words: readonly string[]): boolean {
+  if (singleDashPasswordInWords(words)) return true;
   for (let k = 0; k < words.length; k += 1) {
     const raw = words[k] ?? '';
     const word = trimmed(raw);

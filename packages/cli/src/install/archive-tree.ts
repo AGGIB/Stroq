@@ -23,6 +23,8 @@ export interface ArchiveRead {
   readonly blindSpots: readonly string[];
   /** The one folder every file was in and that was taken off, or null when nothing was. A name that has passed the path rules. */
   readonly topFolder: string | null;
+  /** A 40-hex commit hash from a git archive pax global header, if present. */
+  readonly commit?: string | null;
 }
 
 /**

@@ -8,7 +8,8 @@ const read = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
 
 const html = read('index.html');
-const css = read('styles.css');
+// The count line's rules belong to the landing page, so they live in home.css.
+const css = read('home.css');
 const main = read('main.js');
 const api = read('api/stats.mjs');
 const vercel = JSON.parse(read('vercel.json')) as {

@@ -378,19 +378,23 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'vet',
     synopsis:
-      'vet --from <dir or .tgz> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+      'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
     about: [
-      'read a skill, an MCP server or a plugin, from a folder or a tar archive, before you add it, and show its',
-      'passport: what it asks for or can do, each line marked declared, observed, limited or unknown, the rules',
-      'that matched, and every blind spot. The files are read and none of them is run. A reading, not a',
-      'security certificate: an absent line means nothing was seen, not that nothing is there. Exit codes: 0',
-      'the passport is complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the',
+      'read a skill, an MCP server or a plugin, from a folder, a tar archive, or online from npm or GitHub,',
+      'before you add it, and show its passport: what it asks for or can do, each line marked declared, observed,',
+      'limited or unknown, the rules that matched, and every blind spot. The files are read and none of them is run.',
+      'A reading, not a security certificate: an absent line means nothing was seen, not that nothing is there.',
+      'Exit codes: 0 the passport is complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the',
       'files cannot be read as an artifact',
     ],
     flags: [
       [
         '--from <dir or .tgz>',
-        'the folder or the archive to read (required). An archive is a tar file, plain or gzipped (.tgz, .tar.gz, .tar), as npm pack and git archive write it: it is read in memory, never unpacked to a disk, and refused if it holds a link, a device, a sparse file or a path that climbs out. In a folder, .git and node_modules are left out, and it says so',
+        'the folder or the archive to read. An archive is a tar file, plain or gzipped (.tgz, .tar.gz, .tar), as npm pack and git archive write it: it is read in memory, never unpacked to a disk, and refused if it holds a link, a device, a sparse file or a path that climbs out. In a folder, .git and node_modules are left out, and it says so',
+      ],
+      [
+        '--online <source>',
+        'read a package from npm (npm:<package>[@version|tag]), GitHub (github:<owner>/<repo>[#ref][:subdir]), or an https URL (https://<host>/<path>.tgz). The host is printed before any request; downloads are kept in memory and held to 20 MiB compressed',
       ],
       [
         '--kind <skill|mcp|plugin>',

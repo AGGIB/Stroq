@@ -6,18 +6,18 @@ import type { VetDeps, VetOptions } from './vet-types.js';
 export type { VetDeps, VetOptions } from './vet-types.js';
 
 /**
- * `stroq vet --from <dir or .tgz>` - read a skill, an MCP server or a plugin before it is added, and show
- * what it asks for or can do. The path is a folder, or a tar archive (plain or gzipped) such as `npm pack`
- * or `git archive` writes.
+ * `stroq vet --from <dir or .tgz>` or `stroq vet --online <source>` - read a skill, an MCP server or a
+ * plugin before it is added, and show what it asks for or can do. The path is a folder, or a tar archive
+ * (plain or gzipped) such as `npm pack` or `git archive` writes; online reads from npm, GitHub or an https URL.
  *
  * It reads the files and runs none of them: nothing from the folder or the archive is executed or unpacked
- * to a disk, nothing is fetched, and the only thing it writes is the file `--out` names. What it prints is a
+ * to a disk, and the only thing it writes is the file `--out` names. What it prints is a
  * passport, a record of what the reading found and of what it did not look at; it is a reading and not a
  * security certificate.
  *
  * Exit codes: 0 the passport is complete; 1 `--expect` did not match, or a reading failed so that the
  * passport lacks what it finds; 2 the command line cannot be used; 3 the files cannot be read as an artifact
- * (a path that is nothing, an archive that is refused, a folder over a limit).
+ * (a path that is nothing, an archive that is refused, a folder over a limit, or a fetch that failed).
  *
  * This file holds the options and the parsing. The doing is loaded only when the command runs: the hook
  * process, which starts for every tool call, reads this module and nothing of what follows.
@@ -26,6 +26,7 @@ export type { VetDeps, VetOptions } from './vet-types.js';
 /** The options of the command. Written out here, where `test/help.test.ts` reads them. */
 export const VET_OPTIONS = {
   from: { type: 'string' },
+  online: { type: 'string' },
   kind: { type: 'string' },
   json: { type: 'boolean', default: false },
   expect: { type: 'string' },
@@ -94,14 +95,36 @@ export function parseVetArgs(args: readonly string[]): Parsed {
   const { values, positionals } = read;
   if (positionals.length > 0) {
     return refuse(
-      'the folder or archive is given with --from <dir or .tgz>; a package name or an address is not read here',
+      'the folder or archive is given with --from <dir or .tgz>; an online package or address is read with --online <source>',
     );
   }
-  if (values.from === undefined) {
-    return refuse('give the folder or archive to read with --from <dir or .tgz>');
+  if (values.from !== undefined && values.online !== undefined) {
+    return refuse('give either --from <dir or .tgz> or --online <source>, not both');
+  }
+  if (values.from === undefined && values.online === undefined) {
+    return refuse(
+      'give the folder or archive to read with --from <dir or .tgz>, or an online package with --online <source>',
+    );
   }
   if (values.from === '') {
     return refuse('--from needs the folder or archive to read: --from <dir or .tgz>');
+  }
+  if (values.online === '') {
+    return refuse('--online needs the package or address to read: --online <source>');
+  }
+  if (values.online !== undefined) {
+    if (values.online.startsWith('http://')) {
+      return refuse('https only: plain http is refused');
+    }
+    if (
+      !values.online.startsWith('npm:') &&
+      !values.online.startsWith('github:') &&
+      !values.online.startsWith('https://')
+    ) {
+      return refuse(
+        `unknown source format "${values.online}": expected npm:<package>, github:<owner>/<repo>, or https://...tgz`,
+      );
+    }
   }
   const kind = kindOf(values.kind);
   if (kind === null) return refuse(`--kind has to be one of ${VET_KINDS.join(', ')}`);
@@ -111,16 +134,20 @@ export function parseVetArgs(args: readonly string[]): Parsed {
   if (values.out === '') return refuse('--out needs the name of a file that does not exist yet');
   const expected = values.expect === undefined ? null : digestOf(values.expect);
   if (values.expect !== undefined && expected === null) return refuse(EXPECT_SYNTAX);
+  const common = {
+    kind,
+    json: values.json === true,
+    card: values.card === true,
+    expect: expected,
+    out: values.out ?? null,
+  };
+  const options: VetOptions =
+    values.from !== undefined
+      ? { ...common, from: values.from, online: null }
+      : { ...common, from: null, online: values.online! };
   return {
     ok: true,
-    options: {
-      from: values.from,
-      kind,
-      json: values.json === true,
-      card: values.card === true,
-      expect: expected,
-      out: values.out ?? null,
-    },
+    options,
   };
 }
 
