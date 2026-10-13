@@ -19,6 +19,9 @@ afterEach(removeTempRoots);
 const SKILL_DIGEST = '32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6';
 const OTHER_DIGEST = 'f'.repeat(64);
 const onWindows = process.platform === 'win32';
+/** Made from code points, so that this file holds the characters as numbers and not as themselves. */
+const ESC = String.fromCodePoint(0x1b);
+const RLO = String.fromCodePoint(0x202e);
 
 async function passportOf(file: string, ...flags: string[]): Promise<Passport> {
   const run = await vet(['--from', file, '--json', ...flags]);
@@ -40,15 +43,20 @@ describe('stroq vet --from <archive>', () => {
     expect(lines[1]).toBe(`stroq-tree/1 sha256:${SKILL_DIGEST}  4 files, 945 bytes`);
   });
 
-  it.skipIf(onWindows)('prints the same screen as the folder the archive was made from', async () => {
-    const fromFolder = await vet(['--from', skillFolder()]);
-    const fromArchive = await vet(['--from', skillArchive()]);
+  it.skipIf(onWindows)(
+    'prints the same screen as the folder the archive was made from',
+    async () => {
+      const fromFolder = await vet(['--from', skillFolder()]);
+      const fromArchive = await vet(['--from', skillArchive()]);
 
-    expect(fromArchive.stdout).toBe(fromFolder.stdout);
-  });
+      expect(fromArchive.stdout).toBe(fromFolder.stdout);
+    },
+  );
 
   it('reads a plain .tar, and a gzip that is not called .tgz, by the bytes', async () => {
-    const entries = entriesIn('package', { 'SKILL.md': '---\nname: s\nversion: 2.0.0\n---\n# s\n' });
+    const entries = entriesIn('package', {
+      'SKILL.md': '---\nname: s\nversion: 2.0.0\n---\n# s\n',
+    });
     const plain = await vet(['--from', archive('skill.tar', entries, false)]);
     const odd = await vet(['--from', archive('skill.bin', entries)]);
 
@@ -66,7 +74,10 @@ describe('stroq vet --from <archive>', () => {
   });
 
   it('names an artifact that does not name itself after the archive', async () => {
-    const file = archive('plain-notes.tgz', entriesIn('package', { 'SKILL.md': '---\ndescription: notes\n---\n# n\n' }));
+    const file = archive(
+      'plain-notes.tgz',
+      entriesIn('package', { 'SKILL.md': '---\ndescription: notes\n---\n# n\n' }),
+    );
 
     const first = (await vet(['--from', file])).stdout.split('\n')[0];
 
@@ -137,7 +148,9 @@ describe('stroq vet --expect, with an archive', () => {
   });
 
   it('works on Windows too, because the archive carries the modes the digest is made of', async () => {
-    const run = await vet(['--from', skillArchive(), '--expect', SKILL_DIGEST], { platform: 'win32' });
+    const run = await vet(['--from', skillArchive(), '--expect', SKILL_DIGEST], {
+      platform: 'win32',
+    });
 
     expect(run.code, run.stderr).toBe(0);
     expect(run.stdout.split('\n')[1]).not.toContain('platform-dependent');
@@ -146,7 +159,9 @@ describe('stroq vet --expect, with an archive', () => {
 
 describe('stroq vet --expect, with a folder, on Windows', () => {
   it('exits 2 for a folder, before it reads it, and says why', async () => {
-    const run = await vet(['--from', skillFolder(), '--expect', SKILL_DIGEST], { platform: 'win32' });
+    const run = await vet(['--from', skillFolder(), '--expect', SKILL_DIGEST], {
+      platform: 'win32',
+    });
 
     expect(run.code).toBe(2);
     expect(run.stdout).toBe('');
@@ -156,7 +171,9 @@ describe('stroq vet --expect, with a folder, on Windows', () => {
   });
 
   it('is told as a usage fault, with the way to the help', async () => {
-    const run = await vet(['--from', skillFolder(), '--expect', SKILL_DIGEST], { platform: 'win32' });
+    const run = await vet(['--from', skillFolder(), '--expect', SKILL_DIGEST], {
+      platform: 'win32',
+    });
 
     expect(run.stderr).toMatch(/^stroq vet: --expect is not available on Windows for a folder/);
     expect(run.stderr).toContain('Run "stroq vet --help" to see its options.');
@@ -176,12 +193,31 @@ describe('an archive that is refused', () => {
   const GOOD: TarEntry = { name: 'package/SKILL.md', data: '---\nname: s\n---\n# s\n' };
 
   it.each([
-    ['holds a link', [GOOD, { name: 'package/link', typeflag: '2', linkname: '/etc/passwd' }], /an archive with a link is not read/],
-    ['holds a path that climbs out', [GOOD, { name: 'package/../escape.txt', data: 'x' }], /path refused: '\.' or '\.\.' component/],
-    ['holds an absolute path', [{ name: '/etc/cron.d/x', data: 'x' }, { name: 'SKILL.md', data: 's' }], /absolute path/],
+    [
+      'holds a link',
+      [GOOD, { name: 'package/link', typeflag: '2', linkname: '/etc/passwd' }],
+      /an archive with a link is not read/,
+    ],
+    [
+      'holds a path that climbs out',
+      [GOOD, { name: 'package/../escape.txt', data: 'x' }],
+      /path refused: '\.' or '\.\.' component/,
+    ],
+    [
+      'holds an absolute path',
+      [
+        { name: '/etc/cron.d/x', data: 'x' },
+        { name: 'SKILL.md', data: 's' },
+      ],
+      /absolute path/,
+    ],
     ['holds .git', [GOOD, { name: 'package/.git/config', data: 'x' }], /\.git/],
     ['holds a path twice', [GOOD, GOOD], /appears twice|twice/],
-    ['holds README and readme', [GOOD, { name: 'package/README', data: '1' }, { name: 'package/readme', data: '2' }], /one name on a filesystem/],
+    [
+      'holds README and readme',
+      [GOOD, { name: 'package/README', data: '1' }, { name: 'package/readme', data: '2' }],
+      /one name on a filesystem/,
+    ],
     ['holds nothing but folders', [{ name: 'package/', typeflag: '5' }], /no files/],
   ])('exits 3 for an archive that %s, with a fixed phrase', async (_label, entries, phrase) => {
     const file = archive('refused.tgz', entries);
@@ -245,7 +281,8 @@ describe('an archive that is refused', () => {
   it('writes a name out when it says it, and prints no raw control character', async () => {
     const file = archive('hostile.tgz', [
       GOOD,
-      { name: 'package/a\u001b[2Jb‮txt.sh', data: 'x', via: 'pax' },
+      // An escape that moves the cursor, and a direction override: the two kinds of character that act.
+      { name: `package/a${ESC}[2Jb${RLO}txt.sh`, data: 'x', via: 'pax' },
     ]);
 
     const run = await vet(['--from', file]);
@@ -270,7 +307,9 @@ describe('the other forms of output, for an archive', () => {
     const run = await vet(['--from', skillArchive(), '--card']);
 
     expect(run.code, run.stderr).toBe(0);
-    expect(run.stdout).toContain(`Reproduce: \`stroq vet --from <archive> --expect sha256:${SKILL_DIGEST}\``);
+    expect(run.stdout).toContain(
+      `Reproduce: \`stroq vet --from <archive> --expect sha256:${SKILL_DIGEST}\``,
+    );
     expect(run.stdout).not.toContain('platform-dependent');
   });
 

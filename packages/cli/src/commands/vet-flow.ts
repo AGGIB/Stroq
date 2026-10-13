@@ -1,6 +1,9 @@
 import { writeFileSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { stableStringify } from '@stroq/core';
+import { usageError } from '../help.js';
+import { ArchiveError } from '../install/archive-error.js';
+import { readArchiveFile } from '../install/archive-file.js';
 import {
   READING_PHRASES,
   failedReadingSpot,
@@ -16,6 +19,7 @@ import {
 } from '../install/inspect/index.js';
 import { showable } from '../install/inspect/safe-text.js';
 import { ReadDirError, readDirTree } from '../install/read-dir.js';
+import { sourceTypeOf, type SourceType } from '../install/read-source.js';
 import { TreeError } from '../install/tree.js';
 import { SourceRefSchema, type Passport } from '../install/types.js';
 import { neutralizeControls } from '../terminal-safe.js';
@@ -27,19 +31,28 @@ import { lineText } from './vet-text.js';
 import type { VetDeps, VetOptions } from './vet-types.js';
 
 /**
- * The doing of `stroq vet`: read the folder into a tree, make the passport of that tree, and show it in the
- * form that was asked for. Nothing from the folder is run, and nothing is written but the file `--out` names.
+ * The doing of `stroq vet`: read the folder or the archive into a tree, make the passport of that tree, and
+ * show it in the form that was asked for. Nothing from the folder or the archive is run, and nothing is
+ * written but the file `--out` names.
  *
  * Exit codes: 0 complete; 1 `--expect` did not match, or a reading failed; 2 the output file could not be
- * made (the command line was well formed, but it asks for a file that is there already); 3 the files cannot
- * be read as an artifact. The usage faults (also 2) are `vet.ts`'s.
+ * made (the command line was well formed, but it asks for a file that is there already), or `--expect` was
+ * asked of a folder on Windows; 3 the files cannot be read as an artifact. The other usage faults (also 2)
+ * are `vet.ts`'s.
  */
 const EXIT_UNCONFIRMED = 1;
 const EXIT_OUTPUT = 2;
+const EXIT_USAGE = 2;
 const EXIT_UNREADABLE = 3;
-/** The longest label a passport allows of a source (`types.ts`); the folder name is cut to less, for the escape of a prefix. */
+/** The longest label a passport allows of a source (`types.ts`); the name is cut to less, for the escape of a prefix. */
 const LABEL_MAX = 79;
-const FALLBACK_LABEL = 'folder';
+/** What a source is called when its name cannot be made to fit a label (the root of a disk has none). */
+const FALLBACK_LABELS: Readonly<Record<SourceType, string>> = { dir: 'folder', tarball: 'archive' };
+const EXPECT_ON_WINDOWS =
+  '--expect is not available on Windows for a folder: a folder read there has no executable bit, so its ' +
+  'digest can differ from the digest of the same files read on Linux or macOS, and a bare digest cannot ' +
+  'say which of them it is. Give the files as an archive (.tgz), which carries its own executable bits, ' +
+  'or run it on Linux or macOS.';
 const KIND_ADVICE = ' (--kind skill, --kind mcp or --kind plugin)';
 
 interface Streams {
@@ -53,14 +66,15 @@ const streamsOf = (deps: VetDeps): Streams => ({
 });
 
 /**
- * The name of the folder as a passport may carry it: the base name, made safe, with no separator in it, and
- * never one that starts as an absolute path does (a `~`, a drive letter), because a passport is committed
- * and read on other machines and says which folder it was, not where. A name that cannot be made fit is `folder`.
+ * The name of the folder or archive as a passport may carry it: the base name, made safe, with no separator
+ * in it, and never one that starts as an absolute path does (a `~`, a drive letter), because a passport is
+ * committed and read on other machines and says which folder or file it was, not where. A name that cannot
+ * be made fit is `folder`, or `archive`.
  */
-export function labelOf(dir: string): string {
-  const safe = showable(basename(resolve(dir)), LABEL_MAX).replace(/[\\/]/g, '_');
+export function labelOf(path: string, type: SourceType = 'dir'): string {
+  const safe = showable(basename(resolve(path)), LABEL_MAX).replace(/[\\/]/g, '_');
   const label = /^(?:~|[A-Za-z]:)/.test(safe) ? `_${safe}` : safe;
-  return SourceRefSchema.safeParse({ type: 'dir', label }).success ? label : FALLBACK_LABEL;
+  return SourceRefSchema.safeParse({ type, label }).success ? label : FALLBACK_LABELS[type];
 }
 
 /** Why the files could not be read as an artifact, in the fixed words of the error, or null for a fault that is not one of ours. */
@@ -68,22 +82,44 @@ function unreadableBecause(error: unknown): string | null {
   if (error instanceof InspectError) {
     return error.code === 'cannot-tell-kind' ? `${error.message}${KIND_ADVICE}` : error.message;
   }
-  if (error instanceof ReadDirError || error instanceof TreeError) return error.message;
+  if (
+    error instanceof ReadDirError ||
+    error instanceof ArchiveError ||
+    error instanceof TreeError
+  ) {
+    return error.message;
+  }
   return null;
 }
 
 type Made =
-  { readonly passport: Passport; readonly failure?: undefined } | { readonly failure: string };
+  | { readonly passport: Passport; readonly failure?: undefined; readonly usage?: undefined }
+  | { readonly failure: string; readonly usage?: undefined }
+  | { readonly usage: string; readonly failure?: undefined };
+
+/** The tree of what `--from` names: a folder is walked, and a file is read as an archive. */
+function readSource(type: SourceType, options: VetOptions, deps: VetDeps) {
+  return type === 'dir'
+    ? readDirTree(options.from, deps.platform === undefined ? {} : { platform: deps.platform })
+    : readArchiveFile(options.from);
+}
 
 async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
   try {
-    const { tree, blindSpots } = await readDirTree(
-      options.from,
-      deps.platform === undefined ? {} : { platform: deps.platform },
-    );
+    const type = await sourceTypeOf(options.from);
+    // A folder read on Windows has no executable bit, so its digest is not that of the same files anywhere
+    // else, and a bare digest cannot say so. An archive carries its own bits and has no such trouble.
+    if (
+      type === 'dir' &&
+      options.expect !== null &&
+      (deps.platform ?? process.platform) === 'win32'
+    ) {
+      return { usage: EXPECT_ON_WINDOWS };
+    }
+    const { tree, blindSpots } = await readSource(type, options, deps);
     const context = {
       kind: options.kind,
-      source: { type: 'dir', label: labelOf(options.from) } as const,
+      source: { type, label: labelOf(options.from, type) },
       extraBlindSpots: blindSpots,
       stroqVersion: deps.stroqVersion ?? stroqVersion(),
       rulesId: INSPECT_RULES_ID,
@@ -171,6 +207,10 @@ function incompleteText(passport: Passport): string {
 export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<number> {
   const io = streamsOf(deps);
   const made = await makePassport(options, deps);
+  if (made.usage !== undefined) {
+    io.err(usageError('vet', made.usage));
+    return EXIT_USAGE;
+  }
   if (made.failure !== undefined) {
     io.err(`stroq vet: ${outsideLine(made.failure)}\n`);
     return EXIT_UNREADABLE;
