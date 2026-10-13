@@ -109,12 +109,12 @@ describe('the built CLI: stroq vet', () => {
 
   it('exits 2 with no folder, and 2 for an option that is not its own, in the words of every command', () => {
     const none = stroq('vet');
-    const online = stroq('vet', '--from', skillFolder(), '--online');
+    const unknown = stroq('vet', '--from', skillFolder(), '--bogus');
 
     expect(none.status).toBe(2);
     expect(none.stderr).toContain('--from <dir or .tgz>');
-    expect(online.status).toBe(2);
-    expect(online.stderr).toContain('unknown option --online');
+    expect(unknown.status).toBe(2);
+    expect(unknown.stderr).toContain('unknown option --bogus');
   });
 
   it('exits 3 for a folder that is not there, and prints nothing on stdout', () => {
@@ -131,7 +131,7 @@ describe('the built CLI: stroq vet', () => {
 
     expect(help.status).toBe(0);
     expect(help.stdout).toMatch(/^stroq vet --from <dir or \.tgz>/);
-    for (const flag of ['--from', '--kind', '--json', '--expect', '--card', '--out'])
+    for (const flag of ['--from', '--online', '--kind', '--json', '--expect', '--card', '--out'])
       expect(help.stdout, flag).toContain(flag);
     expect(list.stdout).toMatch(/^ {2}vet --from <dir or \.tgz>/m);
   });

@@ -249,8 +249,22 @@ describe('readTarArchive: sizes and extended headers', () => {
     ]);
     const read = readTarArchive(bytes);
 
+    expect(read.commit).toBe(commit);
     expect(read.tree.entries.map((entry) => entry.path)).toEqual(['README.md']);
     expect(read.topFolder).toBe('owner-repo-0123abc');
+  });
+
+  it('does not allow a second global pax header to overwrite the commit from the first', () => {
+    const commit1 = '0123456789abcdef0123456789abcdef01234567';
+    const commit2 = 'ffffffffffffffffffffffffffffffffffffffff';
+    const bytes = tarOf([
+      concat(paxBlocks({ comment: commit1 }, 'g')),
+      { name: 'README.md', data: 'hello' },
+      concat(paxBlocks({ comment: commit2 }, 'g')),
+      { name: 'second.md', data: 'world' },
+    ]);
+    const read = readTarArchive(bytes);
+    expect(read.commit).toBe(commit1);
   });
 
   it('ignores the pax attributes that are not about the name or the size', () => {

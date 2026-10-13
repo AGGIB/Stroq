@@ -79,6 +79,16 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
     ['a long run of slashes as a value', fileOf(`--token ${'/'.repeat(3900)}`)],
     ['a long run of dollar signs as a value', fileOf(`--token ${'$'.repeat(3900)}`)],
     ['a long run of dashes as a value', fileOf(`--token ${'-'.repeat(3900)}`)],
+    ['mysql with -p repeated', fileOf('mysql -psecret '.repeat(270))],
+    ['mysql one very long password', fileOf(`mysql -p${'a'.repeat(3900)}`)],
+    ['sudo repeated then mysql', fileOf(`${'sudo '.repeat(500)}mysql -psecret`)],
+    ['docker login -p repeated', fileOf('docker login -u user -p secret '.repeat(100))],
+    ['sshpass -p repeated', fileOf('sshpass -p secret ssh host '.repeat(120))],
+    ['redis-cli -a repeated', fileOf('redis-cli -a secret ping '.repeat(150))],
+    ['repeated separators in command line', fileOf('; && || | '.repeat(400))],
+    ['repeated command substitutions', fileOf('$('.repeat(1000) + ')'.repeat(1000))],
+    ['semicolons run ending with word and separator', fileOf(';'.repeat(4000) + 'x;')],
+    ['ampersands run ending with word and separator', fileOf('&'.repeat(4000) + 'x;')],
   ];
 
   it.each(shapes)('reads %s in linear time', (_name, text) => {
@@ -114,6 +124,10 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
       '-u a:b ',
       'x=y ',
       '//r/:_t=${T} ',
+      'mysql -psecret ',
+      'docker login -p sec ',
+      'sshpass -p sec ',
+      'redis-cli -a sec ',
     ];
     for (const shape of shapes) {
       const text = JSON.stringify({ command: shape.repeat(Math.floor(1_900_000 / shape.length)) });
@@ -123,6 +137,14 @@ describe('findCredentialShape: shapes that make a careless pattern backtrack', (
 
       expect(took, shape).toBeLessThan(3_000);
     }
+  });
+
+  it('reads a long run of separators ending with word and separator in linear time', () => {
+    const text = JSON.stringify({ command: ';'.repeat(150_000) + 'x;' });
+
+    const took = cpuTime(() => findCredentialShape(text));
+
+    expect(took).toBeLessThan(3_000);
   });
 
   it('reads a JSON document with a great many tiny strings in linear time', () => {
@@ -256,10 +278,20 @@ describe('findCredentialShape: lines made of the pieces the readers look for', (
     ';',
     '-H',
     '-u',
+    '-p',
+    '-a',
     '--user',
     '--token',
     '--env=',
     '--header=',
+    'mysql',
+    'mariadb',
+    'mysqldump',
+    'docker',
+    'podman',
+    'login',
+    'sshpass',
+    'redis-cli',
     "'",
     '"',
     '`',

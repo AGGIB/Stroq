@@ -84,6 +84,9 @@ export function isNumeric(value: string): boolean {
   return true;
 }
 
+/** Minimum character length for a user password token. */
+export const USER_PASSWORD_MIN = 4;
+
 // ---------------------------------------------------------------------------------------------
 // What stands in for a value.
 
