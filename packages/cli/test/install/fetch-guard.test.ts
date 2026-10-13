@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 /**
  * Section 6 of the Safe Install spec:
  * "The only network code is install/fetch.ts; a guard test forbids fetch(, http.request and https. in the rest of cli/src."
+ * Task Lock also has a local controller transport. Only its exact node:http import is
+ * allowed; the other checks and all other network imports still apply to that file.
  */
 const srcDir = fileURLToPath(new URL('../../src', import.meta.url));
 
@@ -44,8 +46,12 @@ describe('network call boundary', () => {
     // Forbids https. (https.request, https.get, etc.)
     expect(content, `${relative} must not use https.`).not.toMatch(/\bhttps\./);
 
-    // Forbids static and dynamic importing or requiring of network modules
-    expect(content, `${relative} must not import or require network modules`).not.toMatch(
+    const imports =
+      filePath === join(srcDir, 'task', 'broker.ts')
+        ? content.replace(/^import \{ createServer, request \} from 'node:http';\r?$/m, '')
+        : content;
+    // Forbids static and dynamic importing or requiring of other network modules.
+    expect(imports, `${relative} must not import or require network modules`).not.toMatch(
       /(?:from\s+|(?:import|require)\s*\(\s*)['"](?:node:)?(?:https?|http2|net|tls|dns|dgram|undici)['"]/,
     );
   });

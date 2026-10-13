@@ -16,6 +16,25 @@ async function withServer(handler: RequestListener, run: (url: string) => Promis
 }
 
 describe('task hook transport', () => {
+  it.each([
+    'http://example.test/task-token',
+    'http://localhost/task-token',
+    'https://127.0.0.1/task-token',
+  ])('refuses a controller outside the HTTP loopback boundary: %s', async (target) => {
+    let requests = 0;
+    await withServer(
+      (_req, res) => {
+        requests += 1;
+        res.end(JSON.stringify({ stdout: '', exitCode: 0 }));
+      },
+      async (url) => {
+        expect(
+          (await taskHook('{}', { STROQ_TASK_BROKER: target, HTTP_PROXY: url })).stdout,
+        ).toContain('deny');
+        expect(requests).toBe(0);
+      },
+    );
+  });
   it('uses the sandbox HTTP proxy without exposing credentials in the request target', async () => {
     const target = 'http://127.0.0.1:1234/task-token';
     await withServer(
