@@ -147,7 +147,7 @@ describe('commandHint', () => {
   it('says what to run instead of install, in one line that names both commands', () => {
     const hint = commandHint('install');
     expect(hint).toBe(
-      'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+      'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
     );
     expect(hint).not.toContain('\n');
   });

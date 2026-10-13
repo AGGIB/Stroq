@@ -37,6 +37,8 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   // Reads a folder, and with --online goes to the network for a package: that form is a person's. The
   // form that only reads is open, and `stroq vet and the state gate` below holds both.
   vet: ['stroq vet --online', 'stroq vet --from x --online'],
+  add: ['stroq add ./demo', 'stroq add demo --user', 'stroq add demo --restore'],
+  remove: ['stroq remove demo', 'stroq remove demo --force'],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */

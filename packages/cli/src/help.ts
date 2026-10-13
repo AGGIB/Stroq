@@ -19,6 +19,30 @@ interface CommandHelp {
 
 export const COMMANDS: readonly CommandHelp[] = [
   {
+    name: 'add',
+    synopsis: 'add <local-source|installed-name> [--user] [--restore]',
+    about: [
+      'read a local skill directory or tar archive, show its passport and require a person',
+      'to type the first 12 hex digits of its digest before installing the inspected bytes.',
+      'An installed name updates from its recorded source. A passport is not a security certificate.',
+    ],
+    flags: [
+      ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
+      ['--restore', 'restore an installed name from its confirmed store bytes'],
+    ],
+  },
+  {
+    name: 'remove',
+    synopsis: 'remove <name> [--force]',
+    about: ['remove a confirmed skill after a terminal y/N question, and record a receipt'],
+    flags: [
+      [
+        '--force',
+        'also remove a skill changed outside Stroq; still requires a person at a terminal',
+      ],
+    ],
+  },
+  {
     name: 'init',
     synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
     about: [
@@ -536,7 +560,7 @@ export function parseArgsProblem(err: unknown): string | null {
 const HINTS: ReadonlyMap<string, string> = new Map([
   [
     'install',
-    'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+    'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
   ],
 ]);
 

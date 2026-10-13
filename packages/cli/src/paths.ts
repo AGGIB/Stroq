@@ -55,6 +55,7 @@ export const hardenDirIn = (home: string): string => join(home, 'harden');
 export const backupsDirIn = (home: string): string => join(home, 'backups');
 export const storeDirIn = (home: string): string => join(home, 'store');
 export const passportsFileIn = (home: string): string => join(home, 'passports.json');
+export const passportsLockDirIn = (home: string): string => join(home, 'passports.lock');
 export const tasksDirIn = (home: string): string => join(home, 'tasks');
 export const bindingsFileIn = (home: string): string => join(home, 'bindings.yaml');
 

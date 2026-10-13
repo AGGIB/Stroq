@@ -22,6 +22,8 @@ import { runUninstall } from './commands/uninstall.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
 import { runVet } from './commands/vet.js';
+import { runAdd } from './commands/add.js';
+import { runRemove } from './commands/remove.js';
 import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
 import {
@@ -60,6 +62,8 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   coverage: runCoverageCommand,
   harden: runHarden,
   vet: runVet,
+  add: runAdd,
+  remove: runRemove,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {

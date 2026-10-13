@@ -9,6 +9,7 @@ import {
   liveDirIn,
   openclawPluginDirIn,
   passportsFileIn,
+  passportsLockDirIn,
   pluginCliDirIn,
   policyFileIn,
   secretsFileIn,
@@ -37,6 +38,7 @@ export const PROTECTED: ReadonlyArray<(home: string) => string> = [
   backupsDirIn,
   storeDirIn,
   passportsFileIn,
+  passportsLockDirIn,
   tasksDirIn,
   bindingsFileIn,
 ];

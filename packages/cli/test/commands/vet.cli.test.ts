@@ -144,7 +144,7 @@ describe('the built CLI: stroq install', () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe('');
     expect(run.stderr).toBe(
-      'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.\n',
+      'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.\n',
     );
     expect(run.stderr).not.toContain('uninstall');
   });
