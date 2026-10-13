@@ -99,7 +99,6 @@ export function runProblem(run: HostRun): RunProblem | null {
       'the answer of the host is not in a shape that can be read',
     );
   if (run.limitHit !== undefined) return problem(REASONS.limit, `the host said: ${run.limitHit}`);
-  if (run.failureReason !== undefined) return problem(run.failureReason, run.stderrTail);
   if (run.apiProvider !== undefined && run.apiProvider !== 'firstParty')
     return problem(REASONS.apiBilling, `the host is not first party (${run.apiProvider})`);
   if (run.apiKeySource !== undefined && !isSubscriptionKeySource(run.apiKeySource))
@@ -115,6 +114,7 @@ export function runProblem(run: HostRun): RunProblem | null {
     if (auth !== null) return problem(REASONS.auth, `the host said: ${auth}`);
   }
   if (run.timedOut) return problem(REASONS.timeout, 'the host did not answer in time');
+  if (run.failureReason !== undefined) return problem(run.failureReason, run.stderrTail);
   if (run.exitCode !== 0)
     return problem(
       REASONS.hostError,
