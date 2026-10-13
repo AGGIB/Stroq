@@ -202,13 +202,13 @@ describe('gunzipOnce', () => {
     });
 
     it('is stopped near the limit, and does not get to hold what it expands to', () => {
-      const bomb = gz(new Uint8Array(512 * MiB));
+      const bomb = gz(new Uint8Array(128 * MiB));
       const before = process.memoryUsage().arrayBuffers;
 
       expect(codeOf(() => gunzipOnce(bomb, 8 * MiB))).toBe('limit');
 
-      // Far under the 512 MiB it would have been, with room for what the allocator keeps.
-      expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(64 * MiB);
+      // Far under the 128 MiB it would have been, with room for what the allocator keeps.
+      expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(32 * MiB);
     });
   });
 });
