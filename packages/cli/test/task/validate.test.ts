@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseTaskArgv } from '../../src/task/args.js';
@@ -8,7 +8,7 @@ import { canonicalTaskHome, validateTaskPaths } from '../../src/task/validate.js
 
 const dirs: string[] = [];
 const temp = () => {
-  const dir = mkdtempSync(join(tmpdir(), 'stroq-path-check-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-path-check-')));
   dirs.push(dir);
   return dir;
 };
@@ -22,6 +22,15 @@ const contract = (cwd: string, argv: string[] = []) =>
   }).body;
 
 describe('task filesystem boundaries', () => {
+  it('signs the physical root for a project explicitly reached through an alias', () => {
+    const cwd = temp();
+    const alias = join(temp(), 'project-alias');
+    symlinkSync(cwd, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const body = contract(alias, ['--read', 'src/**']);
+    expect(cwd).toBe(realpathSync.native(cwd));
+    expect(body.projectRoot).toBe(cwd.replaceAll('\\', '/'));
+    expect(body.scope.read.allow).toEqual([`${body.projectRoot}/src/**`]);
+  });
   it('normalizes an existing directory and rejects parent or absolute escape paths', () => {
     const cwd = temp();
     mkdirSync(join(cwd, 'src'));

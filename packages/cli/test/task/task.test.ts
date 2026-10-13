@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -28,7 +29,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 const temp = () => {
-  const dir = mkdtempSync(join(tmpdir(), 'stroq-task-test-'));
+  // Match the launcher's physical process.cwd(), even when TMPDIR is /var or a junction.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-task-test-')));
   dirs.push(dir);
   return dir;
 };

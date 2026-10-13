@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -26,7 +35,9 @@ import { runTaskHookCommand } from '../../src/task/broker.js';
 
 const dirs: string[] = [];
 const temp = () => {
-  const dir = mkdtempSync(join(tmpdir(), 'stroq-controller-'));
+  // macOS /var and Windows junction-backed TEMP can name a different lexical root
+  // than the physical cwd the launcher signs. Positive fixtures model process.cwd().
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-controller-')));
   dirs.push(dir);
   return dir;
 };
@@ -72,6 +83,47 @@ function world() {
 }
 
 describe('parent task controller', () => {
+  it('resolves an aliased cwd while keeping lexical file aliases and escaped cwd outside scope', async () => {
+    const w = world();
+    mkdirSync(join(w.cwd, 'src'));
+    const aliases = temp();
+    const projectAlias = join(aliases, 'project-alias');
+    const outsideAlias = join(aliases, 'outside-alias');
+    const kind = process.platform === 'win32' ? 'junction' : 'dir';
+    symlinkSync(w.cwd, projectAlias, kind);
+    symlinkSync(temp(), outsideAlias, kind);
+    const broker = await startTaskBroker(w.engine, 'token', {
+      cwd: w.body.projectRoot,
+      sessionId: w.body.sessionId as string,
+    });
+    try {
+      const env = { STROQ_TASK_BROKER: broker.url };
+      expect((await taskHook(JSON.stringify({ ...w.event, cwd: projectAlias }), env)).stdout).toBe(
+        '',
+      );
+      const throughAlias = {
+        ...w.event,
+        cwd: projectAlias,
+        tool_use_id: 'lexical-alias',
+        tool_input: { file_path: join(projectAlias, 'src', 'ok.ts') },
+      };
+      expect((await taskHook(JSON.stringify(throughAlias), env)).stdout).toContain(
+        'task-scope-path',
+      );
+      expect(
+        (
+          await taskHook(
+            JSON.stringify({ ...w.event, cwd: outsideAlias, tool_use_id: 'escaped-alias' }),
+            env,
+          )
+        ).stdout,
+      ).toContain('deny');
+      const entries = await new AuditLog(join(w.home, 'audit.jsonl')).readAll();
+      expect(entries.map((entry) => entry.decision?.effect)).toEqual(['allow', 'deny']);
+    } finally {
+      await broker.close();
+    }
+  });
   it('does not let a duplicate denied pre burn an extension approved afterward', async () => {
     const w = world();
     vi.spyOn(process.stdout, 'write').mockReturnValue(true);
