@@ -2,3 +2,8 @@ packages:
   - 'packages/*'
 allowBuilds:
   esbuild: true
+overrides:
+  # GHSA alert 2: source-map-js before 1.2.2 can be made to loop on indexed source-map
+  # offsets. Dev only (postcss, magicast under tsup and vitest); 1.2.2 is inside every
+  # parent's range, this only lifts the floor until magicast asks for it itself.
+  source-map-js: ^1.2.2
