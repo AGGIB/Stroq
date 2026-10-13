@@ -35,8 +35,7 @@ const FILE_TOOLS: ReadonlySet<string> = new Set([
 // exact-call extension, including pattern/options, even when their root resolved.
 const RECURSIVE_TOOLS: ReadonlySet<string> = new Set(['Grep', 'Glob', 'LS']);
 
-const fileFingerprints = (tool: string): boolean =>
-  FILE_TOOLS.has(tool) && !RECURSIVE_TOOLS.has(tool);
+const fileFingerprints = (tool: string): boolean => tool === 'Read';
 
 /** Tools that name no file, and so need no resources to be held to a path scope. */
 const PATHLESS_TOOLS: ReadonlySet<string> = new Set([
@@ -69,16 +68,9 @@ function mcpOf(input: ScopeGateInput): { server: string; tool: string } | null {
   return input.classification.mcp ?? parseMcpToolName(input.event.toolName);
 }
 
-/** The tools that read a file in order to change it: they list a read and a write of each file. */
-const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'NotebookEdit']);
-
-/** One fingerprint per file for an edit, whichever of its two entries was refused. */
+/** Read-only extensions retain a target fingerprint; mutations bind the whole call below. */
 const pathFingerprint = (tool: string, entry: PathEntry): string =>
-  fingerprintOf(
-    tool,
-    `file:${EDIT_TOOLS.has(tool) ? 'edit' : entry.op}`,
-    fileTarget(entry.path, entry.real),
-  );
+  fingerprintOf(tool, `file:${entry.op}`, fileTarget(entry.path, entry.real));
 
 /** Bind exact-call approval to execution context as well as every argument. */
 export const wholeCallFingerprint = (input: ScopeGateInput): string => {

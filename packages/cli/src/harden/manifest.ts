@@ -1,9 +1,16 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { withLock } from '@stroq/core';
 import { z } from 'zod';
+import { within } from '../commands/config-file.js';
 import { hardenDirIn, hardenManifestFileIn } from '../paths.js';
-import { assertWriteAllowed, makePrivateDir, nodeFs, writeFileAtomic } from './atomic.js';
+import {
+  assertWriteAllowed,
+  makePrivateDir,
+  nodeFs,
+  removeFile,
+  writeFileAtomic,
+} from './atomic.js';
 import { HardenError, ID_PATTERN, type HardenEnv, type RecordedEdit } from './types.js';
 
 /**
@@ -41,6 +48,8 @@ export interface ManifestEntry {
   readonly recipe: string;
   /** The file did not exist before this apply: undo removes it if it is still only Stroq's. */
   readonly created: boolean;
+  /** The directories this apply created because they did not exist, innermost first. */
+  readonly createdDirs?: readonly string[];
   /**
    * The real path of the file when it was changed, links followed. It is also the key the entry is
    * filed under; undo refuses to act on a path that no longer leads to it.
@@ -139,18 +148,55 @@ const editSchema = z.discriminatedUnion('kind', [
 
 const absolutePath = z.string().refine((path) => isAbsolute(path), 'a path is absolute');
 
-const entrySchema = z.strictObject({
-  recipe: z.string().min(1).max(128),
-  created: z.boolean(),
-  real: absolutePath,
-  root: absolutePath.nullable(),
-  edits: z.array(editSchema),
-  shaBefore: sha256Hex.nullable(),
-  shaAfter: sha256Hex,
-  backup: z.string().regex(ID_PATTERN).nullable(),
-  stroqVersion: z.string().min(1).max(64),
-  appliedAt: z.iso.datetime(),
-});
+const MAX_CREATED_DIRS = 32;
+
+function strictAncestorsOf(path: string): Set<string> {
+  const ancestors = new Set<string>();
+  let current = dirname(path);
+  for (;;) {
+    ancestors.add(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return ancestors;
+}
+
+const createdDirsValid = (entry: {
+  readonly created: boolean;
+  readonly createdDirs?: readonly string[] | undefined;
+  readonly real: string;
+  readonly root: string | null;
+}): boolean => {
+  if (entry.createdDirs === undefined || entry.createdDirs.length === 0) return true;
+  if (!entry.created) return false;
+  if (entry.root === null) return false;
+  const ancestors = strictAncestorsOf(entry.real);
+  for (const dir of entry.createdDirs) {
+    if (!ancestors.has(dir)) return false;
+    if (dir === entry.root || !within(dir, entry.root)) return false;
+  }
+  return true;
+};
+
+const entrySchema = z
+  .strictObject({
+    recipe: z.string().min(1).max(128),
+    created: z.boolean(),
+    createdDirs: z.array(absolutePath).max(MAX_CREATED_DIRS).optional(),
+    real: absolutePath,
+    root: absolutePath.nullable(),
+    edits: z.array(editSchema),
+    shaBefore: sha256Hex.nullable(),
+    shaAfter: sha256Hex,
+    backup: z.string().regex(ID_PATTERN).nullable(),
+    stroqVersion: z.string().min(1).max(64),
+    appliedAt: z.iso.datetime(),
+  })
+  .refine(
+    createdDirsValid,
+    'createdDirs must be strict ancestors of the file, inside root, and present only for created files',
+  );
 
 const manifestSchema = z.strictObject({
   version: z.literal(1),
@@ -315,6 +361,23 @@ export async function writeManifest(env: HardenEnv, manifest: Manifest): Promise
   assertWriteAllowed(file, rules);
   await makePrivateDir(fs, hardenDirIn(env.home));
   await writeFileAtomic(file, text, { ...rules, mode: MANIFEST_MODE, fs });
+}
+
+/**
+ * Removes the manifest file, when an apply is taken back after failing to put the file in place.
+ */
+export async function removeManifest(env: HardenEnv): Promise<void> {
+  const file = hardenManifestFileIn(env.home);
+  const rules = { root: env.home, initRule: false } as const;
+  try {
+    const found = lstatSync(file);
+    if (found.isSymbolicLink() || !found.isFile()) throw unsafe(file, 'is not a regular file');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  assertWriteAllowed(file, rules);
+  const fs = env.fs ?? nodeFs;
+  await removeFile(file, { ...rules, fs });
 }
 
 /**

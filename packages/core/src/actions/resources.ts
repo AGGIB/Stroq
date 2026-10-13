@@ -380,7 +380,9 @@ export function resourcesOfShellTool(
     const input = isRecord(toolInput) ? toolInput : {};
     const command = input['command'];
     const fromCommand =
-      typeof command === 'string' ? commandUrls(command, MAX_RESOURCE_URLS).urls : [];
+      typeof command === 'string'
+        ? commandUrls(command, MAX_RESOURCE_URLS, { taskRemotes: true }).urls
+        : [];
     const socket = toolName === 'Monitor' ? monitorSocket(input) : null;
     const fromSocket = socket === null || socket.url === '' ? [] : [socketUrl(socket.url)];
     const urls = new Map<string, ResourceUrl>();

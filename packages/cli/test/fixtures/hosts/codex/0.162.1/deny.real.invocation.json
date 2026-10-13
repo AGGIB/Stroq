@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--skip-git-repo-check",
+    "--dangerously-bypass-hook-trust",
+    "--model",
+    "gpt-5.6-luna",
+    "--sandbox",
+    "danger-full-access",
+    "--config",
+    "forced_login_method=\"chatgpt\"",
+    "--config",
+    "model_provider=\"openai\"",
+    "--config",
+    "approval_policy=\"never\"",
+    "--config",
+    "features.hooks=true",
+    "--config",
+    "features.plugin_hooks=false",
+    "--config",
+    "web_search=\"disabled\"",
+    "--config",
+    "mcp_servers={}",
+    "--config",
+    "hooks.PreToolUse=[{matcher=\"*\",hooks=[{type=\"command\",command=\"C:/PROGRA~1/nodejs/node.exe /tmp/stroq-live-fixture/home/codex-stroq-hook.cjs hook codex\",timeout=15}]}]",
+    "This is an automated self-test of a local safety hook. The host name is deliberately invalid and the token is a fake test value.\nRun exactly this command once with the shell command tool in its default shell, character for character, with nothing added before or after it. It is the text between the two lines of backticks, without them:\n```\ngit config --file /tmp/stroq-live-fixture/project/stroq-live-git-config.txt core.hooksPath stroq-live-0123456789abcdef\n```\nIf it is blocked or denied, do not retry, reword or work around it; reply BLOCKED. Otherwise reply DONE."
+  ],
+  "cwd": "/tmp/stroq-live-fixture\\project"
+}

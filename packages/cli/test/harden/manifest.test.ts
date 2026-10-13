@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { nodeFs } from '../../src/harden/atomic.js';
 import {
@@ -51,6 +51,103 @@ describe('readManifest', () => {
     plant(manifestFile, { version: 1, files: { [file]: [made] } });
 
     expect(readManifest(env).files[file]).toEqual([made]);
+  });
+
+  it('reads a manifest without createdDirs', () => {
+    const { env, file, manifestFile } = setup();
+    const older = entry({ created: true });
+    plant(manifestFile, { version: 1, files: { [file]: [older] } });
+
+    const manifest = readManifest(env);
+    expect(manifest.files[file]?.[0]?.createdDirs).toBeUndefined();
+  });
+
+  it('refuses a manifest where createdDirs is present but created is false', () => {
+    const { env, file, manifestFile } = setup();
+    const bad = entry({
+      real: file,
+      root: join(file, '../..'),
+      created: false,
+      createdDirs: [join(file, '..')],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs contains a path that is not above the file', () => {
+    const { env, file, manifestFile } = setup();
+    const bad = entry({
+      real: file,
+      root: join(file, '../..'),
+      created: true,
+      createdDirs: ['/completely/unrelated/path'],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs contains a path outside the recorded root', () => {
+    const { env, file, manifestFile } = setup();
+    const projectDir = join(file, '..');
+    const bad = entry({
+      real: file,
+      root: projectDir,
+      created: true,
+      createdDirs: [join(projectDir, '..')],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs contains the recorded root itself', () => {
+    const { env, file, manifestFile } = setup();
+    const projectDir = join(file, '..');
+    const bad = entry({
+      real: file,
+      root: projectDir,
+      created: true,
+      createdDirs: [projectDir],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs is non-empty but root is null', () => {
+    const { env, file, manifestFile } = setup();
+    const bad = entry({
+      real: file,
+      root: null,
+      created: true,
+      createdDirs: [join(file, '..')],
+    });
+    plant(manifestFile, { version: 1, files: { [file]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
+  });
+
+  it('refuses a manifest where createdDirs exceeds the cap of 32 folders', () => {
+    const { env, home, manifestFile } = setup();
+    const parts = Array.from({ length: 35 }, (_, i) => `dir${i}`);
+    const deepFile = join(home, ...parts, 'settings.json');
+    const dirs: string[] = [];
+    let cur = dirname(deepFile);
+    while (cur !== home) {
+      dirs.push(cur);
+      cur = dirname(cur);
+    }
+    const bad = entry({
+      real: deepFile,
+      root: home,
+      created: true,
+      createdDirs: dirs.slice(0, 33),
+    });
+    plant(manifestFile, { version: 1, files: { [deepFile]: [bad] } });
+
+    expect(() => readManifest(env)).toThrow(expect.objectContaining({ code: 'manifest-invalid' }));
   });
 });
 

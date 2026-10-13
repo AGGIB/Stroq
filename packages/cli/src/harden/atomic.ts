@@ -134,6 +134,23 @@ async function statIfPresent(fs: Fs, path: string): Promise<StatLike | undefined
 }
 
 /**
+ * The directories leading to `dir` (and `dir` itself) that do not exist yet, innermost first.
+ */
+export async function missingDirsTo(fs: Fs, dir: string): Promise<string[]> {
+  const missing: string[] = [];
+  let current = dir;
+  for (;;) {
+    const existing = await statIfPresent(fs, current);
+    if (existing !== undefined) break;
+    missing.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return missing;
+}
+
+/**
  * Replaces `target` with `content`, atomically.
  *
  * - The target is resolved first and the REAL file is the one replaced, so a dotfile that is a
@@ -243,4 +260,34 @@ export async function removeFile(
   await options.beforeRemove?.();
   await fs.unlink(real);
   return true;
+}
+
+/**
+ * Removes directories in `dirs` (deepest first) if they exist and are completely empty.
+ * Never removes a directory that has anything in it or violates write rules.
+ */
+export async function removeEmptyDirs(
+  dirs: readonly string[],
+  options: WriteRules & {
+    readonly fs?: Fs | undefined;
+    readonly roots?: readonly string[] | undefined;
+  } = {},
+): Promise<void> {
+  const fs = options.fs ?? nodeFs;
+  const ordered = [...new Set(dirs)].sort((a, b) => b.length - a.length || b.localeCompare(a));
+  for (const dir of ordered) {
+    try {
+      if (resolveRealPath(dir) !== dir) continue;
+      if (options.roots !== undefined) {
+        for (const root of options.roots) {
+          assertWriteAllowed(dir, { ...options, root });
+        }
+      } else {
+        assertWriteAllowed(dir, options);
+      }
+      await fs.rmdir(dir);
+    } catch {
+      // Best-effort cleanup: never let directory cleanup failure hide or break the caller.
+    }
+  }
 }

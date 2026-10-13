@@ -63,8 +63,25 @@ describe('stroq harden undo: giving the file back', () => {
 
     expect(run.code).toBe(0);
     expect(existsSync(file)).toBe(false);
+    expect(existsSync(world.inHome('.claude'))).toBe(false);
     expect(run.out).toContain('The file Stroq made is removed.');
     expect(recordsFor(world.stroqHome, file)).toEqual([]);
+  });
+
+  it('removes the empty folder apply made, and leaves it when another file is in it', async () => {
+    const world = hardenWorld();
+    const file = world.inProject('.claude', 'settings.local.json');
+    await world.runPiped(['apply', '--yes', '--scope', 'project']);
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(world.inProject('.claude'))).toBe(true);
+
+    writeFileSync(world.inProject('.claude', 'other.json'), '{}\n');
+
+    const run = await world.runPiped(['undo', '--yes', '--scope', 'project']);
+    expect(run.code).toBe(0);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(world.inProject('.claude'))).toBe(true);
+    expect(existsSync(world.inProject('.claude', 'other.json'))).toBe(true);
   });
 
   it('keeps what the owner did since, and takes out only what Stroq added', async () => {

@@ -51,6 +51,7 @@ import {
 import { withLiveness } from './doctor-liveness.js';
 import { withProof } from './doctor-proof.js';
 import { stroqVersion } from '../version.js';
+import { configPinStatus } from '../mcp/pin-status.js';
 import {
   installDrift,
   installKey,
@@ -832,6 +833,13 @@ export async function doctorReport(
     opts.all || anyInstalled || anyBroken || anyIncomplete ? perAgentChecks : [collapsed];
   const home = stroqHome();
   const secrets = await checkSecrets();
+  const pinChecks = (
+    await Promise.all(
+      [...new Set(MCP_CONFIGS.map(({ client, scope }) => mcpConfigPath(client, scope, cwd)))].map(
+        configPinStatus,
+      ),
+    )
+  ).flat();
   return {
     checks: [
       { name: 'stroq', ok: true, detail: stroqVersion() },
@@ -847,6 +855,7 @@ export async function doctorReport(
         detail: injectionDetected ? 'injection sample detected' : 'injection sample NOT detected',
       },
       ...hookChecks,
+      ...pinChecks,
       {
         name: 'home',
         ok: true,

@@ -19,6 +19,30 @@ interface CommandHelp {
 
 export const COMMANDS: readonly CommandHelp[] = [
   {
+    name: 'add',
+    synopsis: 'add <local-source|installed-name> [--user] [--restore]',
+    about: [
+      'read a local skill directory or tar archive, show its passport and require a person',
+      'to type the first 12 hex digits of its digest before installing the inspected bytes.',
+      'An installed name updates from its recorded source. A passport is not a security certificate.',
+    ],
+    flags: [
+      ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
+      ['--restore', 'restore an installed name from its confirmed store bytes'],
+    ],
+  },
+  {
+    name: 'remove',
+    synopsis: 'remove <name> [--force]',
+    about: ['remove a confirmed skill after a terminal y/N question, and record a receipt'],
+    flags: [
+      [
+        '--force',
+        'also remove a skill changed outside Stroq; still requires a person at a terminal',
+      ],
+    ],
+  },
+  {
     name: 'init',
     synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
     about: [
@@ -100,8 +124,31 @@ export const COMMANDS: readonly CommandHelp[] = [
     passThrough: true,
   },
   {
+    name: 'task',
+    synopsis:
+      'task [--profile repo-edit-and-test] [--read <glob>] [--write <glob>] [--ttl 30m] -- "<task>"',
+    about: [
+      'preview and confirm a signed Claude Code task; srt is required by default',
+      'The parent controller judges hooks; --hook-only is advisory without OS isolation.',
+    ],
+    flags: [
+      ['--profile <name>', 'repo-edit-and-test'],
+      ['--read <glob>', 'read allowlist; repeat; default project/**'],
+      ['--write <glob>', 'write allowlist; repeat; default project/**'],
+      ['--ttl <duration>', '1m through 24h, default 30m'],
+      ['--hook-only', 'explicit advisory mode without a sandbox'],
+    ],
+    passThrough: true,
+  },
+  {
+    name: 'permit',
+    synopsis: 'permit list | show <task> | extend <task> <fingerprint> | revoke <task>',
+    about: ['inspect signed tasks, confirm a refused exact operation once, or revoke a task'],
+    flags: [],
+  },
+  {
     name: 'mcp',
-    synopsis: 'mcp --server <name> [--cloak] -- <command> …',
+    synopsis: 'mcp --server <name> [--pin sha256:<digest>] [--cloak] -- <command> …',
     about: [
       'the stdio MCP proxy `init --agent mcp` writes into a client config: judges every',
       'tools/call against your policy and scans every result on its way back',
@@ -112,6 +159,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--cwd <dir>', 'the project directory decisions are made for'],
       ['--session <id>', 'the session id; default mcp:<client>'],
       ['--pass-env <names>', 'comma-separated variables the server is started with'],
+      ['--pin sha256:<digest>', 'run only locally confirmed server bytes from a private copy'],
       ['--cloak', 'replace detected values in results before the model reads them'],
     ],
     passThrough: true,
@@ -136,7 +184,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       'an API key), says so, and asks first. Exit 0 verified, 1 failed, 3 anything else',
     ],
     flags: [
-      ['--agent <id>', 'the agent to check; claude-code (the default) is the only one yet'],
+      [
+        '--agent <id>',
+        'claude-code (default, macOS/Linux) or codex (Windows, measured CLI 0.162.1 only)',
+      ],
       ['--yes', 'make the requests without asking; needed where there is no terminal to ask on'],
       ['--dry-run', 'say what would be done, make no request and write nothing'],
       ['--json', 'machine-readable output (version 1)'],
@@ -312,14 +363,19 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'bench',
-    synopsis: 'bench [--corpus <dir> | --actions] [--json] [--verbose]',
+    synopsis:
+      'bench [--corpus <dir> | --actions | --latency] [--n <count>] [--warmup <count>] [--json] [--verbose]',
     about: [
       'measure how much benign developer text the rule set flags,',
-      'or (--actions) how much ordinary agent work your policy interrupts',
+      '(--actions) how much ordinary agent work your policy interrupts,',
+      'or (--latency) what a hook call costs in processor and wall time (p50/p95/p99)',
     ],
     flags: [
       ['--corpus <dir>', 'measure your own files instead of the shipped corpus'],
       ['--actions', 'replay 75 scenarios of ordinary agent work against your policy'],
+      ['--latency', 'measure hook invocation processor and wall time on claude-code'],
+      ['--n <count>', 'number of measured runs per event (default 100)'],
+      ['--warmup <count>', 'number of warmup runs per event (default 5)'],
       ['--json', 'machine-readable output'],
       ['--verbose', 'list the flagged files'],
     ],
@@ -532,7 +588,7 @@ export function parseArgsProblem(err: unknown): string | null {
 const HINTS: ReadonlyMap<string, string> = new Map([
   [
     'install',
-    'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+    'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
   ],
 ]);
 

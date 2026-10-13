@@ -196,6 +196,7 @@ export async function makeRequest(args: RequestArgs): Promise<Requested> {
   const before = ready.before;
   const answer: unknown = await runGuarded(args.driver, args.probe, args.ctx, args.graceMs);
   const run = isWellFormedRun(answer) ? answer : NOT_A_RUN;
+  if (run.notStartedReason !== undefined) return notMade(run.notStartedReason, run.stderrTail);
   return {
     sent: true,
     observation: {

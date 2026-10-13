@@ -1,13 +1,23 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { removeEmptyDirs } from '../../src/harden/atomic.js';
 import { unifiedDiff } from '../../src/harden/diff.js';
 import { applyPlan } from '../../src/harden/index.js';
-import { readManifest } from '../../src/harden/manifest.js';
+import { readManifest, writeManifest } from '../../src/harden/manifest.js';
 import { addDeny, applied, engine, jsonText, owner, setSandbox, undo } from './engine-setup.js';
-import { removeTempDirs } from './helpers.js';
+import { removeTempDirs, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);
 
+const onWindows = process.platform === 'win32';
 const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
 
 describe('undoFile: nothing has changed since', () => {
@@ -31,11 +41,82 @@ describe('undoFile: nothing has changed since', () => {
     const result = await undo(e, real);
 
     expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('.claude'))).toBe(false);
     expect(result.status).toBe('restored');
     expect(result.diff).toBe(unifiedDiff(plan.after, '', { path: real, newMissing: true }));
     expect(result.diff).toContain('+++ /dev/null');
     expect(readManifest(e.env).files).toEqual({});
   });
+
+  it('removes nested empty folders apply made, but leaves folders with other files', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'nested/sub/.claude/settings.json', null, [
+      addDeny('a'),
+    ]);
+    expect(existsSync(path)).toBe(true);
+    expect(existsSync(e.file('nested/sub/.claude'))).toBe(true);
+
+    writeFileSync(e.file('nested/readme.txt'), 'hello');
+
+    await undo(e, real);
+
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('nested/sub/.claude'))).toBe(false);
+    expect(existsSync(e.file('nested/sub'))).toBe(false);
+    expect(existsSync(e.file('nested'))).toBe(true);
+    expect(existsSync(e.file('nested/readme.txt'))).toBe(true);
+  });
+
+  it('leaves a folder that existed before apply alone, removing only the missing part of the chain', async () => {
+    const e = engine();
+    mkdirSync(e.file('existing/folder'), { recursive: true });
+    const { real, path } = await applied(e, 'existing/folder/sub/sub2/settings.json', null, [
+      addDeny('a'),
+    ]);
+    expect(existsSync(path)).toBe(true);
+    expect(existsSync(e.file('existing/folder/sub/sub2'))).toBe(true);
+
+    await undo(e, real);
+
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('existing/folder/sub/sub2'))).toBe(false);
+    expect(existsSync(e.file('existing/folder/sub'))).toBe(false);
+    expect(existsSync(e.file('existing/folder'))).toBe(true);
+    expect(existsSync(e.file('existing'))).toBe(true);
+  });
+
+  it('undoes a manifest entry without createdDirs by removing only the file', async () => {
+    const e = engine();
+    const { real, path } = await applied(e, 'isolated/settings.json', null, [addDeny('a')]);
+    const manifest = readManifest(e.env);
+    const entries = manifest.files[real] ?? [];
+    const stripped = entries.map(({ createdDirs: _ignored, ...rest }) => rest);
+    await writeManifest(e.env, { ...manifest, files: { [real]: stripped } });
+
+    const result = await undo(e, real);
+
+    expect(result.status).toBe('restored');
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(e.file('isolated'))).toBe(true);
+  });
+
+  it.skipIf(onWindows)(
+    'keeps an empty recorded folder reached through a symlink in its parent path',
+    async () => {
+      const e = engine();
+      const targetDir = e.file('target-dir');
+      const targetSubdir = join(targetDir, 'sub');
+      mkdirSync(targetSubdir, { recursive: true });
+      const symlinkDir = e.file('link-folder');
+      symlinkSync(targetDir, symlinkDir);
+
+      await removeEmptyDirs([join(symlinkDir, 'sub')], { root: e.project });
+
+      expect(existsSync(symlinkDir)).toBe(true);
+      expect(existsSync(targetDir)).toBe(true);
+      expect(existsSync(targetSubdir)).toBe(true);
+    },
+  );
 
   it('takes a block out of a line-oriented file and gives back the same bytes', async () => {
     const e = engine();

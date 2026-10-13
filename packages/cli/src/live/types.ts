@@ -116,6 +116,10 @@ export const REASONS = {
   apiBilling: 'api-billing',
   timeout: 'timeout',
   hostError: 'host-error',
+  hostNotIsolated: 'host-not-isolated',
+  loginUnconfirmed: 'login-unconfirmed',
+  modelUnavailable: 'model-unavailable',
+  hostUnmeasured: 'host-unmeasured',
   unparsableStream: 'unparsable-stream',
   // inconclusive: the evidence
   commandAltered: 'command-altered',
@@ -165,6 +169,10 @@ export interface HostRun {
   readonly exitCode: number | null;
   readonly timedOut: boolean;
   readonly stderrTail: string;
+  /** A driver preflight refused before inference; the ledger reservation stays conservative. */
+  readonly notStartedReason?: string;
+  /** A specific host error, beyond a generic failed process. */
+  readonly failureReason?: string;
   /**
    * The host's own words, when it stopped on a usage or rate limit, or when it says it is moving the
    * subscription on to extra usage or an overage. The words of an overage are not looked for in the text of

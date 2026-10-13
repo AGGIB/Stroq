@@ -1,0 +1,420 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { parseTaskArgv } from '../../src/task/args.js';
+import { runTask } from '../../src/commands/task.js';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
+import { prepareTask } from '../../src/task/prepare.js';
+import { FilePermitStore } from '@stroq/core';
+import * as taskBroker from '../../src/task/broker.js';
+
+vi.mock('../../src/task/version.js', async (original) => ({
+  ...(await original<typeof import('../../src/task/version.js')>()),
+  readClaudeVersion: () => '2.1.271 (Claude Code)',
+}));
+
+const dirs: string[] = [];
+afterEach(() => {
+  dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  vi.restoreAllMocks();
+});
+const temp = () => {
+  // Match the launcher's physical process.cwd(), even when TMPDIR is /var or a junction.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-task-test-')));
+  dirs.push(dir);
+  return dir;
+};
+
+describe('task command', () => {
+  it.each(['revocation', 'event budget'] as const)(
+    'wires %s to the child stop signal and prints the advisory exit',
+    async (reason) => {
+      const home = temp();
+      const cwd = temp();
+      const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+      const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const realBroker = taskBroker.startTaskBroker;
+      if (reason === 'event budget')
+        vi.spyOn(taskBroker, 'startTaskBroker').mockImplementation((engine, token, context) =>
+          realBroker(engine, token, { ...context, maxEvents: 2 }),
+        );
+      const launch = vi.fn(
+        async ({
+          env,
+          args,
+          stopSignal,
+        }: {
+          env: NodeJS.ProcessEnv;
+          args: readonly string[];
+          stopSignal?: AbortSignal;
+        }) => {
+          expect(stopSignal).toBeInstanceOf(AbortSignal);
+          expect(stopSignal?.aborted).toBe(false);
+          const event = {
+            hook_event_name: 'PreToolUse',
+            cwd,
+            session_id: args[args.indexOf('--session-id') + 1],
+            tool_name: 'Read',
+            tool_input: { file_path: join(cwd, 'src', 'a.ts') },
+          };
+          if (reason === 'revocation') new FilePermitStore({ home }).revoke('wired-stop');
+          else
+            for (const id of ['one', 'two']) {
+              expect(
+                (await taskBroker.taskHook(JSON.stringify({ ...event, tool_use_id: id }), env))
+                  .stdout,
+              ).toBe('');
+            }
+          expect(
+            (await taskBroker.taskHook(JSON.stringify({ ...event, tool_use_id: 'stop' }), env))
+              .stdout,
+          ).toContain('deny');
+          expect(stopSignal?.aborted).toBe(true);
+          return 1;
+        },
+      );
+      expect(
+        await runTask(['--hook-only', '--', 'fix'], cwd, {
+          home,
+          claude: process.execPath,
+          managed: () => false,
+          confirm: async () => true,
+          taskId: () => 'wired-stop',
+          entry: CLI_ENTRY,
+          launch,
+        }),
+      ).toBe(1);
+      expect(launch).toHaveBeenCalledOnce();
+      expect(stdout.mock.calls.flat().join('')).toContain(
+        'ADVISORY: this run used --hook-only without OS isolation.',
+      );
+      expect(stderr.mock.calls.flat().join('')).toContain(
+        reason === 'revocation' ? 'task-void:revoked' : 'task audit event limit reached',
+      );
+    },
+  );
+  it('refuses an old Claude version and a project-local sandbox runtime before confirmation', async () => {
+    const home = temp();
+    const cwd = temp();
+    const srt = join(cwd, 'srt');
+    writeFileSync(srt, 'test fixture');
+    const confirm = vi.fn();
+    await expect(
+      runTask(['--', 'fix'], cwd, {
+        home,
+        claude: process.execPath,
+        srt: () => srt,
+        managed: () => false,
+        confirm,
+      }),
+    ).rejects.toThrow('sandbox runtime');
+    await expect(
+      runTask(['--hook-only', '--', 'fix'], cwd, {
+        home,
+        claude: process.execPath,
+        version: () => '2.1.247',
+        managed: () => false,
+        confirm,
+      }),
+    ).rejects.toThrow('Claude Code 2.1.248');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
+  });
+  it('removes protected runtime and temporary home when preparation fails', () => {
+    const home = temp();
+    const entry = join(temp(), 'source.ts');
+    writeFileSync(entry, 'test fixture');
+    const taskId = `cleanup-failure-${Date.now()}`;
+    expect(() => prepareTask(home, taskId, entry)).toThrow('built CLI');
+    expect(readdirSync(join(home, 'task-runs'))).toEqual([]);
+    expect(
+      readdirSync(tmpdir()).filter((name) => name.startsWith(`stroq-${taskId}-home-`)),
+    ).toEqual([]);
+  });
+  it('refuses project-local host executables before asking or signing', async () => {
+    const launch = vi.fn();
+    const confirm = vi.fn();
+    const home = temp();
+    const options = { home, srt: () => process.execPath, managed: () => false, launch, confirm };
+    await expect(
+      runTask(['--', 'fix'], dirname(process.execPath), {
+        ...options,
+        claude: process.execPath,
+      }),
+    ).rejects.toThrow(/Node executable/);
+    const cwd = temp();
+    const agent = join(cwd, 'claude');
+    writeFileSync(agent, 'test fixture');
+    await expect(runTask(['--', 'fix'], cwd, { ...options, claude: agent })).rejects.toThrow(
+      /agent runtime/,
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(launch).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
+  });
+  it('refuses a pre-existing linked runtime directory', () => {
+    const home = temp();
+    symlinkSync(temp(), join(home, 'task-runs'), process.platform === 'win32' ? 'junction' : 'dir');
+    expect(() => prepareTask(home, 'linked-task', CLI_ENTRY)).toThrow(/linked|canonical/);
+  });
+  it.each([{ mode: [] }, { mode: ['--hook-only'] }])(
+    'refuses managed hosts in either mode before asking or launching ($mode)',
+    async ({ mode }) => {
+      const launch = vi.fn();
+      const confirm = vi.fn();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      expect(
+        await runTask([...mode, '--', 'fix'], temp(), {
+          home: temp(),
+          srt: () => process.execPath,
+          managed: () => true,
+          launch,
+          confirm,
+          claude: process.execPath,
+        }),
+      ).toBe(1);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(launch).not.toHaveBeenCalled();
+    },
+  );
+  it('launches through srt with protected state and a fresh immutable hook configuration', async () => {
+    const home = temp();
+    const cwd = temp();
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const launch = vi.fn(
+      async ({
+        command,
+        args,
+        env,
+      }: {
+        command: string;
+        args: readonly string[];
+        env: NodeJS.ProcessEnv;
+      }) => {
+        expect(command).toBe(process.execPath);
+        expect(args.slice(0, 3)).toEqual(['--settings', expect.any(String), '--']);
+        expect(args[3]).toBe(process.execPath);
+        const settings = JSON.parse(readFileSync(args[1] as string, 'utf8'));
+        expect(settings.filesystem.denyWrite).toContain(home);
+        expect(settings.filesystem.allowWrite).toContain(env['HOME']);
+        expect(args).toContain('--restricted');
+        expect(args[args.lastIndexOf('--setting-sources') + 1]).toBe('');
+        expect(settings.network.allowedDomains).toContain('api.anthropic.com:443');
+        return 0;
+      },
+    );
+    expect(
+      await runTask(['--', 'fix'], cwd, {
+        home,
+        srt: () => process.execPath,
+        claude: process.execPath,
+        launch,
+        confirm: async () => true,
+        entry: CLI_ENTRY,
+        managed: () => false,
+      }),
+    ).toBe(0);
+    expect(launch).toHaveBeenCalledOnce();
+  });
+  it('parses repeated path restrictions and a bounded ttl', () => {
+    expect(
+      parseTaskArgv([
+        '--read',
+        'src/**',
+        '--read',
+        'test/**',
+        '--write',
+        'src/**',
+        '--ttl',
+        '30m',
+        '--',
+        'fix tests',
+      ]),
+    ).toMatchObject({
+      read: ['src/**', 'test/**'],
+      write: ['src/**'],
+      ttlMs: 1_800_000,
+      task: 'fix tests',
+    });
+  });
+  it.each([
+    [],
+    ['--', ''],
+    ['--ttl', '0m', '--', 'x'],
+    ['--ttl', '25h', '--', 'x'],
+    ['--profile', 'unknown', '--', 'x'],
+    ['--bad', '--', 'x'],
+    ['--read', '--', 'x'],
+    ['--ttl', 'invalid', '--', 'x'],
+    ['--', 'x', 'y'],
+  ])('rejects malformed argv %j', (...argv) => {
+    expect(() => parseTaskArgv(argv)).toThrow();
+  });
+  it('refuses to silently downgrade without srt', async () => {
+    const launch = vi.fn();
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runTask(['--', 'fix'], temp(), { home: temp(), env: { PATH: temp() }, launch }),
+    ).toBe(1);
+    expect(launch).not.toHaveBeenCalled();
+  });
+  it('refuses a missing Claude executable before confirmation', async () => {
+    const confirm = vi.fn();
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runTask(['--hook-only', '--', 'fix'], temp(), {
+        home: temp(),
+        env: { PATH: temp() },
+        managed: () => false,
+        confirm,
+      }),
+    ).toBe(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+  it('starts nothing without an interactive confirmation or after preview expiry', async () => {
+    const home = temp();
+    const launch = vi.fn();
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const options = { home, claude: process.execPath, managed: () => false, launch };
+    expect(await runTask(['--hook-only', '--', 'fix'], temp(), options)).toBe(1);
+    const confirm = vi.fn(async () => true);
+    await expect(
+      runTask(['--hook-only', '--', 'fix'], temp(), {
+        ...options,
+        now: () => new Date(Date.now() - 31 * 60_000),
+        confirm,
+      }),
+    ).rejects.toThrow('preview expired');
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(launch).not.toHaveBeenCalled();
+    expect(existsSync(join(home, 'tasks'))).toBe(false);
+  });
+  it('shows scope before confirmation and writes nothing when declined', async () => {
+    const out = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const launch = vi.fn();
+    const confirm = vi.fn(async () => {
+      expect(out.mock.calls.flat().join('')).toContain('repo-edit-and-test');
+      return false;
+    });
+    expect(
+      await runTask(['--hook-only', '--', 'fix'], temp(), {
+        home: temp(),
+        confirm,
+        launch,
+        claude: process.execPath,
+        managed: () => false,
+      }),
+    ).toBe(1);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(launch).not.toHaveBeenCalled();
+  });
+  it('pins the permit and uses a fake home and a receipt even when launch throws', async () => {
+    const home = temp();
+    const cwd = temp();
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const launch = vi.fn(
+      async ({ env, args }: { env: NodeJS.ProcessEnv; args: readonly string[] }) => {
+        expect(env['HOME']).not.toBe(home);
+        expect(env['STROQ_TASK_HASH']).toMatch(/^[a-f0-9]{64}$/);
+        expect(env['STROQ_TASK_KEY_ID']).toMatch(/^[a-f0-9]{16}$/);
+        expect(args).toContain('--settings');
+        throw new Error('launch failed');
+      },
+    );
+    await expect(
+      runTask(['--hook-only', '--', 'fix'], cwd, {
+        home,
+        confirm: async () => true,
+        launch,
+        taskId: () => 'test-task',
+        entry: CLI_ENTRY,
+        claude: process.execPath,
+        managed: () => false,
+      }),
+    ).rejects.toThrow('launch failed');
+    expect(
+      JSON.parse(readFileSync(join(home, 'tasks/test-task/receipt.json'), 'utf8')),
+    ).toMatchObject({ taskId: 'test-task', calls: [], mode: 'hook-only' });
+  });
+  it('runs the copied packaged hook against the parent without a real model', async () => {
+    const home = join(temp(), "quoted' task");
+    mkdirSync(home);
+    const cwd = temp();
+    let fakeHome = '';
+    vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const launch = async ({ env, args }: { env: NodeJS.ProcessEnv; args: readonly string[] }) => {
+      fakeHome = env['HOME'] as string;
+      const permit = JSON.parse(readFileSync(join(home, 'tasks/test-task/permit.json'), 'utf8'));
+      const entry = join(dirname(args[args.indexOf('--settings') + 1] as string), 'dist/index.js');
+      const shell = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/sh';
+      const settings = JSON.parse(
+        readFileSync(args[args.indexOf('--settings') + 1] as string, 'utf8'),
+      );
+      const command = settings.hooks.PreToolUse[0].hooks[0].command as string;
+      for (const phase of ['PreToolUse', 'PostToolUse']) {
+        await new Promise<void>((resolve, reject) => {
+          const child = existsSync(shell)
+            ? spawn(shell, ['-c', command], { env, stdio: 'pipe' })
+            : spawn(process.execPath, [entry, 'task-hook'], { env, stdio: 'pipe' });
+          let stdout = '';
+          let stderr = '';
+          child.stdout.on('data', (chunk) => {
+            stdout += String(chunk);
+          });
+          child.stderr.on('data', (chunk) => {
+            stderr += String(chunk);
+          });
+          child.on('error', reject);
+          child.on('close', (code) => {
+            try {
+              expect(code, stderr).toBe(0);
+              expect(stdout).toBe('');
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          });
+          child.stdin.end(
+            JSON.stringify({
+              session_id: permit.body.sessionId,
+              tool_use_id: 'packaged-call',
+              hook_event_name: phase,
+              tool_name: 'Read',
+              tool_input: { file_path: `${cwd.replaceAll('\\', '/')}/source.ts` },
+              cwd: permit.body.projectRoot,
+              tool_response: 'ok',
+            }),
+          );
+        });
+      }
+      return 0;
+    };
+    expect(
+      await runTask(['--hook-only', '--', 'fix'], cwd, {
+        home,
+        confirm: async () => true,
+        launch,
+        taskId: () => 'test-task',
+        entry: CLI_ENTRY,
+        claude: process.execPath,
+        managed: () => false,
+      }),
+    ).toBe(0);
+    expect(
+      JSON.parse(readFileSync(join(home, 'tasks/test-task/receipt.json'), 'utf8')).calls[0],
+    ).toMatchObject({ callId: 'packaged-call', status: 'host-reported' });
+    expect(existsSync(fakeHome)).toBe(false);
+  });
+});

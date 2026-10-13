@@ -1,0 +1,1 @@
+{"text":"2026-10-13T10:47:39.149382Z ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: Stroq blocked this action (deny-git-exec): Installing repository-supplied execution (git exec-on-read config or hook file) is blocked. Command: git config --file /tmp/stroq-live-fixture/project/stroq-live-git-config.txt core.hooksPath stroq-live-0123456789abcdef"}

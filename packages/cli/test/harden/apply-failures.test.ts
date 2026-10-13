@@ -52,7 +52,7 @@ describe('applyPlan: a manifest it cannot trust', () => {
 
 describe('applyPlan: when something fails', () => {
   it('leaves the file as it was, with no temporary file and no entry, when the rename fails', async () => {
-    const { env, file, project, planJson } = engine();
+    const { env, file, home, project, planJson } = engine();
     const before = jsonText({ a: 1 });
     writeFileSync(file('settings.json'), before);
     const plan = planJson('settings.json', [addDeny('x')]);
@@ -64,6 +64,7 @@ describe('applyPlan: when something fails', () => {
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
     expect(leftovers(project)).toEqual([]);
     expect(readManifest(env).files).toEqual({});
+    expect(existsSync(join(home, 'harden', 'manifest.json'))).toBe(false);
   });
 
   it('leaves the file alone when it cannot record what it is about to do', async () => {
@@ -106,16 +107,36 @@ describe('applyPlan: when something fails', () => {
       rename: (from, to) =>
         (renames += 1) <= 2
           ? nodeFs.rename(from, to)
-          : Promise.reject(new Error('simulated trouble')),
+          : Promise.reject(new Error('simulated write failure')),
+      unlink: () => Promise.reject(new Error('simulated manifest rollback failure')),
     };
 
-    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated trouble/);
+    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated write failure/);
+    expect(readManifest(env).files[plan.real]).toHaveLength(1);
 
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
     // The entry could not be taken back, and undo says there was nothing to take out.
     const undone = await undoFile(env, file('settings.json'));
     expect(undone.status).toBe('already-undone');
     expect(readFileSync(file('settings.json'), 'utf8')).toBe(before);
+  });
+
+  it('removes directories created for a new file when the file write fails', async () => {
+    const { env, file, planJson } = engine();
+    const plan = planJson('deep/nested/sub/settings.json', [addDeny('x')]);
+    const fs: Fs = {
+      ...nodeFs,
+      rename: (from, to) =>
+        to.endsWith('settings.json')
+          ? Promise.reject(new Error('simulated disk failure'))
+          : nodeFs.rename(from, to),
+    };
+
+    await expect(applyPlan(plan, { ...env, fs })).rejects.toThrow(/simulated disk failure/);
+
+    expect(existsSync(file('deep/nested/sub'))).toBe(false);
+    expect(existsSync(file('deep/nested'))).toBe(false);
+    expect(existsSync(file('deep'))).toBe(false);
   });
 
   it.skipIf(onWindows)(

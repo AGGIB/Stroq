@@ -7,7 +7,12 @@
 //
 // The object keeps state (the text of a line that has not ended, the events so far) because a stream is read
 // over time; everything it hands out is a copy that nothing here changes afterwards.
-import { interpretMessage, type StreamFacts, type StreamStop } from './claude-message.js';
+import {
+  interpretMessage,
+  type Interpreted,
+  type StreamFacts,
+  type StreamStop,
+} from './claude-message.js';
 import type { StreamEvent } from '../types.js';
 
 export type { StreamStop } from './claude-message.js';
@@ -45,7 +50,12 @@ export class ClaudeStreamParser {
   private facts: StreamFacts = {};
   private unparsed = 0;
 
-  constructor(private readonly limits: StreamLimits = DEFAULT_STREAM_LIMITS) {}
+  constructor(
+    private readonly limits: StreamLimits = DEFAULT_STREAM_LIMITS,
+    private readonly interpret: (
+      message: Record<string, unknown>,
+    ) => Interpreted = interpretMessage,
+  ) {}
 
   /**
    * Reads more of the stream. Returns why the host is to be stopped, once the lines so far say so: from
@@ -128,7 +138,7 @@ export class ClaudeStreamParser {
       this.unparsed += 1;
       return;
     }
-    const read = interpretMessage(value);
+    const read = this.interpret(value);
     if (read.unreadable) this.unparsed += 1;
     this.events.push(...read.events);
     this.facts = { ...this.facts, ...read.facts };

@@ -540,6 +540,14 @@ export class StroqEngine {
       gated === null
         ? decision
         : { ...decision, reason: await this.safeSummary(decision.reason, event.cwd, matches) };
+    const operation =
+      gated?.evidence.fingerprint === undefined || decision.effect !== 'deny'
+        ? undefined
+        : await this.safeSummary(
+            JSON.stringify(event.auditInput ?? event.toolInput),
+            event.cwd,
+            matches,
+          );
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
@@ -547,6 +555,7 @@ export class StroqEngine {
       summary,
       classes,
       decision: audited,
+      ...(operation === undefined || Buffer.byteLength(operation) > 64 * 1024 ? {} : { operation }),
       ...(gated === null ? {} : { taskId: gated.taskId, scope: gated.evidence }),
       ...(event.callId === undefined ? {} : { callId: event.callId }),
       ...(provenance.length > 0 ? { provenance } : {}),
@@ -582,7 +591,25 @@ export class StroqEngine {
   }
 
   async post(event: PostToolEvent): Promise<PostResult> {
+    const call = {
+      ...(event.resultFailed === true ? { outcome: 'failed' as const } : {}),
+      ...(event.callId === undefined ? {} : { callId: event.callId }),
+      ...(this.opts.scope?.activeTask() == null
+        ? {}
+        : { taskId: this.opts.scope.activeTask() as string }),
+    };
     if (!SCANNED_TOOLS.test(event.toolName)) {
+      if (call.taskId !== undefined)
+        await this.opts.audit.append({
+          sessionId: event.sessionId,
+          phase: 'post',
+          tool: event.toolName,
+          summary: await this.safeSummary(
+            summarizeInput(event.toolName, event.toolInput),
+            event.cwd,
+          ),
+          ...call,
+        });
       const state = await this.opts.sessions.get(event.sessionId);
       return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
@@ -594,6 +621,7 @@ export class StroqEngine {
       await this.opts.audit.append({
         sessionId: event.sessionId,
         phase: 'post',
+        ...call,
         tool: event.toolName,
         summary: `${summary} — not scanned: no result field (keys: ${event.resultMissing.join(', ')})`,
       });
@@ -625,6 +653,7 @@ export class StroqEngine {
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'post',
+      ...call,
       tool: event.toolName,
       summary,
       scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },

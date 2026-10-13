@@ -29,6 +29,9 @@ export interface AuditEntryInput {
   readonly phase: 'pre' | 'post';
   readonly tool: string;
   readonly summary: string;
+  /** Complete redacted input for an extendable task refusal; never a clipped approval screen. */
+  readonly operation?: string;
+  readonly outcome?: 'failed';
   readonly classes?: readonly ActionClass[];
   readonly decision?: Decision;
   readonly scan?: {
@@ -250,6 +253,7 @@ export class AuditLog {
       const unhashed: Omit<AuditEntry, 'hash'> = {
         ...input,
         summary,
+        ...(input.operation === undefined ? {} : { operation: redact(input.operation) }),
         seq: (last?.seq ?? 0) + 1,
         ts: this.now().toISOString(),
         prevHash: last?.hash ?? GENESIS_HASH,

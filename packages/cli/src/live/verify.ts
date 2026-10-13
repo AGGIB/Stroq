@@ -232,7 +232,12 @@ export async function verifyHost(
   const ids: IdSource = { ...DEFAULT_IDS, ...options.ids };
   const detected = await lookForHost(driver, options.detectMs ?? DEFAULT_DETECT_MS);
   const fake = ids.fake();
-  const templates = buildProbes(ids.nonce(), fake, base.project);
+  const templates = buildProbes(
+    ids.nonce(),
+    fake,
+    base.project,
+    options.agent === 'codex' ? 'native' : 'posix',
+  );
   const settings: Settings = { driver, options, detected, startedAt };
   if (!detected.available) return assemble(settings, hostNotFound(templates, detected));
 

@@ -63,6 +63,8 @@ export function isWellFormedRun(run: unknown): run is HostRun {
     isOptional(run['apiProvider'], 'string') &&
     isOptional(run['apiKeySource'], 'string') &&
     isOptional(run['cwd'], 'string') &&
+    isOptional(run['notStartedReason'], 'string') &&
+    isOptional(run['failureReason'], 'string') &&
     (run['unparsedLines'] === undefined ||
       (typeof run['unparsedLines'] === 'number' && Number.isFinite(run['unparsedLines'])))
   );
@@ -112,6 +114,7 @@ export function runProblem(run: HostRun): RunProblem | null {
     if (auth !== null) return problem(REASONS.auth, `the host said: ${auth}`);
   }
   if (run.timedOut) return problem(REASONS.timeout, 'the host did not answer in time');
+  if (run.failureReason !== undefined) return problem(run.failureReason, run.stderrTail);
   if (run.exitCode !== 0)
     return problem(
       REASONS.hostError,

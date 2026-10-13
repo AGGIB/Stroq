@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "stroqVersion": "0.25.1",
+  "date": "2026-10-13T21:57:54.613Z",
+  "unit": "ms",
+  "outlierThresholdMs": 10000,
+  "n": 100,
+  "warmup": 5,
+  "platform": "darwin",
+  "arch": "arm64",
+  "nodeVersion": "v24.13.1",
+  "results": [
+    {
+      "id": "bare-node",
+      "title": "node -e 0 (baseline)",
+      "samples": 100,
+      "outliers": 0,
+      "droppedSamples": 0,
+      "processor": {
+        "p50": 17.2,
+        "p95": 25.4,
+        "p99": 27.3,
+        "min": 16.6,
+        "max": 27.5
+      },
+      "wall": {
+        "p50": 19.1,
+        "p95": 27.6,
+        "p99": 29.8,
+        "min": 18.3,
+        "max": 29.9
+      }
+    },
+    {
+      "id": "pre-tool-use-bash",
+      "title": "PreToolUse (bash: `git status`)",
+      "samples": 100,
+      "outliers": 0,
+      "droppedSamples": 0,
+      "processor": {
+        "p50": 230.3,
+        "p95": 240.3,
+        "p99": 249.1,
+        "min": 216.4,
+        "max": 263.9
+      },
+      "wall": {
+        "p50": 182.1,
+        "p95": 187.9,
+        "p99": 195.6,
+        "min": 174.7,
+        "max": 239.9
+      },
+      "overhead": {
+        "processorP50": 213.1,
+        "wallP50": 163
+      }
+    },
+    {
+      "id": "post-tool-use-bash",
+      "title": "PostToolUse (short command output)",
+      "samples": 100,
+      "outliers": 0,
+      "droppedSamples": 0,
+      "processor": {
+        "p50": 296.3,
+        "p95": 306.6,
+        "p99": 316.6,
+        "min": 281.3,
+        "max": 348.6
+      },
+      "wall": {
+        "p50": 247,
+        "p95": 254.6,
+        "p99": 261.9,
+        "min": 240.2,
+        "max": 321.3
+      },
+      "overhead": {
+        "processorP50": 279.1,
+        "wallP50": 227.9
+      }
+    },
+    {
+      "id": "post-tool-use-heavy",
+      "title": "PostToolUse (heavy ~60KB content)",
+      "samples": 100,
+      "outliers": 0,
+      "droppedSamples": 0,
+      "processor": {
+        "p50": 312.6,
+        "p95": 323.8,
+        "p99": 330.8,
+        "min": 298.4,
+        "max": 332.1
+      },
+      "wall": {
+        "p50": 263,
+        "p95": 270.5,
+        "p99": 272.6,
+        "min": 256.8,
+        "max": 280.1
+      },
+      "overhead": {
+        "processorP50": 295.4,
+        "wallP50": 243.9
+      }
+    }
+  ]
+}

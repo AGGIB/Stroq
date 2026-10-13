@@ -783,6 +783,42 @@ describe('runInit --agent mcp', () => {
     expect(out.lines.join('')).toContain('unwrapped github');
   });
 
+  it('states that unwrapping a pinned entry removes its runtime check, including dry-run', async () => {
+    const dir = project();
+    const file = join(dir, 'mcp.json');
+    const before = JSON.stringify({
+      mcpServers: {
+        demo: {
+          command: 'node',
+          args: [
+            '/opt/stroq/dist/index.js',
+            'mcp',
+            '--server',
+            'demo',
+            '--client',
+            'cursor',
+            '--pin',
+            'bad',
+            '--',
+            'node',
+            '/server.js',
+          ],
+        },
+      },
+    });
+    writeFileSync(file, before);
+    const out = captureBoth();
+    expect(
+      await inDir(dir, () =>
+        runInit(['--agent', 'mcp', '--config', file, '--unwrap', '--dry-run']),
+      ),
+    ).toBe(0);
+    out.restore();
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    expect(out.err.join('')).toContain('removes the runtime pin');
+    expect(() => JSON.parse(out.out.join(''))).not.toThrow();
+  });
+
   it('writes nothing with --dry-run, keeping stdout pure JSON and outcomes on stderr', async () => {
     const dir = project();
     const file = join(dir, 'mcp.json');

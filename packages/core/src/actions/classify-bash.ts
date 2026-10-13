@@ -57,6 +57,7 @@ import {
   type ShellInput,
 } from './shell-input.js';
 import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
+import { scpRemotes } from './scp-remotes.js';
 import { jobStages, persistenceSignals } from './persistence.js';
 
 const SHELLS = new Set([
@@ -782,9 +783,13 @@ function endsUrl(code: number): boolean {
   );
 }
 
-/** The index after `http://` or `https://`, in any case, if one starts at `at`; otherwise -1. */
+/** The index after a supported network scheme, in any case; otherwise -1. */
 function afterScheme(text: string, at: number): number {
   const lower = (offset: number): number => text.charCodeAt(at + offset) | 0x20;
+  if (lower(0) === 0x73 && lower(1) === 0x73 && lower(2) === 0x68 && text.startsWith('://', at + 3))
+    return at + 6;
+  if (lower(0) === 0x67 && lower(1) === 0x69 && lower(2) === 0x74 && text.startsWith('://', at + 3))
+    return at + 6;
   // `| 0x20` folds a capital letter to its small one, and maps no other character to a letter.
   if (lower(0) !== 0x68 || lower(1) !== 0x74 || lower(2) !== 0x74 || lower(3) !== 0x70) return -1;
   const next = lower(4) === 0x73 ? at + 5 : at + 4;
@@ -801,7 +806,7 @@ function hostOfUrl(url: string): string {
 }
 
 /**
- * The addresses a command names: each `http://` or `https://` address, and each `user@host`
+ * The addresses a command names: HTTP(S), SSH and Git URLs, and `user@host`
  * target, with its text as written. A sibling of `hostsOf`, which keeps only the host and is
  * what the policy reads; this is for a task's scope and for egress binding, which need the
  * address.
@@ -817,10 +822,12 @@ function hostOfUrl(url: string): string {
  * is cut at `MAX_URL_CHARS`, only the first `MAX_URL_SCAN_CHARS` of the command are read, and a
  * command that repeats one address is given up on after a few times `limit` occurrences.
  * Wherever a bound cut something, `capped` is true: the list is then not the whole of it.
+ * `taskRemotes` adds scp-style references for task resources only, never the install reader.
  */
 export function commandUrls(
   command: string,
   limit: number,
+  options: { readonly taskRemotes?: boolean } = {},
 ): { readonly urls: readonly CommandUrl[]; readonly capped: boolean } {
   const text = command.length > MAX_URL_SCAN_CHARS ? command.slice(0, MAX_URL_SCAN_CHARS) : command;
   const found = new Map<string, CommandUrl>();
@@ -859,6 +866,10 @@ export function commandUrls(
   }
   for (const [target, host] of text.matchAll(SSH_TARGET)) {
     if (!keep(target, () => host ?? '')) break;
+  }
+  for (const { url, host } of options.taskRemotes ? scpRemotes(text) : []) {
+    if (url.length > MAX_URL_CHARS) capped = true;
+    if (!keep(url.slice(0, MAX_URL_CHARS), () => host)) break;
   }
   return { urls: [...found.values()], capped };
 }

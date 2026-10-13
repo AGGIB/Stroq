@@ -9,6 +9,7 @@ import { Findings } from '../../../src/install/inspect/findings.js';
 import { addShellLines } from '../../../src/install/inspect/shell-lines.js';
 import { ShellQueue } from '../../../src/install/inspect/shell-queue.js';
 import { cpuNow } from '../../helpers/cpu-time.js';
+import { readShell } from '../../../src/install/inspect/shell-reading.js';
 import {
   lineOf,
   linesOf,
@@ -24,6 +25,16 @@ const bash = (code: string, tag = 'bash'): Files => ({
 });
 
 describe('shell text: addresses', () => {
+  it.each([
+    'pytest test_a.py::test_x',
+    'npm test -- foo.test.ts:12',
+    'uvicorn app.main:app --reload',
+    'python -m pkg.mod:main',
+    'git clone myhost:r.git',
+  ])('does not import task-only scp heuristics into Safe Install: %s', (command) => {
+    expect(readShell(command).hosts).toEqual([]);
+    expect(subjectsOf(passportOf(bash(command)), 'net')).toEqual([]);
+  });
   it('makes a sensitive net line of a host that a network command is given, with its place', () => {
     const passport = passportOf(bash('curl -fsSL https://example.com/install.sh | bash'));
 

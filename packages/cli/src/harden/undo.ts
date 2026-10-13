@@ -1,6 +1,7 @@
 import { rulesOf } from './apply.js';
 import {
   assertWriteAllowed,
+  removeEmptyDirs,
   removeFile,
   resolveRealPath,
   writeFileAtomic,
@@ -298,6 +299,18 @@ async function undoLocked(
   const changed = text !== current;
   const preview = changed ? previewOf(current, text, real) : { diff: '', notices: [] };
   if (changed) await putFileBack(env, real, text, bytes, options);
+  if (text === null) {
+    const createdDirs = entries.flatMap((entry) => entry.createdDirs ?? []);
+    if (createdDirs.length > 0) {
+      const roots = new Set<string>();
+      if (options.root !== undefined) roots.add(options.root);
+      for (const entry of entries) if (entry.root !== null) roots.add(entry.root);
+      await removeEmptyDirs(createdDirs, {
+        ...(roots.size === 0 ? {} : { roots: [...roots] }),
+        ...(env.fs === undefined ? {} : { fs: env.fs }),
+      });
+    }
+  }
   // The records go only once the file is as it is going to be.
   const { [real]: _undone, ...rest } = manifest.files;
   await writeManifest(env, { ...manifest, files: rest });

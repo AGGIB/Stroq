@@ -20,6 +20,52 @@ describe('commandUrls', () => {
   const urls = (command: string, limit = MAX_RESOURCE_URLS): string[] =>
     commandUrls(command, limit).urls.map((u) => u.url);
 
+  it.each([
+    'pytest test_a.py::test_x',
+    'npm test -- foo.test.ts:12',
+    'uvicorn app.main:app',
+    'python -m pkg.mod:main',
+    'git clone short:r.git',
+  ])('keeps the ordinary reader free of task-only scp matching: %s', (command) => {
+    expect(commandUrls(command, 256)).toEqual({ urls: [], capped: false });
+  });
+
+  it.each([
+    'git --no-pager -C "path with spaces" clone short:r.git',
+    'env X=1 sudo git -c protocol.version=2 fetch short:r.git',
+    'git --config-env=protocol.version=VERSION pull short:r.git',
+    'git -- fetch short:r.git',
+    'scp source short:r.git',
+    'rsync source short:r.git',
+    'sftp short:r.git',
+    'rclone copy short:r.git .',
+  ])('recognises a task transfer target with options and wrappers: %s', (command) => {
+    expect(commandUrls(command, 256, { taskRemotes: true }).urls).toContainEqual({
+      url: 'short:r.git',
+      host: 'short',
+    });
+  });
+
+  it.each([
+    'echo "git clone short:r.git"',
+    'git status; uvicorn app.main:app',
+    'scp C:\\work\\a.txt D:\\other\\a.txt',
+  ])('does not invent a remote from command text or local drives: %s', (command) => {
+    expect(commandUrls(command, 256, { taskRemotes: true }).urls).toEqual([]);
+  });
+
+  it('keeps explicit user targets without a transfer command and applies address bounds', () => {
+    expect(commandUrls('echo user@h:path', 256, { taskRemotes: true }).urls).toEqual([
+      { url: 'user@h:path', host: 'h' },
+    ]);
+    const many = commandUrls('scp a host:one other:two third:three', 2, { taskRemotes: true });
+    expect(many.urls).toHaveLength(2);
+    expect(many.capped).toBe(true);
+    const long = commandUrls(`scp a host:${'x'.repeat(MAX_URL_CHARS)}`, 256, { taskRemotes: true });
+    expect(long.urls[0]?.url).toHaveLength(MAX_URL_CHARS);
+    expect(long.capped).toBe(true);
+  });
+
   it('gives the text of an address and its host', () => {
     expect(commandUrls('curl -sS https://api.example/v1/items?id=1 -o out.json', 256)).toEqual({
       urls: [{ url: 'https://api.example/v1/items?id=1', host: 'api.example' }],

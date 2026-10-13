@@ -9,6 +9,7 @@ import {
   readMcpConfig,
   unwrapMcpConfig,
   wrapMcpConfig,
+  wrapperPinArgs,
   type McpEntryOutcome,
 } from './mcp-config.js';
 
@@ -142,7 +143,22 @@ export function initMcp(
   // pipeline still works; the per-entry lines still print, just on stderr instead of
   // vanishing (the Copilot installer's replacement notice follows the same split).
   const outcomeStream = dryRun ? process.stderr : process.stdout;
-  for (const outcome of rewrite.outcomes) outcomeStream.write(`${formatOutcome(outcome)}\n`);
+  for (const outcome of rewrite.outcomes) {
+    outcomeStream.write(`${formatOutcome(outcome)}\n`);
+    const entry = (config.mcpServers as Record<string, unknown>)[outcome.name];
+    if (
+      options.unwrap &&
+      outcome.action === 'unwrapped' &&
+      typeof entry === 'object' &&
+      entry !== null &&
+      'args' in entry &&
+      Array.isArray(entry.args) &&
+      wrapperPinArgs(entry.args).length > 0
+    )
+      outcomeStream.write(
+        'Unwrapping this entry removes the runtime pin and its startup verification.\n',
+      );
+  }
   if (dryRun) {
     process.stdout.write(`${JSON.stringify(rewrite.config, null, 2)}\n`);
     return 0;
