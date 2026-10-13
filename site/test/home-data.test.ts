@@ -225,8 +225,8 @@ describe('the page stays short and readable', () => {
   function visibleWords(): number {
     let page = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
     page = page.replace(/<!--[\s\S]*?-->/g, ' ');
-    page = page.replace(/<script[\s\S]*?<\/script>/g, ' ');
-    page = page.replace(/<svg[\s\S]*?<\/svg>/g, ' ');
+    page = page.replace(/<script[\s\S]*?<\/script\s*>/gi, ' ');
+    page = page.replace(/<svg[\s\S]*?<\/svg\s*>/gi, ' ');
     // Keep a <details>' own <summary>; drop what sits behind it. Innermost first, so
     // a closed group inside a closed list is removed before the list's own body is.
     const innermost = /(<details\b[^>]*>\s*<summary[\s\S]*?<\/summary>)(?:(?!<details\b)[\s\S])*?<\/details>/g;
