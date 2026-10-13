@@ -5,8 +5,8 @@ local hook-based action firewall could plausibly address it (`inScope`) or why i
 (`outOfScope`, grouped with a reason). Each `inScope` entry's `limitation` says what Stroq does
 **not** do for that technique — the half it doesn't enforce, or the surface it cannot see.
 
-This file is not a rehash of all 59 in-scope justifications or all 138 excluded ones — `scope.json`
-already carries a `limitation` or a group `reason` for every one of the 197. It records only the
+This file is not a rehash of all 62 in-scope justifications or all 146 excluded ones — `scope.json`
+already carries a `limitation` or a group `reason` for every one of the 208. It records only the
 method, and the handful of calls that were genuinely close.
 
 ## Method
@@ -14,7 +14,7 @@ method, and the handful of calls that were genuinely close.
 For each technique, the question applied was: **could a tool that sees only an agent's tool
 calls and the content those calls return address this at all?** That question was answered from
 the technique's own name and description in the vendored YAML
-(`vendor/atlas/ATLAS-2026.08.yaml`) — not from whether Stroq's rule set already implements
+(`vendor/atlas/ATLAS-2026.09.yaml`) — not from whether Stroq's rule set already implements
 something for it, and not from whether an attack-corpus scenario already tags it. Reasoning
 backward from "we have a scenario for this, so it must be in scope" was the failure mode to avoid;
 the corpus's own ATLAS tags were checked only once, near the end, as a sanity cross-check against
@@ -50,7 +50,7 @@ one sentence.
    this one sub-technique was pulled into the model-attack-surface exclusion group instead of
    following its family.
 
-2. **`AML.T0125` Create Account — IN.** The least confident of the 59. It requires the agent to
+2. **`AML.T0125` Create Account — IN.** The least confident of the first 59. It requires the agent to
    hold IAM/cloud-account-creation tool access, a narrow deployment shape, and no scenario in the
    corpus exercises it. Kept in because it matches the design spec's own §6b "privilege-widening
    writes" direction and the brief's instruction not to restrict scope to what's already
@@ -82,3 +82,26 @@ one sentence.
    with the agent-specific aside (an agent that fails to validate website origin headers) a minor
    fraction of the text. The majority framing was weighted over the aside, the same rule applied
    to `AML.T0074` above.
+
+## The 2026.09 release
+
+The 2026.08 list (197 techniques) was decided first. The 2026.09 release added eleven:
+`AML.T0000.003` Scan Databases, four sub-techniques of `AML.T0006` Active Scanning
+(`.000` to `.003`), and `AML.T0129` to `AML.T0134`. They were placed on 2026-10-04 by one reader
+from the descriptions in the vendored YAML, with the same question as above, and were not
+reviewed by a second person, which the first 197 were.
+
+- **Out, with the groups their siblings are in:** `AML.T0000.003` and the four `AML.T0006`
+  sub-techniques (reconnaissance on the adversary's own side, as their parents are),
+  `AML.T0131` Crafted AI Assistant Links (a person persuaded to open a link, with the malicious
+  link group), `AML.T0132` Misconfigured or Publicly Exposed AI Services (infrastructure
+  exposure) and `AML.T0133` Discover AI Agent Runtime Capabilities.
+- **Three in, each with the limit stated:** `AML.T0129` Triggers in Multimodal Inputs (Stroq
+  scans text and does not decode images, audio or video), `AML.T0130` AI Agent Response Biasing
+  (an injected instruction is addressed like any other, but the bias is in the model's own
+  reply, which no hook sees) and `AML.T0134` AI Targeted Cloaking (the injected text the agent
+  fetches is scanned like any other, whatever the server showed a person).
+- **The close call:** `AML.T0133`. `AML.T0084` is in scope because a configuration can be
+  read through a tool call; `AML.T0133` is defined as discovery that needs no access to the
+  configuration, by asking the agent, which is the prompt/response channel and not a tool call,
+  so it went out. A reader who weighs the file-read vector the other way could move it in.

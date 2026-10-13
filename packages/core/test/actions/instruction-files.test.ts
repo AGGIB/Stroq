@@ -30,6 +30,7 @@ const INSTRUCTION_PATHS = [
   'C:\\Users\\dev\\.claude\\projects\\p\\memory\\notes.md',
   '.cursor/rules/style.mdc',
   '.windsurf/rules/style.md',
+  '.devin/rules/style.md',
   // Loaded into every session by the host, and missing from the list until 0.21.2.
   // Each name is one Claude Code 2.1.271 itself refers to.
   'CLAUDE.local.md',
@@ -102,6 +103,7 @@ const LOOK_ALIKES = [
   '.github/prompts-old.md',
   '.kiro/steering-old.md',
   '.agents/rules-old.md',
+  '.devin/rules-old.md',
   '.gemini/settings.json.bak',
   '.gemini/settings-old.json',
 ];

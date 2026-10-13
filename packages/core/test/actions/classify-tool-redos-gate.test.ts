@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
 import { classifyTool } from '../../src/actions/classify-tool.js';
+import { cpuNow } from '../cpu-time.js';
 
 /**
  * `classify-redos-gate.test.ts` holds the shell classifier to linear time on commands
@@ -24,9 +25,9 @@ const repeated =
     unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
 
 const timed = (run: () => unknown): number => {
-  const started = performance.now();
+  const started = cpuNow();
   run();
-  return performance.now() - started;
+  return cpuNow() - started;
 };
 
 const holds = (name: string, run: (size: number) => unknown): void => {
@@ -73,6 +74,25 @@ const TARGETS: ReadonlyArray<readonly [string, string]> = [
   ['an ssh client configuration', '/home/dev/.ssh/config'],
   ['a file named like nothing', `${cwd}/.alt/config`],
 ];
+
+describe('resource URL extraction through classifyTool stays linear', () => {
+  const shapes: ReadonlyArray<readonly [string, Build]> = [
+    ['many URL starts', repeated('https://a.example/x ')],
+    ['one unclosed authority', (size) => `https://${'a'.repeat(size)}`],
+    ['quoted URL punctuation', repeated("'https://a.example/x?y=(z)' ")],
+  ];
+  for (const [name, build] of shapes) {
+    it(name, () => {
+      // One quoted shell argument exercises command URL extraction through the public classifier
+      // at all three sizes, without turning every URL into another shell command.
+      const times = [SIZE / 4, SIZE / 2, SIZE].map((size) =>
+        timed(() => classifyTool('Bash', { command: `printf '%s' "${build(size)}"` }, cwd)),
+      );
+      const [quarter = 0, , full = 0] = times;
+      expect(full < BOUND_MS || full < MAX_GROWTH * quarter, times.join(', ')).toBe(true);
+    });
+  }
+});
 
 describe('the text a Write carries stays linear', () => {
   for (const [targetName, path] of TARGETS) {
@@ -194,6 +214,42 @@ const COMMANDS: ReadonlyArray<readonly [string, Build]> = [
   ['helm words', repeated('helm a ')],
   ['firebase words', repeated('firebase a ')],
   ['rsync --del', repeated('rsync --del ')],
+  // The 2026-10-05 reading of what a shell is given: a lone `&`, a parenthesis against a word, a
+  // backslash before a line break, braces, quotes and capitals in a command word.
+  ['backslashes before every newline', (size) => `${'\\'.repeat(63)}\n`.repeat(size / 64)],
+  ['an even run of backslashes before newlines', repeated('a\\\\\\\\\n')],
+  ['one long run of backslashes', (size) => `${'\\'.repeat(size)}\nrm -rf ~`],
+  ['joined lines', repeated('rm \\\n')],
+  ['lone ampersands', repeated('a&b& ')],
+  ['ampersands in quotes', repeated("echo 'a&b'& ")],
+  ['ampersands after redirects', repeated('a 2>&1& b &>c& ')],
+  ['ampersands then a pipe', repeated('a& b |& c; ')],
+  ['parentheses against words', repeated('(a (b ')],
+  ['closing parentheses', repeated('a) b)) ')],
+  ['keywords against a parenthesis', repeated('if(a);then(b);fi;')],
+  ['one long token of parentheses', (size) => `${'('.repeat(size / 2)}${')'.repeat(size / 2)} x`],
+  ['brace words', repeated('{rm,-rf,~} ')],
+  ['nested brace words', repeated('{a,{b,{c,d}}}{e,f} ')],
+  ['unclosed brace words', repeated('{a,')],
+  ['one long brace word', (size) => '{a,b}'.repeat(size / 5)],
+  ['brace ranges', repeated('x{1..9}{a..e} ')],
+  ['split command words', repeated('g""i""t "re""set" ')],
+  ['escaped command words', repeated('\\g\\i\\t re\\set ')],
+  ['ANSI-C command words', repeated("$'g'$'it' $'reset' ")],
+  ['capitals after wrappers', repeated('SUDO ENV NICE RM -RF ')],
+  ['quoted pieces without a closing quote', repeated('git re"set ')],
+  ['globbed command words', repeated('/bin/r? -rf x; ')],
+  ['globbed paths', repeated('/usr/bin/r*/x* ')],
+  ['a path of wildcards', (size) => `/${'*?[a]'.repeat(size / 5)} x`],
+  ['literal substitutions', repeated('$(echo rm) -rf x; ')],
+  ['substituted lookups', repeated('$(which rm) ')],
+  ['backticked prints', repeated('`echo a` ')],
+  [
+    'nested substitutions of prints',
+    (size) => `${'$(echo '.repeat(size / 8)}x${')'.repeat(size / 8)}`,
+  ],
+  ['one long printed text', (size) => `$(echo ${'a'.repeat(size)}) x`],
+  ['one quoted word that holds blanks', (size) => `echo "${'a b '.repeat(size / 4)}"`],
   ['traps', repeated("trap 'echo' EXIT; ")],
   ['double-quoted traps', repeated('trap "a" ')],
   ['trap with escapes', (size) => `trap "${'\\"'.repeat(size / 2)}`],

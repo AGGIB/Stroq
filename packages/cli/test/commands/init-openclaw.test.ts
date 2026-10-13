@@ -156,6 +156,59 @@ describe('runInit --agent openclaw', () => {
     },
   );
 
+  // The sixth review: what the CLI printed went through the rules for Stroq's own notes. It is indented
+  // under the command that printed it now, and a failure is a warning.
+  it.skipIf(process.platform === 'win32')(
+    'indents what each command printed under it, and not under a note of Stroq’s',
+    async () => {
+      const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
+      symlinkSync('/bin/echo', join(bin, 'openclaw'));
+      const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+      const out = capture();
+      await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
+      out.restore();
+
+      const lines = out.lines.join('').split('\n');
+      const at = lines.findIndex((line) => line.startsWith('$ openclaw plugins install --link'));
+      expect(at).toBeGreaterThan(-1);
+      expect(lines[at + 1]).toMatch(/^ {4}plugins install --link /);
+      const enable = lines.findIndex((line) => line === '$ openclaw plugins enable stroq');
+      expect(lines[enable + 1]).toBe('    plugins enable stroq');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || !existsSync('/usr/bin/false'))(
+    'says a command did not succeed as a warning, with what to do',
+    async () => {
+      const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
+      symlinkSync('/usr/bin/false', join(bin, 'openclaw'));
+      const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
+      const errors: string[] = [];
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+        errors.push(String(chunk));
+        return true;
+      });
+      const out = capture();
+      try {
+        const code = await inHome(home, () =>
+          withPath(bin, () => runInit(['--agent', 'openclaw'])),
+        );
+        expect(code).toBe(0);
+      } finally {
+        out.restore();
+        spy.mockRestore();
+      }
+
+      const said = errors.join('');
+      expect(said).toMatch(
+        /^Warning: "openclaw plugins install --link .*" did not succeed; run it yourself$/m,
+      );
+      expect(said).toMatch(
+        /^Warning: "openclaw plugins enable stroq" did not succeed; run it yourself$/m,
+      );
+    },
+  );
+
   it.runIf(process.platform === 'win32')(
     'finds openclaw.cmd on Windows and prints the two commands instead of running them',
     async () => {

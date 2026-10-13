@@ -252,6 +252,49 @@ describe('probeServers', () => {
     expect(results[0]?.flagged).not.toContain('neg');
   });
 
+  // What a server says a tool is, is the `tool_description` of the rule format: a rule that reads
+  // that field is measured against it, and one that reads a field nobody supplies here is not.
+  it('reads a tool description as the `tool_description` field, and as no other', async () => {
+    const onField = (id: string, field: string, phrase: string): AtrRule =>
+      ({
+        id,
+        title: `probe ${id}`,
+        severity: 'critical',
+        detection: {
+          condition: 'any',
+          conditions: [{ field, operator: 'contains', value: phrase }],
+        },
+      }) as unknown as AtrRule;
+
+    probeRuleState.rules = compileRules([
+      onField('PROBE-MCP-00003', 'tool_description', 'STROQ_PROBE_FIELD_DESC_c8d1'),
+      onField('PROBE-MCP-00004', 'user_input', 'STROQ_PROBE_FIELD_USER_3e92'),
+    ]).compiled;
+
+    const dir = fixture();
+    const server = join(dir, 'server.mjs');
+    writeFileSync(server, SERVER_TWO_TOOLS);
+    const config = join(dir, '.mcp.json');
+    writeFileSync(
+      config,
+      JSON.stringify({
+        mcpServers: {
+          helper: {
+            command: process.execPath,
+            args: [server],
+            env: {
+              STROQ_TEST_DESC_POS: 'STROQ_PROBE_FIELD_DESC_c8d1',
+              STROQ_TEST_DESC_NEG: 'STROQ_PROBE_FIELD_USER_3e92',
+            },
+          },
+        },
+      }),
+    );
+    const results = await probeServers(surfaceFor(config));
+    expect(results[0]?.flagged).toContain('pos');
+    expect(results[0]?.flagged).not.toContain('neg');
+  });
+
   // A cloned repository's `.mcp.json` names the command the probe starts. Started with
   // the whole environment, that command receives every credential the user's shell
   // holds, from a repository the user has only just opened: the leak `exposure` exists

@@ -19,6 +19,7 @@ import {
   candidatesFromText,
   collectStrings,
   displayPath,
+  isShellTool,
   redact,
   redactMatches,
   summarizeInput,
@@ -111,8 +112,8 @@ function spellingsOf(path: string, scope: SentIndexScope, sessionCwd: string | n
  * which is why every string leaf of the input is searched rather than the summary.
  */
 const FILE_READING_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep']);
-/** Tools that run a shell command, which may or may not print the file it names. */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash']);
+// The tools that run a shell command (`Bash`, `PowerShell`, `Monitor`) may or may not print the file their
+// command names: the list is the core's (`isShellTool`), which every guard reads, and not one of this file's own.
 
 /**
  * What this call establishes about a credential file, or null when the tool is not
@@ -126,7 +127,7 @@ const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash']);
  */
 function fileEvidenceFor(tool: string): SentFileEvidence | null {
   if (FILE_READING_TOOLS.has(tool)) return 'read';
-  if (SHELL_TOOLS.has(tool)) return 'named';
+  if (isShellTool(tool)) return 'named';
   return null;
 }
 
@@ -143,7 +144,7 @@ function credentialFilesIn(
   // For a shell command, a heredoc body that nothing executes is text being written
   // somewhere, not a file being opened — see `heredoc.ts` for the 12 of 20 findings on
   // this machine that were exactly that.
-  const leaves = SHELL_TOOLS.has(tool)
+  const leaves = isShellTool(tool)
     ? collectStrings(input).map(withoutHeredocData)
     : collectStrings(input);
   return scope.sourcePaths

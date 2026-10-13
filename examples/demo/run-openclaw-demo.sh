@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Replays six recorded OpenClaw tool calls through the real CLI and asserts the
+# Replays six hand-written OpenClaw tool calls through the real CLI and asserts the
 # decision each one must produce, then checks that the plugin the Gateway loads
 # actually ships inside @stroq/cli. A demo that prints a convincing story while the
 # decision underneath it has changed is worse than no demo, so every event is checked

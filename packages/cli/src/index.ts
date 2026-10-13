@@ -4,12 +4,16 @@ import { runCanary } from './commands/canary.js';
 import { runCoverageCommand } from './commands/coverage.js';
 import { runDoctor } from './commands/doctor.js';
 import { runExposure } from './commands/exposure.js';
+import { runHarden } from './commands/harden.js';
 import { runHookCommand } from './commands/hook.js';
 import { runInitCommand } from './commands/init-agent.js';
 import { runInspect } from './commands/inspect.js';
 import { runLog } from './commands/log.js';
 import { runMcp } from './commands/mcp.js';
+import { runPolicy } from './commands/policy.js';
+import { runProve } from './commands/prove.js';
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
+import { handleStdoutError } from './stdout-errors.js';
 import { runReplay } from './commands/replay.js';
 import { runRun } from './commands/run.js';
 import { runSent } from './commands/sent.js';
@@ -17,10 +21,12 @@ import { runTrust } from './commands/trust.js';
 import { runUninstall } from './commands/uninstall.js';
 import { runUntaint } from './commands/untaint.js';
 import { runVerify } from './commands/verify.js';
+import { runVet } from './commands/vet.js';
 import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
 import {
   commandHelp,
+  commandHint,
   parseArgsProblem,
   suggestCommand,
   unknownOption,
@@ -38,6 +44,7 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   uninstall: runUninstall,
   run: runRun,
   doctor: runDoctor,
+  prove: runProve,
   log: runLog,
   verify: () => runVerify(),
   trust: runTrust,
@@ -47,9 +54,12 @@ const COMMANDS: Readonly<Record<string, Runner>> = {
   sent: runSent,
   canary: runCanary,
   attack: runAttackCommand,
+  policy: runPolicy,
   exposure: runExposure,
   bench: runBenchCommand,
   coverage: runCoverageCommand,
+  harden: runHarden,
+  vet: runVet,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -138,6 +148,11 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
 }
 
 function unknownCommand(typed: string): number {
+  const hint = commandHint(typed);
+  if (hint !== null) {
+    process.stderr.write(`${hint}\n`);
+    return 1;
+  }
   const suggestion = suggestCommand(typed);
   process.stderr.write(
     `stroq: unknown command "${typed}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}\n` +
@@ -161,12 +176,7 @@ async function exitNow(code: number): Promise<never> {
   process.exit(code);
 }
 
-// `stroq log --json | head -1` closes the pipe after one line. That is the reader
-// being done, not a failure, and must not end in a stack trace.
-process.stdout.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EPIPE') process.exit(process.exitCode ?? 0);
-  throw err;
-});
+process.stdout.on('error', (err: NodeJS.ErrnoException) => handleStdoutError(err));
 
 main(process.argv.slice(2)).then(
   (code) => {

@@ -34,12 +34,13 @@ export type AntigravityHookEvent = (typeof ANTIGRAVITY_HOOK_EVENTS)[number];
  * Seconds. Antigravity's own default for a handler, and deliberately not the
  * `HOOK_TIMEOUT_SECONDS` three of the other agents get.
  *
- * What a timed-out or failed Antigravity hook does is UNDOCUMENTED. If it fails open
- * a longer budget is strictly safer; if it fails closed a longer budget only delays
- * an answer Stroq produces in well under a second either way. There is no reading
- * under which a shorter one is safer, so the larger default stands — the same
- * conclusion the Copilot adapter reached from a documented fail-open rather than from
- * a silence.
+ * What a timed-out or failed Antigravity hook does is UNDOCUMENTED, except that a line
+ * which cannot start at all (cmd.exe on Windows: `is not recognized as an internal or
+ * external command`) makes it refuse every tool call. If it fails open a longer budget is
+ * strictly safer; if it fails closed a longer budget only delays an answer Stroq
+ * produces in well under a second either way. There is no reading under which a shorter
+ * one is safer, so the larger default stands — the same conclusion the Copilot adapter
+ * reached from a documented fail-open rather than from a silence.
  */
 export const ANTIGRAVITY_HOOK_TIMEOUT_SECONDS = 30;
 

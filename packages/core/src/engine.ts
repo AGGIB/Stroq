@@ -1,5 +1,6 @@
 import { writtenText } from './actions/written-text.js';
-import { classifyTool } from './actions/classify-tool.js';
+import { classifyTool, type ToolClassification } from './actions/classify-tool.js';
+import { INSTRUCTION_SCAN_CLOCK_SIGNAL } from './actions/limit-signals.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
 import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
@@ -18,7 +19,14 @@ import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
-import { candidateTokens, candidatesFromText, exceedsSecretScan } from './secrets/candidates.js';
+import { evaluateScope } from './scope/engine-gate.js';
+import type { ScopeGate } from './scope/types.js';
+import {
+  MAX_SCAN_CHARS,
+  candidateTokens,
+  candidatesFromText,
+  exceedsSecretScan,
+} from './secrets/candidates.js';
 import type { SecretIndex } from './secrets/index.js';
 import type { TrustStore } from './taint/trust.js';
 import type { SessionStore } from './taint/session-store.js';
@@ -51,6 +59,8 @@ export interface EngineOptions {
   readonly trust?: TrustStore;
   /** Optional: decoy files planted with `stroq canary --file`. Without it `fs.canary` never fires. */
   readonly canaryFiles?: CanaryFiles;
+  /** Optional task contract. Without a gate the policy decision and audit shape are unchanged. */
+  readonly scope?: ScopeGate;
   readonly now?: () => Date;
 }
 
@@ -63,6 +73,15 @@ export interface PreResult {
   readonly provenance: readonly ProvenanceHit[];
   /** Known secrets whose values appeared in the arguments (never the values). */
   readonly secrets: readonly SecretHit[];
+  /**
+   * The classification signals behind `classes`, such as `reading-took-too-long`: how the
+   * call was read, which a class alone does not say (a command asked about because the
+   * reading ran past its clock and one asked about because it is dangerous can carry the
+   * same class). Always set by `pre`, empty when the call raised none. `stroq attack` and
+   * `stroq bench` read it to report a run Stroq could not judge (the clock, a limit) as
+   * such, rather than as a pass or a miss (see `limit-signals.ts` for which signals).
+   */
+  readonly signals?: readonly string[];
 }
 
 export interface PostResult {
@@ -146,6 +165,27 @@ export function scanTargetForTool(
   }
   return 'any';
 }
+
+/**
+ * The fields of the rule format that the result of a tool fills in, beside `content`. The text of
+ * what an MCP server returns, or a web fetch or search, is a tool's response, and the text of
+ * `tools/list` is what a server says its tools are: about three hundred rules read those fields and
+ * matched nothing while nobody supplied them (see `supplied-fields.ts`). A local result (a file, a
+ * listing, a command's output) fills neither: those rules were written for what another party
+ * answers, and on one's own work they fire as often as the rules on `content` do.
+ *
+ * A field that is the scanned text is read in each form the scanner makes of it.
+ */
+export function scanFieldsForTool(
+  toolName: string,
+  text: string,
+): Readonly<Record<string, string>> {
+  if (toolName.startsWith('mcp__')) {
+    return toolName.endsWith('__tools_list') ? { tool_description: text } : { tool_response: text };
+  }
+  if (toolName === 'WebFetch' || toolName === 'WebSearch') return { tool_response: text };
+  return {};
+}
 /**
  * The score at which text written into an instruction file counts as a payload: a
  * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
@@ -182,6 +222,24 @@ interface SecretCheck {
   readonly unscannable: boolean;
 }
 const NO_SECRET_CHECK: SecretCheck = { matches: [], unscannable: false };
+
+/**
+ * Script texts cut to what one command's own text may be (`MAX_SCAN_CHARS`), together, and
+ * whether anything was left out: a value past the window is one the guard did not look for,
+ * which the policy is told, as it is for a command that runs past it.
+ */
+function withinScanWindow(texts: readonly string[]): { texts: string[]; cut: boolean } {
+  let room = MAX_SCAN_CHARS;
+  const kept: string[] = [];
+  let cut = false;
+  for (const text of texts) {
+    if (text.length > room) cut = true;
+    const part = text.length > room ? text.slice(0, room) : text;
+    kept.push(part);
+    room -= part.length;
+  }
+  return { texts: kept, cut };
+}
 
 /**
  * Redacts every match from `summary`. A match's `token` is the candidate that hashed
@@ -299,13 +357,24 @@ export class StroqEngine {
    */
   private async checkSecrets(
     event: PreToolEvent,
-    classes: readonly ActionClass[],
+    classification: ToolClassification,
   ): Promise<SecretCheck> {
     const index = this.opts.secrets;
-    if (!index || !classes.some((c) => EGRESS_CLASSES.includes(c))) return NO_SECRET_CHECK;
-    const candidates = candidateTokens(event.toolName, event.toolInput);
+    if (!index || !classification.classes.some((c) => EGRESS_CLASSES.includes(c)))
+      return NO_SECRET_CHECK;
+    // A command that runs a script carries the script: `bash send.sh` names a file, and the
+    // known value is in it. The scripts share the window one command's own text gets, so a
+    // few large ones cannot cost more than a large command would.
+    const scripts = withinScanWindow(classification.scripts ?? []);
+    const candidates = [
+      ...candidateTokens(event.toolName, event.toolInput),
+      ...scripts.texts.flatMap(candidatesFromText),
+    ];
     const matches = await index.lookup(candidates, event.cwd);
-    return { matches, unscannable: exceedsSecretScan(event.toolName, event.toolInput) };
+    return {
+      matches,
+      unscannable: exceedsSecretScan(event.toolName, event.toolInput) || scripts.cut,
+    };
   }
 
   /** Audit summaries must be safe even when the action itself is not outbound. */
@@ -401,27 +470,33 @@ export class StroqEngine {
    * an Edit's `old_string` is what is being removed, and removing an injection is the
    * opposite of saving one. Patches reach the engine as paths only, so for them the
    * taint alone decides.
+   *
+   * A scan that ran out of its budget answers `suspect` (it fails closed), which is the same answer
+   * as a rule that matched. `timedOut` tells the two apart, so the caller can say that the clock
+   * made the ask and a report does not count it as a defence that held.
    */
-  private writesInjection(event: PreToolEvent): boolean {
+  private writesInjection(event: PreToolEvent): { suspect: boolean; timedOut: boolean } {
     const text = writtenText(event.toolInput);
-    if (text === '') return false;
+    if (text === '') return { suspect: false, timedOut: false };
     const scan = scanContent(
       this.opts.rules,
       text,
       { threshold: Math.min(this.opts.policy.threshold, INSTRUCTION_WRITE_THRESHOLD) },
       { target: 'instruction_file' },
     );
-    return scan.verdict === 'suspect';
+    return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const origin = originClasses(await this.findProvenance(event), classification.classes);
-    const { matches, unscannable } = await this.checkSecrets(event, classification.classes);
+    const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
-    const savesInjection =
-      classification.classes.includes('config.instructions') && this.writesInjection(event);
+    const injection = classification.classes.includes('config.instructions')
+      ? this.writesInjection(event)
+      : { suspect: false, timedOut: false };
+    const savesInjection = injection.suspect;
     const decoy = this.opts.canaryFiles
       ? canaryFileTouched(
           this.opts.canaryFiles.paths(),
@@ -439,26 +514,41 @@ export class StroqEngine {
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
-    const decision = withWayOut(
+    const policyDecision = withWayOut(
       evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null),
       this.opts.policy,
       state.taint,
       event.sessionId,
       new Date(this.now()),
     );
+    const gated = await evaluateScope(this.opts.scope, {
+      event,
+      classification,
+      classes,
+      decision: policyDecision,
+    });
+    const decision = gated?.decision ?? policyDecision;
     const provenance = origin.counted.map(toEvidence);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
       event.cwd,
       matches,
     );
+    // A task's refusals name the path, host or tool the agent asked for, and the agent chose that
+    // text: the audit gets it as redacted as the summary of the call is.
+    const audited =
+      gated === null
+        ? decision
+        : { ...decision, reason: await this.safeSummary(decision.reason, event.cwd, matches) };
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
       tool: event.toolName,
       summary,
       classes,
-      decision,
+      decision: audited,
+      ...(gated === null ? {} : { taskId: gated.taskId, scope: gated.evidence }),
+      ...(event.callId === undefined ? {} : { callId: event.callId }),
       ...(provenance.length > 0 ? { provenance } : {}),
       ...(secrets.length > 0 ? { secrets } : {}),
     });
@@ -485,6 +575,9 @@ export class StroqEngine {
       taint,
       provenance: origin.counted,
       secrets,
+      signals: injection.timedOut
+        ? [...classification.signals, INSTRUCTION_SCAN_CLOCK_SIGNAL]
+        : classification.signals,
     };
   }
 
@@ -511,7 +604,10 @@ export class StroqEngine {
       this.opts.rules,
       event.toolResultText,
       { threshold: this.opts.policy.threshold },
-      { target: scanTargetForTool(event.toolName, event.toolInput) },
+      {
+        target: scanTargetForTool(event.toolName, event.toolInput),
+        ...scanFieldsForTool(event.toolName, event.toolResultText),
+      },
     );
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
     // Same derivation as a provenance record's `source` (see recordProvenance):

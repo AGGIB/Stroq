@@ -1,3 +1,5 @@
+import { expandBraces } from './brace-expansion.js';
+
 /**
  * Whether a recursive delete is aimed outside the working tree.
  *
@@ -29,6 +31,15 @@ function withoutTrailingSlashes(path: string): string {
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
   const t = target.replace(/["']/g, '');
   if (t === '') return false;
+  // `rm -rf {~,/tmp/x}` deletes two targets, and the text shows neither: each is judged, and a
+  // word that makes too many to read is one that is not known to be safe.
+  if (t.includes('{')) {
+    const words = expandBraces(t);
+    if (words === null) return true;
+    if (words.length !== 1 || words[0] !== t)
+      return words.some((word) => isDangerousRmTarget(word, cwd));
+  }
+  // `.*` and `./.*` are every dotfile of the directory: `.git`, `.env`, the agent's own settings.
   if (['/', '/*', '.', './', '*', './*', '.*', './.*'].includes(t)) return true;
   // `~`, `~/…` and `~user/…` expand to a home directory, which is never inside a
   // project checkout; `$VAR` is unknown and `..` points upward — all treated as
@@ -51,6 +62,8 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
   }
   if (!t.startsWith('/')) return false;
   const normalized = withoutTrailingSlashes(t);
+  // `cwd` is compared without its trailing slashes, so `/repo/` holds `/repo/build`. A working tree
+  // at `/` (or none) would then hold every path: none is inside it, for a recursive delete.
   const root = withoutTrailingSlashes(cwd);
-  return !normalized.startsWith(`${root}/`);
+  return root === '' || !normalized.startsWith(`${root}/`);
 }

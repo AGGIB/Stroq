@@ -17,21 +17,32 @@ interface CommandHelp {
   readonly passThrough?: boolean;
 }
 
-const COMMANDS: readonly CommandHelp[] = [
+export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'init',
-    synopsis: 'init [--agent <name>] [--user] [--dry-run]',
+    synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
     about: [
       'install hooks for an agent, in this project by default,',
-      "or wrap an MCP client's stdio servers in Stroq's proxy (--agent mcp)",
+      "or wrap an MCP client's stdio servers in Stroq's proxy (--agent mcp).",
+      'On a terminal it shows what it will change, asks first and, for Claude',
+      'Code, Codex, Cursor and Antigravity, checks that the hook it wrote starts',
+      'and judges. On Windows it writes the hook line of Antigravity, Cursor and',
+      'Codex without quotes (a host that escapes each quote cannot start a line',
+      'that has one) and starts it through cmd.exe, as such a host does, before',
+      'it keeps it.',
     ],
     flags: [
       [
         '--agent <name>',
-        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
+        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp. With none, on a terminal: every agent it found (claude-code when none), after it has asked. In a script, in CI or with --no-input: claude-code when it is installed or nothing is; the one other agent when only one is; with several, nothing is installed and the command for each is printed',
       ],
       ['--user', "install into the user's config instead of this project's"],
       ['--dry-run', 'print the change and write nothing'],
+      [
+        '--yes',
+        'on a terminal, init shows what it will change and asks first; --yes answers for you (with no --agent, it guards every agent it found)',
+      ],
+      ['--no-input', 'never ask, and print the plain installer output (what scripts and CI get)'],
       ['--client <name>', 'with --agent mcp: claude-desktop, windsurf, cursor or claude-code'],
       ['--config <path>', 'with --agent mcp: any file with an "mcpServers" object'],
       ['--unwrap', 'with --agent mcp: put every wrapped server back the way it was'],
@@ -108,8 +119,29 @@ const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'doctor',
     synopsis: 'doctor [--all]',
-    about: ['check the installation: Node, rules, the hooks of every agent, a self-test'],
+    about: [
+      'check the installation: Node, rules, the hooks of every agent',
+      'and when each was last called, a self-test',
+    ],
     flags: [['--all', 'list every agent and scope, installed or not']],
+  },
+  {
+    name: 'prove',
+    synopsis: 'prove [--agent <id>] [--yes] [--dry-run] [--json] [--max-requests <n>]',
+    about: [
+      'run the live protection check: ask the real host to run three harmless commands with',
+      "Stroq's hook in place, and show from evidence the model does not write that a command",
+      'your policy denies did not happen, and that the same command runs when the hook is out',
+      'of the way. It makes up to 3 short requests on your own login (subscription usage, never',
+      'an API key), says so, and asks first. Exit 0 verified, 1 failed, 3 anything else',
+    ],
+    flags: [
+      ['--agent <id>', 'the agent to check; claude-code (the default) is the only one yet'],
+      ['--yes', 'make the requests without asking; needed where there is no terminal to ask on'],
+      ['--dry-run', 'say what would be done, make no request and write nothing'],
+      ['--json', 'machine-readable output (version 1)'],
+      ['--max-requests <n>', 'the most requests to make, 1 to 6 (default 3)'],
+    ],
   },
   {
     name: 'log',
@@ -146,7 +178,8 @@ const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'replay',
-    synopsis: 'replay [<session>] [--last] [--transcript <path>] [--json] [--list]',
+    synopsis:
+      'replay [<session>] [--last] [--transcript <path>] [--json] [--list] [--html] [--out <file>]',
     about: [
       'rebuild the recorded sequence: which content the agent read, and which later',
       "actions matched it. --last reads the agent's own transcript, so it works on",
@@ -160,11 +193,14 @@ const COMMANDS: readonly CommandHelp[] = [
       ['--transcript <path>', 'a specific transcript'],
       ['--json', 'machine-readable output'],
       ['--list', 'list the sessions in the audit log'],
+      ['--html', 'one HTML file with the chain drawn (no script, no link, no external resource)'],
+      ['--out <file>', 'write the page to a file that does not exist yet'],
     ],
   },
   {
     name: 'sent',
-    synopsis: 'sent [<session>] [--last] [--transcript <path>] [--json] [--fail-on-finding]',
+    synopsis:
+      'sent [<session>] [--last] [--transcript <path>] [--json] [--card [--html] [--out <file>]] [--fail-on-finding]',
     about: [
       'which credentials appear in a recorded agent session, and in which tool result',
       'or call. Reads names and sources only, never a value',
@@ -176,6 +212,12 @@ const COMMANDS: readonly CommandHelp[] = [
       ],
       ['--transcript <path>', 'a specific transcript or rollout'],
       ['--json', 'machine-readable output'],
+      [
+        '--card',
+        'a card to share instead of the report: counts, providers and the limits of the check, no value, name, path, command or hash',
+      ],
+      ['--html', 'with --card: one HTML file with no script and no external resource'],
+      ['--out <file>', 'with --card: write it to a file that does not exist yet'],
       ['--fail-on-finding', 'exit 1 when a credential is found'],
     ],
   },
@@ -194,11 +236,44 @@ const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'attack',
     synopsis: 'attack [--json] [--only <id>] [--fuzz]',
-    about: ['replay recorded attacks against your policy; exit 1 if any gets through'],
+    about: [
+      'replay recorded attacks against your policy; exit 1 if any gets through or could not be judged',
+    ],
     flags: [
       ['--json', 'machine-readable output'],
       ['--only <id>', 'one scenario, e.g. 05'],
       ['--fuzz', 'cross every scenario with every mutation and print the ones that escape'],
+    ],
+  },
+  {
+    name: 'policy',
+    synopsis:
+      'policy check [<file>] [--json] | policy test [--policy <file>] [--baseline <file>] [--cases <file>] [--max-new-interruptions <n>] [--json]',
+    about: [
+      'see what an edit to your policy.yaml does before you rely on it; both only read. check',
+      'loads a file as the hook does and lists what is wrong: faults by field, a rule that can',
+      'never be the first match, a protection of the default policy the file quietly drops,',
+      'default: allow, a high threshold; exit 1 on a finding. test replays the attack corpus,',
+      'the ordinary-work benchmark and your own cases under the policy and under a baseline,',
+      'and prints every step whose decision changed; exit 1 if an attack gets through, a case',
+      'is not met, something could not be judged, or ordinary work is newly interrupted more',
+      'than --max-new-interruptions allows. Exit 2: wrong command line or an unreadable file',
+    ],
+    flags: [
+      ['--policy <file>', 'test: the policy to try (default: the policy in force)'],
+      [
+        '--baseline <default|file>',
+        'test: what to compare it with (default: the built-in default policy)',
+      ],
+      [
+        '--cases <file>',
+        'test: your own cases, YAML or JSON, up to 256 KiB and 200 cases: attacks that must not pass, and ordinary work with the answer you expect (allow, ask or deny)',
+      ],
+      [
+        '--max-new-interruptions <n>',
+        'test: fail when more steps of ordinary work than this newly ask or deny',
+      ],
+      ['--json', 'machine-readable output (version 1)'],
     ],
   },
   {
@@ -237,10 +312,14 @@ const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'bench',
-    synopsis: 'bench [--corpus <dir>] [--json] [--verbose]',
-    about: ['measure how much benign developer text the rule set flags'],
+    synopsis: 'bench [--corpus <dir> | --actions] [--json] [--verbose]',
+    about: [
+      'measure how much benign developer text the rule set flags,',
+      'or (--actions) how much ordinary agent work your policy interrupts',
+    ],
     flags: [
       ['--corpus <dir>', 'measure your own files instead of the shipped corpus'],
+      ['--actions', 'replay 75 scenarios of ordinary agent work against your policy'],
       ['--json', 'machine-readable output'],
       ['--verbose', 'list the flagged files'],
     ],
@@ -254,10 +333,100 @@ const COMMANDS: readonly CommandHelp[] = [
       ['--json', 'machine-readable output'],
     ],
   },
+  {
+    name: 'harden',
+    synopsis:
+      'harden [plan|apply|undo|status] [--agent <id>] [--scope user|project] [--recipe <name>] [--json] [--yes]',
+    about: [
+      "make the host's own protection of credential files stronger, and give it back. plan (the",
+      'default) shows exactly what would change and writes nothing; apply asks you, then changes the',
+      'file and keeps what undo needs; undo takes it back; status says what is in place. Recipes:',
+      "claude-read-deny (read rules in Claude Code's settings) and cursor-ignore (a block in",
+      '.cursorignore). A filter inside the host, a best effort and not a guarantee: a program that',
+      'reads the file itself is not covered, and only an OS sandbox covers that.',
+      'Exit codes: 0 done or nothing to do, 1 refused or failed, 2 wrong command line, 3 a flag is missing',
+    ],
+    flags: [
+      ['--agent <id>', 'claude-code (the default) or cursor'],
+      [
+        '--scope <user|project>',
+        "user: the person's own settings, ~/.claude/settings.json (the default for claude-code); project: this folder, .claude/settings.local.json, or .cursorignore for cursor (the only scope of cursor)",
+      ],
+      ['--recipe <name>', 'claude-read-deny or cursor-ignore; the agent follows from it'],
+      ['--json', 'machine-readable output, with plan, apply and status'],
+      [
+        '--yes',
+        'with apply and undo: answer the question yourself. On a terminal they ask first; anywhere else they do nothing without it',
+      ],
+      [
+        '--acknowledge-link',
+        'the path is a link and the change lands in the file it leads to. A plan hides its diff until it is given',
+      ],
+      [
+        '--acknowledge-credential-loss',
+        'apply may replace a value that looks like a credential; no copy of it is kept, so undo cannot put it back',
+      ],
+      [
+        '--acknowledge-reformat',
+        'apply may lay the whole file out again, not only the lines it adds',
+      ],
+    ],
+  },
+  {
+    name: 'vet',
+    synopsis:
+      'vet --from <dir> [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+    about: [
+      'read a skill, an MCP server or a plugin folder before you add it, and show its passport: what it asks',
+      'for or can do, each line marked declared, observed, limited or unknown, the rules that matched, and',
+      'every blind spot. The files are read and none of them is run. A reading, not a security certificate:',
+      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is',
+      'complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the files cannot be',
+      'read as an artifact',
+    ],
+    flags: [
+      [
+        '--from <dir>',
+        'the folder to read (required). .git and node_modules are left out, and it says so',
+      ],
+      [
+        '--kind <skill|mcp|plugin>',
+        'what the folder is, when its files do not say (or say two things)',
+      ],
+      [
+        '--json',
+        'the passport itself, in a canonical form: the same bytes for the same files, so that an author can commit it',
+      ],
+      [
+        '--expect <sha256>',
+        'exit 1 unless the digest of the files is this one (64 hex digits, bare or as sha256:<hex>). Not on Windows, where a folder has no executable bit and its digest depends on the platform',
+      ],
+      [
+        '--card',
+        'a Markdown snippet for a README: the name, the digest, the counts and the command that reproduces it, and nothing else from the artifact',
+      ],
+      [
+        '--out <file>',
+        "write the output to a file that does not exist yet, never over one. Write it outside the folder it describes: inside, it is one of that folder's files and changes its digest",
+      ],
+    ],
+  },
 ];
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
+
+/** The name of every command, in the order the help lists them. */
+export const commandNames = (): readonly string[] => COMMANDS.map((c) => c.name);
 const INDENT = 37;
+
+const START_INDENT = 22;
+
+/** What a newcomer runs, in order: the rest of the list is for later. */
+const START_HERE: readonly (readonly [string, string])[] = [
+  ['stroq init', 'guard the agents on this machine (it asks first)'],
+  ['stroq sent --last', 'which of your keys did your agent already see?'],
+  ['stroq doctor', 'are the hooks in place, and was Stroq called?'],
+];
 
 /** `stroq --help`: every command, one block each. */
 export function usage(): string {
@@ -272,6 +441,9 @@ export function usage(): string {
   });
   return [
     'stroq <command>',
+    '',
+    'Start here:',
+    ...START_HERE.map(([command, meaning]) => `${`  ${command}`.padEnd(START_INDENT)}${meaning}`),
     '',
     'Commands:',
     ...blocks,
@@ -349,8 +521,29 @@ export function parseArgsProblem(err: unknown): string | null {
   return first.replace(/\.$/, '');
 }
 
-/** The closest command to a typo, or null when nothing is close. */
+/**
+ * Words that are not commands of Stroq but that a person will type, and what to say to them. A Map and
+ * not an object, so that `constructor` and `__proto__` are words with no hint and not properties.
+ */
+const HINTS: ReadonlyMap<string, string> = new Map([
+  [
+    'install',
+    'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+  ],
+]);
+
+/** What to say to a word that is not a command, in one line, or null when there is nothing special to say. */
+export function commandHint(typed: string): string | null {
+  return HINTS.get(typed.toLowerCase()) ?? null;
+}
+
+/**
+ * The closest command to a typo, or null when nothing is close. A word that has a hint gets none: "install"
+ * is two letters from "uninstall", the one command that takes Stroq out, which is the opposite of what the
+ * person who typed it wants.
+ */
 export function suggestCommand(typed: string): string | null {
+  if (commandHint(typed) !== null) return null;
   let best: string | null = null;
   let bestDistance = 3;
   for (const { name } of COMMANDS) {

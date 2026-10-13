@@ -26,6 +26,7 @@ const COMMANDS: Readonly<Record<string, string>> = {
   run: 'run',
   mcp: 'mcp',
   doctor: 'doctor',
+  prove: 'prove',
   log: 'log',
   verify: 'verify',
   untaint: 'untaint',
@@ -34,11 +35,14 @@ const COMMANDS: Readonly<Record<string, string>> = {
   sent: 'sent',
   canary: 'canary',
   attack: 'attack',
+  policy: 'policy',
   exposure: 'exposure',
   inspect: 'inspect',
   trust: 'trust',
   bench: 'bench',
   coverage: 'coverage',
+  harden: 'harden',
+  vet: 'vet',
 };
 
 /** The flags a command's source accepts: `parseArgs` options, flag sets, `argv.includes`. */

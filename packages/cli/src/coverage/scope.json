@@ -1,5 +1,5 @@
 {
-  "atlasRelease": "2026.08",
+  "atlasRelease": "2026.09",
   "inScope": [
     {
       "id": "AML.T0010",
@@ -236,6 +236,18 @@
     {
       "id": "AML.T0074",
       "limitation": "Covers file-metadata and type-masquerading content a tool call returns, the same surface as prompt obfuscation; reclaiming a stale, previously-trusted package or model namespace after it is deleted or renamed is adversary-side registry activity outside the developer’s machine and is not covered."
+    },
+    {
+      "id": "AML.T0129",
+      "limitation": "Stroq scans the text a tool returns and does not decode or recognise images, audio or video, so an instruction carried only in those channels is not seen; text extracted from a document or fetched page is scanned like any other content."
+    },
+    {
+      "id": "AML.T0130",
+      "limitation": "Covers an injected instruction that arrives in content a tool returns and matches a rule for text addressed to the assistant; the bias itself shows only in the model’s own conversational response, which no hook sees, and it triggers no action for a policy to block."
+    },
+    {
+      "id": "AML.T0134",
+      "limitation": "Covers the injected text when the agent’s fetch returns it and it matches a rule; the cloaking itself, a different response for a person or a crawler, happens on the server and cannot be observed or compared from a hook, and an injection that avoids every rule is not seen."
     }
   ],
   "outOfScope": [
@@ -283,7 +295,8 @@
         "AML.T0067",
         "AML.T0067.000",
         "AML.T0076",
-        "AML.T0102"
+        "AML.T0102",
+        "AML.T0133"
       ]
     },
     {
@@ -325,7 +338,12 @@
         "AML.T0064",
         "AML.T0095",
         "AML.T0095.000",
-        "AML.T0128"
+        "AML.T0128",
+        "AML.T0000.003",
+        "AML.T0006.000",
+        "AML.T0006.001",
+        "AML.T0006.002",
+        "AML.T0006.003"
       ]
     },
     {
@@ -350,7 +368,8 @@
         "AML.T0052.001",
         "AML.T0073",
         "AML.T0087",
-        "AML.T0088"
+        "AML.T0088",
+        "AML.T0131"
       ]
     },
     {
@@ -374,7 +393,8 @@
         "AML.T0034",
         "AML.T0034.000",
         "AML.T0034.001",
-        "AML.T0075"
+        "AML.T0075",
+        "AML.T0132"
       ]
     },
     {

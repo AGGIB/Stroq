@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   commandHelp,
+  commandHint,
   parseArgsProblem,
   suggestCommand,
   unknownOption,
@@ -20,6 +21,23 @@ describe('usage', () => {
       expect(text).toMatch(new RegExp(`^  ${name}\\b`, 'm'));
     expect(text).toContain('help [<command>]');
     expect(text).toContain('--version');
+  });
+
+  it('starts a newcomer with three commands, before the list', () => {
+    const text = usage();
+    const start = text.indexOf('Start here:');
+    expect(start).toBeGreaterThan(0);
+    expect(start).toBeLessThan(text.indexOf('Commands:'));
+    const block = text.slice(start, text.indexOf('Commands:'));
+    expect(block).toMatch(/^ {2}stroq init\s+guard the agents on this machine/m);
+    expect(block).toMatch(/^ {2}stroq sent --last\s+which of your keys/m);
+    expect(block).toMatch(/^ {2}stroq doctor\s+are the hooks in place/m);
+  });
+
+  it('keeps the newcomer block within 80 columns', () => {
+    const text = usage();
+    const block = text.slice(text.indexOf('Start here:'), text.indexOf('Commands:'));
+    for (const line of block.split('\n')) expect(line.length).toBeLessThanOrEqual(80);
   });
 });
 
@@ -115,5 +133,34 @@ describe('suggestCommand', () => {
 
   it('suggests nothing for a word that is not close to any command', () => {
     expect(suggestCommand('kubernetes')).toBeNull();
+  });
+
+  // "install" is two letters from "uninstall", and a person who types it wants to add something, not to
+  // take Stroq out: the wrong suggestion is the one command that undoes what they came to do.
+  it.each(['install', 'INSTALL', 'Install'])('does not suggest uninstall for %s', (typed) => {
+    expect(suggestCommand(typed)).not.toBe('uninstall');
+    expect(suggestCommand(typed)).toBeNull();
+  });
+});
+
+describe('commandHint', () => {
+  it('says what to run instead of install, in one line that names both commands', () => {
+    const hint = commandHint('install');
+    expect(hint).toBe(
+      'stroq has no install: `stroq init` guards an agent, `stroq vet --from <dir>` reads a skill or MCP server before you add it.',
+    );
+    expect(hint).not.toContain('\n');
+  });
+
+  it('answers a different spelling of the case, and nothing for a word that has no hint', () => {
+    expect(commandHint('INSTALL')).toBe(commandHint('install'));
+    expect(commandHint('uninstall')).toBeNull();
+    expect(commandHint('kubernetes')).toBeNull();
+    expect(commandHint('')).toBeNull();
+  });
+
+  it('is not fooled by a name that only looks like an own property of the table', () => {
+    for (const word of ['constructor', '__proto__', 'toString', 'hasOwnProperty'])
+      expect(commandHint(word), word).toBeNull();
   });
 });

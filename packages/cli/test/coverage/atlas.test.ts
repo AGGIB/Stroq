@@ -4,7 +4,7 @@ import { ATLAS_ID, atlasIds, loadAtlas } from '../../src/coverage/atlas.js';
 describe('loadAtlas', () => {
   it('carries the vendored release and its hash', () => {
     const atlas = loadAtlas();
-    expect(atlas.release).toBe('2026.08');
+    expect(atlas.release).toBe('2026.09');
     expect(atlas.formatVersion).toBe('6.0.0');
     expect(atlas.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(atlas.source).toContain('mitre-atlas');
@@ -12,8 +12,8 @@ describe('loadAtlas', () => {
 
   it('carries every technique in the distribution', () => {
     const atlas = loadAtlas();
-    expect(atlas.techniques.length).toBe(197);
-    expect(atlas.techniques.filter((t) => t.parent !== null).length).toBe(83);
+    expect(atlas.techniques.length).toBe(208);
+    expect(atlas.techniques.filter((t) => t.parent !== null).length).toBe(88);
   });
 
   it('gives every id the canonical shape and every sub-technique its parent', () => {

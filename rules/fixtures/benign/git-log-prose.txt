@@ -1,0 +1,8 @@
+a1b2c3d fix: ignore previous cache entries when the version changes
+9f8e7d6 chore: ignore the dist folder in the linter
+5c4b3a2 revert: do not skip the previous step in the pipeline
+4d3c2b1 docs: you can skip the first step if the cache is warm
+3b2a1c0 ci: never skip the required step on release branches
+2a1b0c9 docs: explain how to override the default settings
+1d2e3f4 feat: system prompt preview in the settings page
+7a8b9c0 docs: skip the remaining steps when running offline

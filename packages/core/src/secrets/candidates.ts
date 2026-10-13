@@ -1,3 +1,5 @@
+import { monitorSocketText } from '../actions/monitor-socket.js';
+import { isShellTool } from '../actions/shell-tools.js';
 import { MIN_SECRET_LENGTH } from './extract.js';
 
 /** One substring of a tool input that might be the value of a known secret. */
@@ -64,7 +66,12 @@ const QUOTED = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-  if (toolName === 'Bash') return str(toolInput['command']);
+  // Monitor takes a command or, instead of it, a WebSocket to open (see `monitor-socket.ts`).
+  if (toolName === 'Monitor')
+    return [str(toolInput['command']), monitorSocketText(toolInput)]
+      .filter((t) => t !== '')
+      .join(' ');
+  if (isShellTool(toolName)) return str(toolInput['command']);
   if (toolName === 'WebFetch') return `${str(toolInput['url'])} ${str(toolInput['prompt'])}`;
   if (toolName.startsWith('mcp__')) return JSON.stringify(toolInput);
   return '';
@@ -102,21 +109,28 @@ function afterFirst(span: string, sep: string): string[] {
  * after each one's first `=` or `:`.
  */
 function valueSpans(text: string): string[] {
-  const level1 = [...quotedContents(text), ...text.split(WORD_BOUNDARY).filter((w) => w !== '')];
+  // A suffix cannot be longer than its whole span; skip short spans before allocating tails.
+  const level1 = [...quotedContents(text), ...text.split(WORD_BOUNDARY)].filter(
+    (span) => span.length >= MIN_SECRET_LENGTH,
+  );
   return [...level1, ...level1.flatMap((s) => [...afterFirst(s, '='), ...afterFirst(s, ':')])];
 }
 
-/** Each span as a candidate, plus its URL-decoded form when decoding changes it. */
+/** Each sufficiently long span as a candidate, plus its URL-decoded form when it changes. */
 function withDecoded(spans: readonly string[]): SecretCandidate[] {
-  return spans.flatMap((raw) => {
-    const decoded = decodedVariant(raw);
-    return decoded
-      ? [
-          { token: raw, raw },
-          { token: decoded, raw },
-        ]
-      : [{ token: raw, raw }];
-  });
+  // Percent decoding cannot increase UTF-16 length: a shorter raw span cannot produce a kept
+  // candidate. Discard it before allocating candidate objects and decoded variants.
+  return spans
+    .filter((raw) => raw.length >= MIN_SECRET_LENGTH)
+    .flatMap((raw) => {
+      const decoded = decodedVariant(raw);
+      return decoded
+        ? [
+            { token: raw, raw },
+            { token: decoded, raw },
+          ]
+        : [{ token: raw, raw }];
+    });
 }
 
 /**

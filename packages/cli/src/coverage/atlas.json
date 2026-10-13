@@ -1,8 +1,8 @@
 {
-  "release": "2026.08",
+  "release": "2026.09",
   "formatVersion": "6.0.0",
-  "source": "https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.08.yaml",
-  "sha256": "a8d32f676854cc57721c217ec5b39f07db518076dee4a6c1335df0a7bc8271a2",
+  "source": "https://raw.githubusercontent.com/mitre-atlas/atlas-data/main/dist/v6/ATLAS-2026.09.yaml",
+  "sha256": "935efa93e28294432d3e2f537eb94991ef8d1f8c58341cd360ea3321ddb66688",
   "techniques": [
     {
       "id": "AML.T0000",
@@ -22,6 +22,11 @@
     {
       "id": "AML.T0000.002",
       "name": "Technical Blogs",
+      "parent": "AML.T0000"
+    },
+    {
+      "id": "AML.T0000.003",
+      "name": "Scan Databases",
       "parent": "AML.T0000"
     },
     {
@@ -83,6 +88,26 @@
       "id": "AML.T0006",
       "name": "Active Scanning",
       "parent": null
+    },
+    {
+      "id": "AML.T0006.000",
+      "name": "Enumerate Hosted AI Resources",
+      "parent": "AML.T0006"
+    },
+    {
+      "id": "AML.T0006.001",
+      "name": "Query Platform Metadata APIs",
+      "parent": "AML.T0006"
+    },
+    {
+      "id": "AML.T0006.002",
+      "name": "Scan for Exposed AI Infrastructure",
+      "parent": "AML.T0006"
+    },
+    {
+      "id": "AML.T0006.003",
+      "name": "Probe AI Agent Trigger Channels",
+      "parent": "AML.T0006"
     },
     {
       "id": "AML.T0007",
@@ -987,6 +1012,36 @@
     {
       "id": "AML.T0128",
       "name": "Compromise Infrastructure",
+      "parent": null
+    },
+    {
+      "id": "AML.T0129",
+      "name": "Triggers in Multimodal Inputs",
+      "parent": null
+    },
+    {
+      "id": "AML.T0130",
+      "name": "AI Agent Response Biasing",
+      "parent": null
+    },
+    {
+      "id": "AML.T0131",
+      "name": "Crafted AI Assistant Links",
+      "parent": null
+    },
+    {
+      "id": "AML.T0132",
+      "name": "Misconfigured or Publicly Exposed AI Services",
+      "parent": null
+    },
+    {
+      "id": "AML.T0133",
+      "name": "Discover AI Agent Runtime Capabilities",
+      "parent": null
+    },
+    {
+      "id": "AML.T0134",
+      "name": "AI Targeted Cloaking",
       "parent": null
     }
   ]

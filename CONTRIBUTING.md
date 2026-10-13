@@ -17,7 +17,7 @@ Requires Node >= 22 and pnpm (the pinned version is in the root `package.json`'s
 Useful scripts:
 
 ```bash
-pnpm test:coverage   # vitest with the 80% coverage gate
+pnpm test:coverage   # vitest with the coverage gate (lines 96, functions 97, statements 94, branches 86)
 pnpm typecheck
 pnpm format:check    # prettier --check
 pnpm build:rules     # rebuild packages/core/src/rules.bundle.json from rules/ (run this locally)
@@ -27,7 +27,7 @@ pnpm check:rules     # verify the committed bundle deterministically, the same w
 
 ## Test-Driven Development
 
-Write the failing test first, then the minimal implementation that makes it pass, then refactor. Every new behavior needs a test; every bug fix needs a regression test that fails before the fix and passes after. We aim for 80%+ coverage (enforced by `pnpm test:coverage`); a pull request that drops coverage below the threshold will fail CI.
+Write the failing test first, then the minimal implementation that makes it pass, then refactor. Every new behavior needs a test; every bug fix needs a regression test that fails before the fix and passes after. Coverage is enforced by `pnpm test:coverage` at lines 96, functions 97, statements 94 and branches 86 (`vitest.config.ts`); a pull request that drops coverage below those thresholds will fail CI.
 
 ## Coding Conventions
 
@@ -77,16 +77,26 @@ See `.github/PULL_REQUEST_TEMPLATE.md` for the checklist used on the pull reques
 
 ## Release Process
 
-Releases are cut from `main` once CI is green:
+Releases are cut from `main` once CI is green. Merging a pull request does not bump the version or publish to npm.
 
-1. Update `CHANGELOG.md` with the new version's changes (Keep a Changelog format).
-2. Bump `version` in `packages/cli/package.json` (and `packages/core/package.json`, which stays private).
-3. Commit, then tag and push the tag:
+1. Update `CHANGELOG.md` with a non-empty `## [x.y.z]` section for the new version (Keep a Changelog format).
+2. Keep the release version synchronized in all eight files:
+   - `package.json` (private workspace root)
+   - `packages/cli/package.json` (the published package)
+   - `packages/core/package.json` (private)
+   - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
+   - `plugins/stroq/.claude-plugin/plugin.json`
+   - `plugins/stroq/hooks/stroq-hook.sh` (`STROQ_PIN`)
+   - `packages/cli/openclaw-plugin/package.json`
+   - `packages/cli/openclaw-plugin/openclaw.plugin.json`
+3. Commit the release changes, merge them into `main`, and wait for green CI before tagging that commit. Push only the intended tag, for example:
 
    ```bash
-   git tag v0.1.0
-   git push --tags
+   git tag v0.25.0
+   git push origin v0.25.0
    ```
 
-4. Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds and runs `npm publish --provenance --access public` for the `packages/cli` package. To publish manually instead, run `cd packages/cli && npm publish --access public` (the `--access public` flag is required the first time a scoped package is published, since scoped packages default to private).
-5. This requires an `NPM_TOKEN` repository secret with publish rights for the `@stroq/cli` package (or npm trusted publishing configured for this repository as an alternative to a long-lived token).
+4. Pushing a `v*` tag triggers `.github/workflows/release.yml`. It verifies that the tag matches `packages/cli/package.json`, runs the release checks, builds the package, and stages it with `npm stage publish --access public` (with `--provenance` for token publishing). It does not make the staged version publicly installable. A manual workflow run is accepted only on `main`, for example to retry after configuring npm publishing; it does not create a GitHub release page.
+5. Staging requires either an `NPM_TOKEN` repository secret with publish rights for `@stroq/cli`, or npm trusted publishing configured for this repository/workflow with stage-publish allowed and the repository variable `NPM_TRUSTED_PUBLISHING=true`. If neither is configured, the workflow warns that nothing was published.
+6. A maintainer approves the staged version with 2FA on npmjs.com (Staged Packages), or with `npm stage list` and `npm stage approve <id>` using npm 11.15.0 or later. Approval makes the version publicly installable. Approve promptly: the plugin in the repository already names the new version.
+7. On a tag push, the workflow's second job waits up to 90 minutes for npm to show the version, then creates the GitHub release page from its `CHANGELOG.md` section using `scripts/release-notes.ts`. If npm does not show the version in time, the page is created as a draft; publish that draft after approving the staged version. An existing release page is left unchanged. The release-notes tests require a non-empty changelog section for the CLI version.

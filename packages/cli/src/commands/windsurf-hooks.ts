@@ -1,7 +1,13 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { WINDSURF_EVENTS, type WindsurfEvent } from '../adapters/windsurf.js';
-import { isPlainObject, readJsonObject, writeJsonObject } from './config-file.js';
+import {
+  isPlainObject,
+  parseConfigJson,
+  readConfigText,
+  readJsonObject,
+  writeJsonObject,
+} from './config-file.js';
 
 /**
  * Windsurf merges ONE hooks file per level — system, then user, then workspace — with
@@ -113,6 +119,30 @@ export const isStroqWindsurfHooks = (json: unknown): boolean =>
   WINDSURF_EVENTS.every((event) => eventEntries(json, event).some(isStroqEntry));
 
 /**
+ * Whether EVERY one of the six events holds exactly the entry `init` writes for `command`:
+ * the command as recorded, the PowerShell form beside it, `show_output`, and no other key. A
+ * hooks file is a repository's to write, and the weaker questions each have a forgery: six
+ * commands that end ` hook windsurf` (any program can), the recorded command somewhere in the
+ * text (a note holds it), the real entry on one event and no-ops on the rest, or the real
+ * command with a `working_directory` that moves the hook out of the workspace root.
+ */
+export function carriesRecordedEntries(json: unknown, command: string): boolean {
+  return WINDSURF_EVENTS.every((event) =>
+    eventEntries(json, event).some((entry) => isRecordedEntry(entry, command)),
+  );
+}
+
+/** Whether `entry` is exactly the entry `init` writes for `command`, key for key. */
+export function isRecordedEntry(entry: unknown, command: string): boolean {
+  const wanted = Object.entries(windsurfEntry(command));
+  return (
+    isPlainObject(entry) &&
+    Object.keys(entry).length === wanted.length &&
+    wanted.every(([key, value]) => entry[key] === value)
+  );
+}
+
+/**
  * The workspace file by default. `--user` writes the Windsurf IDE's own user file,
  * `~/.codeium/windsurf/hooks.json`; the JetBrains plugin's `~/.codeium/hooks.json`
  * and the three system files are deliberately not written by `init`, though all of
@@ -126,6 +156,80 @@ export function windsurfHooksPath(scope: 'project' | 'user', cwd: string = proce
 
 export const readWindsurfHooks = (file: string): WindsurfHooksJson =>
   readJsonObject<WindsurfHooksJson>(file);
+
+/**
+ * The workspace file Devin Desktop, the renamed Windsurf, reads first. Its documentation
+ * says `.windsurf/hooks.json` is used "only when `.devin/hooks.json` is absent or defines
+ * no hooks", so a repository (or an agent) that puts hooks in this file switches off a
+ * project install in the other one, which is the one `init` writes. The user file has no
+ * such twin, and the levels are merged, so it cannot be replaced from the repository.
+ */
+export const devinHooksPath = (cwd: string = process.cwd()): string =>
+  join(cwd, '.devin', 'hooks.json');
+
+/**
+ * Whether a hooks file defines at least one hook, which is what stops Devin Desktop from
+ * falling back to `.windsurf/hooks.json`. An event with a non-empty list counts, whatever
+ * is in it: the documentation does not say what a malformed entry does, and counting it
+ * errs on the side of telling the user.
+ */
+export function definesWindsurfHooks(json: unknown): boolean {
+  if (!isPlainObject(json)) return false;
+  const hooks = json['hooks'];
+  return (
+    isPlainObject(hooks) &&
+    Object.values(hooks).some((entries) => Array.isArray(entries) && entries.length > 0)
+  );
+}
+
+/** What the project's `.devin/hooks.json` is, as far as Stroq's install is concerned. */
+export type DevinWorkspaceHooks =
+  | { readonly state: 'absent' }
+  /** There, but it defines no hook: Devin Desktop still reads `.windsurf/hooks.json`. */
+  | { readonly state: 'empty' }
+  /** `text` and `json` are the file as read, for a caller that has to check what its entries run. */
+  | {
+      readonly state: 'defined';
+      /** Entries that END like Stroq's: not who wrote them; see `carriesRecordedEntries`. */
+      readonly carriesStroq: boolean;
+      readonly text: string;
+      readonly json: unknown;
+    }
+  /** Present but not readable as hooks; what Devin Desktop does with it is not documented. */
+  | { readonly state: 'unreadable'; readonly message: string };
+
+/**
+ * What is wrong with the shape of a hooks file, or null. The documentation says what a file
+ * with hooks and a file with none do, not what a file that is neither does, so a wrong shape
+ * is not counted as an empty file: it is unknown. The reason names no key or value from the
+ * file, which is a repository's.
+ */
+function malformedHooks(json: unknown): string | null {
+  if (!isPlainObject(json)) return 'is not a JSON object';
+  const hooks = json['hooks'];
+  if (hooks === undefined || hooks === null) return null;
+  if (!isPlainObject(hooks)) return 'has a "hooks" that is not an object';
+  return Object.values(hooks).some((entries) => entries !== undefined && !Array.isArray(entries))
+    ? 'has an event whose hooks are not a list'
+    : null;
+}
+
+export function readDevinWorkspaceHooks(cwd: string = process.cwd()): DevinWorkspaceHooks {
+  const file = devinHooksPath(cwd);
+  try {
+    const text = readConfigText(file, { strict: true });
+    if (text === null) return { state: 'absent' };
+    if (text.trim().length === 0) return { state: 'empty' };
+    const json = parseConfigJson<unknown>(file, text);
+    const malformed = malformedHooks(json);
+    if (malformed !== null) return { state: 'unreadable', message: `${file} ${malformed}` };
+    return definesWindsurfHooks(json)
+      ? { state: 'defined', carriesStroq: isStroqWindsurfHooks(json), text, json }
+      : { state: 'empty' };
+  } catch (err) {
+    return { state: 'unreadable', message: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export function installWindsurfHooks(file: string, command: string): WindsurfHooksJson {
   const merged = mergeWindsurfHooks(readWindsurfHooks(file), command);

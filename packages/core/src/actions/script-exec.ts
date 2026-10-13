@@ -1,9 +1,21 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 import type { ActionClass } from '../types.js';
 import { classifyCommandGroups, type CommandClassification } from './classify-bash.js';
+import { changesGlobbing, newPatternBudget } from './file-glob.js';
+import { MAX_SCRIPT_BYTES, readScript } from './script-read.js';
+import {
+  expandedPath,
+  named,
+  resolveScript,
+  scriptPaths,
+  type ScriptReference,
+} from './script-paths.js';
+import { parseShellArgs } from './shell-args.js';
+import { SHELL_WORDS } from './shell-lex.js';
+import { resolve as resolveCommand } from './shell-words.js';
 import { commandWord } from './shell-segments.js';
+import { startupFileNames } from './startup-files.js';
 
 /**
  * A script an agent runs is the command it was written to be, and the hook sees only
@@ -28,8 +40,8 @@ import { commandWord } from './shell-segments.js';
  * script is read one level deep. A script that does not exist yet, or changes between
  * the read and the run, is not seen. What a script computes at run time (a variable set
  * in a loop or a function, a name built from `$(…)`) is not followed. A script too big,
- * or a command naming too many, is reported as unread (`shell.unparsed`) rather than
- * passed.
+ * one that exists and cannot be read, or a command naming too many, is reported as unread
+ * (`shell.unparsed`) rather than passed.
  */
 
 /**
@@ -40,10 +52,26 @@ import { commandWord } from './shell-segments.js';
  * script that touches agent configuration or installs a git hook is more often a setup
  * script than an attack, and a hard block on one would stop an installer the user asked
  * for. And `eval "$(tool init)"` is not carried over at all (see `NOT_CARRIED_OVER`).
+ *
+ * `shell.network`, `fs.secrets` and `git.push_external` carry over unchanged. The policy
+ * denies each once the session has read something hostile, and in a clean one allows the
+ * first two and asks about the third, exactly as for the same line typed directly; leaving
+ * them out made "write x.sh, then run `bash x.sh`" a way round every taint-gated deny. An
+ * ordinary script is not touched by the push: `git.push_external` is a push to an address
+ * (`git push https://…`), a `git remote add` or `set-url`, or `gh repo create --push`, not
+ * `git push origin main`; but a script that adds a remote, as a project's setup script may,
+ * is asked about as the same line typed directly is. `config.instructions` (a write to a
+ * file the agent loads as instructions) and `shell.unparsed` (a line the classifier cannot
+ * read, `iex $payload`) carry over for the same reason: each is asked about when typed.
  */
 const SCRIPT_CLASS: ReadonlyMap<ActionClass, ActionClass> = new Map<ActionClass, ActionClass>([
   ['shell.exec_encoded', 'shell.exec_encoded'],
   ['shell.destructive', 'shell.destructive'],
+  ['shell.network', 'shell.network'],
+  ['fs.secrets', 'fs.secrets'],
+  ['git.push_external', 'git.push_external'],
+  ['config.instructions', 'config.instructions'],
+  ['shell.unparsed', 'shell.unparsed'],
   ['config.persistence', 'config.persistence'],
   ['config.self', 'config.self_touch'],
   ['config.git_exec', 'config.persistence'],
@@ -54,34 +82,48 @@ const SCRIPT_CLASS: ReadonlyMap<ActionClass, ActionClass> = new Map<ActionClass,
  * is how `nvm.sh`, `~/.zshrc`, `/etc/profile`, direnv, starship, pyenv and ssh-agent set
  * themselves up: of the 128 shell scripts on one developer's machine that were read, 14
  * raised it, and `source ~/.nvm/nvm.sh` would have been a denial at any taint. Run
- * directly, `eval "$(curl …)"` is still caught by its own network signal.
+ * directly, `eval "$(curl …)"` is still caught by its own network signal. The other is
+ * PowerShell's `& $command`: of 358 shell and PowerShell scripts read on the same machine,
+ * the two that raised it were Python virtualenv `activate.ps1` files, which run an agent's
+ * every `.venv\\Scripts\\Activate.ps1`. The third is a shell handed a program from a command
+ * this cannot read (`nvm_download … | clean=yes sh`, which `nvm.sh` itself has): typed, it is
+ * asked about; inside a script that `source ~/.nvm/nvm.sh` runs, it would ask on every shell.
+ * The fourth is a command word that a command substitution makes (`$(dirname "$0")/lib.sh`,
+ * `$(npm bin)/tsc`): typed, none of 20,008 commands of a real history has one and it is asked about;
+ * in the scripts that the same history ran, 326 of the commands that ran one had it.
+ * The programs it CAN read, and what they do, are carried like any other line.
  */
-const NOT_CARRIED_OVER: ReadonlySet<string> = new Set(['eval-dynamic']);
+const NOT_CARRIED_OVER: ReadonlySet<string> = new Set([
+  'eval-dynamic',
+  'ps-call-operator-expression',
+  'opaque-shell-input',
+]);
+
+/** The ones that are not carried however deep the program was found (`shell-input:`, `ssh-remote:`). */
+const NOT_CARRIED_AT_ANY_DEPTH: ReadonlySet<string> = new Set(['command-from-substitution']);
+
+const isCarried = (signal: string): boolean =>
+  !NOT_CARRIED_OVER.has(signal) &&
+  !NOT_CARRIED_AT_ANY_DEPTH.has(signal.replace(/^(?:shell-input:|ssh-remote:)+/, ''));
 
 const MAX_SCRIPTS = 8;
+/** A file of variables, as `source .env` reads one. */
+const DOT_ENV = /(?:^|[/\\])\.env(?:\.[\w-]+)?$/i;
 const MAX_PATH_CHARS = 4096;
 /** The most candidate paths one command may have looked up before it is reported as unread. */
 const MAX_REFERENCE_PROBES = 256;
 /** The most values one variable is tried with (see `withVariablesResolved`). */
 const MAX_VARIANTS = 4;
-const MAX_SCRIPT_BYTES = 1024 * 1024;
+/** The text the scripts of one command may add up to: one script's worth, so a command costs what a script does. */
+const MAX_TOTAL_SCRIPT_CHARS = MAX_SCRIPT_BYTES;
 const MAX_SCRIPT_LINES = 20_000;
 /** The longest value a variable keeps; past it the value is a stand-in (see `withVariablesResolved`). */
 const MAX_VALUE_CHARS = 2048;
 /** What one line, and the whole script, may grow by when its variables are replaced. */
 const MAX_LINE_EXPANSION = 32 * 1024;
 const MAX_SCRIPT_EXPANSION = 4 * 1024 * 1024;
-const SHEBANG_BYTES = 128;
-const SCRIPT_SHELLS: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'dash',
-  'ksh',
-  'fish',
-  'source',
-  '.',
-]);
+/** The names a shell is run by, from one list: a shell this reads from a pipe it reads a script of. */
+const SCRIPT_SHELLS: ReadonlySet<string> = new Set([...SHELL_WORDS, 'busybox', 'source', '.']);
 const POWERSHELLS: ReadonlySet<string> = new Set([
   'powershell',
   'powershell.exe',
@@ -89,18 +131,6 @@ const POWERSHELLS: ReadonlySet<string> = new Set([
   'pwsh.exe',
 ]);
 const SCRIPT_EXTENSION = /\.(?:sh|bash|zsh|ksh|ps1|bat|cmd)$/i;
-/** `#!/bin/bash`, `#!/usr/bin/env -S bash -e`: a file that says it is a shell script. */
-const SHELL_SHEBANG = /^#!\s*(?:\S*\/)?(?:env\s+(?:-\S+\s+)*)?(?:ba|z|da|k|fi)?sh\b/;
-/** Options of a shell whose next word is their value, not the script. */
-const SHELL_VALUE_OPTIONS: ReadonlySet<string> = new Set([
-  '-o',
-  '+o',
-  '-O',
-  '+O',
-  '--rcfile',
-  '--init-file',
-]);
-
 /** Whitespace-separated words with quotes honoured and backslashes kept: a Windows path stays one. */
 function words(segment: string): string[] {
   return (segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((w) => w.replace(/^["']|["']$/g, ''));
@@ -109,60 +139,90 @@ function words(segment: string): string[] {
 const isEnvAssignment = (word: string): boolean => /^[A-Za-z_]\w*=/.test(word);
 const baseOf = (word: string): string => word.replace(/^.*[/\\]/, '');
 
-/** A script a command names: as it is written, and whether only a shell `#!` line makes it one. */
-interface ScriptReference {
-  readonly token: string;
-  readonly needsShebang: boolean;
-}
-
-const named = (token: string): ScriptReference => ({ token, needsShebang: false });
-
 /**
- * The script a shell is told to run. Its options come first and the script is the first
- * word that is not one: after the script, `-c` and `-n` belong to the script. A shell
- * given a string (`-c`) or only asked to check syntax (`-n`) runs no file; one given no
- * script reads its standard input, which `bash < x.sh` points at a file.
+ * A script operand as the shell sees it. A redirect, a `&`, a `;` or a closing `)` glued to
+ * the word (`x.sh>/dev/null`, `./x.sh&`, `x.sh)`) is not part of the name, and quote marks
+ * inside it (`./"x.sh"`) are removed by the shell before the file is opened.
  */
-function shellScript(rest: readonly string[]): string | null {
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i] as string;
-    if (token === '--') return rest[i + 1] ?? null;
-    // Letters captured, then tested: `-[A-Za-z]*[cn][A-Za-z]*` split one long word two ways
-    // and took 2 s on `bash -nnnn…`.
-    const letters = /^-([A-Za-z]+)$/.exec(token)?.[1];
-    if (token === '--noexec' || (letters !== undefined && /[cn]/.test(letters))) return null;
-    // `-o pipefail`, and a cluster that ends in one: `-euo pipefail`, `-eO extglob`.
-    if (SHELL_VALUE_OPTIONS.has(token) || (letters !== undefined && /[oO]$/.test(letters))) {
-      i += 1;
-      continue;
-    }
-    if (token === '<') return rest[i + 1] ?? null;
-    if (token.startsWith('<') && !token.startsWith('<<') && !token.startsWith('<(')) {
-      return token.slice(1);
-    }
-    if (!token.startsWith('-') && !token.startsWith('+')) return token;
-  }
-  return null;
+function cleanToken(raw: string): string {
+  const cut = raw.search(/(?<=.)[<>]/);
+  const head = (cut === -1 ? raw : raw.slice(0, cut)).replace(/["']/g, '');
+  // A loop, not `/[;&|)}]+$/`: that retries from every character of a long run of them.
+  let end = head.length;
+  while (end > 0 && TOKEN_TAIL.has(head.charAt(end - 1))) end -= 1;
+  return head.slice(0, end);
 }
+
+/** What a shell leaves glued to the end of a word it has already finished with. */
+const TOKEN_TAIL: ReadonlySet<string> = new Set([';', '&', '|', ')', '}']);
+
+/** `./a\.sh` is `./a.sh` to a POSIX shell, and a path with separators in it to Windows: both are tried. */
+const posixUnescaped = (token: string): string => token.replace(/\\(.)/g, '$1');
 
 /** The script files a segment runs, as written: `bash x.sh`, `source x.sh`, `./x.sh`, `pwsh -File x.ps1`. */
 function scriptReferences(segment: string): ScriptReference[] {
+  return scriptReferencesOf(segment).flatMap((reference) =>
+    spellings(reference.token).map((token) => ({ ...reference, token })),
+  );
+}
+
+/**
+ * The names a script operand can mean: as written, with what a shell strips from a word
+ * (quote marks, a glued `;` `&` `)` or redirect) taken off, and each with its backslash
+ * escapes resolved. The operand has already had its quotes removed once by the word split, so
+ * a file whose own name holds a quote mark or ends in `;` is the first spelling, and `./a\.sh`
+ * is the last. A name that exists as none of them is not a script.
+ */
+function spellings(token: string): string[] {
+  const clean = cleanToken(token);
+  return [...new Set([token, clean, posixUnescaped(token), posixUnescaped(clean)])].filter(
+    (name) => name !== '',
+  );
+}
+
+/**
+ * The files a shell is told to run, read from its words as the shell reads them: a word that is
+ * quoted is a name and not a redirect (`bash '<x.sh'` runs a file called `<x.sh`), and a redirect
+ * glued to the shell (`bash<x.sh`) is read as one.
+ */
+function shellScripts(segment: string, fallback: readonly string[]): ScriptReference[] {
+  const command = resolveCommand(segment);
+  const parsed =
+    command === null
+      ? parseShellArgs(fallback)
+      : parseShellArgs(command.name === 'busybox' ? command.args.slice(1) : command.args);
+  if (command?.name === 'busybox' && !SHELL_WORDS.has(command.args[0]?.value ?? '')) return [];
+  // The files it runs as it starts count with the one it is told to run.
+  const sourced = command?.name === 'source' || command?.name === '.';
+  return [...parsed.files, ...parsed.startup].map((token) => named(token, sourced));
+}
+
+function scriptReferencesOf(segment: string): ScriptReference[] {
+  return [...startupFileNames(segment).map((name) => named(name)), ...commandScripts(segment)];
+}
+
+function commandScripts(segment: string): ScriptReference[] {
   const tokens = words(segment);
   // PowerShell's call operator: `& ./clean.ps1`, `& 'C:\\tools\\clean.ps1' -Force`.
   if (tokens[0] === '&') {
     const callee = tokens[1];
     return callee !== undefined && SCRIPT_EXTENSION.test(callee) ? [named(callee)] : [];
   }
-  const word = commandWord(segment).toLowerCase();
+  // The command a stage runs through its wrappers (`setsid bash x.sh`, `env -S "bash x.sh"`,
+  // `exec -a z bash x.sh`) and the function heads before it.
+  const command = resolveCommand(segment);
+  const word = (command?.name || commandWord(segment)).toLowerCase();
   if (word === '') return [];
   const at = tokens.findIndex((t) => !isEnvAssignment(t) && baseOf(t).toLowerCase() === word);
-  if (at === -1) return [];
-  const head = tokens[at] ?? '';
-  const rest = tokens.slice(at + 1);
-  if (SCRIPT_SHELLS.has(word)) {
-    const target = shellScript(rest);
-    return target === null ? [] : [named(target)];
-  }
+  // What a shell runs is read from its arguments as the shell reads them; a program it is
+  // handed on standard input (`cat x.sh | bash`) is found by `shellInput`, which sees the pipe.
+  if (SCRIPT_SHELLS.has(word)) return shellScripts(segment, at === -1 ? [] : tokens.slice(at + 1));
+  // A command word that a brace expansion makes (`./{t,u}.sh` is `./t.sh`) is not among the words
+  // as they are written: the one the shell read is. Any other expansion names no command here.
+  const written = at === -1 ? command?.word : tokens[at];
+  if (written === undefined || (at === -1 && /[$`*?[]/.test(written))) return [];
+  const head = written;
+  const rest = at === -1 ? [] : tokens.slice(at + 1);
   if (POWERSHELLS.has(word)) {
     const file = rest.findIndex((t) => /^-f(?:ile)?$/i.test(t));
     if (file !== -1 && rest[file + 1] !== undefined) return [named(rest[file + 1] as string)];
@@ -177,63 +237,7 @@ function scriptReferences(segment: string): ScriptReference[] {
   // Run directly, by a path: `./deploy.sh`, `scripts\clean.ps1`, and `./cleanup` when the
   // file begins with a shell `#!` line.
   if (!/[/\\]/.test(head)) return [];
-  return [{ token: head, needsShebang: !SCRIPT_EXTENSION.test(head) }];
-}
-
-/** A path as the shell would expand it: `~`, `$HOME` and `$PWD` at the front; any other variable is unknown. */
-function expandedPath(token: string, cwd: string): string | null {
-  const front = /^(?:~|\$HOME|\$\{HOME\}|\$PWD|\$\{PWD\})(?=[/\\]|$)/.exec(token);
-  const rest = front === null ? token : token.slice(front[0].length);
-  const root = front === null ? '' : front[0].includes('PWD') ? cwd : homedir();
-  const joined = front === null ? rest : join(root, rest);
-  return /[$`*?<>|]/.test(joined) ? null : joined;
-}
-
-function resolveScript(token: string, cwd: string): string | null {
-  if (token === '') return null;
-  // `source .env` loads variables; it is configuration, not a program.
-  if (/(?:^|[/\\])\.env(?:\.[\w-]+)?$/i.test(token)) return null;
-  const expanded = expandedPath(token, cwd);
-  if (expanded === null) return null;
-  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
-}
-
-type ScriptRead =
-  | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'too-large' }
-  | { readonly kind: 'none' };
-
-/**
- * The script's text, read through one descriptor: what is checked (a regular file, its
- * size, a shell `#!` line) is what is read, so a file swapped between a check and a read is
- * not a way around either.
- */
-function readScript(path: string, needsShebang: boolean): ScriptRead {
-  let fd: number | null = null;
-  try {
-    fd = openSync(path, 'r');
-    const info = fstatSync(fd);
-    if (!info.isFile()) return { kind: 'none' };
-    if (needsShebang) {
-      const head = Buffer.alloc(SHEBANG_BYTES);
-      const read = readSync(fd, head, 0, SHEBANG_BYTES, 0);
-      if (!SHELL_SHEBANG.test(head.toString('latin1', 0, read))) return { kind: 'none' };
-    }
-    if (info.size > MAX_SCRIPT_BYTES) return { kind: 'too-large' };
-    const buffer = Buffer.alloc(info.size);
-    let filled = 0;
-    while (filled < info.size) {
-      const read = readSync(fd, buffer, filled, info.size - filled, filled);
-      if (read === 0) break;
-      filled += read;
-    }
-    const text = buffer.toString('utf8', 0, filled);
-    return text.includes('\0') ? { kind: 'none' } : { kind: 'text', text };
-  } catch {
-    return { kind: 'none' };
-  } finally {
-    if (fd !== null) closeSync(fd);
-  }
+  return [{ token: head, needsShebang: !SCRIPT_EXTENSION.test(head), direct: true }];
 }
 
 /** Variables whose value is a place the user lives; every other unknown one is a stand-in. */
@@ -494,18 +498,29 @@ function runTargets(lines: readonly string[]): Set<string> {
 const EVAL_REMOTE =
   /\beval\b[^\n]{0,200}?(?:\$\(|`)\s*(?:[A-Za-z_]\w*=\S*\s+){0,3}(?:curl|wget|nc|ncat|socat|fetch|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/i;
 
+/** Whether every line of a file is a comment or a variable set to text: nothing in it runs. */
+function isPlainEnvironment(text: string): boolean {
+  return text.split('\n').every((line) => {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) return true;
+    return /^(?:export\s+)?[A-Za-z_]\w*=/.test(trimmed) && !/\$\(|`/.test(trimmed);
+  });
+}
+
 /** What the script's own lines would be if run, merged from the classes in `SCRIPT_CLASSES`. */
 function classifyScriptText(text: string, cwd: string, name: string): CommandClassification | null {
   const body = withVariablesResolved(withoutTextHeredocs(text))
     .split('\n')
     .filter((line) => !isComment(line))
     .join('\n');
-  const found = classifyCommandGroups(body, cwd);
+  // Not read for the functions it calls: what is read is a bag of lines, one for each value the variables
+  // of a line take, and no function in it ends where it should. A script is read as the lines it holds.
+  const found = classifyCommandGroups(body, cwd, 0, { functions: null });
   const classes = new Set<ActionClass>();
   const signals: string[] = [];
   for (const [cls, own] of found.groups) {
     const mapped = SCRIPT_CLASS.get(cls);
-    const carried = own.filter((signal) => !NOT_CARRIED_OVER.has(signal));
+    const carried = own.filter(isCarried);
     if (mapped === undefined || carried.length === 0) continue;
     classes.add(mapped);
     signals.push(...carried.map((signal) => `script:${name}:${signal}`));
@@ -519,13 +534,18 @@ function classifyScriptText(text: string, cwd: string, name: string): CommandCla
 
 /**
  * The classification of every script file `segments` run, merged, or null when none of
- * them is read or none adds a danger. Reads the files; that is the point. What it could
+ * them is read or none adds a danger. Reads the files; that is the point. The text of each
+ * one read is pushed to `readTexts`, whatever it adds: the secret guard looks through them
+ * for a known value, and a script that raised no class can still print one for a later stage
+ * of the command to send. What it could
  * not read for want of room (a script past the size or line limit, a command that names
  * more scripts than it reads) is `shell.unparsed`, not nothing.
  */
 export function classifyReferencedScripts(
   segments: readonly string[],
   cwd: string,
+  readTexts?: string[],
+  extraFiles: readonly string[] = [],
 ): CommandClassification | null {
   const classes = new Set<ActionClass>();
   const signals: string[] = [];
@@ -533,50 +553,87 @@ export function classifyReferencedScripts(
   const seen = new Set<string>();
   let probes = 0;
   let scripts = 0;
+  let chars = 0;
   let overflow = false;
-  let directory = cwd;
-  const saved: string[] = [];
+  const patterns = newPatternBudget();
+  patterns.unreliable = segments.some(changesGlobbing);
+  const consume = (reference: ScriptReference, directory: string): void => {
+    const found = scriptPaths(reference, directory, patterns);
+    if (!found.complete) overflow = true;
+    for (const path of found.paths) consumePath(reference, path, directory);
+  };
+  const consumePath = (reference: ScriptReference, path: string, directory: string): void => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    // Only a file that is a shell script counts toward the limit: a line of a `git add \`
+    // list or of a heredoc that starts with a path is looked up and passed over.
+    probes += 1;
+    if (probes > MAX_REFERENCE_PROBES) {
+      overflow = true;
+      return;
+    }
+    const read = readScript(path, reference.needsShebang);
+    if (read.kind === 'none') return;
+    if (read.kind === 'unreadable') {
+      // A path that merely looks like a script (a program run by its path, not named as
+      // a script) is passed over: only a file the command names as one is worth an ask.
+      if (!reference.needsShebang) {
+        classes.add('shell.unparsed');
+        signals.push(`script:${basename(path)}:unreadable`);
+      }
+      return;
+    }
+    scripts += 1;
+    if (scripts > MAX_SCRIPTS) {
+      overflow = true;
+      return;
+    }
+    if (read.kind === 'too-large') {
+      classes.add('shell.unparsed');
+      signals.push(`script:${basename(path)}:too-large`);
+      return;
+    }
+    // The scripts one command runs share a budget: reading costs time in proportion to the
+    // text, the hook has one thread, and a host that times it out treats that as an allow.
+    chars += read.text.length;
+    if (chars > MAX_TOTAL_SCRIPT_CHARS) {
+      classes.add('shell.unparsed');
+      signals.push(`script:${basename(path)}:budget`);
+      return;
+    }
+    readTexts?.push(read.text);
+    if (read.text.split('\n', MAX_SCRIPT_LINES + 1).length > MAX_SCRIPT_LINES) {
+      classes.add('shell.unparsed');
+      signals.push(`script:${basename(path)}:too-many-lines`);
+    }
+    // `source .env` loads variables: configuration, unless a line of it runs something.
+    if (reference.sourced === true && DOT_ENV.test(path) && isPlainEnvironment(read.text)) return;
+    const found = classifyScriptText(read.text, directory, basename(path));
+    if (found === null) return;
+    for (const cls of found.classes) classes.add(cls);
+    signals.push(...found.signals);
+    for (const host of found.hosts) hosts.add(host);
+  };
+  // Where the commands after a `cd` are: there, or where they were, because a `cd` can fail, can
+  // be one stage of a pipeline, can be put off by `&&` or `if`, and can be a function that does
+  // nothing. Every directory the command has been in is looked in.
+  let directories: readonly string[] = [cwd];
+  const saved: (readonly string[])[] = [];
   for (const raw of segments) {
     const opens = /^[\s(]*/.exec(raw)?.[0].replace(/\s/g, '').length ?? 0;
-    for (let k = 0; k < opens; k += 1) saved.push(directory);
-    const segment = raw.replace(/^[\s({]+/, '');
-    directory = directoryAfter(segment, directory);
-    for (const reference of scriptReferences(segment)) {
-      const path = resolveScript(reference.token, directory);
-      if (path === null || seen.has(path)) continue;
-      seen.add(path);
-      // Only a file that is a shell script counts toward the limit: a line of a `git add \`
-      // list or of a heredoc that starts with a path is looked up and passed over.
-      probes += 1;
-      if (probes > MAX_REFERENCE_PROBES) {
-        overflow = true;
-        break;
-      }
-      const read = readScript(path, reference.needsShebang);
-      if (read.kind === 'none') continue;
-      scripts += 1;
-      if (scripts > MAX_SCRIPTS) {
-        overflow = true;
-        continue;
-      }
-      if (read.kind === 'too-large') {
-        classes.add('shell.unparsed');
-        signals.push(`script:${basename(path)}:too-large`);
-        continue;
-      }
-      if (read.text.split('\n', MAX_SCRIPT_LINES + 1).length > MAX_SCRIPT_LINES) {
-        classes.add('shell.unparsed');
-        signals.push(`script:${basename(path)}:too-many-lines`);
-      }
-      const found = classifyScriptText(read.text, directory, basename(path));
-      if (found === null) continue;
-      for (const cls of found.classes) classes.add(cls);
-      signals.push(...found.signals);
-      for (const host of found.hosts) hosts.add(host);
-    }
+    for (let k = 0; k < opens; k += 1) saved.push(directories);
+    // A `{` opens a group only before a blank: `{./t.sh,x}` is a word a brace expansion makes.
+    const segment = raw.replace(/^(?:[\s(]|\{(?=\s))+/, '');
+    directories = nextDirectories(directories, segment);
+    for (const reference of scriptReferences(segment))
+      for (const directory of directories) consume(reference, directory);
     for (let k = trailingCloses(raw); k > 0 && saved.length > 0; k -= 1) {
-      directory = saved.pop() ?? directory;
+      directories = saved.pop() ?? directories;
     }
+  }
+  // Files a shell is handed on its standard input, found where the pipe is visible.
+  for (const file of extraFiles) {
+    for (const token of spellings(file)) consume(named(token), cwd);
   }
   if (overflow) {
     classes.add('shell.unparsed');
@@ -596,18 +653,45 @@ function trailingCloses(raw: string): number {
   return count;
 }
 
+/** The most directories a command is looked at in. */
+const MAX_DIRECTORIES = 4;
+
+/** The directories the commands after a segment may be in: where a `cd` in it leads, and where they were. */
+function nextDirectories(directories: readonly string[], segment: string): readonly string[] {
+  const moved = directories.map((directory) => directoryAfter(segment, directory));
+  if (moved.every((directory, n) => directory === directories[n])) return directories;
+  // The first is where the command began; the rest are the latest, so a long chain of `cd` goes on.
+  const all = [...new Set([...moved, ...directories])];
+  return all.length <= MAX_DIRECTORIES
+    ? all
+    : [all[all.length - 1] as string, ...all.slice(0, MAX_DIRECTORIES - 1)];
+}
+
 /** The directory a `cd` or `pushd` leaves the command in; an unknown target leaves it as it was. */
+/**
+ * `resolve(directory, name)` for a name that only goes down (`a`, `a/b`): the directory and the name,
+ * with no pass over the whole path to clean it, which a long chain of `cd a` makes once for each one.
+ */
+function below(directory: string, name: string): string {
+  if (process.platform === 'win32' || !/^[^/\0]+(?:\/[^/\0]+)*$/.test(name))
+    return resolve(directory, name);
+  if (name.split('/').some((part) => part === '.' || part === '..'))
+    return resolve(directory, name);
+  return directory.endsWith('/') ? `${directory}${name}` : `${directory}/${name}`;
+}
+
 function directoryAfter(segment: string, directory: string): string {
   const word = commandWord(segment);
   if (word !== 'cd' && word !== 'pushd') return directory;
-  const target = words(segment)
-    .slice(1)
-    .find((w) => w === '-' || !w.startsWith('-'));
+  const tokens = words(segment);
+  const at = tokens.findIndex((t) => baseOf(t).toLowerCase() === word);
+  if (at === -1) return directory;
+  const target = tokens.slice(at + 1).find((w) => w === '-' || !w.startsWith('-'));
   if (target === undefined) return homedir();
   if (target === '-') return directory;
   const expanded = expandedPath(target, directory);
   if (expanded === null) return directory;
-  const next = isAbsolute(expanded) ? expanded : resolve(directory, expanded);
+  const next = isAbsolute(expanded) ? expanded : below(directory, expanded);
   // No real path is this long; a chain of `pushd a` would otherwise grow it with every step.
   return next.length > MAX_PATH_CHARS ? directory : next;
 }

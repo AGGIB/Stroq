@@ -1,0 +1,158 @@
+/**
+ * The commands the detectors look for by name. A command word that holds a wildcard (`/bin/r[m]`,
+ * `/usr/bin/gi?`) runs whichever file the shell finds it to name, and a name that is not written
+ * cannot be looked for: it is read as each of these that it could be.
+ */
+export const KNOWN_COMMANDS: readonly string[] = [
+  // Files, and what edits them.
+  'rm',
+  'rmdir',
+  'unlink',
+  'shred',
+  'dd',
+  'mkfs',
+  'wipefs',
+  'find',
+  'xargs',
+  'chmod',
+  'chown',
+  'truncate',
+  'mv',
+  'cp',
+  'ln',
+  'tee',
+  'cat',
+  'sed',
+  'echo',
+  'printf',
+  // Interpreters.
+  'perl',
+  'python',
+  'python3',
+  'node',
+  'ruby',
+  'php',
+  'awk',
+  // The network.
+  'curl',
+  'wget',
+  'nc',
+  'ncat',
+  'netcat',
+  'socat',
+  'telnet',
+  'ssh',
+  'scp',
+  'sftp',
+  'rsync',
+  'ftp',
+  'lftp',
+  // Version control, packages and clouds.
+  'git',
+  'gh',
+  'docker',
+  'podman',
+  'kubectl',
+  'helm',
+  'terraform',
+  'tofu',
+  'pulumi',
+  'aws',
+  'gcloud',
+  'az',
+  'firebase',
+  'npm',
+  'npx',
+  'pnpm',
+  'yarn',
+  'bun',
+  'deno',
+  'prisma',
+  'drizzle-kit',
+  'supabase',
+  'vercel',
+  'flyctl',
+  // Privilege, and what runs another command.
+  'sudo',
+  'doas',
+  'su',
+  'env',
+  'nohup',
+  'nice',
+  'timeout',
+  'time',
+  'eval',
+  'exec',
+  // Shells.
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'csh',
+  'tcsh',
+  'fish',
+  // The rest of what an agent can break a machine with.
+  'kill',
+  'killall',
+  'pkill',
+  'crontab',
+  'launchctl',
+  'systemctl',
+  'osascript',
+  'security',
+];
+
+/**
+ * Words that name something only a shell has, with no program of the same name to run. A file system
+ * that does not tell `RM` from `rm` runs both, but `EXPORT` is not `export` on any: it is a word in a
+ * pattern (`grep -E "error|EXPORT|warning"`) or a line of prose, and read as the builtin it would
+ * dump the environment.
+ */
+const SHELL_ONLY_WORDS: ReadonlySet<string> = new Set([
+  'export',
+  'set',
+  'unset',
+  'declare',
+  'typeset',
+  'local',
+  'readonly',
+  'eval',
+  'exec',
+  'trap',
+  'source',
+  'shift',
+  'exit',
+  'return',
+  'break',
+  'continue',
+  'let',
+  'shopt',
+  'setopt',
+  'unsetopt',
+  'builtin',
+  'enable',
+  'bind',
+  'pushd',
+  'popd',
+  'dirs',
+  'disown',
+  'compgen',
+  'complete',
+  'history',
+  'suspend',
+  'logout',
+  'times',
+  'caller',
+  'mapfile',
+  'readarray',
+]);
+
+/**
+ * A command word as the detectors read it: in lower case, as the file system finds the program,
+ * unless only a shell could run it.
+ */
+export function programName(word: string): string {
+  const lower = word.toLowerCase();
+  return SHELL_ONLY_WORDS.has(lower) ? word : lower;
+}

@@ -1,0 +1,7 @@
+Special tokens in the tokenizer
+
+Byte-pair tokenizers reserve a few ids that never come from ordinary text. GPT-2 style models use
+the end-of-text token, written <|endoftext|>, to separate documents in a training corpus, and the
+chat templates of newer models add their own markers for the start and end of a message. When you
+encode user text, pass allowed_special explicitly so that a document that happens to contain such
+a string is not turned into a control token by accident.

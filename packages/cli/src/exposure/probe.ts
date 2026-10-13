@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { loadBundledRules, scanContent } from '@stroq/core';
+import { loadBundledRules, scanContent, scanFieldsForTool } from '@stroq/core';
 import { readMcpConfig, unwrapArgs } from '../commands/mcp-config.js';
 import { childEnv } from '../mcp/child-env.js';
 import { killChildTree } from '../mcp/kill-child.js';
@@ -90,7 +90,16 @@ function flaggedTools(
     .filter(
       (t) =>
         typeof t.description === 'string' &&
-        scanContent(rules, t.description, {}, { target: 'tool_description' }).verdict === 'suspect',
+        scanContent(
+          rules,
+          t.description,
+          {},
+          // What a server says a tool is, which is the field the rules that read a description read.
+          {
+            target: 'tool_description',
+            ...scanFieldsForTool('mcp__probe__tools_list', t.description),
+          },
+        ).verdict === 'suspect',
     )
     .map((t) => (typeof t.name === 'string' ? t.name : '(unnamed)'));
 }

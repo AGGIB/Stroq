@@ -1,7 +1,13 @@
 import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUDGET_MATCH, DEFAULT_BUDGET_MS, loadBundledRules, scanContent } from '@stroq/core';
+import {
+  BUDGET_MATCH,
+  DEFAULT_BUDGET_MS,
+  loadBundledRules,
+  scanContent,
+  scanFieldsForTool,
+} from '@stroq/core';
 
 /** Text extensions only: the corpus is documentation, and a binary would measure nothing. */
 const TEXT = /\.(?:md|rst|txt|adoc)$/i;
@@ -149,11 +155,14 @@ export function runBench(dir: string): BenchReport {
     // rule the bundle ships regardless of where it was written to read. It also changes
     // what the number means — see docs/BENCH.md's Method section.
     const startedAt = performance.now();
+    const text = readPrefix(file, MAX_READ_BYTES);
+    // A page fetched from the web is what the engine reads as a tool's response too, and the rules
+    // that read `tool_response` are measured against documentation the way they will meet it.
     const result = scanContent(
       rules,
-      readPrefix(file, MAX_READ_BYTES),
+      text,
       { budgetMs: BENCH_BUDGET_MS },
-      { target: 'repo_content' },
+      { target: 'repo_content', ...scanFieldsForTool('WebFetch', text) },
     );
     /* Timed against the PRODUCTION budget, which this run deliberately does not use.
        The two numbers were recorded in different files and never compared: this

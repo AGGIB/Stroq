@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isShellTool } from '../actions/shell-tools.js';
 import { normalizeText } from '../normalize/normalizer.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { readRegularFile } from '../util/read-regular-file.js';
@@ -142,7 +143,7 @@ export function atomsForAction(
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): Atom[] {
-  if (toolName === 'Bash') {
+  if (isShellTool(toolName)) {
     const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
     if (command === '') return [];
     const known = knownPackages(cwd);

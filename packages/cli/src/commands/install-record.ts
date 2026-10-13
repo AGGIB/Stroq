@@ -75,6 +75,10 @@ export function recordInstall(
  */
 export type InstallDrift = 'unrecorded' | 'intact' | 'changed';
 
+/** Whether `configText` holds `command`, as raw text or as JSON escapes it. */
+export const carriesCommand = (configText: string, command: string): boolean =>
+  configText.includes(command) || configText.includes(JSON.stringify(command).slice(1, -1));
+
 export function installDrift(
   agent: string,
   scope: string,
@@ -83,6 +87,5 @@ export function installDrift(
 ): InstallDrift {
   const entry = record.entries[installKey(agent, scope)];
   if (!entry) return 'unrecorded';
-  const escaped = JSON.stringify(entry.command).slice(1, -1);
-  return configText.includes(entry.command) || configText.includes(escaped) ? 'intact' : 'changed';
+  return carriesCommand(configText, entry.command) ? 'intact' : 'changed';
 }

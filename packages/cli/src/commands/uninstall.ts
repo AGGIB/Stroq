@@ -4,7 +4,7 @@
 // stays as it was, the same promise `init` makes when it merges in. An agent cannot
 // run this (it is `config.self`, see `changesStroqState` in core): taking the hooks
 // out is the user's call, made outside the agent.
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, rmSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from './antigravity-hooks.js';
 import { codexHooksPath } from './codex-hooks.js';
@@ -12,7 +12,8 @@ import { isPlainObject, readJsonObject, writeJsonObject } from './config-file.js
 import { copilotHooksPath } from './copilot-hooks.js';
 import { cursorHooksPath } from './cursor-hooks.js';
 import { type HookAgent, isInitAgent, runInit, settingsPath } from './init.js';
-import { windsurfHooksPath } from './windsurf-hooks.js';
+import { installKey, readInstallRecord } from './install-record.js';
+import { devinHooksPath, isRecordedEntry, windsurfHooksPath } from './windsurf-hooks.js';
 
 type Scope = 'project' | 'user';
 type Json = Record<string, unknown>;
@@ -156,7 +157,75 @@ export function uninstallAgent(
     };
   if (agent === 'copilot') return uninstallCopilot(copilotHooksPath(scope, cwd), dryRun);
   const target = JSON_TARGETS[agent];
-  return uninstallJson(target, target.path(scope, cwd), dryRun);
+  const own = uninstallJson(target, target.path(scope, cwd), dryRun);
+  // Devin Desktop reads the project's `.devin/hooks.json` first, so a copy of Stroq's entries
+  // made there by hand is an install, and comes out with the one `init` wrote.
+  if (agent !== 'windsurf' || scope !== 'project') return own;
+  const devin = uninstallDevinCopy(cwd, dryRun);
+  if (!devin.removed && devin.message === '') return own;
+  // Two files were read: a preview of each is only text, so it says which file it is of.
+  const both = dryRun && own.removed && devin.removed;
+  return {
+    removed: own.removed || devin.removed,
+    message: both
+      ? `# ${target.path(scope, cwd)}\n${own.message}# ${devinHooksPath(cwd)}\n${devin.message}`
+      : `${own.message}${devin.message}`,
+  };
+}
+
+/** A handler whose command ends ` hook windsurf`: it looks like Stroq's, and may be the repository's. */
+const LOOKS_LIKE_STROQ = / hook windsurf(?: \S+)?$/;
+/** How deep a hooks file is read for such an entry: its own shape is three levels. */
+const MAX_FILE_DEPTH = 8;
+
+/** Whether a handler anywhere in the file has a command that looks like Stroq's, whoever wrote it. */
+function holdsLookalike(value: unknown, depth = 0): boolean {
+  if (depth > MAX_FILE_DEPTH) return false;
+  if (Array.isArray(value)) return value.some((item) => holdsLookalike(item, depth + 1));
+  if (!isPlainObject(value)) return false;
+  const command = value['command'];
+  if (typeof command === 'string' && LOOKS_LIKE_STROQ.test(command)) return true;
+  return Object.values(value).some((item) => holdsLookalike(item, depth + 1));
+}
+
+/**
+ * The copy of Stroq's entries in the project's `.devin/hooks.json`. That file is the repository's:
+ * an entry that merely ends ` hook windsurf` is somebody's, and taking it out would delete a hook
+ * the repository runs. Only an entry that is exactly what `init` recorded for this install goes,
+ * and what is left that looks like one is said, so a file that still has a hook is not taken for
+ * a clean one. With no record there is nothing to compare with, and nothing goes.
+ */
+function uninstallDevinCopy(cwd: string, dryRun: boolean): UninstallResult {
+  const file = devinHooksPath(cwd);
+  if (!existsSync(file)) return { removed: false, message: '' };
+  const left = (why: string): UninstallResult => ({
+    removed: false,
+    message: `${file} ${why}, so it is left alone.\n`,
+  });
+  // The repository's file is not written through a link, which could lead anywhere on the
+  // machine, and is not taken for anything but a JSON object.
+  let before: Json;
+  try {
+    if (lstatSync(file).isSymbolicLink()) return left('is a symbolic link');
+    before = readJsonObject<Json>(file);
+  } catch (error) {
+    return left(`could not be read (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const recorded = readInstallRecord().entries[installKey('windsurf', 'project')]?.command;
+  const ours = (handler: unknown): boolean =>
+    recorded !== undefined && isRecordedEntry(handler, recorded);
+  const after = stripHooksKey(before, ours);
+  const changed = JSON.stringify(after) !== JSON.stringify(before);
+  const note = holdsLookalike(after.hooks)
+    ? `${file} still holds an entry that ends " hook windsurf" and is not the command stroq init recorded; it is the repository's, so it is left.\n`
+    : '';
+  if (!changed) return { removed: false, message: note };
+  if (dryRun) return { removed: true, message: `${JSON.stringify(after, null, 2)}\n${note}` };
+  writeJsonObject(file, after);
+  return {
+    removed: true,
+    message: `Removed Stroq's hooks from ${file}. Anything else in it is unchanged.\n${note}`,
+  };
 }
 
 export async function runUninstall(args: readonly string[]): Promise<number> {

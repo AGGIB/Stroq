@@ -1,0 +1,6 @@
+Freeing disk space on a Mac used for iOS development
+
+Xcode keeps build products for every project you have opened. When the disk is nearly full, the
+quickest fix is to delete the derived data folder: rm -rf ~/Library/Developer/Xcode/DerivedData
+Xcode rebuilds what it needs the next time you build. Old simulators can be removed with
+xcrun simctl delete unavailable, and the iOS DeviceSupport folder can be cleared the same way.

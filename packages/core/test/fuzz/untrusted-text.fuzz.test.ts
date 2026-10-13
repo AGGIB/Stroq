@@ -6,10 +6,14 @@ import {
   splitSegments,
   tokenize,
 } from '../../src/actions/shell-segments.js';
+import { lex, lostPipe } from '../../src/actions/shell-lex.js';
+import { parseShellArgs } from '../../src/actions/shell-args.js';
+import { decodePrograms, shellInput } from '../../src/actions/shell-input.js';
 import { collectKeyedStrings, collectStrings, mapStrings } from '../../src/cloak/json-strings.js';
 import { compileNameMatcher, nameNeedles } from '../../src/cloak/prose-names.js';
 import { expandVariants, normalizeText } from '../../src/normalize/normalizer.js';
 import { neutralizeControls } from '../../src/util/controls.js';
+import { cpuNow } from '../cpu-time.js';
 
 /**
  * Property tests for the code that reads text an attacker wrote: shell commands the
@@ -41,9 +45,9 @@ const shellish = (maxLength: number) =>
 
 /** Fails when one call takes longer than a hook can afford. */
 function fast<T>(fn: () => T, ms = 250): T {
-  const started = performance.now();
+  const started = cpuNow();
   const out = fn();
-  expect(performance.now() - started).toBeLessThan(ms);
+  expect(cpuNow() - started).toBeLessThan(ms);
   return out;
 }
 
@@ -55,6 +59,143 @@ describe('shell segmentation on arbitrary commands', () => {
         fast(() => splitPipelines(command));
         fast(() => extractSubstitutions(command));
         for (const segment of splitSegments(command)) fast(() => tokenize(segment));
+      }),
+      { numRuns: 400 },
+    );
+  });
+});
+
+describe('reading what a shell is handed on arbitrary commands', () => {
+  // The words a shell reads a program from, mixed into the characters that change how it is read.
+  const pieces = [
+    ...SHELL_CHARS,
+    '| bash',
+    '<<<',
+    '<<EOF\n',
+    '\nEOF\n',
+    'echo ',
+    'printf ',
+    '$(',
+    '`',
+  ];
+  const noisy = (maxLength: number) =>
+    fc.array(fc.constantFrom(...pieces), { maxLength }).map((parts) => parts.join(''));
+
+  it('never throws, stays fast, and keeps what it builds within the budget', () => {
+    fc.assert(
+      fc.property(fc.oneof(noisy(200), shellish(400), fc.string({ maxLength: 400 })), (command) => {
+        const lexed = fast(() => lex(command));
+        fast(() => lostPipe(command, lexed));
+        const found = fast(() => shellInput(command));
+        expect(found.texts.join('').length).toBeLessThanOrEqual(2 * command.length + 65_536);
+        fast(() => decodePrograms(command), 500);
+        fast(() => parseShellArgs(command.split(/\s+/)));
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('decodes the text an echo prints, whatever it is, when nothing in it expands', () => {
+    const plain = fc
+      .array(fc.constantFrom(...'abcxyz019 ._/'.split('')), { minLength: 1, maxLength: 40 })
+      .map((chars) => chars.join(''))
+      .filter((text) => text.trim() === text);
+    fc.assert(
+      fc.property(plain, (text) => {
+        const found = shellInput(`echo '${text}' | bash`);
+        expect(found.opaque).toBe(false);
+        expect(found.texts).toEqual([text]);
+        expect(shellInput(`bash <<< '${text}'`).texts).toEqual([text]);
+        expect(shellInput(`printf '%s' '${text}' | sh`).texts).toEqual([text]);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('asks about a pipe into a shell from a source it cannot read, wherever the pipe stands', () => {
+    const before = noisy(40);
+    fc.assert(
+      fc.property(before, (prefix) => {
+        // A backslash that ends the prefix joins the next line to it (`echo <<<\` and then
+        // `unknown-tool | bash` is `echo <<<unknown-tool | bash`, which a shell runs as a pipe from an
+        // echo that prints nothing): that line is not a fresh one.
+        fc.pre(!prefix.endsWith('\\'));
+        // Whatever precedes it, a fresh line with `unknown-tool | bash` is a pipe the reading
+        // finds, or one it says it lost.
+        const command = `${prefix}\nunknown-tool | bash`;
+        const found = shellInput(command);
+        expect(found.opaque || found.texts.length > 0 || found.files.length > 0).toBe(true);
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  // Complete commands, each of which a shell reads to its end and then runs what follows: a quote
+  // or a substitution that closes, a comment that a line break ends, a here-document with its
+  // delimiter. What follows the last of them runs, so a reading that has taken any of them for
+  // something longer has hidden a command.
+  interface Closed {
+    readonly text: string;
+    /** The command runs to a line break: a comment, or a here-document that ends on its own line. */
+    readonly line?: boolean;
+  }
+  const closed: readonly Closed[] = [
+    { text: 'echo a' },
+    { text: 'echo "a b"' },
+    { text: "echo 'a | bash'" },
+    { text: 'echo "a | bash"' },
+    { text: 'echo $(date)' },
+    { text: 'echo "$(date)"' },
+    { text: 'echo $(echo ")")' },
+    { text: 'echo ${x:-a}' },
+    { text: 'echo ${x:-{}' },
+    { text: "echo $'a\\'b'" },
+    { text: "echo $(echo $'\\'')" },
+    { text: 'echo \\$x' },
+    { text: "echo \\$'a\\'" },
+    { text: "echo $$'a'" },
+    { text: 'echo $$' },
+    { text: 'echo a\\\n#b' },
+    { text: 'echo a\\;#b' },
+    { text: 'echo a\\ #b' },
+    { text: 'echo a\u00a0#b' },
+    { text: 'echo `date`' },
+    { text: 'echo a#b' },
+    { text: 'case x in a|b) echo a;; esac' },
+    { text: '[[ a == b ]]' },
+    { text: '(( 1 + 1 ))' },
+    { text: 'f() { echo a; }' },
+    { text: '# a | bash', line: true },
+    { text: "cat <<'@@' >/dev/null\nit's\n@@", line: true },
+    { text: 'cat <<E"O"F >/dev/null\nit\'s\nEOF', line: true },
+    { text: "cat <<EOF >/dev/null\n$(date) 's\nEOF", line: true },
+  ];
+  /** The text of the commands, each joined to the next the way a shell runs one after another. */
+  const sequence = fc
+    .array(fc.tuple(fc.constantFrom(...closed), fc.constantFrom('\n', ';', '\n\n', ' ; ')), {
+      maxLength: 6,
+    })
+    .map((items) =>
+      items
+        .map(([command, separator]) => `${command.text}${command.line === true ? '\n' : separator}`)
+        .join(''),
+    );
+
+  it('decodes the program of a pipe after any run of complete commands', () => {
+    fc.assert(
+      fc.property(sequence, (before) => {
+        const found = decodePrograms(`${before}echo 'rm -rf ~' | bash`);
+        expect(found.texts).toContain('rm -rf ~');
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('asks about the unreadable source of a pipe after any run of complete commands', () => {
+    fc.assert(
+      fc.property(sequence, (before) => {
+        expect(decodePrograms(`${before}unknown-tool | bash`).opaque).toBe(true);
+        expect(decodePrograms(`${before}bash <<< "$x"`).opaque).toBe(true);
       }),
       { numRuns: 400 },
     );

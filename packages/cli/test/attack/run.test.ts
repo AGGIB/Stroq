@@ -82,6 +82,7 @@ const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = 
   ['33-lftp-mirror-delete', 'asked', 'ask-destructive'],
   ['34-cmd-rmdir-quote-collapse', 'asked', 'ask-destructive'],
   ['35-force-push-open-pr', 'asked', 'ask-destructive'],
+  ['36-script-launders-taint-upload', 'blocked', 'deny-network-when-tainted'],
 ];
 
 const OPEN_POLICY: Policy = { ...DEFAULT_POLICY, rules: [] };
@@ -97,15 +98,27 @@ describe('substituteCwd', () => {
 });
 
 describe('runAttack with the default policy', () => {
-  it('stops all thirty-five scenarios and reports rule ids', async () => {
+  it('stops all thirty-six scenarios and reports rule ids', async () => {
     const report = await runAttack(SCENARIOS, DEFAULT_POLICY, 'default');
-    expect(report.version).toBe(1);
+    expect(report.version).toBe(2);
     expect(report.policy).toBe('default');
     expect(report.ok).toBe(true);
-    expect(report.totals).toEqual({ blocked: 16, asked: 19, passed: 0 });
+    expect(report.totals).toEqual({
+      blocked: 17,
+      asked: 19,
+      askedByLimit: 0,
+      passed: 0,
+      timeout: 0,
+      error: 0,
+      inconclusive: 0,
+    });
     expect(report.scenarios.map((r) => [r.id, r.outcome, r.ruleId])).toEqual(EXPECTED);
-    for (const r of report.scenarios)
+    for (const r of report.scenarios) {
       expect(r.steps.every((s) => s.actual === s.expect)).toBe(true);
+      // Nothing in the real corpus is decided by a clock or a limit: each step was a verdict.
+      expect(r.inconclusive).toBe(false);
+      expect(r.steps.every((s) => !s.timedOut && s.error === undefined)).toBe(true);
+    }
   }, 60_000);
 
   it('records every step with its phase and tool, and cleans up after success', async () => {
@@ -123,7 +136,15 @@ describe('runAttack with an open policy', () => {
   it('lets every attack through and fails the suite', async () => {
     const report = await runAttack(SCENARIOS, OPEN_POLICY, 'test');
     expect(report.ok).toBe(false);
-    expect(report.totals).toEqual({ blocked: 0, asked: 0, passed: 35 });
+    expect(report.totals).toEqual({
+      blocked: 0,
+      asked: 0,
+      askedByLimit: 0,
+      passed: 36,
+      timeout: 0,
+      error: 0,
+      inconclusive: 0,
+    });
     expect(report.scenarios.every((r) => r.outcome === 'passed' && r.ruleId === null)).toBe(true);
   }, 60_000);
 });
@@ -206,7 +227,10 @@ describe('runScenario validates its input', () => {
     expect(readdirSync(testTmpDir)).toEqual([]);
   });
 
-  it('rejects a malformed event with the scenario id and step number', async () => {
+  // A malformed event used to throw out of `runScenario` and abort the whole run. It is now the
+  // result of its own scenario (an `error`), so the scenarios after it still run; the outcomes
+  // test file covers that, and this one keeps the context text and the clean-up.
+  it('reports a malformed event as an error with the scenario id and step number', async () => {
     const scenario: Scenario = {
       id: '99-malformed-step',
       title: 'probe: the recorded event fails schema validation',
@@ -225,7 +249,9 @@ describe('runScenario validates its input', () => {
         },
       ],
     };
-    await expect(runScenario(scenario, DEFAULT_POLICY)).rejects.toThrow(/99-malformed-step step 1/);
+    const result = await runScenario(scenario, DEFAULT_POLICY);
+    expect(result.outcome).toBe('error');
+    expect(result.reason).toMatch(/99-malformed-step step 1/);
     expect(readdirSync(testTmpDir)).toEqual([]);
   });
 

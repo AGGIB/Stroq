@@ -8,7 +8,10 @@ import {
   shellAssignments,
   windowsVerb,
 } from './self-config.js';
-import { commandWord } from './shell-segments.js';
+import { lex } from './shell-lex.js';
+import { bodyMayBeScript } from './text-heredocs.js';
+import { commandWord, splitSegments } from './shell-segments.js';
+import { readWords, type Word } from './shell-words.js';
 import { quotedSpans } from './written-text.js';
 
 /**
@@ -53,6 +56,79 @@ const SCHEDULE_TASK =
   /\bschtasks(?:\.exe)?\s+\/create\b|\blaunchctl\s+(?:submit|bootstrap)\b|\bsystemd-run\b[^|;&\n]{0,400}?\s--on-(?:calendar|boot|startup|active|unit-active)\b|\b(?:Register|Set|New)-ScheduledTask\b|\breg(?:\.exe)?\s+add\s+\S{0,300}[/\\](?:Run|RunOnce)\b/i;
 /** `crontab -l` only reads; every other form installs or removes a table. */
 const CRONTAB_READ = /\s-l(?:\s|$)/;
+/**
+ * `at` and `batch` run what they are given later, once: `at now + 1 hour`, `at 17:00 -f job.sh`, `at midnight`, a
+ * lone `batch`. A line of a source file or a document that begins with the word (`at = item.scheduledAt`, `at
+ * least three`, `at noon we meet`) is no job: `at` refuses a time with a word in it that is not one ("garbled
+ * time"), so a line is a job only when every word after the options is part of a time. `at -l`, `-c`, `-d` and
+ * `-V` list, print, delete and name a version, and have no time.
+ */
+const AT_WORDS =
+  /^(?:now|noon|midnight|teatime|today|tomorrow|next|am|pm|utc|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*|(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*|(?:min|hour|day|week|month|year)[a-z]*)$/i;
+function isAJob(job: string): boolean {
+  const words = readWords(job).words;
+  let timed = false;
+  for (let i = 1; i < words.length; i += 1) {
+    const word = words[i] as Word;
+    // What follows a redirect is the script of the job, not its time.
+    if (word.redirect) break;
+    const text = word.value;
+    // `-f file`, `-q queue`, `-t time` take the word after them.
+    if (!word.quoted && /^-[A-Za-z]+$/.test(text)) {
+      if (/[fqt]$/.test(text)) i += 1;
+      // `-t 202612251200` is the time.
+      if (/t$/.test(text)) timed = true;
+      continue;
+    }
+    // Only the characters of a time are one: `batch = []` and `at (x) => 1` are code, whatever words they hold.
+    if (!/^[A-Za-z0-9+:./,\s-]*$/.test(text)) return false;
+    // The pieces of a time are read as `at` reads them: `5pm` is `5` `pm`, `now+1hour` is `now` `+` `1` `hour`.
+    for (const piece of text.match(/\d+|[A-Za-z]+/g) ?? []) {
+      if (!/^\d/.test(piece) && !AT_WORDS.test(piece)) return false;
+      timed = true;
+    }
+  }
+  return timed || words[0]?.value.toLowerCase() === 'batch';
+}
+const AT_READ = /\s-[lcdrV](?:\s|$)/;
+const AT_WORD = /(?:^|\s)(?:at|batch)(?=\s|$)/i;
+/** Whether a text has the word `at` or `batch` where a command could begin, and so may schedule a job. */
+const MENTIONS_A_JOB = /(?:^|[\s;&|({`])(?:at|batch)(?=[\s;&|)}`]|$)/i;
+
+/**
+ * The commands of the texts in which `at` and `batch` are looked for, as the lexer cuts them: it knows the bodies
+ * of here-documents and the strings that span lines, which a cut by lines does not, so a line of prose that begins
+ * `at noon` in a document that is text (`cat <<EOF`, a commit message) is not among them. The lines of a body are
+ * among them where it may be a script that runs later: the command that is given it writes a file that is not a
+ * text file (`cat > run.sh <<EOF`), or is a job (`at now <<EOF`). A document that a filter or an interpreter is given
+ * is data or another language, and one that a shell is given is read as the program it is, by itself. A text the
+ * lexer was not sure of is cut the plain way.
+ */
+export function jobStages(texts: readonly string[]): string[] {
+  const stages: string[] = [];
+  for (const text of texts) {
+    if (!MENTIONS_A_JOB.test(text)) continue;
+    const lexed = lex(text);
+    if (lexed.uncertain) {
+      stages.push(...splitSegments(text));
+      continue;
+    }
+    for (const pipeline of lexed.pipelines)
+      pipeline.forEach((stage, index) => {
+        stages.push(stage.text);
+        if (stage.heredoc !== null && bodyMayBeScript(stage, index > 0))
+          stages.push(...splitSegments(stage.heredoc.body));
+      });
+  }
+  return stages;
+}
+
+const runsLater = (segment: string): boolean => {
+  const from = AT_WORD.exec(segment);
+  if (from === null) return false;
+  const job = segment.slice(from.index).trim();
+  return !AT_READ.test(job) && isAJob(job);
+};
 
 /** Verbs whose DESTINATION is the last argument: `cp x ~/.zshrc` writes it, `cp ~/.zshrc x` reads it. */
 const DESTINATION_LAST: ReadonlySet<string> = new Set(['cp', 'mv', 'install', 'ln', 'rsync']);
@@ -115,10 +191,17 @@ function inlineInterpreterCode(command: string): string[] {
     code.push(quoted ?? rest.split('\n')[0] ?? '');
   }
   return code;
-} /** A URL is where a download comes from, not where it goes: `curl -o /tmp/x https://…/.bashrc`. */
+}
+
+/** A URL is where a download comes from, not where it goes: `curl -o /tmp/x https://…/.bashrc`. */
 const URL_WORD = /^[a-z][a-z0-9+.-]*:\/\//i;
-const REDIRECT_OPERATOR = /^\d*>>?\|?$/;
-const REDIRECT_GLUED = /^\d*>>?\|?(.+)$/;
+/**
+ * `> file`, `2>> file`, `>| file`, `{fd}> file` (a descriptor the shell makes), `1<> file` (opened to read and write),
+ * zsh's `>! file` and `>>! file`, and the redirects that send both streams to a file: `&> file`, `&>> file`, `>& file`
+ * (bash and zsh), `>>& file`, `&>| file`, `&>! file` (zsh). `>&2` and `2>&1` copy a descriptor and name no file.
+ */
+const REDIRECT_OPERATOR = /^(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[|!]?|<>)|&>>?[|!]?|>>?&[|!]?)$/;
+const REDIRECT_GLUED = /^(?:&>>?[|!]?|>>?&[|!]?|(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[|!]?|<>))(.+)$/;
 const RELATIVE_PATH = /^(?![/\\~$]|[A-Za-z]:)/;
 const MAX_BRACE_ALTERNATIVES = 16;
 
@@ -319,7 +402,7 @@ function segmentWrites(segments: readonly string[], cwd: string | null): Segment
     const opens = /^[\s(]*/.exec(raw)?.[0].replace(/\s/g, '').length ?? 0;
     for (let k = 0; k < opens; k += 1) saved.push(directory);
     // `(cd ~/.ssh && …)` and `{ cd ~/.ssh; …; }` begin with the grouping, not the command.
-    const segment = raw.replace(/^[\s({]+/, '');
+    const segment = raw.replace(/^(?:\s|\(|\{(?=\s|$))+/, '');
     const word = commandWord(segment);
     directory = changedDirectory(segment, word) ?? directory;
     const spelled = writtenFiles(segment, word);
@@ -359,6 +442,13 @@ export function persistenceSignals(
   segments: readonly string[],
   command = '',
   cwd: string | null = null,
+  /**
+   * The commands of the reading as the lexer cuts them, which `at` and `batch` are looked for in: the lexer knows
+   * the bodies of here-documents and the strings that span lines, and a line of prose in one that begins `at noon`
+   * is no command. `segments` are cut where the shell cuts and keep those lines, which a write to a startup file
+   * needs (`cat <<EOF >> ~/.zshrc`). A document that a shell is given is read as the program it is, by itself.
+   */
+  commands: readonly string[] = segments,
 ): string[] {
   const assigned = shellAssignments(segments);
   const out = new Set<string>();
@@ -389,6 +479,10 @@ export function persistenceSignals(
     if (autorunText && written.some((file) => AUTORUN_FILE.test(file))) {
       out.add('editor-autorun-task');
     }
+  }
+  for (const segment of commands) {
+    const word = commandWord(segment);
+    if ((word === 'at' || word === 'batch') && runsLater(segment)) out.add('scheduled-task-create');
   }
   return [...out];
 }

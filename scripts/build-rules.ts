@@ -27,10 +27,12 @@ import {
   PRODUCTION_CHARS,
   SLOW_FACTOR,
   loadBenignFixtures,
+  loadFieldFixtures,
   loadRuleSources,
   deriveThresholdMs,
   measureRuleTimingsStable,
   runBenignGate,
+  runOwnExampleGate,
   runTimingGate,
   RulesBuildError,
   STROQ_PREFIX,
@@ -41,6 +43,8 @@ import {
 const root = resolve(import.meta.dirname, '..');
 const sources = ['rules/stroq', 'rules/atr'].map((d) => join(root, d));
 const benignDir = join(root, 'rules/fixtures/benign');
+// Text that is one field of a rule and nothing else: `<field>/<file>`, see BenignFixture.
+const fieldFixturesDir = join(root, 'rules/fixtures/benign-field');
 const overridesFile = join(root, 'rules/atr-overrides.yaml');
 const outFile = join(root, 'packages/core/src/rules.bundle.json');
 const disabledReport = join(root, 'rules/atr-disabled.json');
@@ -84,7 +88,7 @@ function printSlowest(measurements: readonly RuleTiming[]): void {
 function runDefault(): void {
   const { loaded, compiled, errors } = loadCompiled();
   const compilableIds = new Set(compiled.map((r) => r.id));
-  const benign = loadBenignFixtures(benignDir);
+  const benign = [...loadBenignFixtures(benignDir), ...loadFieldFixtures(fieldFixturesDir)];
 
   let timing;
   try {
@@ -117,10 +121,22 @@ function runDefault(): void {
     throw err;
   }
 
+  let exampleGate;
+  try {
+    exampleGate = runOwnExampleGate(
+      survivors.filter((r) => !benignGate.disabled.has(r.id)),
+      loaded.rules,
+    );
+  } catch (err) {
+    if (err instanceof RulesBuildError) fail(`own-example gate failed: ${err.message}`);
+    throw err;
+  }
+
   const disabled = new Map<string, string>([
     ...timing.disabled,
     ...production.disabled,
     ...benignGate.disabled,
+    ...exampleGate.disabled,
   ]);
   for (const e of errors) disabled.set(e.id, `uncompilable: ${e.error}`);
 
@@ -141,6 +157,10 @@ function runDefault(): void {
   console.log(
     `production-size gate: ${production.disabled.size} rule(s) disabled ` +
       `(> ${production.thresholdMs.toFixed(2)} ms on ${PRODUCTION_CHARS} chars, the scanner's own cap)`,
+  );
+  console.log(
+    `own-example gate: ${exampleGate.disabled.size} rule(s) that read a tool's response or description ` +
+      `disabled, for matching none of their own examples through it`,
   );
   console.log(`bundle: ${bundle.rules.length} rules, ${disabled.size} disabled → ${outFile}`);
 }
@@ -203,7 +223,10 @@ function runCheck(): void {
   const candidates = compiled.filter((r) => !committedDisabled.has(r.id));
   let benignGate;
   try {
-    benignGate = runBenignGate(candidates, loadBenignFixtures(benignDir));
+    benignGate = runBenignGate(candidates, [
+      ...loadBenignFixtures(benignDir),
+      ...loadFieldFixtures(fieldFixturesDir),
+    ]);
   } catch (err) {
     if (err instanceof RulesBuildError) fail(`benign-corpus gate failed: ${err.message}`);
     throw err;
@@ -211,8 +234,23 @@ function runCheck(): void {
   const newBenignFailures = [...benignGate.disabled.entries()].map(
     ([id, fixture]) => `${id} — fires on ${fixture} (not in committed rules/atr-disabled.json)`,
   );
+  // The same candidates, minus what the benign gate just found: the rules that read a tool's
+  // response or description must still match one of their own examples through it.
+  let exampleGate;
+  try {
+    exampleGate = runOwnExampleGate(
+      candidates.filter((r) => !benignGate.disabled.has(r.id)),
+      loaded.rules,
+    );
+  } catch (err) {
+    if (err instanceof RulesBuildError) fail(`own-example gate failed: ${err.message}`);
+    throw err;
+  }
+  const newExampleFailures = [...exampleGate.disabled.entries()].map(
+    ([id, reason]) => `${id} — ${reason} (not in committed rules/atr-disabled.json)`,
+  );
 
-  const newFailures = [...newCompileFailures, ...newBenignFailures];
+  const newFailures = [...newCompileFailures, ...newBenignFailures, ...newExampleFailures];
   if (newFailures.length > 0) {
     console.error(
       'rules bundle check failed — new rule failures not covered by the committed disabled list:',

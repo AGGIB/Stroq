@@ -1,0 +1,48 @@
+name: Try-it report
+description: You ran Stroq on your own agent sessions; tell us what it found and what got in your way
+title: '[Try-it]: '
+labels: ['pilot-report']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying it. Four short questions. **Do not paste secret values, file
+        paths, commands or hostnames** from your sessions: counts and the credential names
+        Stroq prints are enough (it prints the name, never the value).
+
+        A real bypass of a documented protection does not go here: use the private security
+        advisory process in [SECURITY.md](../../SECURITY.md).
+  - type: input
+    id: setup
+    attributes:
+      label: 'Agent, operating system and Stroq version'
+      description: 'For example "Claude Code 2.x, macOS 15, @stroq/cli 0.23.0" (`stroq --version` prints the last).'
+    validations:
+      required: true
+  - type: textarea
+    id: found
+    attributes:
+      label: '1. What did `stroq sent --last` (or `stroq replay --last`) find in your latest session?'
+      description: 'Counts and credential names only, or "nothing". Did the result match what you expected?'
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: in-the-way
+    attributes:
+      label: '2. If you installed the hooks: what did Stroq ask about or block that you did not expect?'
+      description: 'Which rule it named, and whether the question was clear. "I did not install them" is a fine answer.'
+      render: text
+  - type: textarea
+    id: missed
+    attributes:
+      label: '3. Is there something you expected it to catch and it did not?'
+      description: 'Describe the shape, not the content. If it is a working bypass, use the security advisory process instead.'
+      render: text
+  - type: textarea
+    id: next
+    attributes:
+      label: '4. Would you keep it on? What one change would make that a yes?'
+      render: text
+    validations:
+      required: true

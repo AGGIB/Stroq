@@ -137,6 +137,14 @@ export interface PreToolEvent {
    * the model sent: the cloak promises that `audit.jsonl` never holds the value.
    */
   readonly auditInput?: Readonly<Record<string, unknown>>;
+  /**
+   * The host's own id for this tool call, when its event carries one: `tool_use_id` in the events of
+   * Claude Code and Codex, `toolCallId` in OpenClaw's. Copilot's event schema has no call id (see
+   * `adapters/copilot.ts`), so it stays unset there. Not set by any adapter yet. It will be filled
+   * when the audit pairs a call's `pre` entry with its `post` entry, and when a task permit names
+   * the call it was widened for.
+   */
+  readonly callId?: string;
 }
 
 export interface PostToolEvent extends PreToolEvent {
@@ -147,6 +155,33 @@ export interface PostToolEvent extends PreToolEvent {
    * so — a host that renamed its result field used to be recorded as a clean scan.
    */
   readonly resultMissing?: readonly string[];
+}
+
+/**
+ * What a tool call reaches, read from its arguments, for a task's scope to be held against.
+ * Nothing builds one yet: it will be filled when the task lock reads the paths, URLs and
+ * shell use of each call.
+ */
+export interface ToolResources {
+  /** The files the call reads or writes, as written, with the path once symlinks are resolved. */
+  readonly paths: readonly {
+    readonly path: string;
+    readonly real?: string;
+    readonly op: 'read' | 'write';
+  }[];
+  /**
+   * False when the call may touch paths that `paths` does not list: a glob, a variable, a
+   * command too complex to read.
+   */
+  readonly pathsComplete: boolean;
+  /** The network addresses the call reaches, with their hosts. */
+  readonly urls: readonly {
+    readonly url: string;
+    readonly host: string;
+    readonly method?: string;
+  }[];
+  /** Whether the call runs a shell command. */
+  readonly shell: boolean;
 }
 
 /** Kinds of "actionable atoms" tracked for instruction provenance. */
