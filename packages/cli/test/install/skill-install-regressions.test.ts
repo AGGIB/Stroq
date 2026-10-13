@@ -99,6 +99,10 @@ describe('skill install review regressions', () => {
     await writeFile(join(first.installedTo, 'outside.txt'), 'outside');
     await addSkill('demo', { ...f.options, restore: true });
     expect(f.output()).toContain('discards outside edits');
+    expect(f.questions.at(-1)).toMatch(/12/);
+    await addSkill('demo', f.options);
+    expect(f.questions.at(-1)).toContain('Apply this update?');
+    expect(f.questions.at(-1)).not.toMatch(/12/);
   });
 
   it('refuses a same-name foreign source across projects and a mismatched --user scope', async () => {
