@@ -49,7 +49,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 function gateReport(agent: string, platform: NodeJS.Platform): ProveReport | null {
   if (!DRIVEN_AGENTS.includes(agent))
     return unsupportedReport(agent, capabilitiesFor(agent)?.reason, DRIVEN_AGENTS);
-  return platform === 'win32' ? windowsReport(agent) : null;
+  return platform === 'win32' && agent !== 'codex' ? windowsReport(agent) : null;
 }
 
 /** Prints a report, as a document of JSON or as words, and says what it exits with. */

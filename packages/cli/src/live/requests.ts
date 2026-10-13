@@ -87,7 +87,12 @@ export class Requests {
   /** The probe to ask for, with the ids of its own: the control of a probe is its command, hook out. */
   private prepare(index: number, step: Step): { probe: Probe; ctx: ProbeContext } {
     const nonce = this.ids.nonce();
-    const built = buildProbes(nonce, this.fake, this.base.project)[index];
+    const built = buildProbes(
+      nonce,
+      this.fake,
+      this.base.project,
+      this.options.agent === 'codex' ? 'native' : 'posix',
+    )[index];
     if (built === undefined) throw new Error(`no probe at ${index}`);
     return {
       probe: step.hook === 'noop' ? controlOf(built) : built,

@@ -75,7 +75,7 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 | `stroq run [--agent <id>] -- <agent> …`                 | Start an agent already confined: sets the git settings that stop a repository running a command at startup, refuses to launch into one that runs something before you could approve it, and checks that Stroq's hooks are installed          |
 | `stroq run --sandbox -- <agent> …`                      | With `srt` installed, also wrap the launch: credential files unreadable, network closed except `--allow-domain` hosts. Without `srt`, Stroq says so and starts the agent unwrapped                                                           |
 | `stroq doctor`                                          | Check Node version, rules, hooks for every agent and when each last called Stroq, self-test                                                                                                                                                  |
-| `stroq prove [--agent <id>] [--yes] [--dry-run]`        | Run the live protection check on Claude Code: up to 3 short requests on your own login (no API key), asked first. Shows the hook stopped a command your policy denies and that it runs without the hook. Exit 0 verified, 1 failed, 3 else   |
+| `stroq prove [--agent <id>] [--yes] [--dry-run]`        | Run the live protection check on Claude Code or Codex CLI: up to 3 short requests on your own login (no API key), asked first. Shows a denied command stopped with the hook and ran without it. Exit 0 verified, 1 failed, 3 else            |
 | `stroq log [--count 20] [--json]`                       | Show recent audit entries; `--json` prints one entry per line                                                                                                                                                                                |
 | `stroq verify`                                          | Verify the audit hash chain                                                                                                                                                                                                                  |
 | `stroq untaint [--session <id>] [--all]`                | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                                                    |
@@ -98,6 +98,14 @@ MCP proxy note: for clients with no hook API, `--agent mcp` rewrites the client'
 `stroq exposure` reads files only. `--probe` is the one flag that starts a process: it launches each configured stdio MCP server, asks once for `tools/list`, scans the tool descriptions and shuts the server down — no tool is ever called. Without it, tool-description poisoning is not covered by the run, and the report says so. `--share` prints a redacted summary built from a whitelist, locally; nothing is transmitted.
 
 The corpus `stroq bench` measures against ships with this repository, not with the npm package; on an installed CLI, point it at your own documentation with `stroq bench --corpus <dir>` — the published number in [`docs/BENCH.md`](https://github.com/AGGIB/Stroq/blob/main/docs/BENCH.md) is exactly that command run against the vendored corpus.
+
+`stroq prove --agent codex` uses the existing ChatGPT login and `gpt-5.6-luna` (measured
+with Codex CLI 0.162.1 on Windows). It runs the fixed probes without Codex's sandbox and
+bypasses hook trust for this invocation, with identical permissions in the control.
+Existing user hooks or local managed hook sources cause a refusal before inference.
+The driver starts a native executable directly; for npm Windows installations, set
+`STROQ_CODEX_BIN` to the package's native `codex.exe`. See the
+[recorded fixtures and limitations](https://github.com/AGGIB/Stroq/blob/main/packages/cli/test/fixtures/hosts/codex/README.md).
 
 ## Learn more
 

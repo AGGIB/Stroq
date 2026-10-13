@@ -12,16 +12,17 @@ import { outsideLine, wrapKeeping } from '../ui/layout.js';
 import type { ProbeResult } from '../live/types.js';
 import { isControlId, CONTROL_SUFFIX } from '../live/state-rule.js';
 import type { ProveReport } from './prove-report.js';
+import { CODEX_MODEL } from '../live/drivers/codex-argv.js';
 
 const WIDTH = 78;
 const NAME_WIDTH = 44;
 const MARK_WIDTH = 15;
 
-/** The model the check asks, which is the cheapest there is. */
+/** The Claude model the check asks. Codex uses its measured subscription model. */
 const MODEL_NAME = 'haiku';
 
 export const hostName = (agent: string): string =>
-  agent === 'claude-code' ? 'Claude Code' : outsideLine(agent);
+  agent === 'claude-code' ? 'Claude Code' : agent === 'codex' ? 'Codex CLI' : outsideLine(agent);
 
 const hostWithVersion = (agent: string, version: string | null): string =>
   version === null ? hostName(agent) : `${hostName(agent)} ${outsideLine(version)}`;
@@ -244,15 +245,22 @@ export function noticeText(facts: NoticeFacts): string[] {
   const requests = `${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'}`;
   return [
     ...wrapKeeping(
-      `stroq prove sends up to ${requests} to ${host} (model: ${MODEL_NAME}), with your own login.`,
+      `stroq prove sends up to ${requests} to ${host} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}), with your own login.`,
       WIDTH,
     ),
     ...bullet(
       "They count against your subscription usage. The login is your subscription's, never an API key; Stroq stops the host at once if it sees one.",
     ),
     ...bullet(
-      'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Claude Code notes the run in its own files, as it does for any run.',
+      facts.agent === 'codex'
+        ? 'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Codex uses ephemeral sessions and may update its own login and cache.'
+        : 'Everything happens in a temporary folder that is removed afterwards. Stroq does not change any file of yours; Claude Code notes the run in its own files, as it does for any run.',
     ),
+    ...(facts.agent === 'codex'
+      ? bullet(
+          'Codex runs these fixed probes without its sandbox and bypasses hook trust. The real run and control use the same permissions.',
+        )
+      : []),
     ...bullet(
       "The model is asked to run three harmless commands, one per request; Stroq's hook decides whether each one runs.",
     ),
@@ -271,7 +279,7 @@ export function dryRunText(facts: DryRunFacts): string[] {
     'Dry run: nothing was done and no request was made.',
     '',
     `Would check:  ${hostWithVersion(facts.agent, facts.hostVersion)}`,
-    `Would make:   up to ${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'} (model: ${MODEL_NAME}, your own login)`,
+    `Would make:   up to ${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}, your own login)`,
     `Hook line:    ${outsideLine(facts.hookLine)}`,
     `Using the policy: ${outsideLine(facts.policy)}`,
     '',

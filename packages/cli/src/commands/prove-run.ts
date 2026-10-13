@@ -10,7 +10,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Policy } from '@stroq/core';
-import { hookCommand } from './hook-command.js';
+import { hookCommand, windowsHookCommands } from './hook-command.js';
 import { definedEnv } from '../live/drivers/host-process.js';
 import { LiveCheckError } from '../live/errors.js';
 import type { Ledger } from '../live/budget.js';
@@ -36,7 +36,9 @@ export function defaultHookLine(agent: string): string {
   } catch {
     // Not a file we can resolve: the line is built from the path as it was given.
   }
-  return hookCommand(process.execPath, entry, agent);
+  return process.platform === 'win32' && agent === 'codex'
+    ? windowsHookCommands(process.execPath, entry, agent)[0]!
+    : hookCommand(process.execPath, entry, agent);
 }
 
 /** The signals that end a process without running a `finally`. */

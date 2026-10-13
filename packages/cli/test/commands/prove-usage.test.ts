@@ -57,16 +57,7 @@ describe('a command line it cannot use', () => {
 });
 
 describe('a host it cannot check', () => {
-  it.each([
-    'codex',
-    'cursor',
-    'windsurf',
-    'antigravity',
-    'copilot',
-    'openclaw',
-    'mcp',
-    'nothing-like-it',
-  ])(
+  it.each(['cursor', 'windsurf', 'antigravity', 'copilot', 'openclaw', 'mcp', 'nothing-like-it'])(
     'says %s is not supported yet, names the ones that are, and exits 3 without asking a host',
     async (agent) => {
       const ran = await prove(['--agent', agent, '--yes'], HONEST_LIVE);
@@ -91,10 +82,10 @@ describe('a host it cannot check', () => {
   });
 
   it('says so, in JSON, as a state of its own', async () => {
-    const ran = await prove(['--agent', 'codex', '--yes', '--json'], HONEST_LIVE);
+    const ran = await prove(['--agent', 'cursor', '--yes', '--json'], HONEST_LIVE);
     expect(json(ran)).toMatchObject({
       version: 1,
-      agent: 'codex',
+      agent: 'cursor',
       state: 'unsupported',
       mode: null,
       probes: [],
@@ -106,6 +97,15 @@ describe('a host it cannot check', () => {
     const ran = await prove(['--yes'], { ...HONEST_LIVE, platform: 'win32' });
     expect(ran.code).toBe(3);
     expect(ran.out).toMatch(/Windows/);
+    expect(ran.driver?.calls).toEqual([]);
+  });
+  it('allows a Codex dry run on Windows without making requests', async () => {
+    const ran = await prove(['--agent', 'codex', '--dry-run'], {
+      ...HONEST_LIVE,
+      platform: 'win32',
+    });
+    expect(ran.code).toBe(0);
+    expect(ran.out).toContain('gpt-5.6-luna');
     expect(ran.driver?.calls).toEqual([]);
   });
 

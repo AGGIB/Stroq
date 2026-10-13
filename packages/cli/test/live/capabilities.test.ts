@@ -19,7 +19,7 @@ describe('the capability table', () => {
   it('lets Codex be driven, with the caveat that its hook trust is bypassed', () => {
     expect(HOST_CAPABILITIES['codex']).toEqual({
       headless: true,
-      caveats: ['hook-trust-bypassed'],
+      caveats: ['hook-trust-bypassed', 'sandbox-disabled'],
     });
   });
 
@@ -45,8 +45,8 @@ describe('the capability table', () => {
       'utf8',
     ).replace(/\s*\n\s*\/\/\s*/g, ' ');
     expect(prose).toMatch(/assumptions, until a live run has measured them/);
-    expect(prose).toMatch(/The one measured fact in the table is the caveat of Codex/);
-    expect(prose).toMatch(/MEASURED, on Codex 0\.158\.0-alpha\.2/);
+    expect(prose).toMatch(/Recorded driver fixtures document the measured versions/);
+    expect(prose).toMatch(/MEASURED on Codex CLI 0\.162\.1, Windows/);
   });
 
   it.each(['cursor', 'windsurf', 'antigravity', 'copilot'])(

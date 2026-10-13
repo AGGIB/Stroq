@@ -7,7 +7,7 @@ export type { ProveDeps } from './prove-types.js';
 /**
  * `stroq prove` - show, on the real host, that a denied action does not happen.
  *
- * Everything else says what Stroq would do. This drives the host (Claude Code, today) on three harmless
+ * Everything else says what Stroq would do. This drives Claude Code or Codex CLI on three harmless
  * commands in a temporary folder, with Stroq's hook in the loop, and reads from places the model does not
  * write whether the one the policy denies was stopped, and whether the same command runs when the hook is
  * out of the way. It makes real requests on the owner's own login, so it says what it costs and asks first.

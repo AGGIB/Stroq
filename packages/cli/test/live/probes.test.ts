@@ -48,6 +48,11 @@ afterEach(() => {
 });
 
 describe('the nonce and the fake secret', () => {
+  it('uses native forward-slash paths for a Codex probe', () => {
+    const native = buildProbes(NONCE, FAKE, project, 'native');
+    expect(native[0]?.command).toContain(`${project.replace(/\\/g, '/')}/stroq-live-allow.txt`);
+    if (process.platform === 'win32') expect(native[0]?.command).not.toContain(posixPath(project));
+  });
   it('makes a nonce of stroq-live- and sixteen hex digits, and no two alike', () => {
     const seen = new Set(Array.from({ length: 500 }, () => newNonce()));
     expect(seen.size).toBe(500);

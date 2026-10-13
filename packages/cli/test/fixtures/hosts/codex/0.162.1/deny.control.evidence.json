@@ -1,0 +1,7 @@
+{
+  "exitCode": 0,
+  "sentinel": {
+    "exists": true,
+    "content": "[core]\n\thooksPath = stroq-live-0123456789abcdef\n"
+  }
+}

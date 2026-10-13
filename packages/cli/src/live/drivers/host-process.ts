@@ -69,6 +69,8 @@ export interface HostSpec {
   readonly spawn: HostSpawn;
   /** Gets what the process prints, as text; returns true to have the process killed on the spot. */
   readonly onStdout: (chunk: string) => boolean;
+  /** Some hosts report a rejected tool call only on stderr. */
+  readonly onStderr?: (chunk: string) => boolean;
   /** Aborted when the check is interrupted: the process is killed at once. */
   readonly signal?: AbortSignal | undefined;
 }
@@ -160,6 +162,10 @@ class Supervision {
 
   private onStderr(chunk: string): void {
     this.stderr = (this.stderr + chunk).slice(-STDERR_TAIL_CHARS);
+    if (!this.done && !this.stoppedByReader && !this.interrupted && this.spec.onStderr?.(chunk)) {
+      this.stoppedByReader = true;
+      this.killForGood();
+    }
   }
 
   private onError(err: Error): void {
