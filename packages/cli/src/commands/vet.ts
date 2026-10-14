@@ -2,7 +2,6 @@ import { parseArgs } from 'node:util';
 import { parseArgsProblem, usageError } from '../help.js';
 import type { ArtifactKind } from '../install/types.js';
 import type { VetDeps, VetOptions } from './vet-types.js';
-import { currentTerminal } from '../ui/terminal.js';
 
 export type { VetDeps, VetOptions } from './vet-types.js';
 
@@ -167,6 +166,8 @@ export async function runVet(args: readonly string[], deps: VetDeps = {}): Promi
   const { vetFlow } = await import('./vet-flow.js');
   return vetFlow(
     parsed.options,
-    parsed.options.probe ? { terminal: currentTerminal(), ...deps } : deps,
+    parsed.options.probe
+      ? { terminal: (await import('../ui/terminal.js')).currentTerminal(), ...deps }
+      : deps,
   );
 }
