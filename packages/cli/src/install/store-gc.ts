@@ -36,3 +36,19 @@ export async function collectSkillStore(
     if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
   }
 }
+
+/** The MCP counterpart: a revision stays while any skill or other MCP record still names it. */
+export async function collectMcpStore(
+  home: string,
+  lock: Passports,
+  digest: string,
+): Promise<void> {
+  const prefix = digest.slice(0, 32);
+  const live = (_key: string, value: unknown): unknown => (_key === 'history' ? undefined : value);
+  const skills = JSON.stringify(lock.skills ?? {}, live);
+  const mcp = JSON.stringify(lock.mcp ?? {}, live);
+  if (skills.includes(prefix) || mcp.includes(prefix)) return;
+  const stored = storePath(home, digest);
+  assertWriteAllowed(stored, { root: home, initRule: false });
+  if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
+}

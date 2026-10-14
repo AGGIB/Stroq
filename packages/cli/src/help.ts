@@ -20,26 +20,41 @@ interface CommandHelp {
 export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'add',
-    synopsis: 'add <local-source|installed-name> [--user] [--restore]',
+    synopsis:
+      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>]',
     about: [
       'read a local skill directory or tar archive, show its passport and require a person',
       'to type the first 12 hex digits of its digest before installing the inspected bytes.',
       'An installed name updates from its recorded source. A passport is not a security certificate.',
+      'With --kind mcp, a local Node server folder is stored by digest and its entry in the client',
+      'config is written to start only those bytes (--pin); only node servers are supported.',
     ],
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
-      ['--restore', 'restore an installed name from its confirmed store bytes'],
+      ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
+      ['--kind <kind>', 'skill (default) or mcp'],
+      ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
+      ['--config <path>', 'with --kind mcp: the client config file to edit'],
+      ['--entrypoint <file>', 'with --kind mcp: the start file, when package.json does not say'],
+      ['--pass-env <names>', 'with --kind mcp: comma-separated variables the server may see'],
+      ['--name <name>', 'with --kind mcp: the server name in the config'],
+      ['--cwd <dir>', 'with --kind mcp: the project directory decisions are made for'],
+      ['--force', 'with --kind mcp: update an entry changed outside Stroq'],
     ],
   },
   {
     name: 'remove',
-    synopsis: 'remove <name> [--force]',
-    about: ['remove a confirmed skill after a terminal y/N question, and record a receipt'],
+    synopsis: 'remove <name> [--force] [--kind skill|mcp]',
+    about: [
+      'remove a confirmed skill after a terminal y/N question, and record a receipt;',
+      'with --kind mcp, delete the config entry or restore the one it replaced',
+    ],
     flags: [
       [
         '--force',
-        'also remove a skill changed outside Stroq; still requires a person at a terminal',
+        'also remove a skill or entry changed outside Stroq; still requires a person at a terminal',
       ],
+      ['--kind <kind>', 'skill (default) or mcp'],
     ],
   },
   {
