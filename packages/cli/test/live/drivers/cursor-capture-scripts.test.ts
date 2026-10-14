@@ -206,6 +206,68 @@ describe('Cursor candidate capture scripts (synthetic test inputs)', () => {
     expect(result.stderr).not.toContain('a'.repeat(36));
     expect(existsSync(f.output)).toBe(false);
   });
+  it.each(['snapshot', 'hook', 'audit'])(
+    'rejects credentials in decoded %s file content before writing candidate bytes',
+    (kind) => {
+      const f = rawCapture();
+      const secret = 'synthetic-private-value';
+      const content = JSON.stringify({ password: secret });
+      const file =
+        kind === 'snapshot'
+          ? 'after.snapshot.json'
+          : kind === 'hook'
+            ? 'hooks.jsonl'
+            : 'audit.jsonl';
+      const record =
+        kind === 'hook' ? { input: { tool_input: { content } } } : { files: [{ content }] };
+      writeFileSync(join(f.root, file), JSON.stringify(record) + '\n');
+
+      const result = f.clean();
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('possible credentials');
+      expect(result.stderr).not.toContain(secret);
+      expect(existsSync(f.output)).toBe(false);
+    },
+  );
+  it('rejects credential keys escaped inside nested JSON content', () => {
+    const f = rawCapture();
+    const content = '{"p\\u0061ssword":"synthetic-private-value"}';
+    writeFileSync(
+      join(f.root, 'after.snapshot.json'),
+      JSON.stringify({ content: JSON.stringify({ content }) }),
+    );
+    const result = f.clean();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('possible credentials');
+    expect(result.stderr).not.toContain('synthetic-private-value');
+    expect(existsSync(f.output)).toBe(false);
+  });
+  it('relocates Windows paths inside a captured hooks.json without changing path forms', () => {
+    const f = rawCapture();
+    const root = 'C:\\Users\\alice\\AppData\\Local\\Temp\\stroq-cursor-capture-ABC123';
+    const project = root + '\\project';
+    writeFileSync(join(f.root, 'location.json'), JSON.stringify({ root, project }));
+    writeFileSync(
+      join(f.root, 'version.json'),
+      JSON.stringify({ version: '3.24.18', os: 'win32' }),
+    );
+    const original = {
+      hooks: { preToolUse: [{ command: `node "${root}\\record-hook.mjs"` }] },
+    };
+    writeFileSync(
+      join(f.root, 'after.snapshot.json'),
+      JSON.stringify({
+        files: [{ path: project + '\\.cursor\\hooks.json', content: JSON.stringify(original) }],
+      }),
+    );
+    const result = f.clean();
+    expect(result.status, result.stderr).toBe(0);
+    const snapshot = JSON.parse(readFileSync(join(f.output, 'after.snapshot.json'), 'utf8'));
+    expect(snapshot.files[0].path).toBe('C:\\stroq-live-fixture\\project\\.cursor\\hooks.json');
+    expect(JSON.parse(snapshot.files[0].content).hooks.preToolUse[0].command).toBe(
+      'node "C:\\stroq-live-fixture\\record-hook.mjs"',
+    );
+  });
   it('fails closed when the requested Cursor executable is unavailable', () => {
     const root = mkdtempSync(join(tmpdir(), 'stroq-cursor-prepare-test-'));
     const output = join(root, 'raw');

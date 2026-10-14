@@ -16,6 +16,36 @@ function safeJson(text: string): unknown {
     throw new Error('invalid capture JSON; inspect the raw file locally');
   }
 }
+const POSSIBLE_CREDENTIAL =
+  /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"(?:password|api_key|authorization|access_token)"\s*:/i;
+const CREDENTIAL_KEY = /^(?:password|api_key|authorization|access_token)$/i;
+
+/** Captured file bodies can themselves contain JSON encoded inside the host record. */
+function assertNoCredentials(raw: string): void {
+  const pending: unknown[] = [raw];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === 'string') {
+      if (POSSIBLE_CREDENTIAL.test(value))
+        throw new Error('raw capture contains possible credentials; remove them before cleaning');
+      if (/^\s*["\[{]/.test(value)) {
+        try {
+          pending.push(JSON.parse(value));
+        } catch {
+          // Ordinary source or command text need not be JSON; its decoded text was checked above.
+        }
+      }
+    } else if (Array.isArray(value)) {
+      for (const each of value) pending.push(each);
+    } else if (value !== null && typeof value === 'object') {
+      for (const [key, each] of Object.entries(value)) {
+        if (CREDENTIAL_KEY.test(key))
+          throw new Error('raw capture contains possible credentials; remove them before cleaning');
+        pending.push(each);
+      }
+    }
+  }
+}
 const location = safeJson(readFileSync(join(input, 'location.json'), 'utf8')) as {
   project?: string;
   home?: string;
@@ -105,16 +135,15 @@ renames.push(
 renames.sort((a, b) => b[0].length - a[0].length);
 const candidates = files.map((name) => {
   const raw = readFileSync(join(input, name), 'utf8');
-  if (
-    /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"(?:password|api_key|authorization|access_token)"\s*:/i.test(
-      raw,
-    )
-  )
-    throw new Error('raw capture contains possible credentials; remove them before cleaning');
+  // Check each decoded record as well as the raw stream, including nested file contents.
+  assertNoCredentials(raw);
   const lines = (
     name.endsWith('.jsonl') ? raw.split('\n').filter((line) => line.trim() !== '') : [raw]
   )
-    .map((line) => JSON.stringify(anonymizeIds(safeJson(line))))
+    .map((line) => {
+      assertNoCredentials(line);
+      return JSON.stringify(anonymizeIds(safeJson(line)));
+    })
     .join('\n');
   let relocated = lines;
   // Relocate the exact project before the generic home anonymizer changes its prefix.

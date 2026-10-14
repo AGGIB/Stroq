@@ -4,14 +4,16 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createThrowawayRoot, assertThrowaway } from '../packages/cli/src/live/throwaway.js';
 import { installCursorHooks } from '../packages/cli/src/commands/cursor-hooks.js';
+import { assertWriteAllowed } from '../packages/cli/src/harden/atomic.js';
 import { cursorRecorderSource } from './cursor-capture-recorder.js';
 
-const [action, target, executable] = process.argv.slice(2);
-if (!target || !['prepare', 'snapshot', 'control', 'restore'].includes(action ?? ''))
+const [action, rawTarget, executable] = process.argv.slice(2);
+if (!rawTarget || !['prepare', 'snapshot', 'control', 'restore'].includes(action ?? ''))
   throw new Error(
     'usage: tsx scripts/capture-cursor-fixture.ts prepare <new raw directory outside repo> <Cursor executable>; snapshot <raw directory> <step label>; control|restore <raw directory>',
   );
-const location = relative(process.cwd(), resolve(target));
+const target = resolve(rawTarget);
+const location = relative(process.cwd(), target);
 if (location === '' || (!isAbsolute(location) && !location.startsWith(`..${sep}`)))
   throw new Error('raw captures must stay outside the repository');
 
@@ -102,7 +104,13 @@ if (action === 'prepare') {
   assertThrowaway(made.project);
   if (realpathSync(made.project) !== join(realpathSync(made.root), 'project'))
     throw new Error('snapshot project is not the prepared throwaway project');
-  const hooksFile = join(made.project, '.cursor', 'hooks.json');
+  const projectFile = (path: string): string => {
+    const file = join(made.project, path);
+    // Markers validate the prepared root; descendants must remain inside it as well.
+    assertWriteAllowed(file, { root: made.project, initRule: false });
+    return file;
+  };
+  const hooksFile = projectFile('.cursor/hooks.json');
   const backup = join(target, 'enforcing-hooks.json');
   const controlCopy = join(target, 'control-hooks-config.json');
   if (action === 'control') {
@@ -141,7 +149,7 @@ if (action === 'prepare') {
     '.claude/settings.json',
   ];
   const files = paths.map((path) => {
-    const file = join(made.project, path);
+    const file = projectFile(path);
     return {
       path,
       exists: existsSync(file),
