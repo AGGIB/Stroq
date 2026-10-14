@@ -1,0 +1,55 @@
+{
+  "host": "cursor",
+  "version": "3.24.18",
+  "os": "win32",
+  "recordedDate": "2026-10-14",
+  "kind": "recorded-host",
+  "model": "grok-4.6",
+  "provenance": "Actual Windows Cursor desktop Agent requests submitted manually by the operator in an authorized marked throwaway project. Recorder forwarded original stdin to the built Stroq CLI and captured responses. Disk snapshots and the fresh live audit were independently inspected. No model requests occur in replay.",
+  "scope": {
+    "preToolUse": {
+      "Write": ["allow", "deny-self-tamper"],
+      "Delete": ["allow", "deny-self-tamper"]
+    },
+    "afterFileEdit": ["allowed scratch Write", "control Write with preToolUse disabled"],
+    "beforeReadFile": "four incidental observations",
+    "control": "Write to the same harmless .claude/settings.json sentinel succeeded with only preToolUse disabled; no independent ungated Delete control was run.",
+    "excluded": [
+      "Cursor Tab",
+      "Cursor Agent CLI",
+      "other OS/releases",
+      "shell/MCP live enforcement",
+      "multi-root"
+    ]
+  },
+  "sanitization": [
+    "Exact private paths replaced while retaining Windows native file paths and /C:/ URI workspace roots.",
+    "Session/generation/tool ids replaced by shared aliases across hooks and audit. Email replaced by fixture-user@example.invalid.",
+    "JSON whitespace normalized; inputHadBom preserves observed BOM metadata. Audit hashes are original values: redaction invalidates their chain and replay does not claim hash verification."
+  ],
+  "files": [
+    "hooks.jsonl",
+    "audit.jsonl",
+    "before-validated.snapshot.json",
+    "after-allow-before-deny.snapshot.json",
+    "after-deny.snapshot.json",
+    "before-control.snapshot.json",
+    "after-control.snapshot.json",
+    "after-restore.snapshot.json"
+  ],
+  "sha256": {
+    "hooks.jsonl": "3711385382fd18cea808b3b4177a2ce69f9987fd02aecb1ecdc07c3aee417f90",
+    "audit.jsonl": "74fbc5eb6e7bd715fcacaa93d233fa7f285c875a67c427e51886d7a7f5373fad",
+    "before-validated.snapshot.json": "cbfc4a8f33b492ca36cd2aa683b9e91f775f2e54fc9b59c9e85ee9bc35b395ad",
+    "after-allow-before-deny.snapshot.json": "1ef54300518053e5e6387bc87bc8112f59b198bfcfedbd54386ee72ecfa65b60",
+    "after-deny.snapshot.json": "587c3dc71241ba91d9778f732375fba23576c2246397d21754bdf8f98c26fcf7",
+    "before-control.snapshot.json": "9e701a15655402960ef72675271627baca2432b39dcb40838f62e7c3ccd871f5",
+    "after-control.snapshot.json": "61879d29b3e8c9e29464334db8e7696dbc1eecee9ca3c5dc548e0a64454656a7",
+    "after-restore.snapshot.json": "0048594f8754e8a2e6319d87858859a4547e59582318e85c8f65b616433ef7c4"
+  },
+  "stroqBuild": {
+    "packageVersion": "0.25.1",
+    "distribution": "local development build with the explicit-allow and Windows-root adapter fixes",
+    "cliSha256": "7471a3b2f20d22482222576da4a17bb80484ba692181d326c339f6ca3275587b"
+  }
+}

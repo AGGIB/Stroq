@@ -873,7 +873,7 @@ Stroq is young; here's what it actually gives you today, and where the edges are
 ## Roadmap
 
 - Local daemon with an ONNX-based classifier, replacing per-invocation Node startup and pure regex matching for the content scan.
-- Cursor Tab hook coverage and recorded Cursor payloads to validate the `preToolUse` Write/Delete integration on a live host.
+- Cursor Tab hook coverage and broader release/OS measurements beyond the [recorded desktop 3.24.18 Windows Write/Delete contract](../packages/cli/test/fixtures/hosts/cursor/README.md).
 - Directory-level self-tamper (a bare `rm -rf .cursor` or `mv .windsurf …`), path normalisation in the protected-path match, and a directory-aware secret-path classifier (`~/.ssh` without a trailing slash) — the limits recorded in [docs/AGENTS.md](AGENTS.md).
 - Recorded wire fixtures for Codex, Copilot CLI, OpenClaw and Windsurf in place of the hand-written ones.
 - NER for the MCP cloak, so unlabelled person names and street addresses in prose are detected too — the one thing AgentCloak Desktop does that Stroq's cloak does not. It waits on a way to do it without adding a native runtime dependency.

@@ -91,7 +91,7 @@ describe('runHook agent routing', () => {
         command: 'ls -la',
       }),
     );
-    expect(allowed).toEqual({ stdout: '', exitCode: 0 });
+    expect(allowed).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
 
     const asked = await runHook(
       'cursor',

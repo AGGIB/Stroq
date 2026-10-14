@@ -1,0 +1,12 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000001",
+  "generation_id": "gen-00000000-0000-4000-8000-000000000001",
+  "hook_event_name": "preToolUse",
+  "workspace_roots": ["/tmp/stroq-live-fixture/project"],
+  "cwd": "/tmp/stroq-live-fixture/project",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/tmp/stroq-live-fixture/project/src/sentinel-allow.ts",
+    "content": "export const sentinel = 'stroq-live-0123456789abcdef';\n"
+  }
+}

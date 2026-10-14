@@ -47,9 +47,9 @@ describe('handleCursorHook — MCP secret egress end to end', () => {
     expect(String(json['user_message'])).toContain('deny-secret-egress');
   });
 
-  it('prints nothing for a harmless body', async () => {
+  it('returns an explicit allow for a harmless body', async () => {
     expect(await addIssueComment(JSON.stringify({ body: 'looks fine' }))).toEqual({
-      stdout: '',
+      stdout: JSON.stringify({ permission: 'allow' }),
       exitCode: 0,
     });
   });
