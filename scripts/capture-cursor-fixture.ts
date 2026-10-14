@@ -106,8 +106,6 @@ if (action === 'prepare') {
   const backup = join(target, 'enforcing-hooks.json');
   const controlCopy = join(target, 'control-hooks-config.json');
   if (action === 'control') {
-    if (existsSync(backup))
-      throw new Error('one control per capture; preserve its backup and prepare a new capture');
     const original = readFileSync(hooksFile, 'utf8');
     const config = JSON.parse(original) as { hooks?: Record<string, unknown> };
     const entries = config.hooks?.['preToolUse'];
@@ -120,6 +118,7 @@ if (action === 'prepare') {
       throw new Error('refusing to disable an unexpected gate');
     const control =
       JSON.stringify({ ...config, hooks: { ...config.hooks, preToolUse: [] } }, null, 2) + '\n';
+    // Exclusive creation is the existence check; never replace an earlier backup.
     writeFileSync(backup, original, { flag: 'wx', mode: 0o600 });
     writeFileSync(controlCopy, control, { flag: 'wx', mode: 0o600 });
     writeFileSync(hooksFile, control);

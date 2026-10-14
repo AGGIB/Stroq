@@ -62,6 +62,10 @@ describe('Cursor candidate capture scripts (synthetic test inputs)', () => {
     const restored = run('restore');
     expect(restored.status, restored.stderr).toBe(0);
     expect(readFileSync(file, 'utf8')).toBe(original);
+    const repeated = run('control');
+    expect(repeated.status).not.toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(original);
+    expect(readFileSync(join(f.root, 'enforcing-hooks.json'), 'utf8')).toBe(original);
   });
 
   it('refuses to disable hooks outside a marked throwaway project', () => {
