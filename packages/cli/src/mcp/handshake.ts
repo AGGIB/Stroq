@@ -1,6 +1,12 @@
 import type { ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import { loadBundledRules, scanContent, scanFieldsForTool, type CompiledRule } from '@stroq/core';
+import {
+  DEFAULT_MAX_CHARS,
+  loadBundledRules,
+  scanContent,
+  scanFieldsForTool,
+  type CompiledRule,
+} from '@stroq/core';
 import { killChildTree } from './kill-child.js';
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
@@ -67,29 +73,49 @@ function listRequest(id: number, cursor?: string): string {
   });
 }
 
-function toolText(tool: McpToolRecord): string {
+function toolText(tool: McpToolRecord): { text: string; unreadableMetadata: boolean } {
   const parts: string[] = [];
+  let unreadableMetadata = false;
   if (typeof tool.name === 'string') parts.push(tool.name);
   if (typeof tool.title === 'string') parts.push(tool.title);
   if (typeof tool.description === 'string') parts.push(tool.description);
-  if (tool.annotations !== undefined) parts.push(JSON.stringify(tool.annotations) ?? '');
-  if (tool.inputSchema !== undefined) parts.push(JSON.stringify(tool.inputSchema) ?? '');
-  return parts.filter((part) => part !== '').join(' ');
+  for (const value of [tool.annotations, tool.inputSchema]) {
+    if (value === undefined) continue;
+    try {
+      parts.push(JSON.stringify(value) ?? '');
+    } catch {
+      // A bounded JSON reply can still nest deeply enough to overflow JSON.stringify.
+      // Keep the other fields, but disclose the metadata that could not be inspected.
+      unreadableMetadata = true;
+    }
+  }
+  return { text: parts.filter((part) => part !== '').join(' '), unreadableMetadata };
 }
 
 export function scanTools(
   tools: readonly McpToolRecord[],
   rules: readonly CompiledRule[],
-): { readonly flagged: readonly string[]; readonly matches: readonly ToolScanMatch[] } {
+): {
+  readonly flagged: readonly string[];
+  readonly matches: readonly ToolScanMatch[];
+  readonly incompleteReason: string | null;
+} {
   const flagged: string[] = [];
   const matches: ToolScanMatch[] = [];
+  const incomplete = new Set<string>();
   for (const t of tools) {
-    const text = toolText(t);
+    const { text, unreadableMetadata } = toolText(t);
+    if (unreadableMetadata)
+      incomplete.add('tool metadata could not be serialized; some fields were not scanned');
+    if (text.length > DEFAULT_MAX_CHARS)
+      incomplete.add(
+        `tool metadata exceeded scan limit (${DEFAULT_MAX_CHARS} characters); only the metadata prefix was scanned`,
+      );
     if (text === '') continue;
     const scan = scanContent(
       rules,
       text,
-      {},
+      { maxChars: DEFAULT_MAX_CHARS },
       {
         target: 'tool_description',
         ...scanFieldsForTool('mcp__probe__tools_list', text),
@@ -103,7 +129,11 @@ export function scanTools(
       }
     }
   }
-  return { flagged, matches };
+  return {
+    flagged,
+    matches,
+    incompleteReason: incomplete.size === 0 ? null : [...incomplete].join('; '),
+  };
 }
 
 export function flaggedTools(
@@ -155,13 +185,16 @@ export async function runMcpHandshake(
         /* ignore */
       }
       const tools = accumulatedTools.slice(0, maxTools);
-      const { flagged, matches } = scanTools(tools, rules);
+      const { flagged, matches, incompleteReason } = scanTools(tools, rules);
+      const reasons = [result.incompleteReason, incompleteReason].filter(
+        (reason): reason is string => reason !== null,
+      );
       resolve({
         tools,
         flagged,
         matches,
         error: result.error,
-        incompleteReason: result.incompleteReason,
+        incompleteReason: reasons.length === 0 ? null : reasons.join('; '),
         pages: pagesCount,
       });
     };
@@ -271,6 +304,14 @@ export async function runMcpHandshake(
               accumulatedTools.push(t);
             }
 
+            if (accumulatedTools.length > maxTools) {
+              finish({
+                error: null,
+                incompleteReason: `tools/list exceeded tool limit (${maxTools} tools)`,
+              });
+              return;
+            }
+
             if (singlePage) {
               finish({ error: null, incompleteReason: null });
               return;
@@ -282,10 +323,7 @@ export async function runMcpHandshake(
               finish({ error: 'invalid nextCursor', incompleteReason: 'protocol error' });
               return;
             }
-            if (
-              accumulatedTools.length > maxTools ||
-              (accumulatedTools.length === maxTools && more)
-            ) {
+            if (accumulatedTools.length === maxTools && more) {
               finish({
                 error: null,
                 incompleteReason: `tools/list exceeded tool limit (${maxTools} tools)`,

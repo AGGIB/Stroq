@@ -90,7 +90,7 @@ async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResul
     server: spec.name,
     tools: result.tools.length,
     flagged: result.flagged,
-    error: result.error,
+    error: result.error ?? result.incompleteReason,
   };
 }
 
