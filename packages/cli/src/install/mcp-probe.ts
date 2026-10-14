@@ -1,6 +1,15 @@
 import type { ChildProcess } from 'node:child_process';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { CompiledRule } from '@stroq/core';
@@ -68,13 +77,18 @@ export interface McpProbeResult {
 export function probeSandboxSettings(
   scratchDir: string,
   userHome: string,
-  host: { realpath?: (path: string) => string; readdir?: (path: string) => string[] } = {},
+  host: {
+    realpath?: (path: string) => string;
+    readdir?: (path: string) => string[];
+    runtimeReads?: readonly string[];
+  } = {},
 ): SrtSettings & { filesystem: SrtSettings['filesystem'] & { allowRead: readonly string[] } } {
   const real = host.realpath ?? realpathSync;
   // Fail closed when the runtime or home cannot be resolved.
   const realHome = real(userHome);
   const realNode = real(process.execPath);
-  if ([scratchDir, realHome, realNode].some(hasGlobSyntax))
+  const runtimeReads = host.runtimeReads ?? [];
+  if ([scratchDir, realHome, realNode, ...runtimeReads].some(hasGlobSyntax))
     throw new McpProbeRefusalError(
       'probe paths contain sandbox glob syntax; the server was not started',
     );
@@ -84,6 +98,7 @@ export function probeSandboxSettings(
       allowRead: [
         scratchDir,
         realNode,
+        ...runtimeReads,
         '/bin',
         '/usr/bin',
         '/usr/lib',
@@ -97,11 +112,39 @@ export function probeSandboxSettings(
         '/dev/random',
         '/etc/ld.so.cache',
       ],
-      denyWrite: [],
+      // srt implicitly permits its shared temp directory; this probe uses private scratch instead.
+      denyWrite: ['/tmp/claude', '/private/tmp/claude'],
       allowWrite: [scratchDir],
     },
     network: { allowedDomains: [], deniedDomains: ['*'] },
   };
+}
+
+/** Only the Linux seccomp helper enters the child namespace; never grant its package or home. */
+export function probeRuntimeReads(srt: string, arch: string = process.arch): readonly string[] {
+  if (arch !== 'x64' && arch !== 'arm64')
+    throw new McpProbeRefusalError(
+      'unsupported sandbox-runtime architecture; the server was not started',
+    );
+  let root = dirname(realpathSync(srt));
+  for (let depth = 0; depth < 4; depth++) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+        name?: unknown;
+      };
+      if (pkg.name === '@anthropic-ai/sandbox-runtime') {
+        const helper = realpathSync(join(root, 'vendor', 'seccomp', arch, 'apply-seccomp'));
+        if (!statSync(helper).isFile() || hasGlobSyntax(helper)) break;
+        return [helper];
+      }
+    } catch {
+      // Keep looking at the bounded set of parents of the trusted launcher.
+    }
+    root = dirname(root);
+  }
+  throw new McpProbeRefusalError(
+    'cannot locate sandbox-runtime seccomp helper; the server was not started',
+  );
 }
 
 export function syntheticProbeEnv(scratchDir: string, plat: NodeJS.Platform): NodeJS.ProcessEnv {
@@ -124,6 +167,7 @@ export function syntheticProbeEnv(scratchDir: string, plat: NodeJS.Platform): No
   env['TMPDIR'] = join(scratchDir, 'tmp');
   env['TMP'] = join(scratchDir, 'tmp');
   env['TEMP'] = join(scratchDir, 'tmp');
+  env['CLAUDE_CODE_TMPDIR'] = join(scratchDir, 'tmp');
 
   return env;
 }
@@ -272,16 +316,17 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
     }
 
     const entrypointAbs = join(treeDir, ...entryFile.split('/'));
-    const settings = probeSandboxSettings(scratchDir, userHome);
+    const srtBin =
+      options.srtBin !== undefined ? options.srtBin : binOnPath('srt', process.env, plat);
+    const runtimeReads =
+      plat === 'linux' && srtBin !== null && existsSync(srtBin) ? probeRuntimeReads(srtBin) : [];
+    const settings = probeSandboxSettings(scratchDir, userHome, { runtimeReads });
     const settingsFile = join(scratchDir, 'srt-settings.json');
     writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
 
     const env = syntheticProbeEnv(scratchDir, plat);
 
     let handshakeResult: HandshakeResult;
-    const srtBin =
-      options.srtBin !== undefined ? options.srtBin : binOnPath('srt', process.env, plat);
-
     if (options.launcher === undefined) {
       const version = spawnSync(srtBin!, ['--version'], { env, encoding: 'utf8', timeout: 5000 });
       const match = /\b(\d+)\.(\d+)\.(\d+)\b/.exec(version.stdout ?? '');

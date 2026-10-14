@@ -9,6 +9,7 @@ import { runVet } from '../../src/commands/vet.js';
 import {
   probeMcpTree,
   probeSandboxSettings,
+  probeRuntimeReads,
   syntheticProbeEnv,
   type ProbeLaunchSpec,
 } from '../../src/install/mcp-probe.js';
@@ -35,6 +36,33 @@ function makeTree(files: Record<string, string>): Tree {
 }
 
 describe('probeSandboxSettings and syntheticProbeEnv', () => {
+  it('allows only the installed seccomp helper rather than its package directory', () => {
+    const root = fixture();
+    mkdirSync(join(root, 'dist'));
+    mkdirSync(join(root, 'vendor', 'seccomp', 'x64'), { recursive: true });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: '@anthropic-ai/sandbox-runtime' }),
+    );
+    const launcher = join(root, 'dist', 'cli.js');
+    writeFileSync(launcher, '');
+    const helper = join(root, 'vendor', 'seccomp', 'x64', 'apply-seccomp');
+    writeFileSync(helper, 'fixture');
+    const runtimeReads = probeRuntimeReads(launcher, 'x64');
+    expect(runtimeReads).toEqual([helper]);
+    const settings = probeSandboxSettings(join(root, 'scratch'), root, { runtimeReads });
+    expect(settings.filesystem.allowRead).toContain(helper);
+    expect(settings.filesystem.allowRead).not.toContain(root);
+  });
+
+  it('refuses unsupported architectures and missing seccomp helpers', () => {
+    const root = fixture();
+    const launcher = join(root, 'srt');
+    writeFileSync(launcher, '');
+    expect(() => probeRuntimeReads(launcher, 'ia32')).toThrow('unsupported');
+    expect(() => probeRuntimeReads(launcher, 'x64')).toThrow('cannot locate');
+  });
+
   it('enforces scratch allowWrite, empty network allowlist, and denyRead on realHome children except node prefix', () => {
     const dir = fixture();
     const home = join(dir, 'userhome');
@@ -52,6 +80,7 @@ describe('probeSandboxSettings and syntheticProbeEnv', () => {
     });
 
     expect(settings.filesystem.allowWrite).toEqual([scratch]);
+    expect(settings.filesystem.denyWrite).toEqual(['/tmp/claude', '/private/tmp/claude']);
     expect(settings.network.allowedDomains).toEqual([]);
     expect(settings.network.deniedDomains).toEqual(['*']);
     expect(settings.filesystem.denyRead).toContain('/');
@@ -71,6 +100,7 @@ describe('probeSandboxSettings and syntheticProbeEnv', () => {
     expect(env['HOME']).toBe(join(scratch, 'home'));
     expect(env['XDG_CONFIG_HOME']).toBe(join(scratch, 'xdg', 'config'));
     expect(env['TMPDIR']).toBe(join(scratch, 'tmp'));
+    expect(env['CLAUDE_CODE_TMPDIR']).toBe(join(scratch, 'tmp'));
   });
 });
 
