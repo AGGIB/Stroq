@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,14 +57,27 @@ let buf='';process.stdin.on('data',c=>{buf+=c;let n;while((n=buf.indexOf('\\n'))
       { complete: true },
     );
     try {
+      let diagnostic = '';
       const result = await probeMcpTree({
         tree,
         entrypoint: 'server.mjs',
         userHome: home,
         confirm: () => true,
         timeoutMs: 15_000,
+        launcher: (spec) => {
+          const child = spawn(spec.command, [...spec.args], {
+            cwd: spec.cwd,
+            env: spec.env,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          child.stderr.on('data', (chunk) => {
+            diagnostic = (diagnostic + String(chunk)).slice(0, 8192);
+          });
+          return child;
+        },
       });
-      expect(result.error).toBeNull();
+      expect(result.error, diagnostic).toBeNull();
       expect(result.tools).toHaveLength(1);
       expect(JSON.parse(result.tools[0]!.description!)).toEqual({
         unrelated: false,
