@@ -1,14 +1,15 @@
 import type { ChildProcess } from 'node:child_process';
-import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { CompiledRule } from '@stroq/core';
-import { childEnv } from '../mcp/child-env.js';
+import { assertWritableTree } from './store.js';
+import { buildTree, treeDigest } from './tree.js';
 import { entrypointOf } from '../mcp/entrypoint.js';
 import { runMcpHandshake, type HandshakeResult, type McpToolRecord } from '../mcp/handshake.js';
 import { killChildTree } from '../mcp/kill-child.js';
-import { srtArgv, type SrtSettings } from '../run/sandbox.js';
+import { hasGlobSyntax, srtArgv, type SrtSettings } from '../run/sandbox.js';
 import { binOnPath } from '../run/which.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
@@ -68,66 +69,46 @@ export function probeSandboxSettings(
   scratchDir: string,
   userHome: string,
   host: { realpath?: (path: string) => string; readdir?: (path: string) => string[] } = {},
-): SrtSettings {
+): SrtSettings & { filesystem: SrtSettings['filesystem'] & { allowRead: readonly string[] } } {
   const real = host.realpath ?? realpathSync;
-  const readdir = host.readdir ?? readdirSync;
-
-  let realHome: string;
-  try {
-    realHome = real(userHome);
-  } catch {
-    realHome = resolve(userHome);
-  }
-
-  let realNode: string;
-  try {
-    realNode = real(process.execPath);
-  } catch {
-    realNode = resolve(process.execPath);
-  }
-
-  // Which direct child of realHome is an ancestor of realNode, if any?
-  let nodePrefixChild: string | null = null;
-  const rel = relative(realHome, realNode);
-  if (rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)) {
-    const firstSegment = rel.split(sep)[0];
-    if (firstSegment) {
-      nodePrefixChild = join(realHome, firstSegment);
-    }
-  }
-
-  const denyRead: string[] = [];
-  try {
-    const children = readdir(realHome);
-    for (const child of children) {
-      const childPath = join(realHome, child);
-      if (nodePrefixChild !== null && resolve(childPath) === resolve(nodePrefixChild)) {
-        continue;
-      }
-      denyRead.push(childPath);
-    }
-  } catch {
-    if (nodePrefixChild === null) {
-      denyRead.push(realHome);
-    }
-  }
-
+  // Fail closed when the runtime or home cannot be resolved.
+  const realHome = real(userHome);
+  const realNode = real(process.execPath);
+  if ([scratchDir, realHome, realNode].some(hasGlobSyntax))
+    throw new McpProbeRefusalError(
+      'probe paths contain sandbox glob syntax; the server was not started',
+    );
   return {
     filesystem: {
-      denyRead,
+      denyRead: ['/', realHome],
+      allowRead: [
+        scratchDir,
+        realNode,
+        '/bin',
+        '/usr/bin',
+        '/usr/lib',
+        '/usr/lib64',
+        '/lib',
+        '/lib64',
+        '/System/Library',
+        '/Library/Apple/System/Library',
+        '/dev/null',
+        '/dev/urandom',
+        '/dev/random',
+        '/etc/ld.so.cache',
+      ],
       denyWrite: [],
       allowWrite: [scratchDir],
     },
-    network: {
-      allowedDomains: [],
-      deniedDomains: [],
-    },
+    network: { allowedDomains: [], deniedDomains: ['*'] },
   };
 }
 
 export function syntheticProbeEnv(scratchDir: string, plat: NodeJS.Platform): NodeJS.ProcessEnv {
-  const baseEnv = childEnv([], process.env, plat);
-  const env: NodeJS.ProcessEnv = { ...baseEnv };
+  const env: NodeJS.ProcessEnv = {};
+  for (const name of ['PATH', 'LANG', 'LC_ALL', 'SystemRoot', 'COMSPEC', 'PATHEXT']) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
 
   delete env['HOME'];
   delete env['USERPROFILE'];
@@ -148,7 +129,9 @@ export function syntheticProbeEnv(scratchDir: string, plat: NodeJS.Platform): No
 }
 
 export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeResult> {
-  const entryFile = entrypointOf(options.tree, options.entrypoint);
+  const tree = buildTree(options.tree.entries, { complete: true });
+  assertWritableTree(tree, treeDigest(tree));
+  const entryFile = entrypointOf(tree, options.entrypoint);
   const plat = options.platform ?? process.platform;
   const userHome = options.userHome ?? homedir();
 
@@ -227,31 +210,6 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
   const scratchXdgData = join(scratchDir, 'xdg', 'data');
   const scratchTmp = join(scratchDir, 'tmp');
 
-  mkdirSync(treeDir, { recursive: true, mode: 0o700 });
-  mkdirSync(scratchHome, { recursive: true, mode: 0o700 });
-  mkdirSync(scratchXdgConfig, { recursive: true, mode: 0o700 });
-  mkdirSync(scratchXdgData, { recursive: true, mode: 0o700 });
-  mkdirSync(scratchTmp, { recursive: true, mode: 0o700 });
-
-  // Materialize verified tree into scratch/tree
-  for (const entry of options.tree.entries) {
-    if (entry.kind === 'file') {
-      const target = join(treeDir, ...entry.path.split('/'));
-      mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-      writeFileSync(target, entry.bytes ?? Buffer.from(''), {
-        mode: entry.exec ? 0o700 : 0o600,
-        flag: 'wx',
-      });
-    }
-  }
-
-  const entrypointAbs = join(treeDir, ...entryFile.split('/'));
-  const settings = probeSandboxSettings(scratchDir, userHome);
-  const settingsFile = join(scratchDir, 'srt-settings.json');
-  writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
-
-  const env = syntheticProbeEnv(scratchDir, plat);
-
   let spawnedChild: ChildProcess | null = null;
   let cleaned = false;
 
@@ -260,6 +218,13 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
     cleaned = true;
     if (spawnedChild) {
       try {
+        if (process.platform !== 'win32' && spawnedChild.pid !== undefined) {
+          try {
+            process.kill(-spawnedChild.pid, 'SIGKILL');
+          } catch {
+            /* group already gone */
+          }
+        }
         killChildTree(spawnedChild, 'SIGKILL');
       } catch {
         /* ignore */
@@ -282,9 +247,47 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
   process.once('exit', cleanup);
 
   try {
+    mkdirSync(treeDir, { recursive: true, mode: 0o700 });
+    mkdirSync(scratchHome, { recursive: true, mode: 0o700 });
+    mkdirSync(scratchXdgConfig, { recursive: true, mode: 0o700 });
+    mkdirSync(scratchXdgData, { recursive: true, mode: 0o700 });
+    mkdirSync(scratchTmp, { recursive: true, mode: 0o700 });
+
+    // Materialize verified tree into scratch/tree
+    for (const entry of tree.entries) {
+      if (entry.kind === 'file') {
+        const target = join(treeDir, ...entry.path.split('/'));
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        writeFileSync(target, entry.bytes ?? Buffer.from(''), {
+          mode: entry.exec ? 0o700 : 0o600,
+          flag: 'wx',
+        });
+      }
+    }
+
+    const entrypointAbs = join(treeDir, ...entryFile.split('/'));
+    const settings = probeSandboxSettings(scratchDir, userHome);
+    const settingsFile = join(scratchDir, 'srt-settings.json');
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+
+    const env = syntheticProbeEnv(scratchDir, plat);
+
     let handshakeResult: HandshakeResult;
     const srtBin =
       options.srtBin !== undefined ? options.srtBin : binOnPath('srt', process.env, plat);
+
+    if (options.launcher === undefined) {
+      const version = spawnSync(srtBin!, ['--version'], { env, encoding: 'utf8', timeout: 5000 });
+      const match = /\b(\d+)\.(\d+)\.(\d+)\b/.exec(version.stdout ?? '');
+      if (
+        version.status !== 0 ||
+        !match ||
+        (Number(match[1]) === 0 && Number(match[2]) === 0 && Number(match[3]) < 79)
+      )
+        throw new McpProbeRefusalError(
+          'sandboxed probe requires srt >=0.0.79 with allowRead support; the server was not started',
+        );
+    }
 
     if (options.launcher !== undefined) {
       const launched = await options.launcher({
@@ -313,6 +316,7 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
       spawnedChild = spawn(srtBin!, srtArgv(settingsFile, process.execPath, [entrypointAbs]), {
         cwd: treeDir,
         env,
+        detached: true,
         stdio: ['pipe', 'pipe', 'ignore'],
       });
       handshakeResult = await runMcpHandshake(spawnedChild, {

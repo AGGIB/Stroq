@@ -258,10 +258,19 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
   const { passport, tree } = made;
   let finalPassport = passport;
 
+  if (options.expect !== null && options.expect !== passport.artifact.digest) {
+    io.err(mismatchText(options.expect, passport.artifact.digest));
+    return EXIT_UNCONFIRMED;
+  }
+
   if (options.probe) {
     if (passport.artifact.kind !== 'mcp') {
       io.err(usageError('vet', '--probe is only supported for an MCP server'));
       return EXIT_USAGE;
+    }
+    if (passportIsIncomplete(passport)) {
+      io.err(incompleteText(passport));
+      return EXIT_UNCONFIRMED;
     }
 
     try {
@@ -275,7 +284,7 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
         launcher: deps.launcher,
       });
 
-      if (probeResult.status !== 'declined') {
+      {
         const existingLines = new Map(
           passport.lines.map((l) => [`${l.kind}:${l.subject}:${l.basis}`, l]),
         );
@@ -287,6 +296,8 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
         }
         const existingSignals = new Set(passport.signals.map((s) => `${s.ruleId}:${s.file}`));
         const newSignals = [...passport.signals];
+        if (probeResult.status === 'declined')
+          newSignals.push({ ruleId: 'reading-failed:mcp-probe', file: probeResult.entrypoint });
         for (const s of probeResult.signals) {
           const key = `${s.ruleId}:${s.file}`;
           if (!existingSignals.has(key)) {

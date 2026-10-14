@@ -65,8 +65,8 @@ function specsFrom(file: string): readonly ServerSpec[] {
  * The child is always killed, including on timeout — and on Windows so is everything
  * it started, which `child.kill` alone would not reach; see `killChildTree`.
  *
- * A response carrying `result.tools` is accepted whatever its id, so a server that
- * answers without the handshake is still read rather than reported as a timeout.
+ * Replies must match the initialize and tools/list request ids. Unsolicited
+ * capability data is not treated as a successful discovery.
  */
 async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResult> {
   let child: ReturnType<typeof spawn>;

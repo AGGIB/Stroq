@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as terminalModule from '../../src/ui/terminal.js';
 import { runVet } from '../../src/commands/vet.js';
 import {
   probeMcpTree,
@@ -52,8 +53,10 @@ describe('probeSandboxSettings and syntheticProbeEnv', () => {
 
     expect(settings.filesystem.allowWrite).toEqual([scratch]);
     expect(settings.network.allowedDomains).toEqual([]);
-    expect(settings.network.deniedDomains).toEqual([]);
-    expect(settings.filesystem.denyRead).toContain(join(home, 'Documents'));
+    expect(settings.network.deniedDomains).toEqual(['*']);
+    expect(settings.filesystem.denyRead).toContain('/');
+    expect(settings.filesystem.denyRead).toContain(home);
+    expect(settings.filesystem.allowRead).not.toContain(nodePrefix);
   });
 
   it('syntheticProbeEnv wipes NODE_OPTIONS, HOME and sets synthetic directories in scratch', () => {
@@ -355,6 +358,73 @@ process.stdin.on('data', (chunk) => {
 });
 
 describe('vetFlow with --probe integration', () => {
+  it('uses the real terminal by default and discloses a declined probe', async () => {
+    const dir = fixture();
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'my-mcp-server', main: 'index.js' }),
+    );
+    writeFileSync(join(dir, 'index.js'), 'console.log("fixture");');
+    let prompts = 0,
+      launches = 0,
+      output = '';
+    const spy = vi.spyOn(terminalModule, 'currentTerminal').mockReturnValue({
+      interactive: true,
+      color: false,
+      color256: false,
+      unicode: false,
+      columns: 80,
+      write: () => {},
+      readLine: async () => {
+        prompts++;
+        return 'n';
+      },
+    });
+    try {
+      const code = await runVet(['--from', dir, '--probe', '--json'], {
+        launcher: () => {
+          launches++;
+          throw new Error('must not start');
+        },
+        out: (text) => {
+          output += text;
+        },
+        err: () => {},
+      });
+      expect(prompts).toBe(1);
+      expect(launches).toBe(0);
+      expect(code).toBe(1);
+      expect(JSON.parse(output).blindSpots).toContain('probe declined; capabilities not observed');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('checks --expect before requesting consent or starting a child', async () => {
+    const dir = fixture();
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'my-mcp-server', main: 'index.js' }),
+    );
+    writeFileSync(join(dir, 'index.js'), 'console.log("fixture");');
+    let calls = 0;
+    const code = await runVet(['--from', dir, '--probe', '--expect', '0'.repeat(64)], {
+      platform: 'linux',
+      confirm: () => {
+        calls++;
+        return true;
+      },
+      launcher: () => {
+        calls++;
+        throw new Error('must not start');
+      },
+      out: () => {},
+      err: () => {},
+    });
+    expect(code).toBe(1);
+    expect(calls).toBe(0);
+  });
+
   it('ordinary vet without --probe remains static', async () => {
     const dir = fixture();
     writeFileSync(

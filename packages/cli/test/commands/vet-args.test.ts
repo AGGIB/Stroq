@@ -31,6 +31,8 @@ describe('the command line of stroq vet', () => {
       card: false,
       expect: null,
       out: null,
+      probe: false,
+      entrypoint: undefined,
     });
   });
 
@@ -43,6 +45,8 @@ describe('the command line of stroq vet', () => {
       card: false,
       expect: null,
       out: null,
+      probe: false,
+      entrypoint: undefined,
     });
     expect(optionsOf(['--online', 'github:owner/repo#v1.0.0']).online).toBe(
       'github:owner/repo#v1.0.0',

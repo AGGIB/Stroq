@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { loadBundledRules, scanContent, scanFieldsForTool, type CompiledRule } from '@stroq/core';
 import { killChildTree } from './kill-child.js';
 
@@ -139,6 +140,8 @@ export async function runMcpHandshake(
     let totalBytes = 0;
     let pagesCount = 0;
     let done = false;
+    let initialized = false;
+    const decoder = new StringDecoder('utf8');
     const accumulatedTools: McpToolRecord[] = [];
     const seenCursors = new Set<string>();
 
@@ -173,6 +176,7 @@ export async function runMcpHandshake(
     );
 
     const write = (text: string): void => {
+      if (done) return;
       try {
         child.stdin?.write(text);
       } catch {
@@ -181,6 +185,9 @@ export async function runMcpHandshake(
     };
 
     child.on('error', (err: Error) => finish({ error: err.message, incompleteReason: null }));
+    child.stdin?.on('error', (err: Error) =>
+      finish({ error: err.message, incompleteReason: 'probe stdin failed' }),
+    );
     child.on('exit', (code) =>
       finish({
         error: `server exited before answering (code ${code ?? 'null'})`,
@@ -189,6 +196,7 @@ export async function runMcpHandshake(
     );
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
+      if (done) return;
       const chunkBuf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
       totalBytes += chunkBuf.length;
       if (totalBytes > maxBytes) {
@@ -199,7 +207,7 @@ export async function runMcpHandshake(
         return;
       }
 
-      buf += chunkBuf.toString('utf8');
+      buf += decoder.write(chunkBuf);
       let nl = buf.indexOf('\n');
       while (nl >= 0) {
         const text = buf.slice(0, nl);
@@ -214,18 +222,24 @@ export async function runMcpHandshake(
           // Servers that log to stdout are common; a line we cannot parse is not an error.
           continue;
         }
+        if (typeof msg !== 'object' || msg === null) {
+          finish({ error: 'invalid JSON-RPC message', incompleteReason: 'protocol error' });
+          return;
+        }
 
         if (msg.id === INIT_ID) {
+          if (initialized || msg.error || typeof msg.result !== 'object' || msg.result === null) {
+            finish({ error: 'initialize failed or repeated', incompleteReason: 'protocol error' });
+            return;
+          }
+          initialized = true;
           write(INITIALIZED);
           pendingListId = listId;
           write(listRequest(listId));
           continue;
         }
 
-        const isListReply =
-          (pendingListId !== null && msg.id === pendingListId) ||
-          Array.isArray(msg.result?.tools) ||
-          (msg.id === listId && msg.error);
+        const isListReply = initialized && pendingListId !== null && msg.id === pendingListId;
 
         if (isListReply) {
           if (msg.error) {
@@ -242,9 +256,19 @@ export async function runMcpHandshake(
           if (Array.isArray(tools)) {
             pagesCount += 1;
             for (const t of tools) {
-              if (typeof t === 'object' && t !== null) {
-                accumulatedTools.push(t);
+              if (
+                typeof t !== 'object' ||
+                t === null ||
+                typeof t.name !== 'string' ||
+                t.name === ''
+              ) {
+                finish({
+                  error: 'tools/list contains an invalid tool',
+                  incompleteReason: 'protocol error',
+                });
+                return;
               }
+              accumulatedTools.push(t);
             }
 
             if (singlePage) {
@@ -252,7 +276,16 @@ export async function runMcpHandshake(
               return;
             }
 
-            if (accumulatedTools.length >= maxTools) {
+            const nextCursor = msg.result?.nextCursor;
+            const more = typeof nextCursor === 'string' && nextCursor !== '';
+            if (nextCursor !== undefined && typeof nextCursor !== 'string') {
+              finish({ error: 'invalid nextCursor', incompleteReason: 'protocol error' });
+              return;
+            }
+            if (
+              accumulatedTools.length > maxTools ||
+              (accumulatedTools.length === maxTools && more)
+            ) {
               finish({
                 error: null,
                 incompleteReason: `tools/list exceeded tool limit (${maxTools} tools)`,
@@ -260,7 +293,7 @@ export async function runMcpHandshake(
               return;
             }
 
-            if (pagesCount >= maxPages) {
+            if (pagesCount >= maxPages && more) {
               finish({
                 error: null,
                 incompleteReason: `tools/list exceeded page limit (${maxPages} pages)`,
@@ -268,7 +301,6 @@ export async function runMcpHandshake(
               return;
             }
 
-            const nextCursor = msg.result?.nextCursor;
             if (typeof nextCursor === 'string' && nextCursor !== '') {
               if (seenCursors.has(nextCursor)) {
                 finish({
@@ -287,6 +319,11 @@ export async function runMcpHandshake(
             finish({ error: null, incompleteReason: null });
             return;
           }
+          finish({
+            error: 'tools/list result has no tools array',
+            incompleteReason: 'protocol error',
+          });
+          return;
         }
       }
     });

@@ -407,13 +407,16 @@ Exit codes: **0** the passport is complete; **1** `--expect` did not match, or a
 Ordinary `stroq vet` is static and runs no code. Passing `--probe` runs an opt-in sandboxed stdio MCP probe to observe dynamic server capabilities:
 
 - **Consent & Confirmation:** The CLI shows the entrypoint that will execute and asks for confirmation on interactive terminals. If declined, no child process is started and the static passport is returned.
-- **Platform & Enclosure:** Requires `srt` (`@anthropic-ai/sandbox-runtime`) on macOS or Linux; Windows and systems without `srt` refuse with an explicit explanation. The verified tree runs in private scratch space outside `$HOME`, with writes allowed only in scratch, network access completely denied (`allowedDomains: []`), and reads to user home directories denied except the path needed to start the Node runtime. Environment is `childEnv([])` with synthetic `HOME`, `XDG`, and `TMPDIR`, and without `NODE_OPTIONS` or caller shell secrets.
+- **Platform & Enclosure:** Requires `srt` >=0.0.79 (`@anthropic-ai/sandbox-runtime`) on macOS or Linux; Windows and systems without `srt` refuse with an explicit explanation. The verified tree runs in private scratch space outside `$HOME`, with writes allowed only in scratch, network access completely denied (`allowedDomains: []`), and reads denied by default except the copied tree, scratch and Node/system runtime paths. Environment uses a minimal allowlist with synthetic `HOME`, `XDG`, and `TMPDIR`, and without `NODE_OPTIONS` or caller shell secrets.
 - **Protocol Handshake & Bounds:** Sends `initialize`, `notifications/initialized`, and follows `nextCursor` in `tools/list` up to 20 pages, 500 tools, 10 MiB total response limit, and 10 s timeout. Cyclic cursors, limit exhaustion, and errors are captured as explicit incompleteness. Tool names, titles, descriptions, annotations, and input schemas are scanned for prompt injection using Stroq's engine rules; `tools/call` is never sent.
 - **Observation, Not Guarantee:** Observed tools and tripped rules are added to the passport as `[observed]` under detector `mcp-probe`. A successful probe is an observation of what was returned, not a security certificate.
 
 An agent can run `stroq vet --from` itself: it only reads. `stroq vet --online` reads packages across the network (HTTPS only, to allowlisted registry and codeload hosts, at most 3 redirects, and 20 MiB download limit). Two limits apply to online reads: an archive with a link anywhere in it is refused as a whole, even when `:subdir` targets a subdirectory that has none; and an archive or package over 20 MiB compressed is refused.
 
 There is no `stroq install`. Typing it prints where to go: `stroq init` guards an agent, `stroq vet --from <dir>` or `stroq vet --online <spec>` reads a skill or MCP server before you add it, and `stroq add` adds a local skill after a check.
+
+
+The sandboxed MCP probe requires srt >=0.0.79 (allowRead support). Its read policy denies the filesystem by default and permits only the copied tree, scratch and Node/system runtime paths. A declined probe is reported as incomplete. Probe environment excludes proxy credentials, CA overrides and Node loaders. Native profile tests use harmless local sentinels and a controlled loopback listener.
 
 ### Add a skill after reading it
 
