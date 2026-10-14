@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { handleCursorHook } from '../../src/adapters/cursor.js';
 import { createEngine } from '../../src/engine-factory.js';
 
-const fixtureRoot = fileURLToPath(new URL('../fixtures/hosts/cursor/0.46.11/', import.meta.url));
+const fixtureRoot = fileURLToPath(new URL('../fixtures/hosts/cursor/synthetic/', import.meta.url));
 
 const readFixture = (name: string): Record<string, unknown> =>
   JSON.parse(readFileSync(join(fixtureRoot, name), 'utf8'));
@@ -21,7 +21,7 @@ const readAuditLines = (homeDir: string): Record<string, unknown>[] => {
     .map((line) => JSON.parse(line));
 };
 
-describe('Cursor contract fixture replay', () => {
+describe('Synthetic Cursor adapter fixture replay', () => {
   let home: string;
   let testProject: string;
 
@@ -147,7 +147,7 @@ describe('Cursor contract fixture replay', () => {
     });
   });
 
-  describe('sentinel outcomes demonstration', () => {
+  describe('simulated sentinel outcomes (no host)', () => {
     it('demonstrates that allowed write creates sentinel and triggers observation', async () => {
       const sentinelPath = join(testProject, 'src', 'allowed-sentinel.ts');
       const sentinelContent = 'export const msg = "sentinel-ok";\n';
@@ -166,7 +166,7 @@ describe('Cursor contract fixture replay', () => {
       // Allowed action produces no block
       expect(preOut).toEqual({ stdout: '', exitCode: 0 });
 
-      // Host executes the write
+      // Simulated host executes the write
       const { mkdirSync } = await import('node:fs');
       mkdirSync(join(testProject, 'src'), { recursive: true });
       writeFileSync(sentinelPath, sentinelContent);
@@ -217,10 +217,10 @@ describe('Cursor contract fixture replay', () => {
       expect(body['permission']).toBe('deny');
       expect(String(body['user_message'])).toContain('deny-self-tamper');
 
-      // Host obeys deny: operation is aborted, file remains unmodified
+      // Simulated host obeys deny: operation is aborted, file remains unmodified
       expect(readFileSync(protectedPath, 'utf8')).toBe(initialContent);
 
-      // Host does NOT emit afterFileEdit for an aborted write
+      // Simulated host does NOT emit afterFileEdit for an aborted write
       const audit = readAuditLines(home);
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({
@@ -265,13 +265,8 @@ describe('Cursor contract fixture replay', () => {
       });
       const denyBody = JSON.parse(denyOut.stdout) as Record<string, unknown>;
       expect(denyBody['permission']).toBe('deny');
-      // Host aborts delete: file is preserved
+      // Simulated host aborts delete: file is preserved
       expect(existsSync(protectedFile)).toBe(true);
     });
-  });
-
-  it('runs purely offline without starting Cursor subprocesses', () => {
-    // Verified by pure in-process engine invocation and absence of spawn calls
-    expect(true).toBe(true);
   });
 });

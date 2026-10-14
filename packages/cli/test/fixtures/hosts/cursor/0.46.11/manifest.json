@@ -1,9 +1,0 @@
-{
-  "host": "cursor",
-  "version": "0.46.11",
-  "os": "darwin",
-  "recordedDate": "2026-10-14",
-  "provenance": "Captured in an authorized throwaway project with real Cursor 0.46.11 on darwin, verifying the preToolUse Write/Delete and afterFileEdit hook contract.",
-  "events": ["allow.write", "allow.post-edit", "deny.write", "allow.delete", "deny.delete"],
-  "cleanup": "Cleaned via scripts/clean-cursor-fixture.ts to sanitize user paths, session IDs, and secrets."
-}

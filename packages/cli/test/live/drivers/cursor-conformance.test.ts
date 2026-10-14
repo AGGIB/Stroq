@@ -10,9 +10,9 @@ const files = readdirSync(root, { recursive: true, withFileTypes: true })
   .map((entry) => join(entry.parentPath, entry.name));
 
 const read = (name: string): Record<string, unknown> =>
-  JSON.parse(readFileSync(join(root, '0.46.11', name), 'utf8'));
+  JSON.parse(readFileSync(join(root, 'synthetic', name), 'utf8'));
 
-describe('recorded Cursor conformance fixtures', () => {
+describe('synthetic Cursor fixture hygiene', () => {
   it('has checked-in fixture files', () => {
     expect(files.length).toBeGreaterThanOrEqual(5);
   });
@@ -40,13 +40,14 @@ describe('recorded Cursor conformance fixtures', () => {
     },
   );
 
-  it('records the measured version, OS, date, and provenance in manifest.json', () => {
+  it('does not claim any measured host version or OS', () => {
     const manifest = read('manifest.json');
     expect(manifest['host']).toBe('cursor');
-    expect(manifest['version']).toBe('0.46.11');
-    expect(manifest['os']).toBe('darwin');
-    expect(manifest['recordedDate']).toBe('2026-10-14');
-    expect(String(manifest['provenance'])).toContain('Cursor 0.46.11');
+    expect(manifest['kind']).toBe('synthetic');
+    expect(manifest['version']).toBeNull();
+    expect(manifest['os']).toBeNull();
+    expect(manifest['recordedDate']).toBeNull();
+    expect(String(manifest['provenance'])).toContain('Cursor was not started');
     expect(manifest['events']).toEqual([
       'allow.write',
       'allow.post-edit',

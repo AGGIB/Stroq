@@ -6,5 +6,6 @@
     "path": "/tmp/stroq-live-fixture/project/src/sentinel-allow.ts",
     "exists": true,
     "content": "export const sentinel = 'stroq-live-0123456789abcdef';\n"
-  }
+  },
+  "evidenceKind": "synthetic"
 }

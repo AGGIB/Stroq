@@ -2,10 +2,10 @@
   "exitCode": 0,
   "permission": "deny",
   "ruleId": "deny-self-tamper",
-  "aborted": true,
   "sentinel": {
     "path": "/tmp/stroq-live-fixture/project/.cursor/hooks.json",
     "deleted": false,
     "exists": true
-  }
+  },
+  "evidenceKind": "synthetic"
 }
