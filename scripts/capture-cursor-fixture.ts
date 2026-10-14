@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createThrowawayRoot, assertThrowaway } from '../packages/cli/src/live/throwaway.js';
 import { installCursorHooks } from '../packages/cli/src/commands/cursor-hooks.js';
+import { cursorRecorderSource } from './cursor-capture-recorder.js';
 
 const [action, target, executable] = process.argv.slice(2);
 if (!target || !['prepare', 'snapshot'].includes(action ?? ''))
@@ -59,18 +60,20 @@ if (action === 'prepare') {
   const recorder = join(target, 'record-hook.mjs');
   writeFileSync(
     recorder,
-    `
-import { spawnSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
-const input = readFileSync(0, 'utf8');
-const result = spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(cli)}, 'hook', 'cursor'], {
- input, encoding: 'utf8', timeout: 10000,
- env: {...process.env, HOME:${JSON.stringify(made.home)}, USERPROFILE:${JSON.stringify(made.home)}, STROQ_HOME:${JSON.stringify(made.stroqHome)}});
-appendFileSync(${JSON.stringify(join(target, 'hooks.jsonl'))}, JSON.stringify({at:new Date().toISOString(),input:JSON.parse(input),stdout:result.stdout,exitCode:result.status,error:result.error?.message})+'\\n', {mode:0o600});
-process.stdout.write(result.stdout ?? '');
-process.exitCode=result.status ?? 1;
-`,
+    cursorRecorderSource({
+      node: process.execPath,
+      cli,
+      log: join(target, 'hooks.jsonl'),
+      home: made.home,
+      stroqHome: made.stroqHome,
+    }),
   );
+  const syntax = spawnSync(process.execPath, ['--check', recorder], {
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (syntax.error || syntax.status !== 0)
+    throw new Error('generated recorder failed syntax validation; no hooks installed');
   const quote = (value: string): string => {
     if (/["\r\n`$%]/.test(value))
       throw new Error('capture paths contain unsupported shell characters');

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { cursorRecorderSource } from '../../../../../scripts/cursor-capture-recorder.js';
 
 function rawCapture() {
   const root = mkdtempSync(join(tmpdir(), 'stroq-cursor-clean-test-'));
@@ -29,6 +30,30 @@ function rawCapture() {
 }
 
 describe('Cursor candidate capture scripts (synthetic test inputs)', () => {
+  it('runs the generated recorder and preserves actual child responses for synthetic stdin', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stroq-cursor-recorder-test-'));
+    const cli = join(root, 'synthetic-cli.mjs');
+    const log = join(root, 'records.jsonl');
+    const recorder = join(root, 'recorder.mjs');
+    writeFileSync(cli, `process.stdout.write(JSON.stringify({permission:'allow'}));`);
+    writeFileSync(
+      recorder,
+      cursorRecorderSource({ node: process.execPath, cli, log, home: root, stroqHome: root }),
+    );
+    expect(spawnSync(process.execPath, ['--check', recorder], { encoding: 'utf8' }).status).toBe(0);
+    const input = { hook_event_name: 'preToolUse', tool_name: 'Write', synthetic: true };
+    const result = spawnSync(process.execPath, [recorder], {
+      input: JSON.stringify(input),
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ permission: 'allow' });
+    const record = JSON.parse(readFileSync(log, 'utf8').trim());
+    expect(record.input).toEqual(input);
+    expect(record.stdout).toBe(result.stdout);
+    expect(record.exitCode).toBe(0);
+  });
+
   it('never promotes cleaned observations to a measured contract', () => {
     const f = rawCapture();
     expect(f.clean().status).toBe(0);
