@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -48,11 +48,12 @@ describe('probeSandboxSettings and syntheticProbeEnv', () => {
     writeFileSync(launcher, '');
     const helper = join(root, 'vendor', 'seccomp', 'x64', 'apply-seccomp');
     writeFileSync(helper, 'fixture');
+    const canonicalHelper = realpathSync(helper);
     const runtimeReads = probeRuntimeReads(launcher, 'x64');
-    expect(runtimeReads).toEqual([helper]);
+    expect(runtimeReads).toEqual([canonicalHelper]);
     const settings = probeSandboxSettings(join(root, 'scratch'), root, { runtimeReads });
-    expect(settings.filesystem.allowRead).toContain(helper);
-    expect(settings.filesystem.allowRead).not.toContain(root);
+    expect(settings.filesystem.allowRead).toContain(canonicalHelper);
+    expect(settings.filesystem.allowRead).not.toContain(realpathSync(root));
   });
 
   it('refuses unsupported architectures and missing seccomp helpers', () => {
