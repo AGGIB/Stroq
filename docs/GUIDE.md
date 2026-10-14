@@ -416,7 +416,7 @@ An agent can run `stroq vet --from` itself: it only reads. `stroq vet --online` 
 There is no `stroq install`. Typing it prints where to go: `stroq init` guards an agent, `stroq vet --from <dir>` or `stroq vet --online <spec>` reads a skill or MCP server before you add it, and `stroq add` adds a local skill after a check.
 
 
-The sandboxed MCP probe requires srt >=0.0.79 (allowRead support). Its read policy denies the filesystem by default and permits only the copied tree, scratch and Node/system runtime paths. A declined probe is reported as incomplete. Probe environment excludes proxy credentials, CA overrides and Node loaders. Native profile tests use harmless local sentinels and a controlled loopback listener.
+The sandboxed MCP probe requires srt >=0.0.79 (allowRead support), ripgrep, and on Linux bubblewrap and socat. Missing runtime dependencies are refused before a server starts. Its read policy denies the filesystem by default and permits only the copied tree, scratch and Node/system runtime paths. A declined probe is reported as incomplete. Probe environment excludes proxy credentials, CA overrides and Node loaders. Native profile tests use harmless local sentinels and a controlled loopback listener.
 
 ### Add a skill after reading it
 
@@ -881,3 +881,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for development setup, how to add a ru
 ## License
 
 Apache-2.0 — see [LICENSE](../LICENSE). Vendored rules under [`rules/atr/`](../rules/atr/) are MIT; see [`rules/atr/LICENSE`](../rules/atr/LICENSE).
+

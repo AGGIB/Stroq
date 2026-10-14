@@ -26,8 +26,12 @@ jobs:
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap socat
+          sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - if: runner.os == 'macOS'
+        run: brew install ripgrep
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
       - run: npm install -g @anthropic-ai/sandbox-runtime@0.0.79
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run packages/cli/test/install/mcp-probe-native.test.ts

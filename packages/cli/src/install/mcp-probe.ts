@@ -149,6 +149,12 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
         'sandboxed probe requires srt on PATH; install it with: npm install -g @anthropic-ai/sandbox-runtime',
       );
     }
+    const dependencies = plat === 'linux' ? ['rg', 'bwrap', 'socat'] : ['rg'];
+    const missing = dependencies.filter((binary) => binOnPath(binary, process.env, plat) === null);
+    if (missing.length)
+      throw new McpProbeRefusalError(
+        `sandboxed probe is missing runtime dependencies: ${missing.join(', ')}; the server was not started`,
+      );
   }
 
   // Confirmation
