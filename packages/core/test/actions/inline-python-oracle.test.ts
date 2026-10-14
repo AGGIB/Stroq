@@ -18,19 +18,20 @@ import { DATA_PROGRAMS, EXEC_PROGRAMS } from './inline-python-corpus.js';
 
 const HARNESS = fileURLToPath(new URL('./inline-python-oracle.py', import.meta.url));
 
-function findPython(): string | null {
-  // The harness runs the interpreter under audit hooks in a POSIX directory of its own.
-  if (process.platform === 'win32') return null;
-  for (const name of ['python3', 'python']) {
-    const probe = spawnSync(name, ['-c', 'import sys; print(int(sys.version_info >= (3, 8)))'], {
-      encoding: 'utf8',
-    });
-    if (probe.status === 0 && probe.stdout.trim() === '1') return name;
-  }
-  return null;
+export { findPython } from './python-runtime.js';
+import { findPython } from './python-runtime.js';
+
+export const PYTHON_INFO = process.platform === 'win32' ? null : findPython();
+const PYTHON = PYTHON_INFO?.path ?? null;
+
+// Diagnostic output identifying the resolved interpreter and version
+if (PYTHON_INFO !== null) {
+  const runtimeNote = PYTHON_INFO.isApple ? ' (Apple runtime)' : '';
+  console.info(
+    `[inline-python-oracle] Using Python: ${PYTHON_INFO.path} (${PYTHON_INFO.version}${runtimeNote})`,
+  );
 }
 
-const PYTHON = findPython();
 const WORK = PYTHON === null ? '' : mkdtempSync(join(tmpdir(), 'stroq-py-oracle-'));
 
 function ask<T>(request: Record<string, unknown>): T {
@@ -356,3 +357,29 @@ describe.skipIf(PYTHON === null)(
     });
   },
 );
+
+describe('findPython', () => {
+  it('throws an actionable error if STROQ_PYTHON is empty', () => {
+    expect(() => findPython('')).toThrow(
+      'STROQ_PYTHON is set to an empty string. Specify an executable name or absolute path for Python >=3.8.',
+    );
+  });
+
+  it('throws an actionable error if the specified python executable cannot be run', () => {
+    expect(() => findPython('stroq-nonexistent-python-binary-xyz')).toThrow(
+      /STROQ_PYTHON was set to "stroq-nonexistent-python-binary-xyz", but it could not be executed:/,
+    );
+  });
+
+  if (process.platform === 'win32') {
+    it('returns null on Windows when no override is given', () => {
+      const prev = process.env['STROQ_PYTHON'];
+      delete process.env['STROQ_PYTHON'];
+      try {
+        expect(findPython()).toBeNull();
+      } finally {
+        if (prev !== undefined) process.env['STROQ_PYTHON'] = prev;
+      }
+    });
+  }
+});
