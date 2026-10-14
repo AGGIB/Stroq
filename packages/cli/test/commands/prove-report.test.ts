@@ -150,6 +150,8 @@ describe('adviceFor', () => {
     const lines = adviceFor(reportOf(verified()));
     expect(lines.join(' ')).toMatch(/stroq doctor/);
     expect(lines.join(' ')).toMatch(/update|change/);
+    expect(lines.join(' ')).toContain('host version is not re-read');
+    expect(lines.join(' ')).toContain('cannot detect a host update');
   });
 
   it('says not to rely on the hook for a host that failed', () => {

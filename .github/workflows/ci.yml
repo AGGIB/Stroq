@@ -31,6 +31,33 @@ jobs:
       - run: pnpm exec vitest run packages/core/test/actions/inline-python-oracle.test.ts packages/core/test/actions/python-runtime.test.ts
         env:
           STROQ_PYTHON: ${{ steps.python.outputs.python-path }}
+  mcp-probe-sandbox:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - if: runner.os == 'macOS'
+        run: brew install ripgrep
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+      - run: npm install -g @anthropic-ai/sandbox-runtime@0.0.79
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run packages/cli/test/install/mcp-probe-native.test.ts
+        env:
+          STROQ_REQUIRE_SRT: '1'
   test:
     runs-on: ubuntu-latest
     strategy:

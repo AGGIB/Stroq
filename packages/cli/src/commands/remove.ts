@@ -10,7 +10,7 @@ export async function runRemove(args: readonly string[]): Promise<number> {
     parsed = parseArgs({
       args: [...args],
       allowPositionals: true,
-      options: { force: { type: 'boolean' } },
+      options: { force: { type: 'boolean' }, kind: { type: 'string' } },
     });
   } catch (error) {
     const problem = parseArgsProblem(error);
@@ -21,6 +21,24 @@ export async function runRemove(args: readonly string[]): Promise<number> {
   if (parsed.positionals.length !== 1 || parsed.positionals[0] === '') {
     process.stderr.write(usageError('remove', 'give the name of one installed skill'));
     return 2;
+  }
+  const kind = parsed.values.kind ?? 'skill';
+  if (kind !== 'skill' && kind !== 'mcp') {
+    process.stderr.write(usageError('remove', '--kind is skill or mcp'));
+    return 2;
+  }
+  if (kind === 'mcp') {
+    const { removeMcp } = await import('../install/mcp-install.js');
+    await removeMcp(parsed.positionals[0]!, {
+      project: process.cwd(),
+      stroqHome: stroqHome(),
+      terminal: currentTerminal(),
+      node: process.execPath,
+      entryArgv: [],
+      force: parsed.values.force === true,
+    });
+    process.stdout.write('MCP server removed; client config restored\n');
+    return 0;
   }
   const { removeSkill } = await import('../install/skill-install.js');
   await removeSkill(parsed.positionals[0]!, {

@@ -20,26 +20,41 @@ interface CommandHelp {
 export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'add',
-    synopsis: 'add <local-source|installed-name> [--user] [--restore]',
+    synopsis:
+      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>]',
     about: [
       'read a local skill directory or tar archive, show its passport and require a person',
       'to type the first 12 hex digits of its digest before installing the inspected bytes.',
       'An installed name updates from its recorded source. A passport is not a security certificate.',
+      'With --kind mcp, a local Node server folder is stored by digest and its entry in the client',
+      'config is written to start only those bytes (--pin); only node servers are supported.',
     ],
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
-      ['--restore', 'restore an installed name from its confirmed store bytes'],
+      ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
+      ['--kind <kind>', 'skill (default) or mcp'],
+      ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
+      ['--config <path>', 'with --kind mcp: the client config file to edit'],
+      ['--entrypoint <file>', 'with --kind mcp: the start file, when package.json does not say'],
+      ['--pass-env <names>', 'with --kind mcp: comma-separated variables the server may see'],
+      ['--name <name>', 'with --kind mcp: the server name in the config'],
+      ['--cwd <dir>', 'with --kind mcp: the project directory decisions are made for'],
+      ['--force', 'with --kind mcp: update an entry changed outside Stroq'],
     ],
   },
   {
     name: 'remove',
-    synopsis: 'remove <name> [--force]',
-    about: ['remove a confirmed skill after a terminal y/N question, and record a receipt'],
+    synopsis: 'remove <name> [--force] [--kind skill|mcp]',
+    about: [
+      'remove a confirmed skill after a terminal y/N question, and record a receipt;',
+      'with --kind mcp, delete the config entry or restore the one it replaced',
+    ],
     flags: [
       [
         '--force',
-        'also remove a skill changed outside Stroq; still requires a person at a terminal',
+        'also remove a skill or entry changed outside Stroq; still requires a person at a terminal',
       ],
+      ['--kind <kind>', 'skill (default) or mcp'],
     ],
   },
   {
@@ -431,14 +446,14 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'vet',
     synopsis:
-      'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+      'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--probe] [--entrypoint <file>] [--json | --card] [--expect <sha256>] [--out <file>]',
     about: [
       'read a skill, an MCP server or a plugin, from a folder, a tar archive, or online from npm or GitHub,',
       'before you add it, and show its passport: what it asks for or can do, each line marked declared, observed,',
-      'limited or unknown, the rules that matched, and every blind spot. The files are read and none of them is run.',
-      'A reading, not a security certificate: an absent line means nothing was seen, not that nothing is there.',
-      'Exit codes: 0 the passport is complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the',
-      'files cannot be read as an artifact',
+      'limited or unknown, the rules that matched, and every blind spot. The files are read and none of them is run',
+      'unless --probe is explicitly requested for an MCP server in a sandbox. A reading, not a security certificate:',
+      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is complete, 1 --expect',
+      'did not match or a reading failed, 2 wrong command line, 3 the files cannot be read as an artifact',
     ],
     flags: [
       [
@@ -468,6 +483,14 @@ export const COMMANDS: readonly CommandHelp[] = [
       [
         '--out <file>',
         "write the output to a file that does not exist yet, never over one. Write it outside the folder it describes: inside, it is one of that folder's files and changes its digest",
+      ],
+      [
+        '--probe',
+        'run a sandboxed stdio MCP handshake (initialize and paginated tools/list) using srt on macOS or Linux after terminal confirmation; limits: 20 pages, 500 tools, 10 MiB, 10 s timeout',
+      ],
+      [
+        '--entrypoint <file>',
+        'the start file of an MCP server (.js, .mjs, .cjs) when package.json does not declare one',
       ],
     ],
   },

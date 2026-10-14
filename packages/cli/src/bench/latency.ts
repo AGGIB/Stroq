@@ -377,14 +377,19 @@ export function formatLatencyBench(report: LatencyBenchReport): string {
   lines.push('');
 
   const colScenario = 38;
+  const colSamples = 16;
   const colProc = 28;
   const colWall = 28;
+  const colOutliers = 10;
+  const colMissingCpu = 13;
 
   const header =
     'Scenario'.padEnd(colScenario) +
+    'Retained / Req'.padEnd(colSamples) +
     'Processor (p50 / p95 / p99)'.padEnd(colProc) +
     'Wall (p50 / p95 / p99)'.padEnd(colWall) +
-    'Outliers';
+    'Outliers'.padStart(colOutliers) +
+    'Missing CPU'.padStart(colMissingCpu);
   lines.push(header);
   lines.push('-'.repeat(header.length));
 
@@ -397,8 +402,35 @@ export function formatLatencyBench(report: LatencyBenchReport): string {
       r.samples > 0
         ? `${r.wall.p50} / ${r.wall.p95} / ${r.wall.p99} ms`.padEnd(colWall)
         : 'n/a'.padEnd(colWall);
-    const line = r.title.padEnd(colScenario) + procStr + wallStr + String(r.outliers).padStart(8);
+    const sampleStr = `${r.samples} / ${report.n}`.padEnd(colSamples);
+    const line =
+      r.title.padEnd(colScenario) +
+      sampleStr +
+      procStr +
+      wallStr +
+      String(r.outliers).padStart(colOutliers) +
+      String(r.droppedSamples).padStart(colMissingCpu);
     lines.push(line);
+  }
+
+  const empty = report.results.filter((r) => r.samples === 0);
+  if (empty.length > 0) {
+    lines.push('');
+    for (const r of empty) {
+      const parts: string[] = [];
+      if (r.outliers > 0) {
+        parts.push(`${r.outliers} outlier${r.outliers === 1 ? '' : 's'} (>10s)`);
+      }
+      if (r.droppedSamples > 0) {
+        parts.push(
+          `${r.droppedSamples} sample${r.droppedSamples === 1 ? '' : 's'} with missing CPU time`,
+        );
+      }
+      const explanation = parts.length > 0 ? parts.join(', ') : 'no measurements survived';
+      lines.push(
+        `Note: "${r.title}" percentiles are n/a because all samples were excluded (${explanation}).`,
+      );
+    }
   }
 
   const baseline = report.results.find((r) => r.id === 'bare-node');

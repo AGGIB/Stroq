@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { loadBundledRules, scanContent, scanFieldsForTool } from '@stroq/core';
 import { readMcpConfig, unwrapArgs, wrapperPinArgs } from '../commands/mcp-config.js';
 import { childEnv } from '../mcp/child-env.js';
-import { killChildTree } from '../mcp/kill-child.js';
+import { runMcpHandshake } from '../mcp/handshake.js';
 import type { Finding } from './findings.js';
 import type { McpSurface } from './mcp-surface.js';
 
@@ -59,52 +58,6 @@ function specsFrom(file: string): readonly ServerSpec[] {
   return specs;
 }
 
-interface JsonRpcMessage {
-  readonly id?: unknown;
-  readonly error?: { readonly message?: unknown };
-  readonly result?: { readonly tools?: readonly { name?: unknown; description?: unknown }[] };
-}
-
-const INIT_ID = 1;
-const LIST_ID = 2;
-
-const line = (msg: unknown): string => `${JSON.stringify(msg)}\n`;
-
-const INITIALIZE = line({
-  jsonrpc: '2.0',
-  id: INIT_ID,
-  method: 'initialize',
-  params: {
-    protocolVersion: PROTOCOL_VERSION,
-    capabilities: {},
-    clientInfo: { name: 'stroq-exposure', version: '1' },
-  },
-});
-const INITIALIZED = line({ jsonrpc: '2.0', method: 'notifications/initialized' });
-const TOOLS_LIST = line({ jsonrpc: '2.0', id: LIST_ID, method: 'tools/list', params: {} });
-
-function flaggedTools(
-  tools: readonly { name?: unknown; description?: unknown }[],
-): readonly string[] {
-  const rules = loadBundledRules();
-  return tools
-    .filter(
-      (t) =>
-        typeof t.description === 'string' &&
-        scanContent(
-          rules,
-          t.description,
-          {},
-          // What a server says a tool is, which is the field the rules that read a description read.
-          {
-            target: 'tool_description',
-            ...scanFieldsForTool('mcp__probe__tools_list', t.description),
-          },
-        ).verdict === 'suspect',
-    )
-    .map((t) => (typeof t.name === 'string' ? t.name : '(unnamed)'));
-}
-
 /**
  * Runs the real MCP handshake — `initialize`, `notifications/initialized`, then exactly
  * one `tools/list` — and reads the descriptions that come back. A tool is never called:
@@ -112,97 +65,33 @@ function flaggedTools(
  * The child is always killed, including on timeout — and on Windows so is everything
  * it started, which `child.kill` alone would not reach; see `killChildTree`.
  *
- * A response carrying `result.tools` is accepted whatever its id, so a server that
- * answers without the handshake is still read rather than reported as a timeout.
+ * Replies must match the initialize and tools/list request ids. Unsolicited
+ * capability data is not treated as a successful discovery.
  */
 async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResult> {
-  return new Promise((resolve) => {
-    const empty = { server: spec.name, tools: 0, flagged: [] as readonly string[] };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(spec.command, [...spec.args], {
-        ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
-        // Not the whole environment: the command comes from a `.mcp.json` that may have
-        // arrived with a repository the user has only just cloned, and it would get
-        // every credential in their shell. The infrastructure variables a server needs
-        // to start, plus what its own config declares, which is what a real client
-        // passes it and what `stroq mcp` does too.
-        env: { ...childEnv([]), ...spec.env },
-        stdio: ['pipe', 'pipe', 'ignore'],
-      });
-    } catch (err) {
-      resolve({ ...empty, error: (err as Error).message });
-      return;
-    }
-
-    let buf = '';
-    let done = false;
-    const finish = (result: ProbeResult): void => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      killChildTree(child, 'SIGTERM');
-      resolve(result);
-    };
-    const timer = setTimeout(
-      () => finish({ ...empty, error: `no tools/list response within ${timeoutMs} ms` }),
-      timeoutMs,
-    );
-
-    /** A closed pipe is the server having exited; it is reported by `error`/`exit`. */
-    const write = (text: string): void => {
-      try {
-        child.stdin?.write(text);
-      } catch {
-        /* ignore */
-      }
-    };
-
-    child.on('error', (err: Error) => finish({ ...empty, error: err.message }));
-    child.on('exit', (code) =>
-      finish({ ...empty, error: `server exited before answering (code ${code ?? 'null'})` }),
-    );
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      buf += chunk.toString('utf8');
-      let nl = buf.indexOf('\n');
-      while (nl >= 0) {
-        const text = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        nl = buf.indexOf('\n');
-        if (text.trim() === '') continue;
-        let msg: JsonRpcMessage;
-        try {
-          msg = JSON.parse(text) as JsonRpcMessage;
-        } catch {
-          // Servers that log to stdout are common; a line we cannot parse is not an error.
-          continue;
-        }
-        const tools = msg.result?.tools;
-        if (Array.isArray(tools)) {
-          finish({
-            server: spec.name,
-            tools: tools.length,
-            flagged: flaggedTools(tools),
-            error: null,
-          });
-          return;
-        }
-        if (msg.id === LIST_ID && msg.error) {
-          const detail =
-            typeof msg.error.message === 'string' ? msg.error.message : 'unknown error';
-          finish({ ...empty, error: `tools/list failed: ${detail}` });
-          return;
-        }
-        if (msg.id === INIT_ID) {
-          write(INITIALIZED);
-          write(TOOLS_LIST);
-        }
-      }
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(spec.command, [...spec.args], {
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+      // Not the whole environment: the command comes from a `.mcp.json` that may have
+      // arrived with a repository the user has only just cloned, and it would get
+      // every credential in their shell. The infrastructure variables a server needs
+      // to start, plus what its own config declares, which is what a real client
+      // passes it and what `stroq mcp` does too.
+      env: { ...childEnv([]), ...spec.env },
+      stdio: ['pipe', 'pipe', 'ignore'],
     });
+  } catch (err) {
+    return { server: spec.name, tools: 0, flagged: [], error: (err as Error).message };
+  }
 
-    write(INITIALIZE);
-  });
+  const result = await runMcpHandshake(child, { timeoutMs, singlePage: true });
+  return {
+    server: spec.name,
+    tools: result.tools.length,
+    flagged: result.flagged,
+    error: result.error ?? result.incompleteReason,
+  };
 }
 
 export async function probeServers(
