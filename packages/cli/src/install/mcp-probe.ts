@@ -253,7 +253,10 @@ export async function probeMcpTree(options: McpProbeOptions): Promise<McpProbeRe
   }
 
   // Setup scratch directory
-  const scratchDir = mkdtempSync(join(tmpdir(), 'stroq-mcp-probe-'));
+  // macOS Unix socket names are limited to 104 bytes. srt creates a mux socket
+  // under TMPDIR; the normal /var/folders path plus nested test tmpdirs can exceed it.
+  const scratchBase = process.platform === 'darwin' ? '/private/tmp' : tmpdir();
+  const scratchDir = mkdtempSync(join(scratchBase, 'stroq-mcp-probe-'));
   const treeDir = join(scratchDir, 'tree');
   const scratchHome = join(scratchDir, 'home');
   const scratchXdgConfig = join(scratchDir, 'xdg', 'config');
