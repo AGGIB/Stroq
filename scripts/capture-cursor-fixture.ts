@@ -1,7 +1,7 @@
 // Prepare an opt-in capture; only Cursor's actual hook invocations produce records.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createThrowawayRoot, assertThrowaway } from '../packages/cli/src/live/throwaway.js';
 import { installCursorHooks } from '../packages/cli/src/commands/cursor-hooks.js';
 
@@ -17,11 +17,24 @@ if (location === '' || (!isAbsolute(location) && !location.startsWith(`..${sep}`
 if (action === 'prepare') {
   if (!executable || existsSync(target))
     throw new Error('give a Cursor executable and a new output directory');
-  const version = spawnSync(executable, ['--version'], {
-    encoding: 'utf8',
-    timeout: 10_000,
-    shell: false,
-  });
+  // The Windows desktop executable needs the same Electron CLI entry as cursor.cmd.
+  const windowsDesktop =
+    process.platform === 'win32' && basename(executable).toLowerCase() === 'cursor.exe';
+  const desktopCli = join(dirname(resolve(executable)), 'resources', 'app', 'out', 'cli.js');
+  if (windowsDesktop && !existsSync(desktopCli))
+    throw new Error('Cursor desktop CLI entry is missing; no capture prepared');
+  const version = spawnSync(
+    executable,
+    windowsDesktop ? [desktopCli, '--version'] : ['--version'],
+    {
+      encoding: 'utf8',
+      timeout: 10_000,
+      shell: false,
+      ...(windowsDesktop
+        ? { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', VSCODE_DEV: '' } }
+        : {}),
+    },
+  );
   if (version.error || version.status !== 0 || !/^\d+\.\d+\.\d+/m.test(version.stdout ?? ''))
     throw new Error('Cursor version could not be read; no capture prepared');
   const cli = resolve('packages/cli/dist/index.js');
@@ -70,7 +83,7 @@ process.exitCode=result.status ?? 1;
   mkdirSync(join(made.project, 'scratch'));
   writeFileSync(join(made.project, 'scratch', 'delete-me.txt'), 'harmless delete sentinel\n');
   console.log(
-    `Prepared ${made.project}. Open it in the measured Cursor. No host action or model request has run.`,
+    `Prepared ${made.project}. Open it in the selected Cursor installation. No host action or model request has run.`,
   );
 } else {
   const label = executable;

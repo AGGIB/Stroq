@@ -15,7 +15,9 @@ usage/cost before starting editor requests. Never use an owner's project or real
 credential files as sentinels.
 
 1. Build Stroq, then run `pnpm exec tsx scripts/capture-cursor-fixture.ts prepare <new-raw-directory-outside-repo> <Cursor-executable>`.
-   The executable's `--version` supplies metadata. This only prepares hooks; it
+   The executable's `--version` supplies metadata. For Windows `Cursor.exe`, the
+   script uses the Electron CLI entry from `resources/app/out/cli.js`, as the
+   installed `cursor.cmd` does. This only prepares hooks; it
    does not launch Cursor or claim a successful measurement.
 2. Open the printed throwaway project in that exact Cursor installation. Run
    `pnpm exec tsx scripts/capture-cursor-fixture.ts snapshot <raw-directory> before`.
