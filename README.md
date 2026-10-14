@@ -59,4 +59,10 @@ Start with the [session secret scan walkthrough](https://stroq.dev/session-secre
 - [False positives](docs/BENCH.md) · [Attack coverage](docs/COVERAGE.md) · [Cloak vs AgentCloak](docs/CLOAK-COMPARISON.md)
 - [Security](SECURITY.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
+## Contributors
+
+Thank you to everyone who contributes code, reports bugs, tests agent integrations, and improves the docs ❤️
+
+[![Contributors](https://contrib.rocks/image?repo=AGGIB/Stroq)](https://github.com/AGGIB/Stroq/graphs/contributors)
+
 [stroq.dev](https://stroq.dev)
