@@ -52,6 +52,7 @@ import { withLiveness } from './doctor-liveness.js';
 import { withProof } from './doctor-proof.js';
 import { stroqVersion } from '../version.js';
 import { configPinStatus } from '../mcp/pin-status.js';
+import { checkInstalledSkills } from '../install/skill-integrity.js';
 import {
   installDrift,
   installKey,
@@ -765,7 +766,13 @@ export function rulesDetail(loaded: number, canFireCount: number): string {
 
 export async function doctorReport(
   cwd: string = process.cwd(),
-  opts: { readonly all?: boolean; readonly now?: number } = {},
+  opts: {
+    readonly all?: boolean;
+    readonly now?: number;
+    readonly home?: string;
+    readonly userHome?: string;
+    readonly platform?: NodeJS.Platform;
+  } = {},
 ): Promise<DoctorReport> {
   const major = Number(process.versions.node.split('.')[0]);
   const rules = loadBundledRules();
@@ -831,7 +838,7 @@ export async function doctorReport(
   );
   const hookChecks =
     opts.all || anyInstalled || anyBroken || anyIncomplete ? perAgentChecks : [collapsed];
-  const home = stroqHome();
+  const home = opts.home ?? stroqHome();
   const secrets = await checkSecrets();
   const pinChecks = (
     await Promise.all(
@@ -840,6 +847,11 @@ export async function doctorReport(
       ),
     )
   ).flat();
+  const skillChecks = await checkInstalledSkills(cwd, home, {
+    ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
+    stroqHome: home,
+    ...(opts.userHome !== undefined ? { userHome: opts.userHome } : {}),
+  });
   return {
     checks: [
       { name: 'stroq', ok: true, detail: stroqVersion() },
@@ -856,6 +868,7 @@ export async function doctorReport(
       },
       ...hookChecks,
       ...pinChecks,
+      ...skillChecks,
       {
         name: 'home',
         ok: true,
