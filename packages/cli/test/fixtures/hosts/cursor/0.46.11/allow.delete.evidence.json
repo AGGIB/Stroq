@@ -1,0 +1,9 @@
+{
+  "exitCode": 0,
+  "stdout": "",
+  "permission": "allow",
+  "sentinel": {
+    "path": "/tmp/stroq-live-fixture/project/scratch/sentinel-temp.txt",
+    "exists": false
+  }
+}

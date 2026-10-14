@@ -1,0 +1,1 @@
+{"sessionId":"00000000-0000-4000-8000-000000000001","phase":"post","tool":"Write","summary":"/tmp/stroq-live-fixture/project/src/sentinel-allow.ts","classes":[],"decision":{"effect":"allow","ruleId":"cursor-edit-observed","reason":"Cursor reported a completed edit; its preToolUse decision is recorded separately"}}

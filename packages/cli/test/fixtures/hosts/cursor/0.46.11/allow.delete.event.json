@@ -1,0 +1,11 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000001",
+  "generation_id": "gen-00000000-0000-4000-8000-000000000001",
+  "hook_event_name": "preToolUse",
+  "workspace_roots": ["/tmp/stroq-live-fixture/project"],
+  "cwd": "/tmp/stroq-live-fixture/project",
+  "tool_name": "Delete",
+  "tool_input": {
+    "file_path": "/tmp/stroq-live-fixture/project/scratch/sentinel-temp.txt"
+  }
+}

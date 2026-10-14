@@ -1,0 +1,10 @@
+{
+  "exitCode": 0,
+  "permission": "deny",
+  "ruleId": "deny-self-tamper",
+  "aborted": true,
+  "sentinel": {
+    "path": "/tmp/stroq-live-fixture/project/.cursor/hooks.json",
+    "modified": false
+  }
+}
