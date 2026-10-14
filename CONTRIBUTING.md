@@ -25,6 +25,19 @@ pnpm check:rules     # verify the committed bundle deterministically, the same w
 ./examples/demo/run-demo.sh
 ```
 
+### Python Oracle Tests
+
+The test suite in `packages/core/test/actions/inline-python-oracle.test.ts` validates Python AST classification against a real CPython runtime with audit hooks (`sys.addaudithook`). On POSIX/macOS systems, it searches for a compatible Python interpreter (`>= 3.8`).
+
+If your environment uses Apple's system Python or you prefer a specific interpreter (e.g. Homebrew or pyenv CPython), specify it with `STROQ_PYTHON`:
+
+```bash
+export STROQ_PYTHON=/opt/homebrew/bin/python3
+pnpm test
+```
+
+Stroq automatically prefers standard non-Apple CPython interpreters when auto-discovering candidates and filters internal Apple Python runtime cache reads under `~/Library/Caches`.
+
 ## Test-Driven Development
 
 Write the failing test first, then the minimal implementation that makes it pass, then refactor. Every new behavior needs a test; every bug fix needs a regression test that fails before the fix and passes after. Coverage is enforced by `pnpm test:coverage` at lines 96, functions 97, statements 94 and branches 86 (`vitest.config.ts`); a pull request that drops coverage below those thresholds will fail CI.

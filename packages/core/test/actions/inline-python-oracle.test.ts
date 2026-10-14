@@ -18,19 +18,95 @@ import { DATA_PROGRAMS, EXEC_PROGRAMS } from './inline-python-corpus.js';
 
 const HARNESS = fileURLToPath(new URL('./inline-python-oracle.py', import.meta.url));
 
-function findPython(): string | null {
-  // The harness runs the interpreter under audit hooks in a POSIX directory of its own.
-  if (process.platform === 'win32') return null;
-  for (const name of ['python3', 'python']) {
-    const probe = spawnSync(name, ['-c', 'import sys; print(int(sys.version_info >= (3, 8)))'], {
-      encoding: 'utf8',
-    });
-    if (probe.status === 0 && probe.stdout.trim() === '1') return name;
-  }
-  return null;
+export interface ResolvedPython {
+  readonly path: string;
+  readonly version: string;
+  readonly isApple: boolean;
 }
 
-const PYTHON = findPython();
+export function findPython(customOverride?: string): ResolvedPython | null {
+  const override = customOverride ?? process.env['STROQ_PYTHON'];
+  if (override !== undefined) {
+    if (override.trim() === '') {
+      throw new Error(
+        'STROQ_PYTHON is set to an empty string. Specify an executable name or absolute path for Python >=3.8.',
+      );
+    }
+    const probe = spawnSync(
+      override,
+      [
+        '-c',
+        'import sys; print(f"{sys.executable}\\t{sys.version.split()[0]}\\t{int(sys.version_info >= (3, 8))}\\t{int(\'Apple\' in sys.version)}")',
+      ],
+      { encoding: 'utf8' },
+    );
+    if (probe.error || probe.status !== 0) {
+      const detail = probe.error?.message ?? probe.stderr?.trim() ?? `exit code ${probe.status}`;
+      throw new Error(
+        `STROQ_PYTHON was set to "${override}", but it could not be executed: ${detail}`,
+      );
+    }
+    const [execPath, version, isGte38, isApple] = (probe.stdout ?? '').trim().split('\t');
+    if (isGte38 !== '1') {
+      throw new Error(
+        `STROQ_PYTHON was set to "${override}" (${version || 'unknown version'}), but Stroq requires Python >= 3.8.`,
+      );
+    }
+    return {
+      path: execPath || override,
+      version: version || 'unknown',
+      isApple: isApple === '1',
+    };
+  }
+
+  // The harness runs the interpreter under audit hooks in a POSIX directory of its own.
+  if (process.platform === 'win32') return null;
+
+  const candidates = ['python3', 'python3.12', 'python3.11', 'python3.10', 'python3.9', 'python'];
+  let appleFallback: ResolvedPython | null = null;
+
+  for (const name of candidates) {
+    const probe = spawnSync(
+      name,
+      [
+        '-c',
+        'import sys; print(f"{sys.executable}\\t{sys.version.split()[0]}\\t{int(sys.version_info >= (3, 8))}\\t{int(\'Apple\' in sys.version)}")',
+      ],
+      { encoding: 'utf8' },
+    );
+    if (probe.status === 0) {
+      const [execPath, version, isGte38, isApple] = (probe.stdout ?? '').trim().split('\t');
+      if (isGte38 === '1') {
+        const resolved: ResolvedPython = {
+          path: execPath || name,
+          version: version || 'unknown',
+          isApple: isApple === '1',
+        };
+        // Prefer standard CPython over Apple Python if available
+        if (!resolved.isApple) {
+          return resolved;
+        }
+        if (appleFallback === null) {
+          appleFallback = resolved;
+        }
+      }
+    }
+  }
+
+  return appleFallback;
+}
+
+export const PYTHON_INFO = findPython();
+const PYTHON = PYTHON_INFO?.path ?? null;
+
+// Diagnostic output identifying the resolved interpreter and version
+if (PYTHON_INFO !== null) {
+  const runtimeNote = PYTHON_INFO.isApple ? ' (Apple runtime)' : '';
+  console.info(
+    `[inline-python-oracle] Using Python: ${PYTHON_INFO.path} (${PYTHON_INFO.version}${runtimeNote})`,
+  );
+}
+
 const WORK = PYTHON === null ? '' : mkdtempSync(join(tmpdir(), 'stroq-py-oracle-'));
 
 function ask<T>(request: Record<string, unknown>): T {
@@ -356,3 +432,29 @@ describe.skipIf(PYTHON === null)(
     });
   },
 );
+
+describe('findPython', () => {
+  it('throws an actionable error if STROQ_PYTHON is empty', () => {
+    expect(() => findPython('')).toThrow(
+      'STROQ_PYTHON is set to an empty string. Specify an executable name or absolute path for Python >=3.8.',
+    );
+  });
+
+  it('throws an actionable error if the specified python executable cannot be run', () => {
+    expect(() => findPython('stroq-nonexistent-python-binary-xyz')).toThrow(
+      /STROQ_PYTHON was set to "stroq-nonexistent-python-binary-xyz", but it could not be executed:/,
+    );
+  });
+
+  if (process.platform === 'win32') {
+    it('returns null on Windows when no override is given', () => {
+      const prev = process.env['STROQ_PYTHON'];
+      delete process.env['STROQ_PYTHON'];
+      try {
+        expect(findPython()).toBeNull();
+      } finally {
+        if (prev !== undefined) process.env['STROQ_PYTHON'] = prev;
+      }
+    });
+  }
+});
