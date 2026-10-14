@@ -41,6 +41,14 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     process.stderr.write(usageError('add', '--kind is skill or mcp'));
     return 2;
   }
+  if (kind === 'skill') {
+    const mcpOnly = ['client', 'config', 'entrypoint', 'pass-env', 'name', 'cwd', 'force'] as const;
+    const invalid = mcpOnly.find((name) => parsed.values[name] !== undefined);
+    if (invalid !== undefined) {
+      process.stderr.write(usageError('add', `unknown option --${invalid} for --kind skill`));
+      return 2;
+    }
+  }
   if (kind === 'mcp') {
     const { addMcp } = await import('../install/mcp-install.js');
     const { hookArgv } = await import('./init.js');

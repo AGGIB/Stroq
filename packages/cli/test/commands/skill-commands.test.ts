@@ -40,12 +40,27 @@ describe('skill command boundaries', () => {
     expect(existsSync(stroqHome)).toBe(false);
   });
 
-  it.each(['--yes', '--confirm-digest=0123456789ab', '--online', '--force'])(
-    'add rejects %s',
-    (flag) => {
-      const { result } = run('add', 'demo', flag);
-      expect(result.status).toBe(2);
-      expect(result.stderr).toContain('unknown option');
-    },
-  );
+  it.each([
+    '--yes',
+    '--confirm-digest=0123456789ab',
+    '--online',
+    '--force',
+    '--client=cursor',
+    '--config=config.json',
+    '--entrypoint=server.js',
+    '--pass-env=TOKEN',
+    '--name=server',
+    '--cwd=.',
+  ])('add rejects %s', (flag) => {
+    const { result } = run('add', 'demo', flag);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('unknown option');
+  });
+
+  it('MCP --force still requires a person at a terminal', () => {
+    const { result, stroqHome } = run('add', 'demo', '--kind=mcp', '--force');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('person at a terminal');
+    expect(existsSync(stroqHome)).toBe(false);
+  });
 });
