@@ -5,6 +5,7 @@ import { usageError } from '../help.js';
 import { ArchiveError } from '../install/archive-error.js';
 import { readArchiveFile } from '../install/archive-file.js';
 import { FetchError, fetchSourceTree } from '../install/fetch.js';
+import { compareLines } from '../install/inspect/findings.js';
 import {
   READING_PHRASES,
   failedReadingSpot,
@@ -19,11 +20,12 @@ import {
   passportIsIncomplete,
 } from '../install/inspect/index.js';
 import { showable } from '../install/inspect/safe-text.js';
+import { McpProbeRefusalError, probeMcpTree } from '../install/mcp-probe.js';
 import { ReadDirError, readDirTree } from '../install/read-dir.js';
 import { sourceTypeOf, type SourceType } from '../install/read-source.js';
 import { parseOnlineSource, SourceSyntaxError } from '../install/source.js';
 import { TreeError } from '../install/tree.js';
-import { SourceRefSchema, type Passport } from '../install/types.js';
+import { SourceRefSchema, type Passport, type Tree } from '../install/types.js';
 import { neutralizeControls } from '../terminal-safe.js';
 import { outsideLine } from '../ui/layout.js';
 import { stroqVersion } from '../version.js';
@@ -96,7 +98,12 @@ function unreadableBecause(error: unknown): string | null {
 }
 
 type Made =
-  | { readonly passport: Passport; readonly failure?: undefined; readonly usage?: undefined }
+  | {
+      readonly passport: Passport;
+      readonly tree: Tree;
+      readonly failure?: undefined;
+      readonly usage?: undefined;
+    }
   | { readonly failure: string; readonly usage?: undefined }
   | { readonly usage: string; readonly failure?: undefined };
 
@@ -135,7 +142,7 @@ async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
         deps.readings === undefined
           ? inspectTree(fetched.tree, context)
           : inspectWithReadings(fetched.tree, context, deps.readings);
-      return { passport };
+      return { passport, tree: fetched.tree };
     }
 
     const from = options.from;
@@ -161,7 +168,7 @@ async function makePassport(options: VetOptions, deps: VetDeps): Promise<Made> {
       deps.readings === undefined
         ? inspectTree(tree, context)
         : inspectWithReadings(tree, context, deps.readings);
-    return { passport };
+    return { passport, tree };
   } catch (error) {
     const because = unreadableBecause(error);
     // A fault that is not a typed one is a fault of Stroq and is not turned into a sentence: the message of a
@@ -248,17 +255,80 @@ export async function vetFlow(options: VetOptions, deps: VetDeps): Promise<numbe
     io.err(`stroq vet: ${outsideLine(made.failure)}\n`);
     return EXIT_UNREADABLE;
   }
-  const { passport } = made;
-  if (options.expect !== null && options.expect !== passport.artifact.digest) {
-    io.err(mismatchText(options.expect, passport.artifact.digest));
+  const { passport, tree } = made;
+  let finalPassport = passport;
+
+  if (options.probe) {
+    if (passport.artifact.kind !== 'mcp') {
+      io.err(usageError('vet', '--probe is only supported for an MCP server'));
+      return EXIT_USAGE;
+    }
+
+    try {
+      const probeResult = await probeMcpTree({
+        tree,
+        entrypoint: options.entrypoint,
+        platform: deps.platform,
+        srtBin: deps.srtBin,
+        terminal: deps.terminal,
+        confirm: deps.confirm,
+        launcher: deps.launcher,
+      });
+
+      if (probeResult.status !== 'declined') {
+        const existingLines = new Map(
+          passport.lines.map((l) => [`${l.kind}:${l.subject}:${l.basis}`, l]),
+        );
+        for (const line of probeResult.lines) {
+          const key = `${line.kind}:${line.subject}:${line.basis}`;
+          if (!existingLines.has(key)) {
+            existingLines.set(key, line);
+          }
+        }
+        const existingSignals = new Set(passport.signals.map((s) => `${s.ruleId}:${s.file}`));
+        const newSignals = [...passport.signals];
+        for (const s of probeResult.signals) {
+          const key = `${s.ruleId}:${s.file}`;
+          if (!existingSignals.has(key)) {
+            existingSignals.add(key);
+            newSignals.push(s);
+          }
+        }
+        const existingBlindSpots = new Set(passport.blindSpots);
+        const newBlindSpots = [...passport.blindSpots];
+        for (const b of probeResult.blindSpots) {
+          if (!existingBlindSpots.has(b)) {
+            existingBlindSpots.add(b);
+            newBlindSpots.push(b);
+          }
+        }
+
+        finalPassport = {
+          ...passport,
+          lines: [...existingLines.values()].sort(compareLines),
+          signals: newSignals,
+          blindSpots: newBlindSpots,
+        };
+      }
+    } catch (err) {
+      if (err instanceof McpProbeRefusalError) {
+        io.err(`stroq vet: ${err.message}\n`);
+        return EXIT_USAGE;
+      }
+      throw err;
+    }
+  }
+
+  if (options.expect !== null && options.expect !== finalPassport.artifact.digest) {
+    io.err(mismatchText(options.expect, finalPassport.artifact.digest));
     return EXIT_UNCONFIRMED;
   }
   // The text is made safe once more on its way out: the screen and the card already are, and the passport
   // is JSON that has no raw control in it, so this changes nothing a reader sees and keeps a file clean.
-  const text = neutralizeControls(textOf(passport, options));
+  const text = neutralizeControls(textOf(finalPassport, options));
   const written = options.out === null ? show(text, io) : writeNew(options, options.out, text, io);
   if (written !== 0) return written;
-  if (!passportIsIncomplete(passport)) return 0;
-  io.err(incompleteText(passport));
+  if (!passportIsIncomplete(finalPassport)) return 0;
+  io.err(incompleteText(finalPassport));
   return EXIT_UNCONFIRMED;
 }

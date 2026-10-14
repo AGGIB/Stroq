@@ -431,14 +431,14 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'vet',
     synopsis:
-      'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--json | --card] [--expect <sha256>] [--out <file>]',
+      'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--probe] [--entrypoint <file>] [--json | --card] [--expect <sha256>] [--out <file>]',
     about: [
       'read a skill, an MCP server or a plugin, from a folder, a tar archive, or online from npm or GitHub,',
       'before you add it, and show its passport: what it asks for or can do, each line marked declared, observed,',
-      'limited or unknown, the rules that matched, and every blind spot. The files are read and none of them is run.',
-      'A reading, not a security certificate: an absent line means nothing was seen, not that nothing is there.',
-      'Exit codes: 0 the passport is complete, 1 --expect did not match or a reading failed, 2 wrong command line, 3 the',
-      'files cannot be read as an artifact',
+      'limited or unknown, the rules that matched, and every blind spot. The files are read and none of them is run',
+      'unless --probe is explicitly requested for an MCP server in a sandbox. A reading, not a security certificate:',
+      'an absent line means nothing was seen, not that nothing is there. Exit codes: 0 the passport is complete, 1 --expect',
+      'did not match or a reading failed, 2 wrong command line, 3 the files cannot be read as an artifact',
     ],
     flags: [
       [
@@ -468,6 +468,14 @@ export const COMMANDS: readonly CommandHelp[] = [
       [
         '--out <file>',
         "write the output to a file that does not exist yet, never over one. Write it outside the folder it describes: inside, it is one of that folder's files and changes its digest",
+      ],
+      [
+        '--probe',
+        'run a sandboxed stdio MCP handshake (initialize and paginated tools/list) using srt on macOS or Linux after terminal confirmation; limits: 20 pages, 500 tools, 10 MiB, 10 s timeout',
+      ],
+      [
+        '--entrypoint <file>',
+        'the start file of an MCP server (.js, .mjs, .cjs) when package.json does not declare one',
       ],
     ],
   },

@@ -89,8 +89,7 @@ const comparePlace = (a: Place, b: Place): number =>
 
 const firstPlace = (line: PassportLine): Place => line.where[0] ?? { file: '', line: null };
 
-/** A total order over lines that looks at nothing but what they say. */
-function compareLines(a: PassportLine, b: PassportLine): number {
+export function compareLines(a: PassportLine, b: PassportLine): number {
   const pa = firstPlace(a);
   const pb = firstPlace(b);
   return (

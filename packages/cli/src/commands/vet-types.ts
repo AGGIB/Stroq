@@ -1,6 +1,8 @@
 import type { Transport } from '../install/fetch.js';
 import type { NamedReading } from '../install/inspect/index.js';
+import type { ProbeLauncher } from '../install/mcp-probe.js';
 import type { ArtifactKind } from '../install/types.js';
+import type { Terminal } from '../ui/terminal.js';
 
 interface VetCommonOptions {
   /** What the artifact is, or `auto` to tell from its files. */
@@ -11,6 +13,10 @@ interface VetCommonOptions {
   readonly expect: string | null;
   /** A file to write the output to. It must not exist yet. */
   readonly out: string | null;
+  /** Opt-in sandboxed probe for vetted MCP servers. */
+  readonly probe: boolean;
+  /** Entrypoint override for the server. */
+  readonly entrypoint?: string | undefined;
 }
 
 /** The command line of `stroq vet`, read and checked: either local with --from or online with --online. */
@@ -38,4 +44,8 @@ export interface VetDeps {
   readonly stroqVersion?: string;
   readonly readings?: readonly NamedReading[];
   readonly transport?: Transport;
+  readonly terminal?: Terminal | undefined;
+  readonly confirm?: (() => Promise<boolean> | boolean) | undefined;
+  readonly launcher?: ProbeLauncher | undefined;
+  readonly srtBin?: string | null | undefined;
 }

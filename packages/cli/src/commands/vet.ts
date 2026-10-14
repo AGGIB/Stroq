@@ -32,6 +32,8 @@ export const VET_OPTIONS = {
   expect: { type: 'string' },
   card: { type: 'boolean', default: false },
   out: { type: 'string' },
+  probe: { type: 'boolean', default: false },
+  entrypoint: { type: 'string' },
 } as const;
 
 const EXIT_USAGE = 2;
@@ -140,6 +142,8 @@ export function parseVetArgs(args: readonly string[]): Parsed {
     card: values.card === true,
     expect: expected,
     out: values.out ?? null,
+    probe: values.probe === true,
+    entrypoint: values.entrypoint,
   };
   const options: VetOptions =
     values.from !== undefined
