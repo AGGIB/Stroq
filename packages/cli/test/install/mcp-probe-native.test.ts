@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, connect } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { probeMcpTree } from '../../src/install/mcp-probe.js';
+import { probeMcpTree, type ProbeLaunchSpec } from '../../src/install/mcp-probe.js';
 import { buildTree } from '../../src/install/tree.js';
 import { binOnPath } from '../../src/run/which.js';
 
@@ -61,14 +62,32 @@ let buf='';process.stdin.on('data',c=>{buf+=c;let n;while((n=buf.indexOf('\\n'))
       { complete: true },
     );
     try {
+      let diagnostic = '';
       const result = await probeMcpTree({
         tree,
         entrypoint: 'server.mjs',
         userHome: home,
         confirm: () => true,
         timeoutMs: 15_000,
+        // Keep the Linux production-launcher check. Capture Seatbelt startup errors on macOS.
+        ...(process.platform === 'darwin'
+          ? {
+              launcher: (spec: ProbeLaunchSpec) => {
+                const child = spawn(spec.command, [...spec.args], {
+                  cwd: spec.cwd,
+                  env: spec.env,
+                  detached: true,
+                  stdio: ['pipe', 'pipe', 'pipe'],
+                });
+                child.stderr.on('data', (chunk) => {
+                  diagnostic = (diagnostic + String(chunk)).slice(0, 8192);
+                });
+                return child;
+              },
+            }
+          : {}),
       });
-      expect(result.error).toBeNull();
+      expect(result.error, diagnostic).toBeNull();
       expect(result.tools).toHaveLength(1);
       const { scratchError, ...observed } = JSON.parse(result.tools[0]!.description!);
       expect(observed, scratchError).toEqual({
