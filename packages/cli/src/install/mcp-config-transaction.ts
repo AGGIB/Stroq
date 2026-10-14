@@ -1,7 +1,5 @@
-import { unlink } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { readConfigText } from '../commands/config-file.js';
-import { writeFileAtomic } from '../harden/atomic.js';
+import { removeFile, writeFileAtomic } from '../harden/atomic.js';
 import type { McpConfigJson } from '../commands/mcp-config.js';
 
 /** Roll back exact bytes (or absence), rather than parsing and rewriting the backup. */
@@ -9,10 +7,15 @@ export async function commitMcpConfig(
   file: string,
   config: McpConfigJson,
   save: () => Promise<void>,
+  options: { readonly before?: string | null; readonly root?: string } = {},
 ): Promise<void> {
-  const before = readConfigText(file, { strict: true });
+  const before =
+    options.before === undefined ? readConfigText(file, { strict: true }) : options.before;
   const written = `${JSON.stringify(config, null, 2)}\n`;
-  const rules = { root: dirname(file), initRule: false };
+  const rules = {
+    ...(options.root === undefined ? {} : { root: options.root }),
+    initRule: false,
+  };
   await writeFileAtomic(file, written, {
     ...rules,
     beforeRename: () => {
@@ -23,10 +26,15 @@ export async function commitMcpConfig(
   try {
     await save();
   } catch (error) {
-    if (readConfigText(file, { strict: true }) !== written)
-      throw new Error('lock write failed; an outside config edit was preserved', { cause: error });
-    if (before === null) await unlink(file);
-    else await writeFileAtomic(file, before, rules);
+    const unchanged = () => {
+      if (readConfigText(file, { strict: true }) !== written)
+        throw new Error('lock write failed; an outside config edit was preserved', {
+          cause: error,
+        });
+    };
+    unchanged();
+    if (before === null) await removeFile(file, { ...rules, beforeRemove: unchanged });
+    else await writeFileAtomic(file, before, { ...rules, beforeRename: unchanged });
     throw error;
   }
 }

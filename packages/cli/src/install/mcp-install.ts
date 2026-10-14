@@ -1,14 +1,21 @@
 import { entrypointOf } from '../mcp/entrypoint.js';
-import { posix, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, dirname, posix, resolve } from 'node:path';
 import { labelOf } from '../commands/vet-flow.js';
-import { readJsonObject, isPlainObject } from '../commands/config-file.js';
-import { hasValidMcpServers, isMcpClient, mcpConfigPath } from '../commands/mcp-config.js';
-import type { McpConfigJson } from '../commands/mcp-config.js';
+import { readConfigText, parseConfigJson, isPlainObject } from '../commands/config-file.js';
+import {
+  hasValidMcpServers,
+  isMcpClient,
+  mcpConfigPath,
+  wrapperIndex,
+} from '../commands/mcp-config.js';
+import type { McpClient, McpConfigJson } from '../commands/mcp-config.js';
 import { renderPassport } from '../commands/vet-render.js';
 import { confirm, confirmTyped } from '../ui/prompt.js';
 import { outsideLine } from '../ui/layout.js';
 import { styleFor } from '../ui/style.js';
 import type { Terminal } from '../ui/terminal.js';
+import { assertWriteAllowed } from '../harden/atomic.js';
 import { stroqVersion } from '../version.js';
 import { inspectTree, INSPECT_RULES_ID, passportIsIncomplete } from './inspect/index.js';
 import { readPassports, SKILL_NAME, withPassports, writePassports } from './lock.js';
@@ -55,7 +62,11 @@ export interface McpRecord {
   readonly grant: { readonly pin: string };
   readonly source: string;
   readonly config: string;
+  /** Automatic targets retain their project/home boundary; explicit --config targets have none. */
+  readonly configRoot?: string | null;
   readonly client: string;
+  /** Optional for records written before the installer recorded the wrapper's context separately. */
+  readonly cwd?: string;
   readonly entrypoint: string;
   readonly passEnv: readonly string[];
   readonly passport: Passport;
@@ -83,26 +94,91 @@ function nameOf(name: string): string {
   return name;
 }
 
-function target(options: McpInstallOptions): { file: string; label: string } {
+interface McpTarget {
+  readonly file: string;
+  readonly label: string;
+  readonly root: string | null;
+}
+
+function clientRoot(
+  client: McpClient,
+  options: Pick<McpInstallOptions, 'project' | 'user'>,
+): string {
+  if (client === 'claude-code' || (client === 'cursor' && options.user !== true))
+    return resolve(options.project);
+  // Windows may deliberately redirect the user's roaming application data outside their home.
+  if (client === 'claude-desktop' && process.platform === 'win32')
+    return resolve(process.env['APPDATA'] ?? homedir());
+  return resolve(homedir());
+}
+
+function target(options: McpInstallOptions): McpTarget {
   if ((options.client === undefined) === (options.config === undefined))
     throw new Error('give exactly one of --client <name> or --config <path>');
   if (options.config !== undefined) {
     const file = resolve(options.config);
-    return { file, label: posix.basename(file.replaceAll('\\', '/')) };
+    return { file, label: posix.basename(file.replaceAll('\\', '/')), root: null };
   }
   const client = options.client!;
   if (!isMcpClient(client)) throw new Error('unknown MCP client');
   return {
-    file: mcpConfigPath(client, options.user === true ? 'user' : 'project', options.project),
+    file: resolve(
+      mcpConfigPath(client, options.user === true ? 'user' : 'project', options.project),
+    ),
     label: client,
+    root: clientRoot(client, options),
   };
 }
 
-function loadConfig(file: string): McpConfigJson {
-  const config = readJsonObject<McpConfigJson>(file);
-  if (!hasValidMcpServers(config))
+function recordedTarget(record: McpRecord): McpTarget {
+  const file = resolve(record.config);
+  let root = record.configRoot;
+  // Older records have only the selected client and its conventional config path.
+  if (root === undefined) {
+    root = null;
+    if (record.client === 'claude-code' && basename(file) === '.mcp.json') root = dirname(file);
+    else if (
+      record.client === 'cursor' &&
+      basename(file) === 'mcp.json' &&
+      basename(dirname(file)) === '.cursor'
+    )
+      root = dirname(dirname(file));
+    else if (record.client === 'windsurf' && basename(file) === 'mcp_config.json') {
+      const parent = dirname(file);
+      // Windsurf discovery can switch paths after installation; both layouts retain the same home.
+      if (basename(parent) === '.codeium') root = dirname(parent);
+      else if (basename(parent) === 'windsurf' && basename(dirname(parent)) === '.codeium')
+        root = dirname(dirname(parent));
+    } else if (isMcpClient(record.client) && file === resolve(mcpConfigPath(record.client, 'user')))
+      root = clientRoot(record.client, { project: process.cwd(), user: true });
+  }
+  return { file, label: record.client, root };
+}
+
+function targetRules(target: McpTarget): { root?: string; initRule: false } {
+  return { ...(target.root === null ? {} : { root: target.root }), initRule: false };
+}
+
+function recordedCwd(record: McpRecord): string {
+  if (record.cwd !== undefined) return resolve(record.cwd);
+  const args = record.written['args'];
+  const at = Array.isArray(args) ? wrapperIndex(args) : null;
+  if (Array.isArray(args) && at !== null) {
+    const end = args.indexOf('--', at);
+    const flag = args.indexOf('--cwd', at);
+    if (flag !== -1 && flag + 1 < end && typeof args[flag + 1] === 'string')
+      return resolve(args[flag + 1]);
+  }
+  throw new Error('the installed MCP wrapper has no recorded working directory');
+}
+
+function loadConfig(file: string): { config: McpConfigJson; text: string | null } {
+  const text = readConfigText(file, { strict: true });
+  const config: McpConfigJson =
+    text === null || text.trim().length === 0 ? {} : parseConfigJson(file, text);
+  if (!isPlainObject(config) || !hasValidMcpServers(config))
     throw new Error('mcpServers in the client config is not an object');
-  return config;
+  return { config, text };
 }
 
 function serversOf(config: McpConfigJson): Record<string, unknown> {
@@ -120,8 +196,9 @@ function withServer(
   return { ...config, mcpServers: servers };
 }
 
-function plainEntry(value: unknown): Record<string, unknown> | null {
-  return isPlainObject(value) ? value : null;
+function currentEntry(config: McpConfigJson, name: string): unknown {
+  const servers = serversOf(config);
+  return Object.hasOwn(servers, name) ? servers[name] : undefined;
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {
@@ -135,6 +212,7 @@ function entryFor(
   record: Pick<McpRecord, 'digest' | 'entrypoint' | 'passEnv'>,
   options: McpInstallOptions,
   label: string,
+  cwd: string,
   original: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const sep = process.platform === 'win32' ? '\\' : '/';
@@ -151,7 +229,7 @@ function entryFor(
       '--pin',
       `sha256:${record.digest}`,
       '--cwd',
-      resolve(options.cwd ?? options.project),
+      cwd,
       '--pass-env',
       record.passEnv.join(','),
       '--',
@@ -219,22 +297,26 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const passEnv = [...new Set(options.passEnv ?? previous?.passEnv ?? [])];
   if (passEnv.some((variable) => !ENV_NAME.test(variable)))
     throw new Error('--pass-env takes variable names: letters, digits and underscores');
-  const { file, label } = target(
+  const selected =
     previous !== undefined && options.client === undefined && options.config === undefined
-      ? { ...options, config: previous.config }
-      : options,
-  );
+      ? recordedTarget(previous)
+      : target(options);
+  const { file, label, root } = selected;
   if (previous !== undefined && resolve(previous.config) !== file)
     throw new Error('the server is installed in another client config; remove it first');
-  const config = loadConfig(file);
-  const current = plainEntry(serversOf(config)[name]);
+  assertWriteAllowed(file, targetRules(selected));
+  const { config } = loadConfig(file);
+  const current = currentEntry(config, name);
   if (previous !== undefined && !jsonEqual(current, previous.written) && options.force !== true)
     throw new Error('the client config entry changed outside Stroq; use remove --force first');
-  if (previous === undefined && current !== null)
+  if (previous === undefined && Object.hasOwn(serversOf(config), name))
     throw new Error('the client config already has a server by this name; refusing to replace it');
   const digest = made.passport.artifact.digest;
-  const original = previous === undefined ? current : previous.original;
-  const written = entryFor(name, { digest, entrypoint, passEnv }, options, label, original);
+  const original = previous === undefined ? null : previous.original;
+  const cwd = resolve(
+    options.cwd ?? (previous === undefined ? options.project : recordedCwd(previous)),
+  );
+  const written = entryFor(name, { digest, entrypoint, passEnv }, options, label, cwd, original);
   const material =
     options.restore === true ||
     previous === undefined ||
@@ -263,12 +345,13 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   return withPassports(options.stroqHome, async (lock) => {
     if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
       throw new Error('the lock changed while confirming; read and confirm again');
-    const fresh = loadConfig(file);
-    if (!jsonEqual(plainEntry(serversOf(fresh)[name]), current))
-      throw new Error('the client config changed while confirming; read and confirm again');
     if (previous !== undefined)
       await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
     await putStore(options.stroqHome, made.tree, digest);
+    assertWriteAllowed(file, targetRules(selected));
+    const fresh = loadConfig(file);
+    if (!jsonEqual(currentEntry(fresh.config, name), current))
+      throw new Error('the client config changed while confirming; read and confirm again');
     const receipt: Receipt = {
       v: 1,
       at: new Date().toISOString(),
@@ -287,7 +370,9 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       grant: { pin: `sha256:${digest}` },
       source,
       config: file,
+      configRoot: root,
       client: label,
+      cwd,
       entrypoint,
       passEnv,
       passport: made.passport,
@@ -296,8 +381,11 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       history: [...history, receipt],
     };
     const next = { ...lock, mcp: { ...(lock.mcp ?? {}), [name]: record } };
-    await commitMcpConfig(file, withServer(fresh, name, written), () =>
-      writePassports(options.stroqHome, next),
+    await commitMcpConfig(
+      file,
+      withServer(fresh.config, name, written),
+      () => writePassports(options.stroqHome, next),
+      { ...targetRules(selected), before: fresh.text },
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
     if (previous !== undefined) await collectMcpStore(options.stroqHome, next, previous.digest);
@@ -312,8 +400,10 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   const previous = recordOf(initial, name);
   if (previous === undefined) throw new Error('the MCP server is not installed');
   await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
-  const file = resolve(previous.config);
-  const current = plainEntry(serversOf(loadConfig(file))[name]);
+  const selected = recordedTarget(previous);
+  const { file } = selected;
+  assertWriteAllowed(file, targetRules(selected));
+  const current = currentEntry(loadConfig(file).config, name);
   const drifted = !jsonEqual(current, previous.written);
   if (drifted && options.force !== true)
     throw new Error(
@@ -332,10 +422,11 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   await withPassports(options.stroqHome, async (lock) => {
     if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
       throw new Error('the lock changed while confirming; read and confirm again');
-    const fresh = loadConfig(file);
-    if (!jsonEqual(plainEntry(serversOf(fresh)[name]), current))
-      throw new Error('the client config changed while confirming; read and confirm again');
     await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+    assertWriteAllowed(file, targetRules(selected));
+    const fresh = loadConfig(file);
+    if (!jsonEqual(currentEntry(fresh.config, name), current))
+      throw new Error('the client config changed while confirming; read and confirm again');
     const receipt: Receipt = {
       v: 1,
       at: new Date().toISOString(),
@@ -352,8 +443,11 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
       [name]: { kind: 'mcp', status: 'revoked', history: [...previous.history, receipt] },
     };
     const next = { ...lock, mcp: rest };
-    await commitMcpConfig(file, withServer(fresh, name, previous.original ?? undefined), () =>
-      writePassports(options.stroqHome, next),
+    await commitMcpConfig(
+      file,
+      withServer(fresh.config, name, previous.original ?? undefined),
+      () => writePassports(options.stroqHome, next),
+      { ...targetRules(selected), before: fresh.text },
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
     await collectMcpStore(options.stroqHome, next, previous.digest);
