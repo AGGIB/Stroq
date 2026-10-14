@@ -1,6 +1,6 @@
 // Sanitizes candidate observations; it never upgrades them to verified host evidence.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { cleanFixture, leaksIn } from '../packages/cli/test/live/drivers/clean-fixture.js';
 
 const [input, output] = process.argv.slice(2);
@@ -36,20 +36,73 @@ if (
   throw new Error('missing capture metadata; no version or OS is invented');
 const hooks = readFileSync(join(input, 'hooks.jsonl'), 'utf8');
 if (!hooks.trim()) throw new Error('no host hook invocations were recorded');
+const snapshots = readdirSync(input).filter((name) => name.endsWith('.snapshot.json'));
+if (snapshots.length < 2) throw new Error('record before and after disk snapshots');
 const files = [
   'hooks.jsonl',
-  ...readdirSync(input).filter((name) => name.endsWith('.snapshot.json')),
+  ...(existsSync(join(input, 'audit.jsonl')) ? ['audit.jsonl'] : []),
+  ...snapshots,
 ];
-if (files.length < 3) throw new Error('record before and after disk snapshots');
+const ids = new Map<string, string>();
+const idKeys = new Set([
+  'conversation_id',
+  'session_id',
+  'generation_id',
+  'tool_use_id',
+  'sessionId',
+  'toolUseId',
+]);
+function anonymizeIds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(anonymizeIds);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, each]) => {
+      if (idKeys.has(key) && typeof each === 'string' && each !== '') {
+        if (!ids.has(each))
+          ids.set(each, `cursor-fixture-id-${String(ids.size + 1).padStart(4, '0')}`);
+        return [key, ids.get(each)];
+      }
+      return [key, anonymizeIds(each)];
+    }),
+  );
+}
+const fixtureRoot =
+  version['os'] === 'win32' ? 'C:\\stroq-live-fixture' : '/tmp/stroq-live-fixture';
+const fixturePath = (name: string): string =>
+  fixtureRoot + (version['os'] === 'win32' ? '\\' : '/') + name;
 const renames = [
-  [location.project, '/tmp/stroq-live-fixture/project'],
-  [location.stroqHome ?? '', '/tmp/stroq-live-fixture/stroq-home'],
-  [location.home ?? '', '/tmp/stroq-live-fixture/home'],
-  [location.root, '/tmp/stroq-live-fixture'],
+  [location.project, fixturePath('project')],
+  [location.stroqHome ?? '', fixturePath('stroq-home')],
+  [location.home ?? '', fixturePath('home')],
+  [location.root, fixtureRoot],
+  [resolve(input), fixturePath('capture')],
 ].filter(([from]) => from !== '') as [string, string][];
+// Windows Cursor uses native paths for files and /C:/ URI paths for workspace roots.
 renames.push(
-  ...renames.map(([from, to]): [string, string] => [JSON.stringify(from).slice(1, -1), to]),
+  ...renames.flatMap(([from, to]): [string, string][] => {
+    const slashed = from.replaceAll('\\', '/');
+    const slashedTo = to.replaceAll('\\', '/');
+    return /^[A-Za-z]:\//.test(slashed)
+      ? [
+          [slashed, slashedTo],
+          ['/' + slashed, '/' + slashedTo],
+        ]
+      : [];
+  }),
 );
+renames.push(
+  ...renames.map(([from, to]): [string, string] => [
+    JSON.stringify(from).slice(1, -1),
+    JSON.stringify(to).slice(1, -1),
+  ]),
+);
+renames.push(
+  ...renames.map(([from, to]): [string, string] => [
+    JSON.stringify(from).slice(1, -1),
+    JSON.stringify(to).slice(1, -1),
+  ]),
+);
+renames.sort((a, b) => b[0].length - a[0].length);
 const candidates = files.map((name) => {
   const raw = readFileSync(join(input, name), 'utf8');
   if (
@@ -58,13 +111,20 @@ const candidates = files.map((name) => {
     )
   )
     throw new Error('raw capture contains possible credentials; remove them before cleaning');
-  const lines = name.endsWith('.jsonl') ? raw : JSON.stringify(safeJson(raw));
+  const lines = (
+    name.endsWith('.jsonl') ? raw.split('\n').filter((line) => line.trim() !== '') : [raw]
+  )
+    .map((line) => JSON.stringify(anonymizeIds(safeJson(line))))
+    .join('\n');
   let relocated = lines;
   // Relocate the exact project before the generic home anonymizer changes its prefix.
   for (const [from, to] of renames) relocated = relocated.split(from).join(to);
   let cleaned: string;
   try {
-    cleaned = cleanFixture(relocated);
+    cleaned = cleanFixture(relocated).replace(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
+      'fixture-user@example.invalid',
+    );
   } catch {
     throw new Error('invalid hook JSONL; inspect the raw file locally');
   }

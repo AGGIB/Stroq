@@ -7,6 +7,7 @@ import {
   cursorResultText,
   cursorToolInput,
   cursorToolName,
+  cursorProjectRoot,
   handleCursorHook,
 } from '../../src/adapters/cursor.js';
 import { createEngine } from '../../src/engine-factory.js';
@@ -162,6 +163,12 @@ describe('event field mapping', () => {
 });
 
 describe('handleCursorHook', () => {
+  it('normalizes recorded Windows URI drive roots without changing POSIX roots', () => {
+    const input = parsed({ workspace_roots: ['/C:/work/project'], hook_event_name: 'preToolUse' });
+    expect(cursorProjectRoot(input, 'win32')).toBe('C:/work/project');
+    expect(cursorProjectRoot(input, 'linux')).toBe('/C:/work/project');
+  });
+
   it('blocks a direct Cursor Write or Delete of protected configuration before execution', async () => {
     for (const tool_name of ['Write', 'Delete']) {
       const out = await run({
@@ -192,7 +199,7 @@ describe('handleCursorHook', () => {
   // `stroq log` shows the gap instead of the agent silently losing its edits.
   it('allows and records a Cursor write whose path it cannot find', async () => {
     const out = await run({ hook_event_name: 'preToolUse', tool_name: 'Write', tool_input: {} });
-    expect(out).toEqual({ stdout: '', exitCode: 0 });
+    expect(out).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
     expect(readFileSync(join(home, 'audit.jsonl'), 'utf8')).toContain('cursor-write-path-unread');
   });
 
@@ -214,7 +221,7 @@ describe('handleCursorHook', () => {
       tool_name: 'Write',
       tool_input: { file_path: 'src/okay.ts', path: null },
     });
-    expect(out).toEqual({ stdout: '', exitCode: 0 });
+    expect(out).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
   });
 
   it('denies an oversized Cursor path list even with a safe path', async () => {
@@ -237,12 +244,12 @@ describe('handleCursorHook', () => {
         tool_name: 'Write',
         tool_input: { file_path: 'src/app.ts', content: 'ok' },
       }),
-    ).toEqual({ stdout: '', exitCode: 0 });
+    ).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
   });
 
-  it('prints nothing for an allowed shell command', async () => {
+  it('returns an explicit allow for a permitted shell command', async () => {
     expect(await run({ hook_event_name: 'beforeShellExecution', command: 'ls -la' })).toEqual({
-      stdout: '',
+      stdout: JSON.stringify({ permission: 'allow' }),
       exitCode: 0,
     });
   });

@@ -7,9 +7,9 @@ import { installCursorHooks } from '../packages/cli/src/commands/cursor-hooks.js
 import { cursorRecorderSource } from './cursor-capture-recorder.js';
 
 const [action, target, executable] = process.argv.slice(2);
-if (!target || !['prepare', 'snapshot'].includes(action ?? ''))
+if (!target || !['prepare', 'snapshot', 'control', 'restore'].includes(action ?? ''))
   throw new Error(
-    'usage: tsx scripts/capture-cursor-fixture.ts prepare <new raw directory outside repo> <Cursor executable>; or snapshot <raw directory> <step label>',
+    'usage: tsx scripts/capture-cursor-fixture.ts prepare <new raw directory outside repo> <Cursor executable>; snapshot <raw directory> <step label>; control|restore <raw directory>',
   );
 const location = relative(process.cwd(), resolve(target));
 if (location === '' || (!isAbsolute(location) && !location.startsWith(`..${sep}`)))
@@ -85,12 +85,14 @@ if (action === 'prepare') {
   );
   mkdirSync(join(made.project, 'scratch'));
   writeFileSync(join(made.project, 'scratch', 'delete-me.txt'), 'harmless delete sentinel\n');
+  mkdirSync(join(made.project, '.claude'));
+  writeFileSync(join(made.project, '.claude', 'settings.json'), '{"cursor_fixture":"unchanged"}\n');
   console.log(
     `Prepared ${made.project}. Open it in the selected Cursor installation. No host action or model request has run.`,
   );
 } else {
   const label = executable;
-  if (!label || !/^[a-z0-9-]{1,40}$/.test(label))
+  if (action === 'snapshot' && (!label || !/^[a-z0-9-]{1,40}$/.test(label)))
     throw new Error('snapshot needs a plain step label');
   const made = JSON.parse(readFileSync(join(target, 'location.json'), 'utf8')) as {
     root: string;
@@ -100,7 +102,45 @@ if (action === 'prepare') {
   assertThrowaway(made.project);
   if (realpathSync(made.project) !== join(realpathSync(made.root), 'project'))
     throw new Error('snapshot project is not the prepared throwaway project');
-  const paths = ['scratch/write-me.txt', 'scratch/delete-me.txt', '.cursor/hooks.json'];
+  const hooksFile = join(made.project, '.cursor', 'hooks.json');
+  const backup = join(target, 'enforcing-hooks.json');
+  const controlCopy = join(target, 'control-hooks-config.json');
+  if (action === 'control') {
+    if (existsSync(backup))
+      throw new Error('one control per capture; preserve its backup and prepare a new capture');
+    const original = readFileSync(hooksFile, 'utf8');
+    const config = JSON.parse(original) as { hooks?: Record<string, unknown> };
+    const entries = config.hooks?.['preToolUse'];
+    if (
+      !Array.isArray(entries) ||
+      entries.length !== 1 ||
+      typeof entries[0]?.command !== 'string' ||
+      !entries[0].command.includes(join(resolve(target), 'record-hook.mjs'))
+    )
+      throw new Error('refusing to disable an unexpected gate');
+    const control =
+      JSON.stringify({ ...config, hooks: { ...config.hooks, preToolUse: [] } }, null, 2) + '\n';
+    writeFileSync(backup, original, { flag: 'wx', mode: 0o600 });
+    writeFileSync(controlCopy, control, { flag: 'wx', mode: 0o600 });
+    writeFileSync(hooksFile, control);
+    console.log(
+      'Private preToolUse gate disabled for the explicit control only. Observation hooks remain. No model request ran.',
+    );
+    exitAction();
+  }
+  if (action === 'restore') {
+    if (readFileSync(hooksFile, 'utf8') !== readFileSync(controlCopy, 'utf8'))
+      throw new Error('control hooks changed externally; refusing to overwrite');
+    writeFileSync(hooksFile, readFileSync(backup, 'utf8'));
+    console.log('Restored the private enforcing gate. No model request ran.');
+    exitAction();
+  }
+  const paths = [
+    'scratch/write-me.txt',
+    'scratch/delete-me.txt',
+    '.cursor/hooks.json',
+    '.claude/settings.json',
+  ];
   const files = paths.map((path) => {
     const file = join(made.project, path);
     return {
@@ -115,4 +155,8 @@ if (action === 'prepare') {
     { flag: 'wx', mode: 0o600 },
   );
   console.log('Recorded disk state only; no host enforcement conclusion inferred.');
+}
+
+function exitAction(): never {
+  process.exit(0);
 }

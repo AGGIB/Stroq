@@ -1,6 +1,6 @@
 {
   "exitCode": 0,
-  "stdout": "",
+  "stdout": "{\"permission\":\"allow\"}",
   "permission": "allow",
   "sentinel": {
     "path": "/tmp/stroq-live-fixture/project/src/sentinel-allow.ts",

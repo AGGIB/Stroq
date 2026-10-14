@@ -153,10 +153,12 @@ const fileText = (input: CursorHookInput): string =>
  * directory, which an agent can move with a permitted `cd` and thereby step the secret
  * index out from under the project's `.env*` files. The process cwd is the last resort.
  */
-function projectRoot(input: CursorHookInput): string {
+export function cursorProjectRoot(input: CursorHookInput, platform = process.platform): string {
   const roots = asList(input.workspace_roots);
   const root = roots.find((r): r is string => typeof r === 'string' && r !== '');
-  return root ?? (input.cwd || process.cwd());
+  const path = root ?? (input.cwd || process.cwd());
+  // Cursor 3.24.18 on Windows reports URI-style drive roots beside native file paths.
+  return platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
 }
 
 export interface CursorDecision {
@@ -167,7 +169,7 @@ export interface CursorDecision {
   readonly agent_message: string;
 }
 
-/** `null` for an allow: Cursor treats empty stdout as allow, which is the smallest surface. */
+/** `null` represents allow internally; blocking hooks must serialize an explicit allow. */
 export function renderDecision(
   decision: Decision,
   provenance: readonly ProvenanceHit[],
@@ -225,7 +227,7 @@ async function scanOutput(engine: StroqEngine, event: EngineEvent, text: string)
 async function handleBlockingPre(engine: StroqEngine, event: EngineEvent): Promise<HookOutput> {
   const { decision, provenance, secrets } = await engine.pre(event);
   const rendered = renderDecision(decision, provenance, secrets);
-  return rendered === null ? NO_OUTPUT : json({ ...rendered });
+  return rendered === null ? json({ permission: 'allow' }) : json({ ...rendered });
 }
 
 /**
@@ -301,7 +303,8 @@ async function handleGenericPre(
 ): Promise<HookOutput> {
   // The installed matcher is `Write|Delete`; anything else reaching here came from a
   // hand-edited matcher and is not a call this handler knows how to classify.
-  if (input.tool_name !== 'Write' && input.tool_name !== 'Delete') return NO_OUTPUT;
+  if (input.tool_name !== 'Write' && input.tool_name !== 'Delete')
+    return json({ permission: 'allow' });
   const paths = cursorWritePaths(event.toolInput);
   if (paths === 'too-many') {
     const decision: Decision = {
@@ -322,7 +325,7 @@ async function handleGenericPre(
       classes: [],
       decision: CURSOR_WRITE_PATH_UNREAD,
     });
-    return NO_OUTPUT;
+    return json({ permission: 'allow' });
   }
   const result = await decidePre(
     engine,
@@ -330,7 +333,7 @@ async function handleGenericPre(
     paths.map((file_path) => ({ ...event.toolInput, file_path })),
   );
   const rendered = renderDecision(result.decision, result.provenance, result.secrets);
-  if (rendered === null) return NO_OUTPUT;
+  if (rendered === null) return json({ permission: 'allow' });
   if (rendered.permission === 'ask') {
     const reason = `${rendered.user_message}; Cursor preToolUse cannot prompt, so Stroq denied it`;
     return json({ permission: 'deny', user_message: reason, agent_message: reason });
@@ -419,7 +422,7 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
     sessionId: input.conversation_id,
     toolName: cursorToolName(input),
     toolInput: cursorToolInput(input),
-    cwd: projectRoot(input),
+    cwd: cursorProjectRoot(input),
   };
   switch (input.hook_event_name) {
     case 'preToolUse':

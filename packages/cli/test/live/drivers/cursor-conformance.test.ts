@@ -12,7 +12,7 @@ const files = readdirSync(root, { recursive: true, withFileTypes: true })
 const read = (name: string): Record<string, unknown> =>
   JSON.parse(readFileSync(join(root, 'synthetic', name), 'utf8'));
 
-describe('synthetic Cursor fixture hygiene', () => {
+describe('Cursor fixture hygiene (synthetic and measured)', () => {
   it('has checked-in fixture files', () => {
     expect(files.length).toBeGreaterThanOrEqual(5);
   });

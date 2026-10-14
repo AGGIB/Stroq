@@ -164,7 +164,7 @@ describe('Synthetic Cursor adapter fixture replay', () => {
       });
 
       // Allowed action produces no block
-      expect(preOut).toEqual({ stdout: '', exitCode: 0 });
+      expect(preOut).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
 
       // Simulated host executes the write
       const { mkdirSync } = await import('node:fs');
@@ -244,7 +244,7 @@ describe('Synthetic Cursor adapter fixture replay', () => {
         tool_name: 'Delete',
         tool_input: { file_path: tempFile },
       });
-      expect(allowOut).toEqual({ stdout: '', exitCode: 0 });
+      expect(allowOut).toEqual({ stdout: JSON.stringify({ permission: 'allow' }), exitCode: 0 });
       unlinkSync(tempFile);
       expect(existsSync(tempFile)).toBe(false);
 
