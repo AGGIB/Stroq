@@ -94,6 +94,12 @@ describe('latency benchmark engine', () => {
     expect(baseline?.overhead).toBeUndefined();
     expect(preBash?.overhead?.wallP50).toBe(0);
     expect(preBash?.overhead?.processorP50).toBe(0);
+
+    const formatted = formatLatencyBench(report);
+    expect(formatted).toContain('Retained / Req');
+    expect(formatted).toContain('Missing CPU');
+    expect(formatted).toContain('Outliers');
+    expect(formatted).toMatch(/1 \/ 3\s+15 \/ 15 \/ 15 ms\s+25 \/ 25 \/ 25 ms\s+1\s+1/);
   });
 
   it('fails fast when child process execution fails', async () => {
@@ -128,6 +134,32 @@ describe('latency benchmark engine', () => {
 
     const formatted = formatLatencyBench(report);
     expect(formatted).toContain('n/a');
+    expect(formatted).toContain('0 / 2');
+    expect(formatted).toContain('percentiles are n/a because all samples were excluded');
+    expect(formatted).toContain('2 outliers (>10s)');
+  });
+
+  it('formats n/a and explains missing-CPU exclusions when samples lack CPU time', async () => {
+    const missingCpuRunner: ChildRunFn = () => ({ wallMs: 25.0, cpuMs: null });
+
+    const report = await runLatencyBench({
+      n: 2,
+      warmup: 0,
+      cliEntry: CLI_ENTRY,
+      runner: missingCpuRunner,
+    });
+
+    for (const res of report.results) {
+      expect(res.samples).toBe(0);
+      expect(res.droppedSamples).toBe(2);
+      expect(res.outliers).toBe(0);
+    }
+
+    const formatted = formatLatencyBench(report);
+    expect(formatted).toContain('n/a');
+    expect(formatted).toContain('0 / 2');
+    expect(formatted).toContain('percentiles are n/a because all samples were excluded');
+    expect(formatted).toContain('2 samples with missing CPU time');
   });
 
   it('fails with child stderr when real child process exits with non-zero code', async () => {
