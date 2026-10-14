@@ -19,7 +19,7 @@ const probePython: PythonProbe = (executable) =>
       '-c',
       [
         'import sys',
-        'apple = sys.platform == "darwin" and ("Apple" in sys.version or (sys.version_info[:2] == (3,9) and (sys.executable.startswith("/usr/bin/") or "/CommandLineTools/" in sys.executable or "/Xcode.app/" in sys.executable)))',
+        'apple = sys.platform == "darwin" and ("Apple" in sys.version or (sys.version_info[:2] == (3,9) and (sys.executable.startswith("/usr/bin/") or "/CommandLineTools/" in sys.executable or "/Xcode" in sys.executable)))',
         'print(f"{sys.executable}\\t{sys.version.split()[0]}\\t{int(sys.version_info >= (3,8))}\\t{int(apple)}")',
       ].join('; '),
     ],
