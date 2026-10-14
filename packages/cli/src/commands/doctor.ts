@@ -52,7 +52,6 @@ import { withLiveness } from './doctor-liveness.js';
 import { withProof } from './doctor-proof.js';
 import { stroqVersion } from '../version.js';
 import { configPinStatus } from '../mcp/pin-status.js';
-import { checkInstalledSkills } from '../install/skill-integrity.js';
 import {
   installDrift,
   installKey,
@@ -847,6 +846,7 @@ export async function doctorReport(
       ),
     )
   ).flat();
+  const { checkInstalledSkills } = await import('../install/skill-integrity.js');
   const skillChecks = await checkInstalledSkills(cwd, home, {
     ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
     stroqHome: home,
