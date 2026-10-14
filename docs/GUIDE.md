@@ -414,11 +414,14 @@ The content-addressed store and `~/.stroq/passports.json` keep the confirmed byt
 
 ### Add a Node MCP server after reading it
 
-`stroq add ./server-directory --kind mcp --client <name>` (or `--config <path>`) reads a local server folder, shows its passport, and asks for the first twelve hex digits of its digest. Then it stores those exact bytes by digest, writes a `--pin sha256:<digest>` wrapper entry into the client config, and records the pin in the `mcp` bucket of `~/.stroq/passports.json`, so `stroq mcp` starts only a verified private copy. The start file comes from `--entrypoint`, else `package.json` `bin`, else `main`, and must be a `.js`, `.mjs` or `.cjs` file; environment variables reach the server only if named in `--pass-env`. `--name` sets the server name in the config.
+`stroq add ./server-directory --kind mcp --client <name>` (or `--config <path>`) reads a local server folder or tar archive, shows its passport, and asks for the first twelve hex digits of its digest. Then it stores those exact bytes by digest, writes a `--pin sha256:<digest>` wrapper entry into the client config, and records the pin in the `mcp` bucket of `~/.stroq/passports.json`, so `stroq mcp` starts only a verified private copy. The start file comes from `--entrypoint`, else `package.json` `bin`, else `main`, and must be a `.js`, `.mjs` or `.cjs` file; environment variables reach the server only if named in `--pass-env`. `--name` sets the server name in the config.
 
 `stroq add <name> --kind mcp` updates from the recorded source and asks for a typed digest when the bytes, start file, environment or entry change. An entry that already exists under that name and was not written by Stroq is never replaced, and an entry edited outside Stroq blocks an update until `--force`. `stroq remove <name> --kind mcp` asks y/N and deletes the entry, or restores the one it replaced; outside edits are kept unless `--force`. If the lock cannot be written the config is put back. Skill and MCP records of the same name are independent, and removing one never deletes bytes the other still names.
 
 **Limits.** Only local Node servers are supported (no npm, GitHub, URL, Python or HTTP servers). The pin is tamper-evident, not tamper-proof. It confirms the bytes you read, not that the server is safe, and the server's own `node_modules` are not fetched or checked.
+
+
+MCP installation accepts local directories and tar archives. After a typed digest confirmation, client configuration is replaced atomically; a lock-write failure restores its original bytes or absence. Updates and removal verify confirmed store bytes before replacement. MCP add --restore uses the confirmed store and requires typed confirmation (use --force to replace a drifted client entry); it cannot repair a corrupted store. Removal preserves a revoked record with a confirmed receipt in passports.json and the audit log. It starts no server and runs no install scripts.
 
 ## Or start the agent already confined
 

@@ -42,12 +42,6 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     return 2;
   }
   if (kind === 'mcp') {
-    if (parsed.values.restore === true) {
-      process.stderr.write(
-        usageError('add', '--restore applies to skills; re-run add to update an MCP server'),
-      );
-      return 2;
-    }
     const { addMcp } = await import('../install/mcp-install.js');
     const { hookArgv } = await import('./init.js');
     const [node, ...entryArgv] = hookArgv(process.execPath, resolve(process.argv[1] ?? ''));
@@ -59,6 +53,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
       node: node!,
       entryArgv,
       user: parsed.values.user === true,
+      restore: parsed.values.restore === true,
       ...(parsed.values.client === undefined ? {} : { client: parsed.values.client }),
       ...(parsed.values.config === undefined ? {} : { config: parsed.values.config }),
       ...(parsed.values.entrypoint === undefined ? {} : { entrypoint: parsed.values.entrypoint }),

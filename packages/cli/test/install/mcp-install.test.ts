@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { addMcp, entrypointOf, removeMcp } from '../../src/install/mcp-install.js';
@@ -8,6 +8,8 @@ import { storePath } from '../../src/install/store.js';
 import { parseMcpArgv } from '../../src/commands/mcp.js';
 import { preparePin } from '../../src/mcp/pin.js';
 import { setup } from '../helpers/skill-install.js';
+import { tgzOf } from '../helpers/tar-writer.js';
+import { commitMcpConfig } from '../../src/install/mcp-config-transaction.js';
 
 async function server(root: string, code = 'console.log("one");\n') {
   const dir = join(root, 'srv');
@@ -129,7 +131,13 @@ describe('confirmed MCP install', () => {
     await removeMcp('demo', f.mcpOptions);
     expect((await f.servers())['demo']).toBeUndefined();
     expect((await f.servers())['other']).toEqual({ command: 'keep', args: ['1'] });
-    expect((await readPassports(f.options.stroqHome)).mcp?.['demo']).toBeUndefined();
+    expect((await readPassports(f.options.stroqHome)).mcp?.['demo']).toMatchObject({
+      status: 'revoked',
+      history: [
+        expect.objectContaining({ action: 'add' }),
+        expect.objectContaining({ action: 'remove', to: null, confirmed: true }),
+      ],
+    });
     await expect(
       readFile(join(storePath(f.options.stroqHome, record.digest), 'manifest.json')),
     ).rejects.toMatchObject({
@@ -169,5 +177,105 @@ describe('confirmed MCP install', () => {
     expect(() => entrypointOf(tree, '../x.js')).toThrow(/inside/);
     expect(() => entrypointOf(tree, 'package.json')).toThrow(/node server/);
     expect(() => entrypointOf(tree, 'missing.js')).toThrow(/not a file/);
+  });
+
+  it('creates an absent client config only after confirmation', async () => {
+    const f = await fixture();
+    await unlink(f.config);
+    await expect(
+      addMcp(f.dir, { ...f.mcpOptions, terminal: { ...f.terminal, readLine: async () => null } }),
+    ).rejects.toThrow(/confirm/);
+    await expect(readFile(f.config)).rejects.toMatchObject({ code: 'ENOENT' });
+    await addMcp(f.dir, f.mcpOptions);
+    expect((await f.servers())['demo'].command).toBe(process.execPath);
+  });
+
+  it('installs an archive without running its scripts', async () => {
+    const f = await fixture();
+    const archive = join(f.root, 'server.tgz');
+    await writeFile(
+      archive,
+      tgzOf([
+        {
+          name: 'package/package.json',
+          data: JSON.stringify({
+            name: 'demo',
+            main: 'server.js',
+            scripts: { install: 'must-not-run' },
+          }),
+        },
+        { name: 'package/server.js', data: 'throw new Error("must not run during add");' },
+      ]),
+    );
+    const record = await addMcp(archive, f.mcpOptions);
+    expect(record.passport.artifact.source.type).toBe('tarball');
+    expect(
+      await readFile(
+        join(storePath(f.options.stroqHome, record.digest), 'tree', 'server.js'),
+        'utf8',
+      ),
+    ).toContain('must not run');
+  });
+
+  it('restores the confirmed wrapper without rereading a removed source', async () => {
+    const f = await fixture();
+    const first = await addMcp(f.dir, f.mcpOptions);
+    const servers = await f.servers();
+    servers['demo'].command = 'outside-edit';
+    await writeFile(f.config, JSON.stringify({ mcpServers: servers }));
+    await unlink(join(f.dir, 'package.json'));
+    const restored = await addMcp('demo', { ...f.mcpOptions, restore: true, force: true });
+    expect(restored.digest).toBe(first.digest);
+    expect(restored.history.at(-1)).toMatchObject({
+      action: 'restore',
+      material: true,
+      confirmed: true,
+    });
+    expect((await f.servers())['demo']).toEqual(first.written);
+  });
+
+  it('reports stored content drift before update or removal', async () => {
+    const f = await fixture();
+    const first = await addMcp(f.dir, f.mcpOptions);
+    const config = await readFile(f.config, 'utf8');
+    const lock = await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8');
+    await writeFile(
+      join(storePath(f.options.stroqHome, first.digest), 'tree', 'server.js'),
+      'tampered',
+    );
+    await expect(addMcp('demo', f.mcpOptions)).rejects.toThrow(/changed|bytes/);
+    await expect(removeMcp('demo', { ...f.mcpOptions, force: true })).rejects.toThrow(
+      /changed|bytes/,
+    );
+    expect(await readFile(f.config, 'utf8')).toBe(config);
+    expect(await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8')).toBe(lock);
+  });
+
+  it.each([true, false])(
+    'rolls back exact config bytes or absence on lock failure (exists=%s)',
+    async (exists) => {
+      const f = await fixture();
+      const raw = '{  "mcpServers": {} , "owner": 1 }\n';
+      if (exists) await writeFile(f.config, raw);
+      else await unlink(f.config);
+      await expect(
+        commitMcpConfig(f.config, { mcpServers: { demo: {} } }, async () => {
+          throw new Error('lock failure');
+        }),
+      ).rejects.toThrow('lock failure');
+      if (exists) expect(await readFile(f.config, 'utf8')).toBe(raw);
+      else await expect(readFile(f.config)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it('keeps an owner edit made while a failed lock write is in progress', async () => {
+    const f = await fixture();
+    await expect(
+      commitMcpConfig(f.config, {}, async () => {
+        await writeFile(f.config, '{"owner":"changed"}');
+        throw new Error('lock failure');
+      }),
+    ).rejects.toThrow(/outside config edit was preserved/);
+    expect(await readFile(f.config, 'utf8')).toBe('{"owner":"changed"}');
   });
 });

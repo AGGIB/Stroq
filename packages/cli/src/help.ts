@@ -31,7 +31,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
-      ['--restore', 'restore an installed name from its confirmed store bytes (skills)'],
+      ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
       ['--kind <kind>', 'skill (default) or mcp'],
       ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
       ['--config <path>', 'with --kind mcp: the client config file to edit'],

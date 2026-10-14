@@ -4,7 +4,11 @@ import { assertWriteAllowed } from '../harden/atomic.js';
 import type { Receipt } from './lock.js';
 
 /** Receipts also live in the atomic lock; the audit line is a second, chronological record. */
-export async function auditReceipt(home: string, receipt: Receipt): Promise<void> {
+export async function auditReceipt(
+  home: string,
+  receipt: Receipt,
+  kind: 'skill' | 'mcp' = 'skill',
+): Promise<void> {
   const file = join(home, 'audit.jsonl');
   try {
     assertWriteAllowed(file, { root: home, initRule: false });
@@ -16,7 +20,7 @@ export async function auditReceipt(home: string, receipt: Receipt): Promise<void
     });
   } catch (cause) {
     throw new Error(
-      `skill ${receipt.action} committed; the receipt is in passports.json, but the audit append failed`,
+      `${kind} ${receipt.action} committed; the receipt is in passports.json, but the audit append failed`,
       { cause },
     );
   }

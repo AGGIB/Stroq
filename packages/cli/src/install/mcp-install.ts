@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { entrypointOf } from '../mcp/entrypoint.js';
 import { posix, resolve } from 'node:path';
 import { labelOf } from '../commands/vet-flow.js';
-import { readJsonObject, writeJsonObject, isPlainObject } from '../commands/config-file.js';
+import { readJsonObject, isPlainObject } from '../commands/config-file.js';
 import { hasValidMcpServers, isMcpClient, mcpConfigPath } from '../commands/mcp-config.js';
 import type { McpConfigJson } from '../commands/mcp-config.js';
 import { renderPassport } from '../commands/vet-render.js';
@@ -12,11 +12,20 @@ import type { Terminal } from '../ui/terminal.js';
 import { stroqVersion } from '../version.js';
 import { inspectTree, INSPECT_RULES_ID, passportIsIncomplete } from './inspect/index.js';
 import { readPassports, SKILL_NAME, withPassports, writePassports } from './lock.js';
-import type { Passports } from './lock.js';
+import type { Passports, Receipt } from './lock.js';
+import { readArchiveFile } from './archive-file.js';
+import { commitMcpConfig } from './mcp-config-transaction.js';
+import { auditReceipt } from './receipt.js';
 import { readDirTree } from './read-dir.js';
 import { sourceTypeOf } from './read-source.js';
 import { collectMcpStore } from './store-gc.js';
-import { assertWritableTree, putStore, storePath } from './store.js';
+import {
+  assertWritableTree,
+  assertInstallablePlatform,
+  putStore,
+  readStoredTree,
+  storePath,
+} from './store.js';
 import type { Passport, Tree } from './types.js';
 
 export interface McpInstallOptions {
@@ -35,6 +44,7 @@ export interface McpInstallOptions {
   readonly cwd?: string;
   readonly force?: boolean;
   readonly user?: boolean;
+  readonly restore?: boolean;
 }
 
 /** What `add --kind mcp` records beside the pin; the proxy reads only kind, status, digest and grant. */
@@ -53,12 +63,7 @@ export interface McpRecord {
   readonly written: Record<string, unknown>;
   /** The entry that stood under this name before Stroq took it, or null when there was none. */
   readonly original: Record<string, unknown> | null;
-  readonly history: readonly {
-    readonly at: string;
-    readonly action: 'add' | 'update';
-    readonly from: string | null;
-    readonly to: string;
-  }[];
+  readonly history: readonly Receipt[];
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -123,41 +128,7 @@ function jsonEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** The server's start file: --entrypoint, else package.json bin, else main. It must be a plain JS file of the tree. */
-export function entrypointOf(tree: Tree, asked: string | undefined): string {
-  let candidate = asked;
-  if (candidate === undefined) {
-    const manifest = tree.entries.find((entry) => entry.path === 'package.json');
-    if (manifest?.bytes !== undefined) {
-      try {
-        const json = JSON.parse(Buffer.from(manifest.bytes).toString('utf8')) as {
-          bin?: unknown;
-          main?: unknown;
-        };
-        const bins =
-          typeof json.bin === 'string'
-            ? [json.bin]
-            : isPlainObject(json.bin)
-              ? Object.values(json.bin)
-              : [];
-        const first = bins.find((value): value is string => typeof value === 'string');
-        candidate = first ?? (typeof json.main === 'string' ? json.main : undefined);
-      } catch {
-        candidate = undefined;
-      }
-    }
-  }
-  if (candidate === undefined)
-    throw new Error('cannot tell the start file of this server; give --entrypoint <file>');
-  const path = posix.normalize(candidate.replaceAll('\\', '/'));
-  if (path.startsWith('../') || path.startsWith('/') || path === '.' || path === '..')
-    throw new Error('the entrypoint must be a file inside the server folder');
-  if (!/\.(?:js|mjs|cjs)$/.test(path))
-    throw new Error('only a node server (.js, .mjs, .cjs) is supported');
-  if (!tree.entries.some((entry) => entry.path === path && entry.kind === 'file'))
-    throw new Error('the entrypoint is not a file of the inspected folder');
-  return path;
-}
+export { entrypointOf } from '../mcp/entrypoint.js';
 
 function entryFor(
   name: string,
@@ -191,12 +162,14 @@ function entryFor(
 }
 
 async function inspectSource(source: string): Promise<{ tree: Tree; passport: Passport }> {
-  if ((await sourceTypeOf(source)) !== 'dir')
-    throw new Error('add --kind mcp reads a local server directory');
-  const { tree, blindSpots } = await readDirTree(source, { rejectNestedRepositories: true });
+  const type = await sourceTypeOf(source);
+  const { tree, blindSpots } =
+    type === 'dir'
+      ? await readDirTree(source, { rejectNestedRepositories: true })
+      : await readArchiveFile(source);
   const passport = inspectTree(tree, {
     kind: 'mcp',
-    source: { type: 'dir', label: labelOf(source, 'dir') },
+    source: { type, label: labelOf(source, type) },
     extraBlindSpots: blindSpots,
     stroqVersion: stroqVersion(),
     rulesId: INSPECT_RULES_ID,
@@ -204,6 +177,7 @@ async function inspectSource(source: string): Promise<{ tree: Tree; passport: Pa
   if (passportIsIncomplete(passport))
     throw new Error('the passport is incomplete; refusing to install');
   assertWritableTree(tree, passport.artifact.digest);
+  assertInstallablePlatform(tree, process.platform);
   return { tree, passport };
 }
 
@@ -221,12 +195,24 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   requirePerson(options);
   const initial = await readPassports(options.stroqHome);
   const named = recordOf(initial, sourceOrName);
+  if (options.restore && named === undefined)
+    throw new Error('--restore needs the name of an installed MCP server');
   const source = named?.source ?? resolve(sourceOrName);
-  const made = await inspectSource(source);
+  const made = options.restore
+    ? {
+        tree: await readStoredTree(storePath(options.stroqHome, named!.digest), named!.digest),
+        passport: named!.passport,
+      }
+    : await inspectSource(source);
   const name = nameOf(
     options.name ?? (named === undefined ? made.passport.artifact.name : sourceOrName),
   );
   const previous = recordOf(initial, name);
+  const prior = initial.mcp?.[name];
+  const history =
+    isPlainObject(prior) && Array.isArray(prior['history']) ? (prior['history'] as Receipt[]) : [];
+  if (previous !== undefined)
+    await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
   if (previous !== undefined && resolve(previous.source) !== source)
     throw new Error(`this path is not ${name}'s recorded source; remove it first`);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
@@ -250,6 +236,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const original = previous === undefined ? current : previous.original;
   const written = entryFor(name, { digest, entrypoint, passEnv }, options, label, original);
   const material =
+    options.restore === true ||
     previous === undefined ||
     previous.digest !== digest ||
     previous.entrypoint !== entrypoint ||
@@ -263,6 +250,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );
   options.terminal.write(renderPassport(made.passport));
+  options.terminal.write(`Client entry: ${outsideLine(JSON.stringify(written))}\n`);
   const yes = material
     ? await confirmTyped(options.terminal, digest)
     : await confirm(
@@ -278,7 +266,20 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     const fresh = loadConfig(file);
     if (!jsonEqual(plainEntry(serversOf(fresh)[name]), current))
       throw new Error('the client config changed while confirming; read and confirm again');
+    if (previous !== undefined)
+      await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
     await putStore(options.stroqHome, made.tree, digest);
+    const receipt: Receipt = {
+      v: 1,
+      at: new Date().toISOString(),
+      name,
+      action: options.restore ? 'restore' : previous === undefined ? 'add' : 'update',
+      from: previous?.digest ?? null,
+      to: digest,
+      material,
+      confirmed: true,
+      stroq: stroqVersion(),
+    };
     const record: McpRecord = {
       kind: 'mcp',
       status: 'confirmed',
@@ -292,25 +293,13 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       passport: made.passport,
       written,
       original,
-      history: [
-        ...(previous?.history ?? []),
-        {
-          at: new Date().toISOString(),
-          action: previous === undefined ? 'add' : 'update',
-          from: previous?.digest ?? null,
-          to: digest,
-        },
-      ],
+      history: [...history, receipt],
     };
     const next = { ...lock, mcp: { ...(lock.mcp ?? {}), [name]: record } };
-    const backup = readFileSync(file, 'utf8');
-    writeJsonObject(file, withServer(fresh, name, written));
-    try {
-      await writePassports(options.stroqHome, next);
-    } catch (error) {
-      writeJsonObject(file, JSON.parse(backup) as unknown);
-      throw error;
-    }
+    await commitMcpConfig(file, withServer(fresh, name, written), () =>
+      writePassports(options.stroqHome, next),
+    );
+    await auditReceipt(options.stroqHome, receipt, 'mcp');
     if (previous !== undefined) await collectMcpStore(options.stroqHome, next, previous.digest);
     return record;
   });
@@ -322,6 +311,7 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   const initial = await readPassports(options.stroqHome);
   const previous = recordOf(initial, name);
   if (previous === undefined) throw new Error('the MCP server is not installed');
+  await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
   const file = resolve(previous.config);
   const current = plainEntry(serversOf(loadConfig(file))[name]);
   const drifted = !jsonEqual(current, previous.written);
@@ -345,17 +335,27 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
     const fresh = loadConfig(file);
     if (!jsonEqual(plainEntry(serversOf(fresh)[name]), current))
       throw new Error('the client config changed while confirming; read and confirm again');
-    const rest = { ...(lock.mcp ?? {}) };
-    delete rest[name];
+    await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+    const receipt: Receipt = {
+      v: 1,
+      at: new Date().toISOString(),
+      name,
+      action: 'remove',
+      from: previous.digest,
+      to: null,
+      material: false,
+      confirmed: true,
+      stroq: stroqVersion(),
+    };
+    const rest = {
+      ...(lock.mcp ?? {}),
+      [name]: { kind: 'mcp', status: 'revoked', history: [...previous.history, receipt] },
+    };
     const next = { ...lock, mcp: rest };
-    const backup = readFileSync(file, 'utf8');
-    writeJsonObject(file, withServer(fresh, name, previous.original ?? undefined));
-    try {
-      await writePassports(options.stroqHome, next);
-    } catch (error) {
-      writeJsonObject(file, JSON.parse(backup) as unknown);
-      throw error;
-    }
+    await commitMcpConfig(file, withServer(fresh, name, previous.original ?? undefined), () =>
+      writePassports(options.stroqHome, next),
+    );
+    await auditReceipt(options.stroqHome, receipt, 'mcp');
     await collectMcpStore(options.stroqHome, next, previous.digest);
   });
 }
