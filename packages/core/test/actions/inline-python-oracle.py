@@ -67,16 +67,6 @@ DANGEROUS_MODULES = {
     "gzip", "bz2", "lzma", "zlib",
 }
 
-# Pre-warm allowed standard library modules and system caches before audit hooks are registered.
-try:
-    import datetime
-    import time
-    datetime.datetime.fromtimestamp(0)
-    datetime.datetime.now()
-    time.localtime()
-except Exception:
-    pass
-
 _events = []
 _armed = False
 # Depth of the calls that are the standard library's own and known: no event in them is a program's.
@@ -97,35 +87,6 @@ def _under_prefix(path):
     if isinstance(text, bytes):
         text = os.fsdecode(text)
     return os.path.realpath(text).startswith(PREFIXES)
-
-
-def _is_apple_runtime_cache(path):
-    """
-    Identifies internal Apple Python runtime cache reads (e.g. timezone or CoreFoundation
-    cache files under isolated HOME/Library/Caches) initiated from standard library frames,
-    rather than directly by the snippet being audited.
-    """
-    if sys.platform != "darwin":
-        return False
-    try:
-        text = os.fspath(path)
-        if isinstance(text, bytes):
-            text = os.fsdecode(text)
-        real = os.path.realpath(text)
-    except Exception:
-        return False
-    home = os.path.realpath(os.environ.get("HOME", ""))
-    caches_dir = os.path.join(home, "Library", "Caches")
-    if not (real == caches_dir or real.startswith(caches_dir + os.sep)):
-        return False
-    # Walk caller frames: if the audited snippet itself directly requested the open, refuse it.
-    frame = sys._getframe(2) if hasattr(sys, "_getframe") else None
-    while frame:
-        co_name = getattr(frame.f_code, "co_filename", "")
-        if co_name == "<snippet>":
-            return False
-        frame = frame.f_back
-    return True
 
 
 def _hook(event, args):
@@ -149,7 +110,7 @@ def _hook(event, args):
         if isinstance(path, int) or str(path).startswith("<"):
             return
         writing = mode is not None and any(ch in str(mode) for ch in "wax+")
-        if not writing and (_under_prefix(path) or _is_apple_runtime_cache(path)):
+        if not writing and _under_prefix(path):
             return
         _flag(event, repr(path)[:80] + " " + str(mode))
     elif event == "import":

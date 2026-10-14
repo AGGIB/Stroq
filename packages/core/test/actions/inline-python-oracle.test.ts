@@ -18,85 +18,10 @@ import { DATA_PROGRAMS, EXEC_PROGRAMS } from './inline-python-corpus.js';
 
 const HARNESS = fileURLToPath(new URL('./inline-python-oracle.py', import.meta.url));
 
-export interface ResolvedPython {
-  readonly path: string;
-  readonly version: string;
-  readonly isApple: boolean;
-}
+export { findPython } from './python-runtime.js';
+import { findPython } from './python-runtime.js';
 
-export function findPython(customOverride?: string): ResolvedPython | null {
-  const override = customOverride ?? process.env['STROQ_PYTHON'];
-  if (override !== undefined) {
-    if (override.trim() === '') {
-      throw new Error(
-        'STROQ_PYTHON is set to an empty string. Specify an executable name or absolute path for Python >=3.8.',
-      );
-    }
-    const probe = spawnSync(
-      override,
-      [
-        '-c',
-        'import sys; print(f"{sys.executable}\\t{sys.version.split()[0]}\\t{int(sys.version_info >= (3, 8))}\\t{int(\'Apple\' in sys.version)}")',
-      ],
-      { encoding: 'utf8' },
-    );
-    if (probe.error || probe.status !== 0) {
-      const detail = probe.error?.message ?? probe.stderr?.trim() ?? `exit code ${probe.status}`;
-      throw new Error(
-        `STROQ_PYTHON was set to "${override}", but it could not be executed: ${detail}`,
-      );
-    }
-    const [execPath, version, isGte38, isApple] = (probe.stdout ?? '').trim().split('\t');
-    if (isGte38 !== '1') {
-      throw new Error(
-        `STROQ_PYTHON was set to "${override}" (${version || 'unknown version'}), but Stroq requires Python >= 3.8.`,
-      );
-    }
-    return {
-      path: execPath || override,
-      version: version || 'unknown',
-      isApple: isApple === '1',
-    };
-  }
-
-  // The harness runs the interpreter under audit hooks in a POSIX directory of its own.
-  if (process.platform === 'win32') return null;
-
-  const candidates = ['python3', 'python3.12', 'python3.11', 'python3.10', 'python3.9', 'python'];
-  let appleFallback: ResolvedPython | null = null;
-
-  for (const name of candidates) {
-    const probe = spawnSync(
-      name,
-      [
-        '-c',
-        'import sys; print(f"{sys.executable}\\t{sys.version.split()[0]}\\t{int(sys.version_info >= (3, 8))}\\t{int(\'Apple\' in sys.version)}")',
-      ],
-      { encoding: 'utf8' },
-    );
-    if (probe.status === 0) {
-      const [execPath, version, isGte38, isApple] = (probe.stdout ?? '').trim().split('\t');
-      if (isGte38 === '1') {
-        const resolved: ResolvedPython = {
-          path: execPath || name,
-          version: version || 'unknown',
-          isApple: isApple === '1',
-        };
-        // Prefer standard CPython over Apple Python if available
-        if (!resolved.isApple) {
-          return resolved;
-        }
-        if (appleFallback === null) {
-          appleFallback = resolved;
-        }
-      }
-    }
-  }
-
-  return appleFallback;
-}
-
-export const PYTHON_INFO = findPython();
+export const PYTHON_INFO = process.platform === 'win32' ? null : findPython();
 const PYTHON = PYTHON_INFO?.path ?? null;
 
 // Diagnostic output identifying the resolved interpreter and version

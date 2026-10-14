@@ -36,7 +36,9 @@ export STROQ_PYTHON=/opt/homebrew/bin/python3
 pnpm test
 ```
 
-Stroq automatically prefers standard non-Apple CPython interpreters when auto-discovering candidates and filters internal Apple Python runtime cache reads under `~/Library/Caches`.
+Stroq automatically prefers standard non-Apple CPython interpreters when auto-discovering candidates.
+
+The oracle rejects Apple system Python (including 3.9.6) before semantic assertions. Use CPython 3.12 on macOS; runtime cache paths are never exempted from file auditing. Windows retains the POSIX oracle limitation even when STROQ_PYTHON is set. The dedicated CI job runs CPython 3.12 on macOS and Linux.
 
 ## Test-Driven Development
 
