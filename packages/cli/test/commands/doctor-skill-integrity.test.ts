@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rm, symlink, chmod } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, rename, symlink, chmod } from 'node:fs/promises';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -46,7 +46,7 @@ describe('doctor skill integrity', () => {
     let check = report.checks.find((c) => c.name === 'skill "demo"');
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('changed at');
-    expect(check?.detail).toContain('reconfirm with "stroq add demo"');
+    expect(check?.detail).not.toContain('reconfirm');
     expect(check?.detail).toContain('restore with "stroq add demo --restore"');
 
     // Restore original file
@@ -125,6 +125,63 @@ describe('doctor skill integrity', () => {
       expect(check?.detail).toContain('unverifiable at');
       expect(check?.detail).toContain('symbolic links are not permitted');
     }
+  });
+
+  it('reports unverifiable when a parent link escapes the recorded root without changing state', async () => {
+    const f = await setup();
+    const added = await addSkill(f.source, f.options);
+    const skillsDir = join(f.options.project, '.claude', 'skills');
+    const outsideDir = join(f.root, 'shared-skills');
+    await rename(skillsDir, outsideDir);
+    await symlink(outsideDir, skillsDir, 'junction');
+    const stateFiles = [
+      join(f.options.stroqHome, 'passports.json'),
+      join(f.options.stroqHome, 'audit.jsonl'),
+      join(f.options.stroqHome, 'store', `sha256-${added.digest.slice(0, 32)}`, 'manifest.json'),
+    ];
+    const before = await Promise.all(stateFiles.map((file) => readFile(file, 'utf8')));
+
+    const checks = await checkInstalledSkills(f.options.project, f.options.stroqHome);
+    expect(checks[0]?.status).toBe('unverifiable');
+    expect(checks[0]?.ok).toBe(false);
+    expect(checks[0]?.detail).toContain('outside its recorded root');
+    expect(await Promise.all(stateFiles.map((file) => readFile(file, 'utf8')))).toEqual(before);
+    expect(await readFile(join(outsideDir, 'demo', 'SKILL.md'), 'utf8')).toContain('# Demo');
+
+    // A missing leaf must not disguise an unsupported link as a recoverable missing install.
+    await rm(join(outsideDir, 'demo'), { recursive: true });
+    expect((await checkInstalledSkills(f.options.project, f.options.stroqHome))[0]?.status).toBe(
+      'unverifiable',
+    );
+  });
+
+  it('supports a deliberately linked installation root', async () => {
+    const f = await setup();
+    const linkedRoot = join(f.root, 'linked-project');
+    await symlink(f.options.project, linkedRoot, 'junction');
+    await addSkill(f.source, { ...f.options, project: linkedRoot });
+
+    const checks = await checkInstalledSkills(linkedRoot, f.options.stroqHome);
+    expect(checks[0]?.status).toBe('intact');
+    expect(checks[0]?.ok).toBe(true);
+  });
+
+  it('rejects recorded paths that do not name the skill installation', async () => {
+    const f = await setup();
+    const added = await addSkill(f.source, f.options);
+    await rm(added.installedTo, { recursive: true });
+    const lock = await readPassports(f.options.stroqHome);
+    await writePassports(f.options.stroqHome, {
+      ...lock,
+      skills: { ...lock.skills, demo: { ...added, installedTo: f.source } },
+    });
+    const lockFile = join(f.options.stroqHome, 'passports.json');
+    const before = await readFile(lockFile, 'utf8');
+
+    const checks = await checkInstalledSkills(f.options.project, f.options.stroqHome);
+    expect(checks[0]?.status).toBe('unverifiable');
+    expect(checks[0]?.detail).toContain('recorded path is not the skill installation path');
+    expect(await readFile(lockFile, 'utf8')).toBe(before);
   });
 
   it('reports unverifiable when store manifest is corrupt or missing required schema', async () => {

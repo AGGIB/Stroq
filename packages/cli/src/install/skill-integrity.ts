@@ -2,10 +2,11 @@ import { lstat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
+import { assertWriteAllowed } from '../harden/atomic.js';
 import { passportsFileIn, stroqHome } from '../paths.js';
-import { readPassports, type Passports, type SkillRecord } from './lock.js';
+import { readPassports, SKILL_NAME, type Passports, type SkillRecord } from './lock.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS, ReadDirError } from './read-dir.js';
-import { quotePath } from './safe-path.js';
+import { checkEntryPath, quotePath } from './safe-path.js';
 import { storePath } from './store.js';
 import { buildTree, treeDigest } from './tree.js';
 import type { Tree, TreeEntry } from './types.js';
@@ -113,16 +114,50 @@ export async function checkSingleSkillIntegrity(
 
   // Validate lock record structure and digest
   if (
-    !record.digest ||
+    typeof record.digest !== 'string' ||
     !/^[0-9a-f]{64}$/.test(record.digest) ||
-    !record.installedTo ||
+    typeof record.installedTo !== 'string' ||
+    record.installedTo === '' ||
+    typeof record.root !== 'string' ||
+    record.root === '' ||
+    !SKILL_NAME.test(name) ||
+    !checkEntryPath(name).ok ||
     record.passport?.artifact?.digest !== record.digest
   ) {
     return {
       name: checkName,
       status: 'unverifiable',
       ok: false,
-      detail: `unverifiable: invalid lock record data; inspect with "stroq vet --from <source>" or restore with "stroq add ${name}${userFlag} --restore"`,
+      detail:
+        'unverifiable: invalid lock record data; inspect the passports lock and the skill with "stroq vet --from <source>"',
+    };
+  }
+
+  // Match the installer's logical target before reading any recorded directory.
+  const root = resolve(record.root);
+  if (resolve(record.installedTo) !== join(root, '.claude', 'skills', name)) {
+    return {
+      name: checkName,
+      status: 'unverifiable',
+      ok: false,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: recorded path is not the skill installation path; inspect the passports lock before restoring or removing the skill`,
+    };
+  }
+
+  // lstat checks only the leaf; the installer's read-only check also resolves parents.
+  // Resolving the recorded root permits a root deliberately linked to another directory.
+  try {
+    assertWriteAllowed(record.installedTo, { root, initRule: false });
+  } catch (error) {
+    const reason =
+      (error as { code?: string }).code === 'path-escapes-root'
+        ? 'installation path resolves outside its recorded root; symbolic links are not permitted to escape it'
+        : 'installation path cannot be resolved safely';
+    return {
+      name: checkName,
+      status: 'unverifiable',
+      ok: false,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: ${reason}; inspect the installation path and its symbolic links before restoring or removing the skill`,
     };
   }
 
@@ -250,7 +285,7 @@ export async function checkSingleSkillIntegrity(
     name: checkName,
     status: 'changed',
     ok: false,
-    detail: `changed at ${quotePath(record.installedTo)}; reconfirm with "stroq add ${name}${userFlag}" or restore with "stroq add ${name}${userFlag} --restore"`,
+    detail: `changed at ${quotePath(record.installedTo)}; restore with "stroq add ${name}${userFlag} --restore"`,
   };
 }
 
