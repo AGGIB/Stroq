@@ -107,7 +107,7 @@ const ADVICE_BY_REASON: ReadonlyArray<readonly [reason: string, line: string]> =
 const GENERIC_ADVICE = 'Nothing was proven either way. Run stroq prove again.';
 
 const VERIFIED_ADVICE = [
-  'Run it again after you update the host or change your policy: stroq doctor marks the proof stale then.',
+  'Run it again after a host upgrade: stroq doctor marks the proof stale for Stroq, policy or install changes, but cannot detect a host update (the host version is not re-read).',
 ];
 
 const FAILED_ADVICE = [
