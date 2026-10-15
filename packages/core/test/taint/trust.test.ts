@@ -71,4 +71,51 @@ describe('FileTrustStore', () => {
   it('trusts nothing when the file is absent', () => {
     expect(new FileTrustStore(join(tmpdir(), 'stroq-no-such-trust.json')).trusts(TEXT)).toBe(false);
   });
+
+  it('lists entries when the trust file is populated', () => {
+    const entry = {
+      source: '/repo/NOTES.md',
+      sha256: trustDigest(TEXT),
+      ruleIds: ['rule-1'],
+      addedAt: '2026-10-15T00:00:00Z',
+    };
+    const file = trustFileWith({ version: 1, entries: [entry] });
+    const store = new FileTrustStore(file);
+    expect(store.list()).toEqual([entry]);
+  });
+
+  it('returns an empty list when the file does not exist', () => {
+    const store = new FileTrustStore(join(tmpdir(), 'stroq-absent-trust.json'));
+    expect(store.list()).toEqual([]);
+  });
+
+  it('returns an empty list and trusts nothing when the file contains invalid JSON', () => {
+    const file = trustFileWith('{ broken json');
+    const store = new FileTrustStore(file);
+    expect(store.list()).toEqual([]);
+    expect(store.trusts(TEXT)).toBe(false);
+  });
+
+  it('caches the loaded entries and does not re-read from disk on subsequent calls', () => {
+    const file = trustFileWith({
+      version: 1,
+      entries: [{ source: '/repo/A.md', sha256: trustDigest(TEXT), ruleIds: [], addedAt: 'x' }],
+    });
+    const store = new FileTrustStore(file);
+    expect(store.trusts(TEXT)).toBe(true);
+
+    // Delete the file on disk: cached result should still be used
+    rmSync(file, { force: true });
+    expect(store.trusts(TEXT)).toBe(true);
+    expect(store.list().map((e) => e.source)).toEqual(['/repo/A.md']);
+  });
+});
+
+describe('trustDigest', () => {
+  it('computes consistent sha256 digests in hexadecimal format', () => {
+    // SHA-256 for string "test": 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+    expect(trustDigest('test')).toBe(
+      '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+    );
+  });
 });
