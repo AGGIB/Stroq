@@ -10,7 +10,7 @@ export async function runRemove(args: readonly string[]): Promise<number> {
     parsed = parseArgs({
       args: [...args],
       allowPositionals: true,
-      options: { force: { type: 'boolean' }, kind: { type: 'string' } },
+      options: { force: { type: 'boolean' }, kind: { type: 'string' }, user: { type: 'boolean' } },
     });
   } catch (error) {
     const problem = parseArgsProblem(error);
@@ -28,6 +28,10 @@ export async function runRemove(args: readonly string[]): Promise<number> {
     return 2;
   }
   if (kind === 'mcp') {
+    if (parsed.values.user !== undefined) {
+      process.stderr.write(usageError('remove', 'unknown option --user for --kind mcp'));
+      return 2;
+    }
     const { removeMcp } = await import('../install/mcp-install.js');
     await removeMcp(parsed.positionals[0]!, {
       project: process.cwd(),
@@ -47,6 +51,7 @@ export async function runRemove(args: readonly string[]): Promise<number> {
     stroqHome: stroqHome(),
     terminal: currentTerminal(),
     force: parsed.values.force === true,
+    user: parsed.values.user === true,
   });
   process.stdout.write('skill removed; receipt recorded\n');
   return 0;
