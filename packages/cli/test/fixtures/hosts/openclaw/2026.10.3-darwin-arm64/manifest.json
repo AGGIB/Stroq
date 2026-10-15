@@ -3,17 +3,25 @@
   "version": "2026.10.3",
   "os": "darwin",
   "recordedDate": "2026-10-15",
-  "kind": "recorded-host",
-  "provenance": "Actual OpenClaw agent tool calls executed in an authorized throwaway workspace. The Stroq OpenClaw plugin forwarded before_tool_call and after_tool_call events to the built Stroq CLI and captured responses. Decisions, scans, and control runs were measured and verified.",
+  "kind": "adapter-replay",
+  "provenance": "Synthetic harness records at the Stroq OpenClaw plugin-to-CLI boundary, with matching adapter audit entries and filesystem snapshots. The version and platform identify the intended host target; these artifacts do not attest that a native OpenClaw Gateway dispatched or enforced the calls.",
   "scope": {
-    "beforeToolCall": {
+    "boundary": "Plugin-normalized CLI inputs and Stroq CLI JSON responses; native Gateway event/context and plugin return values are not retained.",
+    "adapterPre": {
       "exec": ["allow"],
       "write": ["allow", "deny-self-tamper"],
       "read": ["allow"],
       "delete": ["allow"]
     },
-    "afterToolCall": ["recorded scanned tool results"],
-    "control": "Tampering with .claude/settings.json succeeded when before_tool_call hook was disabled in control run.",
+    "adapterPost": ["Clean shell, read and delete results scanned; write results not scanned."],
+    "control": "The synthetic sequence has no pre record for the final protected write, has a post record, and shows the sentinel changed in the after-control snapshot.",
+    "limitations": [
+      "Native OpenClaw loading, tool dispatch, block handling and approval behavior are not verified by this fixture.",
+      "Snapshots do not retain plugin index.js or configuration bytes and cannot verify disabling only the pre gate or restoring the plugin byte for byte.",
+      "The after-restore snapshot resets the protected sentinel without a corresponding tool record; this is harness state, not evidence that plugin restore resets user files.",
+      "The control result reports 33 bytes written, while its input content and disk snapshot contain 32 UTF-8 bytes; that result text is not a byte-count assertion.",
+      "The supplied build hash has no capture-time provenance retained in these files."
+    ],
     "excluded": [
       "Multi-channel gateway forwarding (Telegram, WhatsApp, Slack, etc.)",
       "ClawHub marketplace remote package installation",
@@ -50,6 +58,8 @@
   "stroqBuild": {
     "packageVersion": "0.25.1",
     "distribution": "local development build of Stroq CLI",
-    "cliSha256": "8807fcf6dcdde14c80b685870ee6acdf5913f308577f115f2302ff8a61c92ccf"
-  }
+    "cliSha256": "8807fcf6dcdde14c80b685870ee6acdf5913f308577f115f2302ff8a61c92ccf",
+    "provenance": "Supplied fixture metadata; capture-time build identity is unverified."
+  },
+  "captureMethod": "synthetic-harness"
 }

@@ -24,6 +24,7 @@ const result = spawnSync(${JSON.stringify(paths.node)}, [${JSON.stringify(paths.
     STROQ_HOME: ${JSON.stringify(paths.stroqHome)},
   },
 });
+const exitCode = result.status ?? 1;
 appendFileSync(
   ${JSON.stringify(paths.log)},
   JSON.stringify({
@@ -33,13 +34,13 @@ appendFileSync(
     inputHadBom: input.charCodeAt(0) === 0xfeff,
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
-    exitCode: result.status ?? 0,
+    exitCode,
     error: result.error?.message,
   }) + '\\n',
   { mode: 0o600 }
 );
 process.stdout.write(result.stdout ?? '');
 process.stderr.write(result.stderr ?? '');
-process.exitCode = result.status ?? 0;
+process.exitCode = exitCode;
 `;
 }

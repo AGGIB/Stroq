@@ -26,7 +26,7 @@ const entry = (label: string, path: string): SnapshotFile => {
   return file;
 };
 
-describe('Measured OpenClaw 2026.10.3 macOS contract (offline replay only)', () => {
+describe('Synthetic OpenClaw adapter sequence (offline replay only)', () => {
   let scratch: string | undefined;
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -34,15 +34,29 @@ describe('Measured OpenClaw 2026.10.3 macOS contract (offline replay only)', () 
     scratch = undefined;
   });
 
-  it('retains measured metadata, wire event forms, and reviewed file hashes', () => {
+  it('retains synthetic provenance, normalized CLI inputs, and supplied file hashes', () => {
     const manifest = read('manifest.json');
     expect(manifest).toMatchObject({
       host: 'openclaw',
-      kind: 'recorded-host',
+      kind: 'adapter-replay',
+      captureMethod: 'synthetic-harness',
       version: '2026.10.3',
       os: 'darwin',
       recordedDate: '2026-10-15',
     });
+    expect(manifest.scope.adapterPre).toEqual({
+      exec: ['allow'],
+      write: ['allow', 'deny-self-tamper'],
+      read: ['allow'],
+      delete: ['allow'],
+    });
+    expect(manifest.scope.boundary).toContain('Plugin-normalized CLI inputs');
+    expect(manifest.scope.limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Native OpenClaw loading'),
+        expect.stringContaining('cannot verify disabling only the pre gate'),
+      ]),
+    );
     expect(records).toHaveLength(10);
     expect(audits).toHaveLength(8);
     for (const record of records) {
@@ -60,8 +74,8 @@ describe('Measured OpenClaw 2026.10.3 macOS contract (offline replay only)', () 
     }
   });
 
-  it('replays every actual invocation through the production adapter with response and audit parity', async () => {
-    // Only relocate the measured POSIX paths to this runner's temporary directory.
+  it('replays every supplied CLI invocation through the production adapter with response and audit parity', async () => {
+    // Only relocate the supplied POSIX paths to this runner's temporary directory.
     // No OpenClaw gateway, model request or simulated host enforcement occurs here.
     scratch = mkdtempSync(join(tmpdir(), 'stroq-measured-openclaw-'));
     const project = join(scratch, 'project');
@@ -116,7 +130,27 @@ describe('Measured OpenClaw 2026.10.3 macOS contract (offline replay only)', () 
     }
   });
 
-  it('correlates native gate responses with disk outcomes and the successful ungated control', () => {
+  it('preserves supplied reset and byte-count limitations without asserting plugin restoration', () => {
+    expect(entry('after-restore', '.claude/settings.json')).toEqual(
+      entry('before-validated', '.claude/settings.json'),
+    );
+    expect(entry('after-restore', '.claude/settings.json')).not.toEqual(
+      entry('after-control', '.claude/settings.json'),
+    );
+    for (const label of ['before-control', 'after-control', 'after-restore']) {
+      expect(snapshot(label).map((file) => file.path)).toEqual([
+        'scratch/write-me.txt',
+        'scratch/delete-me.txt',
+        '.claude/settings.json',
+        'sample.txt',
+      ]);
+    }
+    const control = records[9]!;
+    expect(Buffer.byteLength(control.input.params.content, 'utf8')).toBe(32);
+    expect(control.input.result).toBe('Wrote 33 bytes to .claude/settings.json');
+  });
+
+  it('correlates adapter decisions with harness disk transitions and the write without a pre record', () => {
     const pre = records.filter((record) => record.phase === 'pre');
     expect(
       pre.map((record) => [record.input.toolName, JSON.parse(record.stdout).decision]),
@@ -148,7 +182,23 @@ describe('Measured OpenClaw 2026.10.3 macOS contract (offline replay only)', () 
       exists: true,
       content: '{"openclaw_fixture":"tampered"}\n',
     });
-    expect(entry('after-restore', '.claude/settings.json')).toEqual(protectedBefore);
+    const denied = pre[3]!;
+    expect(
+      records.filter(
+        (record) => record.phase === 'post' && record.input.toolCallId === denied.input.toolCallId,
+      ),
+    ).toHaveLength(0);
+    const control = records[9]!;
+    expect(control.phase).toBe('post');
+    expect(control.input.params).toEqual(denied.input.params);
+    expect(
+      records.filter(
+        (record) => record.phase === 'pre' && record.input.toolCallId === control.input.toolCallId,
+      ),
+    ).toHaveLength(0);
+    expect(entry('after-control', '.claude/settings.json').content).toBe(
+      control.input.params.content,
+    );
 
     const denyAudits = audits.filter((audit) => audit.decision?.ruleId === 'deny-self-tamper');
     expect(denyAudits).toHaveLength(1);
