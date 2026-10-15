@@ -74,11 +74,12 @@ describe('wantsHelp', () => {
 
 describe('unknownOption', () => {
   it('finds the first option a command does not have', () => {
-    expect(unknownOption('doctor', ['--all', '--json'])).toBe('--json');
+    expect(unknownOption('doctor', ['--all', '--json', '--bogus'])).toBe('--bogus');
     expect(unknownOption('log', ['--bogus=1'])).toBe('--bogus');
   });
 
   it('accepts known options, their values, positionals and --help', () => {
+    expect(unknownOption('doctor', ['--all', '--json'])).toBeNull();
     expect(unknownOption('log', ['--count', '5', '--json'])).toBeNull();
     expect(unknownOption('log', ['--count=5'])).toBeNull();
     expect(unknownOption('trust', ['README.md', '--json'])).toBeNull();

@@ -30,6 +30,9 @@ function duration(report: SentReport): string {
 }
 
 function origin(report: SentReport): string {
+  if (report.synthetic) {
+    return '  from built-in sample session (synthetic)';
+  }
   if (report.origin === 'audit-log') {
     return "  from Stroq's own audit log";
   }
@@ -62,6 +65,13 @@ function credentialBlock(credential: SentCredential): string[] {
  * both print "nothing found" without this, and only one of them means it.
  */
 function coverageLines(report: SentReport): string[] {
+  if (report.synthetic) {
+    return [
+      'COVERAGE',
+      '  Built-in synthetic sample session with an invented key in a throwaway folder.',
+      '  No real local credential files or environment variables were opened or read.',
+    ];
+  }
   const c = report.coverage;
   const sources =
     c.indexedSources.length > 0 ? c.indexedSources.join(', ') : 'nothing on this machine';
@@ -184,6 +194,14 @@ export function formatSent(report: SentReport): string {
   const lines: string[] = [
     'stroq sent — credential evidence in recorded agent sessions',
     '',
+    ...(report.synthetic
+      ? [
+          'SAMPLE SESSION (SYNTHETIC)',
+          '  This is a built-in demonstration with a made-up key in a temporary folder.',
+          '  Nothing on this machine was scanned to produce this report.',
+          '',
+        ]
+      : []),
     verdictLine(report),
     '',
     `  session ${report.sessionId} · ${report.coverage.calls} tool call(s)${duration(report)}`,
@@ -218,11 +236,20 @@ export function formatSent(report: SentReport): string {
       'this session. Read the coverage below before treating that as clean.',
       '',
     );
+  } else if (report.synthetic) {
+    lines.push(
+      'WHAT THIS SAYS, AND WHAT IT DOES NOT',
+      '  This is a built-in demonstration session with an invented credential.',
+      '  In a real session, findings come from local agent transcripts or audit logs.',
+      '  A finding records that a credential value or file was accessed in a tool call.',
+      '  It does not prove delivery to a model provider or an external breach.',
+      '',
+    );
   } else {
     lines.push(...MEANING, '');
   }
 
-  lines.push(...coverageLines(report), '', ...nextLines(report.credentials));
+  lines.push(...coverageLines(report), '', ...nextLines(report));
   return `${lines.join('\n')}\n`;
 }
 
@@ -232,14 +259,21 @@ export function formatSent(report: SentReport): string {
  * rotate, then the command that shows what the session did, then the one that guards
  * the next session.
  */
-function nextLines(credentials: readonly SentCredential[]): string[] {
-  const rotations = credentials.flatMap((c) => {
+function nextLines(report: SentReport): string[] {
+  if (report.synthetic) {
+    return [
+      'NEXT',
+      '  stroq sent --last      scan the newest real session recorded on this machine',
+      '  stroq init             guard the next session (--agent <name> for another agent)',
+    ];
+  }
+  const rotations = report.credentials.flatMap((c) => {
     const url = c.canary ? null : rotationUrl(c);
     return url === null ? [] : [`    ${c.name}: ${url}`];
   });
   return [
     'NEXT',
-    ...(credentials.length > 0
+    ...(report.credentials.length > 0
       ? ['  Rotate each credential named above that is still live.', ...rotations]
       : []),
     '  stroq replay --last    what the session read, and which later actions matched it',
