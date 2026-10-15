@@ -131,7 +131,7 @@ The exit code is 1 whenever anything escapes: the mutation corpus has no known e
 
 ### Evaluate visibility by host
 
-`stroq attack --host <id>` judges only steps that arrive on channels the specified host can actually observe (see [docs/HOSTS.md](HOSTS.md)). If any step in a scenario occurs on an unobserved channel (for example, native file reads or web fetches on hosts that lack those hook events), that step is reported as unsupported and the command exits 1.
+`stroq attack --host <id>` judges only steps that arrive on channels the specified host can actually observe (see [docs/HOSTS.md](HOSTS.md)). If any step in a scenario occurs on an unobserved channel (for example, native file reads or web fetches on hosts that lack those hook events), that step is skipped and reported as unsupported, the scenario is excluded from blocked/asked counts, and the command exits 1. Visibility is checked per originating tool, including post results; a partial result channel does not make every tool's output observable. This is an in-process visibility model, not a replay through the host's adapter. `--host` cannot be combined with `--fuzz`.
 
 ## What the corpus proves, and doesn't
 

@@ -11,6 +11,56 @@ function capture(): { lines: string[]; restore: () => void } {
 }
 
 describe('stroq attack --host', () => {
+  it('refuses combining host visibility with a fuzzer that cannot account for it', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--only', '01', '--host', 'mcp', '--fuzz']);
+    out.restore();
+    expect(code).toBe(2);
+    expect(out.lines.join('')).toContain('--host cannot be combined with --fuzz');
+    expect(out.lines.join('')).not.toContain('no escapes');
+  });
+
+  it.each([
+    ['codex', '01'],
+    ['windsurf', '04'],
+    ['antigravity', '04'],
+  ])('does not scan invisible precursors or count them as protection on %s', async (host, only) => {
+    const out = capture();
+    const code = await runAttackCommand(['--only', only, '--host', host, '--json']);
+    out.restore();
+    const report = JSON.parse(out.lines.join(''));
+    expect(code).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.totals).toMatchObject({ blocked: 0, asked: 0, unsupportedScenarios: 1 });
+    expect(report.scenarios[0]).toMatchObject({
+      outcome: 'unsupported',
+      unsupportedSteps: [1],
+      steps: [
+        expect.objectContaining({ actual: null, ruleId: null, supported: false }),
+        expect.anything(),
+      ],
+    });
+  });
+
+  it('does not run or count an invisible final attack step', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--only', '05', '--host', 'mcp', '--json']);
+    out.restore();
+    const report = JSON.parse(out.lines.join(''));
+    expect(code).toBe(1);
+    expect(report.totals).toMatchObject({ blocked: 0, asked: 0, unsupportedScenarios: 1 });
+    expect(report.scenarios[0].outcome).toBe('unsupported');
+    expect(report.scenarios[0].steps[0].actual).toBeNull();
+  });
+
+  it('rejects an empty host instead of silently running without visibility checks', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--only', '01', '--host=']);
+    out.restore();
+    expect(code).toBe(1);
+    expect(out.lines.join('')).toContain('unknown host ""');
+  });
+
   it('preserves exact baseline numbers when --host is omitted', async () => {
     const out = capture();
     const code = await runAttackCommand(['--only', '01']);
@@ -50,7 +100,7 @@ describe('stroq attack --host', () => {
     out.restore();
     expect(code).toBe(1);
     const text = out.lines.join('');
-    expect(text).toContain('unsupported on host: step 2 (shell command)');
+    expect(text).toContain('unsupported on host: step 1 (tool result), step 2 (shell command)');
     expect(text).toContain('host mcp');
   });
 

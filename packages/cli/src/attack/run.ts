@@ -40,8 +40,10 @@ export { substituteCwd };
  *   of a command ran past its deadline). A timeout fails closed, which looks exactly like a rule
  *   catching the attack, so it is never counted as one.
  * - `error`: a step threw; there is no answer.
+ * - `unsupported`: the selected host cannot observe a step, so no protection is claimed.
  */
-export type Outcome = 'blocked' | 'asked' | 'asked-by-limit' | 'passed' | 'timeout' | 'error';
+export type Outcome =
+  'blocked' | 'asked' | 'asked-by-limit' | 'passed' | 'timeout' | 'error' | 'unsupported';
 
 /** A step as `stroq attack` reports it: the shared result, with the expectation the scenario set. */
 export type StepResult = SharedStepResult & {
@@ -75,9 +77,10 @@ export interface ScenarioResult {
 }
 
 /**
- * How many scenarios ended in each outcome. The six outcome counts partition the scenarios: each
+ * How many scenarios ended in each outcome. Without a host, the six outcome counts partition the scenarios: each
  * scenario is counted once, in the bucket of its `outcome`, so they add up to the number of
- * scenarios. `inconclusive` counts the scenarios flagged inconclusive, and is not part of that sum:
+ * scenarios. With a host, unsupported scenarios are counted separately in `unsupportedScenarios`.
+ * `inconclusive` counts the scenarios flagged inconclusive, and is not part of that sum:
  * it is the timeouts and the errors, and also a scenario whose attack passed after an earlier step
  * timed out (counted as `passed`, because an attack that got through is never hidden).
  */
@@ -198,7 +201,7 @@ function resultOf(scenario: Scenario, steps: readonly StepResult[], host?: strin
     title: scenario.title,
     incident: scenario.incident,
     class: scenario.class,
-    outcome: outcomeOf(steps, kinds),
+    outcome: hasUnsupported && !inconclusive ? 'unsupported' : outcomeOf(steps, kinds),
     inconclusive,
     reason: inconclusive ? trouble.join('; ') : null,
     // A scenario that stopped at a step that threw has not run every step.
@@ -239,11 +242,26 @@ export async function runScenario(
     const steps: StepResult[] = [];
     for (const [index, step] of scenario.steps.entries()) {
       const label = stepLabel('scenario', scenario.id, index, step.event);
-      const stepExecution = await runStep(engine, step, cwd, label);
       let stepSupport: ReturnType<typeof isStepSupportedOnHost> = null;
-      if (host) {
+      if (host !== undefined) {
         stepSupport = isStepSupportedOnHost(host, step.event);
+        if (stepSupport === null) throw new Error(`unknown host ${JSON.stringify(host)}`);
       }
+      // Never let invisible content taint the simulated session or count an invisible
+      // attack step as a deny. A skipped event has no engine verdict or deciding rule.
+      const stepExecution: SharedStepResult =
+        stepSupport?.supported === false
+          ? {
+              phase:
+                step.event.hook_event_name === 'PreToolUse' ? ('pre' as const) : ('post' as const),
+              tool: step.event.tool_name,
+              actual: null,
+              ruleId: null,
+              reason: stepSupport.evidence,
+              signals: [],
+              timedOut: false,
+            }
+          : await runStep(engine, step, cwd, label);
       const result: StepResult = {
         ...stepExecution,
         expect: step.expect,

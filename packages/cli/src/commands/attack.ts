@@ -36,10 +36,14 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
       host: { type: 'string' },
     },
   });
-  if (values.host && !HOST_IDS.includes(values.host as HostId)) {
+  if (values.host !== undefined && !HOST_IDS.includes(values.host as HostId)) {
     const ids = HOST_IDS.join(', ');
     process.stdout.write(`unknown host "${values.host}"; known hosts: ${ids}\n`);
     return 1;
+  }
+  if (values.host !== undefined && values.fuzz) {
+    process.stdout.write('--host cannot be combined with --fuzz; run host visibility separately\n');
+    return 2;
   }
   const selected = select(values.only);
   if (selected.length === 0) {

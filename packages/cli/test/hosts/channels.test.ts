@@ -131,6 +131,50 @@ describe('host channels visibility table', () => {
   });
 
   describe('isStepSupportedOnHost', () => {
+    it.each([
+      ['codex', 'Read', false],
+      ['codex', 'WebFetch', false],
+      ['codex', 'Bash', true],
+      ['codex', 'mcp__server__tool', true],
+      ['cursor', 'WebFetch', false],
+      ['cursor', 'Read', true],
+      ['cursor', 'Write', false],
+      ['windsurf', 'Bash', false],
+      ['windsurf', 'Read', true],
+      ['windsurf', 'mcp__server__tool', true],
+      ['antigravity', 'Bash', false],
+      ['antigravity', 'WebFetch', false],
+      ['antigravity', 'mcp__server__tool', false],
+      ['antigravity', 'Read', true],
+      ['mcp', 'Bash', false],
+      ['mcp', 'Read', false],
+      ['mcp', 'WebFetch', false],
+      ['mcp', 'mcp__server__tool', true],
+    ])('checks the origin of %s post results from %s', (host, tool, supported) => {
+      const result = isStepSupportedOnHost(host, {
+        session_id: 'test',
+        hook_event_name: 'PostToolUse',
+        tool_name: tool,
+        tool_input: {},
+        tool_result: 'untrusted output',
+      });
+      expect(result?.channel).toBe('tool result');
+      expect(result?.supported).toBe(supported);
+    });
+
+    it('does not assume Cursor matches Edit or an unknown native tool is MCP traffic', () => {
+      const event = {
+        session_id: 'test',
+        hook_event_name: 'PreToolUse' as const,
+        tool_name: 'Edit',
+        tool_input: { file_path: 'foo.txt' },
+      };
+      expect(isStepSupportedOnHost('cursor', event)?.supported).toBe(false);
+      expect(
+        isStepSupportedOnHost('mcp', { ...event, tool_name: 'native_unknown' })?.supported,
+      ).toBe(false);
+    });
+
     it('supports all steps on claude-code', () => {
       for (const scenario of SCENARIOS) {
         for (const step of scenario.steps) {

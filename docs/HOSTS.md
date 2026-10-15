@@ -11,7 +11,7 @@ Which event channels each host hook interface observes, and which steps of recor
 
 Stroq runs against multiple agent hosts and hook architectures. Each host exposes a different subset of tool invocations and results: some hosts observe shell execution and file edits but never native file reads; some observe MCP tool calls but have no hook for web fetching; others observe only proxy traffic.
 
-When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifies steps that occur on channels not observed by that host. If any step of an attack scenario occurs on an unobserved channel, that step is flagged as unsupported, and the attack run exits 1 — ensuring that an attack is never reported as defended when the host could not have observed the attack's precursor actions.
+When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifies steps that occur on channels not observed by that host. Unobserved steps are skipped, not scanned or judged, and their scenarios are reported as unsupported instead of blocked or asked; the attack run exits 1. Post results are checked by their originating tool: partial aggregate visibility never implies that every tool's output is available. This is an in-process visibility model, not a replay through the host's adapter. `--host` cannot be combined with `--fuzz`.
 
 ## Channels
 
@@ -27,7 +27,7 @@ When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifi
 | Host | shell command | file write | file read | MCP call | tool result | web fetch |
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude-code` | seen | seen | seen | seen | seen | seen |
-| `cursor` | seen | partial | partial | seen | seen | not seen |
+| `cursor` | seen | partial | partial | seen | partial | not seen |
 | `codex` | seen | seen | not seen | seen | partial | not seen |
 | `copilot` | seen | seen | seen | seen | seen | seen |
 | `openclaw` | seen | seen | seen | seen | seen | seen |
@@ -49,7 +49,7 @@ When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifi
 | `cursor` | file write | partial | preToolUse matched to Write and Delete; untargeted editor edits not intercepted (docs/AGENTS.md#cursor) |
 | `cursor` | file read | partial | beforeReadFile can allow or deny, but cannot prompt an ask (docs/AGENTS.md#cursor) |
 | `cursor` | MCP call | seen | beforeMCPExecution hook (docs/AGENTS.md#cursor) |
-| `cursor` | tool result | seen | afterShellExecution, afterMCPExecution, and afterFileEdit (docs/AGENTS.md#cursor) |
+| `cursor` | tool result | partial | afterShellExecution and afterMCPExecution scan output; beforeReadFile scans file bodies; afterFileEdit records paths only (docs/AGENTS.md#cursor) |
 | `cursor` | web fetch | not seen | Cursor has no hook for web content fetched by agent (docs/AGENTS.md#cursor) |
 | `codex` | shell command | seen | PreToolUse on Bash and shell execution aliases (docs/AGENTS.md#codex) |
 | `codex` | file write | seen | PreToolUse on apply_patch headers (docs/AGENTS.md#codex) |

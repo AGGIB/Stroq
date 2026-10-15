@@ -312,7 +312,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--fuzz', 'cross every scenario with every mutation and print the ones that escape'],
       [
         '--host <id>',
-        'judge only steps the host actually sends; exit 1 if an attack passed or was unsupported',
+        'judge only steps the host actually sends; exit 1 if an attack passed or was unsupported; cannot combine with --fuzz',
       ],
     ],
   },

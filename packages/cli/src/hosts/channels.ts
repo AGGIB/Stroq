@@ -65,8 +65,8 @@ export const HOST_CHANNELS: Readonly<Record<HostId, Readonly<Record<Channel, Cha
       ),
       'MCP call': entry('seen', 'beforeMCPExecution hook (docs/AGENTS.md#cursor)'),
       'tool result': entry(
-        'seen',
-        'afterShellExecution, afterMCPExecution, and afterFileEdit (docs/AGENTS.md#cursor)',
+        'partial',
+        'afterShellExecution and afterMCPExecution scan output; beforeReadFile scans file bodies; afterFileEdit records paths only (docs/AGENTS.md#cursor)',
       ),
       'web fetch': entry(
         'not seen',
@@ -210,20 +210,35 @@ export const HOST_CHANNELS: Readonly<Record<HostId, Readonly<Record<Channel, Cha
 /**
  * Determines the channel a scenario hook step uses.
  */
-export function channelForStep(event: ClaudeHookEvent): Channel {
-  if (event.hook_event_name === 'PostToolUse' || event.hook_event_name === 'PostToolUseFailure') {
-    return 'tool result';
-  }
-
+function originatingChannel(event: ClaudeHookEvent): Channel | null {
   const tool = event.tool_name;
   if (tool === 'Bash' || tool === 'PowerShell') return 'shell command';
-  if (tool === 'Write' || tool === 'Edit') return 'file write';
+  if (tool === 'Write' || tool === 'Edit' || tool === 'Delete') return 'file write';
   if (tool === 'Read') return 'file read';
   if (tool === 'WebFetch' || tool === 'WebSearch') return 'web fetch';
   if (tool.startsWith('mcp__')) return 'MCP call';
 
-  return 'MCP call';
+  return null;
 }
+
+export function channelForStep(event: ClaudeHookEvent): Channel {
+  if (event.hook_event_name === 'PostToolUse' || event.hook_event_name === 'PostToolUseFailure') {
+    return 'tool result';
+  }
+  return originatingChannel(event) ?? 'MCP call';
+}
+
+// A generic result hook does not imply visibility into every tool's returned content.
+// In particular, Codex has no native read/web events, Windsurf has no command-output
+// event, Antigravity can reread files but has no ordinary result body, and the MCP
+// proxy sees only traffic through its wrapped server.
+const RESULT_HOSTS: Readonly<Partial<Record<Channel, readonly HostId[]>>> = {
+  'shell command': ['claude-code', 'cursor', 'codex', 'copilot', 'openclaw'],
+  'file write': ['claude-code', 'copilot', 'openclaw'],
+  'file read': ['claude-code', 'cursor', 'copilot', 'openclaw', 'windsurf', 'antigravity'],
+  'MCP call': ['claude-code', 'cursor', 'codex', 'copilot', 'openclaw', 'windsurf', 'mcp'],
+  'web fetch': ['claude-code', 'copilot', 'openclaw'],
+};
 
 /**
  * Returns channel support details for a given host and channel, or undefined if unknown host.
@@ -235,7 +250,8 @@ export function supportFor(host: string, channel: Channel): ChannelSupport | und
 }
 
 /**
- * Checks whether a scenario step is supported (i.e. not 'not seen') on a given host.
+ * Checks the originating tool as well as the event phase. Partial aggregate
+ * visibility is not evidence that this particular tool's output reaches a hook.
  */
 export function isStepSupportedOnHost(
   host: string,
@@ -243,10 +259,22 @@ export function isStepSupportedOnHost(
 ): { supported: boolean; channel: Channel; status: ChannelStatus; evidence: string } | null {
   if (!Object.hasOwn(HOST_CHANNELS, host)) return null;
   const channel = channelForStep(event);
-  const support = supportFor(host, channel);
+  const origin = originatingChannel(event);
+  let support = supportFor(host, channel);
   if (!support) return null;
+  if (origin === null) {
+    support = entry('unknown', 'the native tool has no mapped hook channel');
+  } else if (channel === 'tool result') {
+    const seen = RESULT_HOSTS[origin]?.includes(host as HostId) === true;
+    support = entry(
+      seen ? 'seen' : 'not seen',
+      `${event.tool_name} result content is ${seen ? 'visible' : 'not available'} on ${host} (docs/AGENTS.md)`,
+    );
+  } else if (host === 'cursor' && event.tool_name === 'Edit') {
+    support = entry('not seen', 'Cursor preToolUse is matched to Write and Delete, not Edit');
+  }
   return {
-    supported: support.status !== 'not seen',
+    supported: support.status === 'seen' || support.status === 'partial',
     channel,
     status: support.status,
     evidence: support.evidence,
@@ -264,7 +292,7 @@ export function formatHostsMarkdown(): string {
     '',
     'Stroq runs against multiple agent hosts and hook architectures. Each host exposes a different subset of tool invocations and results: some hosts observe shell execution and file edits but never native file reads; some observe MCP tool calls but have no hook for web fetching; others observe only proxy traffic.',
     '',
-    "When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifies steps that occur on channels not observed by that host. If any step of an attack scenario occurs on an unobserved channel, that step is flagged as unsupported, and the attack run exits 1 — ensuring that an attack is never reported as defended when the host could not have observed the attack's precursor actions.",
+    "When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifies steps that occur on channels not observed by that host. Unobserved steps are skipped, not scanned or judged, and their scenarios are reported as unsupported instead of blocked or asked; the attack run exits 1. Post results are checked by their originating tool: partial aggregate visibility never implies that every tool's output is available. This is an in-process visibility model, not a replay through the host's adapter. `--host` cannot be combined with `--fuzz`.",
     '',
     '## Channels',
     '',
