@@ -500,7 +500,7 @@ describe('fetchSourceTree', () => {
       try {
         await expect(
           defaultTransport(new URL('https://example.com/stream.tgz'), {}),
-        ).rejects.toThrow(FetchError);
+        ).rejects.toMatchObject({ code: 'limit' });
         expect(cancelled).toBe(true);
       } finally {
         vi.unstubAllGlobals();
@@ -545,13 +545,20 @@ describe('fetchSourceTree', () => {
       }
     });
 
-    it('rejects when signal is aborted', async () => {
-      const controller = new AbortController();
-      controller.abort();
+    it('rejects when signal is aborted before fetch is initiated without calling fetch', async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+      try {
+        const controller = new AbortController();
+        controller.abort();
 
-      await expect(
-        defaultTransport(new URL('https://example.com/test.tgz'), { signal: controller.signal }),
-      ).rejects.toThrow();
+        await expect(
+          defaultTransport(new URL('https://example.com/test.tgz'), { signal: controller.signal }),
+        ).rejects.toThrow();
+        expect(mockFetch).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 
