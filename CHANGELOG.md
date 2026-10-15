@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenClaw plugin loader schema compatibility.** Package manifest `openclaw.extensions` uses array-of-strings entry format expected by OpenClaw 2026.10.3.
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).
 - **Harden recognizes single-dash password flags.** Credential-shaped values under those flags are masked instead of copied into diffs; the parser remains bounded on long input. Thanks @Nari-Ab (#190).
 
