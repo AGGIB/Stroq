@@ -2,6 +2,18 @@
 
 The [Coverage by agent](GUIDE.md#coverage-by-agent) table in the guide is the summary. This file is the full detail behind it: every hook event Stroq installs on, the wire format it reads, and every documented limit — the honest edges, not just the happy path. Each install command below also appears in the README; this is where the "why" for each adapter lives.
 
+| Host | Agent ID | Integration kind | Event surface |
+| --- | --- | --- | --- |
+| Claude Code | `claude-code` | Native hooks / plugin | Full pre/post tool use on all channels |
+| Cursor | `cursor` | `.cursor/hooks.json` | Shell, MCP, matched Write/Delete, read body scan |
+| Codex | `codex` | `.codex/hooks.json` | Shell, patch, MCP, post command/MCP scan |
+| Copilot CLI | `copilot` | `.github/hooks/stroq.json` | Shell, file tools, patch, web fetch, MCP |
+| OpenClaw | `openclaw` | Gateway in-process plugin | Full before/after tool call dispatch |
+| Windsurf | `windsurf` | `.windsurf/hooks.json` | Six Cascade events: shell, read, write, MCP |
+| Google Antigravity | `antigravity` | `.agents/hooks.json` | PreToolUse, PostToolUse, PreInvocation |
+| MCP proxy | `mcp` | Stdio server wrapper | `tools/call`, `tools/list`, `resources/read` |
+
+
 ### Cursor
 
 ```bash
