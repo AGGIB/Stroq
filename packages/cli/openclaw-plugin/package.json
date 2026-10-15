@@ -6,9 +6,7 @@
   "type": "module",
   "openclaw": {
     "extensions": [
-      {
-        "entry": "index.js"
-      }
+      "./index.js"
     ]
   },
   "engines": {

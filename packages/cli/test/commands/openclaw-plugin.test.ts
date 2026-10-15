@@ -58,7 +58,7 @@ describe('the packaged plugin', () => {
       unknown
     >;
     expect(pkg['type']).toBe('module');
-    expect(pkg['openclaw']).toEqual({ extensions: [{ entry: 'index.js' }] });
+    expect(pkg['openclaw']).toEqual({ extensions: ['./index.js'] });
     // The Gateway runs `npm install --ignore-scripts` on a linked plugin; a plugin
     // with dependencies is one that can fail to install inside someone else's process.
     expect(pkg['dependencies']).toBeUndefined();
