@@ -50,12 +50,22 @@ const CLI_README = { name: 'packages/cli/README.md', text: read('../README.md') 
 const DOCS = [GUIDE, CLI_README];
 
 /**
- * Commands whose rows must name every flag `--help` lists for them: the three whose rows had
- * fallen behind their own help (`attack --fuzz`, `bench --actions`, `coverage` itself). Other
- * rows have older gaps (`init --yes`, `doctor --all`, ...) that are a separate piece of work,
- * so this is a list to grow, not a rule for every row yet.
+ * Commands whose rows must name every flag `--help` lists for them. Expanded to guard doctor,
+ * trust, prove, and core inspection/remediation commands against flag drift across command tables.
  */
-const ROWS_NAME_EVERY_FLAG = ['attack', 'bench', 'coverage'] as const;
+const ROWS_NAME_EVERY_FLAG = [
+  'attack',
+  'bench',
+  'coverage',
+  'doctor',
+  'untaint',
+  'trust',
+  'canary',
+  'log',
+  'why',
+  'inspect',
+  'prove',
+] as const;
 
 describe('reading the commands from help.ts', () => {
   it('finds each command once, and the commands, flags and agents this file relies on', () => {
