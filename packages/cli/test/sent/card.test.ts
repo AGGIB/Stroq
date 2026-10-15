@@ -72,6 +72,18 @@ describe('which provider a credential is filed under', () => {
 });
 
 describe('the card of a report', () => {
+  it('preserves the synthetic marker in JSON, Markdown, HTML and the shareable sentence', () => {
+    const card = buildCard(report({ synthetic: true }), '0.22.0', NOW);
+    expect(card.synthetic).toBe(true);
+    for (const text of [cardMarkdown(card), cardHtml(card), headline(card), postLine(card)]) {
+      expect(text).toMatch(/synthetic/i);
+      expect(text).not.toContain('from this machine');
+      expect(text).not.toContain('from my machine');
+      expect(text).not.toContain('last session');
+    }
+    expect(postLine(card)).toContain('sent --try');
+  });
+
   it('holds counts and providers', () => {
     const card = buildCard(
       report({

@@ -52,6 +52,8 @@ export interface SentCardProvider {
 /** Everything a card says. Numbers, and labels chosen from constants. */
 export interface SentCard {
   readonly version: 1;
+  /** True only for the built-in sample, whose counts describe invented credentials. */
+  readonly synthetic?: boolean;
   /** The agent whose record was read, as a label from `AGENTS`, or null. */
   readonly agent: string | null;
   readonly stroq: string;
@@ -94,6 +96,7 @@ export function buildCard(report: SentReport, stroq: string, now: Date = new Dat
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   return {
     version: 1,
+    ...(report.synthetic === true ? { synthetic: true } : {}),
     agent: report.agent !== null ? (AGENTS[report.agent] ?? null) : null,
     stroq: /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(stroq) ? stroq : 'unknown',
     checked: now.toISOString().slice(0, 10),
@@ -119,6 +122,8 @@ function providerList(card: SentCard): string {
 
 /** The headline: what the record holds, in a sentence that claims no more than a record does. */
 export function headline(card: SentCard): string {
+  if (card.synthetic)
+    return `The built-in synthetic sample holds ${plural(card.credentials, 'invented credential', 'invented credentials')}. No real local credentials were scanned.`;
   if (card.indexed === 0)
     return 'Nothing to check against: Stroq found no credential files or project .env files on this machine.';
   if (card.credentials === 0)
@@ -128,6 +133,8 @@ export function headline(card: SentCard): string {
 
 /** A line for a post. It says what was checked and how, and holds no value. */
 export function postLine(card: SentCard): string {
+  if (card.synthetic)
+    return `Tried Stroq's built-in synthetic sample session with ${plural(card.credentials, 'invented credential', 'invented credentials')}. No real local credentials were scanned. Run with \`npx @stroq/cli sent --try\`.`;
   const subject = card.agent ?? 'my AI coding agent';
   if (card.credentials === 0)
     return `Checked ${subject}'s last session against ${plural(card.indexed, 'credential', 'credentials')} on my machine: none of them appears in its record of ${plural(card.calls, 'tool call', 'tool calls')}. Done locally with \`npx @stroq/cli sent --last\`.`;
@@ -136,6 +143,9 @@ export function postLine(card: SentCard): string {
 
 const LIMITS =
   'A credential in the record shows that its value appeared in a local transcript. It does not show a later request to a model provider, or delivery. A value that was rotated or deleted since the session is not in the index, so it cannot be found.';
+
+const SAMPLE_LIMITS =
+  'This is a built-in synthetic demonstration with invented credentials. No real local credential files or environment variables were read.';
 
 /** The card as Markdown. */
 export function cardMarkdown(card: SentCard): string {
@@ -167,7 +177,7 @@ export function cardMarkdown(card: SentCard): string {
     '|---|---|',
     ...rows.map(([name, value]) => `| ${name} | ${value} |`),
     '',
-    LIMITS,
+    card.synthetic ? SAMPLE_LIMITS : LIMITS,
     '',
     `Checked on ${card.checked} with Stroq ${card.stroq}. The check ran on this machine, and this card holds counts only: no values, names, paths, commands or hashes.`,
     '',
@@ -251,7 +261,7 @@ ${list}
 <dl>${rows
     .map(([name, value]) => `<div><dt>${escapeHtml(name)}</dt><dd>${escapeHtml(value)}</dd></div>`)
     .join('')}</dl>
-<p class="limits">${escapeHtml(LIMITS)}</p>
+<p class="limits">${escapeHtml(card.synthetic ? SAMPLE_LIMITS : LIMITS)}</p>
 <p class="post">${escapeHtml(postLine(card).replace(/`/g, ''))}</p>
 <footer>Checked on ${escapeHtml(card.checked)} with Stroq ${escapeHtml(card.stroq)}. The check ran on this machine; this card holds counts only, no values, names, paths, commands or hashes.</footer>
 </main>

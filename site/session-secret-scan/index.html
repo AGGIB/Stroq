@@ -81,15 +81,9 @@ npx @stroq/cli sent --last --json</code></pre>
 
       <section class="docs-section" id="try-it" aria-labelledby="try-it-title">
         <h2 id="try-it-title">No session to scan yet? Try it with a made-up key.</h2>
-        <p>This makes a project with a fake key in <code>.env</code> and a two-line transcript in which an agent reads it, then scans that transcript. Nothing real is involved: the key is invented and the transcript is a file you wrote. <code>stroq sent</code> still reads this machine's credential files to build its index, as it says before it starts, and the report names the fake key only.</p>
-        <pre class="code" tabindex="0" role="region" aria-label="Try stroq sent with a made-up key"><code>mkdir stroq-try &amp;&amp; cd stroq-try
-echo 'STRIPE_SECRET_KEY=sk_test_51Hx9QfAkeKeyForStroqDemo7Zq3LmN8vB2' &gt; .env
-cat &gt; session.jsonl &lt;&lt;EOF
-{"type":"assistant","sessionId":"demo","cwd":"$PWD","timestamp":"2026-10-13T10:00:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"$PWD/.env"}}]}}
-{"type":"user","sessionId":"demo","cwd":"$PWD","timestamp":"2026-10-13T10:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"STRIPE_SECRET_KEY=sk_test_51Hx9QfAkeKeyForStroqDemo7Zq3LmN8vB2\n"}]}}
-EOF
-npx @stroq/cli sent --transcript session.jsonl</code></pre>
-        <p>The report names <code>STRIPE_SECRET_KEY</code> and the file it came from, and prints no value. Delete the folder when you are done.</p>
+        <p>Run the built-in sample session check. It scans a synthetic agent session with an invented key in an isolated temporary folder, without touching any real credential files or environment variables on your machine:</p>
+        <pre class="code" tabindex="0" role="region" aria-label="Try stroq sent with a made-up key"><code>npx @stroq/cli sent --try</code></pre>
+        <p>The report demonstrates what finding a recorded credential looks like, names <code>STRIPE_SECRET_KEY</code> without printing its value, and cleans up the temporary directory immediately.</p>
       </section>
 
       <section class="docs-section" id="read-the-result" aria-labelledby="read-the-result-title">
