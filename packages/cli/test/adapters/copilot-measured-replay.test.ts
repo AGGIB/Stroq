@@ -46,6 +46,11 @@ describe('Measured Copilot CLI 1.0.98 darwin-arm64 contract (offline replay only
     });
     expect(records).toHaveLength(20);
     expect(audits).toHaveLength(17);
+    expect(manifest.scope.preToolUse).toEqual({
+      bash: ['allow'],
+      apply_patch: ['allow', 'deny-self-tamper'],
+      view: ['allow'],
+    });
 
     for (const record of records) {
       expect(record.inputHadBom).toBe(false);
@@ -119,10 +124,25 @@ describe('Measured Copilot CLI 1.0.98 darwin-arm64 contract (offline replay only
       (record) => record.phase === 'pre' && record.stdout.includes('deny'),
     );
     expect(preDeny).toBeDefined();
+    expect(preDeny!.input.toolName).toBe('apply_patch');
     expect(JSON.parse(preDeny!.stdout)).toMatchObject({
       permissionDecision: 'deny',
       permissionDecisionReason: expect.stringContaining('deny-self-tamper'),
     });
+    const controlPost = records.find(
+      (record) =>
+        record.phase === 'post' &&
+        record.input.toolName === 'apply_patch' &&
+        record.input.toolArgs === preDeny!.input.toolArgs,
+    );
+    expect(controlPost).toBeDefined();
+    expect(controlPost!.input.toolResult.resultType).toBe('success');
+    expect(
+      records.some(
+        (record) =>
+          record.phase === 'pre' && record.input.sessionId === controlPost!.input.sessionId,
+      ),
+    ).toBe(false);
 
     // Check disk snapshots
     const initialWrite = entry('before-validated', 'scratch/write-me.txt');
@@ -159,5 +179,9 @@ describe('Measured Copilot CLI 1.0.98 darwin-arm64 contract (offline replay only
     expect(enforcing.hooks.preToolUse).toHaveLength(1);
     expect(control.hooks.preToolUse).toHaveLength(0);
     expect(restored).toEqual(enforcing);
+    // This historical capture restored the same config but dropped its final newline.
+    expect(entry('after-restore', '.github/hooks/stroq.json').content + '\n').toBe(
+      entry('before-validated', '.github/hooks/stroq.json').content,
+    );
   });
 });

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanFixture, leaksIn } from '../packages/cli/test/live/drivers/clean-fixture.js';
+import { assertThrowaway } from '../packages/cli/src/live/throwaway.js';
+import { assertWriteAllowed } from '../packages/cli/src/harden/atomic.js';
 
 const [input, output] = process.argv.slice(2);
 if (!input || !output) {
@@ -52,16 +54,17 @@ function assertNoCredentials(raw: string): void {
   }
 }
 
-const location = safeJson(readFileSync(join(input, 'location.json'), 'utf8')) as {
+const locationText = readFileSync(join(input, 'location.json'), 'utf8');
+const versionText = readFileSync(join(input, 'version.json'), 'utf8');
+assertNoCredentials(locationText);
+assertNoCredentials(versionText);
+const location = safeJson(locationText) as {
   project?: string;
   home?: string;
   stroqHome?: string;
   root?: string;
 };
-const version = safeJson(readFileSync(join(input, 'version.json'), 'utf8')) as Record<
-  string,
-  unknown
->;
+const version = safeJson(versionText) as Record<string, unknown>;
 
 if (
   !location.project ||
@@ -79,10 +82,16 @@ if (
   location.stroqHome &&
   existsSync(join(location.stroqHome, 'audit.jsonl'))
 ) {
-  writeFileSync(
-    join(input, 'audit.jsonl'),
-    readFileSync(join(location.stroqHome, 'audit.jsonl'), 'utf8'),
-  );
+  assertThrowaway(location.root);
+  assertThrowaway(location.stroqHome);
+  const audit = assertWriteAllowed(join(location.stroqHome, 'audit.jsonl'), {
+    root: location.root,
+    initRule: false,
+  });
+  writeFileSync(join(input, 'audit.jsonl'), readFileSync(audit, 'utf8'), {
+    flag: 'wx',
+    mode: 0o600,
+  });
 }
 
 const hooks = readFileSync(join(input, 'hooks.jsonl'), 'utf8');
@@ -180,7 +189,10 @@ const candidates = files.map((name) => {
   if (leaks.length > 0) {
     throw new Error(`candidate still contains private paths or identities: ${leaks.join(', ')}`);
   }
-  return [name, cleaned] as const;
+  const text = name.endsWith('.jsonl')
+    ? cleaned.trimEnd() + '\n'
+    : JSON.stringify(safeJson(cleaned), null, 2) + '\n';
+  return [name, text] as const;
 });
 
 mkdirSync(output, { recursive: true });
@@ -192,46 +204,71 @@ for (const [name, text] of candidates) {
   sha256Map[name] = hash;
 }
 
-const cliPath = resolve('packages/cli/dist/index.js');
-const cliSha256 = existsSync(cliPath)
-  ? createHash('sha256').update(readFileSync(cliPath)).digest('hex')
-  : undefined;
+const recorded = candidates
+  .find(([name]) => name === 'hooks.jsonl')![1]
+  .trim()
+  .split('\n')
+  .map(
+    (line) => safeJson(line) as { phase?: string; input?: { toolName?: unknown }; at?: unknown },
+  );
+const toolsAt = (phase: string): string[] =>
+  [
+    ...new Set(
+      recorded
+        .filter((record) => record.phase === phase && typeof record.input?.toolName === 'string')
+        .map((record) => record.input!.toolName as string),
+    ),
+  ].sort();
+const isTimestamp = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value) &&
+  !Number.isNaN(Date.parse(value));
+const observedDates = [
+  ...new Set(
+    recorded
+      .map((record) => (isTimestamp(record.at) ? record.at.slice(0, 10) : null))
+      .filter((date): date is string => date !== null),
+  ),
+].sort();
+const build = version['stroqBuild'] as
+  { packageVersion?: unknown; cliSha256?: unknown } | undefined;
+const capturedBuild =
+  build !== undefined &&
+  build !== null &&
+  typeof build.packageVersion === 'string' &&
+  typeof build.cliSha256 === 'string' &&
+  /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(build.packageVersion) &&
+  /^[0-9a-f]{64}$/.test(build.cliSha256);
 
 const manifest = {
   host: 'copilot',
   version: version['version'],
   os: version['os'],
-  recordedDate: new Date().toISOString().slice(0, 10),
-  kind: 'recorded-host',
+  capturePreparedAt: isTimestamp(version['preparedAt']) ? version['preparedAt'] : null,
+  observedDates,
+  kind: 'unreviewed-host-candidate',
   provenance:
-    'Actual GitHub Copilot CLI non-interactive agent requests executed in an authorized throwaway project. Recorder forwarded original stdin to the built Stroq CLI and captured responses. Pre-tool-use allow and deny decisions, post-tool-use callbacks, and control runs were measured and verified.',
+    'Sanitized candidate hook records and disk snapshots. Host origin, enforcement, and control success require independent review before promotion to recorded-host.',
   scope: {
-    preToolUse: {
-      bash: ['allow', 'deny-self-tamper'],
-      create: ['allow'],
-      view: ['allow'],
-    },
-    postToolUse: ['recorded toolResult context'],
-    control:
-      'Tampering with .claude/settings.json succeeded when preToolUse hook was disabled in control run.',
-    excluded: [
-      'Interactive copilot prompt session (desktop IDE plugin)',
-      'Copilot Extensions',
-      'Other OS releases',
-    ],
+    observedPreToolNames: toolsAt('pre'),
+    observedPostToolNames: toolsAt('post'),
+    enforcement: 'unverified',
+    control: 'unverified',
   },
   sanitization: [
     'Exact private paths replaced with /tmp/stroq-live-fixture equivalents.',
     'Session and tool ids replaced with deterministic aliases.',
-    'User emails and tokens sanitized.',
+    'User emails sanitized; possible credentials cause refusal.',
   ],
   files: files,
   sha256: sha256Map,
-  stroqBuild: {
-    packageVersion: '0.25.1',
-    distribution: 'local development build of Stroq CLI',
-    ...(cliSha256 ? { cliSha256 } : {}),
-  },
+  stroqBuild: capturedBuild
+    ? {
+        packageVersion: build.packageVersion,
+        cliSha256: build.cliSha256,
+        provenance: 'recorded at capture preparation',
+      }
+    : { provenance: 'not recorded at capture time; no identity inferred from this checkout' },
 };
 
 writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
