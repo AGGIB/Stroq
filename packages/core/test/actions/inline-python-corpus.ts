@@ -87,6 +87,8 @@ export const DATA_PROGRAMS: readonly Program[] = [
     'import urllib.parse\nprint(urllib.parse.quote("a b"))',
   ],
   ['os for the environment', "import os\nprint(os.environ['HOME'])"],
+  ['os.getenv', "import os\nprint(os.getenv('HOME', ''))"],
+  ['an aliased environment read', "from os import environ as env\nprint(env.get('HOME', ''))"],
 ];
 
 /** Programs that run code. */

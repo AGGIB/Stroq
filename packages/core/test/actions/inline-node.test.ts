@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { judgeNodeProgram } from '../../src/actions/inline-node.js';
 
 describe('judgeNodeProgram', () => {
+  describe('unrecognized JavaScript stays a question', () => {
+    it.each([
+      "const d=require('fs').readFileSync(0,'utf8'); d['con'+'structor']['con'+'structor'](d)()",
+      "require('fs')['wri'+'teFileSync']('sample','x'); require('fs').readFileSync(0)",
+      "const r=require; r('child'+'_process')['ex'+'ecSync']('id'); require('fs').readFileSync(0)",
+      "process['en'+'v'].X='1'; require('fs').readFileSync(0)",
+      '"readFileSync(0)"; console.log(1)',
+      "require('fs').readFileSync('0','utf8')",
+      'require("fs").readFileSync("0","utf8")',
+      "JSON.parse(require('fs').readFileSync(0,'utf8'), (k,v)=>v)",
+    ])('does not infer safety from a matching substring: %s', (program) => {
+      expect(judgeNodeProgram(program)).toBe('unknown');
+    });
+  });
+
   describe('safe synchronous stdin readers (data)', () => {
     it('accepts node -p JSON.parse of fd 0', () => {
       expect(judgeNodeProgram("JSON.parse(require('fs').readFileSync(0,'utf8')).name")).toBe(

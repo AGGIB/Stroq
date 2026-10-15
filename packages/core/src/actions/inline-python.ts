@@ -516,6 +516,7 @@ function judgeImport(
   out: Judgement,
   bound: Set<string>,
   osAliases: Set<string>,
+  environAliases: Set<string>,
 ): number {
   const fail = (name: string): void => {
     const root = name.split('.')[0] ?? '';
@@ -573,9 +574,12 @@ function judgeImport(
     }
     // What `from m import a` brings in is a name of the program, as `a` and as the alias.
     bound.add(name.text);
+    if (module.name === 'os' && name.text === 'environ') environAliases.add(name.text);
     at += 1;
     if (isName(tokens[at], 'as') && isName(tokens[at + 1])) {
       bound.add((tokens[at + 1] as Tok).text);
+      if (module.name === 'os' && name.text === 'environ')
+        environAliases.add((tokens[at + 1] as Tok).text);
       at += 2;
     }
     if (!isOp(tokens[at], ',')) break;
@@ -586,17 +590,28 @@ function judgeImport(
   return at;
 }
 
+/** Keep the environment mapping inside direct reads; never pass it to another function or alias. */
+function readsEnvironment(tokens: readonly Tok[], at: number): boolean {
+  return (
+    isOp(tokens[at + 1], '[') ||
+    (isOp(tokens[at + 1], '.') && isName(tokens[at + 2], 'get') && isOp(tokens[at + 3], '('))
+  );
+}
+
+const ENVIRONMENT_ASSIGNMENT = /^(?:=|:=|\+=|-=|\*=|\/=|\/\/=|%=|\*\*=|&=|\|=|\^=|<<=|>>=)$/;
+
 function judge(tokens: readonly Tok[]): ProgramVerdict {
   const out: Judgement = { exec: false, unknown: false };
   const bound = boundNames(tokens);
   const osAliases = new Set<string>();
+  const environAliases = new Set<string>();
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i] as Tok;
     if (tok.kind !== 'name') continue;
     const word = tok.text;
     if (word === 'import' || (word === 'from' && isName(tokens[i + 1]))) {
       // `from` also begins `yield from` and a `raise … from`, neither of which is read.
-      const next = judgeImport(tokens, i, out, bound, osAliases);
+      const next = judgeImport(tokens, i, out, bound, osAliases, environAliases);
       i = Math.max(i, next - 1);
       continue;
     }
@@ -605,6 +620,7 @@ function judge(tokens: readonly Tok[]): ProgramVerdict {
       if (prev !== undefined && prev.kind === 'name' && osAliases.has(prev.text)) {
         if (EXEC_NAMES.has(word)) out.exec = true;
         else if (!OS_ALLOWED_ATTRIBUTES.has(word)) out.unknown = true;
+        else if (word === 'environ' && !readsEnvironment(tokens, i)) out.unknown = true;
         continue;
       }
       // `re.compile` is a regular expression; a bare `compile` is Python's, and is in `EXEC_NAMES`.
@@ -612,6 +628,8 @@ function judge(tokens: readonly Tok[]): ProgramVerdict {
       else if (!ATTRIBUTES.has(word)) out.unknown = true;
       continue;
     }
+    if (osAliases.has(word) && !isOp(tokens[i + 1], '.')) out.unknown = true;
+    if (environAliases.has(word) && !readsEnvironment(tokens, i)) out.unknown = true;
     if (KEYWORDS.has(word)) continue;
     if (OTHER_KEYWORDS.has(word)) out.unknown = true;
     else if (EXEC_NAMES.has(word)) out.exec = true;
@@ -626,6 +644,13 @@ function judge(tokens: readonly Tok[]): ProgramVerdict {
       continue;
     else out.unknown = true;
   }
+  // The newly allowed os surface is read-only. Assignments can mutate environ or
+  // hide the module behind a new alias whose attributes have different meanings.
+  if (
+    (osAliases.size > 0 || environAliases.size > 0) &&
+    tokens.some((tok) => tok.kind === 'op' && ENVIRONMENT_ASSIGNMENT.test(tok.text))
+  )
+    out.unknown = true;
   return out.exec ? 'exec' : out.unknown ? 'unknown' : 'data';
 }
 

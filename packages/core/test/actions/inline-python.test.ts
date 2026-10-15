@@ -36,6 +36,18 @@ describe('programs that cannot be told', () => {
 });
 
 describe('os module handling', () => {
+  it.each([
+    'import os\nos.environ.clear()',
+    "import os\nos.environ.update({'X':'Y'})",
+    "import os\nos.environ['STROQ_PROBE']='x'",
+    "from os import environ as env\nenv['STROQ_PROBE']='x'",
+    "import os\na=os\na.remove('never-created')",
+    'from os import environ\na=environ\na.clear()',
+    'import os\nprint(os)',
+  ])('keeps environment mutation and module escapes unknown: %s', (program) => {
+    expect(judgePythonProgram(program)).toBe('unknown');
+  });
+
   it('allows read-only environment access', () => {
     expect(judgePythonProgram("import os\nprint(os.environ['HOME'])")).toBe('data');
     expect(judgePythonProgram("import os\nprint(os.environ.get('HOME', ''))")).toBe('data');

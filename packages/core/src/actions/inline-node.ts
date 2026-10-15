@@ -1,115 +1,60 @@
 /**
- * What a program given to `node -e` or `node -p` does when piped data from a command: only handles
- * data, runs code, or cannot be told.
- *
- * Safe synchronous readers read stdin via `fs.readFileSync(0, ...)` and parse or access data
- * without side-effects (e.g. `JSON.parse(require('fs').readFileSync(0, 'utf8')).name`).
- * Anything running arbitrary code, mutating files, touching the network, or using asynchronous
- * event streaming is denied (`exec`) or asked about (`unknown`).
+ * Only a small grammar of synchronous stdin readers is known to handle data.
+ * All other JavaScript stays unknown, including computed calls and extra statements.
  */
-
 export type NodeProgramVerdict = 'data' | 'exec' | 'unknown';
 
 const MAX_PROGRAM_CHARS = 16_000;
 const CONTROL = /[\0-\x08\x0b\x0c\x0e-\x1f]/;
 
-/** What `node` is given that is run: blatant, and so a program that is denied and not asked about. */
+/** Obvious execution primitives are denied rather than merely asked about. */
 export const NODE_EXEC =
-  /\b(?:child_process|execSync|execFileSync|spawnSync|spawn|fork|eval|Function|WebAssembly)\b|\brequire\s*\(\s*['"`](?:vm|child_process|worker_threads|cluster)|\bimport\s*\(|process\s*\.\s*(?:binding|mainModule|dlopen)/;
+  /\b(?:child_process|execSync|execFileSync|spawnSync|spawn|fork|eval|Function|WebAssembly)\b|\brequire\s*\(\s*['"\x60](?:vm|child_process|worker_threads|cluster)|\bimport\s*\(|process\s*\.\s*(?:binding|mainModule|dlopen)/;
 
-/** Prototype pollution, constructor escaping, and global recovery primitives. */
 const PROTOTYPE_ESCAPE = /\b(?:constructor|__proto__|prototype|globalThis|global)\b/;
+const FS_BINDING =
+  /^const\s+fs\s*=\s*require\s*\(\s*(?:'(?:(?:node:)?fs)'|"(?:(?:node:)?fs)")\s*\)\s*;\s*/;
+const STDIN_READ =
+  /^(?:require\s*\(\s*(?:'(?:node:)?fs'|"(?:node:)?fs")\s*\)|fs)\s*\.\s*readFileSync\s*\(\s*(?:0|process\s*\.\s*stdin\s*\.\s*fd)\s*(?:,\s*(?:'utf-?8'|"utf-?8")\s*)?\)/;
+const JSON_PARSE = /^JSON\s*\.\s*parse\s*\(\s*/;
+const PRINT = /^console\s*\.\s*log\s*\(\s*/;
+const PROPERTY =
+  /^(?:\.\s*[A-Za-z_$][\w$]*|\[\s*(?:\d+|'[A-Za-z0-9_$.-]*'|"[A-Za-z0-9_$.-]*")\s*\])\s*/;
 
-/** Asynchronous event streaming, promises, and timers. */
-const ASYNC_STREAM =
-  /\b(?:then|catch|finally|Promise|async|await|setTimeout|setInterval|setImmediate)\b|\.(?:on|once|pipe)\s*\(/;
-
-/** File system writes and mutation operations. */
-const FS_MUTATION =
-  /\b(?:write|writeFileSync|appendFile|appendFileSync|truncate|truncateSync|open|openSync|unlink|unlinkSync|rm|rmSync|rmdir|rmdirSync|mkdir|mkdirSync|copyFile|copyFileSync|rename|renameSync|chmod|chmodSync|chown|chownSync|createWriteStream|createReadStream|watch|watchFile|cp|cpSync)\b/;
-
-/** Network and external socket operations. */
-const NETWORK_OPS = /\b(?:fetch|http|https|net|tls|dgram|WebSocket|axios|undici|request)\b/;
-
-/** Matches require calls to inspect module names. */
-const REQUIRE_CALL = /\brequire\s*\(\s*([^)]*)\)/g;
-
-/** Matches readFileSync calls to verify standard input descriptor (fd 0). */
-const READ_FILE_SYNC = /\breadFileSync\s*\(\s*([^,)]*)/g;
-
-/** Allowed arguments for fd 0 in readFileSync. */
-const VALID_STDIN_FDS = new Set(['0', "'0'", '"0"', 'process.stdin.fd']);
-
-/** Allowed modules in require calls. */
-const ALLOWED_MODULES = new Set(["'fs'", '"fs"', "'node:fs'", '"node:fs"']);
-
-/**
- * Validates calls to require(...) ensuring only allowed modules ('fs', 'node:fs') are loaded.
- */
-function hasOnlyAllowedRequires(program: string): boolean {
-  REQUIRE_CALL.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = REQUIRE_CALL.exec(program)) !== null) {
-    const rawArg = (match[1] ?? '').trim();
-    if (!ALLOWED_MODULES.has(rawArg)) {
-      return false;
-    }
+/** Reads one expression; there are no arbitrary calls, assignments or executable property keys. */
+function readExpression(program: string, boundFs: boolean): string | null {
+  const json = JSON_PARSE.exec(program);
+  let rest = json ? program.slice(json[0].length) : program;
+  const read = STDIN_READ.exec(rest);
+  if (!read || (!boundFs && /^fs\b/.test(rest))) return null;
+  rest = rest.slice(read[0].length).trimStart();
+  if (json) {
+    if (!rest.startsWith(')')) return null;
+    rest = rest.slice(1).trimStart();
   }
-  return true;
+  for (;;) {
+    const property = PROPERTY.exec(rest);
+    if (!property) return rest;
+    rest = rest.slice(property[0].length).trimStart();
+  }
 }
 
-/**
- * Validates that every call to readFileSync reads from standard input (fd 0).
- */
-function hasValidStdinReads(program: string): boolean {
-  READ_FILE_SYNC.lastIndex = 0;
-  let count = 0;
-  let match: RegExpExecArray | null;
-  while ((match = READ_FILE_SYNC.exec(program)) !== null) {
-    const rawFd = (match[1] ?? '').trim();
-    if (!VALID_STDIN_FDS.has(rawFd)) {
-      return false;
-    }
-    count += 1;
-  }
-  return count > 0;
-}
-
-/**
- * Inspects process attribute accesses to forbid dangerous process methods.
- */
-function hasUnsafeProcessAccess(program: string): boolean {
-  const matches = program.matchAll(/process\s*\.\s*([a-zA-Z0-9_$]+)/g);
-  for (const m of matches) {
-    const attr = m[1];
-    if (
-      attr !== 'stdin' &&
-      attr !== 'stdout' &&
-      attr !== 'stderr' &&
-      attr !== 'exit' &&
-      attr !== 'argv' &&
-      attr !== 'env'
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Judge an inline Node program passed to node -e or node -p.
- */
 export function judgeNodeProgram(program: string): NodeProgramVerdict {
   if (program.length > MAX_PROGRAM_CHARS || CONTROL.test(program)) return 'unknown';
   if (NODE_EXEC.test(program)) return 'exec';
-
   if (PROTOTYPE_ESCAPE.test(program)) return 'unknown';
-  if (ASYNC_STREAM.test(program)) return 'unknown';
-  if (FS_MUTATION.test(program)) return 'unknown';
-  if (NETWORK_OPS.test(program)) return 'unknown';
-  if (hasUnsafeProcessAccess(program)) return 'unknown';
-  if (!hasOnlyAllowedRequires(program)) return 'unknown';
-  if (!hasValidStdinReads(program)) return 'unknown';
 
-  return 'data';
+  let rest = program.trim();
+  const binding = FS_BINDING.exec(rest);
+  if (binding) rest = rest.slice(binding[0].length);
+  const print = PRINT.exec(rest);
+  if (print) rest = rest.slice(print[0].length);
+  const tail = readExpression(rest, binding !== null);
+  if (tail === null) return 'unknown';
+  rest = tail;
+  if (print) {
+    if (!rest.startsWith(')')) return 'unknown';
+    rest = rest.slice(1).trim();
+  }
+  return rest === '' || rest === ';' ? 'data' : 'unknown';
 }

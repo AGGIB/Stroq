@@ -103,6 +103,19 @@ describe.skipIf(PYTHON === null)('the interpreter agrees with the reader', () =>
     });
   });
 
+  it('refuses os programs whose audit events show state mutation', () => {
+    const programs = [
+      "import os; os.environ['STROQ_ORACLE_PROBE']='x'",
+      'import os; os.environ.clear()',
+      "import os; alias=os; alias.remove('never-created')",
+    ];
+    const results = run(programs);
+    programs.forEach((program, i) => {
+      expect(results[i]?.events.length, program).toBeGreaterThan(0);
+      expect(judgePythonProgram(program), program).not.toBe('data');
+    });
+  });
+
   it('reads as data nothing that the interpreter sees run code', () => {
     const programs = EXEC_PROGRAMS.map(([, program]) => program);
     programs.forEach((program) => {
