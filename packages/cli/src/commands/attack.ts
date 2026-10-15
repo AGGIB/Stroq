@@ -8,6 +8,7 @@ import { runAttack } from '../attack/run.js';
 import type { Scenario } from '../attack/scenario.js';
 import { SCENARIOS } from '../attack/scenarios/index.js';
 import { loadPolicy, policySource } from '../engine-factory.js';
+import { HOST_IDS, type HostId } from '../hosts/channels.js';
 
 /** `--only 05` or `--only 05-roguepilot-schema-url`. */
 function select(only: string | undefined): readonly Scenario[] {
@@ -32,8 +33,14 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
       json: { type: 'boolean', default: false },
       only: { type: 'string' },
       fuzz: { type: 'boolean', default: false },
+      host: { type: 'string' },
     },
   });
+  if (values.host && !HOST_IDS.includes(values.host as HostId)) {
+    const ids = HOST_IDS.join(', ');
+    process.stdout.write(`unknown host "${values.host}"; known hosts: ${ids}\n`);
+    return 1;
+  }
   const selected = select(values.only);
   if (selected.length === 0) {
     const ids = SCENARIOS.map((s) => s.id).join(', ');
@@ -61,7 +68,7 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
     process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatFuzz(report));
     return report.ok ? 0 : 1;
   }
-  const report = await runAttack(selected, loadPolicy(), displayPath(policySource()));
+  const report = await runAttack(selected, loadPolicy(), displayPath(policySource()), values.host);
   process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
   return report.ok ? 0 : 1;
 }

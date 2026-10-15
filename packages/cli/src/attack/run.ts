@@ -21,6 +21,9 @@ import {
   type StepExpectation,
 } from './scenario.js';
 
+import type { Channel, ChannelStatus } from '../hosts/channels.js';
+import { isStepSupportedOnHost } from '../hosts/channels.js';
+
 // Re-exported: the placeholder substitution moved to the shared step runner, and callers (and the
 // tests) have always found it here.
 export { substituteCwd };
@@ -41,7 +44,12 @@ export { substituteCwd };
 export type Outcome = 'blocked' | 'asked' | 'asked-by-limit' | 'passed' | 'timeout' | 'error';
 
 /** A step as `stroq attack` reports it: the shared result, with the expectation the scenario set. */
-export type StepResult = SharedStepResult & { readonly expect: StepExpectation };
+export type StepResult = SharedStepResult & {
+  readonly expect: StepExpectation;
+  readonly channel?: Channel;
+  readonly supported?: boolean;
+  readonly supportStatus?: ChannelStatus;
+};
 
 export interface ScenarioResult {
   readonly id: string;
@@ -62,6 +70,8 @@ export interface ScenarioResult {
   /** The rule that decided the attack step, or null when it was allowed by default. */
   readonly ruleId: string | null;
   readonly steps: readonly StepResult[];
+  readonly host?: string;
+  readonly unsupportedSteps?: readonly number[];
 }
 
 /**
@@ -80,6 +90,8 @@ export interface AttackTotals {
   readonly timeout: number;
   readonly error: number;
   readonly inconclusive: number;
+  readonly unsupportedSteps?: number;
+  readonly unsupportedScenarios?: number;
 }
 
 export interface AttackReport {
@@ -88,6 +100,7 @@ export interface AttackReport {
   readonly meta: ReportMeta;
   /** `default` or the path of the policy override that was used. */
   readonly policy: string;
+  readonly host?: string;
   readonly scenarios: readonly ScenarioResult[];
   readonly totals: AttackTotals;
   /** False when an attack passed, a scenario is inconclusive, or any scenario did not behave as expected. */
@@ -169,10 +182,17 @@ function outcomeOf(steps: readonly StepResult[], kinds: readonly StepKind[]): Ou
 }
 
 /** The result of a scenario from the steps that ran. */
-function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioResult {
+function resultOf(scenario: Scenario, steps: readonly StepResult[], host?: string): ScenarioResult {
   const kinds = steps.map(stepKind);
   const trouble = steps.flatMap((step, index) => troubleOf(step, index) ?? []);
   const inconclusive = trouble.length > 0;
+  const unsupportedSteps: readonly number[] = host
+    ? steps
+        .map((s, idx) => (s.supported === false ? idx + 1 : null))
+        .filter((idx): idx is number => idx !== null)
+    : [];
+  const hasUnsupported = host !== undefined && unsupportedSteps.length > 0;
+
   return {
     id: scenario.id,
     title: scenario.title,
@@ -184,10 +204,12 @@ function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioRes
     // A scenario that stopped at a step that threw has not run every step.
     ok:
       !inconclusive &&
+      !hasUnsupported &&
       steps.length === scenario.steps.length &&
       steps.every((s) => s.actual === s.expect),
     ruleId: steps[steps.length - 1]?.ruleId ?? null,
     steps,
+    ...(host !== undefined ? { host, unsupportedSteps } : {}),
   };
 }
 
@@ -199,7 +221,11 @@ function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioRes
  *
  * A step that throws ends the scenario there and is its result (`error`); it does not end the run.
  */
-export async function runScenario(scenario: Scenario, policy: Policy): Promise<ScenarioResult> {
+export async function runScenario(
+  scenario: Scenario,
+  policy: Policy,
+  host?: string,
+): Promise<ScenarioResult> {
   checkShape(scenario);
   const root = await mkdtemp(join(tmpdir(), 'stroq-attack-'));
   try {
@@ -213,20 +239,43 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
     const steps: StepResult[] = [];
     for (const [index, step] of scenario.steps.entries()) {
       const label = stepLabel('scenario', scenario.id, index, step.event);
-      const result = { ...(await runStep(engine, step, cwd, label)), expect: step.expect };
+      const stepExecution = await runStep(engine, step, cwd, label);
+      let stepSupport: ReturnType<typeof isStepSupportedOnHost> = null;
+      if (host) {
+        stepSupport = isStepSupportedOnHost(host, step.event);
+      }
+      const result: StepResult = {
+        ...stepExecution,
+        expect: step.expect,
+        ...(stepSupport
+          ? {
+              channel: stepSupport.channel,
+              supported: stepSupport.supported,
+              supportStatus: stepSupport.status,
+            }
+          : {}),
+      };
       steps.push(result);
       // What follows would run against a session the scenario did not mean to leave behind.
       if (result.error !== undefined) break;
     }
-    return resultOf(scenario, steps);
+    return resultOf(scenario, steps, host);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 /** Counts each scenario once, in the bucket of its outcome (see `AttackTotals`). */
-export function totalsOf(results: readonly ScenarioResult[]): AttackTotals {
+export function totalsOf(results: readonly ScenarioResult[], host?: string): AttackTotals {
   const count = (outcome: Outcome): number => results.filter((r) => r.outcome === outcome).length;
+  const unsupportedSteps = results.reduce(
+    (acc, r) => acc + (r.unsupportedSteps ? r.unsupportedSteps.length : 0),
+    0,
+  );
+  const unsupportedScenarios = results.filter(
+    (r) => r.unsupportedSteps && r.unsupportedSteps.length > 0,
+  ).length;
+
   return {
     blocked: count('blocked'),
     asked: count('asked'),
@@ -235,6 +284,7 @@ export function totalsOf(results: readonly ScenarioResult[]): AttackTotals {
     timeout: count('timeout'),
     error: count('error'),
     inconclusive: results.filter((r) => r.inconclusive).length,
+    ...(host !== undefined ? { unsupportedSteps, unsupportedScenarios } : {}),
   };
 }
 
@@ -243,19 +293,26 @@ export async function runAttack(
   scenarios: readonly Scenario[],
   policy: Policy,
   policySource: string,
+  host?: string,
 ): Promise<AttackReport> {
   const results: ScenarioResult[] = [];
-  for (const scenario of scenarios) results.push(await runScenario(scenario, policy));
-  const totals = totalsOf(results);
+  for (const scenario of scenarios) results.push(await runScenario(scenario, policy, host));
+  const totals = totalsOf(results, host);
+  const hasUnsupported = (totals.unsupportedSteps ?? 0) > 0;
   return {
     version: 2,
     meta: buildMeta({ policy, policySource, corpusId: ATTACK_CORPUS_ID, scenarios }),
     policy: policySource,
+    ...(host !== undefined ? { host } : {}),
     scenarios: results,
     totals,
     // Structurally honest: a report can never claim success while an attack passed through, or
     // while a scenario could not be judged, even if some future path produced a scenario whose
     // own `ok` flag was true.
-    ok: results.every((r) => r.ok) && totals.passed === 0 && totals.inconclusive === 0,
+    ok:
+      results.every((r) => r.ok) &&
+      totals.passed === 0 &&
+      totals.inconclusive === 0 &&
+      !hasUnsupported,
   };
 }

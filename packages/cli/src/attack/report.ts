@@ -97,6 +97,13 @@ function mismatch(result: ScenarioResult): string {
 /** What follows a scenario's line: why it could not be judged, or where it went wrong. */
 function detail(result: ScenarioResult): string {
   if (result.inconclusive) return ` (inconclusive: ${result.reason ?? 'no reason recorded'})`;
+  if (result.unsupportedSteps && result.unsupportedSteps.length > 0) {
+    const unsuppDetails = result.steps
+      .map((s, idx) => (s.supported === false ? `step ${idx + 1} (${s.channel ?? s.tool})` : null))
+      .filter((s): s is string => s !== null)
+      .join(', ');
+    return ` (unsupported on host: ${unsuppDetails})`;
+  }
   return result.ok ? '' : mismatch(result);
 }
 
@@ -112,25 +119,41 @@ function scenarioLine(result: ScenarioResult): string {
 }
 
 function summaryLine(report: AttackReport): string {
-  const { blocked, asked, askedByLimit, passed, timeout, error, inconclusive } = report.totals;
+  const { blocked, asked, askedByLimit, passed, timeout, error, inconclusive, unsupportedSteps } =
+    report.totals;
   // Counts that are zero in an ordinary run stay out of the sentence, so that it reads as it did.
   const head =
     `${plural(report.scenarios.length, 'scenario')}: ${blocked} blocked, ${asked} asked, ` +
     (askedByLimit > 0 ? `${askedByLimit} asked at a limit, ` : '') +
     `${passed} passed through` +
+    (unsupportedSteps !== undefined && unsupportedSteps > 0
+      ? `, ${plural(unsupportedSteps, 'step')} unsupported`
+      : '') +
     (timeout > 0 ? `, ${timeout} timed out` : '') +
     (error > 0 ? `, ${error} errored` : '');
-  if (report.ok && passed === 0 && inconclusive === 0) {
+  if (
+    report.ok &&
+    passed === 0 &&
+    inconclusive === 0 &&
+    (!unsupportedSteps || unsupportedSteps === 0)
+  ) {
     return `${head} — each was blocked or put to you as a question.`;
   }
   const notes: string[] = [];
+  if (unsupportedSteps !== undefined && unsupportedSteps > 0) {
+    notes.push(
+      `${plural(unsupportedSteps, 'step')} unsupported on host ${report.host ?? 'specified'} (unsupported steps are not counted as protection)`,
+    );
+  }
   if (inconclusive > 0) {
     notes.push(
       `${plural(inconclusive, 'scenario')} could not be judged (a timeout or an error is neither a block nor a question, so this run proves nothing about ${inconclusive === 1 ? 'it' : 'them'})`,
     );
   }
-  const wrong = report.scenarios.filter((r) => !r.ok && !r.inconclusive).length;
-  if (wrong > 0 || inconclusive === 0) {
+  const wrong = report.scenarios.filter(
+    (r) => !r.ok && !r.inconclusive && (!r.unsupportedSteps || r.unsupportedSteps.length === 0),
+  ).length;
+  if (wrong > 0 || (inconclusive === 0 && (!unsupportedSteps || unsupportedSteps === 0))) {
     notes.push(
       `${plural(wrong, 'scenario')} did not behave as expected; your policy is weaker than the default (compare it with policies/default.yaml)`,
     );

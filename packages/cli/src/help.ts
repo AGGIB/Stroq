@@ -302,7 +302,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'attack',
-    synopsis: 'attack [--json] [--only <id>] [--fuzz]',
+    synopsis: 'attack [--json] [--only <id>] [--fuzz] [--host <id>]',
     about: [
       'replay recorded attacks against your policy; exit 1 if any gets through or could not be judged',
     ],
@@ -310,6 +310,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--json', 'machine-readable output'],
       ['--only <id>', 'one scenario, e.g. 05'],
       ['--fuzz', 'cross every scenario with every mutation and print the ones that escape'],
+      [
+        '--host <id>',
+        'judge only steps the host actually sends; exit 1 if an attack passed or was unsupported',
+      ],
     ],
   },
   {
