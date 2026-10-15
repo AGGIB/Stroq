@@ -252,3 +252,55 @@ export function isStepSupportedOnHost(
     evidence: support.evidence,
   };
 }
+
+/**
+ * Formats docs/HOSTS.md body from the host channel visibility table.
+ */
+export function formatHostsMarkdown(): string {
+  const lines: string[] = [
+    '# Host channel visibility',
+    '',
+    'Which event channels each host hook interface observes, and which steps of recorded attacks each host can actually see.',
+    '',
+    'Stroq runs against multiple agent hosts and hook architectures. Each host exposes a different subset of tool invocations and results: some hosts observe shell execution and file edits but never native file reads; some observe MCP tool calls but have no hook for web fetching; others observe only proxy traffic.',
+    '',
+    "When evaluating attack scenarios with `stroq attack --host <id>`, Stroq identifies steps that occur on channels not observed by that host. If any step of an attack scenario occurs on an unobserved channel, that step is flagged as unsupported, and the attack run exits 1 — ensuring that an attack is never reported as defended when the host could not have observed the attack's precursor actions.",
+    '',
+    '## Channels',
+    '',
+    '- `shell command`: PreToolUse hook on terminal and shell commands (`Bash`, `PowerShell`, `exec`, etc.).',
+    '- `file write`: PreToolUse hook on file modification tools (`Write`, `Edit`, `apply_patch`, etc.).',
+    '- `file read`: PreToolUse hook on file reading tools (`Read`, `str_replace_editor view`, etc.).',
+    '- `MCP call`: PreToolUse hook on Model Context Protocol tool execution (`mcp__*`, etc.).',
+    '- `tool result`: PostToolUse observation hook scanning command output, file bodies, or tool responses.',
+    '- `web fetch`: PreToolUse / PostToolUse hook on URL requests and web fetching tools (`WebFetch`, `WebSearch`, `web_fetch`, etc.).',
+    '',
+    '## Channel visibility matrix',
+    '',
+    `| Host | ${CHANNELS.join(' | ')} |`,
+    `| --- | ${CHANNELS.map(() => '---').join(' | ')} |`,
+  ];
+
+  for (const host of HOST_IDS) {
+    const row = [`\`${host}\``, ...CHANNELS.map((ch) => HOST_CHANNELS[host][ch].status)];
+    lines.push(`| ${row.join(' | ')} |`);
+  }
+
+  lines.push(
+    '',
+    '## Host details',
+    '',
+    '| Host | Channel | Status | Evidence / Reference |',
+    '| --- | --- | --- | --- |',
+  );
+
+  for (const host of HOST_IDS) {
+    for (const ch of CHANNELS) {
+      const record = HOST_CHANNELS[host][ch];
+      lines.push(`| \`${host}\` | ${ch} | ${record.status} | ${record.evidence} |`);
+    }
+  }
+
+  lines.push('');
+  return lines.join('\n');
+}
