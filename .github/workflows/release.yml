@@ -5,8 +5,14 @@ on:
     tags:
       - 'v*'
   # Manual run from a branch whose package.json version is not on npm yet
-  # (e.g. to publish after configuring the token or trusted publishing).
+  # (e.g. to publish after configuring the token or trusted publishing), or
+  # a dry-run smoke test against an already published package version without tagging.
   workflow_dispatch:
+    inputs:
+      test_version:
+        description: 'Published @stroq/cli version to test without publishing (e.g. 0.25.1)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -22,9 +28,9 @@ concurrency:
 
 jobs:
   publish:
-    # Tag pushes always run; manual runs are only honoured from main, so nobody can
-    # publish an unreviewed branch by dispatching the workflow against it.
-    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    # Tag pushes always run; manual runs without test_version are honoured from main.
+    # When test_version is given, skip publish and run the smoke-test job directly.
+    if: (github.event.inputs.test_version == '' || github.event.inputs.test_version == null) && (github.event_name == 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     # The OIDC token for npm provenance and trusted publishing, granted to this job
     # only. Job-level permissions replace the top-level ones, so `contents` is repeated.
@@ -184,7 +190,7 @@ jobs:
   # already (made by hand) is left as it is.
   github-release:
     needs: publish
-    if: github.event_name == 'push'
+    if: (github.event.inputs.test_version == '' || github.event.inputs.test_version == null) && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     # The only job that may write to the repository, and it has no token for npm and no OIDC.
@@ -235,6 +241,12 @@ jobs:
   smoke-test:
     name: smoke-test (${{ matrix.os }})
     needs: [publish, github-release]
+    if: |
+      always() &&
+      (
+        (github.event.inputs.test_version != '' && github.event.inputs.test_version != null) ||
+        (needs.github-release.result == 'success')
+      )
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     permissions:
@@ -254,11 +266,14 @@ jobs:
       - name: Determine version to test
         id: target
         run: |
-          if [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
-            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ github.event.inputs.test_version }}" ]; then
+            RAW="${{ github.event.inputs.test_version }}"
+            echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW="${{ github.ref_name }}"
+            echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::No release tag found to test"
+            echo "::error::No release tag or test_version provided"
             exit 1
           fi
 
