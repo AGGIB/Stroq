@@ -71,6 +71,40 @@ const MAX_REDIRECTS = 3;
 const NPM_REGISTRY_HOST = 'registry.npmjs.org';
 const GITHUB_CODELOAD_HOST = 'codeload.github.com';
 
+async function readStreamBody(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      if (received > maxBytes) {
+        await reader.cancel();
+        throw new FetchError('limit', `the compressed archive is over ${maxBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } catch (err) {
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore secondary cancel error
+    }
+    throw err;
+  }
+  const body = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return body;
+}
+
 export const defaultTransport: Transport = async (url, options) => {
   if (options.signal?.aborted) {
     throw options.signal.reason ?? new DOMException('This operation was aborted', 'AbortError');
@@ -98,37 +132,7 @@ export const defaultTransport: Transport = async (url, options) => {
   }
 
   if (response.body) {
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        if (received > LIMITS.maxCompressed) {
-          await reader.cancel();
-          throw new FetchError(
-            'limit',
-            `the compressed archive is over ${LIMITS.maxCompressed} bytes`,
-          );
-        }
-        chunks.push(value);
-      }
-    } catch (err) {
-      try {
-        await reader.cancel();
-      } catch {
-        // ignore secondary cancel error
-      }
-      throw err;
-    }
-    const body = new Uint8Array(received);
-    let offset = 0;
-    for (const chunk of chunks) {
-      body.set(chunk, offset);
-      offset += chunk.length;
-    }
+    const body = await readStreamBody(response.body.getReader(), LIMITS.maxCompressed);
     return {
       status: response.status,
       statusText: response.statusText,
@@ -173,6 +177,51 @@ function checkHostSafety(host: string, allowlist: readonly string[]): void {
   }
 }
 
+interface RequestTimeoutScope {
+  readonly controller: AbortController;
+  readonly timeoutMessage: string;
+  dispose(): void;
+}
+
+function setupRequestTimeout(state: FetchState): RequestTimeoutScope {
+  const elapsedTotal = Date.now() - state.startedAt;
+  const remainingTotal = LIMITS.totalMs - elapsedTotal;
+  if (remainingTotal <= 0) {
+    throw new FetchError(
+      'timeout',
+      `fetch timed out: exceeded total limit of ${LIMITS.totalMs / 1000} s`,
+    );
+  }
+
+  const isTotalCap = remainingTotal <= LIMITS.perRequestMs;
+  const timeoutMs = Math.min(LIMITS.perRequestMs, remainingTotal);
+  const timeoutMessage = isTotalCap
+    ? `fetch timed out: exceeded total limit of ${LIMITS.totalMs / 1000} s`
+    : `request timed out after ${timeoutMs / 1000} s`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new FetchError('timeout', timeoutMessage));
+  }, timeoutMs);
+
+  const onCustomAbort = () => {
+    controller.abort(state.customSignal?.reason);
+  };
+  if (state.customSignal) {
+    state.customSignal.addEventListener('abort', onCustomAbort, { once: true });
+  }
+
+  return {
+    controller,
+    timeoutMessage,
+    dispose() {
+      clearTimeout(timeoutId);
+      if (state.customSignal) {
+        state.customSignal.removeEventListener('abort', onCustomAbort);
+      }
+    },
+  };
+}
+
 async function requestWithPolicy(
   initialUrl: URL,
   allowlist: readonly string[],
@@ -199,32 +248,7 @@ async function requestWithPolicy(
       );
     }
 
-    const elapsedTotal = Date.now() - state.startedAt;
-    const remainingTotal = LIMITS.totalMs - elapsedTotal;
-    if (remainingTotal <= 0) {
-      throw new FetchError(
-        'timeout',
-        `fetch timed out: exceeded total limit of ${LIMITS.totalMs / 1000} s`,
-      );
-    }
-
-    const isTotalCap = remainingTotal <= LIMITS.perRequestMs;
-    const timeoutMs = Math.min(LIMITS.perRequestMs, remainingTotal);
-    const timeoutMessage = isTotalCap
-      ? `fetch timed out: exceeded total limit of ${LIMITS.totalMs / 1000} s`
-      : `request timed out after ${timeoutMs / 1000} s`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort(new FetchError('timeout', timeoutMessage));
-    }, timeoutMs);
-
-    const onCustomAbort = () => {
-      controller.abort(state.customSignal?.reason);
-    };
-    if (state.customSignal) {
-      state.customSignal.addEventListener('abort', onCustomAbort, { once: true });
-    }
-
+    const timeoutScope = setupRequestTimeout(state);
     const headers: Record<string, string> = {
       'accept-encoding': 'identity',
       ...customHeaders,
@@ -234,7 +258,7 @@ async function requestWithPolicy(
     try {
       response = await state.transport(currentUrl, {
         headers,
-        signal: controller.signal,
+        signal: timeoutScope.controller.signal,
       });
     } catch (err) {
       if (err instanceof FetchError) throw err;
@@ -243,18 +267,15 @@ async function requestWithPolicy(
           state.customSignal.reason ?? new DOMException('This operation was aborted', 'AbortError')
         );
       }
-      if (controller.signal.aborted) {
-        throw new FetchError('timeout', timeoutMessage);
+      if (timeoutScope.controller.signal.aborted) {
+        throw new FetchError('timeout', timeoutScope.timeoutMessage);
       }
       throw new FetchError(
         'unreadable',
         `request to ${currentUrl.origin} failed: ${(err as Error).message}`,
       );
     } finally {
-      clearTimeout(timeoutId);
-      if (state.customSignal) {
-        state.customSignal.removeEventListener('abort', onCustomAbort);
-      }
+      timeoutScope.dispose();
     }
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -339,7 +360,13 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
     );
   }
 
-  const resolvedVersion = typeof doc['version'] === 'string' ? doc['version'] : source.version;
+  if (typeof doc['version'] !== 'string' || doc['version'].length === 0) {
+    throw new FetchError(
+      'bad-source',
+      `registry metadata for ${source.name} is missing a valid version string`,
+    );
+  }
+  const resolvedVersion = doc['version'];
   const dist = (doc['dist'] ?? {}) as Record<string, unknown>;
   const tarballUrlStr = dist['tarball'];
   const integrity = dist['integrity'];
