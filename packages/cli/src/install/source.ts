@@ -46,7 +46,7 @@ export function isHostName(text: string): boolean {
 
 const NPM_UNSCOPED = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
 const NPM_SCOPE = /^@[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
-const NPM_VERSION_OR_TAG = /^[a-zA-Z0-9_.-]+$/;
+const NPM_VERSION_OR_TAG = /^(?!\.+$)[a-zA-Z0-9_.-]+$/;
 
 function parseNpmSource(spec: string): NpmSource {
   if (spec.length === 0) {
