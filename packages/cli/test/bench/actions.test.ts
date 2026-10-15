@@ -204,11 +204,11 @@ describe('the report', () => {
 
 // The number this set exists to bring down: every scenario interrupted is ordinary work a developer
 // would stop using Stroq for. A change that raises it needs a reason that is better than the work.
-// Four are asked about on purpose (see the second batch in the corpus): an inline Node program, an
-// inline Python program that reads the environment, and one that writes a file, each reading what a
+// Two are asked about on purpose (see the second batch in the corpus): an inline Node program
+// that reads via an event stream, and an inline Python program that writes a file, each reading what a
 // fetch printed.
 describe('the default policy on ordinary work', () => {
-  const BASELINE_INTERRUPTED = 4;
+  const BASELINE_INTERRUPTED = 2;
 
   it('interrupts no more of it than it did when the set was written', async () => {
     const report = await runActionsBench(ACTION_SCENARIOS, DEFAULT_POLICY, 'default');

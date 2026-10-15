@@ -75,6 +75,14 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['bitsadmin', (r) => r('bitsadmin ')],
   ['powershell', (r) => r('powershell ')],
   ['Buffer.from(', (r) => `node -e ${r('Buffer.from(')}`],
+  [
+    'node readFileSync',
+    (r) => `node -p ${r("JSON.parse(require('fs').readFileSync(0,'utf8')).x")}`,
+  ],
+  [
+    'python os.environ',
+    (r) => `python3 -c "import os, json, sys; ${r("print(os.environ['USER']); ")}"`,
+  ],
   ['spaces', (r) => `echo${r(' ')}x`],
   ['tabs', (r) => `echo${r('\t')}x`],
   ['dots', (r) => `echo ${r('.')}`],

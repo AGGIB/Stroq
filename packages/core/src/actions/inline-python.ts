@@ -107,10 +107,14 @@ const MODULE_NAMES = set(`sys json re datetime time math collections itertools s
  * file, or reaches another name by a string (no `path`, `modules`, `open`, `system`, `call`, `run`,
  * `load` of a class by name, or dunder).
  */
+const OS_ALLOWED_ATTRIBUTES = set('environ getenv');
+
 const ATTRIBUTES = set(
   // sys and the files it holds
   `stdin stdout stderr argv exit version version_info platform maxsize read readline readlines
    write writelines flush
+   // os read-only environment
+   environ getenv
    // json
    load loads dump dumps JSONDecodeError
    // re
@@ -511,6 +515,8 @@ function judgeImport(
   i: number,
   out: Judgement,
   bound: Set<string>,
+  osAliases: Set<string>,
+  environAliases: Set<string>,
 ): number {
   const fail = (name: string): void => {
     const root = name.split('.')[0] ?? '';
@@ -525,9 +531,18 @@ function judgeImport(
         out.unknown = true;
         return at;
       }
-      if (!MODULES.has(module.name) && !MODULE_NAMES.has(module.name)) fail(module.name);
+      let alias = module.name;
+      if (module.name === 'os') {
+        osAliases.add('os');
+      } else if (!MODULES.has(module.name) && !MODULE_NAMES.has(module.name)) {
+        fail(module.name);
+      }
       at = module.next;
-      if (isName(tokens[at], 'as') && isName(tokens[at + 1])) at += 2;
+      if (isName(tokens[at], 'as') && isName(tokens[at + 1])) {
+        alias = (tokens[at + 1] as Tok).text;
+        if (module.name === 'os') osAliases.add(alias);
+        at += 2;
+      }
       if (!isOp(tokens[at], ',')) return at;
       at += 1;
     }
@@ -538,7 +553,9 @@ function judgeImport(
     out.unknown = true;
     return i + 1;
   }
-  if (!MODULES.has(module.name) && !MODULE_NAMES.has(module.name)) fail(module.name);
+  if (module.name !== 'os' && !MODULES.has(module.name) && !MODULE_NAMES.has(module.name)) {
+    fail(module.name);
+  }
   let at = module.next + 1;
   const parenthesised = isOp(tokens[at], '(');
   if (parenthesised) at += 1;
@@ -548,13 +565,23 @@ function judgeImport(
       out.unknown = true;
       return at;
     }
-    if (EXEC_NAMES.has(name.text)) out.exec = true;
-    else if (!ATTRIBUTES.has(name.text) && !MODULES.has(`${module.name}.${name.text}`))
+    if (EXEC_NAMES.has(name.text)) {
+      out.exec = true;
+    } else if (module.name === 'os') {
+      if (!OS_ALLOWED_ATTRIBUTES.has(name.text)) out.unknown = true;
+    } else if (!ATTRIBUTES.has(name.text) && !MODULES.has(`${module.name}.${name.text}`)) {
       out.unknown = true;
+    }
     // What `from m import a` brings in is a name of the program, as `a` and as the alias.
     bound.add(name.text);
+    if (module.name === 'os' && name.text === 'environ') environAliases.add(name.text);
     at += 1;
-    if (isName(tokens[at], 'as') && isName(tokens[at + 1])) at += 2;
+    if (isName(tokens[at], 'as') && isName(tokens[at + 1])) {
+      bound.add((tokens[at + 1] as Tok).text);
+      if (module.name === 'os' && name.text === 'environ')
+        environAliases.add((tokens[at + 1] as Tok).text);
+      at += 2;
+    }
     if (!isOp(tokens[at], ',')) break;
     at += 1;
     if (parenthesised && isOp(tokens[at], ')')) break;
@@ -563,33 +590,67 @@ function judgeImport(
   return at;
 }
 
+/** Keep the environment mapping inside direct reads; never pass it to another function or alias. */
+function readsEnvironment(tokens: readonly Tok[], at: number): boolean {
+  return (
+    isOp(tokens[at + 1], '[') ||
+    (isOp(tokens[at + 1], '.') && isName(tokens[at + 2], 'get') && isOp(tokens[at + 3], '('))
+  );
+}
+
+const ENVIRONMENT_ASSIGNMENT = /^(?:=|:=|\+=|-=|\*=|\/=|\/\/=|%=|\*\*=|&=|\|=|\^=|<<=|>>=)$/;
+
 function judge(tokens: readonly Tok[]): ProgramVerdict {
   const out: Judgement = { exec: false, unknown: false };
   const bound = boundNames(tokens);
+  const osAliases = new Set<string>();
+  const environAliases = new Set<string>();
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i] as Tok;
     if (tok.kind !== 'name') continue;
     const word = tok.text;
     if (word === 'import' || (word === 'from' && isName(tokens[i + 1]))) {
       // `from` also begins `yield from` and a `raise … from`, neither of which is read.
-      const next = judgeImport(tokens, i, out, bound);
+      const next = judgeImport(tokens, i, out, bound, osAliases, environAliases);
       i = Math.max(i, next - 1);
       continue;
     }
     if (isOp(tokens[i - 1], '.')) {
+      const prev = tokens[i - 2];
+      if (prev !== undefined && prev.kind === 'name' && osAliases.has(prev.text)) {
+        if (EXEC_NAMES.has(word)) out.exec = true;
+        else if (!OS_ALLOWED_ATTRIBUTES.has(word)) out.unknown = true;
+        else if (word === 'environ' && !readsEnvironment(tokens, i)) out.unknown = true;
+        continue;
+      }
       // `re.compile` is a regular expression; a bare `compile` is Python's, and is in `EXEC_NAMES`.
       if (EXEC_NAMES.has(word) && word !== 'compile') out.exec = true;
       else if (!ATTRIBUTES.has(word)) out.unknown = true;
       continue;
     }
+    if (osAliases.has(word) && !isOp(tokens[i + 1], '.')) out.unknown = true;
+    if (environAliases.has(word) && !readsEnvironment(tokens, i)) out.unknown = true;
     if (KEYWORDS.has(word)) continue;
     if (OTHER_KEYWORDS.has(word)) out.unknown = true;
     else if (EXEC_NAMES.has(word)) out.exec = true;
     else if (word.startsWith('_')) out.unknown = true;
     else if (BUILTINS.has(word) && !ALLOWED_BUILTINS.has(word)) out.unknown = true;
-    else if (ALLOWED_BUILTINS.has(word) || MODULE_NAMES.has(word) || bound.has(word)) continue;
+    else if (
+      ALLOWED_BUILTINS.has(word) ||
+      MODULE_NAMES.has(word) ||
+      bound.has(word) ||
+      osAliases.has(word)
+    )
+      continue;
     else out.unknown = true;
   }
+  // The newly allowed os surface is read-only. Assignments can mutate environ or
+  // hide the module behind a new alias whose attributes have different meanings.
+  if (
+    (osAliases.size > 0 || environAliases.size > 0) &&
+    tokens.some((tok) => tok.kind === 'op' && ENVIRONMENT_ASSIGNMENT.test(tok.text))
+  )
+    out.unknown = true;
   return out.exec ? 'exec' : out.unknown ? 'unknown' : 'data';
 }
 

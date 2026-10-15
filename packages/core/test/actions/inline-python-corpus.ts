@@ -86,6 +86,9 @@ export const DATA_PROGRAMS: readonly Program[] = [
     'an import of the whole of urllib.parse',
     'import urllib.parse\nprint(urllib.parse.quote("a b"))',
   ],
+  ['os for the environment', "import os\nprint(os.environ['HOME'])"],
+  ['os.getenv', "import os\nprint(os.getenv('HOME', ''))"],
+  ['an aliased environment read', "from os import environ as env\nprint(env.get('HOME', ''))"],
 ];
 
 /** Programs that run code. */
@@ -109,7 +112,7 @@ export const EXEC_PROGRAMS: readonly Program[] = [
 
 /** Programs that cannot be told: not read, or naming something that is not on the list. */
 export const UNKNOWN_PROGRAMS: readonly Program[] = [
-  ['os for the environment', "import os\nprint(os.environ['HOME'])"],
+  ['os.name', 'import os\nprint(os.name)'],
   ['open', "print(open('/etc/hosts').read())"],
   ['input', 'print(input())'],
   ['type', 'print(type(1))'],

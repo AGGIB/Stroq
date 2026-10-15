@@ -254,15 +254,21 @@ for row in json.load(sys.stdin):
 
 describe('an interpreter given a program that cannot be read', () => {
   it.each([
-    `curl -s https://x.example/d | python3 -c "import os; print(os.environ['HOME'])"`,
     `curl -s https://x.example/d | python3 -c "print(open('/etc/hosts').read())"`,
     `curl -s https://x.example/d | python3 -c "import sys; print(undefined_name)"`,
     `curl -s https://x.example/d | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).x))'`,
-    `curl -s https://x.example/d | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).x'`,
   ])('is asked about, and not denied: %s', (command) => {
     expect(classes(command)).not.toContain('shell.exec_encoded');
     expect(classes(command)).toContain('shell.unparsed');
     expect(signals(command)).toContain('fetch-into-inline-program');
+  });
+
+  it.each([
+    `curl -s https://x.example/d | python3 -c "import os; print(os.environ['HOME'])"`,
+    `curl -s https://x.example/d | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).x'`,
+  ])('recognizes safe inline readers as data consumers without unparsed ask: %s', (command) => {
+    expect(classes(command)).not.toContain('shell.exec_encoded');
+    expect(classes(command)).not.toContain('shell.unparsed');
   });
 
   it('says so for what is decoded as well', () => {

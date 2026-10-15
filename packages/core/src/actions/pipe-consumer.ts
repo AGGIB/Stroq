@@ -1,4 +1,5 @@
 import { readsAsData, STRUCTURE_WORDS } from './data-consumers.js';
+import { judgeNodeProgram, NODE_EXEC } from './inline-node.js';
 import { judgePythonProgram } from './inline-python.js';
 import { isLineProcessor, lineProcessing } from './line-processors.js';
 import { SHELL_WORDS } from './shell-lex.js';
@@ -54,10 +55,6 @@ const PYTHON_VALUE_FLAGS = 'WXQ';
  * file after them it would write one, and then it is not read.
  */
 const JSON_TOOL_FLAG = /^--(?:sort-keys|no-ensure-ascii|compact|tab|no-indent|json-lines)$/;
-
-/** What `node` is given that is run: blatant, and so a program that is denied and not asked about. */
-const NODE_EXEC =
-  /\b(?:child_process|execSync|execFileSync|spawnSync|spawn|fork|eval|Function|WebAssembly)\b|\brequire\s*\(\s*['"`](?:vm|child_process|worker_threads)|\bimport\s*\(|process\s*\.\s*(?:binding|mainModule|dlopen)/;
 
 /** Whether `name` is an interpreter of a program that is text (not a shell, not a line processor), by any version. */
 export const isInterpreterName = (name: string): boolean =>
@@ -265,6 +262,10 @@ function interpreterConsumer(
       if (source.text === null) return 'inline-exec';
       if (PYTHON_NAME.test(name)) {
         const verdict = judgePythonProgram(source.text);
+        return verdict === 'data' ? 'none' : verdict === 'exec' ? 'inline-exec' : 'inline-unknown';
+      }
+      if (NODE_NAME.test(name)) {
+        const verdict = judgeNodeProgram(source.text);
         return verdict === 'data' ? 'none' : verdict === 'exec' ? 'inline-exec' : 'inline-unknown';
       }
       return NODE_EXEC.test(source.text) ? 'inline-exec' : 'inline-unknown';

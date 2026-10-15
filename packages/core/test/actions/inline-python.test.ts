@@ -25,13 +25,51 @@ describe('programs that cannot be told', () => {
   });
 
   it.each([
-    ['os for the environment', "import os\nprint(os.environ['HOME'])"],
+    ['os.name', 'import os\nprint(os.name)'],
     ['open', "print(open('/etc/hosts').read())"],
     ['a name nobody defined', 'print(undefined_name)'],
     ['a carriage return', 'print(1)\rexec(x)'],
     ['an unterminated string', "print('abc"],
   ])('is unknown, not exec, when it only cannot be read: %s', (_name, program) => {
     expect(judgePythonProgram(program)).toBe('unknown');
+  });
+});
+
+describe('os module handling', () => {
+  it.each([
+    'import os\nos.environ.clear()',
+    "import os\nos.environ.update({'X':'Y'})",
+    "import os\nos.environ['STROQ_PROBE']='x'",
+    "from os import environ as env\nenv['STROQ_PROBE']='x'",
+    "import os\na=os\na.remove('never-created')",
+    'from os import environ\na=environ\na.clear()',
+    'import os\nprint(os)',
+  ])('keeps environment mutation and module escapes unknown: %s', (program) => {
+    expect(judgePythonProgram(program)).toBe('unknown');
+  });
+
+  it('allows read-only environment access', () => {
+    expect(judgePythonProgram("import os\nprint(os.environ['HOME'])")).toBe('data');
+    expect(judgePythonProgram("import os\nprint(os.environ.get('HOME', ''))")).toBe('data');
+    expect(judgePythonProgram("import os\nprint(os.getenv('HOME'))")).toBe('data');
+    expect(judgePythonProgram("from os import environ\nprint(environ['HOME'])")).toBe('data');
+    expect(judgePythonProgram("from os import getenv\nprint(getenv('HOME'))")).toBe('data');
+    expect(judgePythonProgram("from os import environ as env\nprint(env['HOME'])")).toBe('data');
+    expect(judgePythonProgram("import os as my_os\nprint(my_os.environ['HOME'])")).toBe('data');
+  });
+
+  it('rejects execution attributes on os as exec', () => {
+    expect(judgePythonProgram("import os\nos.system('id')")).toBe('exec');
+    expect(judgePythonProgram("import os\nos.popen('id').read()")).toBe('exec');
+    expect(judgePythonProgram("from os import system\nsystem('id')")).toBe('exec');
+    expect(judgePythonProgram("from os import popen\npopen('id')")).toBe('exec');
+  });
+
+  it('rejects all other attributes or functions on os as unknown', () => {
+    expect(judgePythonProgram("import os\nos.remove('file')")).toBe('unknown');
+    expect(judgePythonProgram('import os\nprint(os.getcwd())')).toBe('unknown');
+    expect(judgePythonProgram("from os import remove\nremove('file')")).toBe('unknown');
+    expect(judgePythonProgram("from os import walk\nwalk('.')")).toBe('unknown');
   });
 });
 
