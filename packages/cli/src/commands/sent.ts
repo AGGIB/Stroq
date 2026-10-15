@@ -25,6 +25,7 @@ import { homedir, tmpdir } from 'node:os';
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -258,6 +259,76 @@ const NO_SESSION_NEXT =
   '  stroq attack              replay the attack corpus against the default policy\n' +
   '  stroq init --agent <name> guard the next session, then read it with `stroq sent`\n';
 
+/**
+ * Scans a built-in synthetic Claude Code session with an invented key in an ephemeral folder.
+ *
+ * Runs against an isolated FileSecretIndex in a temporary directory, without opening or
+ * reading any local credential files or environment variables on this machine. Cleans up
+ * the temporary directory on success and on error.
+ */
+export async function runSentTry(out: Output): Promise<number> {
+  const scratch = mkdtempSync(join(tmpdir(), 'stroq-sent-try-'));
+  try {
+    const fakeHome = join(scratch, 'home');
+    const projectDir = join(scratch, 'project');
+    mkdirSync(fakeHome, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+
+    const keyName = 'STRIPE_SECRET_KEY';
+    const keyValue = 'sk_test_51Hx9QfAkeKeyForStroqDemo7Zq3LmN8vB2';
+    const envPath = join(projectDir, '.env');
+    writeFileSync(envPath, `${keyName}=${keyValue}\n`);
+
+    const transcriptFile = join(projectDir, 'session.jsonl');
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'sample-session',
+        cwd: projectDir,
+        timestamp: '2026-10-15T10:00:00Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: envPath } }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        sessionId: 'sample-session',
+        cwd: projectDir,
+        timestamp: '2026-10-15T10:00:01Z',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 't1', content: `${keyName}=${keyValue}\n` },
+          ],
+        },
+      }),
+    ];
+    writeFileSync(transcriptFile, lines.join('\n') + '\n');
+
+    const index = new FileSecretIndex(join(fakeHome, 'secrets.json'), fakeHome, {});
+    const stats = await index.refresh(projectDir);
+    const scope: SentIndexScope = {
+      cwd: projectDir,
+      home: fakeHome,
+      sourcePaths: index.sourcePaths(projectDir),
+      indexedSecrets: stats.entries + stats.canaries,
+    };
+
+    const reader = await readerForFile(transcriptFile);
+    const transcript = await reader.read(transcriptFile);
+    const report = await scanTranscript(
+      transcript,
+      { agent: reader.agent, path: 'built-in sample session' },
+      index,
+      scope,
+    );
+    return emit({ ...report, synthetic: true }, out);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export async function runSent(args: readonly string[]): Promise<number> {
   let parsed;
   try {
@@ -270,6 +341,7 @@ export async function runSent(args: readonly string[]): Promise<number> {
         out: { type: 'string' },
         last: { type: 'boolean' },
         transcript: { type: 'string' },
+        try: { type: 'boolean' },
         'fail-on-finding': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -292,6 +364,13 @@ export async function runSent(args: readonly string[]): Promise<number> {
     process.stderr.write(`--html and --out go with --card\n\n${USAGE}`);
     return 2;
   }
+  if (
+    values.try === true &&
+    (values.last === true || values.transcript !== undefined || positionals.length > 0)
+  ) {
+    process.stderr.write(`--try does not take a session, --last, or --transcript\n\n${USAGE}`);
+    return 2;
+  }
   const out: Output = {
     json: values.json === true,
     failOnFinding: values['fail-on-finding'] === true,
@@ -299,6 +378,10 @@ export async function runSent(args: readonly string[]): Promise<number> {
     html: values.html === true || (values.out?.toLowerCase().endsWith('.html') ?? false),
     path: values.out ?? null,
   };
+
+  if (values.try === true) {
+    return runSentTry(out);
+  }
 
   const cwd = process.cwd();
   const home = homedir();

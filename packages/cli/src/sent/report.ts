@@ -114,6 +114,8 @@ export type SentOrigin = 'transcript' | 'audit-log';
 export interface SentReport {
   readonly version: 1;
   readonly origin: SentOrigin;
+  /** True when generated as a synthetic demonstration via `stroq sent --try`. */
+  readonly synthetic?: boolean;
   /** The agent whose transcript this is, or null when it came from the audit log. */
   readonly agent: string | null;
   readonly path: string | null;
