@@ -1,0 +1,63 @@
+{
+  "host": "copilot",
+  "version": "1.0.98",
+  "os": "darwin",
+  "recordedDate": "2026-10-15",
+  "kind": "recorded-host",
+  "provenance": "Actual GitHub Copilot CLI non-interactive agent requests executed in an authorized throwaway project. Recorder forwarded original stdin to the built Stroq CLI and captured responses. Pre-tool-use allow and deny decisions, post-tool-use callbacks, and control runs were measured and verified.",
+  "scope": {
+    "preToolUse": {
+      "bash": [
+        "allow",
+        "deny-self-tamper"
+      ],
+      "create": [
+        "allow"
+      ],
+      "view": [
+        "allow"
+      ]
+    },
+    "postToolUse": [
+      "recorded toolResult context"
+    ],
+    "control": "Tampering with .claude/settings.json succeeded when preToolUse hook was disabled in control run.",
+    "excluded": [
+      "Interactive copilot prompt session (desktop IDE plugin)",
+      "Copilot Extensions",
+      "Other OS releases"
+    ]
+  },
+  "sanitization": [
+    "Exact private paths replaced with /tmp/stroq-live-fixture equivalents.",
+    "Session and tool ids replaced with deterministic aliases.",
+    "User emails and tokens sanitized."
+  ],
+  "files": [
+    "hooks.jsonl",
+    "audit.jsonl",
+    "after-allow-delete.snapshot.json",
+    "after-allow-write.snapshot.json",
+    "after-control.snapshot.json",
+    "after-deny.snapshot.json",
+    "after-restore.snapshot.json",
+    "before-control.snapshot.json",
+    "before-validated.snapshot.json"
+  ],
+  "sha256": {
+    "hooks.jsonl": "cefb7fac812484ad8c32163e94cc8ff572898a3a9c6e424bd5a18da1068afc61",
+    "audit.jsonl": "e56b72954276f55eaea11ff4f37d1e9f636d72ed6f84f94fefc013f65414462d",
+    "after-allow-delete.snapshot.json": "400119bd0e478d9de128d8601d605b54ba7c7f636393659991cfc3fcf9d4d66c",
+    "after-allow-write.snapshot.json": "06ed0c4e331142c96e8354b52c15741213996690fbbc2219a9e66a962739e981",
+    "after-control.snapshot.json": "22a05091ae82fa7239fd7987f7df395cff972d8acd4832282f0790b107ce6d87",
+    "after-deny.snapshot.json": "516d1651f9a949feb7f3b190ea28b62cbeee6c288d62d819b7631a6b5d813213",
+    "after-restore.snapshot.json": "e80731b845fda126053ae8c4d60c20a607727345cde9372c25a9ba2643612c56",
+    "before-control.snapshot.json": "86996cc31634103aa65179e4671959f9b4cb71183300c38590867e3d0edb0064",
+    "before-validated.snapshot.json": "1fb0953dcb7270c7b8954c8a83010a62b8c12e17fa4c5e485307390fa0749c1f"
+  },
+  "stroqBuild": {
+    "packageVersion": "0.25.1",
+    "distribution": "local development build of Stroq CLI",
+    "cliSha256": "8807fcf6dcdde14c80b685870ee6acdf5913f308577f115f2302ff8a61c92ccf"
+  }
+}
