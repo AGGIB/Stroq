@@ -234,10 +234,11 @@ async function deriveBench(): Promise<string> {
       'that are text, `eval` of a tool that prints its own setup, and one pattern of ' +
       '`ATR-2026-00032` are read; they stay in the set, now allowed. The last twenty-five ' +
       'were written after that, from the shapes real agent work took in a Claude Code and ' +
-      'Codex history, and are not fitted to a rule either. They keep four that Stroq still ' +
-      'asks about on purpose: an inline Python program that reads the environment or writes ' +
-      'a file, and an inline Node program, each reading what `curl` printed, which Stroq ' +
-      'cannot tell from one that runs it. Read the rate as which scenarios Stroq interrupts ' +
+      'Codex history, and are not fitted to a rule either. They keep two that Stroq still ' +
+      'asks about on purpose: an inline Python program that writes a file (`open`), ' +
+      'and an inline Node program that reads via an event stream (`process.stdin.on`), ' +
+      'each reading what `curl` printed, which Stroq cannot tell from one that runs it. ' +
+      'Read the rate as which scenarios Stroq interrupts ' +
       'and why, not as a share of commands: the set holds more hard shapes than ordinary ' +
       'work does. A scenario that is interrupted stays in the set: removing it would be ' +
       'fitting the set to the rules.',

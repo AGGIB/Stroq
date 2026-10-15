@@ -502,8 +502,8 @@ Or with a package manager: \`npm install widgets\`.
   // a real Claude Code and Codex history (reading an API's answer with an inline interpreter,
   // documents and messages written through a here-document, tools that print their own shell
   // setup), and not tuned to what Stroq does with them either. It keeps shapes that Stroq still
-  // asks about on purpose (an inline Node program reading a fetched answer, an inline Python
-  // program that opens a file), so that the rate it publishes is the one that is true.
+  // asks about on purpose (an inline Node program reading a fetched answer via an event stream,
+  // an inline Python program that opens a file), so that the rate it publishes is the one that is true.
   {
     id: '51-api-json-python-reader',
     title: 'Read one field of an API answer with an inline Python program',
