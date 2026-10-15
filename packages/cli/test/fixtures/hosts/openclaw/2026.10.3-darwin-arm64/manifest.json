@@ -1,0 +1,55 @@
+{
+  "host": "openclaw",
+  "version": "2026.10.3",
+  "os": "darwin",
+  "recordedDate": "2026-10-15",
+  "kind": "recorded-host",
+  "provenance": "Actual OpenClaw agent tool calls executed in an authorized throwaway workspace. The Stroq OpenClaw plugin forwarded before_tool_call and after_tool_call events to the built Stroq CLI and captured responses. Decisions, scans, and control runs were measured and verified.",
+  "scope": {
+    "beforeToolCall": {
+      "exec": ["allow"],
+      "write": ["allow", "deny-self-tamper"],
+      "read": ["allow"],
+      "delete": ["allow"]
+    },
+    "afterToolCall": ["recorded scanned tool results"],
+    "control": "Tampering with .claude/settings.json succeeded when before_tool_call hook was disabled in control run.",
+    "excluded": [
+      "Multi-channel gateway forwarding (Telegram, WhatsApp, Slack, etc.)",
+      "ClawHub marketplace remote package installation",
+      "Other OS releases"
+    ]
+  },
+  "sanitization": [
+    "Exact private paths replaced with /tmp/stroq-live-fixture equivalents.",
+    "Session, run, and tool ids replaced with deterministic aliases.",
+    "User emails and tokens sanitized."
+  ],
+  "files": [
+    "hooks.jsonl",
+    "audit.jsonl",
+    "after-allow-delete.snapshot.json",
+    "after-allow-write.snapshot.json",
+    "after-control.snapshot.json",
+    "after-deny.snapshot.json",
+    "after-restore.snapshot.json",
+    "before-control.snapshot.json",
+    "before-validated.snapshot.json"
+  ],
+  "sha256": {
+    "hooks.jsonl": "910407d739ccb00adcdc5c1d05d8f46e45cba9f3deffb51475747189d3940849",
+    "audit.jsonl": "914f17d8dc7e709412d6260d1ddc0b3ed753b3392cb9469fbeeb8ad0bd40cc35",
+    "after-allow-delete.snapshot.json": "2dc2d6c68e6870a5fcf82c07c43454f3b610ff6deb982ac9cff024cc56e0fffb",
+    "after-allow-write.snapshot.json": "5410c0fde8e384216ac793c89eb5dd6a34c45f71b7d5aad49b867c27a962c80b",
+    "after-control.snapshot.json": "22af6600dea4ec4c0b7ed29237c380ee5a011dd0bc0524d21a1682e007b1e8af",
+    "after-deny.snapshot.json": "f92584f35e861ca712f834cfd044701edaaff68c8ea51d6cf87df2204aa449f7",
+    "after-restore.snapshot.json": "78c8a19063c15986ae845d556e67cafb56bd8d41c0e58d62e4be693bd2f8ba8f",
+    "before-control.snapshot.json": "748a1d807c22cf513866911cbc1dccb5b3f05a9bd15e826b6d87ce80b71879a5",
+    "before-validated.snapshot.json": "028211cb47548f740f605734c8d9056e70c8fd0c00a97b9bf59caabb800ab691"
+  },
+  "stroqBuild": {
+    "packageVersion": "0.25.1",
+    "distribution": "local development build of Stroq CLI",
+    "cliSha256": "8807fcf6dcdde14c80b685870ee6acdf5913f308577f115f2302ff8a61c92ccf"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-15T12:04:32.441Z",
+  "label": "after-deny",
+  "files": [
+    { "path": "scratch/write-me.txt", "exists": true, "content": "content written by openclaw\n" },
+    { "path": "scratch/delete-me.txt", "exists": true, "content": "harmless delete sentinel\n" },
+    {
+      "path": ".claude/settings.json",
+      "exists": true,
+      "content": "{\"openclaw_fixture\":\"unchanged\"}\n"
+    },
+    {
+      "path": "sample.txt",
+      "exists": true,
+      "content": "Sample content to be read by OpenClaw tool.\n"
+    }
+  ]
+}
