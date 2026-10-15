@@ -112,9 +112,12 @@ const USAGE = `stroq sent — credential evidence in recorded agent sessions
 
   stroq sent --last                 read the newest session of this project
   stroq sent --transcript <path>    read a specific transcript or rollout
+  stroq sent --try                  scan a built-in sample session with a made-up key
   stroq sent [<session-id>]         read a session Stroq itself recorded
 
 Flags:
+  --try                scan a built-in sample session with a made-up key in a
+                       temporary folder, without touching any credential file
   --json               emit the report as JSON
   --card               print a card instead of the report: counts, providers and the
                        limits of the check, and no value, name, path, command or hash,

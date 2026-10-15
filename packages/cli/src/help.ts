@@ -266,7 +266,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'sent',
     synopsis:
-      'sent [<session>] [--last] [--transcript <path>] [--json] [--card [--html] [--out <file>]] [--fail-on-finding]',
+      'sent [<session>] [--last] [--transcript <path>] [--try] [--json] [--card [--html] [--out <file>]] [--fail-on-finding]',
     about: [
       'which credentials appear in a recorded agent session, and in which tool result',
       'or call. Reads names and sources only, never a value',
@@ -277,6 +277,7 @@ export const COMMANDS: readonly CommandHelp[] = [
         'the newest session recorded for this project (this directory, or the folder above it)',
       ],
       ['--transcript <path>', 'a specific transcript or rollout'],
+      ['--try', 'scan a built-in sample session with a made-up key in a temporary folder'],
       ['--json', 'machine-readable output'],
       [
         '--card',
