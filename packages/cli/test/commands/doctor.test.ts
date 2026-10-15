@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -211,6 +212,119 @@ describe('doctorReport', () => {
       process.chdir(originalCwd);
       spy.mockRestore();
     }
+  });
+
+  it('emits a valid version 1 JSON document and exits 1 when no hooks are installed', async () => {
+    let stdout = '';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdout += String(chunk);
+      return true;
+    });
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(cwd);
+      const code = await runDoctor(['--json']);
+      expect(code).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.version).toBe(1);
+      expect(parsed.ok).toBe(false);
+      expect(Array.isArray(parsed.checks)).toBe(true);
+      expect(parsed.checks.some((c: { name: string }) => c.name === 'hooks')).toBe(true);
+      const hooks = parsed.checks.find((c: { name: string }) => c.name === 'hooks');
+      expect(hooks.ok).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+      spy.mockRestore();
+    }
+  });
+
+  it('emits a valid version 1 JSON document and exits 0 when hooks are installed', async () => {
+    installHooks(settingsPath('project', cwd), `${STROQ} hook claude-code`);
+    let stdout = '';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdout += String(chunk);
+      return true;
+    });
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(cwd);
+      const code = await runDoctor(['--json']);
+      expect(code).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.version).toBe(1);
+      expect(parsed.ok).toBe(true);
+      expect(Array.isArray(parsed.checks)).toBe(true);
+      const hooks = parsed.checks.find((c: { name: string }) => c.name === 'hooks');
+      expect(hooks.ok).toBe(true);
+      expect(hooks.detail).toContain('project: installed');
+      expect(hooks.detail).toContain('proof:');
+      expect(hooks.detail).toContain('hook call');
+    } finally {
+      process.chdir(originalCwd);
+      spy.mockRestore();
+    }
+  });
+
+  it('composes --all with --json to include all agent checks', async () => {
+    let stdout = '';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdout += String(chunk);
+      return true;
+    });
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(cwd);
+      const code = await runDoctor(['--all', '--json']);
+      expect(code).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.version).toBe(1);
+      expect(parsed.ok).toBe(false);
+      const names = parsed.checks.map((c: { name: string }) => c.name);
+      expect(names).toContain('hooks');
+      expect(names).toContain('cursor hooks');
+      expect(names).toContain('codex hooks');
+      expect(names).toContain('copilot hooks');
+      expect(names).toContain('windsurf hooks');
+      expect(names).toContain('antigravity hooks');
+    } finally {
+      process.chdir(originalCwd);
+      spy.mockRestore();
+    }
+  });
+
+  it('runs through CLI entry with isolated HOME and STROQ_HOME', () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'stroq-cli-doctor-'));
+    const testProject = mkdtempSync(join(tmpdir(), 'stroq-proj-'));
+    const env = {
+      ...process.env,
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+      STROQ_HOME: join(fakeHome, '.stroq'),
+    };
+
+    const res1 = spawnSync(process.execPath, [CLI_ENTRY, 'doctor', '--json'], {
+      cwd: testProject,
+      encoding: 'utf8',
+      env,
+    });
+    expect(res1.status).toBe(1);
+    const parsed1 = JSON.parse(res1.stdout);
+    expect(parsed1.version).toBe(1);
+    expect(parsed1.ok).toBe(false);
+    expect(Array.isArray(parsed1.checks)).toBe(true);
+    expect(res1.stderr).toBe('');
+
+    installHooks(settingsPath('project', testProject), `${STROQ} hook claude-code`);
+    const res2 = spawnSync(process.execPath, [CLI_ENTRY, 'doctor', '--json'], {
+      cwd: testProject,
+      encoding: 'utf8',
+      env,
+    });
+    expect(res2.status).toBe(0);
+    const parsed2 = JSON.parse(res2.stdout);
+    expect(parsed2.version).toBe(1);
+    expect(parsed2.ok).toBe(true);
+    expect(res2.stderr).toBe('');
   });
 });
 
