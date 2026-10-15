@@ -181,12 +181,15 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'doctor',
-    synopsis: 'doctor [--all]',
+    synopsis: 'doctor [--all] [--json]',
     about: [
       'check the installation: Node, rules, the hooks of every agent',
       'and when each was last called, a self-test',
     ],
-    flags: [['--all', 'list every agent and scope, installed or not']],
+    flags: [
+      ['--all', 'list every agent and scope, installed or not'],
+      ['--json', 'machine-readable output (version 1)'],
+    ],
   },
   {
     name: 'prove',
