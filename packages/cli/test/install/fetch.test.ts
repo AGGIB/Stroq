@@ -216,6 +216,23 @@ describe('fetchSourceTree', () => {
         fetchSourceTree(parseOnlineSource('npm:missing-package'), { transport }),
       ).rejects.toThrow(/resource not found \(HTTP 404\)/);
     });
+
+    it('refuses when registry metadata is missing a valid version string', async () => {
+      const transport = createMockTransport({
+        'https://registry.npmjs.org/bad-version/latest': {
+          body: JSON.stringify({
+            name: 'bad-version',
+            dist: {
+              tarball: 'https://registry.npmjs.org/bad-version/-/bad-version-1.0.0.tgz',
+            },
+          }),
+        },
+      });
+
+      await expect(
+        fetchSourceTree(parseOnlineSource('npm:bad-version'), { transport }),
+      ).rejects.toThrow(/missing a valid version string/);
+    });
   });
 
   describe('github sources', () => {

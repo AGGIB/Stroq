@@ -360,7 +360,13 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
     );
   }
 
-  const resolvedVersion = typeof doc['version'] === 'string' ? doc['version'] : source.version;
+  if (typeof doc['version'] !== 'string' || doc['version'].length === 0) {
+    throw new FetchError(
+      'bad-source',
+      `registry metadata for ${source.name} is missing a valid version string`,
+    );
+  }
+  const resolvedVersion = doc['version'];
   const dist = (doc['dist'] ?? {}) as Record<string, unknown>;
   const tarballUrlStr = dist['tarball'];
   const integrity = dist['integrity'];
