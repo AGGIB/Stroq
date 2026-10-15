@@ -406,7 +406,9 @@ done
   *'@stroq/cli@latest'*) printf '%s' '{}'; exit 0 ;;
   *) ${ETARGET_STDERR} ;;
 esac`);
-    const r = await runWithCopy(preBash('ls'), npm, npx, newHome());
+    const r = await runWithCopy(preBash('ls'), npm, npx, newHome(), {
+      STROQ_PLUGIN_NPX_DEADLINE: '30',
+    });
     expect(r.code).toBe(0);
     const seen = calls(npx.log);
     expect(seen).toHaveLength(1);

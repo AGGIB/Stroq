@@ -63,4 +63,17 @@ describe('skill command boundaries', () => {
     expect(result.stderr).toContain('person at a terminal');
     expect(existsSync(stroqHome)).toBe(false);
   });
+
+  it('remove --user still requires a person at a terminal', () => {
+    const { result, stroqHome } = run('remove', 'demo', '--user');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('person at a terminal');
+    expect(existsSync(stroqHome)).toBe(false);
+  });
+
+  it('remove --kind=mcp rejects --user', () => {
+    const { result } = run('remove', 'demo', '--kind=mcp', '--user');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('unknown option --user for --kind mcp');
+  });
 });
