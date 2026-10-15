@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -83,7 +84,13 @@ describe('confirmed skill install', () => {
     await expect(addSkill(f.source, f.options)).rejects.toThrow(/exists/);
     expect(await readFile(join(target, 'keep'), 'utf8')).toBe('owner');
     const added = await addSkill(f.source, { ...f.options, user: true });
-    expect(added.installedTo).toBe(join(f.options.home, '.claude', 'skills', 'demo'));
+    const userSkill = join(f.options.home, '.claude', 'skills', 'demo');
+    expect(added.installedTo).toBe(userSkill);
+    expect(existsSync(userSkill)).toBe(true);
+    await removeSkill('demo', { ...f.options, user: true });
+    expect(existsSync(userSkill)).toBe(false);
+    const lock = await readPassports(f.options.stroqHome);
+    expect(lock.skills.demo?.status).toBe('revoked');
   });
 
   it('updates docs with y/N, requires a digest for new capabilities, and keeps receipt history', async () => {

@@ -92,6 +92,9 @@ describe('parseOnlineSource', () => {
       expect(() => parseOnlineSource('npm:pkg with space')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:pkg/nested/slash')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:pkg@')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:pkg@.')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:pkg@..')).toThrow(SourceSyntaxError);
+      expect(() => parseOnlineSource('npm:pkg@...')).toThrow(SourceSyntaxError);
       expect(() => parseOnlineSource('npm:pkg@1.0/2')).toThrow(SourceSyntaxError);
     });
   });

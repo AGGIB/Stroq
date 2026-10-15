@@ -11,7 +11,15 @@
 // project, but a model can change directory and a host can run its shell tool elsewhere; a path relative
 // to a directory that is not the project would put a probe's file, or a truncated one, in someone's repository.
 import { randomBytes } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { redact } from '@stroq/core';
 import { AUDIT_SUMMARY_CHARS } from './command.js';
@@ -237,9 +245,14 @@ function assertStaysInProject(project: string, path: string): void {
 function removeProbeFile(project: string, path: string): void {
   assertStaysInProject(project, path);
   try {
-    rmSync(path, { recursive: true, force: true });
+    unlinkSync(path);
   } catch (err) {
-    if (!gone(err)) throw err;
+    if (gone(err)) return;
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch (rmErr) {
+      if (!gone(rmErr)) throw rmErr;
+    }
   }
 }
 

@@ -7,6 +7,7 @@ import {
   readlinkSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -101,7 +102,7 @@ describe('resource path cache for one list of targets', () => {
     symlinkSync('first', link);
     const path = join(link, 'new.txt');
     expect(resolveResourcePath(path)).toBe(join(root, 'first', 'new.txt'));
-    rmSync(link);
+    unlinkSync(link);
     symlinkSync('second', link);
     expect(resolveResourcePath(path)).toBe(join(root, 'second', 'new.txt'));
   });

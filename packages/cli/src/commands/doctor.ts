@@ -65,6 +65,8 @@ export interface DoctorCheck {
   readonly detail: string;
 }
 export interface DoctorReport {
+  readonly version: 1;
+  readonly ok: boolean;
   readonly checks: readonly DoctorCheck[];
 }
 
@@ -852,36 +854,45 @@ export async function doctorReport(
     stroqHome: home,
     ...(opts.userHome !== undefined ? { userHome: opts.userHome } : {}),
   });
+  const checks: readonly DoctorCheck[] = [
+    { name: 'stroq', ok: true, detail: stroqVersion() },
+    { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
+    {
+      name: 'rules',
+      ok: rules.length >= 12,
+      detail: rulesDetail(rules.length, rules.filter(canFire).length),
+    },
+    {
+      name: 'self-test',
+      ok: injectionDetected,
+      detail: injectionDetected ? 'injection sample detected' : 'injection sample NOT detected',
+    },
+    ...hookChecks,
+    ...pinChecks,
+    ...skillChecks,
+    {
+      name: 'home',
+      ok: true,
+      detail: existsSync(home) ? home : `${home} (created on first use)`,
+    },
+    secrets,
+  ];
   return {
-    checks: [
-      { name: 'stroq', ok: true, detail: stroqVersion() },
-      { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
-      {
-        name: 'rules',
-        ok: rules.length >= 12,
-        detail: rulesDetail(rules.length, rules.filter(canFire).length),
-      },
-      {
-        name: 'self-test',
-        ok: injectionDetected,
-        detail: injectionDetected ? 'injection sample detected' : 'injection sample NOT detected',
-      },
-      ...hookChecks,
-      ...pinChecks,
-      ...skillChecks,
-      {
-        name: 'home',
-        ok: true,
-        detail: existsSync(home) ? home : `${home} (created on first use)`,
-      },
-      secrets,
-    ],
+    version: 1,
+    ok: checks.every((c) => c.ok),
+    checks,
   };
 }
 
 export async function runDoctor(argv: readonly string[] = []): Promise<number> {
-  const report = await doctorReport(process.cwd(), { all: argv.includes('--all') });
-  for (const check of report.checks)
-    process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name}: ${check.detail}\n`);
-  return report.checks.every((c) => c.ok) ? 0 : 1;
+  const all = argv.includes('--all');
+  const json = argv.includes('--json');
+  const report = await doctorReport(process.cwd(), { all });
+  if (json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    for (const check of report.checks)
+      process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name}: ${check.detail}\n`);
+  }
+  return report.ok ? 0 : 1;
 }

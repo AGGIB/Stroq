@@ -232,6 +232,32 @@ describe('the Antigravity config files', () => {
   });
 });
 
+describe('bare agent directory self-tamper detection', () => {
+  it.each([
+    'rm -rf .windsurf',
+    'rm -rf .codeium',
+    'rm -rf .cursor',
+    'rm -rf .codex',
+    'rm -rf .openclaw',
+    'rm -rf .agents',
+    'rm -rf ~/.gemini',
+    'rm -rf .claude',
+    'rm -rf .devin',
+    'mv .windsurf .windsurf.bak',
+    'mv .cursor /tmp/cursor_bak',
+    'rm -rf .windsurf/*',
+    'rmdir .codex',
+    'chmod 000 .openclaw',
+  ])('denies bare directory tampering: %s', (segment) => {
+    expect(classifySelfConfigSegment(segment)).toBe('deny');
+  });
+
+  it('leaves intermediate directories between bare root and file to ask-destructive', () => {
+    expect(classifySelfConfigSegment('rm -rf ~/.codeium/windsurf')).toBe(null);
+    expect(classifySelfConfigSegment('rm -rf ~/.gemini/antigravity-cli')).toBe(null);
+  });
+});
+
 describe('classifySelfConfigSegment', () => {
   it.each([
     'echo "# notes" > .claude/CLAUDE.md',

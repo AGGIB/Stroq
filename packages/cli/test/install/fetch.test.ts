@@ -216,6 +216,23 @@ describe('fetchSourceTree', () => {
         fetchSourceTree(parseOnlineSource('npm:missing-package'), { transport }),
       ).rejects.toThrow(/resource not found \(HTTP 404\)/);
     });
+
+    it('refuses when registry metadata is missing a valid version string', async () => {
+      const transport = createMockTransport({
+        'https://registry.npmjs.org/bad-version/latest': {
+          body: JSON.stringify({
+            name: 'bad-version',
+            dist: {
+              tarball: 'https://registry.npmjs.org/bad-version/-/bad-version-1.0.0.tgz',
+            },
+          }),
+        },
+      });
+
+      await expect(
+        fetchSourceTree(parseOnlineSource('npm:bad-version'), { transport }),
+      ).rejects.toThrow(/missing a valid version string/);
+    });
   });
 
   describe('github sources', () => {
@@ -500,7 +517,7 @@ describe('fetchSourceTree', () => {
       try {
         await expect(
           defaultTransport(new URL('https://example.com/stream.tgz'), {}),
-        ).rejects.toThrow(FetchError);
+        ).rejects.toMatchObject({ code: 'limit' });
         expect(cancelled).toBe(true);
       } finally {
         vi.unstubAllGlobals();
@@ -545,13 +562,20 @@ describe('fetchSourceTree', () => {
       }
     });
 
-    it('rejects when signal is aborted', async () => {
-      const controller = new AbortController();
-      controller.abort();
+    it('rejects when signal is aborted before fetch is initiated without calling fetch', async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+      try {
+        const controller = new AbortController();
+        controller.abort();
 
-      await expect(
-        defaultTransport(new URL('https://example.com/test.tgz'), { signal: controller.signal }),
-      ).rejects.toThrow();
+        await expect(
+          defaultTransport(new URL('https://example.com/test.tgz'), { signal: controller.signal }),
+        ).rejects.toThrow();
+        expect(mockFetch).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 

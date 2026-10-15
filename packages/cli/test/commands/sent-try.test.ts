@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -168,6 +175,32 @@ describe('stroq sent --try', () => {
       const out = io.stdout();
       expect(out).toContain('# Stroq session check');
       expect(out).toContain('Stripe 1');
+      expect(out).toMatch(/synthetic/i);
+      expect(out).not.toContain('from my machine');
+    } finally {
+      io.restore();
+    }
+  });
+
+  it('marks the JSON card as synthetic', async () => {
+    const io = capture();
+    try {
+      expect(await runSent(['--try', '--card', '--json'])).toBe(0);
+      expect(JSON.parse(io.stdout())).toMatchObject({ synthetic: true, credentials: 1 });
+    } finally {
+      io.restore();
+    }
+  });
+
+  it('keeps the synthetic marker in an exported HTML card', async () => {
+    const path = join(cwd, 'sample-card.html');
+    const io = capture();
+    try {
+      expect(await runSent(['--try', '--card', '--html', '--out', path])).toBe(0);
+      const html = readFileSync(path, 'utf8');
+      expect(html).toMatch(/synthetic/i);
+      expect(html).not.toContain('from my machine');
+      expect(html).toContain('sent --try');
     } finally {
       io.restore();
     }
