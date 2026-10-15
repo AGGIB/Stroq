@@ -193,11 +193,33 @@ describe('classifyCommand', () => {
     'cat hooks.json > .cursor/hooks.json',
     'sudo -u deploy sed -i "s/deny/allow/" .claude/settings.json',
     'sudo -n sed -i "s/x/y/" .claude/settings.json',
+    'rm -rf .windsurf',
+    'rm -rf .codeium',
+    'rm -rf .cursor',
+    'rm -rf .codex',
+    'rm -rf .openclaw',
+    'rm -rf .agents',
+    'rm -rf ~/.gemini',
+    'mv .windsurf .windsurf.bak',
+    'mv .cursor /tmp/cursor_bak',
+    'rm -rf .windsurf/*',
+    'rmdir .codex',
+    'chmod 000 .openclaw',
   ])('self tamper: %s', (cmd) => expect(classesOf(cmd)).toContain('config.self'));
 
   it('reading settings is not tampering', () => {
     expect(classesOf('cat .claude/settings.json')).not.toContain('config.self');
   });
+
+  it.each([
+    'rm .windsurf/rules/rule.md',
+    'mv .windsurf/workflows/deploy.yaml .windsurf/workflows/old.yaml',
+    'rm .agents/reviewer.md',
+    'touch .codeium/notes.txt',
+    'ls -la .windsurf',
+  ])('leaves subpaths and non-hook files editable: %s', (cmd) =>
+    expect(classesOf(cmd)).not.toContain('config.self'),
+  );
 });
 
 describe('inline interpreter payload', () => {

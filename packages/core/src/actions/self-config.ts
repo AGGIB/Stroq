@@ -198,7 +198,8 @@ export const PROTECTED_DIRS =
  * `.claude` match was narrowed in the first place, and this must not undo that, so
  * the match ends at the token: `.claude`, `.claude/` and `.claude/*` hit, while
  * `.claude/CLAUDE.md` and `.claude/skills/x` do not. The glob is included because the
- * shell expands it to exactly the files this protects.
+ * shell expands it to exactly the files this protects. Trailing separators can
+ * repeat: `.claude//` and Windows `.claude\\` still name the directory itself.
  *
  * `.github` is the exception that proves the rule: `.github/hooks` and
  * `.github/copilot` are Stroq's, so they are here, while a bare `.github` is not —
@@ -211,7 +212,7 @@ export const PROTECTED_DIRS =
  * no class at all.
  */
 export const PROTECTED_DIR_BARE =
-  /(^|[\s"'=(])(?:[A-Za-z]:)?(?:[\w.~\\/-]*[/\\])?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|devin|codeium|agents|gemini)|\.github[/\\](hooks|copilot))(?:[/\\]\*?|\*)?(?=$|[\s"';|&)])/i;
+  /(^|[\s"'=(])(?:[A-Za-z]:)?(?:[\w.~\\/-]*[/\\])?(?:\.(claude|cursor|codex|copilot|openclaw|stroq|windsurf|devin|codeium|agents|gemini)|\.github[/\\](hooks|copilot))(?:[/\\]+\*?|\*)?(?=$|[\s"';|&)])/i;
 
 export const SELF_CONFIG_READ_COMMANDS = new Set([
   'cat',

@@ -204,7 +204,27 @@ describe('PowerShell tampering with Stroq itself', () => {
     'Set-Content .cursor\\hooks.json -Value "{}"',
     'Move-Item .agents\\hooks.json .agents\\off.json',
     'del .github\\hooks\\stroq.json',
+    'Remove-Item -Recurse -Force .windsurf',
+    'Remove-Item -Recurse -Force .codeium',
+    'Remove-Item -Recurse -Force .cursor',
+    'Remove-Item -Recurse -Force .codex',
+    'Remove-Item -Recurse -Force .openclaw',
+    'Remove-Item -Recurse -Force .agents',
+    'Remove-Item -Recurse -Force C:\\Users\\me\\.gemini',
+    'Move-Item .windsurf .windsurf.bak',
+    'Move-Item .cursor C:\\temp\\cursor.bak',
+    'rd /s /q .cursor',
+    'rmdir /s /q .codex',
+    'del /s /q .agents',
   ])('is self-tamper: %s', (command) => expect(classesOf(command)).toContain('config.self'));
+
+  it.each([
+    'Set-Content .windsurf\\rules\\rule.md -Value "test"',
+    'Remove-Item .agents\\workflows\\deploy.yaml',
+    'Get-ChildItem .windsurf',
+  ])('leaves subpaths and non-hook files editable: %s', (command) =>
+    expect(classesOf(command)).not.toContain('config.self'),
+  );
 });
 
 describe('a command whose payload Stroq cannot read', () => {
