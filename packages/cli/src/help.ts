@@ -44,12 +44,13 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'remove',
-    synopsis: 'remove <name> [--force] [--kind skill|mcp]',
+    synopsis: 'remove <name> [--user] [--force] [--kind skill|mcp]',
     about: [
       'remove a confirmed skill after a terminal y/N question, and record a receipt;',
       'with --kind mcp, delete the config entry or restore the one it replaced',
     ],
     flags: [
+      ['--user', "remove from ~/.claude/skills instead of this project's .claude/skills"],
       [
         '--force',
         'also remove a skill or entry changed outside Stroq; still requires a person at a terminal',
