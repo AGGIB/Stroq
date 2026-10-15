@@ -1,20 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { withWayOut } from '../../src/policy/way-out.js';
-import type { Policy, Rule } from '../../src/policy/policy-types.js';
-import type { Decision, Taint } from '../../src/types.js';
+import type { Policy, PolicyRule } from '../../src/policy/policy-types.js';
+import type { ActionClass, Decision, Taint } from '../../src/types.js';
 
-const mockRule = (overrides: Partial<Rule>): Rule => ({
-  id: 'deny-suspect',
-  effect: 'deny',
-  reason: 'Denied by suspect rule.',
+interface MockRuleOptions {
+  readonly id?: string;
+  readonly effect?: 'allow' | 'deny' | 'ask';
+  readonly reason?: string;
+  readonly when?: {
+    readonly classes?: [ActionClass, ...ActionClass[]];
+    readonly taint?: 'any' | 'none' | 'suspect';
+  };
+}
+
+const mockRule = (overrides: MockRuleOptions): PolicyRule => ({
+  id: overrides.id ?? 'deny-suspect',
+  effect: overrides.effect ?? 'deny',
+  reason: overrides.reason ?? 'Denied by suspect rule.',
   when: {
-    classes: [],
-    ...overrides.when,
+    classes: overrides.when?.classes ?? ['network.fetch'],
+    taint: overrides.when?.taint ?? 'any',
   },
-  ...overrides,
 });
 
-const mockPolicy = (rules: Rule[]): Policy => ({
+const mockPolicy = (rules: PolicyRule[]): Policy => ({
   version: 1,
   default: 'allow',
   threshold: 0.7,
@@ -45,7 +54,7 @@ describe('withWayOut', () => {
   it('returns the original decision if rule does not match taint or origin.suspect', () => {
     const rule = mockRule({
       id: 'rule-ordinary',
-      when: { classes: ['network.egress'], taint: 'clean' },
+      when: { classes: ['network.fetch'], taint: 'none' },
     });
     const decision: Decision = { effect: 'deny', ruleId: 'rule-ordinary', reason: 'No network.' };
     const policy = mockPolicy([rule]);
@@ -75,7 +84,7 @@ describe('withWayOut', () => {
   it('includes taint details, age, and untaint instruction when taint is suspect', () => {
     const rule = mockRule({
       id: 'rule-suspect',
-      when: { classes: [], taint: 'suspect' },
+      when: { classes: ['network.fetch'], taint: 'suspect' },
     });
     const decision: Decision = {
       effect: 'ask',
@@ -85,12 +94,14 @@ describe('withWayOut', () => {
     const policy = mockPolicy([rule]);
 
     const taint: Taint = {
-      status: 'suspect',
+      level: 'suspect',
+      since: '2026-10-15T11:50:00Z',
       sources: [
         {
           tool: 'Bash',
+          ruleIds: ['ATR-001'],
           source: 'curl https://evil.example',
-          at: new Date('2026-10-15T11:59:50Z'), // 10s ago
+          at: '2026-10-15T11:59:50Z', // 10s ago
         },
       ],
     };
@@ -107,18 +118,20 @@ describe('withWayOut', () => {
   it('suggests stroq trust when source tool is Read with a file path', () => {
     const rule = mockRule({
       id: 'rule-suspect',
-      when: { classes: [], taint: 'suspect' },
+      when: { classes: ['network.fetch'], taint: 'suspect' },
     });
     const decision: Decision = { effect: 'deny', ruleId: 'rule-suspect', reason: 'Blocked.' };
     const policy = mockPolicy([rule]);
 
     const taint: Taint = {
-      status: 'suspect',
+      level: 'suspect',
+      since: '2026-10-15T11:50:00Z',
       sources: [
         {
           tool: 'Read',
+          ruleIds: ['ATR-002'],
           source: 'docs/architecture.md',
-          at: new Date('2026-10-15T11:58:00Z'), // 2 min ago
+          at: '2026-10-15T11:58:00Z', // 2 min ago
         },
       ],
     };
@@ -134,18 +147,20 @@ describe('withWayOut', () => {
   it('quotes paths with spaces and single quotes safely for the shell', () => {
     const rule = mockRule({
       id: 'rule-suspect',
-      when: { classes: [], taint: 'suspect' },
+      when: { classes: ['network.fetch'], taint: 'suspect' },
     });
     const decision: Decision = { effect: 'deny', ruleId: 'rule-suspect', reason: 'Blocked' };
     const policy = mockPolicy([rule]);
 
     const taint: Taint = {
-      status: 'suspect',
+      level: 'suspect',
+      since: '2026-10-15T11:50:00Z',
       sources: [
         {
           tool: 'Read',
+          ruleIds: ['ATR-003'],
           source: "path with spaces/it's dangerous.md",
-          at: new Date('2026-10-15T11:59:00Z'),
+          at: '2026-10-15T11:59:00Z',
         },
       ],
     };
@@ -159,18 +174,20 @@ describe('withWayOut', () => {
   it('neutralizes control sequences in tainted paths', () => {
     const rule = mockRule({
       id: 'rule-suspect',
-      when: { classes: [], taint: 'suspect' },
+      when: { classes: ['network.fetch'], taint: 'suspect' },
     });
     const decision: Decision = { effect: 'deny', ruleId: 'rule-suspect', reason: 'Blocked.' };
     const policy = mockPolicy([rule]);
 
     const taint: Taint = {
-      status: 'suspect',
+      level: 'suspect',
+      since: '2026-10-15T11:50:00Z',
       sources: [
         {
           tool: 'Read',
+          ruleIds: ['ATR-004'],
           source: 'docs/\u001b[31mpayload\u0007.txt',
-          at: new Date('2026-10-15T11:59:55Z'),
+          at: '2026-10-15T11:59:55Z',
         },
       ],
     };
