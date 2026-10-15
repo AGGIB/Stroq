@@ -91,6 +91,27 @@ describe('stroq <command> --help', () => {
     expect(list.stdout).toContain('Commands:');
     expect(run('help', 'untaint').stdout).toBe(run('untaint', '--help').stdout);
   });
+
+  it.each(['task', 'permit', 'hook'])('%s --help prints its usage and exits 0', (name) => {
+    const out = run(name, '--help');
+    expect(out.stderr).not.toMatch(/TypeError|ERR_PARSE_ARGS/);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toMatch(new RegExp(`^stroq ${name}\\b`));
+  });
+
+  it('task --help lists all task flags', () => {
+    const help = run('task', '--help').stdout;
+    for (const flag of ['--profile', '--read', '--write', '--ttl', '--hook-only']) {
+      expect(help).toContain(flag);
+    }
+  });
+
+  it('permit --help lists all permit subcommands', () => {
+    const help = run('permit', '--help').stdout;
+    for (const sub of ['list', 'show', 'extend', 'revoke']) {
+      expect(help).toContain(sub);
+    }
+  });
 });
 
 describe('a command line stroq cannot use', () => {

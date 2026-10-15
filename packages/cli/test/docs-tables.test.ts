@@ -50,8 +50,8 @@ const CLI_README = { name: 'packages/cli/README.md', text: read('../README.md') 
 const DOCS = [GUIDE, CLI_README];
 
 /**
- * Commands whose rows must name every flag `--help` lists for them. Expanded to guard doctor,
- * trust, prove, and core inspection/remediation commands against flag drift across command tables.
+ * Commands whose rows must name every flag `--help` lists for them: the commands guarded against
+ * documentation drift in their tables across GUIDE.md and packages/cli/README.md.
  */
 const ROWS_NAME_EVERY_FLAG = [
   'attack',
@@ -65,6 +65,9 @@ const ROWS_NAME_EVERY_FLAG = [
   'why',
   'inspect',
   'prove',
+  'init',
+  'uninstall',
+  'task',
 ] as const;
 
 describe('reading the commands from help.ts', () => {
