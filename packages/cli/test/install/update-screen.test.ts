@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { addMcp } from '../../src/install/mcp-install.js';
@@ -47,14 +47,13 @@ describe('what an update of a skill asks of the person', () => {
     expect(f.questions.at(-1)).toMatch(/12/);
   });
 
-  it('asks only y/N for a change to README.md, CHANGELOG.md and files under docs/', async () => {
+  it('asks only y/N for a change to the top-level README.md, CHANGELOG.md and LICENSE.txt', async () => {
     const f = await setup();
-    await mkdirp(join(f.source, 'docs', 'x', 'guide.md'));
     await writeFile(join(f.source, 'README.md'), 'one\n');
-    await writeFile(join(f.source, 'docs', 'x', 'guide.md'), 'one\n');
+    await writeFile(join(f.source, 'LICENSE.txt'), 'one\n');
     await addSkill(f.source, f.options);
     await writeFile(join(f.source, 'README.md'), 'two\n');
-    await writeFile(join(f.source, 'docs', 'x', 'guide.md'), 'two\n');
+    await writeFile(join(f.source, 'LICENSE.txt'), 'two\n');
     await writeFile(join(f.source, 'CHANGELOG.md'), 'new\n');
 
     const updated = await addSkill('demo', f.options);
@@ -62,6 +61,58 @@ describe('what an update of a skill asks of the person', () => {
     expect(f.questions.at(-1)).toContain('Apply this update?');
     expect(updated.history.at(-1)?.material).toBe(false);
     expect(f.output()).toContain('    + two');
+  });
+
+  it.each(['docs/guide.md', 'docs/README.md', 'sub/README.md', 'reference.md'])(
+    'asks for a typed digest when %s changes, because the agent reads it as instructions',
+    async (file) => {
+      const f = await setup();
+      await mkdirp(join(f.source, file));
+      await writeFile(join(f.source, file), 'one\n');
+      await addSkill(f.source, f.options);
+      await writeFile(join(f.source, file), 'two\n');
+
+      await addSkill('demo', f.options);
+
+      expect(f.questions.at(-1)).toMatch(/12/);
+    },
+  );
+
+  it('asks for a typed digest when a README is only removed', async () => {
+    const f = await setup();
+    await writeFile(join(f.source, 'README.md'), 'one\n');
+    await addSkill(f.source, f.options);
+    await rm(join(f.source, 'README.md'));
+
+    await addSkill('demo', f.options);
+
+    expect(f.questions.at(-1)).toMatch(/12/);
+    expect(f.output()).toContain('  removed README.md');
+  });
+
+  it('installs the bytes it showed, not what the folder holds a moment later', async () => {
+    const f = await setup();
+    const installed = await addSkill(f.source, f.options);
+    const shown =
+      '---\nname: demo\ndescription: a demo\n---\n# Demo\nThe sentence that was shown.\n';
+    await writeFile(join(f.source, 'SKILL.md'), shown);
+    const ask = f.terminal.readLine;
+
+    const updated = await addSkill('demo', {
+      ...f.options,
+      terminal: {
+        ...f.terminal,
+        readLine: async (prompt) => {
+          // The folder changes after the screen was printed and before the digest is typed.
+          await writeFile(join(f.source, 'SKILL.md'), 'A different sentence, never shown.\n');
+          return ask(prompt);
+        },
+      },
+    });
+
+    expect(f.output()).toContain('    + The sentence that was shown.');
+    expect(await readFile(join(installed.installedTo, 'SKILL.md'), 'utf8')).toBe(shown);
+    expect(updated.digest).not.toBe(installed.digest);
   });
 
   it.each([

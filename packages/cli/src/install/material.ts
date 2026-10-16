@@ -2,22 +2,28 @@ import type { Passport, Tree, TreeEntry } from './types.js';
 
 const STRENGTH = { unknown: 0, declared: 1, observed: 2, limited: 3 } as const;
 
-/** Text that is read by people. A skill's own instructions are not in it, whatever they are called. */
-const DOC_EXTENSION = String.raw`(?:md|markdown|txt|rst|adoc)`;
-const ROOT_DOCUMENT = new RegExp(
-  String.raw`^(?:README|CHANGELOG|LICENSE|CONTRIBUTING)[A-Za-z0-9_-]*(?:\.${DOC_EXTENSION})?$`,
-  'i',
-);
-const DOCS_FOLDER_DOCUMENT = new RegExp(String.raw`^docs/.+\.${DOC_EXTENSION}$`, 'i');
-
 /**
- * Whether a changed file is documentation, which alone does not need another typed digest. Only
- * `README*`, `CHANGELOG*`, `LICENSE*` and `CONTRIBUTING*` at the top of the tree, and text under `docs/`.
- * `SKILL.md`, the commands and agents of a skill, and any other `.md` or `.txt` are the instructions the
- * agent follows, so a change to one of them is a change to what the skill makes the agent do.
+ * The files whose change alone does not need another typed digest: `README`, `CHANGELOG`, `LICENSE` and
+ * `CONTRIBUTING`, with `.md` or `.txt`, at the top of the tree, spelled in any case of the ASCII letters. Nothing
+ * else: a skill points its agent at `docs/`, at references and at examples, and the agent follows what it
+ * finds there, as it follows `SKILL.md`, the commands and the agents. The name is compared as the tree
+ * spells it, whole: a folder, a backslash, another extension, a trailing dot or blank, a name with
+ * `README.md` inside it, and every letter that only looks like one of these (the Kelvin sign, the long s, a
+ * full-width letter) are not it. The pattern has no `u` flag, so the case folding is the ASCII one.
  */
-export const isDocumentation = (path: string): boolean =>
-  ROOT_DOCUMENT.test(path) || DOCS_FOLDER_DOCUMENT.test(path);
+const DOCUMENT = /^(?:README|CHANGELOG|LICENSE|CONTRIBUTING)\.(?:md|txt)$/i;
+
+export const isDocumentation = (path: string): boolean => DOCUMENT.test(path);
+
+/** Text a person can read: valid UTF-8 with no NUL. A document that turns into anything else is not a document. */
+function isPlainText(bytes: Uint8Array | undefined): boolean {
+  if (bytes === undefined) return false;
+  try {
+    return !new TextDecoder('utf-8', { fatal: true }).decode(bytes).includes('\u0000');
+  } catch {
+    return false;
+  }
+}
 
 /** The files that differ between two trees, and how. */
 export function changedFiles(before: Tree, after: Tree): { path: string; change: string }[] {
@@ -33,24 +39,31 @@ export function changedFiles(before: Tree, after: Tree): { path: string; change:
   });
 }
 
+/**
+ * Whether the files that differ need the typed digest. Only an added or changed document that stays plain
+ * text, a file and not executable, does not. Everything else does: any other file, a file that is removed
+ * (a rename is a removal and an addition), an executable bit on either side, a link or a nested repository,
+ * and a document that is, or was, not text. It can only ask for more than it did when it only knew `.md`
+ * and `.txt`.
+ */
+function filesNeedConfirmation(before: Tree, after: Tree): boolean {
+  const prior = new Map(before.entries.map((entry) => [entry.path, entry]));
+  const next = new Map(after.entries.map((entry) => [entry.path, entry]));
+  return changedFiles(before, after).some(({ path, change }) => {
+    if (change === 'removed' || !isDocumentation(path)) return true;
+    const was = prior.get(path);
+    const is = next.get(path);
+    if (is?.kind !== 'file' || is.exec || !isPlainText(is.bytes)) return true;
+    return was !== undefined && (was.kind !== 'file' || was.exec || !isPlainText(was.bytes));
+  });
+}
+
 export function materialChange(
   before: Passport,
   after: Passport,
   trees?: { before: Tree; after: Tree },
 ): boolean {
-  if (trees !== undefined) {
-    const prior = new Map(trees.before.entries.map((entry) => [entry.path, entry]));
-    const next = new Map(trees.after.entries.map((entry) => [entry.path, entry]));
-    if (
-      changedFiles(trees.before, trees.after).some(
-        ({ path }) =>
-          !isDocumentation(path) ||
-          (prior.get(path)?.exec !== next.get(path)?.exec &&
-            (prior.get(path)?.exec === true || next.get(path)?.exec === true)),
-      )
-    )
-      return true;
-  }
+  if (trees !== undefined && filesNeedConfirmation(trees.before, trees.after)) return true;
   if (JSON.stringify(before.artifact.source) !== JSON.stringify(after.artifact.source)) return true;
   const prior = new Map<string, { strength: number; sensitive: boolean }>();
   for (const line of before.lines) {
@@ -64,9 +77,11 @@ export function materialChange(
   if (
     after.lines.some((line) => {
       const seen = prior.get(JSON.stringify([line.kind, line.subject]));
-      // A tool a skill asks to be allowed is a grant whatever it looks like: `Bash(cat:*)` reads any file.
+      // A line that is new is a capability that was not confirmed, whatever it looks like: `Bash(cat:*)` is
+      // an allowed tool that reads any file, and a document that gains a code block gains the command in it.
+      // Only a rule that matched (a signal) is a reading and not a capability.
       if (seen === undefined)
-        return line.sensitive || line.basis === 'unknown' || line.kind === 'allowed-tools';
+        return line.sensitive || line.basis === 'unknown' || line.kind !== 'signal';
       return (line.sensitive && !seen.sensitive) || STRENGTH[line.basis] < seen.strength;
     })
   )

@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`stroq add --kind mcp` refuses a server whose dependencies are not in its tree.** A `package.json` that lists dependencies, or sources that import a package by name, would load code from a folder that no digest covers. `add` says how to bundle the server or vendor its code inside the tree, `stroq vet` adds the blind spot `imports resolve outside the pin`, and `~/.stroq/run`, where pinned servers are copied, is write-protected in `stroq run --sandbox`.
 
-- **Updates of skills and MCP servers show what changed and classify it strictly.** The screen shows a bounded diff (40 lines per file, 200 in all, every line written out) of each changed text file against the stored version. A change to `SKILL.md`, a command, an agent or any `.md` or `.txt` other than `README*`, `CHANGELOG*`, `LICENSE*`, `CONTRIBUTING*` and files under `docs/` needs the typed digest, and so does any added `allowed-tools` entry.
+- **Updates of skills and MCP servers show what changed and classify it strictly.** The screen shows a bounded diff (40 lines per file, 200 in all, every line written out) of each changed text file against the stored version. Only an added or changed top-level `README`, `CHANGELOG`, `LICENSE` or `CONTRIBUTING` (`.md` or `.txt`, still plain text) asks y/N; a change to `SKILL.md`, a command, an agent, `docs/` or any other file, a removed document, any added `allowed-tools` entry and any new capability line need the typed digest.
 
 ### Fixed
 
