@@ -6,14 +6,21 @@
  * there is no instruction text in the bytes of a JPEG. Strict mode cannot skip a field
  * just because it is probably harmless, so it asks the narrower question it can answer:
  * is this payload what it says it is? A payload that is wholly base64, declared as one
- * of a short list of picture or sound formats, and that begins with that format's own
+ * of a short list of picture or sound formats, and that BEGINS with that format's own
  * signature is passed on as opaque media. Anything else (text under an image type, a
- * type not on the list, prose behind a real header) is content Stroq cannot classify,
- * and the message carrying it is withheld.
+ * type not on the list, a payload that is not base64 at all) is content Stroq cannot
+ * classify, and the message carrying it is withheld.
  *
- * What this does NOT claim: text drawn INTO a picture, or spoken in a recording, is read
- * by the model and not by Stroq. That is the stated limit of strict mode, not a case it
- * solves.
+ * What this does NOT claim. Only the first dozen bytes are checked: it is a check that
+ * the payload starts like the picture or sound it says it is, not that all of it is one.
+ * Base64 of a sentence placed after a real header is wholly base64 and starts like a
+ * picture, and is passed on. (The check could also reject a decoded sample with a long
+ * printable run, and was left out on purpose: real images carry text chunks and
+ * metadata, a sample of a few hundred bytes would miss the sentence anywhere past it,
+ * and a check that sometimes refuses a real picture and does not stop the attack it is
+ * named for is worse than saying so.) Text drawn INTO a picture, or spoken in a
+ * recording, is read by the model and not by Stroq. Those are the stated limits of
+ * strict mode, not cases it solves.
  */
 
 /** The prefix decoded to check a signature: the longest signature below is 12 bytes. */

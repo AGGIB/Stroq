@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STRICT_MAX_WITHHELD } from '../../src/mcp/strict-limits.js';
-import { POISON_OPENING, errorText, everythingSaid, startRig } from './strict-rig.js';
+import { POISON_OPENING, errorText, everythingSaid, startRig, eventually } from './strict-rig.js';
 
 /**
  * What a server says on its own initiative: notifications and requests nobody asked
@@ -8,8 +8,6 @@ import { POISON_OPENING, errorText, everythingSaid, startRig } from './strict-ri
  * that carry no free text and withholds the rest, counts what it withholds, and ends a
  * server that withholds too much.
  */
-
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('notifications and requests a server starts', () => {
   it('reach the client by default, sampling requests and text-bearing notifications included', async () => {
@@ -49,12 +47,15 @@ describe('notifications and requests a server starts', () => {
     await rig.handshake();
     rig.call(3, 'notif');
     await rig.answerFor(3);
-    await wait(300);
-    const told = rig.serverLog().map((line) => JSON.parse(line) as Record<string, unknown>);
-    const refusal = told.find((m) => m['id'] === 'srv-1');
-    expect(refusal).toBeDefined();
-    expect((refusal?.['error'] as { code?: number }).code).toBe(-32601);
-    expect(JSON.stringify(refusal)).not.toContain(POISON_OPENING);
+    // The refusal is written to the server after the answer; wait for the server to have it.
+    const refusal = () =>
+      rig
+        .serverLog()
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((m) => m['id'] === 'srv-1');
+    await eventually(() => expect(refusal()).toBeDefined());
+    expect((refusal()?.['error'] as { code?: number }).code).toBe(-32601);
+    expect(JSON.stringify(refusal())).not.toContain(POISON_OPENING);
     await rig.finish();
   });
 
@@ -145,6 +146,21 @@ describe('a server that withholds too much', () => {
   });
 });
 
+describe('a server that has been ended', () => {
+  it('is delivered nothing more: not the answer it sent after the line that ended it', async () => {
+    const rig = startRig({ strict: true, strictMaxWithheld: 1 });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    // The terminated error is what the client is given for 3; the server's own answer
+    // ('ok') follows its three messages on the same pipe and arrives after it.
+    expect(errorText(await rig.answerFor(3))).toContain('more than 1 withheld');
+    const delivered = [...rig.lines()];
+    await rig.done;
+    expect(rig.lines()).toEqual(delivered);
+    expect(rig.lines().some((l) => l.includes('"ok"'))).toBe(false);
+  }, 60_000);
+});
+
 describe('a server strict mode has ended but that is still running', () => {
   it('is not sent what the client asks next: the request is answered, and never forwarded', async () => {
     const rig = startRig({
@@ -170,11 +186,14 @@ describe('a request the client cancelled', () => {
     const rig = startRig({ strict: true, strictMaxWithheld: 1 });
     await rig.handshake();
     rig.call(4, 'slow');
-    await wait(200);
+    await eventually(() => expect(rig.serverLog().some((l) => l.includes('"slow"'))).toBe(true));
     rig.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 4 } });
-    await wait(200);
+    await eventually(() =>
+      expect(rig.serverLog().some((l) => l.includes('notifications/cancelled'))).toBe(true),
+    );
     rig.call(5, 'benign');
     await rig.answerFor(5);
+    // The server answers 4 (late) just before it answers 5: both are in by now.
     expect(rig.messages().some((m) => m['id'] === 4)).toBe(false);
     expect(rig.ruleIds()).toEqual([]);
     expect(await rig.finish()).toBe(0);
@@ -184,7 +203,7 @@ describe('a request the client cancelled', () => {
     const rig = startRig();
     await rig.handshake();
     rig.call(4, 'slow');
-    await wait(200);
+    await eventually(() => expect(rig.serverLog().some((l) => l.includes('"slow"'))).toBe(true));
     rig.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 4 } });
     rig.call(5, 'benign');
     await rig.answerFor(5);

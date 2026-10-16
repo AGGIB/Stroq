@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { StroqEngine } from '@stroq/core';
+import { afterEach } from 'vitest';
 import { createStrictHandler, type StrictHandlerDeps } from '../../src/mcp/strict-handler.js';
 import { StrictLedger } from '../../src/mcp/strict-ledger.js';
 import type { SplitLine } from '../../src/mcp/framing.js';
@@ -23,6 +24,8 @@ export interface HandlerRig {
   readonly home: string;
   /** Feeds one server line to the handler. */
   feed(text: string, options?: Partial<SplitLine>): Promise<void>;
+  /** The audit entries, parsed. */
+  audit(): Record<string, unknown>[];
   /** The audit entries' rule ids. */
   ruleIds(): string[];
   readonly handler: ReturnType<typeof createStrictHandler>;
@@ -39,8 +42,22 @@ const cleanEngine = {
   }),
 } as unknown as StroqEngine;
 
+/** The homes handler rigs made and the value of STROQ_HOME before the first, put back after each test. */
+const homes: string[] = [];
+let homeBefore: { value: string | undefined } | null = null;
+
+afterEach(() => {
+  for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
+  if (homeBefore === null) return;
+  if (homeBefore.value === undefined) delete process.env['STROQ_HOME'];
+  else process.env['STROQ_HOME'] = homeBefore.value;
+  homeBefore = null;
+});
+
 export function handlerRig(overrides: Partial<StrictHandlerDeps> = {}): HandlerRig {
   const home = mkdtempSync(join(tmpdir(), 'stroq-handler-home-'));
+  homes.push(home);
+  homeBefore ??= { value: process.env['STROQ_HOME'] };
   process.env['STROQ_HOME'] = home;
   const ledger = new StrictLedger();
   const sent: unknown[] = [];
@@ -71,7 +88,7 @@ export function handlerRig(overrides: Partial<StrictHandlerDeps> = {}): HandlerR
     },
     ...overrides,
   });
-  return {
+  const rig: HandlerRig = {
     ledger,
     sent,
     lines,
@@ -82,16 +99,21 @@ export function handlerRig(overrides: Partial<StrictHandlerDeps> = {}): HandlerR
     handler,
     feed: (text, options = {}) =>
       handler.onServerLine({ text, eol: '\n', oversize: false, ...options }),
-    ruleIds: () => {
+    audit: () => {
       const file = join(home, 'audit.jsonl');
       if (!existsSync(file)) return [];
       return readFileSync(file, 'utf8')
         .split('\n')
         .filter((line) => line !== '')
-        .map((line) => (JSON.parse(line) as { decision?: { ruleId?: string } }).decision?.ruleId)
-        .filter((id): id is string => typeof id === 'string');
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
     },
+    ruleIds: () =>
+      rig
+        .audit()
+        .map((entry) => (entry['decision'] as { ruleId?: string } | undefined)?.ruleId)
+        .filter((id): id is string => typeof id === 'string'),
   };
+  return rig;
 }
 
 /** Tracks a client request on the rig's ledger the way the pump does. */

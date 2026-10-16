@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { errorText, startRig } from './strict-rig.js';
+import { errorText, startRig, eventually } from './strict-rig.js';
 
 /**
  * `--strict --cloak`: the cloak is applied only to a result strict mode has read and
@@ -7,8 +7,6 @@ import { errorText, startRig } from './strict-rig.js';
  * drops an oversize or unreadable result and leaves the client's request unanswered;
  * those cases are pinned here as they are, next to what strict mode does with them.
  */
-
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('--strict --cloak', () => {
   it('scans a result, then cloaks it', async () => {
@@ -29,7 +27,8 @@ describe('--strict --cloak', () => {
     const plain = startRig({ cloak: true });
     await plain.handshake();
     plain.call(3, 'bigimage');
-    await wait(1500);
+    // The cloak drops the result and audits that it did; only then is "no answer" an answer.
+    await eventually(() => expect(plain.ruleIds()).toContain('mcp-cloak-unscannable-result'));
     expect(plain.messages().some((m) => m['id'] === 3)).toBe(false);
     await plain.finish();
 
@@ -46,7 +45,7 @@ describe('--strict --cloak', () => {
     const plain = startRig({ cloak: true });
     await plain.handshake();
     plain.call(3, 'big');
-    await wait(2500);
+    await eventually(() => expect(plain.ruleIds()).toContain('mcp-cloak-unscannable-result'));
     expect(plain.messages().some((m) => m['id'] === 3)).toBe(false);
     await plain.finish();
 

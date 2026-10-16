@@ -125,7 +125,7 @@ describe('ending a server', () => {
     track(rig, 3);
     void rig.feed(unknownId(1));
     void rig.feed(unknownId(2));
-    await vi.waitFor(() => expect(rig.terminated()).toBe(1));
+    await vi.waitFor(() => expect(rig.terminated()).toBe(1), { timeout: 30_000 });
   });
 
   it('still stops the process when the audit cannot be written', async () => {

@@ -8,6 +8,7 @@ import {
   everythingSaid,
   startRig,
   type Rig,
+  eventually,
 } from './strict-rig.js';
 
 /**
@@ -64,8 +65,7 @@ describe('a result larger than the proxy parses (8 MiB)', () => {
 describe('a server line that is not JSON', () => {
   it('is forwarded as it is by default, and the request is never answered', async () => {
     const rig = await defaultRun('badjson');
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    expect(rig.lines().some((l) => l.includes(POISON_OPENING))).toBe(true);
+    await eventually(() => expect(rig.lines().some((l) => l.includes(POISON_OPENING))).toBe(true));
     expect(rig.messages().some((m) => m['id'] === 3 && 'result' in m)).toBe(false);
     await rig.finish();
   });
@@ -97,9 +97,9 @@ describe('a response nobody asked for', () => {
   it('is withheld when it is an answer to a request that was already answered', async () => {
     const { rig, answer } = await strictRun('twice');
     expect(JSON.stringify(answer)).toContain('first');
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // The second answer follows the first on the same pipe: wait until it has been dealt with.
+    await eventually(() => expect(rig.ruleIds()).toContain('mcp-strict-unknown-id'));
     expect(everythingSaid(rig)).not.toContain(POISON_OPENING);
-    expect(rig.ruleIds()).toContain('mcp-strict-unknown-id');
     await rig.finish();
   });
 });
@@ -107,8 +107,7 @@ describe('a response nobody asked for', () => {
 describe('an answer whose id has the wrong type', () => {
   it('is forwarded by default and the request it was for is never answered', async () => {
     const rig = await defaultRun('strid');
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    expect(rig.messages().some((m) => m['id'] === '3')).toBe(true);
+    await eventually(() => expect(rig.messages().some((m) => m['id'] === '3')).toBe(true));
     expect(rig.messages().some((m) => m['id'] === 3)).toBe(false);
     await rig.finish();
   });
@@ -218,13 +217,16 @@ describe('text beyond the 200,000 characters the scan reads', () => {
 });
 
 describe('a result the scanner is slow on', () => {
-  it('is bounded under --strict: the answer comes within the deadline, not after 12 to 18 seconds', async () => {
+  it('is withheld at the deadline, not after the 12 to 18 seconds the scan takes', async () => {
+    // 100 KB of ordinary prose takes the real scanner several seconds; a 400 ms deadline
+    // has to stop it. With the deadline taken out this answer is a delivered result (or
+    // arrives much later), and the reason check below fails.
     const started = Date.now();
     const { rig, answer } = await strictRun('heavy', { strictScanMs: 400 });
-    expect(Date.now() - started).toBeLessThan(15_000);
-    // A scan that finishes inside the deadline is delivered; one that does not is
-    // withheld. Either way the proxy is never held for the full length of the scan.
-    if ('error' in answer) expectWithheld(rig, answer, 'scan-timeout');
+    const took = Date.now() - started;
+    expectWithheld(rig, answer, 'scan-timeout');
+    // Generous on purpose: this machine may be loaded; the scan alone takes several times this.
+    expect(took).toBeLessThan(12_000);
     await rig.finish();
   }, 60_000);
 });

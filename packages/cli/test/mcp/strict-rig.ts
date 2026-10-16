@@ -1,7 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { afterEach, vi } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
 import { runMcpProxy } from '../../src/mcp/proxy.js';
 
@@ -12,6 +13,49 @@ import { runMcpProxy } from '../../src/mcp/proxy.js';
  */
 
 const SERVER = join(import.meta.dirname, 'strict-server.mjs');
+
+/**
+ * Every rig a test starts, until the test is over. A rig is a real proxy with a real
+ * child process, and it writes its audit to the Stroq home the environment names AT THE
+ * TIME it writes: one left running by a test that failed would go on writing into the
+ * next test's home. So after each test every rig is closed, waited for, its temporary
+ * directories are removed and the environment variables it set are put back.
+ */
+interface LiveRig {
+  readonly stdin: PassThrough;
+  readonly done: Promise<number>;
+  readonly dirs: readonly string[];
+  readonly restoreEnv: () => void;
+}
+const live = new Set<LiveRig>();
+const CLEANUP_WAIT_MS = 20_000;
+
+afterEach(async () => {
+  for (const rig of [...live].reverse()) {
+    live.delete(rig);
+    rig.stdin.end();
+    // A server that outlives its stdin is stopped by the proxy's own shutdown ladder.
+    await Promise.race([rig.done.catch(() => 1), sleepMs(CLEANUP_WAIT_MS)]);
+    for (const dir of rig.dirs) rmSync(dir, { recursive: true, force: true });
+    rig.restoreEnv();
+  }
+});
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Sets environment variables and returns what puts each back as it was, unset included. */
+function setEnv(values: Readonly<Record<string, string>>): () => void {
+  const before = Object.keys(values).map((key) => [key, process.env[key]] as const);
+  for (const [key, value] of Object.entries(values)) process.env[key] = value;
+  return () => {
+    for (const [key, value] of before) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
 
 /** The sentence the fixture's poisoned payloads open with; a withheld message must never repeat it. */
 export const POISON_OPENING = 'Ignore all previous instructions';
@@ -58,16 +102,18 @@ export interface Rig {
   readonly done: Promise<number>;
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = sleepMs;
 
 export function startRig(options: RigOptions = {}): Rig {
   const home = mkdtempSync(join(tmpdir(), 'stroq-strict-home-'));
   const cwd = mkdtempSync(join(tmpdir(), 'stroq-strict-cwd-'));
-  process.env['STROQ_HOME'] = home;
   const serverLogFile = join(cwd, 'server-received.log');
-  process.env['STRICT_SERVER_LOG'] = serverLogFile;
   const extra = options.env ?? {};
-  for (const [key, value] of Object.entries(extra)) process.env[key] = value;
+  const restoreEnv = setEnv({
+    ...extra,
+    STROQ_HOME: home,
+    STRICT_SERVER_LOG: serverLogFile,
+  });
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -113,6 +159,8 @@ export function startRig(options: RigOptions = {}): Rig {
         }
       : {}),
   });
+
+  live.add({ stdin, done, dirs: [home, cwd], restoreEnv });
 
   const parse = (line: string): Wire => {
     try {
@@ -190,6 +238,15 @@ export function startRig(options: RigOptions = {}): Rig {
   };
   return rig;
 }
+
+/**
+ * Polls `check` until it stops throwing. For what a test has to see happen after it has
+ * already seen something else (the proxy writing the audit, the server receiving a line):
+ * a fixed sleep either fails on a slow machine or wastes time on a fast one. The default
+ * of `vi.waitFor` is one second, which a loaded machine does not respect.
+ */
+export const eventually = <T>(check: () => T | Promise<T>): Promise<T> =>
+  vi.waitFor(check, { timeout: 60_000, interval: 25 });
 
 /** The `error.message` of an answer, or '' when it is not an error. */
 export const errorText = (answer: Wire): string =>
