@@ -1,12 +1,17 @@
 // What a runtime pin holds besides the name of the server and the digest of its files.
 //
-// `add` records, beside the pin, what it wrote into the client config: the variables the wrapper passes,
-// the start file, and the command that follows `--`. A wrapper is a file an agent can edit, and the name and
-// the digest alone would let an edit give the confirmed server a secret (`--pass-env`), run another file of
-// the confirmed tree, or add arguments, while `doctor` stayed green. So when the record has these fields the
-// wrapper in front of the proxy must agree with them, and the proxy refuses to start otherwise, with a
-// fixed phrase that `doctor` shows. A record without them (one written by hand) is held to what it has.
-import { wrapperIndex } from '../commands/mcp-config.js';
+// `add` records, beside the pin, the entry it wrote into the client config (`written`): the command and every
+// argument in order, which is the Stroq entry, `mcp`, `--server`, `--client`, `--pin`, `--cwd`, `--pass-env`,
+// and the command after `--`. A wrapper is a file an agent can edit, and the name and the digest alone would
+// let an edit give the confirmed server a secret (`--pass-env`), run another file of the confirmed tree, add
+// arguments, drop `--cloak`, or start a different Stroq, while `doctor` stayed green.
+//
+// So when the record has `written`, the command line the proxy was started with is compared with it token by
+// token (the same tokens in the same order, nothing added, nothing taken out), and `doctor`, which can see the
+// whole config entry, compares that too (`env`, `cwd`, any other key). Any difference is a refusal. The
+// comparison is on the lock's `written`, never on the client config, and the refusals are fixed phrases that
+// hold nothing of the wrapper. A record without `written` (one written by hand) is held to what it has.
+import { isDeepStrictEqual } from 'node:util';
 import { BIND_PHRASES } from './pin-argument.js';
 
 /** A wrapper that is not the one that was confirmed. The message is a fixed phrase, safe to print. */
@@ -20,8 +25,12 @@ export class PinBindError extends Error {
 export interface WrapperAsRun {
   /** The names the wrapper passes, or null when it has no `--pass-env` (and so inherits everything). */
   readonly passEnv?: readonly string[] | null;
+}
+
+/** The command line the client starts, whole: the program, then every argument, node's own flags included. */
+export interface Launch {
   readonly command: string;
-  readonly args: readonly string[];
+  readonly argv: readonly string[];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -29,37 +38,47 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
-const sameNames = (a: readonly string[], b: readonly string[]): boolean => {
-  const left = new Set(a);
-  const right = new Set(b);
-  return left.size === right.size && [...left].every((name) => right.has(name));
+/** The same names, with the same repeats; the order is the business of the whole-line comparison. */
+const sameMultiset = (a: readonly string[], b: readonly string[]): boolean => {
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.length === right.length && left.every((name, i) => name === right[i]);
 };
 
-/** The command and arguments that the recorded wrapper entry gives the server, after its `--`. */
-function recordedCommand(written: unknown): string[] | null {
-  const args = isRecord(written) ? written['args'] : undefined;
-  if (!isStrings(args)) return null;
-  const at = wrapperIndex(args) ?? args.indexOf('mcp');
-  const end = args.indexOf('--', Math.max(at, 0));
-  return end === -1 ? null : args.slice(end + 1);
+export interface Comparison {
+  /** The command line the wrapper was started with; without it a recorded entry cannot be compared. */
+  readonly launch?: Launch;
+  /** The config entry as it stands, for a caller that can see the client config (`doctor`). */
+  readonly entry?: unknown;
 }
 
 /**
  * Throws a `PinBindError` unless the wrapper agrees with what `add` recorded. `startFile` is the path in the
  * tree of the first argument, which the pin has already shown to be a file of the confirmed tree.
  */
-export function assertBound(record: unknown, wrapper: WrapperAsRun, startFile: string): void {
+export function assertBound(
+  record: unknown,
+  wrapper: WrapperAsRun,
+  startFile: string,
+  comparison: Comparison = {},
+): void {
   if (!isRecord(record)) return;
   const names = record['passEnv'];
-  if (isStrings(names) && (wrapper.passEnv == null || !sameNames(wrapper.passEnv, names)))
+  if (isStrings(names) && (wrapper.passEnv == null || !sameMultiset(wrapper.passEnv, names)))
     throw new PinBindError(BIND_PHRASES[0]);
   const entry = record['entrypoint'];
   if (typeof entry === 'string' && entry !== startFile) throw new PinBindError(BIND_PHRASES[1]);
-  const recorded = recordedCommand(record['written']);
-  const now = [wrapper.command, ...wrapper.args];
-  if (
-    recorded !== null &&
-    (recorded.length !== now.length || recorded.some((x, i) => x !== now[i]))
-  )
-    throw new PinBindError(BIND_PHRASES[2]);
+  const written = record['written'];
+  if (!isRecord(written)) return;
+  const { launch } = comparison;
+  if (launch === undefined) throw new PinBindError(BIND_PHRASES[4]);
+  const args = written['args'];
+  const same =
+    written['command'] === launch.command &&
+    isStrings(args) &&
+    args.length === launch.argv.length &&
+    args.every((arg, i) => arg === launch.argv[i]);
+  if (!same) throw new PinBindError(BIND_PHRASES[2]);
+  if (comparison.entry !== undefined && !isDeepStrictEqual(comparison.entry, written))
+    throw new PinBindError(BIND_PHRASES[3]);
 }

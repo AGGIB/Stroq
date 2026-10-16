@@ -52,6 +52,8 @@ export interface McpProxyOptions {
    */
   readonly cloak?: boolean;
   readonly pin?: string;
+  /** The command line this proxy was started with, whole; the pin compares it with what `add` wrote. */
+  readonly launch?: { readonly command: string; readonly argv: readonly string[] };
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {

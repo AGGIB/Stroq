@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Updates of skills and MCP servers show what changed and classify it strictly.** The screen shows a bounded diff (40 lines per file, 200 in all, every line written out) of each changed text file against the stored version. Only an added or changed top-level `README`, `CHANGELOG`, `LICENSE` or `CONTRIBUTING` (`.md` or `.txt`, still plain text) asks y/N; a change to `SKILL.md`, a command, an agent, `docs/` or any other file, a removed document, any added `allowed-tools` entry and any new capability line need the typed digest.
 
-- **The MCP runtime pin binds the wrapper `stroq add` wrote.** The proxy compares the wrapper's `--pass-env` names, start file and command with the recorded ones and refuses to start on a difference, so an edited client config cannot hand the confirmed server another secret or run another file of its tree; `stroq doctor` shows the reason.
+- **The MCP runtime pin binds the wrapper `stroq add` wrote, exactly.** The proxy compares the command line it was started with (node, its flags, the Stroq entry, every flag and the command after `--`) with the recorded entry and refuses to start on any difference, so an edited client config cannot hand the confirmed server another secret, run another file of its tree or drop a flag; `stroq doctor` also compares the entry's `env`, `cwd` and other keys, reports a pin that was taken out, and shows the reason.
 
 ### Fixed
 

@@ -8,7 +8,7 @@ import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
 import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
 import { MCP_PIN } from './pin-argument.js';
-import { assertBound, PinBindError } from './pin-binding.js';
+import { assertBound, PinBindError, type Launch } from './pin-binding.js';
 
 export interface PinOptions {
   readonly server: string;
@@ -18,6 +18,10 @@ export interface PinOptions {
   readonly home?: string;
   /** The wrapper's `--pass-env`: null when it has none. Compared with what `add` recorded, when it recorded one. */
   readonly passEnv?: readonly string[] | null;
+  /** The command line the wrapper was started with, whole. Needed when the confirmation recorded the entry `add` wrote. */
+  readonly launch?: Launch;
+  /** The client config entry as it stands, for `doctor`, which compares all of it with the recorded one. */
+  readonly entry?: unknown;
 }
 export interface PinnedLaunch {
   readonly command: string;
@@ -129,11 +133,10 @@ async function checked(
   const { digest, record } = confirm(options, home);
   const { tree, root } = await verifiedTree(home, digest);
   const startFile = entrypoint(options, root, tree);
-  assertBound(
-    record,
-    options.passEnv === undefined ? { ...options, passEnv: null } : options,
-    startFile,
-  );
+  assertBound(record, { passEnv: options.passEnv ?? null }, startFile, {
+    ...(options.launch === undefined ? {} : { launch: options.launch }),
+    ...(options.entry === undefined ? {} : { entry: options.entry }),
+  });
   return { tree, args: options.args.map((arg) => treeArgument(arg, root, tree)), home };
 }
 

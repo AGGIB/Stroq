@@ -67,6 +67,9 @@ describe('confirmed MCP install', () => {
       pin: `sha256:${record.digest}`,
       command: 'node',
       args: [join(storePath(f.options.stroqHome, record.digest), 'tree', 'server.js')],
+      // What the proxy knows of how it was started: the wrapper is held to the entry that add wrote.
+      passEnv: ['API_KEY'],
+      launch: { command: servers['demo'].command as string, argv: args },
     });
     await pinned.cleanup();
   });

@@ -5,5 +5,7 @@ export const MCP_PIN = /^sha256:[0-9a-f]{64}$/;
 export const BIND_PHRASES = [
   'the --pass-env of the wrapper is not the one confirmed',
   'the start file of the wrapper is not the one confirmed',
-  'the arguments of the wrapper are not the ones confirmed',
+  'the command line of the wrapper is not the one confirmed',
+  'the client config entry is not the one confirmed (env, cwd, command or another key)',
+  'the command line of the wrapper cannot be compared with the one confirmed',
 ] as const;

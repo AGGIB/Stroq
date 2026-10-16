@@ -171,6 +171,8 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     command: invocation.command,
     args: invocation.args,
     ...(invocation.pin === undefined ? {} : { pin: invocation.pin }),
+    // Whole, as the client started it: node, its own flags, the Stroq entry, `mcp` and what follows.
+    launch: { command: process.execPath, argv: [...process.execArgv, ...process.argv.slice(1)] },
     stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
