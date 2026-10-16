@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`stroq vet --online` holds every redirect to the first request.** A redirect to another port of the allowed host, or to a URL with user information, is refused (the check compared the host name only), and a GitHub ref that is `.`, contains `..` or holds a path separator is refused instead of changing the address that is fetched.
 
+- **`stroq add --kind skill` is honored.** The flag was parsed and ignored, so a folder with both `SKILL.md` and `.mcp.json` failed with advice to say which kind it was, and saying so changed nothing. The error now names the flag, and `--kind skill` installs the folder as a skill.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

@@ -81,6 +81,8 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     terminal: currentTerminal(),
     user: parsed.values.user === true,
     restore: parsed.values.restore === true,
+    // Only what the person said: without --kind the files tell what the folder is.
+    ...(parsed.values.kind === 'skill' ? { kind: 'skill' as const } : {}),
   });
   process.stdout.write(`confirmed sha256:${added.digest}\n`);
   return 0;

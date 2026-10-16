@@ -8,7 +8,12 @@ import { outsideLine } from '../ui/layout.js';
 import type { Terminal } from '../ui/terminal.js';
 import { stroqVersion } from '../version.js';
 import { readArchiveFile } from './archive-file.js';
-import { inspectTree, INSPECT_RULES_ID, passportIsIncomplete } from './inspect/index.js';
+import {
+  inspectTree,
+  INSPECT_RULES_ID,
+  InspectError,
+  passportIsIncomplete,
+} from './inspect/index.js';
 import {
   readPassports,
   SKILL_NAME,
@@ -44,6 +49,8 @@ export interface SkillOptions {
   readonly user?: boolean;
   readonly restore?: boolean;
   readonly force?: boolean;
+  /** `--kind skill`: the person says what the folder is, for files that look like more than one kind of artifact. */
+  readonly kind?: 'skill';
 }
 
 function requirePerson(options: SkillOptions): void {
@@ -76,19 +83,42 @@ function targetOf(
   return { root, path };
 }
 
-async function inspectSource(source: string): Promise<{ tree: Tree; passport: Passport }> {
+/** The passport of a tree as a skill's: the kind the person gave, or the one the files say. */
+function passportOfSkill(
+  tree: Tree,
+  source: string,
+  type: 'dir' | 'tarball',
+  blindSpots: readonly string[],
+  kind: 'skill' | undefined,
+): Passport {
+  try {
+    return inspectTree(tree, {
+      kind: kind ?? 'auto',
+      source: { type, label: labelOf(source, type) },
+      extraBlindSpots: blindSpots,
+      stroqVersion: stroqVersion(),
+      rulesId: INSPECT_RULES_ID,
+    });
+  } catch (error) {
+    // The message of the inspector says to "say which kind it is"; for add, this is how.
+    if (error instanceof InspectError && error.code === 'cannot-tell-kind')
+      throw new Error(
+        `${error.message}; give --kind skill (or --kind mcp for a server) to stroq add`,
+      );
+    throw error;
+  }
+}
+
+async function inspectSource(
+  source: string,
+  kind: 'skill' | undefined,
+): Promise<{ tree: Tree; passport: Passport }> {
   const type = await sourceTypeOf(source);
   const { tree, blindSpots } =
     type === 'dir'
       ? await readDirTree(source, { rejectNestedRepositories: true })
       : await readArchiveFile(source);
-  const passport = inspectTree(tree, {
-    kind: 'auto',
-    source: { type, label: labelOf(source, type) },
-    extraBlindSpots: blindSpots,
-    stroqVersion: stroqVersion(),
-    rulesId: INSPECT_RULES_ID,
-  });
+  const passport = passportOfSkill(tree, source, type, blindSpots, kind);
   if (passport.artifact.kind !== 'skill')
     throw new Error('add currently installs skills only; use vet for an MCP server or plugin');
   if (passportIsIncomplete(passport))
@@ -201,7 +231,7 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
         }),
         passport: installed!.passport,
       }
-    : await inspectSource(source);
+    : await inspectSource(source, options.kind);
   const name = nameOf(installed === undefined ? made.passport.artifact.name : sourceOrName);
   const prior = Object.hasOwn(initial.skills, name) ? initial.skills[name] : undefined;
   const previous = prior?.status === 'revoked' ? undefined : prior;
