@@ -455,14 +455,14 @@ export class StroqEngine {
    * were read from. A failing index withholds the excerpt rather than storing it unchecked,
    * and so does a result that holds too many known values to check.
    */
-  private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
+  private async safeExcerpts(text: string, cwd: string, atoms: readonly Atom[]): Promise<string[]> {
     const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
     const index = this.opts.secrets;
     if (!index) return atoms.map((atom) => clip(atom.value));
     try {
-      const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
+      const matches = await index.lookup(candidatesOfVariants(text), cwd);
       if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
-      const scrub = excerptRedactor(event.toolResultText, matches);
+      const scrub = excerptRedactor(text, matches);
       if (scrub === null) return atoms.map(() => '[REDACTED:too-many-secrets]');
       return atoms.map((atom) => clip(scrub(atom)));
     } catch {
@@ -508,7 +508,7 @@ export class StroqEngine {
     const marked = lost && noted === null;
     if (atoms.length === 0) return { error: noted, incomplete: marked };
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
-    const excerpts = await this.safeExcerpts(event, atoms);
+    const excerpts = await this.safeExcerpts(event.toolResultText, event.cwd, atoms);
     try {
       await store.record(
         event.sessionId,
@@ -551,18 +551,21 @@ export class StroqEngine {
     return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
   }
 
-  /** The atoms no record accounts for, as the audit keeps them: kind and a redacted excerpt. */
+  /**
+   * The atoms no record accounts for, as the audit keeps them: kind and an excerpt scrubbed
+   * as a provenance record's is. An atom is cut from normalised text, so a known value sits in
+   * it lowercased and a plain redaction of the call's summary would miss it.
+   */
   private async gapEvidence(
     unverified: readonly Atom[],
-    cwd: string,
-    known: readonly SecretMatch[],
+    event: PreToolEvent,
   ): Promise<ProvenanceGap[]> {
-    return Promise.all(
-      unverified.slice(0, MAX_GAPS_AUDITED).map(async (atom) => ({
-        kind: atom.kind,
-        excerpt: redact(await this.safeSummary(atom.value, cwd, known)).slice(0, MAX_STORED_CHARS),
-      })),
-    );
+    const shown = unverified.slice(0, MAX_GAPS_AUDITED);
+    if (shown.length === 0) return [];
+    const command = event.toolInput['command'];
+    const text = typeof command === 'string' ? command : JSON.stringify(event.toolInput);
+    const excerpts = await this.safeExcerpts(text, event.cwd, shown);
+    return shown.map((atom, i) => ({ kind: atom.kind, excerpt: excerpts[i] ?? '' }));
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {
@@ -615,7 +618,7 @@ export class StroqEngine {
     });
     const decision = gated?.decision ?? policyDecision;
     const provenance = origin.counted.map(toEvidence);
-    const gaps = await this.gapEvidence(unverified, event.cwd, matches);
+    const gaps = await this.gapEvidence(unverified, event);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
       event.cwd,
