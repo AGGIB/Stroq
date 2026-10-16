@@ -8,6 +8,7 @@ import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
 import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
 import { MCP_PIN } from './pin-argument.js';
+import { assertBound, PinBindError } from './pin-binding.js';
 
 export interface PinOptions {
   readonly server: string;
@@ -15,6 +16,8 @@ export interface PinOptions {
   readonly command: string;
   readonly args: readonly string[];
   readonly home?: string;
+  /** The wrapper's `--pass-env`: null when it has none. Compared with what `add` recorded, when it recorded one. */
+  readonly passEnv?: readonly string[] | null;
 }
 export interface PinnedLaunch {
   readonly command: string;
@@ -30,7 +33,7 @@ function jsonFile(file: string): unknown {
   return JSON.parse(read.text) as unknown;
 }
 
-function confirm(options: PinOptions, home: string): string {
+function confirm(options: PinOptions, home: string): { digest: string; record: unknown } {
   if (!MCP_PIN.test(options.pin))
     throw new Error('invalid pin: expected sha256:<64 lowercase hex>');
   let lock;
@@ -50,7 +53,7 @@ function confirm(options: PinOptions, home: string): string {
   const digest = options.pin.slice(7);
   if (!record.success || record.data.digest !== digest || record.data.grant.pin !== options.pin)
     throw new Error('this server and digest are not confirmed on this machine');
-  return digest;
+  return { digest, record: raw };
 }
 
 async function plainFolder(folder: string): Promise<void> {
@@ -123,9 +126,14 @@ async function checked(
   options: PinOptions,
 ): Promise<{ tree: Tree; args: readonly (string | null)[]; home: string }> {
   const home = options.home ?? stroqHome();
-  const digest = confirm(options, home);
+  const { digest, record } = confirm(options, home);
   const { tree, root } = await verifiedTree(home, digest);
-  entrypoint(options, root, tree);
+  const startFile = entrypoint(options, root, tree);
+  assertBound(
+    record,
+    options.passEnv === undefined ? { ...options, passEnv: null } : options,
+    startFile,
+  );
   return { tree, args: options.args.map((arg) => treeArgument(arg, root, tree)), home };
 }
 
@@ -180,7 +188,13 @@ export async function inspectPin(
   try {
     await checked(options);
     return { ok: true, detail: 'confirmed bytes intact (tamper-evident, not tamper-proof)' };
-  } catch {
+  } catch (error) {
+    // A wrapper that is not the one confirmed says so, in one of a few fixed phrases.
+    if (error instanceof PinBindError)
+      return {
+        ok: false,
+        detail: `${error.message}; start refused (re-run stroq add to confirm it)`,
+      };
     return {
       ok: false,
       detail:
