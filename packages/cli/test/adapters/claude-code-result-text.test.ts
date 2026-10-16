@@ -149,3 +149,51 @@ describe('a prose tool result with no text in it', () => {
     expect(await store().isIncomplete('with-text')).toBe(false);
   });
 });
+
+// Reading a screenshot returns its bytes as base64 in the result. Those are not text anything
+// copies from, and a result as long as the clip is read as possibly cut short.
+describe('a result that is an image', () => {
+  const store = () => new FileProvenanceStore(sessionsDir());
+  const image = (chars: number) => ({
+    type: 'image',
+    file: {
+      base64: 'iVBORw0KGgo'.repeat(Math.ceil(chars / 11)).slice(0, chars),
+      type: 'image/png',
+      originalSize: 1,
+      dimensions: { displayHeight: 1, displayWidth: 1, originalHeight: 1, originalWidth: 1 },
+    },
+  });
+
+  it('is read as no text beyond its kind, however large', () => {
+    expect(toolResultToText(image(300_000))).toBe('image');
+    expect(toolResultReading(image(300_000)).serialised).toBe(false);
+  });
+
+  it('is read the same inside a content list, beside the text that goes with it', () => {
+    const list = [
+      { type: 'image', data: 'AAAA'.repeat(80_000), mimeType: 'image/png' },
+      { type: 'text', text: 'a caption' },
+    ];
+    expect(toolResultToText(list)).toBe('image\na caption');
+  });
+
+  it.each([300_000, 660_000])(
+    'leaves the session complete after reading %i characters of image',
+    async (chars) => {
+      await post(`image-${chars}`, 'Read', image(chars), { file_path: '/tmp/shot.png' });
+      expect(await store().isIncomplete(`image-${chars}`)).toBe(false);
+      expect((await decide(`image-${chars}`, 'npx some-new-tool')).effect).toBe('allow');
+    },
+  );
+
+  it('still marks the session after a text result as long as the clip', async () => {
+    const text = 'y\n'.repeat(DEFAULT_MAX_CHARS);
+    await post(
+      'long-text',
+      'Read',
+      { type: 'text', file: { filePath: 'big.txt', content: text } },
+      { file_path: 'big.txt' },
+    );
+    expect(await store().isIncomplete('long-text')).toBe(true);
+  });
+});

@@ -150,6 +150,30 @@ export interface ResultReading {
 
 const plain = (value: string): ResultReading => ({ text: value, serialised: false });
 
+const MEDIA_KINDS: ReadonlySet<unknown> = new Set(['image', 'audio', 'video']);
+/** How deep a result is looked into for media; a result nested deeper keeps what it holds. */
+const MEDIA_SCAN_DEPTH = 32;
+
+/**
+ * `value` without its media: an object whose `type` is an image, audio or video is reduced to
+ * that kind, and a `base64` field is dropped. What a screenshot returns is its bytes in
+ * base64 (hundreds of thousands of characters for a large one). It is not text anything is
+ * copied from, and it would otherwise be read as text, scanned, and, past the clip, make the
+ * session look as if a result had been cut short.
+ */
+function withoutMedia(value: unknown, depth = 0): unknown {
+  if (depth > MEDIA_SCAN_DEPTH || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1));
+  const record = value as Record<string, unknown>;
+  const kind = record['type'];
+  if (typeof kind === 'string' && MEDIA_KINDS.has(kind)) return { type: kind };
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => key !== 'base64')
+      .map(([key, item]) => [key, withoutMedia(item, depth + 1)]),
+  );
+}
+
 /**
  * An object that is none of the shapes above, read as the string values in it, one to a line.
  * A web fetch's result is such an object (`{bytes, code, codeText, result, durationMs, url}`),
@@ -164,9 +188,10 @@ function objectReading(obj: Record<string, unknown>): ResultReading {
   const streams = streamsOf(obj);
   if (streams !== null) return plain(streams);
   if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
-  const strings = collectStrings(obj).filter((value) => value !== '');
+  const readable = withoutMedia(obj);
+  const strings = collectStrings(readable).filter((value) => value !== '');
   if (strings.length > 0) return plain(strings.join('\n'));
-  return { text: JSON.stringify(obj), serialised: true };
+  return { text: JSON.stringify(readable), serialised: true };
 }
 
 export function toolResultReading(result: unknown): ResultReading {
