@@ -85,6 +85,7 @@ const describeId = (id: JsonRpcId): string =>
   typeof id === 'string' ? `string of ${id.length} characters` : 'number';
 
 const RESPONSE_KEYS: ReadonlySet<string> = new Set(['jsonrpc', 'id', 'result', 'error']);
+const JSONRPC_VERSION = '2.0';
 
 type ResponseMessage = Extract<McpMessage, { kind: 'response' }>;
 type ReadOk = Extract<StrictRead, { ok: true }>;
@@ -248,7 +249,9 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     }
     const about = { toolName: entry.toolName, answers: entry };
     const isError = Object.hasOwn(value, 'error');
+    // `jsonrpc` is delivered as it came, so it is held to the one value it can have.
     if (
+      value['jsonrpc'] !== JSONRPC_VERSION ||
       !Object.keys(value).every((key) => RESPONSE_KEYS.has(key)) ||
       (isError && 'result' in value)
     )

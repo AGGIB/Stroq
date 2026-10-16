@@ -31,6 +31,19 @@ const hasOnly = (record: Record<string, unknown>, allowed: Allowed): boolean =>
 const isOptionalString = (value: unknown): boolean =>
   value === undefined || typeof value === 'string';
 
+/**
+ * `resultType` is a protocol word (`complete`, `input_required`), so it is held to the
+ * shape of one: lowercase letters and underscores, short. Not because a longer value
+ * would escape the scan (it is a string of the result and is scanned like any other) but
+ * because a field that exists to carry one word has no business carrying a sentence.
+ */
+const RESULT_TYPE = /^[a-z_]{1,32}$/;
+const isOptionalResultType = (value: unknown): boolean =>
+  value === undefined || (typeof value === 'string' && RESULT_TYPE.test(value));
+
+/** The roles a prompt message has. */
+const ROLES: ReadonlySet<string> = new Set(['user', 'assistant']);
+
 const TOOLS_CALL_KEYS: Allowed = new Set([
   'content',
   'structuredContent',
@@ -94,6 +107,8 @@ function readItem(item: unknown, media: Media): WithholdReason | null {
   if (type === 'resource') {
     const resource = item['resource'];
     if (!isRecord(resource)) return 'invalid-shape';
+    // A resource has no `type` (the item around it has): a string there is a free field.
+    if (Object.hasOwn(resource, 'type')) return 'invalid-shape';
     if (!['uri', 'text'].every((key) => isOptionalString(resource[key]))) return 'invalid-shape';
     const blob = resource['blob'];
     if (blob === undefined) return null;
@@ -127,7 +142,7 @@ function readToolsCall(result: Record<string, unknown>): StrictRead {
   if (!hasOnly(result, TOOLS_CALL_KEYS)) return withheld('unread-content');
   const isError = result['isError'];
   if (isError !== undefined && typeof isError !== 'boolean') return withheld('invalid-shape');
-  if (!isOptionalString(result['resultType'])) return withheld('invalid-shape');
+  if (!isOptionalResultType(result['resultType'])) return withheld('invalid-shape');
   const media: Media = new Map();
   const reason = readItems(result['content'], media);
   return reason === null ? finish(result, media) : withheld(reason);
@@ -147,7 +162,7 @@ function readToolsList(result: Record<string, unknown>): StrictRead {
   const tools = result['tools'];
   if (!Array.isArray(tools) || !isOptionalString(result['nextCursor']))
     return withheld('invalid-shape');
-  if (!isOptionalString(result['resultType'])) return withheld('invalid-shape');
+  if (!isOptionalResultType(result['resultType'])) return withheld('invalid-shape');
   for (const tool of tools) {
     const reason = readTool(tool);
     if (reason !== null) return withheld(reason);
@@ -171,7 +186,7 @@ function readResourcesRead(result: Record<string, unknown>): StrictRead {
   if (!hasOnly(result, RESOURCES_READ_KEYS)) return withheld('unread-content');
   const contents = result['contents'];
   if (!Array.isArray(contents)) return withheld('invalid-shape');
-  if (!isOptionalString(result['resultType'])) return withheld('invalid-shape');
+  if (!isOptionalResultType(result['resultType'])) return withheld('invalid-shape');
   const media: Media = new Map();
   for (const entry of contents) {
     const reason = readContents(entry, media);
@@ -183,7 +198,7 @@ function readResourcesRead(result: Record<string, unknown>): StrictRead {
 function readMessage(message: unknown, media: Media): WithholdReason | null {
   if (!isRecord(message)) return 'invalid-shape';
   if (!hasOnly(message, MESSAGE_KEYS)) return 'unread-content';
-  if (typeof message['role'] !== 'string') return 'invalid-shape';
+  if (typeof message['role'] !== 'string' || !ROLES.has(message['role'])) return 'invalid-shape';
   return readItem(message['content'], media);
 }
 
@@ -192,7 +207,7 @@ function readPromptsGet(result: Record<string, unknown>): StrictRead {
   const messages = result['messages'];
   if (!Array.isArray(messages) || !isOptionalString(result['description']))
     return withheld('invalid-shape');
-  if (!isOptionalString(result['resultType'])) return withheld('invalid-shape');
+  if (!isOptionalResultType(result['resultType'])) return withheld('invalid-shape');
   const media: Media = new Map();
   for (const message of messages) {
     const reason = readMessage(message, media);
