@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, constants, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
@@ -18,8 +18,9 @@ export interface ProvenanceStore {
   clear(sessionId: string): Promise<void>;
   /**
    * Whether this session may have read something that is no longer on record: a record
-   * was dropped to stay within the cap, or a result was only partly recorded. A lookup
-   * that finds nothing means "not read" only when this is false.
+   * was dropped to stay within the cap, or a result was only partly recorded; or the
+   * directory the note would go in cannot be written, so a loss could not be noted. A
+   * lookup that finds nothing means "not read" only when this is false.
    *
    * Ask AFTER `lookup`, never before. Setting the note always comes before the records
    * are rewritten, so a lookup that saw records after a drop is followed by an answer of
@@ -53,6 +54,19 @@ const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'encoded',
 ]);
 
+/**
+ * Whether a note could be written in `dir`. A directory that does not exist yet can: it is made
+ * on first use. One that exists and cannot be written to is where a loss goes unrecorded.
+ */
+async function canWriteIn(dir: string): Promise<boolean> {
+  try {
+    await access(dir, constants.W_OK);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 /** Whether anything is at `path`, a dangling symlink included. */
 async function exists(path: string): Promise<boolean> {
   try {
@@ -83,6 +97,8 @@ export class FileProvenanceStore implements ProvenanceStore {
   constructor(
     private readonly dir: string,
     private readonly now: () => Date = () => new Date(),
+    /** Test seam: the move that makes a written file the real one. */
+    private readonly renameFile: typeof rename = rename,
   ) {}
 
   private file(sessionId: string): string {
@@ -122,7 +138,7 @@ export class FileProvenanceStore implements ProvenanceStore {
     const target = this.file(sessionId);
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(tmp, JSON.stringify(records), { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
-    await rename(tmp, target);
+    await this.renameFile(tmp, target);
   }
 
   async record(sessionId: string, inputs: readonly ProvenanceInput[]): Promise<void> {
@@ -149,13 +165,24 @@ export class FileProvenanceStore implements ProvenanceStore {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
     const body = JSON.stringify({ incomplete: true, since: this.now().toISOString() });
-    await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
-    await rename(tmp, target);
+    try {
+      await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
+      await this.renameFile(tmp, target);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      // Another process may have written the note first, and on Windows renaming onto it then
+      // fails (EPERM, EBUSY). The note being there is all that was asked for.
+      if (await exists(target).catch(() => false)) return;
+      throw err;
+    }
   }
 
   async isIncomplete(sessionId: string): Promise<boolean> {
     try {
-      return await exists(this.incompleteFile(sessionId));
+      if (await exists(this.incompleteFile(sessionId))) return true;
+      // A loss is noted by writing a file here. Where that cannot be done the note cannot
+      // exist, and its absence says nothing.
+      return !(await canWriteIn(this.dir));
     } catch {
       // A file Stroq cannot even stat is not evidence that nothing was lost.
       return true;

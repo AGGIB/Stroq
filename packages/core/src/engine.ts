@@ -503,7 +503,10 @@ export class StroqEngine {
     const store = this.opts.provenance;
     if (!store) return { error: null, incomplete: false };
     const noted = lost ? await this.noteIncomplete(store, event.sessionId) : null;
-    if (atoms.length === 0) return { error: noted, incomplete: lost };
+    // Only a note that was written makes the session incomplete: one that could not be leaves
+    // it reading as it did, and the failure is the error that gets logged.
+    const marked = lost && noted === null;
+    if (atoms.length === 0) return { error: noted, incomplete: marked };
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
     const excerpts = await this.safeExcerpts(event, atoms);
     try {
@@ -518,10 +521,10 @@ export class StroqEngine {
           suspect,
         })),
       );
-      return { error: noted, incomplete: lost };
+      return { error: noted, incomplete: marked };
     } catch (err) {
-      await this.noteIncomplete(store, event.sessionId);
-      return { error: messageOf(err), incomplete: true };
+      const failed = await this.noteIncomplete(store, event.sessionId);
+      return { error: messageOf(err), incomplete: failed === null };
     }
   }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -206,6 +206,29 @@ describe('a result whose atoms could not be written', () => {
     });
   });
 });
+
+describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+  'a loss that could not be noted',
+  () => {
+    it('is not reported as noted, and the next action still asks', async () => {
+      const f = fixture();
+      await f.post('first result, so the sessions directory exists');
+      await f.post(payload());
+      chmodSync(f.dir, 0o500);
+      try {
+        const lost = await f.post(`${urls(250, 'd')}\nnothing else`);
+        expect(lost.provenanceError).not.toBeNull();
+        expect(lost.provenanceIncomplete).toBe(false);
+
+        const r = await f.pre(REAL);
+
+        expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+      } finally {
+        chmodSync(f.dir, 0o700);
+      }
+    });
+  },
+);
 
 describe('a tainted session that never recorded an atom', () => {
   it('stays complete: nothing was lost, so an unrecorded package is not a question', async () => {

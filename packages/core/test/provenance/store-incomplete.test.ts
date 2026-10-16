@@ -1,4 +1,13 @@
-import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -178,5 +187,69 @@ describe('FileProvenanceStore when the flag cannot be read', () => {
     await mkdir(join(dir, '..'), { recursive: true });
     writeFileSync(dir, 'a file where the sessions directory should be');
     expect(await new FileProvenanceStore(dir).isIncomplete('s1')).toBe(true);
+  });
+});
+
+// A directory this process cannot write to is where a loss cannot be noted. root ignores modes.
+const canRestrict = process.platform !== 'win32' && process.getuid?.() !== 0;
+
+describe.skipIf(!canRestrict)(
+  'FileProvenanceStore when the sessions directory cannot be written',
+  () => {
+    const restricted = async () => {
+      const f = fresh();
+      await f.store.record('s1', [input('h')]);
+      chmodSync(f.dir, 0o500);
+      return f;
+    };
+
+    it('fails to note a loss, and reads the session as incomplete all the same', async () => {
+      const f = await restricted();
+      try {
+        await expect(f.store.markIncomplete('s1')).rejects.toThrow();
+        expect(existsSync(join(f.dir, `${sessionKey('s1')}.prov.incomplete`))).toBe(false);
+        expect(await f.store.isIncomplete('s1')).toBe(true);
+      } finally {
+        chmodSync(f.dir, 0o700);
+      }
+    });
+
+    it('reads a session as complete again once the directory can be written', async () => {
+      const f = await restricted();
+      chmodSync(f.dir, 0o700);
+      expect(await f.store.isIncomplete('s1')).toBe(false);
+    });
+
+    it('still reads a directory that does not exist yet as complete', async () => {
+      const { store } = fresh();
+      expect(await store.isIncomplete('s1')).toBe(false);
+    });
+  },
+);
+
+describe('FileProvenanceStore.markIncomplete when the rename fails', () => {
+  const failing = (before?: () => void) => {
+    const { dir } = fresh();
+    const rename = async (): Promise<void> => {
+      before?.();
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    };
+    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+  };
+
+  it('leaves no temporary file behind, and says it failed', async () => {
+    const { dir, store } = failing();
+    await expect(store.markIncomplete('s1')).rejects.toThrow(/operation not permitted/);
+    expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('succeeds when another process wrote the note first, which is what a Windows rename race looks like', async () => {
+    const { dir, store } = failing(() =>
+      writeFileSync(join(dir, `${sessionKey('s1')}.prov.incomplete`), '{}'),
+    );
+    await expect(store.markIncomplete('s1')).resolves.toBeUndefined();
+    expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    expect(await store.isIncomplete('s1')).toBe(true);
   });
 });
