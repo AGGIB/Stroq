@@ -14,6 +14,7 @@ import {
   isScannedMethod,
   paramsOf,
   parseLine,
+  type JsonRpcId,
   type PendingTable,
   type SplitLine,
 } from './framing.js';
@@ -260,6 +261,18 @@ export function createPump(deps: PumpDeps): Pump {
     if (message.kind === 'request') await replyToClient(terminatedResponse(message.id, limit));
   }
 
+  /**
+   * `--strict` only: answers a request that was in this proxy's hands (being judged) when
+   * the server was ended. The check at the top of `handleClientLine` cannot see that, since
+   * judging is asynchronous and the server can be ended while it is under way. Such a call
+   * is neither tracked nor sent: it is answered the way every later request is. Null, and
+   * so nothing to do, when the server is still there (always, without `--strict`).
+   */
+  function answerIfEnded(id: JsonRpcId): Promise<void> | null {
+    if (strictHandler?.wasTerminated() !== true) return null;
+    return replyToClient(terminatedResponse(id, strictHandler.terminatedLimit()));
+  }
+
   async function handleClientLine(line: SplitLine): Promise<void> {
     if (strictHandler?.wasTerminated() === true)
       return refuseAfterEnd(line, strictHandler.terminatedLimit());
@@ -324,6 +337,8 @@ export function createPump(deps: PumpDeps): Pump {
         // Resolve credentials first, then judge the exact arguments that will be
         // forwarded. Restored values can affect path and command classification.
         const plan = cloak === null ? EMPTY_PLAN : await cloak.planUncloak(params);
+        const endedAfterPlan = answerIfEnded(message.id);
+        if (endedAfterPlan !== null) return endedAfterPlan;
         if (plan.refused.length > 0) {
           const { toolName, toolInput } = callAuditFields(params);
           const decision = cloakSecretRestore(plan.refused);
@@ -344,6 +359,8 @@ export function createPump(deps: PumpDeps): Pump {
           cloak === null ? { value: params, replacements: [] } : cloak.applyUncloak(params, plan);
         if (!isRecord(restored.value)) throw new Error('restored MCP parameters are invalid');
         const verdict = await judgeToolCall(ctx, message.value, message.id, restored.value, params);
+        const endedAfterJudging = answerIfEnded(message.id);
+        if (endedAfterJudging !== null) return endedAfterJudging;
         if (verdict.pending !== null) {
           pending.set(message.id, verdict.pending);
           strict?.ledger.track({

@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import type { StroqEngine } from '@stroq/core';
 import { afterEach, vi } from 'vitest';
 import { createEngine } from '../../src/engine-factory.js';
 import { runMcpProxy } from '../../src/mcp/proxy.js';
@@ -73,6 +74,8 @@ export interface RigOptions {
   /** How long a stopped server has before it is killed; the default is the proxy's own. */
   readonly shutdownGraceMs?: number;
   readonly env?: Readonly<Record<string, string>>;
+  /** Wraps the real engine, for a test that needs it slow or failing at a chosen call. */
+  readonly engine?: (real: StroqEngine) => StroqEngine;
 }
 
 export type Wire = Record<string, unknown>;
@@ -134,7 +137,7 @@ export function startRig(options: RigOptions = {}): Rig {
   });
 
   const done = runMcpProxy({
-    engine: createEngine(),
+    engine: options.engine === undefined ? createEngine() : options.engine(createEngine()),
     sessionId: 'mcp:strict-test',
     server: 'srv',
     cwd,
@@ -256,3 +259,23 @@ export const errorText = (answer: Wire): string =>
 
 /** Every text the client was given, joined: what must never contain the server's own words. */
 export const everythingSaid = (rig: Rig): string => [...rig.lines(), rig.stderr()].join('\n');
+
+/**
+ * An engine that takes `ms` to judge a call to the tool named `tool` (before it asks the
+ * real one), which is how a test makes a request still be in the proxy's hands while the
+ * server is ended.
+ */
+export const withSlowPre =
+  (tool: string, ms: number) =>
+  (real: StroqEngine): StroqEngine =>
+    new Proxy(real, {
+      get(target, property) {
+        if (property === 'pre')
+          return async (event: Parameters<StroqEngine['pre']>[0]) => {
+            if (event.toolName.endsWith(`__${tool}`)) await sleepMs(ms);
+            return target.pre(event);
+          };
+        const member = Reflect.get(target, property) as unknown;
+        return typeof member === 'function' ? member.bind(target) : member;
+      },
+    });
