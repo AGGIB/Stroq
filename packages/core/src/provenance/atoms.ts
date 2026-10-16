@@ -244,6 +244,54 @@ function urlAtoms(text: string): Positioned[] {
   return [...fromUrls, ...fromSsh];
 }
 
+/** How much text after an installer is looked at to see whether its wrapped lines outgrow the window. */
+const WRAP_SCAN = 8 * MAX_LINE_SCAN;
+
+const skipBlanks = (text: string, from: number): number => {
+  let at = from;
+  while (text.charAt(at) === ' ' || text.charAt(at) === '\t') at += 1;
+  return at;
+};
+
+/**
+ * Whether what follows a runner or installer is a wrapped command: the rest of its line is
+ * empty, or only a backslash, and the next line is indented and either follows that backslash
+ * or starts with a flag (`-x`, `--long`). A dash and a space is a list item, not a flag.
+ * Written without a pattern so that a long run of blanks costs a pass, not a square.
+ */
+function startsWrapped(tail: string): boolean {
+  let at = skipBlanks(tail, 0);
+  const backslash = tail.charAt(at) === '\\';
+  if (backslash) at = skipBlanks(tail, at + 1);
+  if (tail.charAt(at) === '\r') at += 1;
+  if (tail.charAt(at) !== '\n') return false;
+  const next = skipBlanks(tail, at + 1);
+  if (next === at + 1) return false;
+  return backslash || (tail.charAt(next) === '-' && /[-A-Za-z]/.test(tail.charAt(next + 1)));
+}
+
+/**
+ * Whether a wrapped runner or installer outgrows the line window once its lines are joined,
+ * which leaves its last arguments, a package among them, past the part that is read.
+ *
+ * Only a command that says it is wrapped counts. The continuation pass joins every indented
+ * line into one, so the same window would be passed by the first installer of any indented
+ * block (a workflow, a Makefile recipe, a README example): 29 files of this repository were
+ * flagged for that and none for a command that was wrapped. An installer wrapped over lines of
+ * plain words, with no backslash and no flag, is not told apart from such a block and is not
+ * counted; the pass over the text as written still reads the first window of it.
+ */
+function wrappedCommandCut(text: string): boolean {
+  for (const pattern of [RUNNER, INSTALLER]) {
+    for (const m of text.matchAll(pattern)) {
+      const from = (m.index ?? 0) + m[0].length;
+      const tail = text.slice(from, from + WRAP_SCAN);
+      if (startsWrapped(tail) && restOfLine(collapseContinuations(tail), 0).cut) return true;
+    }
+  }
+  return false;
+}
+
 function packageAtoms(text: string): Found {
   const runners = runnerPackages(text);
   const installers = installedPackages(text);
@@ -424,11 +472,9 @@ export function extractAtomsDeep(text: string): Atom[] {
  * added cannot be known without paying for the passes the cap exists to avoid. A result that
  * holds exactly that many is read as cut, which costs nothing real.
  *
- * The continuation pass is held to the same line window as the others. Joining indented
- * lines can make a command longer than the window, with its package past the end of it, and
- * it also makes a long indented block after any installer read as cut. Measured on the
- * documentation corpus with every indented line joined, that was none of 293 matches in 121
- * files.
+ * The continuation pass is held to the window only for a command that says it is wrapped
+ * (see `wrappedCommandCut`): joining every indented line makes a long line of any indented
+ * block, and read as a cut that flagged ordinary workflows, Makefiles and README blocks.
  */
 export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
@@ -436,8 +482,8 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const seen = new Set<string>();
   const out: Atom[] = [];
   let truncated = cutText;
-  const merge = (extraction: Extraction): void => {
-    truncated = truncated || extraction.capped || extraction.lineCut;
+  const merge = (extraction: Extraction, byLine = true): void => {
+    truncated = truncated || extraction.capped || (byLine && extraction.lineCut);
     for (const atom of extraction.atoms) {
       if (out.length >= MAX_ATOMS) return;
       const key = atomHash(atom);
@@ -455,7 +501,8 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   if (out.length < MAX_ATOMS) {
     const collapsed = collapseContinuations(bounded);
     if (collapsed !== bounded) {
-      merge(extractBounded(collapsed));
+      merge(extractBounded(collapsed), false);
+      truncated = truncated || wrappedCommandCut(bounded);
     }
   }
 

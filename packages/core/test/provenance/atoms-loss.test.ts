@@ -100,6 +100,37 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
     expect(truncated).toBe(false);
   });
 
+  it('reports the loss when the wrapped lines end each with a backslash', () => {
+    const text = `npm install \\\n${'  --save-exact \\\n'.repeat(40)}  evil-helper-fix\n`;
+    const { atoms, truncated } = extractAtomsDeepWithLoss(text);
+    expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
+    expect(truncated).toBe(true);
+  });
+
+  // The continuation pass joins every indented line, so an installer in an indented block is
+  // followed by the whole block as one line. That is not a wrapped command unless it says so:
+  // a backslash, or an argument line that starts with a flag.
+  const steps = (count: number) =>
+    Array.from({ length: count }, (_, i) => `      - run: npm test -- --shard=${i}/${count}`).join(
+      '\n',
+    );
+  it.each([
+    ['a workflow step', `jobs:\n  build:\n    steps:\n      - run: npm install\n${steps(20)}\n`],
+    [
+      'a Makefile recipe',
+      `install:\n\tnpm install\n${Array.from({ length: 20 }, (_, i) => `\tnode scripts/build-${i}.js --minify --sourcemap`).join('\n')}\n`,
+    ],
+    [
+      'an indented README block',
+      `## Install\n\n    npm install widgets\n${Array.from({ length: 12 }, (_, i) => `    node dist/index.js --config ./config/production-${i}.json --port 80${i}`).join('\n')}\n`,
+    ],
+    ['an installer with its flag on its own line', `    npm install -g typescript\n${steps(20)}\n`],
+    ['a runner with a dash-list after it', `steps:\n  npx tool\n${steps(20)}\n`],
+  ])('reports no loss for %s followed by a long indented block', (_name, text) => {
+    expect(text.length).toBeGreaterThan(600);
+    expect(extractAtomsDeepWithLoss(text).truncated).toBe(false);
+  });
+
   // `npm install` ends at its last letter, and the part of the line that is read starts there:
   // a space and 511 characters are 512, the whole window; one more character is past it.
   it.each([
