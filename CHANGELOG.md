@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The MCP runtime pin binds the wrapper `stroq add` wrote, exactly.** The proxy compares the command line it was started with (node, its flags, the Stroq entry, every flag and the command after `--`) with the recorded entry and refuses to start on any difference, so an edited client config cannot hand the confirmed server another secret, run another file of its tree or drop a flag; `stroq doctor` also compares the entry's `env`, `cwd` and other keys, reports a pin that was taken out, and shows the reason.
 
+- **A damaged store no longer blocks `stroq remove`.** Removing a skill or an MCP server needs the digest from the lock and not the stored bytes, with or without `--force`. A restore or an update whose stored copy is damaged refuses and says to remove it with `--force` and add it again from its source.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

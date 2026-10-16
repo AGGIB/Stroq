@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { storeDirIn } from '../paths.js';
+import { outsideLine } from '../ui/layout.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from './read-dir.js';
 import { buildTree, treeDigest } from './tree.js';
 import type { Tree, TreeEntry } from './types.js';
@@ -93,6 +94,36 @@ export async function readStoredTree(folder: string, digest: string): Promise<Tr
   const verified = buildTree(entries, { complete: true });
   assertWritableTree(verified, digest);
   return verified;
+}
+
+/** Who a stored copy is for, to name the way out when the copy is damaged. */
+export interface StoredSubject {
+  readonly kind: 'skill' | 'mcp';
+  readonly name: string;
+  /** Where it was added from, as the lock records it. */
+  readonly source: string;
+}
+
+/**
+ * The stored tree of an installed skill or server, or an error that says what is wrong with the copy and what
+ * to do: a damaged store cannot be restored or compared with, and removing needs no bytes at all, so the way
+ * out is to remove it with `--force` and add it again from its source.
+ */
+export async function readStoredTreeOf(
+  home: string,
+  digest: string,
+  subject: StoredSubject,
+): Promise<Tree> {
+  try {
+    return await readStoredTree(storePath(home, digest), digest);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'it could not be read';
+    const mcp = subject.kind === 'mcp' ? ' --kind mcp' : '';
+    throw new Error(
+      `the stored copy of ${subject.kind} ${subject.name} is damaged (${outsideLine(reason)}); ` +
+        `run stroq remove ${subject.name}${mcp} --force, then stroq add ${outsideLine(JSON.stringify(subject.source))}${mcp} again from its source`,
+    );
+  }
 }
 
 export async function putStore(home: string, tree: Tree, digest: string): Promise<string> {

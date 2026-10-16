@@ -30,8 +30,7 @@ import {
   assertInstallablePlatform,
   assertWritableTree,
   putStore,
-  readStoredTree,
-  storePath,
+  readStoredTreeOf,
   writeTree,
 } from './store.js';
 import { treeDigest } from './tree.js';
@@ -195,10 +194,11 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const source = installed?.source ?? resolve(sourceOrName);
   const made = restoring
     ? {
-        tree: await readStoredTree(
-          storePath(options.stroqHome, installed!.digest),
-          installed!.digest,
-        ),
+        tree: await readStoredTreeOf(options.stroqHome, installed!.digest, {
+          kind: 'skill',
+          name: sourceOrName,
+          source: installed!.source,
+        }),
         passport: installed!.passport,
       }
     : await inspectSource(source);
@@ -215,7 +215,11 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const oldTree =
     previous === undefined
       ? undefined
-      : await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+      : await readStoredTreeOf(options.stroqHome, previous.digest, {
+          kind: 'skill',
+          name,
+          source: previous.source,
+        });
   const material =
     previous === undefined ||
     previous.source !== source ||

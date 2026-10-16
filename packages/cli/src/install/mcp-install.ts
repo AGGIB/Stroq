@@ -32,7 +32,7 @@ import {
   assertWritableTree,
   assertInstallablePlatform,
   putStore,
-  readStoredTree,
+  readStoredTreeOf,
   storePath,
 } from './store.js';
 import type { Passport, Tree } from './types.js';
@@ -280,7 +280,11 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const source = named?.source ?? resolve(sourceOrName);
   const made = options.restore
     ? {
-        tree: await readStoredTree(storePath(options.stroqHome, named!.digest), named!.digest),
+        tree: await readStoredTreeOf(options.stroqHome, named!.digest, {
+          kind: 'mcp',
+          name: sourceOrName,
+          source: named!.source,
+        }),
         passport: named!.passport,
       }
     : await inspectSource(source);
@@ -295,7 +299,11 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const oldTree =
     previous === undefined
       ? undefined
-      : await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+      : await readStoredTreeOf(options.stroqHome, previous.digest, {
+          kind: 'mcp',
+          name,
+          source: previous.source,
+        });
   if (previous !== undefined && resolve(previous.source) !== source)
     throw new Error(`this path is not ${name}'s recorded source; remove it first`);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
@@ -358,7 +366,11 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
       throw new Error('the lock changed while confirming; read and confirm again');
     if (previous !== undefined)
-      await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+      await readStoredTreeOf(options.stroqHome, previous.digest, {
+        kind: 'mcp',
+        name,
+        source: previous.source,
+      });
     await putStore(options.stroqHome, made.tree, digest);
     assertWriteAllowed(file, targetRules(selected));
     const fresh = loadConfig(file);
@@ -411,7 +423,8 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   const initial = await readPassports(options.stroqHome);
   const previous = recordOf(initial, name);
   if (previous === undefined) throw new Error('the MCP server is not installed');
-  await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+  // Removing needs the digest from the lock and the entry in the client config, never the stored bytes: a
+  // damaged store must not make a server impossible to take out.
   const selected = recordedTarget(previous);
   const { file } = selected;
   assertWriteAllowed(file, targetRules(selected));
@@ -434,7 +447,6 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   await withPassports(options.stroqHome, async (lock) => {
     if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
       throw new Error('the lock changed while confirming; read and confirm again');
-    await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
     assertWriteAllowed(file, targetRules(selected));
     const fresh = loadConfig(file);
     if (!jsonEqual(currentEntry(fresh.config, name), current))

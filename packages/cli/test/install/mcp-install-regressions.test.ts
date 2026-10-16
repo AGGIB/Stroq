@@ -316,24 +316,23 @@ describe('MCP config edits remain owned by the client', () => {
     },
   );
 
-  it('merges unrelated edits during removal store verification', async () => {
+  it('merges unrelated edits made while the removal is being confirmed', async () => {
     const f = await fixture();
     await addMcp(f.dir, f.mcpOptions);
-    const actual = store.readStoredTree;
-    let calls = 0;
-    vi.spyOn(store, 'readStoredTree').mockImplementation(async (...args) => {
-      calls++;
-      const tree = await actual(...args);
-      if (calls === 2) {
-        const config = await f.readConfig();
-        config.owner = 'concurrent-edit';
-        config.mcpServers.other = { command: 'foreign' };
-        await writeFile(f.config, JSON.stringify(config));
-      }
-      return tree;
+    const ask = f.terminal.readLine;
+    await removeMcp('demo', {
+      ...f.mcpOptions,
+      terminal: {
+        ...f.terminal,
+        readLine: async (prompt) => {
+          const config = await f.readConfig();
+          config.owner = 'concurrent-edit';
+          config.mcpServers.other = { command: 'foreign' };
+          await writeFile(f.config, JSON.stringify(config));
+          return ask(prompt);
+        },
+      },
     });
-    await removeMcp('demo', f.mcpOptions);
-    expect(calls).toBe(2);
     expect(await f.readConfig()).toEqual({
       owner: 'concurrent-edit',
       mcpServers: { other: { command: 'foreign' } },
