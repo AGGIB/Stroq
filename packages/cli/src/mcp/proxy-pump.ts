@@ -6,6 +6,7 @@ import { logError } from '../log.js';
 import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloak.js';
 import { OrderedQueue, writeBackpressured } from './pump-stream.js';
 import { createStrictHandler, type StrictHandlerDeps } from './strict-handler.js';
+import { strictLine } from './strict-line.js';
 import { terminatedResponse } from './strict-reasons.js';
 import {
   MAX_LINE_CHARS,
@@ -166,8 +167,12 @@ export function createPump(deps: PumpDeps): Pump {
   // in the queue unread.
   const fromClient = (sink: NodeJS.WritableStream, text: string): Promise<void> =>
     writeBackpressured(sink, text, clientIn);
+  // Under --strict every line Stroq writes escapes the characters some readers end a line
+  // at (`strict-line.ts`); the default proxy writes what JSON.stringify makes.
+  const lineOf = (value: unknown): string =>
+    strict === null ? JSON.stringify(value) : strictLine(value);
   const replyToClient = (value: unknown): Promise<void> =>
-    fromClient(clientOut, `${JSON.stringify(value)}\n`);
+    fromClient(clientOut, `${lineOf(value)}\n`);
 
   // Every write triggered by handling a SERVER line always lands on `clientOut` and
   // is paused against `serverOut`.
@@ -183,7 +188,7 @@ export function createPump(deps: PumpDeps): Pump {
           ...strict,
           ctx,
           cloak,
-          toClient: replyFromResult,
+          toClient: (value) => writeBackpressured(clientOut, `${strictLine(value)}\n`, serverOut),
           toClientLine: (line) => writeBackpressured(clientOut, `${line}\n`, serverOut),
           // A handful of fixed lines at most (one per withheld server request), so no
           // backpressure wait: pausing the server's stdout while waiting on its stdin
@@ -192,7 +197,7 @@ export function createPump(deps: PumpDeps): Pump {
             // Checked here, in the step that writes: a refusal is for a server that is still there.
             if (strictHandler?.wasTerminated() === true) return;
             try {
-              serverIn.write(`${JSON.stringify(value)}\n`);
+              serverIn.write(`${strictLine(value)}\n`);
             } catch (err) {
               logError('mcp strict server write', err);
             }

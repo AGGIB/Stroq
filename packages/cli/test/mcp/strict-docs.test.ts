@@ -70,6 +70,10 @@ describe('the --strict section of docs/AGENTS.md', () => {
     expect(section).not.toContain('sees less of it');
   });
 
+  it('says the characters some readers end a line at are written as escapes', () => {
+    for (const escape of ['\\u2028', '\\u2029', '\\u0085']) expect(section).toContain(escape);
+  });
+
   it('says why the views are separate texts and that the default proxy’s own text is one', () => {
     expect(section).toContain('the same reader, unchanged');
     expect(section).toContain('at least what the default scans');

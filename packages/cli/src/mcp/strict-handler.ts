@@ -15,6 +15,7 @@ import {
 import { appendBlocks, type McpContext } from './judge.js';
 import type { StrictLedger, TrackedRequest } from './strict-ledger.js';
 import { STRICT_MAX_BENIGN_WITHHELD } from './strict-limits.js';
+import { strictLine } from './strict-line.js';
 import { describeMethod, forwardableServerMessage } from './strict-messages.js';
 import {
   countClass,
@@ -423,7 +424,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     if (terminated) return answerEnded(entry);
     let line: string;
     try {
-      line = JSON.stringify(message);
+      line = strictLine(message);
     } catch (err) {
       logError('mcp strict serialise', err);
       return withhold('scan-failed', {
