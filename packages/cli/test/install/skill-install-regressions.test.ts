@@ -90,12 +90,12 @@ describe('skill install review regressions', () => {
   it('shows the target, replaced source, old digest, changes and restore loss before asking', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'more docs');
+    await writeFile(join(f.source, 'README.md'), 'more docs');
     await addSkill('demo', f.options);
     expect(f.output()).toContain(JSON.stringify(first.installedTo));
     expect(f.output()).toContain(`Replaces demo from ${JSON.stringify(f.source)}`);
     expect(f.output()).toContain(`Previous sha256:${first.digest}`);
-    expect(f.output()).toContain('added notes.md');
+    expect(f.output()).toContain('added README.md');
     await writeFile(join(first.installedTo, 'outside.txt'), 'outside');
     await addSkill('demo', { ...f.options, restore: true });
     expect(f.output()).toContain('discards outside edits');

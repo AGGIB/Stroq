@@ -4,7 +4,7 @@ import { styleFor } from '../ui/style.js';
 import type { Terminal } from '../ui/terminal.js';
 import { outsideLine } from '../ui/layout.js';
 import type { SkillRecord } from './lock.js';
-import { changedFiles } from './material.js';
+import { updateDiffLines } from './update-diff.js';
 import type { Passport, Tree } from './types.js';
 
 interface SkillConfirmation {
@@ -30,8 +30,7 @@ export async function confirmSkill(terminal: Terminal, prepared: SkillConfirmati
       `Replaces ${name} from ${outsideLine(JSON.stringify(previous.source))}\nPrevious sha256:${previous.digest}\n`,
     );
     if (oldTree !== undefined) {
-      for (const file of changedFiles(oldTree, made.tree))
-        terminal.write(`  ${file.change} ${file.path}\n`);
+      for (const line of updateDiffLines(oldTree, made.tree)) terminal.write(`${line}\n`);
     }
     const oldLines = new Set(previous.passport.lines.map((line) => JSON.stringify(line)));
     for (const line of passport.lines.filter((line) => !oldLines.has(JSON.stringify(line))))

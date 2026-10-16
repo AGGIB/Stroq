@@ -23,6 +23,7 @@ import type { Passports, Receipt } from './lock.js';
 import { readArchiveFile } from './archive-file.js';
 import { commitMcpConfig } from './mcp-config-transaction.js';
 import { assertSelfContained } from './mcp-outside-imports.js';
+import { updateDiffLines } from './update-diff.js';
 import { auditReceipt } from './receipt.js';
 import { readDirTree } from './read-dir.js';
 import { sourceTypeOf } from './read-source.js';
@@ -291,8 +292,10 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const prior = initial.mcp?.[name];
   const history =
     isPlainObject(prior) && Array.isArray(prior['history']) ? (prior['history'] as Receipt[]) : [];
-  if (previous !== undefined)
-    await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+  const oldTree =
+    previous === undefined
+      ? undefined
+      : await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
   if (previous !== undefined && resolve(previous.source) !== source)
     throw new Error(`this path is not ${name}'s recorded source; remove it first`);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
@@ -332,6 +335,8 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     `${previous === undefined ? 'Install' : 'Update'} MCP server ${name} in ${outsideLine(JSON.stringify(file))}\n`,
   );
   if (previous !== undefined) options.terminal.write(`Previous sha256:${previous.digest}\n`);
+  if (oldTree !== undefined)
+    for (const line of updateDiffLines(oldTree, made.tree)) options.terminal.write(`${line}\n`);
   options.terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );

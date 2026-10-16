@@ -96,7 +96,7 @@ describe('confirmed skill install', () => {
   it('updates docs with y/N, requires a digest for new capabilities, and keeps receipt history', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'More examples.\n');
+    await writeFile(join(f.source, 'README.md'), 'More examples.\n');
     const second = await addSkill('demo', f.options);
     expect(second.digest).not.toBe(first.digest);
     expect(f.prompts()).toBe(2);
@@ -112,7 +112,7 @@ describe('confirmed skill install', () => {
   it('records external drift and refuses removal until --force is given', async () => {
     const f = await setup();
     const added = await addSkill(f.source, f.options);
-    await writeFile(join(added.installedTo, 'notes.md'), 'an outside edit');
+    await writeFile(join(added.installedTo, 'README.md'), 'an outside edit');
     await expect(removeSkill('demo', f.options)).rejects.toThrow(/drift/);
     expect((await readPassports(f.options.stroqHome)).skills.demo!.status).toBe('drifted');
     await removeSkill('demo', { ...f.options, force: true });
@@ -166,12 +166,12 @@ describe('confirmed skill install', () => {
   it('keeps the old install when an update is refused', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'new docs');
+    await writeFile(join(f.source, 'README.md'), 'new docs');
     await expect(
       addSkill('demo', { ...f.options, terminal: { ...f.terminal, readLine: async () => 'n' } }),
     ).rejects.toThrow(/confirm/);
     expect((await readPassports(f.options.stroqHome)).skills.demo!.digest).toBe(first.digest);
-    await expect(readFile(join(first.installedTo, 'notes.md'))).rejects.toMatchObject({
+    await expect(readFile(join(first.installedTo, 'README.md'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
   });
@@ -196,11 +196,11 @@ describe('confirmed skill install', () => {
   it('rolls an update back if its lock cannot be written', async () => {
     const f = await setup();
     const added = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'new docs');
+    await writeFile(join(f.source, 'README.md'), 'new docs');
     vi.spyOn(lockModule, 'writePassports').mockRejectedValueOnce(new Error('disk refused'));
     await expect(addSkill('demo', f.options)).rejects.toThrow('disk refused');
     expect((await readPassports(f.options.stroqHome)).skills.demo!.digest).toBe(added.digest);
-    await expect(readFile(join(added.installedTo, 'notes.md'))).rejects.toMatchObject({
+    await expect(readFile(join(added.installedTo, 'README.md'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
     expect(await readFile(join(added.installedTo, 'SKILL.md'), 'utf8')).toContain('# Demo');
@@ -275,7 +275,7 @@ describe('confirmed skill install', () => {
       ...lock,
       mcp: { server: { kind: 'mcp', status: 'confirmed', digest: first.digest } },
     });
-    await writeFile(join(f.source, 'notes.md'), 'second revision');
+    await writeFile(join(f.source, 'README.md'), 'second revision');
     const second = await addSkill('demo', f.options);
     await removeSkill('demo', f.options);
     expect(
