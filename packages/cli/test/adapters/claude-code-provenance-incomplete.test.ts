@@ -70,7 +70,9 @@ describe('provenance when what a session read no longer fits', () => {
     const answer = await act(REAL);
 
     expect(answer.decision).toBe('ask');
-    expect(answer.reason).toContain(`stroq untaint --session ${SESSION}`);
+    // The read flagged the session, so untaint would clear far more than this one question.
+    expect(answer.reason).not.toContain('untaint');
+    expect(answer.reason).toMatch(/approve/i);
   });
 
   it('keeps denying while the read is still on record, just under the 2,000 kept', async () => {
