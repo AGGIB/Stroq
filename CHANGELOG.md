@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`stroq add` refuses an archive that holds a `node_modules` folder before it asks for a digest.** The stored copy leaves `node_modules` out, so a tarball made with bundled dependencies used to pass `vet` and the typed digest and then fail to install.
 
+- **`stroq vet --online` holds every redirect to the first request.** A redirect to another port of the allowed host, or to a URL with user information, is refused (the check compared the host name only), and a GitHub ref that is `.`, contains `..` or holds a path separator is refused instead of changing the address that is fetched.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

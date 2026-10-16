@@ -113,6 +113,13 @@ function parseNpmSource(spec: string): NpmSource {
   return { type: 'npm', name, version };
 }
 
+/**
+ * Whether a ref would change which address is fetched: `.` and `..` are collapsed by a URL, and a separator
+ * makes it a path. Checked where the source is read and again where the request is made.
+ */
+export const refChangesAddress = (ref: string): boolean =>
+  ref === '.' || ref.includes('..') || /[\\/]/.test(ref);
+
 const GITHUB_OWNER = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const GITHUB_REPO = /^[a-zA-Z0-9_.-]+$/;
 
@@ -156,6 +163,13 @@ function parseGitHubSource(spec: string): GitHubSource {
     }
     if (/[\p{Cc}\p{Cf}\p{Cs}\s]/u.test(ref)) {
       throw new SourceSyntaxError('ref cannot contain whitespace or control characters');
+    }
+    // `.` and `..` are collapsed by a URL, and a separator is a path: either changes which address is fetched
+    // while the ref that is recorded stays as written.
+    if (refChangesAddress(ref)) {
+      throw new SourceSyntaxError(
+        'ref cannot be "." or contain ".." or a path separator: it would change the address that is fetched',
+      );
     }
   }
 
