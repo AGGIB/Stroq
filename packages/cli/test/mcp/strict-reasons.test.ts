@@ -61,6 +61,13 @@ describe('countClass', () => {
       expect(countClass('unsolicited', method)).toBe('hostile');
   });
 
+  it('counts a log line or a progress message as benign only when it is a notification: one with an id is hostile', () => {
+    for (const method of ['notifications/message', 'notifications/progress']) {
+      expect(countClass('unsolicited', method, false)).toBe('benign');
+      expect(countClass('unsolicited', method, true)).toBe('hostile');
+    }
+  });
+
   it('classifies every reason there is', () => {
     for (const reason of WITHHOLD_REASONS)
       expect(['hostile', 'benign']).toContain(countClass(reason, 'x'));

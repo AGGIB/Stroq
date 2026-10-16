@@ -400,7 +400,7 @@ The default proxy scans the results it knows how to read and forwards everything
 **What counts toward which cap.**
 
 - Counts toward `--strict-max-withheld` (default 20), the malformed or hostile kind: `unparsable`, `invalid-shape`, `unknown-id`, `id-mismatch`, `oversize`, `unread-content`, `scan-failed`, and `unsolicited` for every method but the two below (sampling, elicitation and roots requests, a `list_changed` notification that carries anything).
-- Counts toward the separate cap of 1000, the kinds a benign server also produces: `scan-timeout`, `oversize-text`, `cloak-refused`, and `unsolicited` for `notifications/message` (MCP logging) and `notifications/progress` with a message.
+- Counts toward the separate cap of 1000, the kinds a benign server also produces: `scan-timeout`, `oversize-text`, `cloak-refused`, and `unsolicited` for `notifications/message` (MCP logging) and `notifications/progress` with a message, when they are notifications: a message with those names that has an `id` is a request, the server asking the client for something, and counts toward the hostile cap.
 
 Both are audited line by line, the message that crosses a cap included, so the audit a flood can write is bounded by the two caps together (plus one line each). A server that logs a great deal is not an attacker; one that sends a thousand log lines is flooding, and is ended all the same.
 

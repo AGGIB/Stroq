@@ -68,6 +68,53 @@ describe('the cap for malformed and hostile messages', () => {
   });
 });
 
+describe('a log line or a progress message that has an id', () => {
+  // A notification has no id. A message with one is a REQUEST that happens to use the
+  // name of a chatty method, and is the server asking the client for something.
+  const named = (method: string, id: unknown, n: number): string =>
+    JSON.stringify({ jsonrpc: '2.0', id, method, params: { n } });
+
+  it.each(['notifications/message', 'notifications/progress'])(
+    'counts a request named %s as hostile: it ends the server at the hostile cap',
+    async (method) => {
+      const rig = handlerRig({ maxWithheld: 3, maxBenign: 1000 });
+      for (let n = 1; n <= 3; n += 1) await rig.feed(named(method, n, n));
+      expect(rig.terminated()).toBe(0);
+      await rig.feed(named(method, 4, 4));
+      expect(rig.terminated()).toBe(1);
+    },
+  );
+
+  it('refuses such a request to the server, as it does any request it will not deliver', async () => {
+    const rig = handlerRig();
+    await rig.feed(named('notifications/message', 'r1', 1));
+    expect(rig.toServer).toEqual([
+      expect.objectContaining({ id: 'r1', error: expect.objectContaining({ code: -32601 }) }),
+    ]);
+  });
+
+  // Written out as text: `1e400` is not a number JSON.stringify can produce.
+  it.each([['{}'], ['null'], ['[]'], ['1e400']])(
+    'counts one with an id that is not even a usable id (%s) as hostile too',
+    async (id) => {
+      const rig = handlerRig({ maxWithheld: 1, maxBenign: 1000 });
+      const line = `{"jsonrpc":"2.0","id":${id},"method":"notifications/message"}`;
+      await rig.feed(line);
+      await rig.feed(line);
+      expect(rig.terminated()).toBe(1);
+    },
+  );
+
+  it('does not change a real notification, which stays benign', async () => {
+    const rig = handlerRig({ maxWithheld: 3, maxBenign: 1000 });
+    for (let n = 0; n < 12; n += 1)
+      await rig.feed(
+        JSON.stringify({ jsonrpc: '2.0', method: 'notifications/message', params: { n } }),
+      );
+    expect(rig.terminated()).toBe(0);
+  });
+});
+
 describe('the cap for the kinds a benign server also produces', () => {
   it('does not end a server for log lines, however many past the hostile limit', async () => {
     const rig = handlerRig({ maxWithheld: 2, maxBenign: 40 });

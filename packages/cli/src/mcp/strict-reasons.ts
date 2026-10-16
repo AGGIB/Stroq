@@ -62,9 +62,15 @@ const BENIGN_UNSOLICITED: ReadonlySet<string> = new Set([
   'notifications/progress',
 ]);
 
-export function countClass(reason: WithholdReason, method?: string): CountClass {
+/**
+ * `method` is the method of a message the server started and `hasId` says whether that
+ * message has an `id` member at all, usable or not. A log line or a progress message is
+ * chatty only as a NOTIFICATION: one with an id is a request, the server asking the
+ * client for something under the name of a harmless method, and it counts as hostile.
+ */
+export function countClass(reason: WithholdReason, method?: string, hasId = false): CountClass {
   if (BENIGN_REASONS.has(reason)) return 'benign';
-  if (reason === 'unsolicited' && method !== undefined && BENIGN_UNSOLICITED.has(method))
+  if (reason === 'unsolicited' && !hasId && method !== undefined && BENIGN_UNSOLICITED.has(method))
     return 'benign';
   return 'hostile';
 }

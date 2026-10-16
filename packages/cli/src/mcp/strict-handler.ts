@@ -174,10 +174,12 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       readonly answers?: TrackedRequest | null;
       readonly toServer?: Record<string, unknown>;
       readonly method?: string;
+      /** Whether the server-initiated message had an `id` member, usable or not. */
+      readonly hasId?: boolean;
     },
   ): Promise<void> {
     if (terminated) return;
-    const hostile = countClass(reason, options.method) === 'hostile';
+    const hostile = countClass(reason, options.method, options.hasId) === 'hostile';
     const count = hostile ? (hostileCount += 1) : (benignCount += 1);
     const limit = hostile ? maxWithheld : maxBenign;
     const answers = options.answers ?? null;
@@ -416,6 +418,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     if (forward !== null) return deps.toClient(forward);
     return withhold('unsolicited', {
       method: message.method,
+      hasId: Object.hasOwn(message.value, 'id'),
       toolName: toolOf('unsolicited_server_message'),
       summary: `withheld a server ${message.kind} (${describeMethod(message.method)})`,
       ...(message.kind === 'request' ? { toServer: refusedServerRequest(message.id) } : {}),
