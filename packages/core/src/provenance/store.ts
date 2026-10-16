@@ -1,4 +1,14 @@
-import { access, constants, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  constants,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
@@ -149,8 +159,42 @@ export class FileProvenanceStore implements ProvenanceStore {
   private async write(sessionId: string, records: readonly ProvenanceRecord[]): Promise<void> {
     const target = this.file(sessionId);
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmp, JSON.stringify(records), { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
-    await this.renameFile(tmp, target);
+    try {
+      await writeFile(tmp, JSON.stringify(records), { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
+      await this.renameFile(tmp, target);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /** The error from noting an eviction, or null: it is kept, not thrown, so the records still go in. */
+  private async tryNote(sessionId: string): Promise<unknown> {
+    try {
+      await this.markIncomplete(sessionId);
+      return null;
+    } catch (err) {
+      return err;
+    }
+  }
+
+  /**
+   * Makes the records file one that does not parse, by overwriting its first byte where it is.
+   * That needs no new space, so it works on a full disk, and a file that does not parse is what
+   * every lookup already fails closed on. It is what a loss that could not be noted leaves
+   * behind, until `clear` (untaint) starts the session over.
+   */
+  private async poison(sessionId: string): Promise<void> {
+    try {
+      const handle = await open(this.file(sessionId), 'r+');
+      try {
+        await handle.write('!', 0, 'utf8');
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      // No file to poison: nothing was recorded to lose.
+    }
   }
 
   async record(sessionId: string, inputs: readonly ProvenanceInput[]): Promise<void> {
@@ -165,8 +209,17 @@ export class FileProvenanceStore implements ProvenanceStore {
       const kept = all.slice(-MAX_RECORDS);
       // The note first, the records second: a crash between the two leaves a session
       // that says it is incomplete and is not, never one that is and does not say so.
-      if (kept.length < all.length) await this.markIncomplete(sessionId);
-      await this.write(sessionId, kept);
+      // A note that cannot be written (the disk is full) does not stop the records going in,
+      // and leaves the file failing closed, since nothing else would say a record was dropped.
+      const noteError = kept.length < all.length ? await this.tryNote(sessionId) : null;
+      let writeError: unknown = null;
+      try {
+        await this.write(sessionId, kept);
+      } catch (err) {
+        writeError = err;
+      }
+      if (noteError !== null) await this.poison(sessionId);
+      if (noteError !== null || writeError !== null) throw noteError ?? writeError;
     });
   }
 

@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rename as renameFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -325,5 +325,63 @@ describe('FileProvenanceStore pending marker', () => {
     const { dir, store } = fresh();
     await store.setPending('s1', true);
     expect(statSync(join(dir, `${sessionKey('s1')}.prov.pending`)).mode & 0o777).toBe(0o600);
+  });
+});
+
+// A disk that fills at the cap: the move that makes the note the real one fails, and the
+// directory can still be written to. Failing is not allowed to mean forgetting.
+describe('FileProvenanceStore when the note of an eviction cannot be written', () => {
+  const noSpace = () => Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+  const failingFor = (suffix: string) => {
+    const { dir } = fresh();
+    const rename: typeof renameFile = async (from, to) => {
+      if (String(to).endsWith(suffix)) throw noSpace();
+      await renameFile(from, to);
+    };
+    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+  };
+
+  it('still writes the records, and then fails closed on them, where the note would have been', async () => {
+    const { dir, store } = failingFor('.prov.incomplete');
+    await store.record('s1', batch('a', MAX_RECORDS));
+
+    await expect(store.record('s1', [input('b0')])).rejects.toThrow(/no space left/);
+
+    const raw = readFileSync(provFile(dir, 's1'), 'utf8');
+    expect(raw).toContain('"hash":"b0"');
+    await expect(store.lookup('s1', ['a0'])).rejects.toThrow(/corrupt provenance/);
+    await expect(store.record('s1', [input('c0')])).rejects.toThrow(/corrupt provenance/);
+  });
+
+  it('fails closed on the records that were there when neither file could be written', async () => {
+    const { dir } = fresh();
+    const full = new FileProvenanceStore(dir, undefined, async () => {
+      throw noSpace();
+    });
+    const plain = new FileProvenanceStore(dir);
+    await plain.record('s1', batch('a', MAX_RECORDS));
+
+    await expect(full.record('s1', [input('b0')])).rejects.toThrow(/no space left/);
+
+    await expect(plain.lookup('s1', ['a0'])).rejects.toThrow(/corrupt provenance/);
+  });
+
+  it('is cleared by clear(), which is what untaint calls', async () => {
+    const { store } = failingFor('.prov.incomplete');
+    await store.record('s1', batch('a', MAX_RECORDS));
+    await expect(store.record('s1', [input('b0')])).rejects.toThrow();
+
+    await store.clear('s1');
+
+    expect(await store.lookup('s1', ['a0'])).toEqual([]);
+    await expect(store.record('s1', [input('c0')])).resolves.toBeUndefined();
+  });
+
+  it('leaves a store whose notes are written alone', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('a', MAX_RECORDS));
+    await store.record('s1', [input('b0')]);
+    expect(await store.lookup('s1', ['b0'])).toHaveLength(1);
+    expect(await store.isIncomplete('s1')).toBe(true);
   });
 });
