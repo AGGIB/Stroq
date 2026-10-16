@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { classifySpecifier, scanModules } from '../../../src/install/inspect/module-specifiers.js';
-import { askNode, oracleAvailable, type Variant } from '../../helpers/node-oracle.js';
+import { askNode, nodeParses, oracleAvailable, type Variant } from '../../helpers/node-oracle.js';
 
 /**
  * The reader of module names against Node itself. Each snippet is run by a child node whose resolve hooks
@@ -25,6 +25,8 @@ interface Snippet {
   readonly asks: readonly string[];
   /** Also run it as a `.js` file under a `package.json` of the matching type. */
   readonly alsoAsJs?: true;
+  /** Syntax that only some versions of Node parse: where this one does not, Node asks for nothing. */
+  readonly needs?: 'source' | 'defer';
 }
 
 const script = (name: string, code: string, asks: readonly string[] = [NAME]): Snippet => ({
@@ -108,9 +110,8 @@ const SNIPPETS: readonly Snippet[] = [
   module_('import star', "import * as ns from 'zzpkg'"),
   module_('import for effect', "import 'zzpkg'"),
   module_('import with attributes', "import x from 'zzpkg' with { type: 'json' }"),
-  module_('import source phase', "import source x from 'zzpkg'"),
-  // Node 24 does not take the deferred phase; the reader reads it all the same.
-  module_('import defer', "import defer * as ns from 'zzpkg'", []),
+  { ...module_('import source phase', "import source x from 'zzpkg'"), needs: 'source' },
+  { ...module_('import defer', "import defer * as ns from 'zzpkg'"), needs: 'defer' },
   module_('export star', "export * from 'zzpkg'"),
   module_('export star as', "export * as ns from 'zzpkg'"),
   module_('export names', "export { a } from 'zzpkg'"),
@@ -179,8 +180,17 @@ const covers = (code: string, name: string): boolean => {
   return scan.concerns.length > 0 || scan.specifiers.includes(name);
 };
 
+/** The names as a set: Node asks twice for a module that two statements of one file both name. */
+const setOf = (names: readonly string[]): string[] => [...new Set(names)].sort();
+
 describe.skipIf(!oracleAvailable)('the reader of module names against Node', () => {
   it('asks Node about every snippet and gets answers it can compare', async () => {
+    // Syntax that only some versions of Node take is asked of this Node first, so that a row is held to
+    // what this Node does and not to what another one did.
+    const parses = {
+      source: await nodeParses("import source x from 'zzprobe'"),
+      defer: await nodeParses("import defer * as ns from 'zzprobe'"),
+    };
     const jobs = SNIPPETS.flatMap((snippet) =>
       variantsOf(snippet).map((variant) => ({ snippet, variant })),
     );
@@ -199,20 +209,24 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
 
     const problems: string[] = [];
     for (const { snippet, variant } of jobs) {
-      const names = bare(asked.get(`${snippet.name}|${variant}`) ?? []).sort();
+      const names = setOf(bare(asked.get(`${snippet.name}|${variant}`) ?? []));
       const label = `${snippet.name} (${variant})`;
+      const supported = snippet.needs === undefined || parses[snippet.needs];
+      const expected = supported ? setOf(snippet.asks) : [];
       // The oracle saw what the table says it should: a snippet that Node cannot run is part of the table.
-      if (JSON.stringify(names) !== JSON.stringify([...snippet.asks].sort()))
+      if (JSON.stringify(names) !== JSON.stringify(expected))
         problems.push(
-          `${label}: Node asked for ${JSON.stringify(names)}, the table says ${JSON.stringify(snippet.asks)}`,
+          `${label}: Node asked for ${JSON.stringify(names)}, the table says ${JSON.stringify(expected)}`,
         );
       // The reader reports each of them, or flags the file.
       for (const name of names)
         if (!covers(snippet.code, name)) problems.push(`${label}: the reader missed ${name}`);
+      // A row about syntax that this Node does not take still has to be read by the reader.
+      if (!supported) expect(covers(snippet.code, NAME), `${label}: read all the same`).toBe(true);
     }
 
     expect(problems).toEqual([]);
-  }, 120_000);
+  }, 300_000);
 
   it('finds a known import in random harmless noise, as Node does', async () => {
     const noise = [
@@ -270,5 +284,5 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
       ),
       { numRuns: 30 },
     );
-  }, 120_000);
+  }, 300_000);
 });

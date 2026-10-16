@@ -33,7 +33,8 @@ registerHooks({
 });
 `;
 
-const CASE_TIMEOUT_MS = 20_000;
+/** A child that has not finished by then is reported as such: an empty log would read as "Node asked for nothing". */
+export const CASE_TIMEOUT_MS = 90_000;
 const roots: string[] = [];
 let ready: Promise<string> | null = null;
 
@@ -63,9 +64,26 @@ function run(entry: string, log: string): Promise<void> {
       { env, stdio: 'ignore', timeout: CASE_TIMEOUT_MS },
     );
     child.on('error', reject);
-    // The exit code is not asked about: a snippet may well end in an error after the imports it makes.
-    child.on('close', () => resolve());
+    // The exit code is not asked about: a snippet may well end in an error after the imports it makes. A child
+    // that was killed for taking too long is: what it logged is not what Node would have asked.
+    child.on('close', (_code, signal) =>
+      signal === null
+        ? resolve()
+        : reject(
+            new Error(
+              `node was stopped (${signal}) after ${CASE_TIMEOUT_MS} ms; its log is not an answer`,
+            ),
+          ),
+    );
   });
+}
+
+/**
+ * Whether this Node parses a syntax that only some versions have (`import source x from '...'`, `import defer *
+ * as ns from '...'`): asked of Node itself, by whether it resolves the module the statement names.
+ */
+export async function nodeParses(statement: string): Promise<boolean> {
+  return (await askNode(statement, 'mjs')).includes('zzprobe');
 }
 
 /** Every specifier Node asked to resolve from `code`, in the order it asked. */
