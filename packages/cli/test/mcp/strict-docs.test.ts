@@ -74,6 +74,10 @@ describe('the --strict section of docs/AGENTS.md', () => {
     for (const escape of ['\\u2028', '\\u2029', '\\u0085']) expect(section).toContain(escape);
   });
 
+  it('says that the messages it forwards on the server\u2019s initiative are neither counted nor audited', () => {
+    expect(section).toContain('are not counted, audited or rate-limited');
+  });
+
   it('says why the views are separate texts and that the default proxy’s own text is one', () => {
     expect(section).toContain('the same reader, unchanged');
     expect(section).toContain('at least what the default scans');
