@@ -13,7 +13,7 @@ import {
   type McpMessage,
   type SplitLine,
 } from './framing.js';
-import { withWarningBlock, type McpContext } from './judge.js';
+import { appendBlocks, type McpContext } from './judge.js';
 import type { StrictLedger, TrackedRequest } from './strict-ledger.js';
 import { STRICT_MAX_BENIGN_WITHHELD } from './strict-limits.js';
 import { describeMethod, forwardableServerMessage } from './strict-messages.js';
@@ -122,13 +122,23 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * Ends the server. The process is stopped FIRST: everything after is a write to a
    * client that may have stopped reading, and a write that never finishes must not be
    * what keeps a hostile server alive. Then it says why (audit, stderr) and answers
-   * every request still waiting.
+   * every request still waiting. `crossing` is the message that went over the cap: it is
+   * audited like the ones before it, so the log shows which one was the last.
    */
-  async function endServer(also: TrackedRequest | null, limit: number): Promise<void> {
+  async function endServer(
+    also: TrackedRequest | null,
+    limit: number,
+    crossing: {
+      readonly reason: WithholdReason;
+      readonly toolName: string;
+      readonly summary: string;
+    },
+  ): Promise<void> {
     terminated = true;
     endedAtLimit = limit;
     const waiting = [...(also === null ? [] : [also]), ...ledger.drain()];
     deps.terminate();
+    await audit(crossing.reason, crossing.toolName, crossing.summary);
     try {
       await denyDirectly(
         {
@@ -171,7 +181,12 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     const count = hostile ? (hostileCount += 1) : (benignCount += 1);
     const limit = hostile ? maxWithheld : maxBenign;
     const answers = options.answers ?? null;
-    if (count > limit) return endServer(answers, limit);
+    if (count > limit)
+      return endServer(answers, limit, {
+        reason,
+        toolName: options.toolName,
+        summary: options.summary,
+      });
     await audit(reason, options.toolName, options.summary);
     if (options.toServer !== undefined) deps.toServer(options.toServer);
     if (answers !== null) await deps.toClient(withheldResponse(answers.id, reason));
@@ -351,10 +366,8 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       result = done.result;
       notice = done.notice;
     }
-    if (isRecord(result) && entry.method === 'tools/call') {
-      if (warning !== null) result = withWarningBlock(result, warning);
-      if (notice !== null) result = withWarningBlock(result as Record<string, unknown>, notice);
-    }
+    if (isRecord(result) && entry.method === 'tools/call')
+      result = appendBlocks(result, [warning, notice]);
     return send(entry, { ...value, result });
   }
 

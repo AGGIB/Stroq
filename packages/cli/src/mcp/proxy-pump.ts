@@ -26,7 +26,7 @@ import {
   mcpMethodToolName,
   refuseBatch,
   scanMcpResult,
-  withWarningBlock,
+  appendBlocks,
   type McpContext,
 } from './judge.js';
 
@@ -488,9 +488,10 @@ export function createPump(deps: PumpDeps): Pump {
     // `cloaked` came from `result`, which `isRecord` already accepted, and
     // `mapStrings` preserves the shape — so this is a record whenever either branch
     // above put something in it.
-    let out = isRecord(cloaked) ? cloaked : (result as Record<string, unknown>);
-    if (warns && warning !== null) out = withWarningBlock(out, warning);
-    if (notice !== null) out = withWarningBlock(out, notice);
+    const out = appendBlocks(isRecord(cloaked) ? cloaked : (result as Record<string, unknown>), [
+      warns ? warning : null,
+      notice,
+    ]);
     return replyFromResult({ ...message.value, result: out });
   }
 

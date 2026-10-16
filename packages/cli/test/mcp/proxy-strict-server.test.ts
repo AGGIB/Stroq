@@ -99,8 +99,9 @@ describe('a server that withholds too much', () => {
     expect(await rig.done).toBe(1);
     expect(rig.stderr()).toContain('strict mode ended the server');
     const ids = rig.ruleIds();
+    // The limit's worth, and the one message past it that ended the server: all audited.
     expect(ids.filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(
-      DEFAULT_STRICT_MAX_WITHHELD,
+      DEFAULT_STRICT_MAX_WITHHELD + 1,
     );
     expect(ids.filter((id) => id === 'mcp-strict-terminated')).toHaveLength(1);
   }, 60_000);
@@ -132,7 +133,7 @@ describe('a server that withholds too much', () => {
     const answer = await rig.answerFor(3);
     expect(errorText(answer)).toContain('more than 30 withheld');
     expect(await rig.done).toBe(1);
-    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(30);
+    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(31);
   }, 60_000);
 
   it('does not count what it forwards or what the client asked for', async () => {

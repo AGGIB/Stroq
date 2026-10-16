@@ -508,6 +508,14 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
     process.stdout.write(`unknown agent "${agent}" (supported: ${INIT_AGENTS.join(', ')})\n`);
     return 1;
   }
+  // `--strict` is the MCP proxy's. Accepted and ignored for any other agent, it would
+  // leave a user believing something is stricter than it is.
+  if (values.strict === true && agent !== 'mcp') {
+    process.stdout.write(
+      `--strict applies to --agent mcp only: it makes the MCP proxy withhold what it cannot fully scan, and ${agent} has no proxy. Nothing was changed.\n`,
+    );
+    return 1;
+  }
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
   const node = process.execPath;

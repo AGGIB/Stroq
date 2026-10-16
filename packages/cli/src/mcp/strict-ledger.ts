@@ -1,4 +1,4 @@
-import type { JsonRpcId } from './framing.js';
+import { keyOf, type JsonRpcId } from './framing.js';
 import { STRICT_CANCELLED_MEMORY, STRICT_MAX_TRACKED } from './strict-limits.js';
 
 /**
@@ -15,8 +15,6 @@ export interface TrackedRequest {
   /** The `mcp__<server>__<tool>` name the request is audited and scanned under. */
   readonly toolName: string;
 }
-
-const keyOf = (id: JsonRpcId): string => (typeof id === 'string' ? `s:${id}` : `n:${id}`);
 
 /** The key a response id would have under the other type, when the two spell the same value. */
 function otherTypeKey(id: JsonRpcId): string | null {

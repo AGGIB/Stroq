@@ -413,6 +413,12 @@ export function countWrapped(config: McpConfigJson): McpProxyCount {
   return { wrapped, stdio: stdio.length, stale, unfiltered };
 }
 
+/** True when this config entry is Stroq's wrapper and runs with `--strict`. */
+export const entryRunsStrict = (entry: unknown): boolean =>
+  isPlainObject(entry) &&
+  !hasInvalidArgs(entry) &&
+  wrapperStrictArgs(argsOf(entry)).includes('--strict');
+
 /**
  * How many of the wrappers `countWrapped` counts as protected also run in strict mode,
  * so `doctor` can show them apart. A separate count, not a field of `McpProxyCount`:

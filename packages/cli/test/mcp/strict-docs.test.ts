@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { MCP_STRICT_NOTE } from '../../src/commands/init-mcp.js';
 import { commandHelp } from '../../src/help.js';
+import { MAX_LINE_CHARS } from '../../src/mcp/framing.js';
 import {
   DEFAULT_STRICT_MAX_WITHHELD,
   STRICT_MAX_BENIGN_WITHHELD,
+  STRICT_MAX_TEXT_CHARS,
   STRICT_SCAN_DEADLINE_MS,
 } from '../../src/mcp/strict-limits.js';
 import { FORWARDED_SERVER_METHODS } from '../../src/mcp/strict-messages.js';
@@ -78,5 +81,32 @@ describe('the --strict section of docs/AGENTS.md', () => {
       expect(benign).toContain('`notifications/message`');
       expect(benign).toContain('`notifications/progress`');
     });
+  });
+});
+
+describe('the note `stroq init --agent mcp --strict` prints', () => {
+  it('states the numbers the code uses, not numbers typed twice', () => {
+    expect(MCP_STRICT_NOTE).toContain(
+      `more than ${DEFAULT_STRICT_MAX_WITHHELD} malformed or hostile`,
+    );
+    expect(MCP_STRICT_NOTE).toContain(`${STRICT_MAX_BENIGN_WITHHELD} for log lines`);
+    expect(MCP_STRICT_NOTE).toContain(`above ${MAX_LINE_CHARS / (1024 * 1024)} MiB`);
+  });
+
+  it('says what it costs and what it is not', () => {
+    expect(MCP_STRICT_NOTE).toContain('not a sandbox');
+    expect(MCP_STRICT_NOTE).toContain('--unwrap');
+    expect(MCP_STRICT_NOTE).toContain('byte for byte');
+    expect(MCP_STRICT_NOTE).toContain('keeps it on');
+  });
+});
+
+describe('the sizes the client is told about when a message is withheld', () => {
+  it('are the real ones', async () => {
+    const { withheldMessage } = await import('../../src/mcp/strict-reasons.js');
+    expect(withheldMessage('oversize')).toContain(`${MAX_LINE_CHARS / (1024 * 1024)} MiB`);
+    expect(withheldMessage('oversize-text')).toContain(
+      `${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')} characters`,
+    );
   });
 });

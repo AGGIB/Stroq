@@ -3,6 +3,7 @@ import {
   WITHHOLD_REASONS,
   countClass,
   refusedServerRequest,
+  withheldMessage,
 } from '../../src/mcp/strict-reasons.js';
 
 describe('refusedServerRequest', () => {
@@ -63,5 +64,28 @@ describe('countClass', () => {
   it('classifies every reason there is', () => {
     for (const reason of WITHHOLD_REASONS)
       expect(['hostile', 'benign']).toContain(countClass(reason, 'x'));
+  });
+});
+
+describe('withheldMessage', () => {
+  it('says what the default proxy would have done, and for --cloak that is not forward it', () => {
+    // Plain --cloak DROPS a result it cannot cloak and leaves the request unanswered.
+    expect(withheldMessage('cloak-refused')).not.toContain('forwarded');
+    expect(withheldMessage('cloak-refused')).toContain('--cloak');
+    expect(withheldMessage('cloak-refused')).toContain('dropped');
+    for (const reason of WITHHOLD_REASONS.filter((r) => r !== 'cloak-refused'))
+      expect(withheldMessage(reason)).toContain('would have forwarded it');
+  });
+
+  it('takes its sizes from the constants, not from numbers typed twice', () => {
+    expect(withheldMessage('oversize')).toContain('8 MiB');
+    expect(withheldMessage('oversize-text')).toContain('200,000 characters');
+  });
+
+  it('never carries a word that is not its own', () => {
+    for (const reason of WITHHOLD_REASONS)
+      expect(withheldMessage(reason)).toMatch(
+        /^Stroq strict mode withheld this server response \(/,
+      );
   });
 });

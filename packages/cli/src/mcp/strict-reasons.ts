@@ -1,6 +1,6 @@
 import type { Decision } from '@stroq/core';
-import type { JsonRpcId } from './framing.js';
-import { STRICT_ERROR_CODE, STRICT_ID_CHARS } from './strict-limits.js';
+import { MAX_LINE_CHARS, type JsonRpcId } from './framing.js';
+import { STRICT_ERROR_CODE, STRICT_ID_CHARS, STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 
 /**
  * Why strict mode withheld a server message. Each class has ONE fixed sentence, used
@@ -26,12 +26,14 @@ export const WITHHOLD_REASONS = [
 
 export type WithholdReason = (typeof WITHHOLD_REASONS)[number];
 
+const MIB = 1024 * 1024;
+
 const EXPLANATION: Readonly<Record<WithholdReason, string>> = {
-  oversize: 'the message is larger than the proxy reads (8 MiB)',
+  oversize: `the message is larger than the proxy reads (${MAX_LINE_CHARS / MIB} MiB)`,
   unparsable: 'the message is not valid JSON',
   'invalid-shape': 'the message does not have the shape of an MCP message of that kind',
   'unread-content': 'the message carries content Stroq does not read',
-  'oversize-text': 'the message carries more text than Stroq scans (200,000 characters)',
+  'oversize-text': `the message carries more text than Stroq scans (${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')} characters)`,
   'scan-failed': 'Stroq could not finish reading the message',
   'scan-timeout': 'scanning the message took longer than the time Stroq allows',
   'id-mismatch': 'the message answers with a request id of a different type than the request',
@@ -67,10 +69,21 @@ export function countClass(reason: WithholdReason, method?: string): CountClass 
   return 'hostile';
 }
 
+/**
+ * What the default proxy would have done with the message, so the client can tell what
+ * strict mode changed. It forwards almost everything it cannot read; `--cloak` alone is
+ * the exception, which DROPS a result it cannot mask and leaves the request unanswered.
+ */
+const WITHOUT_STRICT: Readonly<Partial<Record<WithholdReason, string>>> = {
+  'cloak-refused':
+    'Without --strict, --cloak alone would have dropped it and left the request unanswered.',
+};
+const WITHOUT_STRICT_DEFAULT = 'Without --strict the default proxy would have forwarded it.';
+
 /** The sentence the client reads when its request was withheld. Fixed per reason. */
 export const withheldMessage = (reason: WithholdReason): string =>
   `Stroq strict mode withheld this server response (${reason}): ${EXPLANATION[reason]}. ` +
-  'Nothing the server sent for this request was delivered. Without --strict it would have been forwarded unscanned.';
+  `Nothing the server sent for this request was delivered. ${WITHOUT_STRICT[reason] ?? WITHOUT_STRICT_DEFAULT}`;
 
 /** The JSON-RPC error answering request `id`, for a response strict mode withheld. */
 export const withheldResponse = (

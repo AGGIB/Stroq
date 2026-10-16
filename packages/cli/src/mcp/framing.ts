@@ -267,7 +267,8 @@ export interface PendingRequest {
  */
 export const MAX_PENDING = 4096;
 
-const keyOf = (id: JsonRpcId): string => (typeof id === 'string' ? `s:${id}` : `n:${id}`);
+/** The key a request id is filed under: string ids and number ids are separate namespaces. */
+export const keyOf = (id: JsonRpcId): string => (typeof id === 'string' ? `s:${id}` : `n:${id}`);
 
 export class PendingTable {
   private readonly entries = new Map<string, PendingRequest>();
