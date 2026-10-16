@@ -9,11 +9,8 @@ import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
 import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
-import {
-  candidatesOfVariants,
-  excerptRedactor,
-  percentDecodedLeniently,
-} from './provenance/excerpt.js';
+import { MAX_STORED_CHARS, ProvenanceRecorder } from './provenance/record.js';
+import { percentDecodedLeniently } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
@@ -209,7 +206,6 @@ export function scanFieldsForTool(
 const INSTRUCTION_WRITE_THRESHOLD = 0.4;
 
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
-const MAX_STORED_CHARS = 120;
 
 /** Action classes that send data somewhere: the only ones checked for secret values. */
 const EGRESS_CLASSES: readonly ActionClass[] = [
@@ -225,22 +221,11 @@ const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
 
 /** What the provenance store knew about the atoms of one proposed action. */
 interface ProvenanceLookup {
-  readonly hits: ProvenanceHit[];
+  readonly hits: readonly ProvenanceHit[];
   /** Atoms with no record, while the session's records are incomplete; empty otherwise. */
-  readonly unrecorded: Atom[];
+  readonly unrecorded: readonly Atom[];
 }
 const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [] };
-
-/** What recording one result's provenance came to: the failure, and whether evidence was lost. */
-interface ProvenanceOutcome {
-  readonly error: string | null;
-  readonly incomplete: boolean;
-}
-
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
-/** The most atoms the audit names as unverifiable: enough to say what, not a copy of the command. */
-const MAX_GAPS_AUDITED = 3;
 
 /**
  * The secret guard's verdict on one action: the known values found in its arguments,
@@ -357,7 +342,11 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
 }
 
 export class StroqEngine {
-  constructor(private readonly opts: EngineOptions) {}
+  private readonly recorder: ProvenanceRecorder;
+
+  constructor(private readonly opts: EngineOptions) {
+    this.recorder = new ProvenanceRecorder(opts.provenance, opts.secrets);
+  }
 
   private now(): string {
     return (this.opts.now ?? (() => new Date()))().toISOString();
@@ -449,86 +438,6 @@ export class StroqEngine {
   }
 
   /**
-   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted, clipped,
-   * and with every value the secret index knows taken out (see `excerptRedactor` for the
-   * spellings an atom can hold one in). The values are looked up in every form the atoms
-   * were read from. A failing index withholds the excerpt rather than storing it unchecked,
-   * and so does a result that holds too many known values to check.
-   */
-  private async safeExcerpts(text: string, cwd: string, atoms: readonly Atom[]): Promise<string[]> {
-    const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
-    const index = this.opts.secrets;
-    if (!index) return atoms.map((atom) => clip(atom.value));
-    try {
-      const matches = await index.lookup(candidatesOfVariants(text), cwd);
-      if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
-      const scrub = excerptRedactor(text, matches);
-      if (scrub === null) return atoms.map(() => '[REDACTED:too-many-secrets]');
-      return atoms.map((atom) => clip(scrub(atom)));
-    } catch {
-      return atoms.map(() => '[REDACTED:secret-index-unavailable]');
-    }
-  }
-
-  /**
-   * Notes that evidence for the session was lost, never throwing; the error message, or null.
-   * Called before the records of the same result are written, so the note is never later than
-   * the loss it describes.
-   */
-  private async noteIncomplete(store: ProvenanceStore, sessionId: string): Promise<string | null> {
-    try {
-      await store.markIncomplete(sessionId);
-      return null;
-    } catch (err) {
-      return messageOf(err);
-    }
-  }
-
-  /**
-   * Persists provenance for `atoms`, never throwing: recording is enrichment,
-   * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
-   * the caller the scan verdict and taint already computed in `post()`.
-   *
-   * Recording is also evidence, and what is not recorded reads, to a later lookup, as
-   * not read. So `lost` (the extraction left atoms out) and a failed write both mark the
-   * session incomplete, and only `stroq untaint` takes the mark off.
-   */
-  private async recordProvenance(
-    event: PostToolEvent,
-    summary: string,
-    atoms: readonly Atom[],
-    suspect: boolean,
-    lost: boolean,
-  ): Promise<ProvenanceOutcome> {
-    const store = this.opts.provenance;
-    if (!store) return { error: null, incomplete: false };
-    const noted = lost ? await this.noteIncomplete(store, event.sessionId) : null;
-    // Only a note that was written makes the session incomplete: one that could not be leaves
-    // it reading as it did, and the failure is the error that gets logged.
-    const marked = lost && noted === null;
-    if (atoms.length === 0) return { error: noted, incomplete: marked };
-    const source = redact(summary).slice(0, MAX_STORED_CHARS);
-    const excerpts = await this.safeExcerpts(event.toolResultText, event.cwd, atoms);
-    try {
-      await store.record(
-        event.sessionId,
-        atoms.map((atom, i) => ({
-          tool: event.toolName,
-          source,
-          kind: atom.kind,
-          hash: atomHash(atom),
-          excerpt: excerpts[i] ?? '',
-          suspect,
-        })),
-      );
-      return { error: noted, incomplete: marked };
-    } catch (err) {
-      const failed = await this.noteIncomplete(store, event.sessionId);
-      return { error: messageOf(err), incomplete: failed === null };
-    }
-  }
-
-  /**
    * Whether the text a write to an instruction file puts there trips a rule, scanned
    * as an instruction file would be when it is read back. Only the new text counts:
    * an Edit's `old_string` is what is being removed, and removing an injection is the
@@ -549,23 +458,6 @@ export class StroqEngine {
       { target: 'instruction_file' },
     );
     return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
-  }
-
-  /**
-   * The atoms no record accounts for, as the audit keeps them: kind and an excerpt scrubbed
-   * as a provenance record's is. An atom is cut from normalised text, so a known value sits in
-   * it lowercased and a plain redaction of the call's summary would miss it.
-   */
-  private async gapEvidence(
-    unverified: readonly Atom[],
-    event: PreToolEvent,
-  ): Promise<ProvenanceGap[]> {
-    const shown = unverified.slice(0, MAX_GAPS_AUDITED);
-    if (shown.length === 0) return [];
-    const command = event.toolInput['command'];
-    const text = typeof command === 'string' ? command : JSON.stringify(event.toolInput);
-    const excerpts = await this.safeExcerpts(text, event.cwd, shown);
-    return shown.map((atom, i) => ({ kind: atom.kind, excerpt: excerpts[i] ?? '' }));
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {
@@ -608,7 +500,7 @@ export class StroqEngine {
     // is that the session lost some, and the decision should not claim more than that.
     const policyDecision =
       origin.counted.length === 0 && unverified.length > 0
-        ? withIncompleteNote(evaluated, this.opts.policy, event.sessionId)
+        ? withIncompleteNote(evaluated, this.opts.policy, event.sessionId, state.taint !== null)
         : evaluated;
     const gated = await evaluateScope(this.opts.scope, {
       event,
@@ -618,7 +510,7 @@ export class StroqEngine {
     });
     const decision = gated?.decision ?? policyDecision;
     const provenance = origin.counted.map(toEvidence);
-    const gaps = await this.gapEvidence(unverified, event);
+    const gaps = await this.recorder.gaps(unverified, event);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
       event.cwd,
@@ -771,7 +663,7 @@ export class StroqEngine {
     // that length may have been cut off, and the atoms in the cut part were never seen.
     const lost =
       truncated || event.toolResultText.length >= DEFAULT_MAX_CHARS || event.resultUnread === true;
-    const recorded = await this.recordProvenance(
+    const recorded = await this.recorder.record(
       event,
       summary,
       atoms,

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MAX_CHARS,
   collectStrings,
   describeEvidence,
   describeSecretHit,
@@ -50,7 +51,9 @@ export type ClaudeHookEvent = z.input<typeof ClaudeHookInputSchema>;
 
 export const HIGH_IMPACT_TOOL =
   /^(Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
-const MAX_RESULT_CHARS = 200_000;
+// The engine reads a result of exactly this length as possibly cut short here, so every place
+// that clips a result clips at the one number (`DEFAULT_MAX_CHARS`, which the scan reads to).
+const MAX_RESULT_CHARS = DEFAULT_MAX_CHARS;
 
 export interface HookOutput {
   readonly stdout: string;

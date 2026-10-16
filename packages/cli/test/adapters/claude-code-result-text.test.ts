@@ -2,13 +2,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { FileProvenanceStore } from '@stroq/core';
+import { DEFAULT_MAX_CHARS, FileProvenanceStore } from '@stroq/core';
 import {
   handleClaudeHook,
   toolResultReading,
   toolResultToText,
 } from '../../src/adapters/claude-code.js';
 import { createEngine } from '../../src/engine-factory.js';
+import { MCP_MAX_RESULT_CHARS } from '../../src/mcp/mcp-result-text.js';
 import { sessionsDir } from '../../src/paths.js';
 
 beforeEach(() => {
@@ -81,6 +82,15 @@ describe('a result delivered as an object of string fields', () => {
   it('reports a serialised result anywhere in an array', () => {
     expect(toolResultReading(['text', { count: 3 }]).serialised).toBe(true);
     expect(toolResultReading(['text', 'more']).serialised).toBe(false);
+  });
+});
+
+// The engine treats a result of exactly DEFAULT_MAX_CHARS as possibly clipped, which is only
+// right while every place that clips a result clips at that length.
+describe('where a result is clipped', () => {
+  it('is the length the engine reads as a possible clip, for the hook and for the MCP proxy', () => {
+    expect(toolResultToText('x'.repeat(DEFAULT_MAX_CHARS + 5))).toHaveLength(DEFAULT_MAX_CHARS);
+    expect(MCP_MAX_RESULT_CHARS).toBe(DEFAULT_MAX_CHARS);
   });
 });
 

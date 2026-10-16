@@ -115,6 +115,19 @@ describe('a session whose records were evicted', () => {
     expect(r.decision.reason).toContain('stroq untaint --session s1');
   });
 
+  it('does not point at untaint when the session is tainted, since that clears the taint too', async () => {
+    const f = fixture();
+    await f.post(INJECTION);
+    await f.provenance.markIncomplete('s1');
+
+    const r = await f.pre(REAL);
+
+    expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+    expect(r.decision.reason).toMatch(/provenance .*incomplete/i);
+    expect(r.decision.reason).not.toContain('untaint');
+    expect(r.decision.reason).toMatch(/approve/i);
+  });
+
   it('keeps asking after a later short result, which does not make the loss any smaller', async () => {
     const f = fixture();
     await f.post(payload());
