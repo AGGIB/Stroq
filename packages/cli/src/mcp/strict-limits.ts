@@ -41,6 +41,14 @@ export const STRICT_SCAN_DEADLINE_MS = DEFAULT_BUDGET_MS;
 export const STRICT_MAX_QUEUED_LINES = 256;
 
 /**
+ * The same bound in text rather than in lines: about 32 MiB of queued server output. A
+ * line count is no bound on memory when a line can be 8 MiB (256 of them is 2 GiB, and a
+ * stalled scan measured 591 MiB held with 2 MiB lines), so the gate pauses at whichever
+ * of the two is reached first.
+ */
+export const STRICT_MAX_QUEUED_CHARS = 32 * 1024 * 1024;
+
+/**
  * The text a strict scan reads: the same 200,000 characters the default scan clips to.
  * Text beyond it is not read, so in strict mode a result that long is withheld rather
  * than delivered with its tail unread.

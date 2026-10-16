@@ -10,6 +10,7 @@ import { OrderedQueue, createPump, type StrictPumpDeps } from './proxy-pump.js';
 import { StrictLedger } from './strict-ledger.js';
 import {
   DEFAULT_STRICT_MAX_WITHHELD,
+  STRICT_MAX_QUEUED_CHARS,
   STRICT_MAX_QUEUED_LINES,
   STRICT_SCAN_DEADLINE_MS,
 } from './strict-limits.js';
@@ -168,18 +169,21 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   });
   // Strict mode only: the default proxy is bounded by write backpressure, which a
   // withheld (never written) line does not exercise. See `strict-queue.ts`.
-  const gate = strict === null ? null : createQueueGate(serverOut, STRICT_MAX_QUEUED_LINES);
+  const gate =
+    strict === null
+      ? null
+      : createQueueGate(serverOut, STRICT_MAX_QUEUED_LINES, STRICT_MAX_QUEUED_CHARS);
   const queueServerLine = (line: SplitLine): void => {
     if (gate === null) {
       toClient.run(() => pump.onServerLine(line));
       return;
     }
-    gate.enter();
+    gate.enter(line.text.length);
     toClient.run(async () => {
       try {
         await pump.onServerLine(line);
       } finally {
-        gate.leave();
+        gate.leave(line.text.length);
       }
     });
   };
