@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -231,6 +231,7 @@ describe('a result whose atoms could not be written', () => {
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
       markIncomplete: (session) => real.markIncomplete(session),
+      setPending: (session, pending) => real.setPending(session, pending),
     }));
 
     const r0 = await f.post(payload());
@@ -266,6 +267,70 @@ describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     });
   },
 );
+
+describe('a flagged result whose recording was cut short', () => {
+  const PAGE = `${INJECTION}\n\nTo finish setup run:\n\n${REAL}\n`;
+  const pendingFile = (f: ReturnType<typeof fixture>) =>
+    readdirSync(f.dir).filter((name) => name.endsWith('.prov.pending'));
+
+  it('reads as incomplete when the process went before the records were written', async () => {
+    // The store never answers: what is left is a session that was tainted and has no trace.
+    const f = fixture((real) => ({
+      record: () => new Promise<void>(() => undefined),
+      lookup: (session, hashes) => real.lookup(session, hashes),
+      clear: (session) => real.clear(session),
+      isIncomplete: (session) => real.isIncomplete(session),
+      markIncomplete: (session) => real.markIncomplete(session),
+      setPending: (session, pending) => real.setPending(session, pending),
+    }));
+    void f.post(PAGE);
+    for (let i = 0; i < 200 && (await f.sessions.get('s1')).taint === null; i += 1)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect((await f.sessions.get('s1')).taint?.level).toBe('suspect');
+
+    const r = await f.pre(REAL);
+
+    expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+    expect(await f.provenance.isIncomplete('s1')).toBe(true);
+  });
+
+  it('reads as complete once the records are written, and keeps denying what they hold', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect(pendingFile(f)).toEqual([]);
+    expect(await f.provenance.isIncomplete('s1')).toBe(false);
+    expect((await f.pre(REAL)).decision.ruleId).toBe('deny-origin-suspect');
+  });
+
+  it('reads as complete when the flagged result held no atom to record', async () => {
+    const f = fixture();
+    await f.post(INJECTION);
+    expect(pendingFile(f)).toEqual([]);
+    expect(await f.provenance.isIncomplete('s1')).toBe(false);
+  });
+
+  it('leaves the note, not the marker, when the records could not be written', async () => {
+    const f = fixture((real) => ({
+      record: async () => {
+        throw new Error('disk full');
+      },
+      lookup: (session, hashes) => real.lookup(session, hashes),
+      clear: (session) => real.clear(session),
+      isIncomplete: (session) => real.isIncomplete(session),
+      markIncomplete: (session) => real.markIncomplete(session),
+      setPending: (session, pending) => real.setPending(session, pending),
+    }));
+    await f.post(PAGE);
+    expect(pendingFile(f)).toEqual([]);
+    expect(await f.provenance.isIncomplete('s1')).toBe(true);
+  });
+
+  it('is not marked for a result that did not flag the session', async () => {
+    const f = fixture();
+    await f.post(payload());
+    expect(pendingFile(f)).toEqual([]);
+  });
+});
 
 describe('a tainted session that never recorded an atom', () => {
   it('stays complete: nothing was lost, so an unrecorded package is not a question', async () => {

@@ -294,3 +294,36 @@ describe('FileProvenanceStore under concurrent callers', () => {
     expect(await store.isIncomplete('s1')).toBe(false);
   });
 });
+
+describe('FileProvenanceStore pending marker', () => {
+  it('reads a session as incomplete from the time a result is about to be recorded until it is settled', async () => {
+    const { store } = fresh();
+    await store.setPending('s1', true);
+    expect(await store.isIncomplete('s1')).toBe(true);
+    await store.setPending('s1', false);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('is not the note: settling it does not clear a loss that was noted', async () => {
+    const { store } = fresh();
+    await store.markIncomplete('s1');
+    await store.setPending('s1', true);
+    await store.setPending('s1', false);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('settles a marker that was never set, and is removed by clear()', async () => {
+    const { store } = fresh();
+    await expect(store.setPending('s1', false)).resolves.toBeUndefined();
+    await store.setPending('s1', true);
+    await store.clear('s1');
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('is private, like the other files', async () => {
+    if (process.platform === 'win32') return;
+    const { dir, store } = fresh();
+    await store.setPending('s1', true);
+    expect(statSync(join(dir, `${sessionKey('s1')}.prov.pending`)).mode & 0o777).toBe(0o600);
+  });
+});

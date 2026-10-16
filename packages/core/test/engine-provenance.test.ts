@@ -179,6 +179,7 @@ describe('StroqEngine provenance', () => {
       clear: async () => {},
       isIncomplete: async () => false,
       markIncomplete: async () => {},
+      setPending: async () => {},
     };
     const e = new StroqEngine({
       rules: loadBundledRules(),

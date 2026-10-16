@@ -642,15 +642,18 @@ export class StroqEngine {
       summary,
       scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },
     });
-    const state =
-      scan.verdict === 'suspect' && !trusted
-        ? await this.opts.sessions.markSuspect(event.sessionId, {
-            tool: event.toolName,
-            ruleIds,
-            at: this.now(),
-            source,
-          })
-        : await this.opts.sessions.get(event.sessionId);
+    const taints = scan.verdict === 'suspect' && !trusted;
+    // The taint is written before the records, with a lookup and a lock between the two: a
+    // process that goes in that gap must not leave a session that is flagged and has no trace.
+    if (taints) await this.recorder.begin(event.sessionId);
+    const state = taints
+      ? await this.opts.sessions.markSuspect(event.sessionId, {
+          tool: event.toolName,
+          ruleIds,
+          at: this.now(),
+          source,
+        })
+      : await this.opts.sessions.get(event.sessionId);
     // Atoms come from the *normalized* text, exactly like the scan above and
     // like `atomsForAction` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the

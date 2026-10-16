@@ -81,6 +81,22 @@ export class ProvenanceRecorder {
   }
 
   /**
+   * Marks that a result which taints the session is about to be recorded. The taint is written
+   * first and the records after, with a secret-index lookup and a lock between; a process that
+   * goes in that gap would leave a session that is flagged and has no trace. Never throws: where
+   * the marker cannot be written the sessions directory is unwritable, which already reads as
+   * incomplete.
+   */
+  async begin(sessionId: string): Promise<void> {
+    await this.store?.setPending(sessionId, true).catch(() => undefined);
+  }
+
+  /** Takes the marker `begin` put on off again, whether or not the records were written. */
+  private async settle(store: ProvenanceStore, sessionId: string): Promise<void> {
+    await store.setPending(sessionId, false).catch(() => undefined);
+  }
+
+  /**
    * Persists provenance for `atoms`.
    *
    * Recording is also evidence, and what is not recorded reads, to a later lookup, as
@@ -100,7 +116,10 @@ export class ProvenanceRecorder {
     // Only a note that was written makes the session incomplete: one that could not be leaves
     // it reading as it did, and the failure is the error that gets logged.
     const marked = lost && noted === null;
-    if (atoms.length === 0) return { error: noted, incomplete: marked };
+    if (atoms.length === 0) {
+      await this.settle(store, event.sessionId);
+      return { error: noted, incomplete: marked };
+    }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
     const excerpts = await this.excerpts(event.toolResultText, event.cwd, atoms);
     try {
@@ -115,9 +134,11 @@ export class ProvenanceRecorder {
           suspect,
         })),
       );
+      await this.settle(store, event.sessionId);
       return { error: noted, incomplete: marked };
     } catch (err) {
       const failed = await this.note(store, event.sessionId);
+      await this.settle(store, event.sessionId);
       return { error: messageOf(err), incomplete: failed === null };
     }
   }

@@ -33,6 +33,13 @@ export interface ProvenanceStore {
    * `clear`: a later short result does not make an earlier loss any less of one.
    */
   markIncomplete(sessionId: string): Promise<void>;
+  /**
+   * Marks that a result is about to be recorded (`true`) and that it has been (`false`). While
+   * it is marked the session reads as incomplete: a process that goes between the two leaves
+   * the marker behind, where it would otherwise leave a session that was flagged and has no
+   * trace and no note. Unlike the note it is taken off by the one that put it on.
+   */
+  setPending(sessionId: string, pending: boolean): Promise<void>;
 }
 
 /** Oldest records are dropped beyond this many per session. */
@@ -46,6 +53,7 @@ const PRIVATE_DIR_MODE = 0o700;
  * flag; what is inside is for a person looking at the file.
  */
 const INCOMPLETE_SUFFIX = '.prov.incomplete';
+const PENDING_SUFFIX = '.prov.pending';
 const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'url',
   'host',
@@ -109,6 +117,10 @@ export class FileProvenanceStore implements ProvenanceStore {
     return join(this.dir, `${sessionKey(sessionId)}${INCOMPLETE_SUFFIX}`);
   }
 
+  private pendingFile(sessionId: string): string {
+    return join(this.dir, `${sessionKey(sessionId)}${PENDING_SUFFIX}`);
+  }
+
   private async read(sessionId: string): Promise<ProvenanceRecord[]> {
     let raw: string;
     try {
@@ -158,13 +170,12 @@ export class FileProvenanceStore implements ProvenanceStore {
     });
   }
 
-  async markIncomplete(sessionId: string): Promise<void> {
-    const target = this.incompleteFile(sessionId);
-    // Idempotent and monotonic, so it needs no lock: whoever writes it writes the same thing.
+  /** Writes a small file whose presence is the point, once, atomically and privately. */
+  private async writeNote(target: string, body: string): Promise<void> {
+    // Idempotent, so it needs no lock: whoever writes it writes the same thing.
     if (await exists(target)) return;
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    const body = JSON.stringify({ incomplete: true, since: this.now().toISOString() });
     try {
       await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
       await this.renameFile(tmp, target);
@@ -177,9 +188,26 @@ export class FileProvenanceStore implements ProvenanceStore {
     }
   }
 
+  async markIncomplete(sessionId: string): Promise<void> {
+    const body = JSON.stringify({ incomplete: true, since: this.now().toISOString() });
+    await this.writeNote(this.incompleteFile(sessionId), body);
+  }
+
+  async setPending(sessionId: string, pending: boolean): Promise<void> {
+    if (!pending) {
+      await rm(this.pendingFile(sessionId), { force: true });
+      return;
+    }
+    await this.writeNote(
+      this.pendingFile(sessionId),
+      JSON.stringify({ pending: true, since: this.now().toISOString() }),
+    );
+  }
+
   async isIncomplete(sessionId: string): Promise<boolean> {
     try {
       if (await exists(this.incompleteFile(sessionId))) return true;
+      if (await exists(this.pendingFile(sessionId))) return true;
       // A loss is noted by writing a file here. Where that cannot be done the note cannot
       // exist, and its absence says nothing.
       return !(await canWriteIn(this.dir));
@@ -199,6 +227,7 @@ export class FileProvenanceStore implements ProvenanceStore {
     await withLock(`${this.file(sessionId)}.lock`, async () => {
       await rm(this.file(sessionId), { force: true });
       await rm(this.incompleteFile(sessionId), { force: true });
+      await rm(this.pendingFile(sessionId), { force: true });
     });
   }
 }
