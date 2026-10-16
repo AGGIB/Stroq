@@ -329,6 +329,8 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
         },
         lookup: async () => [],
         clear: async () => {},
+        isIncomplete: async () => false,
+        markIncomplete: async () => {},
       },
     };
   }
