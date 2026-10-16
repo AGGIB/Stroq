@@ -423,6 +423,12 @@ export function extractAtomsDeep(text: string): Atom[] {
  * the continuation pass after it are skipped once the cap is full, and what they would have
  * added cannot be known without paying for the passes the cap exists to avoid. A result that
  * holds exactly that many is read as cut, which costs nothing real.
+ *
+ * The continuation pass is held to the same line window as the others. Joining indented
+ * lines can make a command longer than the window, with its package past the end of it, and
+ * it also makes a long indented block after any installer read as cut. Measured on the
+ * documentation corpus with every indented line joined, that was none of 293 matches in 121
+ * files.
  */
 export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
@@ -430,11 +436,8 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const seen = new Set<string>();
   const out: Atom[] = [];
   let truncated = cutText;
-  // `byLine` is false for the continuation pass: collapsing joins every indented line into
-  // one, so a line that runs past the window there is an artefact of the joining, and the
-  // pass over the text as it was written has already read each of those lines on its own.
-  const merge = (extraction: Extraction, byLine = true): void => {
-    truncated = truncated || extraction.capped || (byLine && extraction.lineCut);
+  const merge = (extraction: Extraction): void => {
+    truncated = truncated || extraction.capped || extraction.lineCut;
     for (const atom of extraction.atoms) {
       if (out.length >= MAX_ATOMS) return;
       const key = atomHash(atom);
@@ -452,7 +455,7 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   if (out.length < MAX_ATOMS) {
     const collapsed = collapseContinuations(bounded);
     if (collapsed !== bounded) {
-      merge(extractBounded(collapsed), false);
+      merge(extractBounded(collapsed));
     }
   }
 

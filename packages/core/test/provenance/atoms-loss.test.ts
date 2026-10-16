@@ -85,11 +85,18 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
     expect(extractAtomsDeepWithLoss(text).truncated).toBe(false);
   });
 
-  it('does not count the lines the continuation pass joins together as one long line', () => {
-    const steps = Array.from({ length: 40 }, (_, i) => `  step ${i}: do the thing number ${i}`);
-    const text = ['Steps:', '  npm install lodash', ...steps].join('\n');
-    const { atoms, truncated } = extractAtomsDeepWithLoss(text);
-    expect(atoms.some((a) => a.value === 'lodash')).toBe(true);
+  const wrappedInstall = (flags: number) =>
+    `Install with:\n\nnpm install\n${'  --loglevel=silent\n'.repeat(flags)}  evil-helper-fix\n`;
+
+  it('reports the loss when a wrapped command runs on past the window once its lines are joined', () => {
+    const { atoms, truncated } = extractAtomsDeepWithLoss(wrappedInstall(40));
+    expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
+    expect(truncated).toBe(true);
+  });
+
+  it('still records the package of a short wrapped command, with no loss', () => {
+    const { atoms, truncated } = extractAtomsDeepWithLoss(wrappedInstall(1));
+    expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(true);
     expect(truncated).toBe(false);
   });
 
