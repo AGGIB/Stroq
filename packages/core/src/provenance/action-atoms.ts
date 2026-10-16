@@ -172,16 +172,21 @@ function counts(atom: Atom, networkShaped: boolean): boolean {
   return ALWAYS_COUNTED.includes(atom.kind) || networkShaped;
 }
 
-/** The atoms of `atoms` that count towards the origin of an action of these `classes`. */
-export function countingAtoms(atoms: readonly Atom[], classes: readonly ActionClass[]): Atom[] {
-  const networkShaped = isNetworkShaped(classes);
-  return atoms.filter((atom) => counts(atom, networkShaped));
+/**
+ * The atoms that can raise the floor of a session whose records are incomplete: packages,
+ * pipe-to-shell and encoded blobs. A URL or host never does, however network-shaped the
+ * action: a flagged record that was lost has already tainted the session, and a tainted
+ * session denies network commands, so the floor there would only ask about every `curl`
+ * and `ssh` of an unflagged one.
+ */
+export function floorAtoms(atoms: readonly Atom[]): Atom[] {
+  return atoms.filter((atom) => ALWAYS_COUNTED.includes(atom.kind));
 }
 
 /**
  * The `origin.*` classes of an action, from the records its atoms matched (`hits`) and
- * from `unverified`: atoms that count for the action, that no record holds, in a session
- * whose records are known to be incomplete (see `countingAtoms` for which count).
+ * from `unverified`: atoms that can raise the floor, that no record holds, in a session
+ * whose records are known to be incomplete (see `floorAtoms` for which can).
  *
  * A record that matches keeps its class, `origin.suspect` included. An unverified atom is
  * `origin.untrusted` and never `origin.suspect`: the loss says the source cannot be ruled

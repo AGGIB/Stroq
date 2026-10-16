@@ -7,7 +7,7 @@ import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
-import { atomsForAction, countingAtoms, originClasses } from './provenance/action-atoms.js';
+import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
 import {
   candidatesOfVariants,
@@ -566,7 +566,7 @@ export class StroqEngine {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const lookup = await this.findProvenance(event);
-    const unverified = countingAtoms(lookup.unrecorded, classification.classes);
+    const unverified = floorAtoms(lookup.unrecorded);
     const origin = originClasses(lookup.hits, classification.classes, unverified);
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
