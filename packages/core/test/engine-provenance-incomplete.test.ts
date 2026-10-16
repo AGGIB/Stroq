@@ -283,6 +283,23 @@ describe('the audit entry of an action no record accounts for', () => {
   });
 });
 
+describe('a result the adapter could not read text out of', () => {
+  it('marks the session, so the next unrecorded package is a question', async () => {
+    const f = fixture();
+    const r = await f.engine.post({
+      sessionId: 's1',
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example.test/' },
+      toolResultText: '{"bytes":12}',
+      resultUnread: true,
+      cwd,
+    });
+    expect(r.provenanceIncomplete).toBe(true);
+    expect(await f.provenance.isIncomplete('s1')).toBe(true);
+    expect((await f.pre('npx some-helper')).decision.ruleId).toBe('ask-origin-untrusted');
+  });
+});
+
 describe('what an incomplete session does not change', () => {
   const incomplete = async () => {
     const f = fixture();

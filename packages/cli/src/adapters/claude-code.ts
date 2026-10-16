@@ -1,4 +1,5 @@
 import {
+  collectStrings,
   describeEvidence,
   describeSecretHit,
   toEvidence,
@@ -138,23 +139,55 @@ function streamsOf(obj: Record<string, unknown>): string | null {
   return parts.join('\n');
 }
 
-function objectToText(obj: Record<string, unknown>): string {
-  if (typeof obj['text'] === 'string') return obj['text'];
+/** The text of a tool result, and whether it had to be serialised because it held none. */
+export interface ResultReading {
+  readonly text: string;
+  readonly serialised: boolean;
+}
+
+const plain = (value: string): ResultReading => ({ text: value, serialised: false });
+
+/**
+ * An object that is none of the shapes above, read as the string values in it, one to a line.
+ * A web fetch's result is such an object (`{bytes, code, codeText, result, durationMs, url}`),
+ * and serialised it turned every line break in the page into the two characters backslash and
+ * `n`: the line-start patterns of provenance and the rules then missed what the page said.
+ * Only an object with no string at all is serialised.
+ */
+function objectReading(obj: Record<string, unknown>): ResultReading {
+  if (typeof obj['text'] === 'string') return plain(obj['text']);
   const file = fileContentOf(obj);
-  if (file !== null) return file;
+  if (file !== null) return plain(file);
   const streams = streamsOf(obj);
-  if (streams !== null) return streams;
-  if (Array.isArray(obj['content'])) return toolResultToText(obj['content']);
-  return JSON.stringify(obj);
+  if (streams !== null) return plain(streams);
+  if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
+  const strings = collectStrings(obj).filter((value) => value !== '');
+  if (strings.length > 0) return plain(strings.join('\n'));
+  return { text: JSON.stringify(obj), serialised: true };
+}
+
+export function toolResultReading(result: unknown): ResultReading {
+  if (typeof result === 'string') return plain(clip(result));
+  if (Array.isArray(result)) {
+    const parts = result.map(toolResultReading);
+    return {
+      text: clip(parts.map((part) => part.text).join('\n')),
+      serialised: parts.some((part) => part.serialised),
+    };
+  }
+  if (result && typeof result === 'object') {
+    const reading = objectReading(result as Record<string, unknown>);
+    return { ...reading, text: clip(reading.text) };
+  }
+  return plain(result === undefined || result === null ? '' : String(result));
 }
 
 export function toolResultToText(result: unknown): string {
-  if (typeof result === 'string') return clip(result);
-  if (Array.isArray(result)) return clip(result.map(toolResultToText).join('\n'));
-  if (result && typeof result === 'object')
-    return clip(objectToText(result as Record<string, unknown>));
-  return result === undefined || result === null ? '' : String(result);
+  return toolResultReading(result).text;
 }
+
+/** Tools whose output is prose: a result of one that held no text is not a result Stroq has read. */
+const PROSE_TOOL = /^(WebFetch|WebSearch|Grep)$/;
 
 function preOutput(decision: 'deny' | 'ask', reason: string): HookOutput {
   return {
@@ -206,10 +239,14 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const failed = input.hook_event_name === 'PostToolUseFailure';
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
+  const reading = toolResultReading(response);
   const result = await engine.post({
     ...base,
     ...(failed ? { resultFailed: true as const } : {}),
-    toolResultText: toolResultToText(response),
+    toolResultText: reading.text,
+    ...(reading.serialised && PROSE_TOOL.test(input.tool_name)
+      ? { resultUnread: true as const }
+      : {}),
     // No result field at all is not an empty result: it is a payload shape this
     // adapter does not know, and the audit says so instead of recording a clean scan.
     ...(response === undefined ? { resultMissing: Object.keys(input).sort() } : {}),

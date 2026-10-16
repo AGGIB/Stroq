@@ -769,7 +769,8 @@ export class StroqEngine {
     const { atoms, truncated } = extractAtomsDeepWithLoss(normalizeText(event.toolResultText));
     // The hosts clip a result at `DEFAULT_MAX_CHARS` before it gets here, so text of exactly
     // that length may have been cut off, and the atoms in the cut part were never seen.
-    const lost = truncated || event.toolResultText.length >= DEFAULT_MAX_CHARS;
+    const lost =
+      truncated || event.toolResultText.length >= DEFAULT_MAX_CHARS || event.resultUnread === true;
     const recorded = await this.recordProvenance(
       event,
       summary,

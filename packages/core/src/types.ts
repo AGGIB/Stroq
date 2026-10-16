@@ -157,6 +157,13 @@ export interface PostToolEvent extends PreToolEvent {
    * so — a host that renamed its result field used to be recorded as a clean scan.
    */
   readonly resultMissing?: readonly string[];
+  /**
+   * Set by an adapter when it could not read text out of the result: a tool that returns
+   * prose gave an object with no string in it, so what was scanned is the object serialised.
+   * Text a pattern needs at the start of a line is not at the start of one there, and atoms
+   * in the result may be missing, so the session is noted as incomplete.
+   */
+  readonly resultUnread?: true;
 }
 
 /**

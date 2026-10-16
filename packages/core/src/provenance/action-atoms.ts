@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { isShellTool } from '../actions/shell-tools.js';
 import { normalizeText } from '../normalize/normalizer.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
+import { collectStrings } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { extractAtoms, normalizePackageName } from './atoms.js';
 
@@ -133,6 +134,17 @@ export function knownPackages(cwd: string): ReadonlySet<string> {
 }
 
 /**
+ * An MCP call's arguments as the text they carry: the string values, one to a line. Serialised,
+ * a line break in a value is the two characters backslash and `n`, and a pattern that needs the
+ * start of a line (`npx`, `npm install`) no longer finds its start. An argument with no string
+ * in it is all there is to read, so it is serialised.
+ */
+function textOfInput(toolInput: Readonly<Record<string, unknown>>): string {
+  const strings = collectStrings(toolInput);
+  return strings.length > 0 ? strings.join('\n') : JSON.stringify(toolInput);
+}
+
+/**
  * Atoms of a proposed action that could have been copied from earlier tool output.
  * The action text is normalized first, exactly like the scanned output it is matched
  * against: otherwise a command carrying a zero-width space or a homoglyph would hash
@@ -151,7 +163,7 @@ export function atomsForAction(
       (atom) => atom.kind !== 'pkg' || !known.has(atom.value),
     );
   }
-  if (toolName.startsWith('mcp__')) return extractAtoms(normalizeText(JSON.stringify(toolInput)));
+  if (toolName.startsWith('mcp__')) return extractAtoms(normalizeText(textOfInput(toolInput)));
   return [];
 }
 
