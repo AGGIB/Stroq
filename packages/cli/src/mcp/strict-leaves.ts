@@ -53,6 +53,46 @@ export function collectLeaves(value: unknown, media: MediaPayloads = NO_MEDIA): 
   return leaves;
 }
 
+/**
+ * The post-condition: whether `text` is exactly the scan text of `value`. Run on the
+ * structure that is about to be delivered, after the text was built and before anything
+ * is sent, so the invariant strict mode exists for (every string the client is given was
+ * scanned) is checked at the last moment rather than assumed from how the text was made.
+ * A string that is in the message and not in the text, a text that has a string the
+ * message lacks, or a different order, all fail it.
+ *
+ * Written as a second, separate walk (recursive, with a cursor over `text`) rather than a
+ * call to `collectLeaves`, so that a change to one cannot silently change what the other
+ * agrees to. Linear in the size of the message: each string is matched in place, never
+ * searched for.
+ */
+export function isCovered(value: unknown, media: MediaPayloads, text: string): boolean {
+  let cursor = 0;
+  let first = true;
+  const take = (leaf: string): boolean => {
+    if (!first) {
+      if (text.charCodeAt(cursor) !== 10) return false;
+      cursor += 1;
+    }
+    first = false;
+    if (!text.startsWith(leaf, cursor)) return false;
+    cursor += leaf.length;
+    return true;
+  };
+  const walk = (node: unknown, depth: number): boolean => {
+    if (typeof node === 'string') return take(node);
+    if (node === null || typeof node !== 'object') return true;
+    if (depth >= STRICT_MAX_DEPTH) return false;
+    if (Array.isArray(node)) return node.every((item) => walk(item, depth + 1));
+    const record = node as Record<string, unknown>;
+    const payloadKey = media.get(record);
+    return Object.keys(record).every(
+      (key) => take(key) && (key === payloadKey || walk(record[key], depth + 1)),
+    );
+  };
+  return walk(value, 0) && cursor === text.length;
+}
+
 /** The scan text for `value`: its leaves, a real newline between them; null when too deep. */
 export function leafText(value: unknown, media: MediaPayloads = NO_MEDIA): string | null {
   const leaves = collectLeaves(value, media);

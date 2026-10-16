@@ -25,7 +25,8 @@ import {
   withheldResponse,
   type WithholdReason,
 } from './strict-reasons.js';
-import { readStrictError, readStrictResult } from './strict-result.js';
+import { isCovered } from './strict-leaves.js';
+import { readStrictError, readStrictResult, type StrictRead } from './strict-result.js';
 import type { BoundedScanVerdict } from './strict-scan.js';
 
 /**
@@ -86,6 +87,7 @@ const describeId = (id: JsonRpcId): string =>
 const RESPONSE_KEYS: ReadonlySet<string> = new Set(['jsonrpc', 'id', 'result', 'error']);
 
 type ResponseMessage = Extract<McpMessage, { kind: 'response' }>;
+type ReadOk = Extract<StrictRead, { ok: true }>;
 type ServerInitiated = Extract<McpMessage, { kind: 'request' | 'notification' }>;
 
 export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandler {
@@ -262,16 +264,26 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         ...about,
         summary: `withheld a ${describeMethod(entry.method)} response`,
       });
-    return deliver(entry, message, read.text);
+    return deliver(entry, message, read);
   }
 
   async function deliver(
     entry: TrackedRequest,
     message: ResponseMessage,
-    text: string,
+    read: ReadOk,
   ): Promise<void> {
     const { value } = message;
+    const { text } = read;
     const about = { toolName: entry.toolName, answers: entry };
+    // The post-condition of the whole mode, checked on the structure about to be sent:
+    // every string in it is a string of the text about to be scanned. It holds by the
+    // way the text is built; this is the check that notices the day it stops holding.
+    const body = Object.hasOwn(value, 'error') ? value['error'] : value['result'];
+    if (!isCovered(body, read.media, text))
+      return withhold('unread-content', {
+        ...about,
+        summary: `withheld a ${describeMethod(entry.method)} response with strings outside the scan text`,
+      });
     const nothingToRead = text === '' && !isScannedMethod(entry.method);
     const outcome = nothingToRead ? null : await scanned(entry, text);
     if (typeof outcome === 'string')

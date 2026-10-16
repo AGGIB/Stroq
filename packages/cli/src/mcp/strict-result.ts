@@ -1,5 +1,5 @@
 import { isRecord } from '../adapters/tool-input.js';
-import { leafText, type MediaPayloads } from './strict-leaves.js';
+import { NO_MEDIA, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 import { isClassifiedMedia } from './strict-media.js';
 import type { WithholdReason } from './strict-reasons.js';
@@ -20,7 +20,7 @@ import type { WithholdReason } from './strict-reasons.js';
  */
 
 export type StrictRead =
-  | { readonly ok: true; readonly text: string }
+  | { readonly ok: true; readonly text: string; readonly media: MediaPayloads }
   | { readonly ok: false; readonly reason: WithholdReason };
 
 const withheld = (reason: WithholdReason): StrictRead => ({ ok: false, reason });
@@ -119,7 +119,8 @@ function readItems(items: unknown, media: Media): WithholdReason | null {
 function finish(value: unknown, media: MediaPayloads): StrictRead {
   const text = leafText(value, media);
   if (text === null) return withheld('scan-failed');
-  return text.length > STRICT_MAX_TEXT_CHARS ? withheld('oversize-text') : { ok: true, text };
+  if (text.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
+  return isCovered(value, media, text) ? { ok: true, text, media } : withheld('unread-content');
 }
 
 function readToolsCall(result: Record<string, unknown>): StrictRead {
@@ -206,7 +207,8 @@ function readPromptsGet(result: Record<string, unknown>): StrictRead {
  * ping answer, a `logging/setLevel` acknowledgement) holds nothing to read.
  */
 function readAnyResult(result: unknown): StrictRead {
-  if (isRecord(result) && Object.keys(result).length === 0) return { ok: true, text: '' };
+  if (isRecord(result) && Object.keys(result).length === 0)
+    return { ok: true, text: '', media: NO_MEDIA };
   return finish(result, new Map());
 }
 
