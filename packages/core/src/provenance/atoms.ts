@@ -113,10 +113,19 @@ export function normalizePackageName(raw: string): string {
   return withoutVersion(base).toLowerCase();
 }
 
-function restOfLine(text: string, from: number): string {
+/** The part of a line an extractor read, and whether the line went on past what it read. */
+interface LineScan {
+  readonly line: string;
+  readonly cut: boolean;
+}
+
+function restOfLine(text: string, from: number): LineScan {
   const rest = text.slice(from, from + MAX_LINE_SCAN);
   const stop = rest.search(LINE_END);
-  return (stop === -1 ? rest : rest.slice(0, stop)).trim();
+  return {
+    line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),
+    cut: stop === -1 && text.length > from + MAX_LINE_SCAN,
+  };
 }
 
 /**
@@ -176,27 +185,44 @@ function installerPackages(tokens: readonly string[]): string[] {
   return out;
 }
 
+/** Atoms one extractor found, and whether it stopped reading a line before the line ended. */
+interface Found {
+  readonly positioned: Positioned[];
+  readonly cut: boolean;
+}
+
+/** A runner or installer match with the rest of its line, positioned at the match's start. */
+function lineAfter(text: string, m: RegExpMatchArray): { index: number; scan: LineScan } {
+  const index = m.index ?? 0;
+  return { index, scan: restOfLine(text, index + m[0].length) };
+}
+
 /** Every package named after a runner match, positioned at that match's start index. */
-function runnerPackages(text: string): Positioned[] {
-  return [...text.matchAll(RUNNER)].flatMap((m): Positioned[] => {
-    const index = m.index ?? 0;
-    const pkg = runnerPackage(restOfLine(text, index + m[0].length).split(/\s+/));
-    if (pkg === null) return [];
-    const value = normalizePackageName(pkg);
-    return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
-  });
+function runnerPackages(text: string): Found {
+  const lines = [...text.matchAll(RUNNER)].map((m) => lineAfter(text, m));
+  return {
+    positioned: lines.flatMap(({ index, scan }): Positioned[] => {
+      const pkg = runnerPackage(scan.line.split(/\s+/));
+      if (pkg === null) return [];
+      const value = normalizePackageName(pkg);
+      return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
+    }),
+    cut: lines.some(({ scan }) => scan.cut),
+  };
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installedPackages(text: string): Positioned[] {
-  return [...text.matchAll(INSTALLER)].flatMap((m): Positioned[] => {
-    const index = m.index ?? 0;
-    const tokens = restOfLine(text, index + m[0].length).split(/\s+/);
-    return installerPackages(tokens).flatMap((pkg): Positioned[] => {
-      const value = normalizePackageName(pkg);
-      return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
-    });
-  });
+function installedPackages(text: string): Found {
+  const lines = [...text.matchAll(INSTALLER)].map((m) => lineAfter(text, m));
+  return {
+    positioned: lines.flatMap(({ index, scan }): Positioned[] =>
+      installerPackages(scan.line.split(/\s+/)).flatMap((pkg): Positioned[] => {
+        const value = normalizePackageName(pkg);
+        return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
+      }),
+    ),
+    cut: lines.some(({ scan }) => scan.cut),
+  };
 }
 
 function urlAtoms(text: string): Positioned[] {
@@ -218,8 +244,13 @@ function urlAtoms(text: string): Positioned[] {
   return [...fromUrls, ...fromSsh];
 }
 
-function packageAtoms(text: string): Positioned[] {
-  return [...runnerPackages(text), ...installedPackages(text)];
+function packageAtoms(text: string): Found {
+  const runners = runnerPackages(text);
+  const installers = installedPackages(text);
+  return {
+    positioned: [...runners.positioned, ...installers.positioned],
+    cut: runners.cut || installers.cut,
+  };
 }
 
 const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -266,6 +297,53 @@ export function atomHash(atom: Atom): string {
   return createHash('sha256').update(`${atom.kind}\n${atom.value}`).digest('hex').slice(0, 32);
 }
 
+/** The atoms found in a text, and whether a bound kept some atom that is in the text out of them. */
+export interface AtomExtraction {
+  readonly atoms: Atom[];
+  /**
+   * True when something that could have been an atom was left out: more distinct atoms than
+   * `MAX_ATOMS`, a runner or installer line longer than the part of it that is read, or text
+   * past the characters `extractAtomsDeepWithLoss` reads. An atom that was left out looks, to
+   * a later lookup, like content the session never read.
+   */
+  readonly truncated: boolean;
+}
+
+/** One extraction pass, with the two ways a bound can cut it told apart. */
+interface Extraction {
+  readonly atoms: Atom[];
+  /** More distinct atoms were found than `MAX_ATOMS` keeps. */
+  readonly capped: boolean;
+  /** A runner or installer line went on past the part of it that is read. */
+  readonly lineCut: boolean;
+}
+
+function extractBounded(text: string): Extraction {
+  const packages = packageAtoms(text);
+  const positioned = [
+    ...urlAtoms(text),
+    ...packages.positioned,
+    ...pipeShellAtoms(text),
+    ...encodedAtoms(text),
+  ];
+  positioned.sort((a, b) => a.index - b.index);
+  const seen = new Set<string>();
+  const unique: Atom[] = [];
+  let capped = false;
+  for (const { atom } of positioned) {
+    const value = atom.value.slice(0, MAX_VALUE_CHARS);
+    const key = `${atom.kind}\n${value}`;
+    if (seen.has(key)) continue;
+    if (unique.length >= MAX_ATOMS) {
+      capped = true;
+      break;
+    }
+    seen.add(key);
+    unique.push({ kind: atom.kind, value });
+  }
+  return { atoms: unique, capped, lineCut: packages.cut };
+}
+
 /**
  * Extracts actionable atoms — the pieces of text an agent could copy into a
  * dangerous action — in text order, deduped, capped at MAX_ATOMS. Every extractor
@@ -278,24 +356,7 @@ export function atomHash(atom: Atom): string {
  * tell prose from code.
  */
 export function extractAtoms(text: string): Atom[] {
-  const positioned = [
-    ...urlAtoms(text),
-    ...packageAtoms(text),
-    ...pipeShellAtoms(text),
-    ...encodedAtoms(text),
-  ];
-  positioned.sort((a, b) => a.index - b.index);
-  const seen = new Set<string>();
-  const unique: Atom[] = [];
-  for (const { atom } of positioned) {
-    const value = atom.value.slice(0, MAX_VALUE_CHARS);
-    const key = `${atom.kind}\n${value}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push({ kind: atom.kind, value });
-    if (unique.length >= MAX_ATOMS) break;
-  }
-  return unique;
+  return extractBounded(text).atoms;
 }
 
 /**
@@ -344,13 +405,37 @@ export function extractAtoms(text: string): Atom[] {
  * `scanContent`'s own rule matching is already blind to it, since the two now read the
  * same bounded prefix of the same text. Provenance never sees further than content
  * rules already don't, so the bound costs nothing a rule wasn't already going to miss.
+ * That is true of the rules and not of provenance, which can later be asked about an
+ * atom that was cut off here: `extractAtomsDeepWithLoss` says when one may have been.
  */
 export function extractAtomsDeep(text: string): Atom[] {
-  const bounded = text.length > DEFAULT_MAX_CHARS ? text.slice(0, DEFAULT_MAX_CHARS) : text;
+  return extractAtomsDeepWithLoss(text).atoms;
+}
+
+/**
+ * `extractAtomsDeep`, and whether any bound it applies left an atom out. The recording side
+ * needs the second half: this function is the only place that knows the text it was given
+ * was longer than it reads, or held more atoms than it keeps, and nothing downstream can
+ * tell a dropped atom from one that was never there. A session that dropped one has to say
+ * so, or a later action carrying exactly that atom looks like it came from nowhere.
+ *
+ * Reaching `MAX_ATOMS` counts as a loss even when nothing more was found: the variants and
+ * the continuation pass after it are skipped once the cap is full, and what they would have
+ * added cannot be known without paying for the passes the cap exists to avoid. A result that
+ * holds exactly that many is read as cut, which costs nothing real.
+ */
+export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
+  const cutText = text.length > DEFAULT_MAX_CHARS;
+  const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const seen = new Set<string>();
   const out: Atom[] = [];
-  const merge = (atoms: readonly Atom[]): void => {
-    for (const atom of atoms) {
+  let truncated = cutText;
+  // `byLine` is false for the continuation pass: collapsing joins every indented line into
+  // one, so a line that runs past the window there is an artefact of the joining, and the
+  // pass over the text as it was written has already read each of those lines on its own.
+  const merge = (extraction: Extraction, byLine = true): void => {
+    truncated = truncated || extraction.capped || (byLine && extraction.lineCut);
+    for (const atom of extraction.atoms) {
       if (out.length >= MAX_ATOMS) return;
       const key = atomHash(atom);
       if (seen.has(key)) continue;
@@ -361,15 +446,15 @@ export function extractAtomsDeep(text: string): Atom[] {
 
   for (const variant of expandVariants(bounded)) {
     if (out.length >= MAX_ATOMS) break;
-    merge(extractAtoms(variant.text));
+    merge(extractBounded(variant.text));
   }
 
   if (out.length < MAX_ATOMS) {
     const collapsed = collapseContinuations(bounded);
     if (collapsed !== bounded) {
-      merge(extractAtoms(collapsed));
+      merge(extractBounded(collapsed), false);
     }
   }
 
-  return out;
+  return { atoms: out, truncated: truncated || out.length >= MAX_ATOMS };
 }
