@@ -47,6 +47,14 @@ export const STRICT_MAX_QUEUED_LINES = 256;
  */
 export const STRICT_MAX_TEXT_CHARS = MCP_MAX_RESULT_CHARS;
 
+/**
+ * How deeply a message may nest and still be read. Real results nest a dozen levels;
+ * this is the point past which Stroq stops reading and withholds, rather than following
+ * a structure that exists to be followed. It is far inside what the serialiser handles,
+ * so a message that passes can always be written again.
+ */
+export const STRICT_MAX_DEPTH = 256;
+
 /** Requests the client has cancelled whose late answers are still expected and are dropped without counting. */
 export const STRICT_CANCELLED_MEMORY = 256;
 

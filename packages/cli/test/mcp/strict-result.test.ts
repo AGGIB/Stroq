@@ -110,13 +110,13 @@ describe('readStrictResult: tools/call', () => {
   });
 
   it('withholds text past the scan window and reads text exactly at it', () => {
-    const at = readStrictResult('tools/call', {
-      content: [text('a'.repeat(STRICT_MAX_TEXT_CHARS))],
-    });
+    // The window counts everything scanned, keys included: measure what the keys cost.
+    const overhead = textOf(readStrictResult('tools/call', { content: [text('')] })).length;
+    const fill = STRICT_MAX_TEXT_CHARS - overhead;
+    const at = readStrictResult('tools/call', { content: [text('a'.repeat(fill))] });
     expect(reasonOf(at)).toBe('readable');
-    const over = readStrictResult('tools/call', {
-      content: [text('a'.repeat(STRICT_MAX_TEXT_CHARS + 1))],
-    });
+    expect(textOf(at)).toHaveLength(STRICT_MAX_TEXT_CHARS);
+    const over = readStrictResult('tools/call', { content: [text('a'.repeat(fill + 1))] });
     expect(reasonOf(over)).toBe('oversize-text');
   });
 
