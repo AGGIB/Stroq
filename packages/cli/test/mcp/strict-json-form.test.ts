@@ -2,11 +2,7 @@ import { loadBundledRules, scanContent, scanFieldsForTool, scanTargetForTool } f
 import { describe, expect, it } from 'vitest';
 import { mcpResultText, resultTextFor } from '../../src/mcp/judge.js';
 import { leafText } from '../../src/mcp/strict-leaves.js';
-import {
-  STRICT_COPY_MAX_CHARS,
-  STRICT_COPY_STRING_CHARS,
-  STRICT_MAX_TEXT_CHARS,
-} from '../../src/mcp/strict-limits.js';
+import { STRICT_MAX_TEXT_CHARS } from '../../src/mcp/strict-limits.js';
 import { readStrictResult } from '../../src/mcp/strict-result.js';
 
 /**
@@ -106,19 +102,38 @@ describe('the JSON view', () => {
     expect(json).toContain('"structuredContent":{"a":"b"}');
   });
 
-  it('cuts a long string, and does not cut the decoded strings', () => {
-    const long = 'x'.repeat(STRICT_COPY_STRING_CHARS + 500);
+  it('carries a long string whole: nothing is cut to the length of a string', () => {
+    const long = 'x'.repeat(5_000);
     const read = readStrictResult('tools/call', { content: [], structuredContent: { long } });
     expect(viewText(read, 'strings')).toContain(long);
-    const json = viewText(read, 'json');
-    expect(json).toContain('x'.repeat(STRICT_COPY_STRING_CHARS));
-    expect(json).not.toContain('x'.repeat(STRICT_COPY_STRING_CHARS + 1));
+    expect(viewText(read, 'json')).toContain(`"long":"${long}"`);
   });
 
-  it('is capped', () => {
+  it('is as long as the structure is, up to the window the default proxy clips to', () => {
     const rows = Array.from({ length: 5000 }, (_, i) => ({ id: i, label: `row number ${i}` }));
-    const read = readStrictResult('tools/call', { content: [], structuredContent: { rows } });
-    expect(viewText(read, 'json').length).toBe(STRICT_COPY_MAX_CHARS);
+    const result = { content: [], structuredContent: { rows } };
+    const json = viewText(readStrictResult('tools/call', result), 'json');
+    expect(json).toBe(JSON.stringify(result));
+    expect(json.length).toBeGreaterThan(32 * 1024);
+    expect(json.length).toBeLessThan(STRICT_MAX_TEXT_CHARS);
+  });
+
+  it('is cut at the window and not past it', () => {
+    // 150,000 line breaks fit the window as decoded strings and are 300,000 characters of JSON.
+    const result = { content: [{ type: 'text', text: '\n'.repeat(150_000) }] };
+    const read = readStrictResult('tools/call', result);
+    expect(read.ok).toBe(true);
+    expect(viewText(read, 'json')).toHaveLength(STRICT_MAX_TEXT_CHARS);
+    expect(viewText(read, 'json')).toBe(JSON.stringify(result).slice(0, STRICT_MAX_TEXT_CHARS));
+  });
+
+  it('puts a payload that sits far into the result in front of a rule written for JSON', () => {
+    // 45 KB of padding before the field: past the 32 KiB the earlier copy was cut to.
+    const pad = Array.from({ length: 30 }, () => 'z'.repeat(1500));
+    const result = { protocolVersion: '2025-06-18', pad, ...INJECTED };
+    const read = readStrictResult('initialize', result);
+    expect(viewText(read, 'json')).toContain('"query":"x\'; DROP TABLE users; --"');
+    expect(strictVerdict(read, 'mcp__srv__initialize')).toBe('suspect');
   });
 
   it('keeps a key even when its value is not a string', () => {

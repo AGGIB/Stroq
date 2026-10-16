@@ -1,8 +1,4 @@
-import {
-  STRICT_COPY_MAX_CHARS,
-  STRICT_COPY_STRING_CHARS,
-  STRICT_MAX_DEPTH,
-} from './strict-limits.js';
+import { STRICT_MAX_DEPTH } from './strict-limits.js';
 
 /**
  * The decoded strings of a message: one of the views strict mode scans (`strict-views.ts`),
@@ -60,23 +56,6 @@ export function collectLeaves(value: unknown, media: MediaPayloads = NO_MEDIA): 
     }
   }
   return leaves;
-}
-
-/**
- * The JSON view of `value`: JSON, strings cut to `STRICT_COPY_STRING_CHARS`, the whole cut
- * to `STRICT_COPY_MAX_CHARS`. Keys are kept (they are part of the JSON), and
- * the payload of a recognised media record is replaced by a fixed marker so the copy keeps
- * the shape without carrying megabytes of base64. Plain `JSON.stringify` with a replacer:
- * the structure was already walked to its depth bound, so it cannot overflow the stack.
- */
-export function clippedCopy(value: unknown, media: MediaPayloads = NO_MEDIA): string {
-  const json = JSON.stringify(value, function (this: unknown, key: string, member: unknown) {
-    if (typeof this === 'object' && this !== null && media.get(this) === key) return '[media]';
-    return typeof member === 'string' && member.length > STRICT_COPY_STRING_CHARS
-      ? member.slice(0, STRICT_COPY_STRING_CHARS)
-      : member;
-  });
-  return (json ?? '').slice(0, STRICT_COPY_MAX_CHARS);
 }
 
 /**

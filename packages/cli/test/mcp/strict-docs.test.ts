@@ -6,8 +6,6 @@ import { commandHelp } from '../../src/help.js';
 import { MAX_LINE_CHARS } from '../../src/mcp/framing.js';
 import {
   DEFAULT_STRICT_MAX_WITHHELD,
-  STRICT_COPY_MAX_CHARS,
-  STRICT_COPY_STRING_CHARS,
   STRICT_MAX_BENIGN_WITHHELD,
   STRICT_MAX_TEXT_CHARS,
   STRICT_SCAN_DEADLINE_MS,
@@ -60,12 +58,21 @@ describe('the --strict section of docs/AGENTS.md', () => {
     expect(commandHelp('mcp')).toContain(`cap of ${STRICT_MAX_BENIGN_WITHHELD}`);
   });
 
-  it('states the cuts of the serialised copy the code makes', () => {
-    expect(section).toContain(
-      `strings cut to ${STRICT_COPY_STRING_CHARS.toLocaleString('en-US')} characters`,
-    );
-    expect(section).toContain(`the whole copy to ${STRICT_COPY_MAX_CHARS / 1024} KiB`);
-    expect(section).toContain(`${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')}-character window`);
+  it('states the window the code reads, for the decoded strings and for the JSON view', () => {
+    const window = STRICT_MAX_TEXT_CHARS.toLocaleString('en-US');
+    expect(section).toContain(`${window}-character window`);
+    expect(section).toContain(`the first ${window} characters of the JSON`);
+  });
+
+  it('does not claim a cut the code no longer makes, or a loss it no longer has', () => {
+    expect(section).not.toContain('2,000 characters');
+    expect(section).not.toContain('32 KiB');
+    expect(section).not.toContain('sees less of it');
+  });
+
+  it('says why the views are separate texts and that the default proxy’s own text is one', () => {
+    expect(section).toContain('the same reader, unchanged');
+    expect(section).toContain('at least what the default scans');
   });
 
   describe('which cap each reason counts toward', () => {
