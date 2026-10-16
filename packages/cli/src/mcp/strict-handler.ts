@@ -134,6 +134,11 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       readonly summary: string;
     },
   ): Promise<void> {
+    // The flag and the ledger are changed in ONE synchronous step, before the first await.
+    // The pump records a request and writes it to the server in one step too, after testing
+    // this flag (`sendToServer` in `proxy-pump.ts`), so a request is either in what is
+    // drained here, and answered below, or it never gets past that test: answered there,
+    // not tracked, not written. Nothing can fall between the two.
     terminated = true;
     endedAtLimit = limit;
     const waiting = [...(also === null ? [] : [also]), ...ledger.drain()];
@@ -161,6 +166,17 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   }
 
   /**
+   * The answer for a request this handler had already taken from the ledger when the
+   * server was ended. The end drained only what was still in the ledger, so a request
+   * taken before it is this handler's to answer, and it is answered with what the ones
+   * the end answered got. Nothing else answers it, so it is answered exactly once.
+   */
+  const answerEnded = (request: TrackedRequest | null): Promise<void> =>
+    request === null
+      ? Promise.resolve()
+      : deps.toClient(terminatedResponse(request.id, endedAtLimit));
+
+  /**
    * One withheld message: counted toward the cap for its kind, audited and, if it belongs
    * to a request, answered. The answer is written even when the audit fails, so no
    * addressable request is ever left waiting. `method` is the method of a message the
@@ -178,7 +194,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       readonly hasId?: boolean;
     },
   ): Promise<void> {
-    if (terminated) return;
+    if (terminated) return answerEnded(options.answers ?? null);
     const hostile = countClass(reason, options.method, options.hasId) === 'hostile';
     const count = hostile ? (hostileCount += 1) : (benignCount += 1);
     const limit = hostile ? maxWithheld : maxBenign;
@@ -190,6 +206,9 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         summary: options.summary,
       });
     await audit(reason, options.toolName, options.summary);
+    // The audit was an await: the server may have been ended during it, and a server that
+    // was ended is refused nothing and delivered nothing more.
+    if (terminated) return answerEnded(answers);
     if (options.toServer !== undefined) deps.toServer(options.toServer);
     if (answers !== null) await deps.toClient(withheldResponse(answers.id, reason));
   }
@@ -399,6 +418,9 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * request to leave waiting.
    */
   async function send(entry: TrackedRequest, message: Record<string, unknown>): Promise<void> {
+    // The scan (and the cloak) before this were awaits: a response that was being read
+    // when the server was ended is not delivered, and its request is answered as the end.
+    if (terminated) return answerEnded(entry);
     let line: string;
     try {
       line = JSON.stringify(message);

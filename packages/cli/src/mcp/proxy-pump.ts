@@ -166,8 +166,6 @@ export function createPump(deps: PumpDeps): Pump {
   // in the queue unread.
   const fromClient = (sink: NodeJS.WritableStream, text: string): Promise<void> =>
     writeBackpressured(sink, text, clientIn);
-  const forwardToServer = (line: SplitLine): Promise<void> =>
-    fromClient(serverIn, `${line.text}${line.eol}`);
   const replyToClient = (value: unknown): Promise<void> =>
     fromClient(clientOut, `${JSON.stringify(value)}\n`);
 
@@ -191,6 +189,8 @@ export function createPump(deps: PumpDeps): Pump {
           // backpressure wait: pausing the server's stdout while waiting on its stdin
           // is how a pipe deadlocks.
           toServer: (value) => {
+            // Checked here, in the step that writes: a refusal is for a server that is still there.
+            if (strictHandler?.wasTerminated() === true) return;
             try {
               serverIn.write(`${JSON.stringify(value)}\n`);
             } catch (err) {
@@ -230,6 +230,9 @@ export function createPump(deps: PumpDeps): Pump {
    * is on — the ORIGINAL line goes through byte for byte, key order and whitespace
    * included, exactly as it always has. Only a line that actually changed is
    * re-serialised, and only then is byte-exactness knowingly given up.
+   *
+   * `track` records the request in the strict ledger; see `sendToServer` for why it is
+   * handed to the write instead of being done before it.
    */
   async function forwardWithRestores(
     line: SplitLine,
@@ -237,13 +240,18 @@ export function createPump(deps: PumpDeps): Pump {
     params: Record<string, unknown>,
     plan: UncloakPlan,
     restored: ReturnType<McpCloak['applyUncloak']>,
+    track: (() => void) | undefined,
   ): Promise<void> {
+    // Not a gate, which is `sendToServer`: a restore audited for a call that is then
+    // refused would say the value reached a server it never did.
+    const ended = refuseIfEnded(line);
+    if (ended !== null) return ended;
     if (cloak === null || plan.values.size === 0) {
       if (cloak !== null) await cloak.auditUncloak(callAuditFields(params).toolName, plan, []);
-      return forwardToServer(line);
+      return forwardToServer(line, track);
     }
     await cloak.auditUncloak(callAuditFields(params).toolName, plan, restored.replacements);
-    return fromClient(serverIn, `${JSON.stringify({ ...message, params: restored.value })}\n`);
+    return sendToServer(line, `${JSON.stringify({ ...message, params: restored.value })}\n`, track);
   }
 
   /**
@@ -261,21 +269,52 @@ export function createPump(deps: PumpDeps): Pump {
     if (message.kind === 'request') await replyToClient(terminatedResponse(message.id, limit));
   }
 
+  /** `--strict` only: the refusal for `line` if the server has been ended, else null (always null without it). */
+  function refuseIfEnded(line: SplitLine): Promise<void> | null {
+    return strictHandler?.wasTerminated() === true
+      ? refuseAfterEnd(line, strictHandler.terminatedLimit())
+      : null;
+  }
+
   /**
-   * `--strict` only: answers a request that was in this proxy's hands (being judged) when
-   * the server was ended. The check at the top of `handleClientLine` cannot see that, since
-   * judging is asynchronous and the server can be ended while it is under way. Such a call
-   * is neither tracked nor sent: it is answered the way every later request is. Null, and
-   * so nothing to do, when the server is still there (always, without `--strict`).
+   * THE write of a client message to the server: there is no other. The server can be
+   * ended while a client request is being handled (judged, cloaked, audited: every one of
+   * those is an await, and the server pump runs beside this one), so a check made before
+   * such an await says nothing about the write after it. Here the check, the recording
+   * of the request (`track`) and the write happen in ONE synchronous step, with no await
+   * between them, and ending the server (`strict-handler.ts`) sets its flag and empties
+   * the ledger in one step too. So a request is either in the ledger when the server is
+   * ended, and answered by that, or it was refused here, answered by this and never
+   * tracked or written. Never both, never neither.
+   *
+   * The forms of "refused" are `refuseAfterEnd`'s: a request is answered, anything else
+   * dropped. Without `--strict` there is no handler to ask, `track` is absent, and this
+   * is the write that was always here.
    */
-  function answerIfEnded(id: JsonRpcId): Promise<void> | null {
-    if (strictHandler?.wasTerminated() !== true) return null;
-    return replyToClient(terminatedResponse(id, strictHandler.terminatedLimit()));
+  function sendToServer(line: SplitLine, text: string, track?: () => void): Promise<void> {
+    const ended = refuseIfEnded(line);
+    if (ended !== null) return ended;
+    track?.();
+    return fromClient(serverIn, text);
+  }
+
+  function forwardToServer(line: SplitLine, track?: () => void): Promise<void> {
+    return sendToServer(line, `${line.text}${line.eol}`, track);
+  }
+
+  /** `--strict` only: the recording of a request in the ledger, to be done by the write that sends it. Undefined without it. */
+  function trackFor(
+    id: JsonRpcId,
+    method: string,
+    toolName: string | undefined,
+  ): (() => void) | undefined {
+    if (strict === null || toolName === undefined) return undefined;
+    return () => strict.ledger.track({ id, method, toolName });
   }
 
   async function handleClientLine(line: SplitLine): Promise<void> {
-    if (strictHandler?.wasTerminated() === true)
-      return refuseAfterEnd(line, strictHandler.terminatedLimit());
+    const endedAtTheStart = refuseIfEnded(line);
+    if (endedAtTheStart !== null) return endedAtTheStart;
     // Some servers (Jackson/.NET stacks are documented offenders) reject JSON
     // prefixed with a byte-order mark; `JSON.parse` rejects it too. Stripped only
     // for parsing — the ORIGINAL text (BOM included) is what a forward sends, so
@@ -337,8 +376,6 @@ export function createPump(deps: PumpDeps): Pump {
         // Resolve credentials first, then judge the exact arguments that will be
         // forwarded. Restored values can affect path and command classification.
         const plan = cloak === null ? EMPTY_PLAN : await cloak.planUncloak(params);
-        const endedAfterPlan = answerIfEnded(message.id);
-        if (endedAfterPlan !== null) return endedAfterPlan;
         if (plan.refused.length > 0) {
           const { toolName, toolInput } = callAuditFields(params);
           const decision = cloakSecretRestore(plan.refused);
@@ -359,18 +396,16 @@ export function createPump(deps: PumpDeps): Pump {
           cloak === null ? { value: params, replacements: [] } : cloak.applyUncloak(params, plan);
         if (!isRecord(restored.value)) throw new Error('restored MCP parameters are invalid');
         const verdict = await judgeToolCall(ctx, message.value, message.id, restored.value, params);
-        const endedAfterJudging = answerIfEnded(message.id);
-        if (endedAfterJudging !== null) return endedAfterJudging;
-        if (verdict.pending !== null) {
-          pending.set(message.id, verdict.pending);
-          strict?.ledger.track({
-            id: message.id,
-            method: 'tools/call',
-            toolName: verdict.pending.toolName,
-          });
-        }
+        if (verdict.pending !== null) pending.set(message.id, verdict.pending);
         if (verdict.forward)
-          return forwardWithRestores(line, message.value, params, plan, restored);
+          return forwardWithRestores(
+            line,
+            message.value,
+            params,
+            plan,
+            restored,
+            trackFor(message.id, 'tools/call', verdict.pending?.toolName),
+          );
         return verdict.reply === null ? undefined : replyToClient(verdict.reply);
       } catch (err) {
         // An engine that cannot answer must not become an allow: the call is
@@ -396,14 +431,16 @@ export function createPump(deps: PumpDeps): Pump {
       });
     // Strict mode answers only requests it knows were asked, every method included,
     // so it records the ones the default proxy has no reason to remember.
-    strict?.ledger.track({
-      id: message.id,
-      method: message.method,
-      toolName: isScannedMethod(message.method)
-        ? mcpMethodToolName(ctx.server, message.method)
-        : mcpToolName(ctx.server, message.method),
-    });
-    return forwardToServer(line);
+    return forwardToServer(
+      line,
+      trackFor(
+        message.id,
+        message.method,
+        isScannedMethod(message.method)
+          ? mcpMethodToolName(ctx.server, message.method)
+          : mcpToolName(ctx.server, message.method),
+      ),
+    );
   }
 
   // Streaming mode only: true while the oversize server line under way has already
