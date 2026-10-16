@@ -84,14 +84,17 @@ describe('stroq untaint', () => {
     expect(await provenance.isIncomplete('s2')).toBe(false);
   });
 
-  it('leaves a tainted session whose provenance file is gone clean once it is cleared', async () => {
+  it('clears the note and the taint together for a session that has both', async () => {
     const provenance = new FileProvenanceStore(sessionsDir());
-    await new FileSessionStore(sessionsDir()).markSuspect('s1', src);
+    const sessions = new FileSessionStore(sessionsDir());
+    await sessions.markSuspect('s1', src);
+    await provenance.markIncomplete('s1');
     expect(await provenance.isIncomplete('s1')).toBe(true);
 
     expect(await runUntaint(['--session', 's1'])).toBe(0);
 
     expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect((await sessions.get('s1')).taint).toBeNull();
   });
 
   it('clears every session with --all', async () => {

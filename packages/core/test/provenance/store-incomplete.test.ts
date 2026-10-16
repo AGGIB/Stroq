@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -115,7 +115,7 @@ describe('FileProvenanceStore incomplete flag', () => {
     expect(await store.isIncomplete('s1')).toBe(false);
   });
 
-  it('reads an unreadable flag file as incomplete rather than clean', async () => {
+  it('reads a garbled flag file as incomplete, since its presence is the flag', async () => {
     const { dir, store } = fresh();
     await mkdir(dir, { recursive: true });
     writeFileSync(join(dir, `${sessionKey('s1')}.prov.incomplete`), '{garbage');
@@ -123,14 +123,14 @@ describe('FileProvenanceStore incomplete flag', () => {
   });
 });
 
-describe('FileProvenanceStore on a session that is known to exist', () => {
-  it('reads a tainted session with no provenance file as incomplete', async () => {
+describe('FileProvenanceStore on a tainted session', () => {
+  it('reads a tainted session that never recorded an atom as complete: nothing was lost', async () => {
     const { store, sessions } = fresh();
     await sessions.markSuspect('s1', taint);
-    expect(await store.isIncomplete('s1')).toBe(true);
+    expect(await store.isIncomplete('s1')).toBe(false);
   });
 
-  it('reads a brand-new session as complete: nothing marks it as known', async () => {
+  it('reads a session nothing has touched as complete', async () => {
     const { store, sessions } = fresh();
     await sessions.markSuspect('other', taint);
     expect(await store.isIncomplete('s1')).toBe(false);
@@ -143,20 +143,12 @@ describe('FileProvenanceStore on a session that is known to exist', () => {
     expect(await store.isIncomplete('s1')).toBe(false);
   });
 
-  it('reads a provenance file that was deleted under a tainted session as incomplete', async () => {
-    const { dir, store, sessions } = fresh();
-    await store.record('s1', [input('h')]);
-    await sessions.markSuspect('s1', taint);
-    expect(await store.isIncomplete('s1')).toBe(false);
-    rmSync(provFile(dir, 's1'));
-    expect(await store.isIncomplete('s1')).toBe(true);
-  });
-
-  it('is complete again once untaint cleared both the taint and the provenance', async () => {
+  it('stays incomplete after untaint of the taint alone, until the provenance is cleared too', async () => {
     const { store, sessions } = fresh();
     await sessions.markSuspect('s1', taint);
-    expect(await store.isIncomplete('s1')).toBe(true);
+    await store.markIncomplete('s1');
     await sessions.clear('s1');
+    expect(await store.isIncomplete('s1')).toBe(true);
     await store.clear('s1');
     expect(await store.isIncomplete('s1')).toBe(false);
   });
@@ -167,5 +159,24 @@ describe('FileProvenanceStore on a session that is known to exist', () => {
     writeFileSync(provFile(dir, 's1'), '{not json');
     await expect(store.lookup('s1', ['h'])).rejects.toThrow(/corrupt provenance/);
     await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
+  });
+});
+
+describe('FileProvenanceStore when the flag cannot be read', () => {
+  it.skipIf(process.platform === 'win32')(
+    'counts a dangling symlink at the flag path as the flag being there',
+    async () => {
+      const { dir, store } = fresh();
+      await mkdir(dir, { recursive: true });
+      symlinkSync(join(dir, 'nothing-here'), join(dir, `${sessionKey('s1')}.prov.incomplete`));
+      expect(await store.isIncomplete('s1')).toBe(true);
+    },
+  );
+
+  it('reads a sessions path it cannot stat as incomplete rather than clean', async () => {
+    const { dir } = fresh();
+    await mkdir(join(dir, '..'), { recursive: true });
+    writeFileSync(dir, 'a file where the sessions directory should be');
+    expect(await new FileProvenanceStore(dir).isIncomplete('s1')).toBe(true);
   });
 });

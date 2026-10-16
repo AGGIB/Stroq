@@ -17,14 +17,6 @@ export function sessionKey(sessionId: string): string {
   return createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
 }
 
-/**
- * The file a session's taint lives in. It exists only once the session has been tainted,
- * so its presence is how the other stores in this directory tell that a session is known.
- */
-export function sessionStateFile(dir: string, sessionId: string): string {
-  return join(dir, `${sessionKey(sessionId)}.json`);
-}
-
 function emptyState(sessionId: string, now: string): SessionState {
   return { sessionId, taint: null, updatedAt: now };
 }
@@ -68,7 +60,7 @@ export class FileSessionStore implements SessionStore {
   ) {}
 
   private file(sessionId: string): string {
-    return sessionStateFile(this.dir, sessionId);
+    return join(this.dir, `${sessionKey(sessionId)}.json`);
   }
 
   private async read(sessionId: string): Promise<SessionState> {

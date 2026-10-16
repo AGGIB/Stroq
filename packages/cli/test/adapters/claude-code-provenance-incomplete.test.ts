@@ -1,11 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { sessionKey } from '@stroq/core';
 import { handleClaudeHook } from '../../src/adapters/claude-code.js';
 import { createEngine } from '../../src/engine-factory.js';
-import { sessionsDir } from '../../src/paths.js';
 
 // Provenance holds a bounded number of entries per session. These pin what the hook answers
 // when what the session read no longer fits: it asks, instead of treating the source as clean.
@@ -81,10 +79,10 @@ describe('provenance when what a session read no longer fits', () => {
     expect((await act(REAL)).decision).toBe('deny');
   });
 
-  it('asks when the provenance file of a tainted session was deleted', async () => {
-    await post(payload(INJECTION));
-    rmSync(join(sessionsDir(), `${sessionKey(SESSION)}.prov.json`));
-    expect((await act(REAL)).decision).toBe('ask');
+  it('does not ask in a tainted session that never recorded an atom', async () => {
+    await post(INJECTION);
+    expect((await act('npx some-helper')).decision).toBe('allow');
+    expect((await act('pip install requests')).decision).toBe('allow');
   });
 
   it('leaves a command with no atom alone in an incomplete session', async () => {

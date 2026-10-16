@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { sessionKey, sessionStateFile } from '../taint/session-store.js';
+import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
 import { withLock } from '../util/lock.js';
 
@@ -18,9 +18,8 @@ export interface ProvenanceStore {
   clear(sessionId: string): Promise<void>;
   /**
    * Whether this session may have read something that is no longer on record: a record
-   * was dropped to stay within the cap, a result was only partly recorded, or the file
-   * is gone from a session that is known to exist. A lookup that finds nothing means
-   * "not read" only when this is false.
+   * was dropped to stay within the cap, or a result was only partly recorded. A lookup
+   * that finds nothing means "not read" only when this is false.
    *
    * Ask AFTER `lookup`, never before. Setting the note always comes before the records
    * are rewritten, so a lookup that saw records after a drop is followed by an answer of
@@ -54,9 +53,10 @@ const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'encoded',
 ]);
 
+/** Whether anything is at `path`, a dangling symlink included. */
 async function exists(path: string): Promise<boolean> {
   try {
-    await stat(path);
+    await lstat(path);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
@@ -155,11 +155,7 @@ export class FileProvenanceStore implements ProvenanceStore {
 
   async isIncomplete(sessionId: string): Promise<boolean> {
     try {
-      if (await exists(this.incompleteFile(sessionId))) return true;
-      if (await exists(this.file(sessionId))) return false;
-      // No records file. For a session nothing ever touched that is the ordinary start,
-      // but a tainted session has read something, and records it should hold have gone.
-      return await exists(sessionStateFile(this.dir, sessionId));
+      return await exists(this.incompleteFile(sessionId));
     } catch {
       // A file Stroq cannot even stat is not evidence that nothing was lost.
       return true;
