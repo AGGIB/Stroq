@@ -6,6 +6,7 @@ import {
   MAX_SCAN_CHARS,
   SCAN_OVERLAP,
   candidateTokens,
+  candidatesFromText,
   exceedsSecretScan,
 } from '../../src/secrets/candidates.js';
 
@@ -453,5 +454,38 @@ describe('the tools that run a shell command', () => {
     for (const tool of probes)
       expect(tokensOf(tool, send).includes(VALUE), tool).toBe(isShellTool(tool));
     expect(probes.filter(isShellTool)).toEqual(['Bash', 'PowerShell', 'Monitor']);
+  });
+});
+
+// In the JSON an MCP call is read as, a line break or a tab in a string is a backslash and a
+// letter, and splitting on the backslash leaves the next word glued to that letter: the value
+// after "hello\n" was the token "nVALUE". The strings are read as they are written as well.
+describe('candidates of an MCP call whose string holds a line break', () => {
+  const VALUE = 'Zq8xK2mPvL9nR4tY7wB3cD6fG1hJ5kN0';
+
+  it.each([
+    ['a line feed', `hello\n${VALUE}`],
+    ['a tab', `hello\t${VALUE}`],
+    ['a carriage return and a line feed', `hello\r\n${VALUE}`],
+    ['a line feed before more text', `hello\n${VALUE} and the rest`],
+    ['a quote mark', `say "hello"\n${VALUE}`],
+  ])('finds the value after %s', (_name, body) => {
+    expect(tokensOf('mcp__srv__send_message', { body })).toContain(VALUE);
+  });
+
+  it('finds the value in a nested array and object', () => {
+    expect(tokensOf('mcp__srv__send', { rows: [['a', `x\n${VALUE}`]] })).toContain(VALUE);
+    expect(tokensOf('mcp__srv__send', { a: { b: `x\t${VALUE}` } })).toContain(VALUE);
+  });
+
+  it('still finds the value the serialised form already held, and adds no copy of a plain string', () => {
+    expect(tokensOf('mcp__srv__send', { body: `hello ${VALUE}` })).toContain(VALUE);
+    const plain = { body: `hello ${VALUE}` };
+    expect(candidateTokens('mcp__srv__send', plain)).toEqual(
+      candidatesFromText(JSON.stringify(plain)),
+    );
+    expect(exceedsSecretScan('mcp__srv__send', { body: 'a'.repeat(MAX_SCAN_CHARS - 100) })).toBe(
+      false,
+    );
   });
 });

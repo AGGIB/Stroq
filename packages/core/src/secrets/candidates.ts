@@ -1,4 +1,5 @@
 import { monitorSocketText } from '../actions/monitor-socket.js';
+import { collectStrings } from '../cloak/json-strings.js';
 import { isShellTool } from '../actions/shell-tools.js';
 import { MIN_SECRET_LENGTH } from './extract.js';
 
@@ -64,6 +65,22 @@ const WORD_BOUNDARY = /[\s"'`]+/;
 // alternative is one bounded `[^X]*` run between a matching pair of `X`.
 const QUOTED = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
+/** A character `JSON.stringify` writes as an escape: a quote, a backslash or a control character. */
+const JSON_ESCAPED = /["\\\u0000-\u001f]/;
+
+/**
+ * An MCP call's arguments as the text a secret could be in: the JSON, and every string in it
+ * that the JSON escapes, as it is written. In the JSON a line break or a tab is a backslash and a
+ * letter, and the delimiter split cuts at the backslash, so the value that follows read as the
+ * token `nVALUE` and never matched. A string with nothing to escape is already in the JSON
+ * as it is, and adding it would only double the text for the scan limit.
+ */
+function mcpText(toolInput: Readonly<Record<string, unknown>>): string {
+  const json = JSON.stringify(toolInput);
+  const written = collectStrings(toolInput).filter((value) => JSON_ESCAPED.test(value));
+  return written.length > 0 ? `${json}\n${written.join('\n')}` : json;
+}
+
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '');
   // Monitor takes a command or, instead of it, a WebSocket to open (see `monitor-socket.ts`).
@@ -73,7 +90,7 @@ function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>):
       .join(' ');
   if (isShellTool(toolName)) return str(toolInput['command']);
   if (toolName === 'WebFetch') return `${str(toolInput['url'])} ${str(toolInput['prompt'])}`;
-  if (toolName.startsWith('mcp__')) return JSON.stringify(toolInput);
+  if (toolName.startsWith('mcp__')) return mcpText(toolInput);
   return '';
 }
 

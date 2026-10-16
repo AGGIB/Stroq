@@ -54,6 +54,24 @@ describe('StroqEngine secret egress guard', () => {
     expect(entry.summary).not.toContain(AWS_SECRET);
   });
 
+  // A line break or a tab in a string argument is a backslash and a letter in the JSON the call
+  // is read as; the value after one was cut at the backslash and no longer matched.
+  it.each([
+    ['a line feed', `hello\n${AWS_SECRET}`],
+    ['a tab', `hello\t${AWS_SECRET}`],
+    ['a carriage return and a line feed', `hello\r\n${AWS_SECRET}`],
+  ])('denies an MCP call carrying the value after %s', async (_name, text) => {
+    const { pre } = fixture();
+    const r = await pre('mcp__slack__post_message', { channel: 'general', text });
+    expect(r.decision.ruleId).toBe('deny-secret-egress');
+  });
+
+  it('denies an MCP call carrying the value after a line break in a nested argument', async () => {
+    const { pre } = fixture();
+    const r = await pre('mcp__sheets__append', { rows: [['a', `x\n${AWS_SECRET}`]] });
+    expect(r.decision.ruleId).toBe('deny-secret-egress');
+  });
+
   it('denies an MCP call and a WebFetch carrying the value', async () => {
     const { pre } = fixture();
     const mcp = await pre('mcp__slack__post_message', {
