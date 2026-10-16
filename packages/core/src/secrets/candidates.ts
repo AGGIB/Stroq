@@ -1,5 +1,4 @@
 import { monitorSocketText } from '../actions/monitor-socket.js';
-import { collectStrings } from '../cloak/json-strings.js';
 import { isShellTool } from '../actions/shell-tools.js';
 import { MIN_SECRET_LENGTH } from './extract.js';
 
@@ -65,20 +64,27 @@ const WORD_BOUNDARY = /[\s"'`]+/;
 // alternative is one bounded `[^X]*` run between a matching pair of `X`.
 const QUOTED = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
-/** A character `JSON.stringify` writes as an escape: a quote, a backslash or a control character. */
-const JSON_ESCAPED = /["\\\u0000-\u001f]/;
+/**
+ * An escape of the JSON `JSON.stringify` writes: the short ones for white space and the control
+ * characters (`\n \r \t \b \f`, `\u0000` to `\u001f`), which become a space below, and the
+ * others, which are matched only so that an escaped backslash is taken whole: `\\n` is a
+ * backslash and an `n`, not a line feed.
+ */
+const JSON_ESCAPE = /\\(?:[nrtbf]|u00[01][0-9a-f]|["\\/]|u[0-9a-f]{4})/g;
+const JSON_WHITE_SPACE_ESCAPE = /^\\(?:[nrtbf]|u00[01])/;
 
 /**
- * An MCP call's arguments as the text a secret could be in: the JSON, and every string in it
- * that the JSON escapes, as it is written. In the JSON a line break or a tab is a backslash and a
- * letter, and the delimiter split cuts at the backslash, so the value that follows read as the
- * token `nVALUE` and never matched. A string with nothing to escape is already in the JSON
- * as it is, and adding it would only double the text for the scan limit.
+ * An MCP call's arguments as the text a secret could be in: the JSON, with the escapes for white
+ * space read as a space. In the JSON a line break or a tab in a string is a backslash and a
+ * letter, and the delimiter split cuts at the backslash, so the value that followed read as the
+ * token `nVALUE` and never matched. A space makes it a token of its own. The text is no longer
+ * than the JSON, so the scan limit is spent as it was, and no string is left unread for being
+ * nested deep. Escaped quotes and backslashes stay as they are.
  */
 function mcpText(toolInput: Readonly<Record<string, unknown>>): string {
-  const json = JSON.stringify(toolInput);
-  const written = collectStrings(toolInput).filter((value) => JSON_ESCAPED.test(value));
-  return written.length > 0 ? `${json}\n${written.join('\n')}` : json;
+  return JSON.stringify(toolInput).replace(JSON_ESCAPE, (escape) =>
+    JSON_WHITE_SPACE_ESCAPE.test(escape) ? ' ' : escape,
+  );
 }
 
 function textOf(toolName: string, toolInput: Readonly<Record<string, unknown>>): string {
