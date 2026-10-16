@@ -10,7 +10,7 @@ import {
   wrapperIndex,
 } from '../commands/mcp-config.js';
 import type { McpClient, McpConfigJson } from '../commands/mcp-config.js';
-import { renderPassport } from '../commands/vet-render.js';
+import { confirmationScreen } from '../commands/vet-render.js';
 import { confirm, confirmTyped } from '../ui/prompt.js';
 import { outsideLine } from '../ui/layout.js';
 import { styleFor } from '../ui/style.js';
@@ -324,6 +324,8 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     previous.entrypoint !== entrypoint ||
     !jsonEqual(previous.passEnv, passEnv) ||
     !jsonEqual(previous.written, written);
+  // Before a word is written: an artifact whose sensitive lines do not all fit is not asked about.
+  const screen = confirmationScreen(made.passport, source);
   options.terminal.write(
     `${previous === undefined ? 'Install' : 'Update'} MCP server ${name} in ${outsideLine(JSON.stringify(file))}\n`,
   );
@@ -331,7 +333,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   options.terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );
-  options.terminal.write(renderPassport(made.passport));
+  options.terminal.write(screen);
   options.terminal.write(`Client entry: ${outsideLine(JSON.stringify(written))}\n`);
   const yes = material
     ? await confirmTyped(options.terminal, digest)

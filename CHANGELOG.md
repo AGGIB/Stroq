@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Signed Claude Code tasks and explicit permit extensions.** `stroq task` previews a scope and starts a task with a parent-owned gate; `stroq permit` inspects, extends or revokes it. Isolation requires srt; `--hook-only` is explicitly advisory. Thanks @kok-o (#197).
 - **`stroq bench --latency` measures hook invocation cost.** Reports processor and wall-time percentiles beside a bare Node baseline, verifies that each scenario actually reaches its audit path, and reads the CLI version from the package manifest. Thanks @Nari-Ab (#191).
 
+### Changed
+
+- **The confirmation screen of `stroq add` cannot hide the lines that matter.** Rows are ranked credentials, hosts, commands, hooks and install scripts before the tools a skill asks for. Every sensitive row is shown when you type a digest, and a source with more than 80 sensitive lines is refused with the number that would be hidden and the `stroq vet --from <source> --json` command that lists them all.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

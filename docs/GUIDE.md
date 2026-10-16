@@ -358,17 +358,17 @@ Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the ste
 skill pdf-forms 1.2.0 (name and version declared by the artifact, not checked)
 stroq-tree/1 sha256:32bb90d578d8f26224c2f87ec67ce6672c92091d108eb655a652feda5076d3f6  4 files, 945 bytes
 SENSITIVE (8)
-  [declared] allowed-tools  Bash(python3:*)            SKILL.md:5
-  [declared] allowed-tools  WebFetch                   SKILL.md:5
   [observed] cred.env       PDF_API_KEY                scripts/fill.py:5
+  [observed] net            api.pdf-tools.example      SKILL.md:20 (+1 more)
   [observed] exec           curl                       SKILL.md:20
   [observed] exec           python3                    SKILL.md:19
   [observed] exec           subprocess                 scripts/fill.py:2 (+1 more)
-  [observed] net            api.pdf-tools.example      SKILL.md:20 (+1 more)
+  [declared] allowed-tools  Bash(python3:*)            SKILL.md:5
+  [declared] allowed-tools  WebFetch                   SKILL.md:5
   [observed] signal         process-spawn: subprocess  scripts/fill.py:2 (+1 more)
 OTHER (6)
-  [declared] allowed-tools  Grep                       SKILL.md:5
-  [declared] allowed-tools  Read                       SKILL.md:5
+  [observed] cred.env       PDF_REGION                 scripts/fill.py:6
+  [observed] exec           pip                        SKILL.md:13
   and 4 more lines not shown (4 other); stroq vet --json lists all of them
 SIGNALS (1): process-spawn
 BLIND SPOTS (6), what was not looked at
@@ -386,7 +386,7 @@ How to read it:
 
 - **Line 1** is the kind and the name. The name and the version are what the artifact says about itself; Stroq does not check them, and says so. If the artifact says nothing, the name is the folder's.
 - **Line 2** is the digest of the files, `stroq-tree/1 sha256:...`, and how many files and bytes it covers. The same files give the same digest on any machine, whatever order they were made in. It is the digest of what is in the folder: a checkout can rewrite line endings, so the digest of a folder is not expected to equal the digest of the archive an author published. To check a published archive, read the archive: the one folder that wraps its files (`package/`, `owner-repo-<commit>/`) is taken off, and the digest is of the files and their executable bits as the archive has them.
-- **Every line says what it rests on.** `[declared]`: the artifact says so about itself (its front matter, its manifest). `[observed]`: reading its files found it. `[limited]`: Stroq itself holds the artifact to it when it runs it. `[unknown]`: something here could not be understood. The sensitive lines come first. A screen is about 25 lines; the lines that do not fit are counted, and `--json` lists all of them.
+- **Every line says what it rests on.** `[declared]`: the artifact says so about itself (its front matter, its manifest). `[observed]`: reading its files found it. `[limited]`: Stroq itself holds the artifact to it when it runs it. `[unknown]`: something here could not be understood. The sensitive lines come first, and within a group the credentials, hosts and commands come before the tools a skill asks for. A screen is about 25 lines; the lines that do not fit are counted, and `--json` lists all of them.
 - **`SIGNALS`** are the rules that matched: a place to look, not a verdict. A harmless document can match.
 - **`BLIND SPOTS`** are always printed, all of them: what was not looked at (nothing was run; code in other languages; the prose of documents). **An absent line means nothing was seen, not that nothing is there.** A claim such as "no credentials granted" would only be honest with the basis `limited`, and a reading of files cannot give that.
 
@@ -420,7 +420,7 @@ The sandboxed MCP probe requires srt >=0.0.79 (allowRead support), ripgrep, and 
 
 ### Add a skill after reading it
 
-Run `stroq add ./skill-directory` (or give a local `.tgz`) to show its passport and full digest, then type the first twelve hex digits at the terminal to install those inspected bytes. By default it writes `.claude/skills/<name>` in this project; `--user` uses the home directory's `.claude/skills`. This adds local skills only; `vet` still reads MCP servers and plugins without installing them.
+Run `stroq add ./skill-directory` (or give a local `.tgz`) to show its passport and full digest, then type the first twelve hex digits at the terminal to install those inspected bytes. The screen you type against shows every sensitive line, credentials and hosts first (the screen of `vet` may cut); an artifact with more than 80 sensitive lines is refused before any digest is asked for, with the number that would have been hidden and the command that lists them all (`stroq vet --from <source> --json`). By default it writes `.claude/skills/<name>` in this project; `--user` uses the home directory's `.claude/skills`. This adds local skills only; `vet` still reads MCP servers and plugins without installing them.
 
 `stroq add <installed-name>` updates from its recorded local source, keeping its original installation directory. The screen names the destination, replaced source, previous digest, changed files and new passport lines. Any added, changed or removed file other than `.md` or `.txt`, a changed executable bit, new sensitive capability, weaker basis or new blind spot needs another typed digest; only documentation changes without those conditions ask y/N. A different source declaring an installed name is refused, and `--user` must match the recorded root. The old skill remains until confirmation. A directory created outside Stroq is never replaced. Outside changes mark an installed skill `drifted` before an update prompt; `stroq add <name> --restore` warns that it permanently discards outside edits, then restores the previously confirmed store bytes after another typed confirmation. `stroq remove <name> [--user]` asks y/N and removes only an unchanged skill; `--user` targets user scope (`~/.claude/skills`), and `--force` also removes outside edits.
 
