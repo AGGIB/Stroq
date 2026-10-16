@@ -195,6 +195,23 @@ describe('a result that was only partly recorded', () => {
     expect((await f.pre('npx some-other-helper')).decision.effect).toBe('ask');
   });
 
+  // The extractor reads 200,000 characters, so a text of exactly that length was read whole and
+  // it reports no loss. The engine cannot tell that text from a longer one a host cut to that
+  // length, so it takes 200,000 as a loss and 199,999 as complete.
+  it.each([
+    [DEFAULT_MAX_CHARS - 1, false],
+    [DEFAULT_MAX_CHARS, true],
+  ])('reads a result of %i characters as incomplete: %s', async (length, incomplete) => {
+    const f = fixture();
+    const text = `${payload()}\n${'y\n'.repeat(DEFAULT_MAX_CHARS)}`.slice(0, length);
+    expect(text).toHaveLength(length);
+
+    const r = await f.post(text);
+
+    expect(r.provenanceIncomplete).toBe(incomplete);
+    expect(await f.provenance.isIncomplete('s1')).toBe(incomplete);
+  });
+
   it('marks the session even when the cut result held no atom at all', async () => {
     const f = fixture();
     await f.post('y\n'.repeat(DEFAULT_MAX_CHARS / 2));

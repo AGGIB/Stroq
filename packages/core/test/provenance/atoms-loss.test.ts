@@ -100,6 +100,17 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
     expect(truncated).toBe(false);
   });
 
+  // `npm install` ends at its last letter, and the part of the line that is read starts there:
+  // a space and 511 characters are 512, the whole window; one more character is past it.
+  it.each([
+    ['512 characters after the installer', 511, false],
+    ['513 characters after the installer', 512, true],
+  ])('reports the window boundary at %s', (_name, length, cut) => {
+    const text = `npm install ${'a'.repeat(length)}`;
+    expect(text.length - 'npm install'.length).toBe(length + 1);
+    expect(extractAtomsDeepWithLoss(text).truncated).toBe(cut);
+  });
+
   it('reports no loss for a long line that names no runner or installer', () => {
     expect(extractAtomsDeepWithLoss(`${'word '.repeat(400)}`).truncated).toBe(false);
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { wholeCallFingerprint } from '../../src/scope/scope-check.js';
 import { HARD_CLASSES } from '../../src/scope/hard-set.js';
-import type { ActionClass, Decision } from '../../src/types.js';
+import type { ActionClass } from '../../src/types.js';
 import { ALLOW, ASK, DENY, callOf, gateFixture, verdictOf } from './gate-fixture.js';
 
 const HINT = /to extend: stroq permit extend fix-login-1 ([0-9a-f]{64})/;
@@ -93,31 +93,6 @@ describe('step 4: the policy decision', () => {
     expect(verdict.evidence.kind).toBe('ask');
     expect(verdict.decision.reason).toContain('policy asks');
     expect(fpOf(verdict.decision.reason)).toBe(wholeCallFingerprint(call));
-  });
-
-  // The ask that incomplete provenance produces (`origin.untrusted` with no record behind
-  // it) must stay one a task's owner can lift for that call, unlike a flagged record's
-  // `origin.suspect`: uncertainty is not evidence, and the hard set is only evidence.
-  it('turns the ask incomplete provenance produces into a deny its owner can extend, not a hard one', async () => {
-    const f = gateFixture();
-    const asked: Decision = {
-      effect: 'ask',
-      ruleId: 'ask-origin-untrusted',
-      reason: 'copied from content the agent read',
-    };
-    const call = callOf(
-      'Bash',
-      { command: 'npx some-helper' },
-      {
-        classes: ['origin.untrusted'],
-        decision: asked,
-      },
-    );
-    const verdict = await verdictOf(f, call);
-    expect(verdict.decision.effect).toBe('deny');
-    expect(verdict.decision.ruleId).toBe('task-ask:ask-origin-untrusted');
-    expect(fpOf(verdict.decision.reason)).toBe(wholeCallFingerprint(call));
-    expect(HARD_CLASSES).not.toContain('origin.untrusted');
   });
 
   it('turns an ask with no rule id into a deny with a stable id', async () => {

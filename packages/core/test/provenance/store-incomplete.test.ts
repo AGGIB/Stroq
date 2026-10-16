@@ -253,3 +253,44 @@ describe('FileProvenanceStore.markIncomplete when the rename fails', () => {
     expect(await store.isIncomplete('s1')).toBe(true);
   });
 });
+
+describe('FileProvenanceStore under concurrent callers', () => {
+  const tmpFiles = (dir: string) => readdirSync(dir).filter((name) => name.endsWith('.tmp'));
+
+  it('notes a loss once, however many callers note it at the same time', async () => {
+    const { dir, store } = fresh();
+    await Promise.all(Array.from({ length: 12 }, () => store.markIncomplete('s1')));
+    expect(await store.isIncomplete('s1')).toBe(true);
+    expect(tmpFiles(dir)).toEqual([]);
+  });
+
+  it('settles a note that races a clear to one of the two outcomes, and leaves nothing behind', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', [input('h')]);
+    await Promise.all([store.markIncomplete('s1'), store.clear('s1')]);
+    expect(tmpFiles(dir)).toEqual([]);
+    await store.clear('s1');
+    expect(await store.isIncomplete('s1')).toBe(false);
+    expect(await store.lookup('s1', ['h'])).toEqual([]);
+  });
+
+  it('keeps both records, and notes the loss once, when two writers straddle the cap', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('a', MAX_RECORDS - 1));
+    expect(await store.isIncomplete('s1')).toBe(false);
+
+    await Promise.all([store.record('s1', [input('x')]), store.record('s1', [input('y')])]);
+
+    expect(await store.lookup('s1', ['x', 'y'])).toHaveLength(2);
+    expect(await store.lookup('s1', ['a0'])).toEqual([]);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('does not note a loss when two writers together only fill the cap', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('a', MAX_RECORDS - 2));
+    await Promise.all([store.record('s1', [input('x')]), store.record('s1', [input('y')])]);
+    expect(await store.lookup('s1', ['a0', 'x', 'y'])).toHaveLength(3);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+});
