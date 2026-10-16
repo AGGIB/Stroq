@@ -340,6 +340,9 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   options.terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );
+  options.terminal.write(
+    'Self-contained: no dependency is listed and no import by name was found. That is a best-effort reading of the text, not a proof that nothing outside the tree is loaded; the pin is tamper-evident, not tamper-proof.\n',
+  );
   options.terminal.write(screen);
   options.terminal.write(`Client entry: ${outsideLine(JSON.stringify(written))}\n`);
   const yes = material

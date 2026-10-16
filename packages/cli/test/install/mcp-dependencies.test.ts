@@ -7,6 +7,7 @@ import { mcpFixture } from '../helpers/mcp-install.js';
 
 const REMEDY =
   /bundle the server into one self-contained file or vendor its dependencies inside the tree/;
+const BEST_EFFORT = /best-effort reading of the text/;
 
 async function untouched(f: Awaited<ReturnType<typeof mcpFixture>>, before: string) {
   expect(await readFile(f.config, 'utf8')).toBe(before);
@@ -96,5 +97,41 @@ describe('add --kind mcp holds a server to what its tree contains', () => {
 
     expect(await readFile(f.config, 'utf8')).toBe(before);
     expect(JSON.stringify((await readPassports(f.options.stroqHome)).mcp)).toBe(lockBefore);
+  });
+
+  it('says the reading is best-effort in the refusal and on the screen it asks against', async () => {
+    const refused = await mcpFixture({ 'server.js': "require('zod')\n" });
+    await expect(addMcp(refused.dir, refused.mcpOptions)).rejects.toThrow(BEST_EFFORT);
+
+    const accepted = await mcpFixture();
+    await addMcp(accepted.dir, accepted.mcpOptions);
+    expect(accepted.output()).toMatch(BEST_EFFORT);
+    expect(accepted.output()).toContain('tamper-evident, not tamper-proof');
+  });
+
+  it.each([
+    ['a module requested by a name built at run time', 'const n = "a"; require(n)\n', /run time/],
+    ['createRequire', 'import { createRequire } from "node:module"\n', /createRequire/],
+    ['text that cannot be read with certainty', "const s = 'open\nrequire('a')\n", /certainty/],
+    ['an escaped module name', "require('\\x70kg')\n", /escapes/],
+    ['an import of a path outside the tree', "require('../other.js')\n", /outside the tree/],
+    ['a file Node runs through a loader', "require('./tool.ts')\n", /loader/],
+  ])('refuses a server with %s, naming the file', async (_what, code, why) => {
+    const f = await mcpFixture({ 'server.js': code, 'tool.ts': 'x' });
+    const before = await readFile(f.config, 'utf8');
+
+    const error = await addMcp(f.dir, f.mcpOptions).catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(why);
+    expect((error as Error).message).toContain('"server.js"');
+    expect((error as Error).message).toMatch(REMEDY);
+    await untouched(f, before);
+  });
+
+  it('refuses a package.json whose entries point out of the tree', async () => {
+    const f = await mcpFixture({}, { exports: { '.': '../elsewhere.js' } });
+
+    await expect(addMcp(f.dir, f.mcpOptions)).rejects.toThrow(/"package.json".*outside the tree/);
   });
 });

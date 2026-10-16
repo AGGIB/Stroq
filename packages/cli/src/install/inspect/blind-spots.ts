@@ -63,7 +63,7 @@ export type TallyKey = (typeof TALLY_KEYS)[number];
 
 /** Said of an MCP server whose code asks for packages by name: the pin does not hold what is found there. */
 export const OUTSIDE_IMPORTS_SPOT =
-  'imports resolve outside the pin: the server lists dependencies or imports a package by name, and Node finds it in a folder that no digest covers';
+  'imports resolve outside the pin: the server lists dependencies, imports a package by name, or loads code in a way its text does not settle, so Node may find it in a folder that no digest covers; this is a best-effort reading of the text';
 
 const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   'unreadable-text': (n) =>

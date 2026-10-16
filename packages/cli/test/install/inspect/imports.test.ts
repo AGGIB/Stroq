@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OUTSIDE_IMPORTS_SPOT } from '../../../src/install/inspect/blind-spots.js';
 import { completeTree, passportOf, type Files } from '../../helpers/inspect.js';
-import { outsideImportsOfTree } from '../../../src/install/inspect/imports.js';
+import { hasOutsideImports, outsideImportsOfTree } from '../../../src/install/inspect/imports.js';
 
 const manifest = (extra: Record<string, unknown> = {}): string =>
   JSON.stringify({ name: 'srv', version: '1.0.0', bin: 'server.js', ...extra });
@@ -29,7 +29,7 @@ describe('what an MCP server asks for that its tree does not hold', () => {
       'server.js': 'console.log(1)\n',
     });
 
-    expect(found).toEqual({ declared: [], modules: [] });
+    expect(found).toEqual({ declared: [], modules: [], concerns: [] });
   });
 
   it('finds a package the sources import by name even when package.json lists none', () => {
@@ -65,7 +65,7 @@ describe('what an MCP server asks for that its tree does not hold', () => {
       'vendor/other.mjs': 'export default 2\n',
     };
 
-    expect(outside(files)).toEqual({ declared: [], modules: [] });
+    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
     expect(spotOf(files)).toBe(false);
   });
 
@@ -173,5 +173,187 @@ describe('the blind spot of vet', () => {
 
     expect(passport.blindSpots).toContain('dependencies were not followed, fetched or read');
     expect(passport.blindSpots).toContain(OUTSIDE_IMPORTS_SPOT);
+  });
+});
+
+const concernsOfFiles = (files: Files) =>
+  Object.fromEntries(outside(files).concerns.map((c) => [c.concern, c.files]));
+const server = (code: string, more: Files = {}): Files => ({
+  'package.json': manifest(),
+  'server.js': code,
+  ...more,
+});
+
+describe('a file whose imports cannot be read is never read as one with none', () => {
+  it.each([
+    ['a name built at run time', 'const n = "a"; require(n)', 'computed'],
+    ['require used as a value', 'const r = require; r("a")', 'computed'],
+    ['a dynamic import of a computed name', 'import(name)', 'computed'],
+    ['createRequire', 'const { createRequire } = require("module")', 'dynamic-code'],
+    ['process.binding', 'process.binding("fs")', 'dynamic-code'],
+    ['a function made from text', 'new Function("a", "return a")', 'dynamic-code'],
+    ['eval', 'eval("1")', 'dynamic-code'],
+    ['a string that is not closed', 'const s = "open\nrequire("a")', 'doubt'],
+    ['an HTML-like comment', 'x = 1 <!-- require("a")', 'doubt'],
+    ['an escaped module name', 'require("\\x70kg")', 'escaped'],
+  ])('flags %s', (_what, code, concern) => {
+    const found = outside(server(code));
+
+    expect(concernsOfFiles(server(code))).toHaveProperty(concern, ['server.js']);
+    expect(hasOutsideImports(found)).toBe(true);
+    expect(spotOf(server(code))).toBe(true);
+  });
+
+  it('flags a file that is not valid UTF-8 text, and one with a NUL', () => {
+    const bad = {
+      'package.json': manifest(),
+      'server.js': { bytes: new Uint8Array([0x72, 0xff, 0xfe, 0x28]) },
+      'lib/binary.js': { bytes: new Uint8Array([0x72, 0x00, 0x28]) },
+    };
+
+    expect(concernsOfFiles(bad)).toHaveProperty('unreadable', ['lib/binary.js', 'server.js']);
+    expect(spotOf(bad)).toBe(true);
+  });
+
+  it('flags a file past the amount of text it reads, and says which', () => {
+    const files = server("require('./a.js')\n", { 'a.js': 'module.exports = 1\n' });
+    const found = outsideImportsOfTree(completeTree(files), { budgetBytes: 20 });
+
+    expect(found.concerns).toEqual([{ concern: 'budget', files: ['server.js'] }]);
+  });
+
+  it('reads a file that is longer than the one megabyte the other readings take, to its end', () => {
+    const filler = `// ${'x'.repeat(1.5 * 1024 * 1024)}\n`;
+    const found = outside(server(`${filler}require('left-pad')\n`));
+
+    expect(found.modules).toEqual(['left-pad']);
+    expect(found.concerns).toEqual([]);
+  });
+
+  it('flags a file that Node runs through a loader or natively', () => {
+    for (const request of [
+      "require('./addon.node')",
+      "import './mod.wasm'",
+      "require('./helper.ts')",
+      "import('./view.jsx')",
+      "require('./data.txt')",
+    ]) {
+      const files = server(request, {
+        'addon.node': 'x',
+        'mod.wasm': 'x',
+        'helper.ts': 'x',
+        'view.jsx': 'x',
+        'data.txt': 'x',
+      });
+
+      expect(concernsOfFiles(files), request).toHaveProperty('loader', ['server.js']);
+    }
+    // Without the extension Node still finds a native addon, and runs a file with no extension as code.
+    expect(concernsOfFiles(server("require('./addon')", { 'addon.node': 'x' }))).toHaveProperty(
+      'loader',
+    );
+    expect(concernsOfFiles(server("require('./tool')", { tool: 'x' }))).toHaveProperty('loader');
+  });
+
+  it('does not flag JSON, which loads no code, or a name that is a file with .js on it', () => {
+    const files = server(
+      "require('./config.json'); require('./lib'); require('./dir'); require('./a.b')",
+      {
+        'config.json': '{}',
+        'lib.js': 'module.exports = 1',
+        'dir/index.js': 'module.exports = 1',
+        'a.b.js': 'module.exports = 1',
+      },
+    );
+
+    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+  });
+
+  it('flags an import of a place outside the tree: an absolute path, a file: URL, a path that climbs out', () => {
+    for (const request of [
+      "require('/etc/x.js')",
+      "import 'file:///etc/x.js'",
+      "require('../shared/x.js')",
+      "require('./../../x.js')",
+    ])
+      expect(concernsOfFiles(server(request)), request).toHaveProperty('outside', ['server.js']);
+    // A Windows path has to be written with escapes, and a name written with escapes is not read.
+    expect(concernsOfFiles(server("require('C:\\\\x.js')"))).toHaveProperty('escaped', [
+      'server.js',
+    ]);
+    expect(
+      concernsOfFiles(server("require('../server.js')", { 'lib/a.js': "require('../server.js')" })),
+    ).toHaveProperty('outside', ['server.js']);
+    expect(
+      concernsOfFiles({
+        'package.json': manifest(),
+        'server.js': "require('./lib/a.js')",
+        'lib/a.js': "require('../server.js'); require('./b.js')",
+        'lib/b.js': '1',
+      }),
+    ).toEqual({});
+  });
+
+  it.each([
+    ['main', { main: '../other/index.js' }],
+    ['main', { main: '/abs/index.js' }],
+    ['bin', { bin: '../other/cli.js' }],
+    ['exports', { exports: '../server.js' }],
+    ['exports', { exports: { '.': { import: './ok.mjs', require: '../bad.cjs' } } }],
+    ['exports', { exports: { '.': 'server.js' } }],
+    ['exports', { exports: { '.': './node_modules/x/index.js' } }],
+    ['imports', { imports: { '#dep': 'some-package' } }],
+    ['imports', { imports: { '#dep': '../x.js' } }],
+    ['imports', { imports: { '#dep': { node: 'other-package', default: './ok.js' } } }],
+  ])('flags a package.json whose %s points out of the tree', (_field, extra) => {
+    const files = {
+      'package.json': manifest(extra),
+      'server.js': 'console.log(1)\n',
+      'ok.mjs': '1',
+      'ok.js': '1',
+    };
+
+    expect(concernsOfFiles(files)).toHaveProperty('outside', ['package.json']);
+    expect(spotOf(files)).toBe(true);
+  });
+
+  it('does not flag a package.json whose entries stay inside', () => {
+    const files = {
+      'package.json': manifest({
+        main: 'server.js',
+        exports: { '.': { import: './server.js', require: './server.js' }, './x': './lib/x.js' },
+        imports: { '#a': './lib/a.js', '#fs': 'node:fs' },
+        bin: { srv: 'server.js' },
+      }),
+      'server.js': "import '#a'",
+      'lib/a.js': '1',
+    };
+
+    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+  });
+
+  it('flags a package.json that is not valid JSON', () => {
+    const files = { 'package.json': '{ not json', 'server.js': '1' };
+
+    expect(concernsOfFiles(files)).toHaveProperty('unreadable', ['package.json']);
+  });
+
+  it('flags a package.json that is not text', () => {
+    const files = {
+      'package.json': { bytes: new Uint8Array([0x7b, 0xff, 0x7d]) },
+      'server.js': '1',
+    };
+
+    expect(concernsOfFiles(files)).toHaveProperty('unreadable', ['package.json']);
+  });
+
+  it('does not look at files that are not run by Node without a loader, or at node_modules', () => {
+    const files = server('1', {
+      'view.jsx': 'require(name)',
+      'types.ts': "import x from 'zod'",
+      'node_modules/held/index.js': 'require(name)',
+    });
+
+    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
   });
 });
