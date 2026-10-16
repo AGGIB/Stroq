@@ -178,6 +178,33 @@ function readManifest(input: InspectInput): Manifest {
   return { fields, self, concern: manifestPointsOut(manifest) };
 }
 
+const isManifest = (path: string): boolean =>
+  (path === 'package.json' || path.endsWith('/package.json')) && !IN_MODULES.test(path);
+
+/**
+ * Every other package.json of the tree. A folder with one of its own is a package of its own to Node: its
+ * `imports` say what `#name` means for the files below it, and its `exports` and `main` what is loaded. The
+ * root one is read by `readManifest`; these are only asked where they point.
+ */
+function nestedManifestConcerns(input: InspectInput): { concern: ImportsConcern; path: string }[] {
+  const found: { concern: ImportsConcern; path: string }[] = [];
+  for (const entry of input.tree.entries) {
+    if (entry.kind !== 'file' || !isManifest(entry.path) || entry.path === 'package.json') continue;
+    const file = input.byPath.get(entry.path);
+    const manifest = file === undefined ? null : parseJsonObject(file.text);
+    const concern = manifest === null ? 'unreadable' : manifestPointsOut(manifest);
+    if (concern !== null) found.push({ concern, path: entry.path });
+  }
+  return found;
+}
+
+interface Context {
+  readonly folders: ReadonlySet<string>;
+  readonly self: string | null;
+  /** The paths of the links and nested repositories of the tree. */
+  readonly links: ReadonlySet<string>;
+}
+
 interface Reading {
   readonly modules: Set<string>;
   readonly concerns: Map<ImportsConcern, Set<string>>;
@@ -205,10 +232,16 @@ function checkRelative(
   reading: Reading,
   path: string,
   specifier: string,
-  paths: ReadonlySet<string>,
+  input: InspectInput,
+  links: ReadonlySet<string>,
 ): void {
+  const paths = input.paths;
   const target = landing(path, specifier);
   if (target === null) return note(reading, 'outside', path);
+  // A link is never followed: Node would, and what it leads to is not in the tree.
+  const suffixes = ['', '.js', '.mjs', '.cjs', '.json', '.node', '/index.js'];
+  if (suffixes.some((suffix) => links.has(`${target}${suffix}`)))
+    return note(reading, 'outside', path);
   const ext = posix.extname(target).toLowerCase();
   if (LOADED_BY_NODE.has(ext)) return;
   // Node tries the name, then the name with `.js`, `.json` and `.node`; a file of another kind that it finds is
@@ -227,12 +260,12 @@ function readSpecifiers(
   path: string,
   specifiers: readonly string[],
   input: InspectInput,
-  context: { folders: ReadonlySet<string>; self: string | null },
+  context: Context,
 ): void {
   for (const specifier of specifiers) {
     const kind = classifySpecifier(specifier);
     if (kind === 'absolute') note(reading, 'outside', path);
-    else if (kind === 'relative') checkRelative(reading, path, specifier, input.paths);
+    else if (kind === 'relative') checkRelative(reading, path, specifier, input, context.links);
     else if (kind === 'bare') {
       const name = packageNameOf(specifier);
       if (name !== context.self && !heldAbove(name, path, context.folders))
@@ -241,12 +274,7 @@ function readSpecifiers(
   }
 }
 
-function readFile(
-  reading: Reading,
-  entry: TreeEntry,
-  input: InspectInput,
-  context: { folders: ReadonlySet<string>; self: string | null },
-): void {
+function readFile(reading: Reading, entry: TreeEntry, input: InspectInput, context: Context): void {
   try {
     const text = textOf(entry);
     if (text === null) return note(reading, 'unreadable', entry.path);
@@ -262,9 +290,17 @@ function readFile(
 /** What the files of the tree ask for that the tree does not hold, and what could not be read. */
 export function outsideImports(input: InspectInput, options: ReadOptions = {}): OutsideImports {
   const manifest = readManifest(input);
-  const context = { folders: foldersOf(input.paths), self: manifest.self };
+  const context: Context = {
+    folders: foldersOf(input.paths),
+    self: manifest.self,
+    links: new Set(input.tree.entries.filter((e) => e.kind !== 'file').map((e) => e.path)),
+  };
   const reading: Reading = { modules: new Set(), concerns: new Map() };
   if (manifest.concern !== null) note(reading, manifest.concern, 'package.json');
+  for (const { concern, path } of nestedManifestConcerns(input)) note(reading, concern, path);
+  // A link in the tree is never followed, and what a link to a script stands for was not read.
+  for (const entry of input.tree.entries)
+    if (entry.kind !== 'file' && NODE_FILE.test(entry.path)) note(reading, 'outside', entry.path);
   let budget = options.budgetBytes ?? SCAN_BUDGET_BYTES;
   for (const entry of input.tree.entries) {
     if (entry.kind !== 'file' || !NODE_FILE.test(entry.path) || IN_MODULES.test(entry.path))

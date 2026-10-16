@@ -357,3 +357,152 @@ describe('a file whose imports cannot be read is never read as one with none', (
     expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
   });
 });
+
+describe('the specifiers are judged as Node would look them up', () => {
+  const asks = (request: string, more: Files = {}) => outside(server(request, more));
+
+  it.each([
+    ["require('NODE:fs')", 'NODE:fs'],
+    ["require('Node:fs')", 'Node:fs'],
+    ["require('FS')", 'FS'],
+    ["require('DATA:text/javascript,1')", 'DATA:text'],
+    ["import 'https://example.com/x.js'", 'https:'],
+    ["import 'http://example.com/x.js'", 'http:'],
+    ["require('npm:left-pad')", 'npm:left-pad'],
+    ["require('..\\\\..\\\\x')", null],
+  ])('%s is looked up by name, or flagged', (request, name) => {
+    const found = asks(request);
+
+    if (name !== null) expect(found.modules).toContain(name);
+    expect(hasOutsideImports(found)).toBe(true);
+  });
+
+  it.each([
+    "require('node:fs')",
+    "require('fs')",
+    "require('fs/promises')",
+    "require('node:test')",
+    "import 'data:text/javascript,export default 1'",
+    "require('#internal')",
+  ])('%s is a built-in of Node or a # import of the package', (request) => {
+    expect(asks(request, { 'lib.js': '1' }).modules).toEqual([]);
+  });
+
+  it('counts a relative specifier that climbs out of the tree, by any path, as outside the pin', () => {
+    for (const request of [
+      "require('../x')",
+      "require('./../x')",
+      "require('./a/../../x')",
+      "require('../../x')",
+      "require('./a/b/../../../x')",
+    ])
+      expect(concernsOfFiles(server(request, { 'a/b/c.js': '1' })), request).toHaveProperty(
+        'outside',
+        ['server.js'],
+      );
+    expect(
+      concernsOfFiles(
+        server("require('./a/../lib/x.js'); require('./a/b/../c.js')", {
+          'lib/x.js': '1',
+          'a/c.js': '1',
+        }),
+      ),
+    ).toEqual({});
+  });
+
+  it('counts a relative import that lands on a link as outside, and a link to a script as unread', () => {
+    const files = server("require('./linked.js'); require('./dir-link')", {
+      'linked.js': { symlink: '/etc/passwd' },
+      'dir-link': { symlink: '/usr/lib' },
+      'tool.js': { symlink: '../elsewhere.js' },
+    });
+    const found = concernsOfFiles(files);
+
+    expect(found['outside']).toEqual(['linked.js', 'server.js', 'tool.js']);
+  });
+
+  it('reads the package.json of a folder of the tree, which is a package of its own to Node', () => {
+    for (const nested of [
+      { imports: { '#dep': 'left-pad' } },
+      { imports: { '#dep': '../outside.js' } },
+      { exports: '../outside.js' },
+      { main: '../outside.js' },
+    ])
+      expect(
+        concernsOfFiles(
+          server("require('./lib/a.js')", {
+            'lib/package.json': JSON.stringify({ name: 'lib', ...nested }),
+            'lib/a.js': "require('#dep')",
+          }),
+        ),
+        JSON.stringify(nested),
+      ).toHaveProperty('outside', ['lib/package.json']);
+    expect(
+      concernsOfFiles(
+        server("require('./lib/a.js')", {
+          'lib/package.json': '{ not json',
+          'lib/a.js': '1',
+        }),
+      ),
+    ).toHaveProperty('unreadable', ['lib/package.json']);
+    expect(
+      concernsOfFiles(
+        server("require('./lib/a.js')", {
+          'lib/package.json': JSON.stringify({
+            imports: { '#dep': './dep.js', '#fs': 'node:fs' },
+            exports: { './*': './*.js' },
+          }),
+          'lib/a.js': "require('#dep')",
+          'lib/dep.js': '1',
+        }),
+      ),
+    ).toEqual({});
+  });
+
+  it('reads patterns in exports and imports, and a package that names itself', () => {
+    const inside = {
+      'package.json': manifest({
+        name: 'srv',
+        exports: { '.': './server.js', './lib/*': './lib/*.js', './x/*.js': './x/*.js' },
+        imports: { '#lib/*': './lib/*.js' },
+      }),
+      'server.js': "require('srv/lib/a'); require('srv'); require('#lib/a')",
+      'lib/a.js': '1',
+    };
+    const outsidePattern = {
+      ...inside,
+      'package.json': manifest({
+        name: 'srv',
+        exports: { './lib/*': '../lib/*.js' },
+      }),
+    };
+
+    expect(outside(inside)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(concernsOfFiles(outsidePattern)).toHaveProperty('outside', ['package.json']);
+  });
+
+  it('reports every file that has a concern, not only the first', () => {
+    const files = server('require(name)', {
+      'a.js': 'require(a)',
+      'b.js': 'eval(b)',
+      'lib/c.js': "const s = 'open",
+      'lib/d.js': 'require(d)',
+    });
+    const found = concernsOfFiles(files);
+
+    expect(found['computed']).toEqual(['a.js', 'lib/d.js', 'server.js']);
+    expect(found['dynamic-code']).toEqual(['b.js']);
+    expect(found['doubt']).toEqual(['lib/c.js']);
+  });
+
+  it('keeps going past a file it could not read', () => {
+    const files = server("require('left-pad')", {
+      'a.js': { bytes: new Uint8Array([0xff, 0xfe]) },
+      'b.js': "require('is-odd')",
+    });
+    const found = outside(files);
+
+    expect(found.modules).toEqual(['is-odd', 'left-pad']);
+    expect(concernsOfFiles(files)).toHaveProperty('unreadable', ['a.js']);
+  });
+});

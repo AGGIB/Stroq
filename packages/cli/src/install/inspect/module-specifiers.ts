@@ -282,9 +282,11 @@ export function classifySpecifier(specifier: string): SpecifierKind {
   if (specifier.startsWith('./') || specifier.startsWith('../')) return 'relative';
   if (specifier.startsWith('/') || WINDOWS_PATH.test(specifier)) return 'absolute';
   if (specifier.startsWith('#') || BUILTINS.has(specifier)) return 'inside';
-  const scheme = SCHEME.exec(specifier)?.[0]?.toLowerCase();
+  // Only the lower-case `node:` and `data:` are Node's own. `NODE:fs` is a package name to `require`, which
+  // looks it up in the folders above the file; a scheme is compared as written, and anything else is by name.
+  const scheme = SCHEME.exec(specifier)?.[0];
   if (scheme === 'node:' || scheme === 'data:') return 'inside';
-  return scheme === 'file:' ? 'absolute' : 'bare';
+  return scheme?.toLowerCase() === 'file:' ? 'absolute' : 'bare';
 }
 
 /**

@@ -313,10 +313,17 @@ describe('how a specifier is looked up', () => {
     'child_process',
     'data:text/javascript,export default 1',
     '#internal/thing',
-  ])('%j is Node\u2019s own, or the package\u2019s', (spec) => {
+  ])('%j is a built-in of Node, or a # import of the package', (spec) => {
     expect(classifySpecifier(spec)).toBe('inside');
     expect(isBareSpecifier(spec)).toBe(false);
   });
+
+  it.each(['NODE:fs', 'Node:fs', 'DATA:text/javascript,1', 'FS', 'Path', 'fs/Promises'])(
+    '%j is not a built-in of Node, because Node compares it as written',
+    (spec) => {
+      expect(classifySpecifier(spec)).toBe('bare');
+    },
+  );
 
   it('counts a URL scheme node cannot load, and a package-manager scheme, as outside the tree', () => {
     expect(isBareSpecifier('https://example.com/a.js')).toBe(true);
