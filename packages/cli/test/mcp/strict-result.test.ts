@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { leafText } from '../../src/mcp/strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from '../../src/mcp/strict-limits.js';
 import { readStrictError, readStrictResult } from '../../src/mcp/strict-result.js';
 
@@ -110,8 +111,8 @@ describe('readStrictResult: tools/call', () => {
   });
 
   it('withholds text past the scan window and reads text exactly at it', () => {
-    // The window counts everything scanned, keys included: measure what the keys cost.
-    const overhead = textOf(readStrictResult('tools/call', { content: [text('')] })).length;
+    // The window counts the decoded strings, keys included: measure what the keys cost.
+    const overhead = (leafText({ content: [text('')] }) as string).length;
     const fill = STRICT_MAX_TEXT_CHARS - overhead;
     const at = readStrictResult('tools/call', { content: [text('a'.repeat(fill))] });
     expect(reasonOf(at)).toBe('readable');

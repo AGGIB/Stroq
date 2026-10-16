@@ -54,6 +54,7 @@ const TOOLS = [
   'bigimage',
   'linkname',
   'hiddenres',
+  'sqlstruct',
 ].map((name) => ({ name, description: `case ${name}`, inputSchema: { type: 'object' } }));
 
 // The id of a `slow` call, answered late: when the next call arrives.
@@ -222,6 +223,11 @@ function call(name, id, args) {
             resource: { uri: 'file:///a', mimeType: 'text/plain', text: INJ },
           },
         ],
+      });
+    case 'sqlstruct': // a structured result in which a key and its value, side by side, are the payload
+      return reply(id, {
+        content: [{ type: 'text', text: 'ok' }],
+        structuredContent: { status: 'ok', query: "x'; DROP TABLE users; --" },
       });
     case 'customer':
       return reply(id, text('Customer: mail peter@bugle.example'));

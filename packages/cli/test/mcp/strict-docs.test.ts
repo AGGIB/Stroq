@@ -6,6 +6,8 @@ import { commandHelp } from '../../src/help.js';
 import { MAX_LINE_CHARS } from '../../src/mcp/framing.js';
 import {
   DEFAULT_STRICT_MAX_WITHHELD,
+  STRICT_COPY_MAX_CHARS,
+  STRICT_COPY_STRING_CHARS,
   STRICT_MAX_BENIGN_WITHHELD,
   STRICT_MAX_TEXT_CHARS,
   STRICT_SCAN_DEADLINE_MS,
@@ -56,6 +58,14 @@ describe('the --strict section of docs/AGENTS.md', () => {
     expect(section).toContain(`${STRICT_SCAN_DEADLINE_MS / 1000}-second deadline`);
     expect(commandHelp('mcp')).toContain(`default ${DEFAULT_STRICT_MAX_WITHHELD}`);
     expect(commandHelp('mcp')).toContain(`cap of ${STRICT_MAX_BENIGN_WITHHELD}`);
+  });
+
+  it('states the cuts of the serialised copy the code makes', () => {
+    expect(section).toContain(
+      `strings cut to ${STRICT_COPY_STRING_CHARS.toLocaleString('en-US')} characters`,
+    );
+    expect(section).toContain(`the whole copy to ${STRICT_COPY_MAX_CHARS / 1024} KiB`);
+    expect(section).toContain(`${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')}-character window`);
   });
 
   describe('which cap each reason counts toward', () => {

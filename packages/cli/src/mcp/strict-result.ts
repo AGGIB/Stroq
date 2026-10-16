@@ -1,5 +1,5 @@
 import { isRecord } from '../adapters/tool-input.js';
-import { NO_MEDIA, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
+import { NO_MEDIA, copyTail, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 import { isClassifiedMedia } from './strict-media.js';
 import type { WithholdReason } from './strict-reasons.js';
@@ -130,11 +130,17 @@ function readItems(items: unknown, media: Media): WithholdReason | null {
   return null;
 }
 
-/** The scan text of `value`, held to the scan window. */
+/**
+ * The scan text of `value`. The window is decided on the decoded strings alone, as it
+ * always was: a result whose strings do not fit is withheld, and the serialised copy that
+ * follows them is only ever added into the room that is left, so it cannot make a text
+ * that fits look cut short.
+ */
 function finish(value: unknown, media: MediaPayloads): StrictRead {
-  const text = leafText(value, media);
-  if (text === null) return withheld('scan-failed');
-  if (text.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
+  const leaves = leafText(value, media);
+  if (leaves === null) return withheld('scan-failed');
+  if (leaves.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
+  const text = leaves + copyTail(value, media, leaves.length);
   return isCovered(value, media, text) ? { ok: true, text, media } : withheld('unread-content');
 }
 

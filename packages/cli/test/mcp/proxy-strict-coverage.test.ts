@@ -9,6 +9,27 @@ import { startRig } from './strict-rig.js';
  * end through the real proxy and the real scanner.
  */
 
+describe('a payload that is JSON syntax: a key and its value side by side', () => {
+  it('taints the session in the default proxy, which scans the JSON form of structuredContent', async () => {
+    const rig = startRig();
+    await rig.handshake();
+    rig.call(3, 'sqlstruct');
+    await rig.answerFor(3);
+    expect(rig.tainted()).toBe(true);
+    await rig.finish();
+  });
+
+  it('taints it in strict mode too: the scan text carries the serialised structure after the strings', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'sqlstruct');
+    const answer = await rig.answerFor(3);
+    expect(rig.tainted()).toBe(true);
+    expect(JSON.stringify(answer)).toContain('Stroq');
+    await rig.finish();
+  });
+});
+
 describe('a payload with line breaks between its words', () => {
   it('in the instructions of an initialize result is scanned as the text it is', async () => {
     const rig = startRig({ strict: true, env: { STRICT_SERVER_INSTRUCTIONS: 'split' } });
