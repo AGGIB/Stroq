@@ -58,10 +58,25 @@ const decide = async (sessionId: string, command: string) => {
 };
 
 describe('a result delivered as an object of string fields', () => {
-  it('keeps the real line breaks of the text, instead of the two characters that spell one', () => {
+  it('keeps the real line breaks of the text, ahead of the serialised form', () => {
     const text = toolResultToText(webFetch('first line\nnpx evil-helper-fix\nlast line'));
-    expect(text).toContain('first line\nnpx evil-helper-fix\nlast line');
-    expect(text).not.toContain('\\n');
+    expect(text).toContain('OK\nfirst line\nnpx evil-helper-fix\nlast line\nhttps://');
+  });
+
+  // Rules written for JSON (`"key": "value"`) need the object's own syntax, which the string
+  // values alone do not have; the text a line-start pattern needs is not in the serialised form.
+  it('also carries the object serialised, after the text, so both kinds of pattern have it', () => {
+    const text = toolResultToText(webFetch('a\nb'));
+    expect(text.startsWith('OK\na\nb\nhttps://docs.example.test/\n{')).toBe(true);
+    expect(text).toContain('"result":"a\\nb"');
+  });
+
+  it('keeps the serialised form out of the clip: a long page is not read as cut short', () => {
+    const page = 'line of prose\n'.repeat(13_000);
+    expect(page.length).toBeGreaterThan(180_000);
+    const text = toolResultToText(webFetch(page));
+    expect(text.length).toBeLessThan(DEFAULT_MAX_CHARS);
+    expect(text).toContain(page);
   });
 
   it('reads string fields nested in objects and arrays, in order', () => {
@@ -70,7 +85,7 @@ describe('a result delivered as an object of string fields', () => {
       results: [{ content: [{ title: 'one', url: 'https://a.test/' }] }, 'a summary\nof the hits'],
       durationSeconds: 1.5,
     });
-    expect(text).toBe('q\none\nhttps://a.test/\na summary\nof the hits');
+    expect(text.startsWith('q\none\nhttps://a.test/\na summary\nof the hits\n{')).toBe(true);
   });
 
   it('serialises only an object with no string field at all', () => {
@@ -165,7 +180,9 @@ describe('a result that is an image', () => {
   });
 
   it('is read as no text beyond its kind, however large', () => {
-    expect(toolResultToText(image(300_000))).toBe('image');
+    const text = toolResultToText(image(300_000));
+    expect(text.length).toBeLessThan(100);
+    expect(text).not.toContain('iVBORw0KGgo');
     expect(toolResultReading(image(300_000)).serialised).toBe(false);
   });
 
@@ -174,7 +191,10 @@ describe('a result that is an image', () => {
       { type: 'image', data: 'AAAA'.repeat(80_000), mimeType: 'image/png' },
       { type: 'text', text: 'a caption' },
     ];
-    expect(toolResultToText(list)).toBe('image\na caption');
+    const text = toolResultToText(list);
+    expect(text).toContain('a caption');
+    expect(text).not.toContain('AAAA');
+    expect(text.length).toBeLessThan(100);
   });
 
   it.each([300_000, 660_000])(
@@ -195,5 +215,28 @@ describe('a result that is an image', () => {
       { file_path: 'big.txt' },
     );
     expect(await store().isIncomplete('long-text')).toBe(true);
+  });
+});
+
+// About a hundred rules match JSON syntax: a key, a colon and a value. They fired on an object
+// result before it was read as its string values, and have to go on firing.
+describe('a rule written for JSON syntax', () => {
+  const sqli = "x'; DROP TABLE users; --";
+  const flagged = async (tool: string, response: unknown, sessionId: string) =>
+    (await post(sessionId, tool, response, {})).stdout.includes('additionalContext');
+
+  it('still matches an MCP result that is an object', async () => {
+    expect(await flagged('mcp__srv__run', { status: 'ok', query: sqli }, 'json-mcp')).toBe(true);
+  });
+
+  it('still matches a key of a web fetch result', async () => {
+    const response = { ...webFetch('a plain page'), query: sqli };
+    expect(await flagged('WebFetch', response, 'json-fetch')).toBe(true);
+  });
+
+  it('does not match what holds none of it', async () => {
+    expect(await flagged('mcp__srv__run', { status: 'ok', query: 'select' }, 'json-clean')).toBe(
+      false,
+    );
   });
 });

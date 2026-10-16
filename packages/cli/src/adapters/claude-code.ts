@@ -174,12 +174,29 @@ function withoutMedia(value: unknown, depth = 0): unknown {
   );
 }
 
+/** The most of the serialised form that is added after the text, and the longest string in it. */
+const JSON_FORM_CHARS = 32_768;
+const JSON_FORM_STRING_CHARS = 2_000;
+
+/** `value` serialised, its long strings cut (their text is read in full beside it), and the whole kept short. */
+const jsonForm = (value: unknown): string =>
+  (
+    JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
+        ? item.slice(0, JSON_FORM_STRING_CHARS)
+        : item,
+    ) ?? ''
+  ).slice(0, JSON_FORM_CHARS);
+
 /**
- * An object that is none of the shapes above, read as the string values in it, one to a line.
- * A web fetch's result is such an object (`{bytes, code, codeText, result, durationMs, url}`),
- * and serialised it turned every line break in the page into the two characters backslash and
- * `n`: the line-start patterns of provenance and the rules then missed what the page said.
- * Only an object with no string at all is serialised.
+ * An object that is none of the shapes above, read as the string values in it, one to a line,
+ * and then as the object serialised. A web fetch's result is such an object (`{bytes, code,
+ * codeText, result, durationMs, url}`), and only serialised it turned every line break in the
+ * page into the two characters backslash and `n`: the patterns that need the start of a line
+ * then missed what the page said. Only the values, though, left out the keys, and about a
+ * hundred rules are written for JSON syntax (a key, a colon, a value); so both are there, the
+ * text first, and the serialised form only as far as the clip leaves room. An object with no
+ * string at all is serialised alone, and said to be.
  */
 function objectReading(obj: Record<string, unknown>): ResultReading {
   if (typeof obj['text'] === 'string') return plain(obj['text']);
@@ -190,8 +207,11 @@ function objectReading(obj: Record<string, unknown>): ResultReading {
   if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
   const readable = withoutMedia(obj);
   const strings = collectStrings(readable).filter((value) => value !== '');
-  if (strings.length > 0) return plain(strings.join('\n'));
-  return { text: JSON.stringify(readable), serialised: true };
+  const serialised = jsonForm(readable);
+  if (strings.length === 0) return { text: serialised, serialised: true };
+  const joined = strings.join('\n');
+  const room = MAX_RESULT_CHARS - 1 - joined.length - 1;
+  return plain(room > 0 ? `${joined}\n${serialised.slice(0, room)}` : joined);
 }
 
 export function toolResultReading(result: unknown): ResultReading {
