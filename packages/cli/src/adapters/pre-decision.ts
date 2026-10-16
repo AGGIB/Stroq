@@ -188,6 +188,13 @@ export interface PostOutcome {
   readonly scanned: boolean;
   readonly verdict: 'clean' | 'suspect';
   readonly warning: string | null;
+  /**
+   * Present, and true, only when the scan stopped on its own wall-clock budget rather
+   * than finishing: the verdict is then `suspect` because an unfinished scan fails
+   * closed, which says nothing about what the text holds. `stroq mcp --strict` withholds
+   * a result in that state; every other caller has no use for the distinction.
+   */
+  readonly timedOut?: boolean;
 }
 
 /**
@@ -204,12 +211,14 @@ export async function scanPostResult(
   const result = await engine.post({ ...event, toolResultText });
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
+  const timedOut = result.scan.timedOut === true ? { timedOut: true } : {};
   if (result.scan.verdict !== 'suspect' || result.trusted === true)
-    return { scanned: true, verdict: 'clean', warning: null };
+    return { scanned: true, verdict: 'clean', warning: null, ...timedOut };
   return {
     scanned: true,
     verdict: 'suspect',
     warning: warningFor(result.scan, event.toolName, taintSource(result)),
+    ...timedOut,
   };
 }
 

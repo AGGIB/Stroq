@@ -5,6 +5,7 @@ import { isRecord } from '../adapters/tool-input.js';
 import { logError } from '../log.js';
 import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloak.js';
 import { OrderedQueue, writeBackpressured } from './pump-stream.js';
+import { createStrictHandler, type StrictHandlerDeps } from './strict-handler.js';
 import {
   MAX_LINE_CHARS,
   asJsonRpcId,
@@ -131,16 +132,31 @@ export interface PumpDeps {
    * otherwise guarantees no longer holds. See the note in `framing.ts`.
    */
   readonly cloak?: McpCloak | null;
+  /**
+   * `--strict`, or null/absent for the default proxy. When present, every SERVER line is
+   * handled by `strict-handler.ts` instead of the default handler below, and the client
+   * lines this pump handles also record each request in `strict.ledger`; see that module.
+   */
+  readonly strict?: StrictPumpDeps | null;
 }
+
+/** What `proxy.ts` supplies for strict mode; the pump adds the streams it owns. */
+export type StrictPumpDeps = Pick<
+  StrictHandlerDeps,
+  'ledger' | 'maxWithheld' | 'scan' | 'terminate' | 'note'
+>;
 
 export interface Pump {
   readonly onClientLine: (line: SplitLine) => Promise<void>;
   readonly onServerLine: (line: SplitLine) => Promise<void>;
+  /** Strict mode only: whether the server was ended for exceeding its limit of withheld messages. */
+  readonly strictTerminated?: () => boolean;
 }
 
 export function createPump(deps: PumpDeps): Pump {
   const { ctx, pending, clientIn, serverIn, serverOut, clientOut } = deps;
   const cloak = deps.cloak ?? null;
+  const strict = deps.strict ?? null;
 
   // Every write triggered by handling a CLIENT line — a forward to the server, or a
   // reply written straight back to the client — is paused against `clientIn`:
@@ -159,6 +175,27 @@ export function createPump(deps: PumpDeps): Pump {
     writeBackpressured(clientOut, `${line.text}${line.eol}`, serverOut);
   const replyFromResult = (value: unknown): Promise<void> =>
     writeBackpressured(clientOut, `${JSON.stringify(value)}\n`, serverOut);
+
+  const strictHandler =
+    strict === null
+      ? null
+      : createStrictHandler({
+          ...strict,
+          ctx,
+          cloak,
+          toClient: replyFromResult,
+          toClientLine: (line) => writeBackpressured(clientOut, `${line}\n`, serverOut),
+          // A handful of fixed lines at most (one per withheld server request), so no
+          // backpressure wait: pausing the server's stdout while waiting on its stdin
+          // is how a pipe deadlocks.
+          toServer: (value) => {
+            try {
+              serverIn.write(`${JSON.stringify(value)}\n`);
+            } catch (err) {
+              logError('mcp strict server write', err);
+            }
+          },
+        });
 
   /** `mcpToolName`/`mcpCallInput`, applied the same way for every "could not classify this tools/call" audit path. */
   const callAuditFields = (
@@ -238,7 +275,10 @@ export function createPump(deps: PumpDeps): Pump {
     if (message.kind === 'notification') {
       if (isCancelledNotification(message.method)) {
         const cancelled = asJsonRpcId(paramsOf(message.value)['requestId']);
-        if (cancelled !== null) pending.cancel(cancelled);
+        if (cancelled !== null) {
+          pending.cancel(cancelled);
+          strict?.ledger.cancel(cancelled);
+        }
         return forwardToServer(line);
       }
       if (isToolsCall(message.method)) {
@@ -286,7 +326,14 @@ export function createPump(deps: PumpDeps): Pump {
           cloak === null ? { value: params, replacements: [] } : cloak.applyUncloak(params, plan);
         if (!isRecord(restored.value)) throw new Error('restored MCP parameters are invalid');
         const verdict = await judgeToolCall(ctx, message.value, message.id, restored.value, params);
-        if (verdict.pending !== null) pending.set(message.id, verdict.pending);
+        if (verdict.pending !== null) {
+          pending.set(message.id, verdict.pending);
+          strict?.ledger.track({
+            id: message.id,
+            method: 'tools/call',
+            toolName: verdict.pending.toolName,
+          });
+        }
         if (verdict.forward)
           return forwardWithRestores(line, message.value, params, plan, restored);
         return verdict.reply === null ? undefined : replyToClient(verdict.reply);
@@ -312,6 +359,15 @@ export function createPump(deps: PumpDeps): Pump {
         method: message.method,
         toolName: mcpMethodToolName(ctx.server, message.method),
       });
+    // Strict mode answers only requests it knows were asked, every method included,
+    // so it records the ones the default proxy has no reason to remember.
+    strict?.ledger.track({
+      id: message.id,
+      method: message.method,
+      toolName: isScannedMethod(message.method)
+        ? mcpMethodToolName(ctx.server, message.method)
+        : mcpToolName(ctx.server, message.method),
+    });
     return forwardToServer(line);
   }
 
@@ -320,6 +376,7 @@ export function createPump(deps: PumpDeps): Pump {
   let inLoggedOversizeRun = false;
 
   async function handleServerLine(line: SplitLine): Promise<void> {
+    if (strictHandler !== null) return strictHandler.onServerLine(line);
     if (line.oversize) {
       // One entry per RUN of oversize segments, logged on the run's first segment
       // only — never keyed on an individual segment's text being empty, which a
@@ -455,5 +512,6 @@ export function createPump(deps: PumpDeps): Pump {
         logError('mcp proxy server line', err);
       }
     },
+    ...(strictHandler === null ? {} : { strictTerminated: strictHandler.wasTerminated }),
   };
 }

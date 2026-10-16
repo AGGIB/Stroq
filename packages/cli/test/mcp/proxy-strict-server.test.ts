@@ -1,0 +1,165 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_STRICT_MAX_WITHHELD } from '../../src/mcp/strict-limits.js';
+import { POISON_OPENING, errorText, everythingSaid, startRig } from './strict-rig.js';
+
+/**
+ * What a server says on its own initiative: notifications and requests nobody asked
+ * for. The default proxy forwards all of it; strict mode forwards five fixed methods
+ * that carry no free text and withholds the rest, counts what it withholds, and ends a
+ * server that withholds too much.
+ */
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('notifications and requests a server starts', () => {
+  it('reach the client by default, sampling requests and text-bearing notifications included', async () => {
+    const rig = startRig();
+    await rig.handshake();
+    rig.call(3, 'notif');
+    await rig.answerFor(3);
+    const methods = rig.messages().map((m) => m['method']);
+    expect(methods).toEqual(
+      expect.arrayContaining([
+        'notifications/message',
+        'sampling/createMessage',
+        'notifications/tools/list_changed',
+      ]),
+    );
+    await rig.finish();
+  });
+
+  it('are withheld, audited and counted under --strict; only the answer is delivered', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    const answer = await rig.answerFor(3);
+    expect(JSON.stringify(answer)).toContain('"ok"');
+    expect(rig.messages().filter((m) => typeof m['method'] === 'string')).toEqual([]);
+    expect(everythingSaid(rig)).not.toContain(POISON_OPENING);
+    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(3);
+    // The audit says what kind of message it was and nothing the server wrote in it.
+    const summaries = JSON.stringify(rig.audit());
+    expect(summaries).toContain('sampling/createMessage');
+    expect(summaries).not.toContain(POISON_OPENING);
+    await rig.finish();
+  });
+
+  it('answers a withheld server request so the server is not left waiting for the client', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    await rig.answerFor(3);
+    await wait(300);
+    const told = rig.serverLog().map((line) => JSON.parse(line) as Record<string, unknown>);
+    const refusal = told.find((m) => m['id'] === 'srv-1');
+    expect(refusal).toBeDefined();
+    expect((refusal?.['error'] as { code?: number }).code).toBe(-32601);
+    expect(JSON.stringify(refusal)).not.toContain(POISON_OPENING);
+    await rig.finish();
+  });
+
+  it('forwards the progress, list-changed and ping messages that carry no free text', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    for (const [id, tool] of [
+      [3, 'progress'],
+      [4, 'listchanged'],
+      [5, 'serverping'],
+    ] as const) {
+      rig.call(id, tool);
+      await rig.answerFor(id);
+    }
+    const methods = rig
+      .messages()
+      .flatMap((m) => (typeof m['method'] === 'string' ? [m['method']] : []));
+    expect(methods).toEqual(['notifications/progress', 'notifications/tools/list_changed', 'ping']);
+    expect(rig.ruleIds()).toEqual([]);
+    await rig.finish();
+  });
+
+  it('withholds a progress notification that carries a message', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'progressmsg');
+    await rig.answerFor(3);
+    expect(rig.messages().some((m) => m['method'] === 'notifications/progress')).toBe(false);
+    expect(rig.ruleIds()).toContain('mcp-strict-unsolicited');
+    await rig.finish();
+  });
+});
+
+describe('a server that withholds too much', () => {
+  it('is ended after the limit: the waiting request gets a clear error, the exit is non-zero, the audit is bounded', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'flood');
+    const answer = await rig.answerFor(3);
+    expect(errorText(answer)).toContain(`more than ${DEFAULT_STRICT_MAX_WITHHELD} withheld`);
+    expect(await rig.done).toBe(1);
+    expect(rig.stderr()).toContain('strict mode ended the server');
+    const ids = rig.ruleIds();
+    expect(ids.filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(
+      DEFAULT_STRICT_MAX_WITHHELD,
+    );
+    expect(ids.filter((id) => id === 'mcp-strict-terminated')).toHaveLength(1);
+  }, 60_000);
+
+  it('uses the limit it was given', async () => {
+    const rig = startRig({ strict: true, strictMaxWithheld: 2 });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    const answer = await rig.answerFor(3);
+    expect(errorText(answer)).toContain('more than 2 withheld');
+    expect(await rig.done).toBe(1);
+    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(2);
+  }, 60_000);
+
+  it('delivers nothing more once the server has been ended', async () => {
+    const rig = startRig({ strict: true, strictMaxWithheld: 1 });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    await rig.answerFor(3);
+    await rig.done;
+    const given = rig.lines().length;
+    expect(rig.lines().filter((l) => l.includes('"ok"'))).toEqual([]);
+    expect(rig.lines().length).toBe(given);
+  }, 60_000);
+
+  it('does not count what it forwards or what the client asked for', async () => {
+    const rig = startRig({ strict: true, strictMaxWithheld: 1 });
+    await rig.handshake();
+    for (let id = 3; id < 8; id += 1) {
+      rig.call(id, 'progress');
+      await rig.answerFor(id);
+    }
+    expect(await rig.finish()).toBe(0);
+  });
+});
+
+describe('a request the client cancelled', () => {
+  it('has its late answer dropped without counting against the server', async () => {
+    const rig = startRig({ strict: true, strictMaxWithheld: 1 });
+    await rig.handshake();
+    rig.call(4, 'slow');
+    await wait(200);
+    rig.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 4 } });
+    await wait(200);
+    rig.call(5, 'benign');
+    await rig.answerFor(5);
+    expect(rig.messages().some((m) => m['id'] === 4)).toBe(false);
+    expect(rig.ruleIds()).toEqual([]);
+    expect(await rig.finish()).toBe(0);
+  });
+
+  it('is answered late by the default proxy, as it always was', async () => {
+    const rig = startRig();
+    await rig.handshake();
+    rig.call(4, 'slow');
+    await wait(200);
+    rig.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 4 } });
+    rig.call(5, 'benign');
+    await rig.answerFor(5);
+    expect(rig.messages().some((m) => m['id'] === 4)).toBe(true);
+    await rig.finish();
+  });
+});

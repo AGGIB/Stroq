@@ -11,8 +11,6 @@ import type { ScannedMethod } from './framing.js';
 /** The same bound `toolResultToText` clips a tool result to in the Claude Code adapter. */
 export const MCP_MAX_RESULT_CHARS = 200_000;
 
-const clip = (text: string): string => text.slice(0, MCP_MAX_RESULT_CHARS);
-
 const stringAt = (record: Record<string, unknown>, key: string): string => {
   const value = record[key];
   return typeof value === 'string' ? value : '';
@@ -86,8 +84,16 @@ const itemsText = (value: unknown): string =>
         .join('\n')
     : contentItemText(value);
 
-const joined = (parts: readonly string[]): string =>
-  clip(parts.filter((part) => part !== '').join('\n'));
+/**
+ * `limit` is the clip, `MCP_MAX_RESULT_CHARS` for everything the default (non-strict)
+ * proxy does. `Infinity` reads the whole text: strict mode needs the length BEFORE the
+ * clip, since a result that runs past the scan window is one it could not read whole.
+ */
+const joined = (parts: readonly string[], limit: number): string =>
+  parts
+    .filter((part) => part !== '')
+    .join('\n')
+    .slice(0, limit);
 
 /**
  * A `tools/call` result: every content item, `structuredContent` as JSON, and an
@@ -95,16 +101,22 @@ const joined = (parts: readonly string[]): string =>
  * the model for more input, which is exactly where an injection would sit. `isError`
  * results are scanned too: a poisoned error text is still content the model reads.
  */
-export function mcpResultText(result: unknown): string {
+function toolsCallText(result: unknown, limit: number): string {
   if (!isRecord(result)) return '';
   const structured = result['structuredContent'];
   const inputRequests = result['inputRequests'];
-  return joined([
-    itemsText(result['content']),
-    structured === undefined ? '' : asJson(structured),
-    inputRequests === undefined ? '' : asJson(inputRequests),
-  ]);
+  return joined(
+    [
+      itemsText(result['content']),
+      structured === undefined ? '' : asJson(structured),
+      inputRequests === undefined ? '' : asJson(inputRequests),
+    ],
+    limit,
+  );
 }
+
+export const mcpResultText = (result: unknown): string =>
+  toolsCallText(result, MCP_MAX_RESULT_CHARS);
 
 /**
  * A `tools/list` result: the name, title, description, annotations and input schema
@@ -112,7 +124,7 @@ export function mcpResultText(result: unknown): string {
  * `description` inside it is exactly as model-visible, and exactly as much of a
  * rug-pull surface, as the tool's own top-level `description`.
  */
-function toolsListText(result: unknown): string {
+function toolsListText(result: unknown, limit: number): string {
   if (!isRecord(result) || !Array.isArray(result['tools'])) return '';
   return joined(
     result['tools'].map((tool) => {
@@ -129,28 +141,42 @@ function toolsListText(result: unknown): string {
         .filter((part) => part !== '')
         .join(' ');
     }),
+    limit,
   );
 }
 
 /** A `resources/read` result: the text of every entry it returned. */
-function resourcesReadText(result: unknown): string {
+function resourcesReadText(result: unknown, limit: number): string {
   if (!isRecord(result)) return '';
-  return joined([itemsText(result['contents'])]);
+  return joined([itemsText(result['contents'])], limit);
 }
 
 /** A `prompts/get` result: its description and the text of every message. */
-function promptsGetText(result: unknown): string {
+function promptsGetText(result: unknown, limit: number): string {
   if (!isRecord(result)) return '';
   const messages = Array.isArray(result['messages']) ? result['messages'] : [];
-  return joined([
-    stringAt(result, 'description'),
-    ...messages.map((message) => (isRecord(message) ? itemsText(message['content']) : '')),
-  ]);
+  return joined(
+    [
+      stringAt(result, 'description'),
+      ...messages.map((message) => (isRecord(message) ? itemsText(message['content']) : '')),
+    ],
+    limit,
+  );
 }
 
-export function resultTextFor(method: ScannedMethod, result: unknown): string {
-  if (method === 'tools/list') return toolsListText(result);
-  if (method === 'resources/read') return resourcesReadText(result);
-  if (method === 'prompts/get') return promptsGetText(result);
-  return mcpResultText(result);
+function textFor(method: ScannedMethod, result: unknown, limit: number): string {
+  if (method === 'tools/list') return toolsListText(result, limit);
+  if (method === 'resources/read') return resourcesReadText(result, limit);
+  if (method === 'prompts/get') return promptsGetText(result, limit);
+  return toolsCallText(result, limit);
 }
+
+export const resultTextFor = (method: ScannedMethod, result: unknown): string =>
+  textFor(method, result, MCP_MAX_RESULT_CHARS);
+
+/**
+ * The same text, not clipped. Strict mode (`strict-result.ts`) needs the length before
+ * the clip: a result that runs past the scan window is one it could not read whole.
+ */
+export const fullResultTextFor = (method: ScannedMethod, result: unknown): string =>
+  textFor(method, result, Infinity);

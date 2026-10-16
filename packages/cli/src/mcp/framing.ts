@@ -20,6 +20,12 @@ import { isRecord } from '../adapters/tool-input.js';
  * re-serialise the whole stream. Anything that would re-serialise a line Stroq did
  * not deliberately rewrite is a bug in this proxy, not a style choice.
  *
+ * The opt-in `--strict` is the one deliberate exception to "only the line it changed":
+ * it re-serialises EVERY server message it delivers (`strict-handler.ts`), so that the
+ * client receives the structure that was scanned and not whatever a different JSON
+ * parser would read out of the same bytes (a duplicate key, say). It does so on the
+ * server-to-client direction only.
+ *
  * `createLineSplitter` holds pending chunks in an array and joins them at most once
  * per line — when the line completes, or, in streaming mode, when it first crosses
  * `MAX_LINE_CHARS` — rather than re-concatenating and re-scanning an ever-growing
