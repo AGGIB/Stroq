@@ -2,9 +2,10 @@ import { resolve } from 'node:path';
 import { createEngine } from '../engine-factory.js';
 import { runMcpProxy } from '../mcp/proxy.js';
 import { MCP_PIN } from '../mcp/pin-argument.js';
+import { MAX_STRICT_MAX_WITHHELD } from '../mcp/strict-limits.js';
 
 export const MCP_USAGE =
-  'usage: stroq mcp --server <name> [--client <name>] [--pin sha256:<digest>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] -- <command> [args...]\n';
+  'usage: stroq mcp --server <name> [--client <name>] [--pin sha256:<digest>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] [--strict [--strict-max-withheld <n>]] -- <command> [args...]\n';
 
 /** What `--client` becomes when the flag is absent; `init` always writes it. */
 export const DEFAULT_MCP_CLIENT = 'unknown';
@@ -26,6 +27,14 @@ export interface McpInvocation {
    * before the model reads them, and back in on the way out. Off unless asked for.
    */
   readonly cloak: boolean;
+  /**
+   * `--strict`: never deliver a server message Stroq could not fully read and scan. Absent
+   * rather than false when the flag is not given, so an invocation that does not use it
+   * keeps exactly the shape it always had.
+   */
+  readonly strict?: true;
+  /** `--strict-max-withheld`: how many withheld messages end a strict server; absent for the default. */
+  readonly strictMaxWithheld?: number;
   readonly pin?: string;
   readonly command: string;
   readonly args: readonly string[];
@@ -35,9 +44,24 @@ export type McpArgvResult =
   | { readonly ok: true; readonly invocation: McpInvocation }
   | { readonly ok: false; readonly error: string };
 
-const OPTIONS = new Set(['--server', '--client', '--cwd', '--session', '--pass-env', '--pin']);
+const OPTIONS = new Set([
+  '--server',
+  '--client',
+  '--cwd',
+  '--session',
+  '--pass-env',
+  '--pin',
+  '--strict-max-withheld',
+]);
 /** Flags that take no value; kept separate so the "needs a value" check stays exact. */
-const FLAGS = new Set(['--cloak']);
+const FLAGS = new Set(['--cloak', '--strict']);
+
+/** A whole number written without a sign, a fraction or a leading zero, from 1 to the largest accepted. */
+const parseWithheldLimit = (value: string): number | null => {
+  if (!/^[1-9]\d{0,3}$/.test(value)) return null;
+  const limit = Number(value);
+  return limit <= MAX_STRICT_MAX_WITHHELD ? limit : null;
+};
 
 /**
  * `--pass-env` is a comma-separated list of variable NAMES. Blank members are
@@ -65,6 +89,8 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   let cwd: string | null = null;
   let passEnv: readonly string[] | null = null;
   let cloak = false;
+  let strict = false;
+  let strictMaxWithheld: number | undefined;
   let pin: string | undefined;
   let rest: readonly string[] | null = null;
   for (let i = 0; i < argv.length; i += 1) {
@@ -75,6 +101,7 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     }
     if (FLAGS.has(token)) {
       if (token === '--cloak') cloak = true;
+      if (token === '--strict') strict = true;
       continue;
     }
     if (!OPTIONS.has(token)) return { ok: false, error: `unknown option "${token}"` };
@@ -90,6 +117,15 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     if (token === '--cwd') cwd = value;
     if (token === '--session') session = value;
     if (token === '--pass-env') passEnv = parsePassEnv(value);
+    if (token === '--strict-max-withheld') {
+      const limit = parseWithheldLimit(value);
+      if (limit === null)
+        return {
+          ok: false,
+          error: `--strict-max-withheld needs a whole number from 1 to ${MAX_STRICT_MAX_WITHHELD}`,
+        };
+      strictMaxWithheld = limit;
+    }
     if (token === '--pin') {
       if (pin !== undefined) return { ok: false, error: '--pin may be supplied only once' };
       if (!MCP_PIN.test(value))
@@ -98,6 +134,8 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     }
     i += 1;
   }
+  if (strictMaxWithheld !== undefined && !strict)
+    return { ok: false, error: '--strict-max-withheld needs --strict' };
   if (server === '') return { ok: false, error: '--server is required' };
   if (rest === null) return { ok: false, error: 'the server command must follow "--"' };
   const [command, ...args] = rest;
@@ -114,6 +152,8 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
       cloak,
       command,
       args,
+      ...(strict ? { strict: true as const } : {}),
+      ...(strictMaxWithheld === undefined ? {} : { strictMaxWithheld }),
       ...(pin === undefined ? {} : { pin }),
     },
   };
@@ -168,6 +208,10 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
     cwd: resolveMcpCwd(invocation.cwd),
     passEnv: invocation.passEnv,
     cloak: invocation.cloak,
+    ...(invocation.strict === true ? { strict: true } : {}),
+    ...(invocation.strictMaxWithheld === undefined
+      ? {}
+      : { strictMaxWithheld: invocation.strictMaxWithheld }),
     command: invocation.command,
     args: invocation.args,
     ...(invocation.pin === undefined ? {} : { pin: invocation.pin }),

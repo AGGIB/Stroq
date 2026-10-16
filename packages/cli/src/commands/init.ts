@@ -475,6 +475,7 @@ export const INIT_OPTIONS = {
   config: { type: 'string' },
   unwrap: { type: 'boolean', default: false },
   cloak: { type: 'boolean', default: false },
+  strict: { type: 'boolean', default: false },
   // The first-run screen's, which the installer has no use for: `--yes` answers its question
   // and `--no-input` keeps it from being asked.
   yes: { type: 'boolean', default: false },
@@ -530,6 +531,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
       ...(values.config === undefined ? {} : { config: values.config }),
       unwrap: values.unwrap === true,
       cloak: values.cloak === true,
+      strict: values.strict === true,
     });
   // On Windows a line the host cannot start is a hook that blocks every tool (Antigravity) or never runs, so the
   // line is shown to start, the way that host starts it, before it is written.
