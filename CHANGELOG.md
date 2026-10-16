@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A damaged store no longer blocks `stroq remove`.** Removing a skill or an MCP server needs the digest from the lock and not the stored bytes, with or without `--force`. A restore or an update whose stored copy is damaged refuses and says to remove it with `--force` and add it again from its source.
 
+- **`stroq add` refuses an archive that holds a `node_modules` folder before it asks for a digest.** The stored copy leaves `node_modules` out, so a tarball made with bundled dependencies used to pass `vet` and the typed digest and then fail to install.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

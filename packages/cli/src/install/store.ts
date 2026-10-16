@@ -27,11 +27,24 @@ export async function assertPlainDirectory(path: string): Promise<boolean> {
   }
 }
 
-/** Never materialise links or nested repositories; a silent omission would change the inspected tree. */
+/** The folder the directory reader leaves out, in any case: `NODE_MODULES` is `node_modules` on a disk that folds case. */
+const inNodeModules = (path: string): boolean =>
+  path.split('/').some((part) => part.toLowerCase() === 'node_modules');
+
+/**
+ * Never materialise links or nested repositories; a silent omission would change the inspected tree. The same
+ * goes for `node_modules`: the stored copy is read back through the reader that leaves it out, so a tree that
+ * holds one (an archive made with bundled dependencies) would be confirmed by its digest and then refused by
+ * the store. It is refused here, at inspection, before anyone is asked.
+ */
 export function assertWritableTree(tree: Tree, digest: string): void {
   if (treeDigest(tree) !== digest) throw new Error('the inspected bytes changed before writing');
   if (tree.entries.some((entry) => entry.kind !== 'file' || entry.bytes === undefined))
     throw new Error('a skill with links, nested repositories or missing bytes cannot be installed');
+  if (tree.entries.some((entry) => inNodeModules(entry.path)))
+    throw new Error(
+      'a source that holds a node_modules folder cannot be installed: the copy Stroq keeps leaves node_modules out, so it would not be the bytes you confirmed (leave it out of the archive; a server must be self-contained)',
+    );
 }
 
 /** Explicit platform input keeps the Windows refusal covered on every test runner. */
