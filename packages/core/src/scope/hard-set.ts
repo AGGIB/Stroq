@@ -7,6 +7,13 @@ import type { ActionClass } from '../types.js';
  * configuration or a repository hook rewritten, an encoded command run, an action copied
  * from text the session had already flagged.
  *
+ * `origin.untrusted` is absent on purpose, including when it is only there because the
+ * session's provenance is incomplete (see `originClasses`). The set holds evidence: a record
+ * that Stroq flagged what the action copies. Incompleteness is the lack of it, and a policy
+ * ask a task's owner can lift for one call (`stroq permit extend`) is the right answer to a
+ * lack of evidence; a class nothing can lift would end a long task at its first unrecorded
+ * package with no way on.
+ *
  * A constant in CODE, on purpose. Everything else Stroq decides is first-match over a YAML
  * file that its user can replace, and a rule that can be edited is not a floor. Typed as
  * `ActionClass`, so that a class renamed or removed breaks the build here instead of

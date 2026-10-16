@@ -1,4 +1,4 @@
-import type { ProvenanceEvidence, ProvenanceHit } from '../types.js';
+import type { ProvenanceEvidence, ProvenanceGap, ProvenanceHit } from '../types.js';
 import { neutralizeControls } from '../util/controls.js';
 
 export function ageLabel(fromIso: string, now: Date): string {
@@ -26,4 +26,18 @@ export function describeEvidence(evidence: ProvenanceEvidence, now: Date): strin
     `"${evidence.excerpt}" appeared in the output of ${evidence.tool} (${evidence.source})`,
   );
   return `${quoted} ${ageLabel(evidence.at, now)} ago; ${flagged}`;
+}
+
+const GAP_KIND_LABEL: Readonly<Record<ProvenanceGap['kind'], string>> = {
+  url: 'URL',
+  host: 'host',
+  pkg: 'package',
+  pipe_shell: 'pipe-to-shell command',
+  encoded: 'encoded blob',
+};
+
+/** One English sentence for `stroq why`, saying what provenance could not rule out and why. */
+export function describeGap(gap: ProvenanceGap): string {
+  const quoted = neutralizeControls(`"${gap.excerpt}"`);
+  return `provenance for this session is incomplete, so the ${GAP_KIND_LABEL[gap.kind]} ${quoted} could not be ruled out as copied from content the agent read.`;
 }

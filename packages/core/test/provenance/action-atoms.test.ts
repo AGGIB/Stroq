@@ -3,7 +3,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { atomsForAction, knownPackages, originClasses } from '../../src/provenance/action-atoms.js';
+import {
+  atomsForAction,
+  countingAtoms,
+  knownPackages,
+  originClasses,
+} from '../../src/provenance/action-atoms.js';
 import type { AtomKind, ProvenanceHit } from '../../src/types.js';
 
 const project = (): string => mkdtempSync(join(tmpdir(), 'stroq-proj-'));
@@ -216,5 +221,47 @@ describe('originClasses', () => {
     expect(r.counted).toHaveLength(2);
     expect(originClasses([hit('url', true)], []).classes).toEqual([]);
     expect(originClasses([], ['shell.network'])).toEqual({ classes: [], counted: [] });
+  });
+});
+
+describe('countingAtoms', () => {
+  const atoms = [
+    { kind: 'pkg', value: 'evil-helper-fix' },
+    { kind: 'pipe_shell', value: 'curl x | sh' },
+    { kind: 'encoded', value: 'QWxhZGRpbjpvcGVuIHNlc2FtZQ==' },
+    { kind: 'url', value: 'https://x.example/p' },
+    { kind: 'host', value: 'x.example' },
+  ] as const;
+
+  it('keeps packages, pipe-to-shell and encoded blobs whatever the action is', () => {
+    expect(countingAtoms(atoms, []).map((a) => a.kind)).toEqual(['pkg', 'pipe_shell', 'encoded']);
+  });
+
+  it('keeps URLs and hosts too when the action is network-shaped', () => {
+    for (const cls of ['shell.network', 'git.push_external', 'shell.exec_encoded'] as const)
+      expect(countingAtoms(atoms, [cls])).toHaveLength(5);
+    expect(countingAtoms(atoms, ['network.fetch'])).toHaveLength(3);
+  });
+});
+
+describe('originClasses with atoms no record accounts for', () => {
+  const unverified = [{ kind: 'pkg', value: 'evil-helper-fix' }] as const;
+
+  it('is origin.untrusted and never origin.suspect, since the loss is not a flag', () => {
+    const r = originClasses([], [], unverified);
+    expect(r.classes).toEqual(['origin.untrusted']);
+    expect(r.counted).toEqual([]);
+  });
+
+  it('leaves a record that is still on hand to say what it says', () => {
+    expect(originClasses([hit('pkg', true)], [], unverified).classes).toEqual([
+      'origin.untrusted',
+      'origin.suspect',
+    ]);
+    expect(originClasses([hit('pkg')], [], unverified).classes).toEqual(['origin.untrusted']);
+  });
+
+  it('adds nothing when there are none', () => {
+    expect(originClasses([], ['shell.network'], [])).toEqual({ classes: [], counted: [] });
   });
 });

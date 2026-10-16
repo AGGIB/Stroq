@@ -61,6 +61,39 @@ describe('stroq untaint', () => {
     expect(existsSync(provFile('s2'))).toBe(true);
   });
 
+  it('clears the note that provenance was incomplete with --session, for that session only', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await provenance.markIncomplete('s1');
+    await provenance.markIncomplete('s2');
+    expect(await provenance.isIncomplete('s1')).toBe(true);
+
+    expect(await runUntaint(['--session', 's1'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect(await provenance.isIncomplete('s2')).toBe(true);
+  });
+
+  it('clears the note that provenance was incomplete for every session with --all', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await provenance.markIncomplete('s1');
+    await provenance.markIncomplete('s2');
+
+    expect(await runUntaint(['--all'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect(await provenance.isIncomplete('s2')).toBe(false);
+  });
+
+  it('leaves a tainted session whose provenance file is gone clean once it is cleared', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await new FileSessionStore(sessionsDir()).markSuspect('s1', src);
+    expect(await provenance.isIncomplete('s1')).toBe(true);
+
+    expect(await runUntaint(['--session', 's1'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+  });
+
   it('clears every session with --all', async () => {
     const store = new FileSessionStore(sessionsDir());
     await store.markSuspect('s1', src);

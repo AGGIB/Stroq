@@ -161,14 +161,46 @@ export interface OriginClassification {
   readonly counted: readonly ProvenanceHit[];
 }
 
+const isNetworkShaped = (classes: readonly ActionClass[]): boolean =>
+  classes.some((c) => NETWORK_CLASSES.includes(c));
+
+/**
+ * Whether an atom counts towards an action's origin: a package, a pipe-to-shell or an
+ * encoded blob always, a URL or host only when the action is network-shaped.
+ */
+function counts(atom: Atom, networkShaped: boolean): boolean {
+  return ALWAYS_COUNTED.includes(atom.kind) || networkShaped;
+}
+
+/** The atoms of `atoms` that count towards the origin of an action of these `classes`. */
+export function countingAtoms(atoms: readonly Atom[], classes: readonly ActionClass[]): Atom[] {
+  const networkShaped = isNetworkShaped(classes);
+  return atoms.filter((atom) => counts(atom, networkShaped));
+}
+
+/**
+ * The `origin.*` classes of an action, from the records its atoms matched (`hits`) and
+ * from `unverified`: atoms that count for the action, that no record holds, in a session
+ * whose records are known to be incomplete (see `countingAtoms` for which count).
+ *
+ * A record that matches keeps its class, `origin.suspect` included. An unverified atom is
+ * `origin.untrusted` and never `origin.suspect`: the loss says the source cannot be ruled
+ * out, not that it was flagged. So the floor asks, where a flagged record that is still on
+ * hand denies. That also keeps it out of the task hard set (`HARD_CLASSES` holds
+ * `origin.suspect`, deliberately not `origin.untrusted`): a task's policy ask is a refusal
+ * its owner can lift for that one call, which is the right size for uncertainty, while a
+ * hard class cannot be lifted by anything and would turn the first unrecorded package of
+ * every long session into a dead end.
+ */
 export function originClasses(
   hits: readonly ProvenanceHit[],
   classes: readonly ActionClass[],
+  unverified: readonly Atom[] = [],
 ): OriginClassification {
-  const network = classes.some((c) => NETWORK_CLASSES.includes(c));
-  const counted = hits.filter((h) => ALWAYS_COUNTED.includes(h.atom.kind) || network);
+  const networkShaped = isNetworkShaped(classes);
+  const counted = hits.filter((h) => counts(h.atom, networkShaped));
   const out: ActionClass[] = [];
-  if (counted.length > 0) out.push('origin.untrusted');
+  if (counted.length > 0 || unverified.length > 0) out.push('origin.untrusted');
   if (counted.some((h) => h.record.suspect)) out.push('origin.suspect');
   return { classes: out, counted };
 }

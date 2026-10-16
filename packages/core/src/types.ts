@@ -227,6 +227,17 @@ export interface ProvenanceEvidence {
   readonly suspect: boolean;
 }
 
+/**
+ * An atom of a proposed action that no record accounts for, in a session whose records are
+ * known to be incomplete. Where `ProvenanceEvidence` says what a record showed, this says
+ * what no record could: the atom may have been read, and the evidence that would say so is gone.
+ */
+export interface ProvenanceGap {
+  readonly kind: AtomKind;
+  /** Redacted atom value, ≤ 120 chars, for explanations. */
+  readonly excerpt: string;
+}
+
 /** A known secret whose value appeared in an outbound tool call. Never carries the value. */
 export interface SecretHit {
   /** Key or variable name, e.g. `AWS_SECRET_ACCESS_KEY`, `password (api.github.com)`. */
