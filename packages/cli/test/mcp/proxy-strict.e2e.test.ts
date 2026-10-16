@@ -120,7 +120,7 @@ describe('stroq mcp --strict, as a client launches it', () => {
     const run = start(['--strict', '--strict-max-withheld', '5']);
     run.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
     await run.answer(1);
-    run.send(call(3, 'flood'));
+    run.send(call(3, 'floodsampling'));
     const answer = await run.answer(3);
     expect(JSON.stringify(answer)).toContain('more than 5 withheld');
     const code = await run.closed;

@@ -24,6 +24,10 @@ export interface RigOptions {
   readonly strictMaxWithheld?: number;
   /** Generous by default, so a busy machine cannot turn a slow scan into a withheld one. */
   readonly strictScanMs?: number;
+  /** The cap for the withheld kinds a benign server also sends; the default is the real one. */
+  readonly strictMaxBenign?: number;
+  /** How long a stopped server has before it is killed; the default is the proxy's own. */
+  readonly shutdownGraceMs?: number;
   readonly env?: Readonly<Record<string, string>>;
 }
 
@@ -95,6 +99,7 @@ export function startRig(options: RigOptions = {}): Rig {
     stdout,
     stderr,
     ...(options.cloak === true ? { cloak: true } : {}),
+    ...(options.shutdownGraceMs === undefined ? {} : { shutdownGraceMs: options.shutdownGraceMs }),
     ...(options.strict === true
       ? {
           strict: true,
@@ -102,6 +107,9 @@ export function startRig(options: RigOptions = {}): Rig {
           ...(options.strictMaxWithheld === undefined
             ? {}
             : { strictMaxWithheld: options.strictMaxWithheld }),
+          ...(options.strictMaxBenign === undefined
+            ? {}
+            : { strictMaxBenign: options.strictMaxBenign }),
         }
       : {}),
   });

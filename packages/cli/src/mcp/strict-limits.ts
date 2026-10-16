@@ -18,6 +18,26 @@ import { MCP_MAX_RESULT_CHARS } from './mcp-result-text.js';
  */
 export const DEFAULT_STRICT_MAX_WITHHELD = 20;
 
+/**
+ * The cap for the withheld messages that a benign server also produces: log lines, a
+ * progress notification with a message, a scan that ran out of time, a text past the scan
+ * window. They are counted and audited like the rest, but they do not count toward
+ * `--strict-max-withheld`, since a chatty server is not an attacker; a server that sends
+ * this many is flooding, and is ended all the same. Every one of them is an audit line,
+ * so this is also the bound on the audit a flood of them can write.
+ */
+export const STRICT_MAX_BENIGN_WITHHELD = 1000;
+
+/**
+ * The longest string Stroq treats as an id or a progress token: one a client could have
+ * chosen, short and plain. A longer one is a field a server is using for something else.
+ * It is also the longest id echoed back to a server in a refusal.
+ */
+export const STRICT_ID_CHARS = 64;
+
+/** The most digits of an integer id read from the head of an unparsable line: 2^53 has sixteen. */
+export const STRICT_ID_DIGITS = 15;
+
 /** The largest `--strict-max-withheld` accepted: a wrapper that sets 0 or a million has not asked for a bound. */
 export const MAX_STRICT_MAX_WITHHELD = 1000;
 

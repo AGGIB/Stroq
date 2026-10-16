@@ -47,6 +47,7 @@ const TOOLS = [
   'listchanged',
   'serverping',
   'flood',
+  'floodsampling',
   'twice',
   'slow',
   'customer',
@@ -58,7 +59,9 @@ const TOOLS = [
 // The id of a `slow` call, answered late: when the next call arrives.
 let slowId = null;
 
-function call(name, id) {
+function call(name, id, args) {
+  // How many unsolicited messages the flood tools send; a test that only needs to cross a cap sends fewer.
+  const count = Number(args?.count ?? 1000);
   if (slowId !== null && name !== 'slow') {
     reply(slowId, text('a late answer'));
     slowId = null;
@@ -183,12 +186,21 @@ function call(name, id) {
     case 'serverping':
       out({ jsonrpc: '2.0', id: 'srv-ping', method: 'ping' });
       return reply(id, text('ok'));
-    case 'flood': // a thousand notifications nobody asked for, then an answer
-      for (let i = 0; i < 1000; i += 1)
+    case 'flood': // notifications nobody asked for, then an answer
+      for (let i = 0; i < count; i += 1)
         out({
           jsonrpc: '2.0',
           method: 'notifications/message',
           params: { level: 'info', data: `n${i}` },
+        });
+      return reply(id, text('ok'));
+    case 'floodsampling': // requests of the model nobody asked for, then an answer
+      for (let i = 0; i < count; i += 1)
+        out({
+          jsonrpc: '2.0',
+          id: `s${i}`,
+          method: 'sampling/createMessage',
+          params: { messages: [] },
         });
       return reply(id, text('ok'));
     case 'twice': // the same answer twice
@@ -282,7 +294,7 @@ function handle(message) {
             },
       ],
     });
-  if (method === 'tools/call') return call(params?.name, id);
+  if (method === 'tools/call') return call(params?.name, id, params?.arguments);
   if (id !== undefined && id !== null)
     out({
       jsonrpc: '2.0',
@@ -291,6 +303,9 @@ function handle(message) {
     });
   return undefined;
 }
+
+// A server that ignores SIGTERM, as a hostile one would: it stays up until it is killed.
+if (process.env['STRICT_SERVER_IGNORE_TERM'] !== undefined) process.on('SIGTERM', () => {});
 
 let buffer = '';
 process.stdin.setEncoding('utf8');

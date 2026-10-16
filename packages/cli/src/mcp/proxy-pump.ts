@@ -6,6 +6,7 @@ import { logError } from '../log.js';
 import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloak.js';
 import { OrderedQueue, writeBackpressured } from './pump-stream.js';
 import { createStrictHandler, type StrictHandlerDeps } from './strict-handler.js';
+import { terminatedResponse } from './strict-reasons.js';
 import {
   MAX_LINE_CHARS,
   asJsonRpcId,
@@ -143,7 +144,7 @@ export interface PumpDeps {
 /** What `proxy.ts` supplies for strict mode; the pump adds the streams it owns. */
 export type StrictPumpDeps = Pick<
   StrictHandlerDeps,
-  'ledger' | 'maxWithheld' | 'scan' | 'terminate' | 'note'
+  'ledger' | 'maxWithheld' | 'maxBenign' | 'scan' | 'terminate' | 'note'
 >;
 
 export interface Pump {
@@ -244,7 +245,24 @@ export function createPump(deps: PumpDeps): Pump {
     return fromClient(serverIn, `${JSON.stringify({ ...message, params: restored.value })}\n`);
   }
 
+  /**
+   * After strict mode has ended the server, nothing a client sends is forwarded: the
+   * process is going (it may take its grace period to die, and a hostile one may ignore
+   * the first signal), and a request written to it would be read by the server strict
+   * mode just refused to keep. A request is answered with the same error the ones that
+   * were waiting got; anything else has nobody to tell and is dropped.
+   */
+  async function refuseAfterEnd(line: SplitLine, limit: number): Promise<void> {
+    const unmarked = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
+    const value = parseLine(unmarked);
+    if (value === undefined) return;
+    const message = classifyMessage(value);
+    if (message.kind === 'request') await replyToClient(terminatedResponse(message.id, limit));
+  }
+
   async function handleClientLine(line: SplitLine): Promise<void> {
+    if (strictHandler?.wasTerminated() === true)
+      return refuseAfterEnd(line, strictHandler.terminatedLimit());
     // Some servers (Jackson/.NET stacks are documented offenders) reject JSON
     // prefixed with a byte-order mark; `JSON.parse` rejects it too. Stripped only
     // for parsing — the ORIGINAL text (BOM included) is what a forward sends, so

@@ -189,7 +189,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
       [
         '--strict-max-withheld <n>',
-        'with --strict: end a server that has more than n messages withheld (default 20)',
+        'with --strict: end a server with more than n malformed or hostile messages withheld (default 20); log lines, progress messages and the like have their own cap of 1000',
       ],
     ],
     passThrough: true,

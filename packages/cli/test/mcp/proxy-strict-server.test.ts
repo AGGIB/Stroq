@@ -92,7 +92,7 @@ describe('a server that withholds too much', () => {
   it('is ended after the limit: the waiting request gets a clear error, the exit is non-zero, the audit is bounded', async () => {
     const rig = startRig({ strict: true });
     await rig.handshake();
-    rig.call(3, 'flood');
+    rig.call(3, 'floodsampling', { count: 100 });
     const answer = await rig.answerFor(3);
     expect(errorText(answer)).toContain(`more than ${DEFAULT_STRICT_MAX_WITHHELD} withheld`);
     expect(await rig.done).toBe(1);
@@ -105,24 +105,33 @@ describe('a server that withholds too much', () => {
   }, 60_000);
 
   it('uses the limit it was given', async () => {
-    const rig = startRig({ strict: true, strictMaxWithheld: 2 });
-    await rig.handshake();
-    rig.call(3, 'notif');
-    const answer = await rig.answerFor(3);
-    expect(errorText(answer)).toContain('more than 2 withheld');
-    expect(await rig.done).toBe(1);
-    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(2);
-  }, 60_000);
-
-  it('delivers nothing more once the server has been ended', async () => {
     const rig = startRig({ strict: true, strictMaxWithheld: 1 });
     await rig.handshake();
     rig.call(3, 'notif');
-    await rig.answerFor(3);
-    await rig.done;
-    const given = rig.lines().length;
-    expect(rig.lines().filter((l) => l.includes('"ok"'))).toEqual([]);
-    expect(rig.lines().length).toBe(given);
+    const answer = await rig.answerFor(3);
+    expect(errorText(answer)).toContain('more than 1 withheld');
+    expect(await rig.done).toBe(1);
+  }, 60_000);
+
+  it('does not end a server for log lines, many more than the hostile limit of them', async () => {
+    const rig = startRig({ strict: true });
+    await rig.handshake();
+    rig.call(3, 'flood', { count: 120 });
+    const answer = await rig.answerFor(3, 90_000);
+    expect(JSON.stringify(answer)).toContain('"ok"');
+    expect(await rig.finish()).toBe(0);
+    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(120);
+    expect(rig.ruleIds()).not.toContain('mcp-strict-terminated');
+  }, 120_000);
+
+  it('ends it past the separate cap for them, with that cap in the error', async () => {
+    const rig = startRig({ strict: true, strictMaxBenign: 30 });
+    await rig.handshake();
+    rig.call(3, 'flood', { count: 100 });
+    const answer = await rig.answerFor(3);
+    expect(errorText(answer)).toContain('more than 30 withheld');
+    expect(await rig.done).toBe(1);
+    expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(30);
   }, 60_000);
 
   it('does not count what it forwards or what the client asked for', async () => {
@@ -134,6 +143,26 @@ describe('a server that withholds too much', () => {
     }
     expect(await rig.finish()).toBe(0);
   });
+});
+
+describe('a server strict mode has ended but that is still running', () => {
+  it('is not sent what the client asks next: the request is answered, and never forwarded', async () => {
+    const rig = startRig({
+      strict: true,
+      strictMaxWithheld: 1,
+      shutdownGraceMs: 4000,
+      env: { STRICT_SERVER_IGNORE_TERM: '1' },
+    });
+    await rig.handshake();
+    rig.call(3, 'notif');
+    expect(errorText(await rig.answerFor(3))).toContain('more than 1 withheld');
+    // The server ignores the first signal and is still alive for the grace period.
+    rig.call(9, 'benign');
+    const late = await rig.answerFor(9);
+    expect(errorText(late)).toContain('ended this server');
+    expect(rig.serverLog().some((line) => line.includes('"id":9'))).toBe(false);
+    expect(await rig.done).toBe(1);
+  }, 60_000);
 });
 
 describe('a request the client cancelled', () => {

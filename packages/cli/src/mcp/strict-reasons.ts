@@ -1,6 +1,6 @@
 import type { Decision } from '@stroq/core';
 import type { JsonRpcId } from './framing.js';
-import { STRICT_ERROR_CODE } from './strict-limits.js';
+import { STRICT_ERROR_CODE, STRICT_ID_CHARS } from './strict-limits.js';
 
 /**
  * Why strict mode withheld a server message. Each class has ONE fixed sentence, used
@@ -40,6 +40,33 @@ const EXPLANATION: Readonly<Record<WithholdReason, string>> = {
   'cloak-refused': 'the cloak could not process the message, so it was not delivered unmasked',
 };
 
+/**
+ * Which cap a withheld message counts toward. A malformed or hostile message (not JSON, a
+ * shape nobody defined, an answer to nothing, an unrecognised field, a request of the
+ * client's model) is `hostile`. What a benign server also produces is `benign`: log lines
+ * and progress messages (the one kind of server-initiated message that is often just
+ * chatty), a scan that took too long, a text past the window, a result the cloak could not
+ * mask. The two have separate caps; see `strict-limits.ts`.
+ */
+export type CountClass = 'hostile' | 'benign';
+
+const BENIGN_REASONS: ReadonlySet<WithholdReason> = new Set([
+  'scan-timeout',
+  'oversize-text',
+  'cloak-refused',
+]);
+const BENIGN_UNSOLICITED: ReadonlySet<string> = new Set([
+  'notifications/message',
+  'notifications/progress',
+]);
+
+export function countClass(reason: WithholdReason, method?: string): CountClass {
+  if (BENIGN_REASONS.has(reason)) return 'benign';
+  if (reason === 'unsolicited' && method !== undefined && BENIGN_UNSOLICITED.has(method))
+    return 'benign';
+  return 'hostile';
+}
+
 /** The sentence the client reads when its request was withheld. Fixed per reason. */
 export const withheldMessage = (reason: WithholdReason): string =>
   `Stroq strict mode withheld this server response (${reason}): ${EXPLANATION[reason]}. ` +
@@ -65,16 +92,26 @@ export const terminatedResponse = (id: JsonRpcId, limit: number): Record<string,
   },
 });
 
+/** JSON-RPC's own code for a method the receiver does not have. */
+export const METHOD_NOT_FOUND_CODE = -32601;
+
 /**
  * What the server is told when it sent a request strict mode will not deliver: a
  * method-not-found, so a server waiting on the client's answer fails that call at once
  * instead of waiting for one that will never be sent.
+ *
+ * The id is the server's, and is echoed only when it is short enough to be one: a refusal
+ * is written to the server's stdin without waiting for it to drain, so what it carries
+ * has to be bounded, and an id of any size the server chose is not. A longer one is
+ * answered with `null`, which JSON-RPC allows when the id cannot be determined. The
+ * number of refusals is bounded by the withheld-message caps, so the most that can ever
+ * be buffered for the server is those caps times this small message.
  */
 export const refusedServerRequest = (id: JsonRpcId): Record<string, unknown> => ({
   jsonrpc: '2.0',
-  id,
+  id: typeof id === 'string' && id.length > STRICT_ID_CHARS ? null : id,
   error: {
-    code: -32601,
+    code: METHOD_NOT_FOUND_CODE,
     message: 'Stroq strict mode does not forward server-initiated requests to the client.',
   },
 });

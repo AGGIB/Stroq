@@ -15,9 +15,10 @@ import {
 } from './framing.js';
 import { withWarningBlock, type McpContext } from './judge.js';
 import type { StrictLedger, TrackedRequest } from './strict-ledger.js';
-import { STRICT_ID_SNIFF_CHARS } from './strict-limits.js';
-import { describeMethod, mayForwardServerMessage } from './strict-messages.js';
+import { STRICT_MAX_BENIGN_WITHHELD } from './strict-limits.js';
+import { describeMethod, forwardableServerMessage } from './strict-messages.js';
 import {
+  countClass,
   refusedServerRequest,
   terminatedDecision,
   terminatedResponse,
@@ -28,6 +29,7 @@ import {
 import { isCovered } from './strict-leaves.js';
 import { readStrictError, readStrictResult, type StrictRead } from './strict-result.js';
 import type { BoundedScanVerdict } from './strict-scan.js';
+import { sniffId } from './strict-sniff.js';
 
 /**
  * The server-to-client half of `stroq mcp --strict`. Every server line comes through
@@ -48,15 +50,17 @@ export interface StrictHandlerDeps {
   readonly ctx: McpContext;
   readonly ledger: StrictLedger;
   readonly cloak: McpCloak | null;
-  /** How many withheld messages end the server. */
+  /** How many malformed or hostile withheld messages end the server (`--strict-max-withheld`). */
   readonly maxWithheld: number;
+  /** How many of the kinds a benign server also produces end it; `STRICT_MAX_BENIGN_WITHHELD` when absent. */
+  readonly maxBenign?: number;
   /** The scan under a hard deadline; see `strict-scan.ts`. */
   readonly scan: (text: string, toolName: string) => BoundedScanVerdict;
   /** One JSON message to the client, backpressure honoured. For the short fixed messages Stroq writes itself. */
   readonly toClient: (value: unknown) => Promise<void>;
   /** The same for a line the handler serialised itself, so a failure to serialise is its to handle. */
   readonly toClientLine: (line: string) => Promise<void>;
-  /** One JSON message to the server; fire and forget, since there are at most `maxWithheld` of them. */
+  /** One JSON message to the server; fire and forget, since the caps bound how many there are. */
   readonly toServer: (value: unknown) => void;
   /** Ends the server process (and, after a grace period, kills it). */
   readonly terminate: () => void;
@@ -66,18 +70,10 @@ export interface StrictHandlerDeps {
 
 export interface StrictServerHandler {
   readonly onServerLine: (line: SplitLine) => Promise<void>;
-  /** True once the server was ended for exceeding its withheld-message limit. */
+  /** True once the server was ended for exceeding a withheld-message cap. */
   readonly wasTerminated: () => boolean;
-}
-
-/** The id a response-shaped message that failed to parse seems to answer, when its head says. */
-const ID_IN_HEAD = /"id"\s*:\s*(-?\d{1,15}|"[^"\\]{1,64}")/;
-
-/** The request id named in the head of an unparsable or oversize line, or null. */
-export function sniffId(head: string): JsonRpcId | null {
-  const found = ID_IN_HEAD.exec(head.slice(0, STRICT_ID_SNIFF_CHARS))?.[1];
-  if (found === undefined) return null;
-  return asJsonRpcId(found.startsWith('"') ? found.slice(1, -1) : Number(found));
+  /** The cap that ended it (0 until it is ended), for what is said to the client afterwards. */
+  readonly terminatedLimit: () => number;
 }
 
 /** What an id looks like in an audit line without saying it: a server chose it. */
@@ -86,6 +82,7 @@ const describeId = (id: JsonRpcId): string =>
 
 const RESPONSE_KEYS: ReadonlySet<string> = new Set(['jsonrpc', 'id', 'result', 'error']);
 const JSONRPC_VERSION = '2.0';
+const BOM = '\uFEFF';
 
 type ResponseMessage = Extract<McpMessage, { kind: 'response' }>;
 type ReadOk = Extract<StrictRead, { ok: true }>;
@@ -93,7 +90,10 @@ type ServerInitiated = Extract<McpMessage, { kind: 'request' | 'notification' }>
 
 export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandler {
   const { ctx, ledger, cloak, maxWithheld } = deps;
-  let withheldCount = 0;
+  const maxBenign = deps.maxBenign ?? STRICT_MAX_BENIGN_WITHHELD;
+  let endedAtLimit = 0;
+  let hostileCount = 0;
+  let benignCount = 0;
   let terminated = false;
   let inOversizeRun = false;
 
@@ -118,10 +118,17 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     }
   };
 
-  /** Ends the server: answers everything still waiting, says why on stderr, stops the process. */
-  async function endServer(also: TrackedRequest | null): Promise<void> {
+  /**
+   * Ends the server. The process is stopped FIRST: everything after is a write to a
+   * client that may have stopped reading, and a write that never finishes must not be
+   * what keeps a hostile server alive. Then it says why (audit, stderr) and answers
+   * every request still waiting.
+   */
+  async function endServer(also: TrackedRequest | null, limit: number): Promise<void> {
     terminated = true;
+    endedAtLimit = limit;
     const waiting = [...(also === null ? [] : [also]), ...ledger.drain()];
+    deps.terminate();
     try {
       await denyDirectly(
         {
@@ -130,24 +137,24 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
           toolInput: {},
           cwd: ctx.cwd,
         },
-        terminatedDecision(maxWithheld),
-        `mcp strict: the server had more than ${maxWithheld} messages withheld and was ended`,
+        terminatedDecision(limit),
+        `mcp strict: the server had more than ${limit} messages withheld and was ended`,
         () => ({ stdout: '', exitCode: 0 }),
       );
     } catch (err) {
       logError('mcp strict audit', err);
     }
     deps.note(
-      `stroq mcp: strict mode ended the server "${ctx.server}": more than ${maxWithheld} of its messages were withheld (see stroq log)\n`,
+      `stroq mcp: strict mode ended the server "${ctx.server}": more than ${limit} of its messages were withheld (see stroq log)\n`,
     );
-    for (const request of waiting) await deps.toClient(terminatedResponse(request.id, maxWithheld));
-    deps.terminate();
+    for (const request of waiting) await deps.toClient(terminatedResponse(request.id, limit));
   }
 
   /**
-   * One withheld message: counted, audited and, if it belongs to a request, answered.
-   * The answer is written even when the audit fails and even for the message that
-   * crosses the limit, so no addressable request is ever left waiting.
+   * One withheld message: counted toward the cap for its kind, audited and, if it belongs
+   * to a request, answered. The answer is written even when the audit fails, so no
+   * addressable request is ever left waiting. `method` is the method of a message the
+   * server started, which decides whether it is the chatty kind.
    */
   async function withhold(
     reason: WithholdReason,
@@ -156,12 +163,15 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       readonly summary: string;
       readonly answers?: TrackedRequest | null;
       readonly toServer?: Record<string, unknown>;
+      readonly method?: string;
     },
   ): Promise<void> {
     if (terminated) return;
-    withheldCount += 1;
+    const hostile = countClass(reason, options.method) === 'hostile';
+    const count = hostile ? (hostileCount += 1) : (benignCount += 1);
+    const limit = hostile ? maxWithheld : maxBenign;
     const answers = options.answers ?? null;
-    if (withheldCount > maxWithheld) return endServer(answers);
+    if (count > limit) return endServer(answers, limit);
     await audit(reason, options.toolName, options.summary);
     if (options.toServer !== undefined) deps.toServer(options.toServer);
     if (answers !== null) await deps.toClient(withheldResponse(answers.id, reason));
@@ -214,9 +224,9 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     entry: TrackedRequest,
     text: string,
   ): Promise<PostOutcome | WithholdReason> {
-    const verdict = deps.scan(text, entry.toolName);
-    if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
     try {
+      const verdict = deps.scan(text, entry.toolName);
+      if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
       const outcome = await scanPostResult(
         ctx.engine,
         {
@@ -227,6 +237,8 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         },
         text,
       );
+      // A result the engine declined to scan is one nobody read: not a clean result.
+      if (!outcome.scanned) return 'scan-failed';
       return outcome.timedOut === true ? 'scan-timeout' : outcome;
     } catch (err) {
       logError('mcp strict scan', err);
@@ -235,7 +247,14 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   }
 
   async function onResponse(message: ResponseMessage): Promise<void> {
-    const { id, value } = message;
+    const { id } = message;
+    // An integer beyond 2^53 does not survive being written again: it would reach the
+    // client as a different number. No request of a client has one.
+    if (typeof id === 'number' && !Number.isSafeInteger(id))
+      return withhold('invalid-shape', {
+        toolName: toolOf('unreadable_server_message'),
+        summary: 'withheld a response whose id is not a safe integer or a string',
+      });
     const entry = ledger.take(id);
     if (entry === undefined) {
       if (ledger.takeCancelled(id)) return;
@@ -247,6 +266,21 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         answers: meant ?? null,
       });
     }
+    // From here the request is taken and has to be answered, whatever goes wrong.
+    try {
+      return await answer(entry, message);
+    } catch (err) {
+      logError('mcp strict response', err);
+      return withhold('scan-failed', {
+        toolName: entry.toolName,
+        answers: entry,
+        summary: `withheld a ${describeMethod(entry.method)} response after an internal error`,
+      });
+    }
+  }
+
+  async function answer(entry: TrackedRequest, message: ResponseMessage): Promise<void> {
+    const { value } = message;
     const about = { toolName: entry.toolName, answers: entry };
     const isError = Object.hasOwn(value, 'error');
     // `jsonrpc` is delivered as it came, so it is held to the one value it can have.
@@ -347,8 +381,10 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   }
 
   async function onServerInitiated(message: ServerInitiated): Promise<void> {
-    if (mayForwardServerMessage(message)) return deps.toClient(message.value);
+    const forward = forwardableServerMessage(message);
+    if (forward !== null) return deps.toClient(forward);
     return withhold('unsolicited', {
+      method: message.method,
       toolName: toolOf('unsolicited_server_message'),
       summary: `withheld a server ${message.kind} (${describeMethod(message.method)})`,
       ...(message.kind === 'request' ? { toServer: refusedServerRequest(message.id) } : {}),
@@ -357,9 +393,13 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
 
   async function handle(line: SplitLine): Promise<void> {
     if (line.oversize) return onOversize(line);
-    const value = parseLine(line.text);
+    // Nothing to scan and nothing to deliver: not a message, and not held against the server.
+    if (line.text.trim() === '') return;
+    // A few servers write a byte-order mark before their JSON; `JSON.parse` rejects it.
+    const text = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
+    const value = parseLine(text);
     if (value === undefined)
-      return withholdUnaddressed('unparsable', 'a server line that is not JSON', line.text);
+      return withholdUnaddressed('unparsable', 'a server line that is not JSON', text);
     const message = classifyMessage(value);
     if (message.kind === 'response') return onResponse(message);
     if (message.kind === 'request' || message.kind === 'notification')
@@ -377,6 +417,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
 
   return {
     wasTerminated: () => terminated,
+    terminatedLimit: () => endedAtLimit,
     onServerLine: async (line) => {
       if (terminated) return;
       await handle(line);

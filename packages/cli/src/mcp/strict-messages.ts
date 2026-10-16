@@ -1,5 +1,6 @@
 import { isRecord } from '../adapters/tool-input.js';
 import type { McpMessage } from './framing.js';
+import { STRICT_ID_CHARS } from './strict-limits.js';
 
 /**
  * Which messages a SERVER starts, rather than answers, strict mode still forwards.
@@ -38,6 +39,7 @@ const LIST_CHANGED = [
 ] as const;
 const PROGRESS = 'notifications/progress';
 const PING = 'ping';
+const JSONRPC_VERSION = '2.0';
 
 /** Every method strict mode forwards when a server starts the exchange. */
 export const FORWARDED_SERVER_METHODS: readonly string[] = [...LIST_CHANGED, PROGRESS, PING];
@@ -45,30 +47,45 @@ export const FORWARDED_SERVER_METHODS: readonly string[] = [...LIST_CHANGED, PRO
 const JSON_RPC_KEYS: ReadonlySet<string> = new Set(['jsonrpc', 'id', 'method', 'params']);
 const PROGRESS_KEYS: ReadonlySet<string> = new Set(['progressToken', 'progress', 'total']);
 
-/** A progress token a client could have sent: short, and made of no word a person would read. */
-const TOKEN = /^[A-Za-z0-9._:-]{1,128}$/;
+/** An id or a progress token a client could have chosen: short, and no word a person would read. */
+const TOKEN = new RegExp(`^[A-Za-z0-9._:-]{1,${STRICT_ID_CHARS}}$`);
 
 const isEmptyParams = (params: unknown): boolean =>
   params === undefined || (isRecord(params) && Object.keys(params).length === 0);
 
-function isPlainProgress(params: unknown): boolean {
-  if (!isRecord(params) || !Object.keys(params).every((key) => PROGRESS_KEYS.has(key)))
-    return false;
-  const token = params['progressToken'];
-  const tokenOk = typeof token === 'number' || (typeof token === 'string' && TOKEN.test(token));
-  const numeric = (value: unknown): boolean => value === undefined || Number.isFinite(value);
-  return tokenOk && Number.isFinite(params['progress']) && numeric(params['total']);
+const isToken = (value: unknown): value is string | number =>
+  Number.isSafeInteger(value) || (typeof value === 'string' && TOKEN.test(value));
+
+/** The three fields of a plain progress notification, or null when it is anything more. */
+function plainProgress(params: unknown): Record<string, unknown> | null {
+  if (!isRecord(params) || !Object.keys(params).every((key) => PROGRESS_KEYS.has(key))) return null;
+  const { progressToken, progress, total } = params;
+  if (!isToken(progressToken) || typeof progress !== 'number' || !Number.isFinite(progress))
+    return null;
+  if (total !== undefined && !(typeof total === 'number' && Number.isFinite(total))) return null;
+  return { progressToken, progress, ...(total === undefined ? {} : { total }) };
 }
 
-/** True when strict mode forwards this server-initiated message; false to withhold it. */
-export function mayForwardServerMessage(
+/**
+ * The message strict mode forwards for a server-initiated `message`, or null to withhold
+ * it. The message is BUILT here from the fields that were checked, not passed on: the
+ * server's own `jsonrpc` member and any string it put in an id would otherwise reach the
+ * client as they came.
+ */
+export function forwardableServerMessage(
   message: Extract<McpMessage, { kind: 'request' | 'notification' }>,
-): boolean {
+): Record<string, unknown> | null {
   const { value, method } = message;
-  if (!Object.keys(value).every((key) => JSON_RPC_KEYS.has(key))) return false;
-  if (message.kind === 'request') return method === PING && isEmptyParams(value['params']);
-  if ((LIST_CHANGED as readonly string[]).includes(method)) return isEmptyParams(value['params']);
-  return method === PROGRESS && isPlainProgress(value['params']);
+  if (!Object.keys(value).every((key) => JSON_RPC_KEYS.has(key))) return null;
+  if (message.kind === 'request') {
+    if (method !== PING || !isEmptyParams(value['params']) || !isToken(message.id)) return null;
+    return { jsonrpc: JSONRPC_VERSION, id: message.id, method };
+  }
+  if ((LIST_CHANGED as readonly string[]).includes(method))
+    return isEmptyParams(value['params']) ? { jsonrpc: JSONRPC_VERSION, method } : null;
+  if (method !== PROGRESS) return null;
+  const params = plainProgress(value['params']);
+  return params === null ? null : { jsonrpc: JSONRPC_VERSION, method, params };
 }
 
 /**

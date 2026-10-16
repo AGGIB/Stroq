@@ -71,6 +71,8 @@ export interface McpProxyOptions {
   readonly strictMaxWithheld?: number;
   /** Overrides `STRICT_SCAN_DEADLINE_MS`, the hard time bound on scanning one message; tests only. */
   readonly strictScanMs?: number;
+  /** Overrides `STRICT_MAX_BENIGN_WITHHELD`, the cap for the withheld kinds a benign server also sends; tests only. */
+  readonly strictMaxBenign?: number;
   readonly pin?: string;
 }
 
@@ -152,6 +154,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
       ? {
           ledger: new StrictLedger(),
           maxWithheld: options.strictMaxWithheld ?? DEFAULT_STRICT_MAX_WITHHELD,
+          ...(options.strictMaxBenign === undefined ? {} : { maxBenign: options.strictMaxBenign }),
           scan: createBoundedScan(options.strictScanMs ?? STRICT_SCAN_DEADLINE_MS),
           terminate: () => onSigterm(),
           note: (text) => options.stderr.write(text),

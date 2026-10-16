@@ -99,7 +99,7 @@ const MCP_CLOAK_NOTE =
  */
 const MCP_STRICT_NOTE =
   '--strict is ON for the entries above: a server message Stroq could not fully read and scan is withheld, and the request it answers gets a fixed error instead. That covers a result above 8 MiB, one that is not valid JSON, one with a field Stroq does not read, a response nobody asked for, and server-initiated requests and log messages (sampling, elicitation, roots).\n' +
-  'It is also counted: a server with more than 20 messages withheld is ended. Messages that are delivered are re-written as the JSON Stroq parsed, so they are no longer forwarded byte for byte.\n' +
+  'It is also counted: a server with more than 20 malformed or hostile messages withheld (1000 for log lines and progress messages) is ended. Messages that are delivered are re-written as the JSON Stroq parsed, so they are no longer forwarded byte for byte.\n' +
   'Strict mode filters what the client receives. It is not a sandbox for the server, and withholding a message cannot undo what the server already did. Re-running this command without --strict keeps it on; "stroq init --agent mcp --unwrap" and then a plain init turns it off.\n';
 
 export function initMcp(
