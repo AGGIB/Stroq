@@ -22,11 +22,13 @@ import { STRICT_SCAN_DEADLINE_MS } from './strict-limits.js';
  * pure (it reads the rules and the text and writes nothing), so being stopped half-way
  * leaves nothing behind.
  *
- * What this bounds is a DRY RUN of the scan the engine is about to do. The engine's own
- * `post` then runs the real one, on the same text, in the same process, with the cost
- * the dry run just showed to be bounded; strict mode withholds a message whose dry run
- * did not finish. That doubles the scan cost of a strict result, which is a price paid
- * for the bound, not an accident. It is a bound on a measured cost, not a proof: a
+ * What this bounds is a DRY RUN of the scans the engine is about to do. A result has
+ * several texts to scan (the views of `strict-views.ts`) and the dry run does all of them
+ * under ONE deadline: the clock is the message's, not each text's, so a result cannot buy
+ * three deadlines by having three views. The engine's own `post` then runs the real scans,
+ * on the same texts, in the same process, with the cost the dry run just showed to be
+ * bounded; strict mode withholds a message whose dry run did not finish. That doubles the
+ * scan cost of a strict result, which is a price paid for the bound, not an accident. It is a bound on a measured cost, not a proof: a
  * machine that became much slower between the two runs could still make the second one
  * long, and the engine's own (soft) budget then marks the message suspect and strict
  * mode withholds it as a timeout.
@@ -60,16 +62,35 @@ const isTimeout = (error: unknown): boolean =>
   (error as { code?: unknown }).code === TIMEOUT_CODE;
 
 /**
- * A function that runs `job` on a text under `deadlineMs`. One context is reused for
- * every call; each call only swaps in the closure it runs.
+ * Runs `job` on every text, one after the other, each with what is left of `deadlineMs`
+ * as its own soft budget. True as soon as one of them stopped on its budget, and the rest
+ * are not run.
+ */
+function scanEach(
+  texts: readonly string[],
+  toolName: string,
+  deadlineMs: number,
+  job: ScanJob,
+): boolean {
+  const started = performance.now();
+  for (const [index, text] of texts.entries()) {
+    const left = Math.max(1, Math.floor(deadlineMs - (performance.now() - started)));
+    if (job(text, toolName, index === 0 ? deadlineMs : left)) return true;
+  }
+  return false;
+}
+
+/**
+ * A function that runs `job` on every text of a message under ONE `deadlineMs`. One
+ * context is reused for every call; each call only swaps in the closure it runs.
  */
 export function createBoundedScan(
   deadlineMs: number = STRICT_SCAN_DEADLINE_MS,
   job: ScanJob = engineScanJob,
-): (text: string, toolName: string) => BoundedScanVerdict {
+): (texts: readonly string[], toolName: string) => BoundedScanVerdict {
   const context = vm.createContext({ run: (): boolean => false });
-  return (text, toolName) => {
-    context.run = (): boolean => job(text, toolName, deadlineMs);
+  return (texts, toolName) => {
+    context.run = (): boolean => scanEach(texts, toolName, deadlineMs, job);
     try {
       const timedOut = vm.runInContext('run()', context, { timeout: deadlineMs });
       return timedOut === true ? 'timeout' : 'ok';

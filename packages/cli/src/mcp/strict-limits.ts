@@ -84,15 +84,12 @@ export const STRICT_MAX_TEXT_CHARS = MCP_MAX_RESULT_CHARS;
 export const STRICT_MAX_DEPTH = 256;
 
 /**
- * The serialised copy appended to the scan text (see `strict-leaves.ts`): a separator
- * line, then the structure as JSON, each string cut to `STRICT_COPY_STRING_CHARS`
- * characters and the whole cut to `STRICT_COPY_MAX_CHARS`. The decoded strings are the
- * scan; the copy is there so a rule whose pattern is JSON syntax (a key and its value side
- * by side, about forty bundled rules) has the text it was written for, as it does in the
- * default proxy. Both cuts are far below what the default proxy reads of the same JSON
- * (the window), which is the price of keeping the copy from crowding out the text.
+ * The JSON view of a result (see `strict-views.ts`): the structure as JSON, each string cut
+ * to `STRICT_COPY_STRING_CHARS` characters and the whole cut to `STRICT_COPY_MAX_CHARS`.
+ * It is there so a rule whose pattern is JSON syntax (a key and its value side by side,
+ * about forty bundled rules) has the text it was written for. Both cuts are far below what
+ * the default proxy reads of the same JSON, which `strict-views.ts` scans as its own view.
  */
-export const STRICT_COPY_SEPARATOR = '\n---\n';
 export const STRICT_COPY_STRING_CHARS = 2000;
 export const STRICT_COPY_MAX_CHARS = 32 * 1024;
 

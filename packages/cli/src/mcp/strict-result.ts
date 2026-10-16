@@ -1,8 +1,9 @@
 import { isRecord } from '../adapters/tool-input.js';
-import { NO_MEDIA, copyTail, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
+import { NO_MEDIA, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 import { isClassifiedMedia } from './strict-media.js';
 import type { WithholdReason } from './strict-reasons.js';
+import { scanViews, type ScanView } from './strict-views.js';
 
 /**
  * What strict mode reads of a server result, and what makes it refuse to deliver one.
@@ -11,19 +12,39 @@ import type { WithholdReason } from './strict-reasons.js';
  * forwards the rest unread. Strict mode turns that around: a result is delivered only
  * if its shape is one Stroq understands (each method has an allowlist of the keys it
  * knows, and a key beyond it is content nobody scanned: withheld) and EVERY string in it
- * is part of the text that is scanned. That text is not the default scan's extraction:
- * it is the decoded strings of the whole result, keys included (`strict-leaves.ts`), so
- * no field is read in a form (JSON, with its escapes) different from the one the client
- * receives, and none is skipped because a sibling was read instead. The one thing left
- * out is the payload of a binary item that `strict-media.ts` classified as a picture or
- * a sound; the validators below record which, by identity.
+ * is in a text that is scanned. Several texts are, the VIEWS of `strict-views.ts`: the
+ * default proxy's own text, the decoded strings of the whole result keys included
+ * (`strict-leaves.ts`, the one whose completeness is proved), and the result as JSON. So
+ * no field is read only in a form (JSON, with its escapes) different from the one the
+ * client receives, and none is skipped because a sibling was read instead. The one thing
+ * left out is the payload of a binary item that `strict-media.ts` classified as a picture
+ * or a sound; the validators below record which, by identity.
  */
 
-export type StrictRead =
-  | { readonly ok: true; readonly text: string; readonly media: MediaPayloads }
-  | { readonly ok: false; readonly reason: WithholdReason };
+/** A result that cannot be delivered, and why. */
+interface Withheld {
+  readonly ok: false;
+  readonly reason: WithholdReason;
+}
 
-const withheld = (reason: WithholdReason): StrictRead => ({ ok: false, reason });
+/**
+ * `text` is the decoded strings (the one `isCovered` proves), `views` everything to scan:
+ * that text among them unless an earlier view has the same one.
+ */
+export type StrictRead =
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly media: MediaPayloads;
+      readonly views: readonly ScanView[];
+    }
+  | Withheld;
+
+/** What a reader makes of a body before the views are added: the strings, proved. */
+type StringsRead =
+  { readonly ok: true; readonly text: string; readonly media: MediaPayloads } | Withheld;
+
+const withheld = (reason: WithholdReason): Withheld => ({ ok: false, reason });
 
 type Allowed = ReadonlySet<string>;
 const hasOnly = (record: Record<string, unknown>, allowed: Allowed): boolean =>
@@ -131,20 +152,17 @@ function readItems(items: unknown, media: Media): WithholdReason | null {
 }
 
 /**
- * The scan text of `value`. The window is decided on the decoded strings alone, as it
- * always was: a result whose strings do not fit is withheld, and the serialised copy that
- * follows them is only ever added into the room that is left, so it cannot make a text
- * that fits look cut short.
+ * The decoded strings of `value`, proved complete. The window is decided on them: a result
+ * whose strings do not fit is withheld.
  */
-function finish(value: unknown, media: MediaPayloads): StrictRead {
-  const leaves = leafText(value, media);
-  if (leaves === null) return withheld('scan-failed');
-  if (leaves.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
-  const text = leaves + copyTail(value, media, leaves.length);
+function finish(value: unknown, media: MediaPayloads): StringsRead {
+  const text = leafText(value, media);
+  if (text === null) return withheld('scan-failed');
+  if (text.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
   return isCovered(value, media, text) ? { ok: true, text, media } : withheld('unread-content');
 }
 
-function readToolsCall(result: Record<string, unknown>): StrictRead {
+function readToolsCall(result: Record<string, unknown>): StringsRead {
   if (!hasOnly(result, TOOLS_CALL_KEYS)) return withheld('unread-content');
   const isError = result['isError'];
   if (isError !== undefined && typeof isError !== 'boolean') return withheld('invalid-shape');
@@ -163,7 +181,7 @@ function readTool(tool: unknown): WithholdReason | null {
     : 'invalid-shape';
 }
 
-function readToolsList(result: Record<string, unknown>): StrictRead {
+function readToolsList(result: Record<string, unknown>): StringsRead {
   if (!hasOnly(result, TOOLS_LIST_KEYS)) return withheld('unread-content');
   const tools = result['tools'];
   if (!Array.isArray(tools) || !isOptionalString(result['nextCursor']))
@@ -188,7 +206,7 @@ function readContents(entry: unknown, media: Media): WithholdReason | null {
   return null;
 }
 
-function readResourcesRead(result: Record<string, unknown>): StrictRead {
+function readResourcesRead(result: Record<string, unknown>): StringsRead {
   if (!hasOnly(result, RESOURCES_READ_KEYS)) return withheld('unread-content');
   const contents = result['contents'];
   if (!Array.isArray(contents)) return withheld('invalid-shape');
@@ -208,7 +226,7 @@ function readMessage(message: unknown, media: Media): WithholdReason | null {
   return readItem(message['content'], media);
 }
 
-function readPromptsGet(result: Record<string, unknown>): StrictRead {
+function readPromptsGet(result: Record<string, unknown>): StringsRead {
   if (!hasOnly(result, PROMPTS_GET_KEYS)) return withheld('unread-content');
   const messages = result['messages'];
   if (!Array.isArray(messages) || !isOptionalString(result['description']))
@@ -227,18 +245,24 @@ function readPromptsGet(result: Record<string, unknown>): StrictRead {
  * the whole result, which leaves no key and no string in it unread. An empty object (a
  * ping answer, a `logging/setLevel` acknowledgement) holds nothing to read.
  */
-function readAnyResult(result: unknown): StrictRead {
+function readAnyResult(result: unknown): StringsRead {
   if (isRecord(result) && Object.keys(result).length === 0)
     return { ok: true, text: '', media: NO_MEDIA };
   return finish(result, new Map());
 }
 
-const READERS: ReadonlyMap<string, (result: Record<string, unknown>) => StrictRead> = new Map([
+const READERS: ReadonlyMap<string, (result: Record<string, unknown>) => StringsRead> = new Map([
   ['tools/call', readToolsCall],
   ['tools/list', readToolsList],
   ['resources/read', readResourcesRead],
   ['prompts/get', readPromptsGet],
 ]);
+
+/** The strings read of `body` with the views to scan added, for a response to `method` (null: an error). */
+function withViews(method: string | null, body: unknown, read: StringsRead): StrictRead {
+  if (!read.ok) return read;
+  return { ...read, views: scanViews(method, body, read.text, read.media) };
+}
 
 /**
  * What a `result` is read as, or why it cannot be. Never throws: anything that goes
@@ -247,8 +271,8 @@ const READERS: ReadonlyMap<string, (result: Record<string, unknown>) => StrictRe
 export function readStrictResult(method: string, result: unknown): StrictRead {
   try {
     const reader = READERS.get(method);
-    if (reader === undefined) return readAnyResult(result);
-    return isRecord(result) ? reader(result) : withheld('invalid-shape');
+    if (reader === undefined) return withViews(method, result, readAnyResult(result));
+    return isRecord(result) ? withViews(method, result, reader(result)) : withheld('invalid-shape');
   } catch {
     return withheld('scan-failed');
   }
@@ -261,7 +285,7 @@ export function readStrictError(error: unknown): StrictRead {
     if (!hasOnly(error, ERROR_KEYS)) return withheld('unread-content');
     if (typeof error['code'] !== 'number' || typeof error['message'] !== 'string')
       return withheld('invalid-shape');
-    return finish(error, new Map());
+    return withViews(null, error, finish(error, new Map()));
   } catch {
     return withheld('scan-failed');
   }

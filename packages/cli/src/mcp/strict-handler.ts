@@ -7,7 +7,6 @@ import {
   MAX_LINE_CHARS,
   asJsonRpcId,
   classifyMessage,
-  isScannedMethod,
   parseLine,
   type JsonRpcId,
   type McpMessage,
@@ -30,6 +29,7 @@ import { isCovered } from './strict-leaves.js';
 import { readStrictError, readStrictResult, type StrictRead } from './strict-result.js';
 import type { BoundedScanVerdict } from './strict-scan.js';
 import { sniffId } from './strict-sniff.js';
+import type { ScanView } from './strict-views.js';
 
 /**
  * The server-to-client half of `stroq mcp --strict`. Every server line comes through
@@ -54,8 +54,8 @@ export interface StrictHandlerDeps {
   readonly maxWithheld: number;
   /** How many of the kinds a benign server also produces end it; `STRICT_MAX_BENIGN_WITHHELD` when absent. */
   readonly maxBenign?: number;
-  /** The scan under a hard deadline; see `strict-scan.ts`. */
-  readonly scan: (text: string, toolName: string) => BoundedScanVerdict;
+  /** The scan of all the texts of one message under one hard deadline; see `strict-scan.ts`. */
+  readonly scan: (texts: readonly string[], toolName: string) => BoundedScanVerdict;
   /** One JSON message to the client, backpressure honoured. For the short fixed messages Stroq writes itself. */
   readonly toClient: (value: unknown) => Promise<void>;
   /** The same for a line the handler serialised itself, so a failure to serialise is its to handle. */
@@ -234,27 +234,45 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     return { result: outcome.result, notice: cloakNotice(outcome.replacements) };
   }
 
-  /** Scans `text` and returns the engine's outcome, or the reason it cannot be delivered. */
+  /**
+   * Scans every view of a result and returns the engine's outcome for it, or the reason
+   * it cannot be delivered. The dry run takes all the texts together, so they share one
+   * deadline; the engine then scans them one after the other. The result is as suspect as
+   * its worst view, and carries ONE warning: the first suspect view's. A view the engine
+   * did not scan or ran out of time on makes the result one nobody read in full.
+   */
   async function scanned(
     entry: TrackedRequest,
-    text: string,
+    views: readonly ScanView[],
   ): Promise<PostOutcome | WithholdReason> {
     try {
-      const verdict = deps.scan(text, entry.toolName);
-      if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
-      const outcome = await scanPostResult(
-        ctx.engine,
-        {
-          sessionId: ctx.sessionId,
-          toolName: entry.toolName,
-          toolInput: { method: entry.method },
-          cwd: ctx.cwd,
-        },
-        text,
+      const verdict = deps.scan(
+        views.map((view) => view.text),
+        entry.toolName,
       );
-      // A result the engine declined to scan is one nobody read: not a clean result.
-      if (!outcome.scanned) return 'scan-failed';
-      return outcome.timedOut === true ? 'scan-timeout' : outcome;
+      if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
+      const outcomes: PostOutcome[] = [];
+      for (const view of views) {
+        const outcome = await scanPostResult(
+          ctx.engine,
+          {
+            sessionId: ctx.sessionId,
+            toolName: entry.toolName,
+            // The default proxy's audit line names the method alone; the other views say which they are.
+            toolInput:
+              view.name === 'default'
+                ? { method: entry.method }
+                : { method: entry.method, view: view.name },
+            cwd: ctx.cwd,
+          },
+          view.text,
+        );
+        // A result the engine declined to scan is one nobody read: not a clean result.
+        if (!outcome.scanned) return 'scan-failed';
+        if (outcome.timedOut === true) return 'scan-timeout';
+        outcomes.push(outcome);
+      }
+      return outcomes.find((outcome) => outcome.warning !== null) ?? (outcomes[0] as PostOutcome);
     } catch (err) {
       logError('mcp strict scan', err);
       return 'scan-failed';
@@ -325,19 +343,19 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     read: ReadOk,
   ): Promise<void> {
     const { value } = message;
-    const { text } = read;
     const about = { toolName: entry.toolName, answers: entry };
     // The post-condition of the whole mode, checked on the structure about to be sent:
-    // every string in it is a string of the text about to be scanned. It holds by the
-    // way the text is built; this is the check that notices the day it stops holding.
+    // every string in it is a string of the decoded-strings view that is about to be
+    // scanned. It holds by the way the text is built; this is the check that notices the
+    // day it stops holding.
     const body = Object.hasOwn(value, 'error') ? value['error'] : value['result'];
-    if (!isCovered(body, read.media, text))
+    if (!isCovered(body, read.media, read.text))
       return withhold('unread-content', {
         ...about,
         summary: `withheld a ${describeMethod(entry.method)} response with strings outside the scan text`,
       });
-    const nothingToRead = text === '' && !isScannedMethod(entry.method);
-    const outcome = nothingToRead ? null : await scanned(entry, text);
+    // A result with nothing in it that the default proxy would scan has no views at all.
+    const outcome = read.views.length === 0 ? null : await scanned(entry, read.views);
     if (typeof outcome === 'string')
       return withhold(outcome, {
         ...about,

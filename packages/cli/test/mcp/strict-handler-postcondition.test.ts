@@ -23,12 +23,20 @@ vi.mock('../../src/mcp/strict-result.js', async (importOriginal) => {
   };
 });
 
+/** A read whose strings view is `text`, and which has no other view. */
+const readOf = (text: string): ReturnType<typeof ReadStrictResult> => ({
+  ok: true,
+  text,
+  media: NO_MEDIA,
+  views: [{ name: 'strings', text }],
+});
+
 const response = (id: number, result: unknown): string =>
   JSON.stringify({ jsonrpc: '2.0', id, result });
 
 describe('the handler’s coverage post-condition', () => {
   it('withholds and answers a result whose reader left a string out of the scan text', async () => {
-    swap.reader = () => ({ ok: true, text: 'content\ntype\ntext\nok', media: NO_MEDIA });
+    swap.reader = () => readOf('content\ntype\ntext\nok');
     try {
       const rig = handlerRig();
       track(rig, 3);
@@ -47,11 +55,29 @@ describe('the handler’s coverage post-condition', () => {
   });
 
   it('withholds a result whose scan text has a string the structure does not', async () => {
-    swap.reader = () => ({ ok: true, text: 'content\ntype\ntext\nok\nextra', media: NO_MEDIA });
+    swap.reader = () => readOf('content\ntype\ntext\nok\nextra');
     try {
       const rig = handlerRig();
       track(rig, 3);
       await rig.feed(response(3, { content: [{ type: 'text', text: 'ok' }] }));
+      expect(JSON.stringify(rig.sent)).toContain('(unread-content)');
+    } finally {
+      swap.reader = null;
+    }
+  });
+
+  it('is proved on the decoded strings, not on whatever else is scanned: a string only in another view does not count', async () => {
+    swap.reader = () => ({
+      ok: true,
+      text: 'content\ntype\ntext',
+      media: NO_MEDIA,
+      views: [{ name: 'default', text: 'ok' }],
+    });
+    try {
+      const rig = handlerRig();
+      track(rig, 3);
+      await rig.feed(response(3, { content: [{ type: 'text', text: 'ok' }] }));
+      expect(rig.lines).toEqual([]);
       expect(JSON.stringify(rig.sent)).toContain('(unread-content)');
     } finally {
       swap.reader = null;
