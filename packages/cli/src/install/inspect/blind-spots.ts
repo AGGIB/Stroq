@@ -57,8 +57,13 @@ export const TALLY_KEYS = [
   'dependencies',
   'symlink',
   'list-cut',
+  'outside-imports',
 ] as const;
 export type TallyKey = (typeof TALLY_KEYS)[number];
+
+/** Said of an MCP server whose code asks for packages by name: the pin does not hold what is found there. */
+export const OUTSIDE_IMPORTS_SPOT =
+  'imports resolve outside the pin: the server lists dependencies or imports a package by name, and Node finds it in a folder that no digest covers';
 
 const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   'unreadable-text': (n) =>
@@ -92,6 +97,7 @@ const SPOTS: Readonly<Record<TallyKey, (count: number) => string>> = {
   symlink: (n) =>
     `${some(n, 'symbolic link was', 'symbolic links were')} recorded and not followed`,
   'list-cut': () => 'a list of tools, hooks or entries was cut at the number a reading takes',
+  'outside-imports': () => OUTSIDE_IMPORTS_SPOT,
 };
 
 /** The blind spots for the counts of a reading, in a fixed order. */
@@ -117,6 +123,7 @@ export const READING_PHRASES = {
   'native-code': 'native code',
   source: 'JavaScript, TypeScript and Python source',
   obfuscation: 'minified or obfuscated files',
+  imports: 'the packages that JavaScript files ask for by name',
   'repo-files': 'files of a repository that run on their own',
   'tree-entries': 'links, nested repositories, LFS pointers and executables',
   shell: 'shell text',

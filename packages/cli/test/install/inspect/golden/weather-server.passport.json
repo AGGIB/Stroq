@@ -174,6 +174,7 @@
     "anything the program fetches, builds or decides at run time was not looked at",
     "code in languages other than JavaScript, TypeScript, Python and shell was not read",
     "dependencies were not followed, fetched or read",
+    "imports resolve outside the pin: the server lists dependencies or imports a package by name, and Node finds it in a folder that no digest covers",
     "nothing was run: this is a reading of the files, and what the program does when it runs was not observed",
     "the prose of documents was not read, only their shell blocks and inline commands"
   ],

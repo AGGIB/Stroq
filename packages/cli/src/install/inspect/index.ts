@@ -125,7 +125,7 @@ export function inspectWithReadings(
   const input = buildInput(tree, findings);
   const kind = kindOf(input, context.kind);
 
-  const read = { input, findings, shell: new ShellQueue(), declared: {} };
+  const read = { kind, input, findings, shell: new ShellQueue(), declared: {} };
   runReadings(read, readings);
 
   // What the artifact says it is called is a declaration, shown as one; the title is the source's name

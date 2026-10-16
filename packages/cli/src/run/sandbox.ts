@@ -14,6 +14,7 @@ import {
   passportsLockDirIn,
   pluginCliDirIn,
   policyFileIn,
+  runDirIn,
   secretsFileIn,
   storeDirIn,
   tasksDirIn,
@@ -245,6 +246,11 @@ const protectedState = (home: string): readonly string[] => [
   hardenDirIn(home),
   backupsDirIn(home),
   storeDirIn(home),
+  // The private copies in which a pinned MCP server runs. Node looks a package up in the folders above the
+  // file that asks, so `run/node_modules` would be found by a server that asks for one by name. Expected, not
+  // measured with a real srt: a pinned server that is started inside this sandbox cannot make its copy
+  // here, the same cost as `plugin-cli` above.
+  runDirIn(home),
   passportsFileIn(home),
   passportsLockDirIn(home),
   tasksDirIn(home),

@@ -173,8 +173,12 @@ describe.skipIf(process.platform === 'win32')(
 
     it('leaves the state the hooks write alone: sessions, the audit chain, the log, the stamps', () => {
       const denied = denyWriteOf();
-      for (const name of ['sessions', 'audit.jsonl', 'stroq.log', 'last-hook', 'cloak', 'run'])
+      for (const name of ['sessions', 'audit.jsonl', 'stroq.log', 'last-hook', 'cloak'])
         expect(denied, name).not.toContain(join(HOME, name));
+    });
+
+    it('denies writes to the folder where a pinned MCP server runs its private copy', () => {
+      expect(denyWriteOf()).toContain(join(HOME, 'run'));
     });
 
     it('lists no path twice, whether a credential path or another input already names it', () => {

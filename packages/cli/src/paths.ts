@@ -54,6 +54,12 @@ export const liveDirIn = (home: string): string => join(home, 'live');
 export const hardenDirIn = (home: string): string => join(home, 'harden');
 export const backupsDirIn = (home: string): string => join(home, 'backups');
 export const storeDirIn = (home: string): string => join(home, 'store');
+/**
+ * Where a runtime pin copies the verified files of an MCP server to run them (`mcp/pin.ts`). Node looks a
+ * package up in the folders above the file that asks, so whatever is planted in `run/node_modules`
+ * would be found by a pinned server that asks for a package by name.
+ */
+export const runDirIn = (home: string): string => join(home, 'run');
 export const passportsFileIn = (home: string): string => join(home, 'passports.json');
 export const passportsLockDirIn = (home: string): string => join(home, 'passports.lock');
 export const tasksDirIn = (home: string): string => join(home, 'tasks');

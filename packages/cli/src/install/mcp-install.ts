@@ -22,6 +22,7 @@ import { readPassports, SKILL_NAME, withPassports, writePassports } from './lock
 import type { Passports, Receipt } from './lock.js';
 import { readArchiveFile } from './archive-file.js';
 import { commitMcpConfig } from './mcp-config-transaction.js';
+import { assertSelfContained } from './mcp-outside-imports.js';
 import { auditReceipt } from './receipt.js';
 import { readDirTree } from './read-dir.js';
 import { sourceTypeOf } from './read-source.js';
@@ -282,6 +283,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
         passport: named!.passport,
       }
     : await inspectSource(source);
+  assertSelfContained(made.tree);
   const name = nameOf(
     options.name ?? (named === undefined ? made.passport.artifact.name : sourceOrName),
   );

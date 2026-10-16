@@ -11,6 +11,7 @@ import type { ReadingName } from './blind-spots.js';
 import type { Findings } from './findings.js';
 import { inspectFrontmatter } from './frontmatter-lines.js';
 import type { DeclaredHint } from './identity.js';
+import { inspectImports } from './imports.js';
 import type { InspectInput } from './input.js';
 import { inspectManifests } from './manifest-lines.js';
 import { inspectNativeCode } from './native-code.js';
@@ -22,9 +23,12 @@ import type { ShellQueue } from './shell-queue.js';
 import { queueMarkdownShell, queueScriptShell } from './shell-sources.js';
 import { inspectObfuscation, inspectSource } from './source-lines.js';
 import { inspectTreeEntries } from './tree-checks.js';
+import type { ArtifactKind } from '../types.js';
 
 /** What a reading is given, and the one thing it may hand on: what the artifact calls itself. */
 export interface ReadContext {
+  /** The kind of artifact this is, for the readings that mean something only for one. */
+  readonly kind: ArtifactKind;
   readonly input: InspectInput;
   readonly findings: Findings;
   readonly shell: ShellQueue;
@@ -52,6 +56,7 @@ export const READINGS: readonly NamedReading[] = [
   { name: 'native-code', run: (c) => inspectNativeCode(c.input, c.findings) },
   { name: 'source', run: (c) => inspectSource(c.input, c.findings) },
   { name: 'obfuscation', run: (c) => inspectObfuscation(c.input, c.findings) },
+  { name: 'imports', run: (c) => inspectImports(c.input, c.findings, c.kind) },
   { name: 'repo-files', run: (c) => inspectRepoFiles(c.input, c.findings) },
   { name: 'tree-entries', run: (c) => inspectTreeEntries(c.input, c.findings) },
   { name: 'shell', run: (c) => addShellLines(c.shell, c.findings) },

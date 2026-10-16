@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The confirmation screen of `stroq add` cannot hide the lines that matter.** Rows are ranked credentials, hosts, commands, hooks and install scripts before the tools a skill asks for. Every sensitive row is shown when you type a digest, and a source with more than 80 sensitive lines is refused with the number that would be hidden and the `stroq vet --from <source> --json` command that lists them all.
 
+- **`stroq add --kind mcp` refuses a server whose dependencies are not in its tree.** A `package.json` that lists dependencies, or sources that import a package by name, would load code from a folder that no digest covers. `add` says how to bundle the server or vendor its code inside the tree, `stroq vet` adds the blind spot `imports resolve outside the pin`, and `~/.stroq/run`, where pinned servers are copied, is write-protected in `stroq run --sandbox`.
+
 ### Fixed
 
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).

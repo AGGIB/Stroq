@@ -6,7 +6,7 @@ import { McpPinSchema, readPassportLock } from '../install/lock-reader.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
-import { passportsFileIn, storeDirIn, stroqHome } from '../paths.js';
+import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
 import { MCP_PIN } from './pin-argument.js';
 
 export interface PinOptions {
@@ -132,7 +132,7 @@ async function checked(
 async function privateRunDir(home: string): Promise<string> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   await plainFolder(home);
-  const run = join(home, 'run');
+  const run = runDirIn(home);
   await mkdir(run, { recursive: true, mode: 0o700 });
   await plainFolder(run);
   for (const folder of [home, run]) {
