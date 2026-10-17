@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createBoundedScan, type ScanJob } from '../../src/mcp/strict-scan.js';
 
@@ -34,7 +35,14 @@ describe('createBoundedScan', () => {
   });
 
   it('stops a catastrophic pattern part-way through its match', () => {
-    const evil = /^(a+)+$/;
+    // Intentional hostile fixture data: its match runs only inside the hard-bounded VM scan.
+    const pattern = readFileSync(
+      new URL('./fixtures/catastrophic-regex.txt', import.meta.url),
+      'utf8',
+    ).trimEnd();
+    const evil = new RegExp(pattern);
+    expect(evil.source).toBe('^(a+)+$');
+    expect(evil.flags).toBe('');
     const scan = createBoundedScan(150, (text) => evil.test(text));
     const started = Date.now();
     expect(scan([`${'a'.repeat(60)}b`], 'mcp__srv__call')).toBe('timeout');
