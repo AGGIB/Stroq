@@ -1,4 +1,4 @@
-import { appendFile, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readPassports } from '../../src/install/lock.js';
@@ -18,16 +18,21 @@ const MCP_REMEDY =
   /stroq remove demo --kind mcp --force, then stroq add \S+ --kind mcp --name demo --config \S+ --entrypoint server\.js/;
 const SKILL_REMEDY = /stroq remove demo --force, then stroq add \S+$/;
 
-const damages = [
+/** The ways a stored copy is damaged, by what is done to the file `file` of its tree or to the copy as a whole. */
+const damagesOf = (file: string) =>
   [
-    'a byte appended to a file',
-    async (store: string) => appendFile(join(store, 'tree', 'server.js'), '// x\n'),
-  ],
-  ['a file gone', async (store: string) => rm(join(store, 'tree', 'server.js'))],
-  ['the manifest gone', async (store: string) => rm(join(store, 'manifest.json'))],
-  ['the manifest not JSON', async (store: string) => writeFile(join(store, 'manifest.json'), 'x')],
-  ['the whole copy gone', async (store: string) => rm(store, { recursive: true })],
-] as const;
+    [
+      'a byte appended to a file',
+      async (store: string) => appendFile(join(store, 'tree', file), '// x\n'),
+    ],
+    ['a file gone', async (store: string) => rm(join(store, 'tree', file))],
+    ['the manifest gone', async (store: string) => rm(join(store, 'manifest.json'))],
+    [
+      'the manifest not JSON',
+      async (store: string) => writeFile(join(store, 'manifest.json'), 'x'),
+    ],
+    ['the whole copy gone', async (store: string) => rm(store, { recursive: true })],
+  ] as const;
 
 async function installedServer() {
   const f = await mcpFixture();
@@ -37,7 +42,7 @@ async function installedServer() {
   return { f, record, store, entries };
 }
 
-describe.each(damages)('an MCP server whose stored copy has %s', (_what, damage) => {
+describe.each(damagesOf('server.js'))('an MCP server whose stored copy has %s', (_what, damage) => {
   it('is removed with a y/N, from the digest in the lock', async () => {
     const { f, store, entries } = await installedServer();
     await damage(store);
@@ -94,34 +99,43 @@ describe.each(damages)('an MCP server whose stored copy has %s', (_what, damage)
   });
 });
 
-describe.each(damages.slice(0, 3))('a skill whose stored copy has %s', (_what, damageMcp) => {
-  const damage = async (store: string) =>
-    damageMcp(store).catch(() => undefined) as Promise<unknown>;
-
+describe.each(damagesOf('SKILL.md'))('a skill whose stored copy has %s', (_what, damage) => {
   async function installedSkill() {
     const f = await setup();
     const record = await addSkill(f.source, f.options);
-    const store = storePath(f.options.stroqHome, record.digest);
-    // The skill has SKILL.md, not server.js: damage the file it has.
-    await appendFile(join(store, 'tree', 'SKILL.md'), '\nx\n');
-    await damage(store);
-    return { f, record };
+    const installed = join(record.installedTo, 'SKILL.md');
+    await damage(storePath(f.options.stroqHome, record.digest));
+    return { f, record, installed };
   }
 
-  it('is removed from the digest in the lock', async () => {
-    const { f } = await installedSkill();
+  it('is removed from the digest in the lock, and its folder with it', async () => {
+    const { f, record } = await installedSkill();
 
     await removeSkill('demo', f.options);
 
     expect((await readPassports(f.options.stroqHome)).skills['demo']?.status).toBe('revoked');
+    await expect(stat(record.installedTo)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('cannot be restored or updated, and says to remove it with --force and add it again', async () => {
-    const { f } = await installedSkill();
+  it('cannot be restored or updated, says to remove it with --force and add it again, and changes nothing', async () => {
+    const { f, installed } = await installedSkill();
     await writeFile(join(f.source, 'README.md'), 'more\n');
+    const lock = await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8');
+    const text = await readFile(installed, 'utf8');
 
     await expect(addSkill('demo', { ...f.options, restore: true })).rejects.toThrow(SKILL_REMEDY);
     await expect(addSkill('demo', f.options)).rejects.toThrow(SKILL_REMEDY);
+
+    expect(await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8')).toBe(lock);
+    expect(await readFile(installed, 'utf8')).toBe(text);
+  });
+
+  it('is installed again from its source after it is removed with --force', async () => {
+    const { f } = await installedSkill();
+    await removeSkill('demo', { ...f.options, force: true });
+
+    await addSkill(f.source, f.options);
+
     expect((await readPassports(f.options.stroqHome)).skills['demo']?.status).toBe('confirmed');
   });
 });

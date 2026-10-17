@@ -82,7 +82,6 @@ describe('the pin binds the wrapper add wrote, exactly', () => {
         'another variable added',
         (l: string[]) => (l[value(l, '--pass-env')] = 'API_KEY,SECRET_TOKEN'),
       ],
-      ['a variable taken out', (l: string[]) => (l[value(l, '--pass-env')] = '')],
       ['an empty value', (l: string[]) => (l[value(l, '--pass-env')] = '')],
       ['another case', (l: string[]) => (l[value(l, '--pass-env')] = 'api_key')],
       ['a repeat', (l: string[]) => (l[value(l, '--pass-env')] = 'API_KEY,API_KEY')],
@@ -112,6 +111,12 @@ describe('the pin binds the wrapper add wrote, exactly', () => {
       const { verdict, edit } = await confirmed();
 
       expect(await verdict(edit(change))).not.toBe('accepted');
+    });
+
+    it('refuses one of two variables taken out, and says it was the environment', async () => {
+      const { verdict, edit } = await confirmed({}, ['A_KEY', 'B_KEY']);
+
+      expect(await verdict(edit((l) => (l[value(l, '--pass-env')] = 'A_KEY')))).toMatch(/pass-env/);
     });
 
     it('refuses the same variables in another order, and says it was the command line', async () => {
@@ -166,7 +171,8 @@ describe('the pin binds the wrapper add wrote, exactly', () => {
         'the --pin=DIGEST spelling',
         (l: string[]) => l.splice(l.indexOf('--pin'), 2, `--pin=${l[value(l, '--pin')]}`),
       ],
-      ['--pin placed after --', (l: string[]) => l.splice(l.indexOf('--pin'), 2)],
+      ['--pin moved after --', (l: string[]) => l.push(...l.splice(l.indexOf('--pin'), 2))],
+      ['--pin taken out', (l: string[]) => l.splice(l.indexOf('--pin'), 2)],
       [
         'another digest in --pin',
         (l: string[]) => (l[value(l, '--pin')] = `sha256:${'f'.repeat(64)}`),

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAdd } from '../../src/commands/add.js';
@@ -61,7 +61,6 @@ describe('add --kind skill', () => {
   it('is kept for an update of the skill', async () => {
     const f = await both();
     await addSkill(f.source, { ...f.options, kind: 'skill' });
-    await mkdir(join(f.source, 'docs'), { recursive: true });
     await writeFile(join(f.source, 'README.md'), 'more\n');
 
     const updated = await addSkill('demo', { ...f.options, kind: 'skill' });

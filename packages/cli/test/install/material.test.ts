@@ -217,45 +217,97 @@ describe('what counts as documentation in an update', () => {
     }
   });
 
-  it('is documentation only if it was documentation before, for any path at all', () => {
-    fc.assert(
-      fc.property(fc.string({ maxLength: 40 }), (path) => {
-        expect(!isDocumentation(path) || wasDocumentation(path)).toBe(true);
-      }),
-      { numRuns: 2000 },
-    );
-    fc.assert(
-      fc.property(
-        fc.constantFrom(
-          'README',
-          'readme',
-          'LICENSE',
-          'CHANGELOG',
-          'CONTRIBUTING',
-          'SKILL',
-          'docs/a',
-        ),
-        fc.constantFrom(
-          '',
-          '.md',
-          '.txt',
-          '.MD',
-          '.sh',
-          '.md.sh',
-          '.',
-          ' ',
-          'K',
-          '/',
-          '\\',
-          '/../x',
-        ),
-        fc.constantFrom('', '.', ' ', '/', 'x'),
-        (stem, extension, tail) => {
-          const path = `${stem}${extension}${tail}`;
-          expect(!isDocumentation(path) || wasDocumentation(path), path).toBe(true);
-        },
+  /**
+   * The rule written out, apart from the pattern that implements it: the eight names, with the ASCII letters folded
+   * and nothing else. (`toLowerCase` would fold the Kelvin sign to a `k`, which is what the rule must not do.)
+   */
+  const DOCUMENT_NAMES = new Set(
+    ['readme', 'changelog', 'license', 'contributing'].flatMap((stem) =>
+      ['.md', '.txt'].map((extension) => `${stem}${extension}`),
+    ),
+  );
+  const asciiLower = (text: string): string =>
+    text.replace(/[A-Z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32));
+  const documentationByTable = (path: string): boolean => DOCUMENT_NAMES.has(asciiLower(path));
+
+  /** Letters that only look like the ones of a document's name, with the one they imitate. */
+  const LOOK_ALIKES: readonly (readonly [string, string])[] = [
+    ['K', '\u212a'],
+    ['s', '\u017f'],
+    ['E', '\u0415'],
+    ['A', '\uff21'],
+    ['I', '\u0399'],
+    ['.', '\uff0e'],
+    ['t', '\uff54'],
+  ];
+
+  /**
+   * Names that are, or are one step from, a document's: the stem in any case, an extension near `.md` or `.txt`, a
+   * folder or other text before it, something after it, and now and then a letter swapped for one that looks like it.
+   * It is built from the real names, so that it hits the rule and not only misses it.
+   */
+  const candidate = fc
+    .record({
+      stem: fc.constantFrom('README', 'CHANGELOG', 'LICENSE', 'CONTRIBUTING', 'SKILL', 'NOTES'),
+      cases: fc.array(fc.boolean(), { minLength: 12, maxLength: 12 }),
+      extension: fc.constantFrom(
+        '.md',
+        '.md',
+        '.txt',
+        '.txt',
+        '.MD',
+        '.Txt',
+        '.md.sh',
+        '.markdown',
+        '.rst',
+        '.',
       ),
-      { numRuns: 2000 },
+      before: fc.constantFrom('', '', '', '', '', '', './', 'sub/', 'docs/', ' '),
+      after: fc.constantFrom('', '', '', '', '', '', '.', ' ', '\n', '/x'),
+      alike: fc.oneof(
+        { weight: 8, arbitrary: fc.constant(undefined) },
+        { weight: 2, arbitrary: fc.integer({ min: 0, max: LOOK_ALIKES.length - 1 }) },
+      ),
+    })
+    .map(({ stem, cases, extension, before, after, alike }) => {
+      const cased = [...stem].map((letter, i) =>
+        cases[i % cases.length] ? letter.toLowerCase() : letter,
+      );
+      let name = `${cased.join('')}${extension}`;
+      if (alike !== undefined) {
+        const [letter, imitation] = LOOK_ALIKES[alike]!;
+        name = name.replace(new RegExp(letter, 'i'), imitation);
+      }
+      return `${before}${name}${after}`;
+    });
+
+  it('generates both the names that are documents and the names that are not', () => {
+    const sample = fc.sample(candidate, { numRuns: 4000, seed: 7 });
+    const documents = sample.filter(documentationByTable).length;
+
+    expect(documents).toBeGreaterThan(200);
+    expect(sample.length - documents).toBeGreaterThan(1500);
+    // and the look-alikes are really in there
+    expect(sample.some((path) => /[\u212a\u017f\u0415\uff21\u0399\uff0e\uff54]/.test(path))).toBe(
+      true,
+    );
+  });
+
+  it('agrees with the table of eight names for every candidate', () => {
+    fc.assert(
+      fc.property(candidate, (path) => {
+        expect(isDocumentation(path), JSON.stringify(path)).toBe(documentationByTable(path));
+      }),
+      { numRuns: 4000, seed: 7 },
+    );
+  });
+
+  it('is documentation only if it was documentation before, for any candidate', () => {
+    fc.assert(
+      fc.property(candidate, (path) => {
+        expect(!isDocumentation(path) || wasDocumentation(path), JSON.stringify(path)).toBe(true);
+      }),
+      { numRuns: 4000, seed: 11 },
     );
   });
 
