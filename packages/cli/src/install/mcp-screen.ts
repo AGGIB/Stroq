@@ -1,5 +1,7 @@
 // What a person reads before typing the digest of an MCP server, in the order that they read it.
 import { confirmationScreen } from '../commands/vet-render.js';
+import { entryRunsStrict } from '../commands/mcp-config.js';
+import { reconfirmCommand } from '../mcp/pin-argument.js';
 import { outsideLine } from '../ui/layout.js';
 import type { Terminal } from '../ui/terminal.js';
 import type { PreparedMcp } from './mcp-prepare.js';
@@ -13,7 +15,8 @@ const SELF_CONTAINED =
  * sensitive lines do not all fit is refused before a word has been written.
  */
 export function showMcpScreen(terminal: Pick<Terminal, 'write'>, prepared: PreparedMcp): void {
-  const { name, previous, oldTree, made, entrypoint, passEnv, written, selected } = prepared;
+  const { name, previous, oldTree, made, entrypoint, passEnv, written, selected, current } =
+    prepared;
   const screen = confirmationScreen(made.passport, prepared.source);
   terminal.write(
     `${previous === undefined ? 'Install' : 'Update'} MCP server ${name} in ${outsideLine(JSON.stringify(selected.file))}\n`,
@@ -21,6 +24,14 @@ export function showMcpScreen(terminal: Pick<Terminal, 'write'>, prepared: Prepa
   if (previous !== undefined) terminal.write(`Previous sha256:${previous.digest}\n`);
   if (oldTree !== undefined)
     for (const line of updateDiffLines(oldTree, made.tree)) terminal.write(`${line}\n`);
+  if (entryRunsStrict(written))
+    terminal.write(
+      'Strict filtering: ON (--strict). Messages the proxy cannot fully scan are withheld; this does not sandbox the server.\n',
+    );
+  else if (entryRunsStrict(current))
+    terminal.write(
+      `Note: the current entry runs with --strict, but that flag is not confirmed in the lock; the replacement below does not. To enable it with confirmation: ${reconfirmCommand(name, { strict: true })}\n`,
+    );
   terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );

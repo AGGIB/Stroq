@@ -45,6 +45,7 @@ export function entryFor(
   label: string,
   cwd: string,
   original: Record<string, unknown> | null,
+  strictArgs: readonly string[] = [],
 ): Record<string, unknown> {
   const sep = process.platform === 'win32' ? '\\' : '/';
   return {
@@ -63,6 +64,7 @@ export function entryFor(
       cwd,
       '--pass-env',
       record.passEnv.join(','),
+      ...strictArgs,
       '--',
       'node',
       `${storePath(options.stroqHome, record.digest)}${sep}tree${sep}${record.entrypoint}`,

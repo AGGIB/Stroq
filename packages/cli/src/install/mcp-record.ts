@@ -24,6 +24,8 @@ export interface McpInstallOptions {
   readonly force?: boolean;
   readonly user?: boolean;
   readonly restore?: boolean;
+  /** Enable strict filtering in the confirmed wrapper; when absent, keep the recorded strict arguments. */
+  readonly strict?: boolean;
 }
 
 /** What `add --kind mcp` records beside the pin; the proxy reads only kind, status, digest and grant. */

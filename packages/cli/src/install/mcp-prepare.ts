@@ -3,6 +3,7 @@
 // that would be written. Nothing is written here.
 import { resolve } from 'node:path';
 import { isPlainObject } from '../commands/config-file.js';
+import { wrapperStrictArgs } from '../commands/mcp-config.js';
 import { labelOf } from '../commands/vet-flow.js';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { entrypointOf } from '../mcp/entrypoint.js';
@@ -165,6 +166,7 @@ export async function prepareMcp(
     selected.label,
     cwd,
     original,
+    strictArgsOf(previous, options.strict),
   );
   const material =
     options.restore === true ||
@@ -190,4 +192,14 @@ export async function prepareMcp(
     written,
     material,
   };
+}
+
+/** Only the confirmed wrapper supplies inherited checks; --force never promotes flags from a drifted config. */
+function strictArgsOf(
+  previous: McpRecord | undefined,
+  requested: boolean | undefined,
+): readonly string[] {
+  const recorded = previous?.written['args'];
+  const kept = wrapperStrictArgs(Array.isArray(recorded) ? recorded : []);
+  return requested === true && !kept.includes('--strict') ? ['--strict', ...kept] : kept;
 }

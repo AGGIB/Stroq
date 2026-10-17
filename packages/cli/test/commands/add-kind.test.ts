@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAdd } from '../../src/commands/add.js';
 import * as skillInstall from '../../src/install/skill-install.js';
+import * as mcpInstall from '../../src/install/mcp-install.js';
 import { addSkill } from '../../src/install/skill-install.js';
 import { setup } from '../helpers/skill-install.js';
 
@@ -23,6 +24,14 @@ async function both() {
 }
 
 describe('add --kind skill', () => {
+  it.each([{ kind: [] }, { kind: ['--kind', 'skill'] }])(
+    'refuses strict for an inferred or explicit skill (%j)',
+    async ({ kind }) => {
+      const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect(await runAdd(['./somewhere', ...kind, '--strict'])).toBe(2);
+      expect(write.mock.calls.map(([text]) => String(text)).join('')).toContain('--strict');
+    },
+  );
   it('is passed to the install, and an add without --kind leaves the kind to the files', async () => {
     const seen: unknown[] = [];
     vi.spyOn(skillInstall, 'addSkill').mockImplementation(async (_source, options) => {
@@ -66,6 +75,20 @@ describe('add --kind skill', () => {
     const updated = await addSkill('demo', { ...f.options, kind: 'skill' });
 
     expect(updated.history.map((h) => h.action)).toEqual(['add', 'update']);
+  });
+});
+
+describe('add --kind mcp --strict', () => {
+  it('passes an explicit request, and leaves an absent request absent for recorded inheritance', async () => {
+    const seen: (boolean | undefined)[] = [];
+    vi.spyOn(mcpInstall, 'addMcp').mockImplementation(async (_source, options) => {
+      seen.push(options.strict);
+      return { digest: 'a'.repeat(64) } as never;
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    await runAdd(['./somewhere', '--kind', 'mcp', '--config', './client.json', '--strict']);
+    await runAdd(['demo', '--kind', 'mcp']);
+    expect(seen).toEqual([true, undefined]);
   });
 });
 

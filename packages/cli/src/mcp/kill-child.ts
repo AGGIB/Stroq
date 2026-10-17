@@ -31,6 +31,9 @@ export type KillSpawn = (
 /** The subset of `ChildProcess` this module needs, so callers need not own a real one. */
 export interface Killable {
   readonly pid?: number | undefined;
+  /** Set once the process has exited; a real `ChildProcess` carries both. */
+  readonly exitCode?: number | null | undefined;
+  readonly signalCode?: NodeJS.Signals | null | undefined;
   kill(signal?: NodeJS.Signals): boolean;
 }
 
@@ -51,6 +54,10 @@ export function killChildTree(
   plat: NodeJS.Platform = process.platform,
   spawnFn: KillSpawn = spawn as unknown as KillSpawn,
 ): void {
+  // A child that has already exited has nothing left to stop, and on Windows its pid may belong to
+  // another process by now: `taskkill /pid` would end that one. (`close` can lag `exit` when a
+  // grandchild holds the pipes, so the caller's own flag is not enough.)
+  if (child.exitCode != null || child.signalCode != null) return;
   const pid = child.pid;
   if (plat === 'win32' && pid !== undefined) {
     try {

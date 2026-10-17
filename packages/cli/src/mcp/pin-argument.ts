@@ -28,5 +28,16 @@ export const BIND_PHRASES: readonly string[] = Object.values(BIND);
  * and `doctor` tell a person to run. The name comes from a lock or a config, so it is quoted by `commandLine` and
  * never becomes a second command.
  */
-export const reconfirmCommand = (name: string): string =>
-  commandLine(['stroq', 'add', { positional: name, what: 'name' }, '--kind', 'mcp', '--force']);
+export const reconfirmCommand = (
+  name: string,
+  options: { readonly strict?: boolean } = {},
+): string =>
+  commandLine([
+    'stroq',
+    'add',
+    { positional: name, what: 'name' },
+    '--kind',
+    'mcp',
+    ...(options.strict === true ? ['--strict'] : []),
+    '--force',
+  ]);

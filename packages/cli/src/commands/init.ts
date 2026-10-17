@@ -475,6 +475,7 @@ export const INIT_OPTIONS = {
   config: { type: 'string' },
   unwrap: { type: 'boolean', default: false },
   cloak: { type: 'boolean', default: false },
+  strict: { type: 'boolean', default: false },
   // The first-run screen's, which the installer has no use for: `--yes` answers its question
   // and `--no-input` keeps it from being asked.
   yes: { type: 'boolean', default: false },
@@ -507,6 +508,14 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
     process.stdout.write(`unknown agent "${agent}" (supported: ${INIT_AGENTS.join(', ')})\n`);
     return 1;
   }
+  // `--strict` is the MCP proxy's. Accepted and ignored for any other agent, it would
+  // leave a user believing something is stricter than it is.
+  if (values.strict === true && agent !== 'mcp') {
+    process.stdout.write(
+      `--strict applies to --agent mcp only: it makes the MCP proxy withhold what it cannot fully scan, and ${agent} has no proxy. Nothing was changed.\n`,
+    );
+    return 1;
+  }
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
   const node = process.execPath;
@@ -530,6 +539,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
       ...(values.config === undefined ? {} : { config: values.config }),
       unwrap: values.unwrap === true,
       cloak: values.cloak === true,
+      strict: values.strict === true,
     });
   // On Windows a line the host cannot start is a hook that blocks every tool (Antigravity) or never runs, so the
   // line is shown to start, the way that host starts it, before it is written.

@@ -15,7 +15,7 @@ import {
   percentDecodedLeniently,
 } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
-import type { ProvenanceStore } from './provenance/store.js';
+import type { ProvenanceInput, ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { scanContent } from './scan/scanner.js';
@@ -324,6 +324,30 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
+/** The atoms one text of a result holds, and the text they were read from. */
+interface ReadingAtoms {
+  readonly text: string;
+  readonly atoms: readonly Atom[];
+}
+
+/**
+ * The atoms of the texts a result is read as, each atom credited to the first text that
+ * has it, so an atom several texts hold is one. Every text is read the way `post` has
+ * always read its own: normalised, then up to `MAX_ATOMS` atoms from it.
+ */
+function atomsOfReadings(texts: readonly string[]): ReadingAtoms[] {
+  const seen = new Set<string>();
+  return texts.map((text) => ({
+    text,
+    atoms: extractAtomsDeep(normalizeText(text)).filter((atom) => {
+      const hash = atomHash(atom);
+      if (seen.has(hash)) return false;
+      seen.add(hash);
+      return true;
+    }),
+  }));
+}
+
 export class StroqEngine {
   constructor(private readonly opts: EngineOptions) {}
 
@@ -439,25 +463,33 @@ export class StroqEngine {
   private async recordProvenance(
     event: PostToolEvent,
     summary: string,
-    atoms: readonly Atom[],
+    readings: readonly ReadingAtoms[],
     suspect: boolean,
   ): Promise<string | null> {
     const store = this.opts.provenance;
-    if (!store || atoms.length === 0) return null;
+    if (!store || readings.every((reading) => reading.atoms.length === 0)) return null;
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
-    const excerpts = await this.safeExcerpts(event, atoms);
-    try {
-      await store.record(
-        event.sessionId,
-        atoms.map((atom, i) => ({
+    // Each atom's excerpt is scrubbed against the text the atom came from: a credential
+    // echoed in one reading of a result is not in the others, and so not in their index.
+    const inputs: ProvenanceInput[] = [];
+    for (const reading of readings) {
+      const excerpts = await this.safeExcerpts(
+        { ...event, toolResultText: reading.text },
+        reading.atoms,
+      );
+      reading.atoms.forEach((atom, i) =>
+        inputs.push({
           tool: event.toolName,
           source,
           kind: atom.kind,
           hash: atomHash(atom),
           excerpt: excerpts[i] ?? '',
           suspect,
-        })),
+        }),
       );
+    }
+    try {
+      await store.record(event.sessionId, inputs);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);
@@ -650,14 +682,22 @@ export class StroqEngine {
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
     // record explaining why.
-    await this.opts.audit.append({
-      sessionId: event.sessionId,
-      phase: 'post',
-      ...call,
-      tool: event.toolName,
-      summary,
-      scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },
-    });
+    // An extra reading of a result is audited only when it matched: the call that records
+    // the result writes the line every result has.
+    if (event.extraReading !== true || scan.verdict === 'suspect')
+      await this.opts.audit.append({
+        sessionId: event.sessionId,
+        phase: 'post',
+        ...call,
+        tool: event.toolName,
+        summary,
+        scan: {
+          verdict: scan.verdict,
+          score: scan.score,
+          ruleIds,
+          ...(trusted ? { trusted } : {}),
+        },
+      });
     const state =
       scan.verdict === 'suspect' && !trusted
         ? await this.opts.sessions.markSuspect(event.sessionId, {
@@ -667,6 +707,9 @@ export class StroqEngine {
             source,
           })
         : await this.opts.sessions.get(event.sessionId);
+    // The call that records a result is the only one that remembers it.
+    if (event.extraReading === true)
+      return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
     // like `atomsForAction` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
@@ -674,13 +717,14 @@ export class StroqEngine {
     // Deep, not raw: a tool result the agent is told to "decode and run" hides
     // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
     // them the same way the scanner already does via expandVariants.
-    const atoms = extractAtomsDeep(normalizeText(event.toolResultText));
+    const readings = atomsOfReadings([event.toolResultText, ...(event.otherReadings ?? [])]);
     const provenanceError = await this.recordProvenance(
       event,
       summary,
-      atoms,
-      scan.verdict === 'suspect' && !trusted,
+      readings,
+      (scan.verdict === 'suspect' && !trusted) || event.suspectInAnotherReading === true,
     );
+    const atoms = readings.flatMap((reading) => reading.atoms);
     return { scan, taint: state.taint, scanned: true, atoms, provenanceError, trusted };
   }
 }

@@ -13,7 +13,12 @@ import { mcpFixture } from '../helpers/mcp-install.js';
  * then refused at run time with no warning at the moment of the rewrite. Now `init` leaves it as it is, says so, and
  * prints the one command that confirms a changed wrapper.
  */
-async function run(f: Awaited<ReturnType<typeof mcpFixture>>, dryRun = false, cloak = false) {
+async function run(
+  f: Awaited<ReturnType<typeof mcpFixture>>,
+  dryRun = false,
+  cloak = false,
+  strict = false,
+) {
   const out: string[] = [];
   const err: string[] = [];
   vi.stubEnv('STROQ_HOME', f.options.stroqHome);
@@ -23,6 +28,7 @@ async function run(f: Awaited<ReturnType<typeof mcpFixture>>, dryRun = false, cl
     config: f.config,
     unwrap: false,
     cloak,
+    strict,
   });
   return { code, out: out.join(''), err: err.join('') };
 }
@@ -78,6 +84,27 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
     expect(await readFile(f.config, 'utf8')).toBe(before);
     expect(JSON.parse(out).mcpServers.demo).toEqual(written);
     expect(err).toContain('stroq add demo --kind mcp --force');
+  });
+
+  it('keeps a confirmed wrapper when strict is requested, and names the confirmed opt-in', async () => {
+    const f = await mcpFixture();
+    await addMcp(f.dir, f.mcpOptions);
+    const written = (await f.servers())['demo'];
+    const { out } = await run(f, false, false, true);
+    expect((await f.servers())['demo']).toEqual(written);
+    expect(out).toContain('--strict was not changed by this run');
+    expect(out).toContain('stroq add demo --kind mcp --strict --force');
+    expect((await f.servers())['other'].args).toContain('--strict');
+    expect(out).toContain('entries kept as confirmed are unchanged');
+  });
+
+  it('plain init leaves a strict confirmed wrapper strict', async () => {
+    const f = await mcpFixture();
+    await addMcp(f.dir, { ...f.mcpOptions, strict: true });
+    const written = (await f.servers())['demo'];
+    await run(f);
+    expect((await f.servers())['demo']).toEqual(written);
+    expect(written.args).toContain('--strict');
   });
 
   it('leaves doctor green for it: the pin is still the one that was confirmed', async () => {
