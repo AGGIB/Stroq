@@ -84,6 +84,50 @@ describe('the --strict section of docs/AGENTS.md', () => {
     expect(section).toContain('remembers the atoms of EVERY view');
   });
 
+  describe('the limits it states about time, trust, signals, versions and rules', () => {
+    it('says the hard bound covers the scan only, and what the unbounded part cost when measured', () => {
+      expect(section).toContain(`covers the scan, not the whole of handling a message`);
+      expect(section).toContain('serialising what is delivered');
+      expect(section).toContain('availability effect on that one wrapper');
+      expect(section).toContain(`ONE deadline of ${STRICT_SCAN_DEADLINE_MS / 1000} seconds`);
+    });
+
+    it('says trust entries suppress one view, and that the dry run reads the bundled rules', () => {
+      expect(section).toContain('suppresses only the view it was made from');
+      expect(section).toContain('The dry run uses the bundled rules');
+    });
+
+    it('says ending the server signals the direct child on POSIX and the tree on Windows', () => {
+      expect(section).toContain('Ending the server signals the direct child');
+      expect(section).toContain('`sh -c` or `npx`');
+      expect(section).toContain('On Windows the whole tree is killed');
+    });
+
+    it('says what is shared with the default proxy: end-anchored rules and the window', () => {
+      expect(section).toContain('ATR-2026-02009');
+      expect(section).toContain('in strict mode and in the default proxy alike');
+      expect(section).toContain(
+        `past the ${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')}-character window`,
+      );
+      expect(section).toContain('six characters of JSON');
+    });
+
+    it('says older and newer versions do not mix', () => {
+      expect(section).toContain('fails on the unknown option');
+      expect(section).toContain('silently');
+    });
+
+    it('is the same as SECURITY.md in its scope: the deadline is about the scan', () => {
+      const security = readFileSync(
+        fileURLToPath(new URL('../../../../SECURITY.md', import.meta.url)),
+        'utf8',
+      );
+      expect(security).toContain('make the SCAN of a message run past its 4-second hard deadline');
+      expect(security).not.toContain('stall the proxy past the deadline');
+      expect(security).toContain('which is an availability effect on that wrapper');
+    });
+  });
+
   it('says why the views are separate texts and that the default proxy’s own text is one', () => {
     expect(section).toContain('the same reader, unchanged');
     expect(section).toContain('at least what the default scans');
