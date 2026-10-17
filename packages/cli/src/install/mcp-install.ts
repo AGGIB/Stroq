@@ -4,6 +4,7 @@ import { basename, dirname, posix, resolve } from 'node:path';
 import { labelOf } from '../commands/vet-flow.js';
 import { readConfigText, parseConfigJson, isPlainObject } from '../commands/config-file.js';
 import {
+  entryRunsStrict,
   hasValidMcpServers,
   isMcpClient,
   mcpConfigPath,
@@ -328,6 +329,13 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     `${previous === undefined ? 'Install' : 'Update'} MCP server ${name} in ${outsideLine(JSON.stringify(file))}\n`,
   );
   if (previous !== undefined) options.terminal.write(`Previous sha256:${previous.digest}\n`);
+  // `stroq add` writes the wrapper from scratch and never writes `--strict`. An entry that
+  // someone made strict (`init --agent mcp --strict`) is replaced by one that is not, and
+  // that is said here rather than found out later.
+  if (entryRunsStrict(current))
+    options.terminal.write(
+      'Note: the current entry runs with --strict; stroq add does not write --strict, so the entry below does not. Run "stroq init --agent mcp --strict" on this config afterwards to turn it back on.\n',
+    );
   options.terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
   );

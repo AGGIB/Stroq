@@ -79,4 +79,24 @@ describe('killChildTree', () => {
     expect(() => killChildTree(child, 'SIGTERM', 'win32', throwing)).not.toThrow();
     expect(child.signals).toEqual(['SIGTERM']);
   });
+  it('does nothing for a child that has already exited, so a reused pid is never signalled', () => {
+    // `close` can lag `exit` (a grandchild holding the pipes), and on Windows the pid of an
+    // exited process may by now belong to another one: `taskkill /pid` would end that one.
+    for (const state of [{ exitCode: 0 }, { exitCode: 1 }, { signalCode: 'SIGTERM' as const }]) {
+      const child = { ...fakeChild(4242), ...state };
+      const spawn = recordingSpawn();
+      killChildTree(child, 'SIGTERM', 'win32', spawn);
+      killChildTree(child, 'SIGKILL', 'linux', spawn);
+      expect(spawn.calls).toEqual([]);
+      expect(child.signals).toEqual([]);
+    }
+  });
+
+  it('still signals a child whose exit status is not yet set', () => {
+    const child = { ...fakeChild(4242), exitCode: null, signalCode: null };
+    const spawn = recordingSpawn();
+    killChildTree(child, 'SIGTERM', 'win32', spawn);
+    expect(spawn.calls).toHaveLength(1);
+    expect(child.signals).toEqual(['SIGTERM']);
+  });
 });

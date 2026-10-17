@@ -157,6 +157,29 @@ export interface PostToolEvent extends PreToolEvent {
    * so — a host that renamed its result field used to be recorded as a clean scan.
    */
   readonly resultMissing?: readonly string[];
+  /**
+   * This call is one more reading of a result that ANOTHER call to `post` records: the
+   * same result as a different text (`stroq mcp --strict` scans several texts of one
+   * server result). It is scanned by the same rules and taints the session when it
+   * matches, and nothing else: no provenance is recorded for it (the other call does
+   * that, once) and no audit line is written unless it matched. Absent, `post` records
+   * and audits every call, as it always has.
+   */
+  readonly extraReading?: true;
+  /**
+   * Set on the call that records a result when an extra reading of the same result
+   * matched: what is remembered of the result is then flagged as suspect, as it would
+   * be had the recorded text matched itself. Absent, only this call's own verdict counts.
+   */
+  readonly suspectInAnotherReading?: true;
+  /**
+   * Set on the call that records a result: the texts of its other readings. What is
+   * remembered of the result is the atoms of all of them, once each (an atom more than one
+   * text holds is one record), each text read as `toolResultText` is: the same cap of
+   * atoms per text, and a known secret taken out of an atom's excerpt by the text the atom
+   * came from. Absent, only `toolResultText` is remembered.
+   */
+  readonly otherReadings?: readonly string[];
 }
 
 /**

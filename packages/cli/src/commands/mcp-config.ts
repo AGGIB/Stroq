@@ -139,6 +139,26 @@ export function wrapperPinArgs(args: readonly unknown[]): readonly string[] {
   );
 }
 
+/**
+ * The strict-mode arguments a wrapper already carries: `--strict` and `--strict-max-withheld` with its value,
+ * split or inline. Read only from the wrapper's own arguments, before its `--`,
+ * so a `--strict` that belongs to the wrapped server is never mistaken for Stroq's.
+ * Kept as written, malformed limits included, for the reason pins are: a rewrite must
+ * not silently take a check off, and a limit the proxy refuses stops it starting.
+ */
+export function wrapperStrictArgs(args: readonly unknown[]): readonly string[] {
+  const at = wrapperIndex(args);
+  const before = at === null ? [] : args.slice(at, args.indexOf('--', at));
+  return before.flatMap((value, i) =>
+    value === '--strict' ||
+    (typeof value === 'string' && value.startsWith('--strict-max-withheld='))
+      ? [value]
+      : value === '--strict-max-withheld'
+        ? ['--strict-max-withheld', String(before[i + 1] ?? '')]
+        : [],
+  );
+}
+
 /** The command a wrapped entry wraps, read back from after the wrapper's own `--`. */
 export function unwrapArgs(args: readonly unknown[]): OriginalCommand | null {
   const at = wrapperIndex(args);
@@ -185,6 +205,14 @@ export interface WrapOptions {
    * once turned on.
    */
   readonly cloak?: boolean;
+  /**
+   * `--strict`: written into the wrapper when `init --agent mcp --strict` asked for it.
+   * Unlike the cloak it is NOT switched off by running `init` again without it: strict
+   * mode is a check, not a transformation, and a rewrite that dropped it would be a
+   * silent downgrade (the same reason `--pin` survives a rewrite). To take it off,
+   * `--unwrap` and wrap again.
+   */
+  readonly strict?: boolean;
 }
 
 const serversOf = (config: McpConfigJson): Record<string, unknown> =>
@@ -234,6 +262,9 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
   if (command === '') return { entry, action: 'skipped (no command)' };
   const args = original?.args ?? coerceArgs(argsOf(entry));
   const pins = wrapperPinArgs(argsOf(entry));
+  const kept = wrapperStrictArgs(argsOf(entry));
+  const strictArgs =
+    opts.strict === true && !kept.includes('--strict') ? ['--strict', ...kept] : kept;
   return {
     action: original === null ? 'wrapped' : 'already wrapped',
     entry: {
@@ -259,6 +290,7 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
         // `mcp --server <name> --client`, which is untouched, and `unwrapArgs` reads
         // from the separator, so an extra token between them changes neither.
         ...(opts.cloak === true ? ['--cloak'] : []),
+        ...strictArgs,
         '--',
         command,
         ...args,
@@ -380,4 +412,29 @@ export function countWrapped(config: McpConfigJson): McpProxyCount {
     if (!recordsPassEnv(args)) unfiltered += 1;
   }
   return { wrapped, stdio: stdio.length, stale, unfiltered };
+}
+
+/** True when this config entry is Stroq's wrapper and runs with `--strict`. */
+export const entryRunsStrict = (entry: unknown): boolean =>
+  isPlainObject(entry) &&
+  !hasInvalidArgs(entry) &&
+  wrapperStrictArgs(argsOf(entry)).includes('--strict');
+
+/**
+ * How many of the wrappers `countWrapped` counts as protected also run in strict mode,
+ * so `doctor` can show them apart. A separate count, not a field of `McpProxyCount`:
+ * the shape `countWrapped` returns is what everything that reads it already expects.
+ */
+export function countStrict(config: McpConfigJson): number {
+  return Object.values(serversOf(config))
+    .filter(isPlainObject)
+    .filter((entry) => !isHttpEntry(entry) && typeof entry['command'] === 'string')
+    .filter((entry) => {
+      const entryPath = wrappedEntryPath(argsOf(entry));
+      return (
+        entryPath !== null &&
+        existsSync(entryPath) &&
+        wrapperStrictArgs(argsOf(entry)).includes('--strict')
+      );
+    }).length;
 }

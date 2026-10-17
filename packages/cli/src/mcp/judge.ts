@@ -350,6 +350,21 @@ export async function scanMcpResult(
 }
 
 /**
+ * `withWarningBlock` for each block that is not null, in order. The default pump and the
+ * strict handler both append the scan's warning and then the cloak's notice to a result;
+ * this is the one place that says in which order, so the two cannot disagree.
+ */
+export function appendBlocks(
+  result: Record<string, unknown>,
+  blocks: readonly (string | null)[],
+): Record<string, unknown> {
+  return blocks.reduce<Record<string, unknown>>(
+    (out, block) => (block === null ? out : withWarningBlock(out, block)),
+    result,
+  );
+}
+
+/**
  * The one channel that reaches the model in MCP: an extra text item on the result's
  * own `content`. Nothing else is altered — `structuredContent`, `isError`,
  * `resultType` and every other key are carried through by the spread — and the

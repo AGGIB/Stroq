@@ -47,6 +47,8 @@ function installerTakes(args: readonly string[]): boolean {
  */
 export function mayDraw(args: readonly string[]): boolean {
   if (args.includes('--dry-run') || args.includes('--no-input')) return false;
+  // `--strict` is refused for every agent but the MCP proxy, which this screen never draws for.
+  if (args.includes('--strict')) return false;
   // What follows `--` is not an option: the `--agent` that the screen adds would be one more word.
   if (args.includes('--') || !installerTakes(args)) return false;
   const agent = explicitAgent(args);
