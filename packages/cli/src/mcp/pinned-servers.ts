@@ -5,11 +5,12 @@
 // So a pinned server cannot make its copy inside the sandbox and does not start there. That follows from the
 // deny; it has not been measured with a real srt. `stroq run` and `stroq doctor` say it when there is such a server.
 import { passportsFileIn } from '../paths.js';
-import { McpPinSchema, readPassportLock } from '../install/lock-reader.js';
 
 /** The names of the servers the lock holds as confirmed and pinned, sorted; none when the lock cannot be read. */
-export function pinnedServers(home: string): string[] {
+export async function pinnedServers(home: string): Promise<string[]> {
   try {
+    // Loaded here and not at the top: the hooks load the files that call this, and must not load the lock reader.
+    const { McpPinSchema, readPassportLock } = await import('../install/lock-reader.js');
     const lock = readPassportLock(passportsFileIn(home));
     return Object.entries(lock.mcp)
       .filter(([, record]) => McpPinSchema.safeParse(record).success)

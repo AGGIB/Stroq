@@ -525,7 +525,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
   // casting it into `hookCommand` and never using the result — is what lets every
   // later reference to `agent` be a plain `HookAgent`, no cast required.
   if (agent === 'mcp')
-    return initMcp(scope, hookArgv(node, entry), dryRun, {
+    return await initMcp(scope, hookArgv(node, entry), dryRun, {
       ...(values.client === undefined ? {} : { client: values.client }),
       ...(values.config === undefined ? {} : { config: values.config }),
       unwrap: values.unwrap === true,

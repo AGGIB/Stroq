@@ -12,7 +12,7 @@
 // comparison is on the lock's `written`, never on the client config, and the refusals are fixed phrases that
 // hold nothing of the wrapper. A record without `written` (one written by hand) is held to what it has.
 import { isDeepStrictEqual } from 'node:util';
-import { BIND_PHRASES } from './pin-argument.js';
+import { BIND } from './pin-argument.js';
 
 /** A wrapper that is not the one that was confirmed. The message is a fixed phrase, safe to print. */
 export class PinBindError extends Error {
@@ -65,20 +65,20 @@ export function assertBound(
   if (!isRecord(record)) return;
   const names = record['passEnv'];
   if (isStrings(names) && (wrapper.passEnv == null || !sameMultiset(wrapper.passEnv, names)))
-    throw new PinBindError(BIND_PHRASES[0]);
+    throw new PinBindError(BIND.passEnv);
   const entry = record['entrypoint'];
-  if (typeof entry === 'string' && entry !== startFile) throw new PinBindError(BIND_PHRASES[1]);
+  if (typeof entry === 'string' && entry !== startFile) throw new PinBindError(BIND.startFile);
   const written = record['written'];
   if (!isRecord(written)) return;
   const { launch } = comparison;
-  if (launch === undefined) throw new PinBindError(BIND_PHRASES[4]);
+  if (launch === undefined) throw new PinBindError(BIND.incomparable);
   const args = written['args'];
   const same =
     written['command'] === launch.command &&
     isStrings(args) &&
     args.length === launch.argv.length &&
     args.every((arg, i) => arg === launch.argv[i]);
-  if (!same) throw new PinBindError(BIND_PHRASES[2]);
+  if (!same) throw new PinBindError(BIND.commandLine);
   if (comparison.entry !== undefined && !isDeepStrictEqual(comparison.entry, written))
-    throw new PinBindError(BIND_PHRASES[3]);
+    throw new PinBindError(BIND.entry);
 }

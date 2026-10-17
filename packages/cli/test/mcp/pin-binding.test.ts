@@ -285,6 +285,17 @@ describe('the pin binds the wrapper add wrote, exactly', () => {
     expect(code).toBe(1);
     expect(stderr).toMatch(/refusing to start/);
     expect(stderr).toMatch(/--pass-env/);
+    // the line to run is named, with the real name of the server, and nothing of the wrapper is in it
+    expect(stderr).toContain('stroq add demo --kind mcp --force');
+    expect(stderr).not.toContain('SECRET_TOKEN');
+  });
+
+  it('names the same command in the status doctor reads from a wrapper that is not the one confirmed', async () => {
+    const { asRun, edit } = await confirmed();
+    const status = await inspectPin(asRun(edit((l) => l.push('--extra')))!);
+
+    expect(status.ok).toBe(false);
+    expect(status.detail).toContain('stroq add demo --kind mcp --force');
   });
 
   it('refuses a lock record of another kind under the same name', async () => {
@@ -366,5 +377,12 @@ describe('doctor compares the whole config entry with the one confirmed', () => 
 
     expect(statuses).toMatchObject([{ ok: false }]);
     expect(statuses[0]!.detail).toMatch(/pin/);
+    expect(statuses[0]!.detail).toContain('stroq add demo --kind mcp --force');
+  });
+
+  it('names the command that confirms the entry again when the entry is not the confirmed one', async () => {
+    const statuses = await inConfig((e) => (e['cwd'] = '/tmp'));
+
+    expect(statuses[0]!.detail).toContain('stroq add demo --kind mcp --force');
   });
 });

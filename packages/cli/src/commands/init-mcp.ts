@@ -1,5 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
+import { reconfirmCommand } from '../mcp/pin-argument.js';
+import { outsideLine } from '../ui/layout.js';
 import { writeJsonObject } from './config-file.js';
 import {
   MCP_CLIENTS,
@@ -90,12 +92,26 @@ const MCP_CLOAK_NOTE =
   'A cloaked result and a restored call are re-serialised, so those two message kinds are no longer forwarded byte for byte; everything else still is.\n' +
   'Re-run this command WITHOUT --cloak to switch it back off.\n';
 
-export function initMcp(
+/**
+ * The servers of this config file that `add` confirmed. The lock reader is loaded here, when it is needed, and not
+ * with the rest of `init`, which the hooks load on every call and which must not pull in Safe Install.
+ */
+async function confirmedNames(file: string): Promise<ReadonlySet<string>> {
+  const { confirmedEntries } = await import('../mcp/confirmed-entries.js');
+  return new Set(confirmedEntries(file).keys());
+}
+
+/** Why a wrapper that `add` confirmed was not rewritten, and the one command that applies what this run would have changed. */
+const keptNote = (name: string, cloak: boolean): string =>
+  `  ${outsideLine(name)} is pinned by stroq add and the pin holds its wrapper exactly as add wrote it, so this run left it alone` +
+  `${cloak ? ' (the cloak is not on for it)' : ''}. To rewrite it for this directory, node and flags, confirm it again: ${reconfirmCommand(name)}`;
+
+export async function initMcp(
   scope: 'project' | 'user',
   argv: readonly string[],
   dryRun: boolean,
   options: McpOptions,
-): number {
+): Promise<number> {
   if ((options.client === undefined) === (options.config === undefined)) {
     process.stdout.write(
       'stroq init --agent mcp needs exactly one of --client <name> or --config <path>\n',
@@ -138,6 +154,7 @@ export function initMcp(
         client: target.label,
         cwd: process.cwd(),
         cloak: options.cloak,
+        confirmed: await confirmedNames(target.file),
       });
   // Under --dry-run stdout carries only the JSON preview, so a `--dry-run | jq`
   // pipeline still works; the per-entry lines still print, just on stderr instead of
@@ -145,6 +162,8 @@ export function initMcp(
   const outcomeStream = dryRun ? process.stderr : process.stdout;
   for (const outcome of rewrite.outcomes) {
     outcomeStream.write(`${formatOutcome(outcome)}\n`);
+    if (outcome.action === 'kept (confirmed by stroq add)')
+      outcomeStream.write(`${keptNote(outcome.name, options.cloak)}\n`);
     const entry = (config.mcpServers as Record<string, unknown>)[outcome.name];
     if (
       options.unwrap &&

@@ -249,13 +249,13 @@ function pluginCopyNote(home: string, plat: NodeJS.Platform): string | null {
   return `  sandbox: ${copy} is not installed, and the sandbox does not let the Claude Code plugin's hook wrapper make it (a denied directory cannot be made): run once without the sandbox so the wrapper can install its pinned copy, if you use the plugin.`;
 }
 
-function reportSandbox(
+async function reportSandbox(
   sandbox: GeneratedSandbox,
   agent: string | null,
   plat: NodeJS.Platform,
   isTTY: boolean,
   home: string,
-): void {
+): Promise<void> {
   const fs = sandbox.settings.filesystem;
   line(
     `  sandbox: ${fs.denyRead.length} credential file${fs.denyRead.length === 1 ? '' : 's'} unreadable, writes limited to ${fs.allowWrite.length} paths`,
@@ -288,7 +288,7 @@ function reportSandbox(
   process.stderr.write(`${NOT_COVERED}\n`);
   const copy = pluginCopyNote(home, plat);
   if (copy !== null) process.stderr.write(`${copy}\n`);
-  const pinned = pinnedServers(home);
+  const pinned = await pinnedServers(home);
   if (pinned.length > 0)
     process.stderr.write(
       `  sandbox: ${sandboxPinNote(
@@ -359,7 +359,13 @@ export async function runRun(
       ? null
       : await buildSandbox(invocation, agent, workspace, userHome, !invocation.dryRun, plat);
   if (sandbox !== null)
-    reportSandbox(sandbox, agent, plat, deps.isTTY ?? process.stdin.isTTY === true, stroqHome());
+    await reportSandbox(
+      sandbox,
+      agent,
+      plat,
+      deps.isTTY ?? process.stdin.isTTY === true,
+      stroqHome(),
+    );
 
   const childEnvironment: NodeJS.ProcessEnv = {
     ...env,

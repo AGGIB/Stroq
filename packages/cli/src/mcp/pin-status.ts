@@ -1,6 +1,6 @@
-import { resolve } from 'node:path';
 import { parseMcpArgv } from '../commands/mcp.js';
 import { readMcpConfig, wrapperIndex } from '../commands/mcp-config.js';
+import { reconfirmCommand } from './pin-argument.js';
 
 export interface PinStatus {
   readonly name: string;
@@ -10,32 +10,6 @@ export interface PinStatus {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** What `add` wrote for each server it confirmed in this config file, by name, from the lock and not from the config. */
-async function confirmedEntries(
-  file: string,
-): Promise<ReadonlyMap<string, Record<string, unknown>>> {
-  const confirmed = new Map<string, Record<string, unknown>>();
-  try {
-    const { readPassportLock } = await import('../install/lock-reader.js');
-    const { passportsFileIn, stroqHome } = await import('../paths.js');
-    const lock = readPassportLock(passportsFileIn(stroqHome()));
-    for (const [name, record] of Object.entries(lock.mcp)) {
-      if (
-        isRecord(record) &&
-        record['kind'] === 'mcp' &&
-        record['status'] === 'confirmed' &&
-        isRecord(record['written']) &&
-        typeof record['config'] === 'string' &&
-        resolve(record['config']) === resolve(file)
-      )
-        confirmed.set(name, record['written']);
-    }
-  } catch {
-    // No lock, or one that cannot be read: nothing was confirmed that could be compared.
-  }
-  return confirmed;
-}
 
 const isWrapperWithPin = (
   entry: unknown,
@@ -70,7 +44,9 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
   if (servers === null || typeof servers !== 'object' || Array.isArray(servers)) return [];
   const statuses: PinStatus[] = [];
   const { quotePath } = await import('../install/safe-path.js');
-  const confirmed = await confirmedEntries(file);
+  // Loaded here and not at the top: the hooks load this file, and must not load the lock reader with it.
+  const { confirmedEntries } = await import('./confirmed-entries.js');
+  const confirmed = confirmedEntries(file);
   for (const [name, entry] of Object.entries(servers)) {
     const label = `mcp pin ${quotePath(name)}`;
     if (!isWrapperWithPin(entry)) {
@@ -79,8 +55,7 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
         statuses.push({
           name: label,
           ok: false,
-          detail:
-            'the pin was taken out of this entry, or it is not the one confirmed; start is not guarded (re-run stroq add to confirm it)',
+          detail: `the pin was taken out of this entry, or it is not the one confirmed; start is not guarded (to confirm it again run: ${reconfirmCommand(name)})`,
         });
       continue;
     }

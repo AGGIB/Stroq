@@ -6,7 +6,7 @@ import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
 import { killChildTree } from './kill-child.js';
-import { BIND_PHRASES, PIN_SANDBOX_PHRASES } from './pin-argument.js';
+import { BIND_PHRASES, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
 import { OrderedQueue, createPump } from './proxy-pump.js';
 
 /**
@@ -63,7 +63,7 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     const { preparePin } = await import('./pin.js');
     pinned = await preparePin({ ...options, pin: options.pin });
   } catch (error) {
-    options.stderr.write(`stroq mcp: ${pinRefusal(error)}; refusing to start\n`);
+    options.stderr.write(`stroq mcp: ${pinRefusal(error, options.server)}; refusing to start\n`);
     return 1;
   }
   try {
@@ -81,14 +81,16 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
 }
 
 /** Only fixed diagnostic phrases may reach stderr; filesystem errors can contain untrusted paths. */
-function pinRefusal(error: unknown): string {
+function pinRefusal(error: unknown, server: string): string {
   const message = error instanceof Error ? error.message : '';
   if (message === 'the local confirmation lock exceeds the size limit') return message;
   if (message === 'the local MCP confirmation lock is missing or invalid') return message;
   if (message === 'this server and digest are not confirmed on this machine') return message;
   if (message === 'the pinned server files changed (digest mismatch)') return message;
   if (message === 'the stored manifest digest changed') return message;
-  if (BIND_PHRASES.some((phrase) => phrase === message)) return message;
+  // A wrapper that is not the one confirmed: the phrase, and the command that confirms the wrapper as it stands.
+  if (BIND_PHRASES.includes(message))
+    return `${message} (to confirm it again run: ${reconfirmCommand(server)})`;
   if (PIN_SANDBOX_PHRASES.some((phrase) => phrase === message)) return message;
   return 'pinned server cannot be verified';
 }

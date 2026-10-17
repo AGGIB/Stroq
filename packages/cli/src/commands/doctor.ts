@@ -850,7 +850,7 @@ export async function doctorReport(
       ),
     )
   ).flat();
-  const pinned = pinnedServers(home);
+  const pinned = await pinnedServers(home);
   const pinSandbox: DoctorCheck[] =
     pinned.length === 0
       ? []
