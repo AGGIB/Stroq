@@ -306,6 +306,64 @@ const SNIPPETS: readonly Snippet[] = [
     mustFlag: true,
   },
   module_('import.meta.resolve', "import.meta.resolve('zzpkg')"),
+  // The token stream: comments, line breaks, optional chaining and automatic semicolons change nothing about which token follows which.
+  script(
+    'comments between process, the dots and the members',
+    'process /* c */ . /* d */ mainModule /* e */ . /* f */ require("zzpkg")',
+  ),
+  script('a line break before each dot', 'process\n.mainModule\n.require("zzpkg")'),
+  script('a line comment before each dot', 'process // c\n.mainModule // d\n.require("zzpkg")'),
+  script('U+2028 before each dot', 'process\u2028.mainModule\u2029.require("zzpkg")'),
+  script('optional chaining', 'process?.mainModule?.require("zzpkg")'),
+  script(
+    'optional chaining with a string in brackets',
+    'process?.["mainModule"]?.require("zzpkg")',
+  ),
+  script(
+    'no automatic semicolon before a bracket',
+    'var x = process\n["mainModule"].require("zzpkg")',
+  ),
+  script(
+    'an automatic semicolon: require assigned, called on the next line',
+    'var r = require\nr("zzpkg")',
+  ),
+  script('a semicolon before an array holding require', ';[require][0]("zzpkg")'),
+  script(
+    'a call on the next line with require as the argument',
+    'var a = function (r) { return r }\n(require)("zzpkg")',
+  ),
+  script(
+    'a template tagged on the line before, with require in a hole',
+    'var t = function (s, r) { return r("zzpkg") }\nt`${require}`',
+  ),
+  script('require in a static block', 'class A { static { require("zzpkg") } }'),
+  script('require in a class field', 'class A { x = require("zzpkg") }\nnew A()'),
+  script(
+    'a getter called eval',
+    'var o = { get eval() { return process.mainModule.require("zzpkg") } }; o.eval',
+  ),
+  script('a default that is require, in a pattern', 'var { r = require } = {}; r("zzpkg")'),
+  script(
+    'a default that is require, in a catch pattern',
+    'try { throw {} } catch ({ r = require }) { r("zzpkg") }',
+  ),
+  script(
+    'with process, naming a member without a dot',
+    'with (process) { mainModule.require("zzpkg") }',
+  ),
+  script(
+    'with the global object and eval',
+    'with (globalThis) { eval("process.mainModule.require(\'zzpkg\')") }',
+  ),
+  script('a shorthand property hands require on', 'var o = { require }; o.require("zzpkg")'),
+  script(
+    'require taken out of module by a pattern',
+    'var { require: r } = module; r.call(module, "zzpkg")',
+  ),
+  script(
+    'the constructor of new.target',
+    'function F() { return new.target.constructor("return process.mainModule.require(\'zzpkg\')")() }\nnew F()',
+  ),
   script('require through a comma expression', '(0, require)("zzpkg")'),
   script('require called with an optional call', 'require?.("zzpkg")'),
   script('require passed to Reflect.apply', 'Reflect.apply(require, null, ["zzpkg"])'),

@@ -49,7 +49,14 @@ interface ClauseState {
 
 type State =
   | { readonly at: 'idle' }
-  | { readonly at: 'require'; readonly guarded: boolean; readonly name: string }
+  | {
+      readonly at: 'require';
+      readonly guarded: boolean;
+      readonly name: string;
+      /** A property called `require` (`o.require`) and a key (`{ require: 1 }`) are names and not the function. */
+      readonly property: boolean;
+      readonly key: boolean;
+    }
   | { readonly at: 'requireMember' }
   | { readonly at: 'resolve' }
   | { readonly at: 'call' }
@@ -140,10 +147,10 @@ function stepRequire(state: State, token: Token): Step | null {
       if (isPunct(token, '(')) return { state: { at: 'call' } };
       if (isPunct(token, '.')) return { state: { at: 'requireMember' } };
       // `typeof require` asks whether there is one. Any other use of the name, `const r = require`, is a way
-      // of calling it that no later `require(` shows.
-      return state.guarded
-        ? { state: IDLE, again: true }
-        : { state: IDLE, concern: requireValue(state.name), again: true };
+      // of calling it that no later `require(` shows. A property or a key called `require` is not a use of it.
+      if (state.guarded || state.property || (state.key && isPunct(token, ':')))
+        return { state: IDLE, again: true };
+      return { state: IDLE, concern: requireValue(state.name), again: true };
     case 'requireMember':
       if (isWord(token, 'main')) return { state: IDLE };
       return isWord(token, 'resolve')
@@ -184,11 +191,25 @@ function stepIdle(token: Token, before: Token | null): Step {
   const member = isPunct(before, '.') || isPunct(before, '?.');
   switch (token.text) {
     case 'require':
-      return { state: { at: 'require', guarded: isWord(before, 'typeof'), name: 'require' } };
+      return {
+        state: {
+          at: 'require',
+          guarded: isWord(before, 'typeof'),
+          name: 'require',
+          property: member,
+          key: isPunct(before, '{') || isPunct(before, ','),
+        },
+      };
     case 'getBuiltinModule':
       // `process.getBuiltinModule('vm')` hands over a built-in module without an import that names it.
       return {
-        state: { at: 'require', guarded: isWord(before, 'typeof'), name: 'getBuiltinModule' },
+        state: {
+          at: 'require',
+          guarded: isWord(before, 'typeof'),
+          name: 'getBuiltinModule',
+          property: false,
+          key: false,
+        },
       };
     case 'import':
       return member ? { state: IDLE } : { state: { at: 'import' } };
@@ -253,7 +274,8 @@ export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
   // The text ended in the middle of something that asks for a module: `require` and a bracket, nothing more.
   if (['call', 'callEnd', 'requireMember', 'resolve'].includes(state.at))
     notes.add('computed', 'the text ends in the middle of a request for a module', text.length);
-  if (state.at === 'require' && !state.guarded) notes.add(...requireValue(state.name), text.length);
+  if (state.at === 'require' && !state.guarded && !state.property)
+    notes.add(...requireValue(state.name), text.length);
   if (lexer.doubt !== null) notes.add('doubt', lexer.doubt.reason, lexer.doubt.at);
   const list = notes.list(text);
   return {

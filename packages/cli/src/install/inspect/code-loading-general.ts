@@ -29,7 +29,7 @@ const GLOBAL_OBJECT: ReadonlySet<string> = new Set(['globalThis', 'global']);
 /** Between these a name is chosen and not used: `typeof globalThis !== 'undefined' ? globalThis : global || self`. */
 const CHOICE: ReadonlySet<string> = new Set(['?', ':', '|', '&']);
 /** Words before a name that ask about it and do not use it. */
-const ASKS: ReadonlySet<string> = new Set(['typeof', 'in', 'instanceof']);
+const ASKS: ReadonlySet<string> = new Set(['typeof', 'in', 'instanceof', 'break', 'continue']);
 /** The deepest bracket nesting that holds a name back until the bracket closes. */
 const GROUPS_MAX = 512;
 
@@ -55,6 +55,14 @@ const flagged = (reason: string, at: number): Finding => ({
   at,
 });
 
+interface Group {
+  readonly held: Held[];
+  readonly head: boolean;
+}
+
+/** Words whose bracket is a head and not a parameter list: what stands in it is used, and `{` after it is a block. */
+const HEADS: ReadonlySet<string> = new Set(['if', 'while', 'for', 'switch', 'with']);
+
 /** A name that looks like an argument, held back with its finding: if the bracket is a parameter list it is a parameter. */
 interface Held {
   readonly name: string;
@@ -66,11 +74,16 @@ export class Occurrences {
   private prev2: Token | null = null;
   private prev3: Token | null = null;
   private stage: Stage | null = null;
-  /** The names held back in each open bracket, until it is known whether the bracket was a parameter list. */
-  private readonly groups: Held[][] = [];
+  /**
+   * The names held back in each open bracket, until it is known whether the bracket was a parameter list. A head
+   * (`if (...)`, `while (...)`, `with (...)`, a class heritage) is never one, whatever follows it.
+   */
+  private readonly groups: Group[] = [];
+  private heritage = false;
   private overflow = 0;
   /** What the bracket that closed last held back, until the token after it shows what the bracket was. */
   private closed: Held[] = [];
+  private closedHead = false;
   /** The parameters of the function whose body opens with the next brace, and of an arrow that may open one. */
   private shadow: ReadonlySet<string> | null = null;
   private arrow: ReadonlySet<string> | null = null;
@@ -114,11 +127,14 @@ export class Occurrences {
     const arrow = this.arrow;
     this.arrow = null;
     const held = this.closed;
+    const head = this.closedHead;
     this.closed = [];
+    this.closedHead = false;
     this.shadow = isPunct(token, '{') ? arrow : null;
     if (held.length === 0) return;
     const names = new Set(held.map((one) => one.name));
-    if (isPunct(token, '{')) this.shadow = new Set([...(this.shadow ?? []), ...names]);
+    if (head) out.push(...held.map((one) => one.finding));
+    else if (isPunct(token, '{')) this.shadow = new Set([...(this.shadow ?? []), ...names]);
     else if (isPunct(token, '=>')) this.arrow = names;
     else out.push(...held.map((one) => one.finding));
   }
@@ -204,12 +220,21 @@ export class Occurrences {
     }
     if (token.kind === 'punct' && OPERATORS.has(token.text)) return;
     if (isPunct(token, '(')) return;
-    if (isPunct(token, ':') && (isPunct(before, '{') || isPunct(before, ','))) return;
+    // A key (`{ process: 1 }`), or a label at the start of a statement (`process: for (;;) {}`).
+    if (
+      isPunct(token, ':') &&
+      (before === null ||
+        isPunct(before, '{') ||
+        isPunct(before, ',') ||
+        isPunct(before, ';') ||
+        isPunct(before, '}'))
+    )
+      return;
     const finding = flagged(`passes ${name} on as a value, which this reading does not follow`, at);
     const argumentLike = isPunct(before, '(') || isPunct(before, ',');
-    const held = this.groups.at(-1);
-    if (argumentLike && (isPunct(token, ',') || isPunct(token, ')')) && held !== undefined) {
-      held.push({ name, finding });
+    const group = this.groups.at(-1);
+    if (argumentLike && (isPunct(token, ',') || isPunct(token, ')')) && group !== undefined) {
+      group.held.push({ name, finding });
       return;
     }
     out.push(finding);
@@ -218,6 +243,7 @@ export class Occurrences {
   /** The braces, for the parameters a function shadows; and the `?` and `:` of a choice, told from the key of an object. */
   private punctuation(token: Token): void {
     if (isPunct(token, '{') || isPunct(token, '${')) {
+      this.heritage = false;
       if (this.braces.length < GROUPS_MAX && this.braceOverflow === 0)
         this.braces.push(this.shadow);
       else this.braceOverflow += 1;
@@ -237,17 +263,23 @@ export class Occurrences {
   private start(token: Token, out: Finding[]): void {
     this.punctuation(token);
     if (isPunct(token, '(')) {
-      if (this.groups.length < GROUPS_MAX) this.groups.push([]);
+      const head = this.heritage || (this.prev?.kind === 'word' && HEADS.has(this.prev.text));
+      if (this.groups.length < GROUPS_MAX) this.groups.push({ held: [], head });
       else this.overflow += 1;
       return;
     }
     if (isPunct(token, ')')) {
       if (this.overflow > 0) this.overflow -= 1;
-      else this.closed = this.groups.pop() ?? [];
+      else {
+        const group = this.groups.pop();
+        this.closed = group?.held ?? [];
+        this.closedHead = group?.head ?? false;
+      }
       return;
     }
     if (token.kind !== 'word') return;
     const name = token.text;
+    if (name === 'extends') this.heritage = true;
     if (isMember(this.prev)) {
       if (name === 'meta' && this.prev2?.kind === 'word' && this.prev2.text === 'import')
         this.stage = { stage: 'next', name: 'import.meta', at: token.at, before: null };

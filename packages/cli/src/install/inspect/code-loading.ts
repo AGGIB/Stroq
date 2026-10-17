@@ -150,6 +150,8 @@ export interface Facts {
 
 type Pending =
   | { readonly kind: 'function'; readonly at: number; readonly key: boolean }
+  /** `{ require: r }`: a key called `require` is a name, unless the braces are a pattern that takes it out of `module`. */
+  | { readonly kind: 'require-key'; readonly at: number }
   | { readonly kind: 'member-string'; readonly name: string; readonly at: number }
   | { readonly kind: 'machinery'; readonly object: string; readonly at: number }
   | { readonly kind: 'machinery-end'; readonly object: string; readonly at: number }
@@ -315,6 +317,15 @@ export class LoadingWatch {
           return null;
         }
         return found('uses the Function constructor, which makes code from text', pending.at);
+      case 'require-key':
+        if (isPunct(token, ':') && this.overflow === 0)
+          this.scopes.at(-1)!.keys.push({
+            concern: 'computed',
+            reason:
+              'require is taken out of an object by a pattern, so what it loads is not written out',
+            at: pending.at,
+          });
+        return null;
       case 'member-string':
         return isPunct(token, ']')
           ? found(`reaches ${pending.name} by a string, which hides it from a reader`, pending.at)
@@ -448,6 +459,8 @@ export class LoadingWatch {
       this.write = { left: WRITE_WINDOW };
     const finding = this.rule(token, member);
     if (finding !== null) out.push(finding);
+    if (name === 'require' && (isPunct(this.prev, '{') || isPunct(this.prev, ',')))
+      this.pending ??= { kind: 'require-key', at: token.at };
     return out;
   }
 
