@@ -188,6 +188,21 @@ describe('FileProvenanceStore when the flag cannot be read', () => {
     writeFileSync(dir, 'a file where the sessions directory should be');
     expect(await new FileProvenanceStore(dir).isIncomplete('s1')).toBe(true);
   });
+
+  it('reads a missing sessions path below a regular file as incomplete', async () => {
+    const { dir } = fresh();
+    writeFileSync(dir, 'a file where a parent directory should be');
+    expect(await new FileProvenanceStore(join(dir, 'nested', 'sessions')).isIncomplete('s1')).toBe(
+      true,
+    );
+  });
+
+  it('reads missing nested directories below a writable directory as complete', async () => {
+    const { dir } = fresh();
+    expect(await new FileProvenanceStore(join(dir, 'nested', 'sessions')).isIncomplete('s1')).toBe(
+      false,
+    );
+  });
 });
 
 // A directory this process cannot write to is where a loss cannot be noted. root ignores modes.

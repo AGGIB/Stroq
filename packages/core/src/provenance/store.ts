@@ -8,6 +8,7 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -76,15 +77,21 @@ const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
 ]);
 
 /**
- * Whether a note could be written in `dir`. A directory that does not exist yet can: it is made
- * on first use. One that exists and cannot be written to is where a loss goes unrecorded.
+ * Whether a note could be written in `dir`. A missing directory is made on first use, provided
+ * its existing ancestor is a writable directory. A writable file cannot hold a note.
  */
 async function canWriteIn(dir: string): Promise<boolean> {
   try {
+    if (!(await stat(dir)).isDirectory()) return false;
     await access(dir, constants.W_OK);
     return true;
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ENOENT';
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+    // A dangling symlink is not a missing directory that mkdir can create. Windows may
+    // also report ENOENT below a regular file, so check the existing ancestor's type.
+    if (await exists(dir)) return false;
+    const parent = dirname(dir);
+    return parent !== dir && canWriteIn(parent);
   }
 }
 
