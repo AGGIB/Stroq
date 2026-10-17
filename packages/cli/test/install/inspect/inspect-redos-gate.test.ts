@@ -7,7 +7,7 @@ import { showable } from '../../../src/install/inspect/safe-text.js';
 import { shebangInterpreter } from '../../../src/install/inspect/shell-sources.js';
 import { splitToolList, toolIsSensitive } from '../../../src/install/inspect/tool-spec.js';
 import { buildTree } from '../../../src/install/tree.js';
-import { cpuNow } from '../../helpers/cpu-time.js';
+import { expectLinear, repeat, SIZES, type EntryPoint } from '../../helpers/linear-gate.js';
 import { CONTEXT } from '../../helpers/inspect.js';
 import { fileEntry } from '../../helpers/install-tree.js';
 
@@ -23,18 +23,6 @@ import { fileEntry } from '../../helpers/install-tree.js';
  * quadratic pattern takes sixteen. Only a time that is both slow and growing faster than it should
  * fails, and a size that looks too slow is timed again, because noise only adds.
  */
-const SIZE = 256 * 1024;
-const SIZES = [SIZE / 16, SIZE / 4, SIZE] as const;
-/** A time under this is not slow, however much it grew. */
-const BOUND_MS = 300;
-const MAX_GROWTH = 11;
-const TRIES = 3;
-
-const repeat =
-  (unit: string) =>
-  (size: number): string =>
-    unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
-
 type Shape = (size: number) => string;
 
 /** Near misses of what each pattern looks for, repeated: each is the start of something the patterns match. */
@@ -118,8 +106,6 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
 const inspectOne = (path: string, text: string): unknown =>
   inspectTree(buildTree([fileEntry(path, text)], { complete: true }), CONTEXT);
 
-type EntryPoint = (text: string) => unknown;
-
 const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ['a JavaScript file', (text) => inspectOne('a.js', text)],
   ['a Python file', (text) => inspectOne('a.py', text)],
@@ -159,47 +145,6 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ['shebangInterpreter', (text) => shebangInterpreter(`#!${text}`)],
   ['showable', (text) => showable(text, 200)],
 ];
-
-const timed = (run: () => unknown): number => {
-  const started = cpuNow();
-  run();
-  return cpuNow() - started;
-};
-
-/**
- * Fails if a time is both slow and more than `MAX_GROWTH` times the one before it. `measure` is the
- * processor time of a run, except in the test of the gate itself, which counts steps instead: a test of
- * the gate that timed a quadratic reader was slow on a coverage runner (past its time limit) and too
- * fast to cross the bound on another, and the gate's arithmetic is what that test is about.
- */
-function expectLinear(
-  inputs: readonly string[],
-  run: EntryPoint,
-  measure: (run: () => unknown) => number = timed,
-): void {
-  const times: number[] = [];
-  for (const input of inputs) {
-    const before = times[times.length - 1];
-    let took = measure(() => run(input));
-    for (
-      let tries = 1;
-      tries < TRIES && before !== undefined && took >= BOUND_MS && took >= MAX_GROWTH * before;
-      tries += 1
-    ) {
-      took = Math.min(
-        took,
-        measure(() => run(input)),
-      );
-    }
-    times.push(took);
-  }
-  const growth = times.map((ms, i) => `${ms.toFixed(1)} ms at ${(SIZES[i] ?? 0) / 1024} KiB`);
-  for (let i = 1; i < times.length; i += 1) {
-    const small = times[i - 1] ?? 0;
-    const big = times[i] ?? 0;
-    expect(big < BOUND_MS || big < MAX_GROWTH * small, growth.join(', ')).toBe(true);
-  }
-}
 
 describe('the gate itself', () => {
   // A gate that nothing fails proves nothing: this reader is quadratic on purpose, and must be caught.

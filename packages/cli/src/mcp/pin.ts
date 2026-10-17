@@ -1,4 +1,4 @@
-import { readRegularFile } from '@stroq/core';
+import { readRegularFile, SEALED_SOURCES_ENV } from '@stroq/core';
 import { lstatSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -6,8 +6,9 @@ import { McpPinSchema, readPassportLock } from '../install/lock-reader.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
-import { passportsFileIn, storeDirIn, stroqHome } from '../paths.js';
-import { MCP_PIN } from './pin-argument.js';
+import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
+import { MCP_PIN, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
+import { assertBound, PinBindError, type Launch } from './pin-binding.js';
 
 export interface PinOptions {
   readonly server: string;
@@ -15,6 +16,12 @@ export interface PinOptions {
   readonly command: string;
   readonly args: readonly string[];
   readonly home?: string;
+  /** The wrapper's `--pass-env`: null when it has none. Compared with what `add` recorded, when it recorded one. */
+  readonly passEnv?: readonly string[] | null;
+  /** The command line the wrapper was started with, whole. Needed when the confirmation recorded the entry `add` wrote. */
+  readonly launch?: Launch;
+  /** The client config entry as it stands, for `doctor`, which compares all of it with the recorded one. */
+  readonly entry?: unknown;
 }
 export interface PinnedLaunch {
   readonly command: string;
@@ -30,7 +37,7 @@ function jsonFile(file: string): unknown {
   return JSON.parse(read.text) as unknown;
 }
 
-function confirm(options: PinOptions, home: string): string {
+function confirm(options: PinOptions, home: string): { digest: string; record: unknown } {
   if (!MCP_PIN.test(options.pin))
     throw new Error('invalid pin: expected sha256:<64 lowercase hex>');
   let lock;
@@ -50,7 +57,7 @@ function confirm(options: PinOptions, home: string): string {
   const digest = options.pin.slice(7);
   if (!record.success || record.data.digest !== digest || record.data.grant.pin !== options.pin)
     throw new Error('this server and digest are not confirmed on this machine');
-  return digest;
+  return { digest, record: raw };
 }
 
 async function plainFolder(folder: string): Promise<void> {
@@ -123,16 +130,20 @@ async function checked(
   options: PinOptions,
 ): Promise<{ tree: Tree; args: readonly (string | null)[]; home: string }> {
   const home = options.home ?? stroqHome();
-  const digest = confirm(options, home);
+  const { digest, record } = confirm(options, home);
   const { tree, root } = await verifiedTree(home, digest);
-  entrypoint(options, root, tree);
+  const startFile = entrypoint(options, root, tree);
+  assertBound(record, { passEnv: options.passEnv ?? null }, startFile, {
+    ...(options.launch === undefined ? {} : { launch: options.launch }),
+    ...(options.entry === undefined ? {} : { entry: options.entry }),
+  });
   return { tree, args: options.args.map((arg) => treeArgument(arg, root, tree)), home };
 }
 
 async function privateRunDir(home: string): Promise<string> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   await plainFolder(home);
-  const run = join(home, 'run');
+  const run = runDirIn(home);
   await mkdir(run, { recursive: true, mode: 0o700 });
   await plainFolder(run);
   for (const folder of [home, run]) {
@@ -150,10 +161,28 @@ async function copyEntry(folder: string, entry: TreeEntry): Promise<void> {
   await writeFile(target, entry.bytes!, { flag: 'wx', mode: entry.exec ? 0o700 : 0o600 });
 }
 
+/** An error that says the disk would not let the folder be made or written: a permission, not a fault of the pin. */
+const denied = (error: unknown): boolean =>
+  ['EPERM', 'EACCES', 'EROFS'].includes((error as NodeJS.ErrnoException | undefined)?.code ?? '');
+
+/**
+ * The folder for the copy. Under `stroq run --sandbox` it is denied on purpose, so a pinned server cannot be
+ * prepared there; that is said in its own words, and not as a server that "cannot be verified".
+ */
+async function copyFolder(home: string): Promise<string> {
+  try {
+    return await mkdtemp(join(await privateRunDir(home), 'stroq-mcp-pin-'));
+  } catch (error) {
+    if (!denied(error)) throw error;
+    const sandboxed = process.env[SEALED_SOURCES_ENV] === '1';
+    throw new Error(PIN_SANDBOX_PHRASES[sandboxed ? 0 : 1]);
+  }
+}
+
 /** The verified code is never started from a mutable store path. */
 export async function preparePin(options: PinOptions): Promise<PinnedLaunch> {
   const { tree, args, home } = await checked(options);
-  const folder = await mkdtemp(join(await privateRunDir(home), 'stroq-mcp-pin-'));
+  const folder = await copyFolder(home);
   const cleanup = async (): Promise<void> => {
     await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   };
@@ -180,7 +209,13 @@ export async function inspectPin(
   try {
     await checked(options);
     return { ok: true, detail: 'confirmed bytes intact (tamper-evident, not tamper-proof)' };
-  } catch {
+  } catch (error) {
+    // A wrapper that is not the one confirmed says so, in one of a few fixed phrases.
+    if (error instanceof PinBindError)
+      return {
+        ok: false,
+        detail: `${error.message}; start refused (to confirm it again run: ${reconfirmCommand(options.server)})`,
+      };
     return {
       ok: false,
       detail:

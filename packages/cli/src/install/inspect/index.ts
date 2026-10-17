@@ -92,7 +92,10 @@ function assertComplete(tree: Tree): void {
  * passport (`analysis` says which), and a changed answer is then put down to the reader and not to
  * the artifact.
  */
-export const INSPECT_RULES_ID = 'stroq-vet-rules/1';
+export const INSPECT_RULES_ID = 'stroq-vet-rules/2';
+// /1 shipped in 0.25.0. /2 adds the `imports` reading (the blind spot `imports resolve outside the pin`, and a
+// server's dependencies, by-name imports and ways of loading code that the text does not settle): the same files
+// now give a passport with a finding that /1 did not make.
 
 /** The kind of the artifact: the one it was told, or the one its files say. */
 function kindOf(input: InspectInput, asked: ArtifactKind | 'auto'): ArtifactKind {
@@ -125,7 +128,7 @@ export function inspectWithReadings(
   const input = buildInput(tree, findings);
   const kind = kindOf(input, context.kind);
 
-  const read = { input, findings, shell: new ShellQueue(), declared: {} };
+  const read = { kind, input, findings, shell: new ShellQueue(), declared: {} };
   runReadings(read, readings);
 
   // What the artifact says it is called is a declaration, shown as one; the title is the source's name

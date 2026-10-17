@@ -159,8 +159,8 @@ describe('the lines', () => {
 
     expect(rows).toEqual([
       '  [observed] cred.env       API_KEY     a/b.py:7',
-      '  [declared] allowed-tools  Bash(ls:*)  SKILL.md',
       '  [unknown]  net            h.example   x.js:1 (+1 more)',
+      '  [declared] allowed-tools  Bash(ls:*)  SKILL.md',
       '  [limited]  tool           t           x.js:1',
     ]);
   });

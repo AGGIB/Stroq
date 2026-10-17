@@ -58,6 +58,8 @@ import { withLiveness } from './doctor-liveness.js';
 import { withProof } from './doctor-proof.js';
 import { stroqVersion } from '../version.js';
 import { configPinStatus } from '../mcp/pin-status.js';
+import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
+import { outsideLine } from '../ui/layout.js';
 import {
   installDrift,
   installKey,
@@ -859,6 +861,24 @@ export async function doctorReport(
       ),
     )
   ).flat();
+  const pinned = await pinnedServers(home);
+  const pinSandbox: DoctorCheck[] =
+    pinned.length === 0
+      ? []
+      : [
+          {
+            name: 'mcp pins and the sandbox',
+            ok: true,
+            detail: sandboxPinNote(
+              pinned
+                .slice(0, 5)
+                .map((name) => JSON.stringify(outsideLine(name)))
+                .join(', '),
+              pinned.length,
+              home,
+            ),
+          },
+        ];
   const { checkInstalledSkills } = await import('../install/skill-integrity.js');
   const skillChecks = await checkInstalledSkills(cwd, home, {
     ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
@@ -880,6 +900,7 @@ export async function doctorReport(
     },
     ...hookChecks,
     ...pinChecks,
+    ...pinSandbox,
     ...skillChecks,
     {
       name: 'home',

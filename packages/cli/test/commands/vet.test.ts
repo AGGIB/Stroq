@@ -56,7 +56,9 @@ describe('stroq vet --from <skill folder>', () => {
     expect(out.slice(sensitive, other)).toMatch(
       /\[observed\] net\s+api\.pdf-tools\.example\s+SKILL\.md:20 \(\+1 more\)/,
     );
-    expect(out.slice(other)).toMatch(/\[declared\] allowed-tools\s+Grep\s+SKILL\.md:5/);
+    // The rows of each group go by what a person must see first: the credential before the tools.
+    expect(out.slice(other)).toMatch(/\[observed\] cred\.env\s+PDF_REGION\s+scripts\/fill\.py:6/);
+    expect(out.indexOf('cred.env       PDF_API_KEY')).toBeLessThan(out.indexOf('allowed-tools'));
     // A line that is not sensitive is not among the ones that are.
     expect(out.slice(sensitive, other)).not.toContain('PDF_REGION');
   });

@@ -67,6 +67,9 @@ describe('confirmed MCP install', () => {
       pin: `sha256:${record.digest}`,
       command: 'node',
       args: [join(storePath(f.options.stroqHome, record.digest), 'tree', 'server.js')],
+      // What the proxy knows of how it was started: the wrapper is held to the entry that add wrote.
+      passEnv: ['API_KEY'],
+      launch: { command: servers['demo'].command as string, argv: args },
     });
     await pinned.cleanup();
   });
@@ -234,7 +237,7 @@ describe('confirmed MCP install', () => {
     expect((await f.servers())['demo']).toEqual(first.written);
   });
 
-  it('reports stored content drift before update or removal', async () => {
+  it('reports stored content drift before an update, and removal does not need the stored bytes', async () => {
     const f = await fixture();
     const first = await addMcp(f.dir, f.mcpOptions);
     const config = await readFile(f.config, 'utf8');
@@ -244,11 +247,12 @@ describe('confirmed MCP install', () => {
       'tampered',
     );
     await expect(addMcp('demo', f.mcpOptions)).rejects.toThrow(/changed|bytes/);
-    await expect(removeMcp('demo', { ...f.mcpOptions, force: true })).rejects.toThrow(
-      /changed|bytes/,
-    );
     expect(await readFile(f.config, 'utf8')).toBe(config);
     expect(await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8')).toBe(lock);
+
+    await removeMcp('demo', { ...f.mcpOptions, force: true });
+
+    expect((await f.servers())['demo']).toBeUndefined();
   });
 
   it.each([true, false])(

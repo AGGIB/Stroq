@@ -6,6 +6,7 @@
 // author wrote and a README is where it would be believed. The name is the one string that comes from the
 // artifact, and it is made safe (one line, no control character, cut) and put in a code span that it
 // cannot close.
+import { tryCommandLine, type Piece } from '../shell-quote.js';
 import { failedReadings } from '../install/inspect/index.js';
 import type { Passport } from '../install/types.js';
 import { isPlatformDependent } from './vet-render.js';
@@ -17,24 +18,40 @@ const RULE_MAX = 48;
 /** `text` as Markdown code: with no backtick in it, nothing in it can end the span. */
 const code = (text: string): string => `\`${text.replaceAll('`', "'")}\``;
 
+/**
+ * A command to paste, for Markdown: the values in it come from the passport, which may have been written by
+ * somebody else, so they are quoted for a shell, and a value that cannot be (or that holds a backtick, which could
+ * end the code span) leaves no command at all.
+ */
+const command = (pieces: readonly Piece[]): string => {
+  const printed = tryCommandLine(pieces, { forbid: '`' });
+  return printed.line === null
+    ? 'not shown, because the source has characters that cannot be quoted safely for a shell'
+    : code(printed.line);
+};
+
 /** The command that gives the same digest, or why there is none where the digest depends on the platform. */
 function reproduceLine(passport: Passport): string {
   if (isPlatformDependent(passport)) {
     return 'Reproduce: not available, because this folder was read where the executable bit is not known (Windows), so its digest depends on the platform.';
   }
   const source = passport.artifact.source;
+  const expected: Piece[] = [
+    { flag: '--expect', value: `sha256:${passport.artifact.digest}`, what: 'value' },
+  ];
   if (source.type === 'npm') {
-    return `Reproduce: ${code(`stroq vet --online npm:${source.name}@${source.version} --expect sha256:${passport.artifact.digest}`)}`;
+    return `Reproduce: ${command(['stroq', 'vet', { flag: '--online', value: `npm:${source.name}@${source.version}`, what: 'source' }, ...expected])}`;
   }
   if (source.type === 'github') {
     const sub = source.subdir ? `:${source.subdir}` : '';
-    return `Reproduce: ${code(`stroq vet --online github:${source.owner}/${source.repo}#${source.commit ?? source.ref}${sub} --expect sha256:${passport.artifact.digest}`)}`;
+    const spec = `github:${source.owner}/${source.repo}#${source.commit ?? source.ref}${sub}`;
+    return `Reproduce: ${command(['stroq', 'vet', { flag: '--online', value: spec, what: 'source' }, ...expected])}`;
   }
   if (source.type === 'url') {
-    return `Reproduce: ${code(`stroq vet --online <url> --expect sha256:${passport.artifact.digest}`)}`;
+    return `Reproduce: ${command(['stroq', 'vet', '--online', '<url>', ...expected])}`;
   }
   const from = source.type === 'tarball' ? '<archive>' : '<dir>';
-  return `Reproduce: ${code(`stroq vet --from ${from} --expect sha256:${passport.artifact.digest}`)}`;
+  return `Reproduce: ${command(['stroq', 'vet', '--from', from, ...expected])}`;
 }
 
 export function renderCard(passport: Passport): string {

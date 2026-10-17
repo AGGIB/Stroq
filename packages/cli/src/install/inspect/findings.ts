@@ -17,6 +17,7 @@ import {
   type TallyKey,
 } from './blind-spots.js';
 import { showable, showableWhere } from './safe-text.js';
+import { severityRank } from './severity.js';
 
 const SUBJECT_MAX = 200;
 /** Several readings may find the same thing, and all of them are named, so a detector may be long. */
@@ -103,9 +104,15 @@ export function compareLines(a: PassportLine, b: PassportLine): number {
   );
 }
 
-/** Which lines survive when there are too many: the sensitive ones first, then by the total order. */
+/**
+ * Which lines survive when there are too many: the sensitive ones first, the most severe kinds among
+ * them, then by the total order. A cut that went by the alphabet would keep a hundred allowed tools
+ * and lose the credential file.
+ */
 const compareForKeeping = (a: PassportLine, b: PassportLine): number =>
-  Number(b.sensitive) - Number(a.sensitive) || compareLines(a, b);
+  Number(b.sensitive) - Number(a.sensitive) ||
+  severityRank(a.kind) - severityRank(b.kind) ||
+  compareLines(a, b);
 
 export class Findings {
   private readonly drafts = new Map<string, Draft>();
