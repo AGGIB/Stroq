@@ -33,12 +33,8 @@ beforeEach(() => {
   cleared = [];
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;
-  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
-    handler: () => void,
-    delay?: number,
-    ...rest: unknown[]
-  ) => {
-    const timer = realSet(handler, delay, ...rest);
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, delay?: number) => {
+    const timer = realSet(handler, delay);
     if (delay === GRACE_MS || delay === GRACE_MS * 2) armed.push(timer);
     return timer;
   }) as unknown as typeof setTimeout);
