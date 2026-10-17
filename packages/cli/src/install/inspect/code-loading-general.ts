@@ -10,7 +10,12 @@
 // looks like an argument (`f(a, module)`) is held until its bracket closes, because `function (exports, module) {` is
 // a parameter and not a use, and a parameter list is told by what follows its `)`: `{` or `=>`.
 import { cookString, type Token } from './js-lexer.js';
-import { HARMLESS_MEMBERS, WATCHED_MEMBERS } from './code-loading-registry.js';
+import {
+  HARMLESS_MEMBERS,
+  isLiteralValue,
+  opensLiteral,
+  WATCHED_MEMBERS,
+} from './code-loading-registry.js';
 import type { Finding } from './code-loading.js';
 
 const isPunct = (token: Token | null, text: string): boolean =>
@@ -46,6 +51,8 @@ type Stage =
   /** `NAME[`: a string that is a harmless member, or it is a name this reading does not follow. */
   | { readonly stage: 'bracket'; readonly name: string; readonly at: number }
   | { readonly stage: 'bracket-end'; readonly name: string; readonly at: number }
+  /** After `NAME:` in braces: a value that is written out gives the key a value; a name is the target of a pattern. */
+  | { readonly stage: 'key-target'; readonly name: string; readonly at: number }
   /** `x.__proto__`: set (`d.__proto__ = b`) it only changes the prototype; read, it leads to `.constructor`. */
   | { readonly stage: 'proto'; readonly at: number; readonly deleted: boolean };
 
@@ -89,6 +96,8 @@ export class Occurrences {
   private arrow: ReadonlySet<string> | null = null;
   /** For each open brace, the parameters it shadows: inside a function a parameter called `module` is not Node's. */
   private readonly braces: (ReadonlySet<string> | null)[] = [];
+  /** For each open brace, whether it is an object written out as a value (`x = { ... }`), whose keys bind nothing. */
+  private readonly literals: boolean[] = [];
   private braceOverflow = 0;
   /** `?` that wait for their `:`, and whether the last colon was one of them (a choice) or a key. */
   private ternary = 0;
@@ -139,6 +148,11 @@ export class Occurrences {
     else out.push(...held.map((one) => one.finding));
   }
 
+  /** Whether the innermost open brace is an object written out as a value (a deeper nesting is not trusted). */
+  private inLiteral(): boolean {
+    return this.braceOverflow === 0 && this.literals.at(-1) === true;
+  }
+
   private shadowed(name: string): boolean {
     return this.braces.some((names) => names?.has(name) === true);
   }
@@ -186,6 +200,15 @@ export class Occurrences {
         );
         return;
       }
+      case 'key-target':
+        if (!isLiteralValue(token) && !this.inLiteral())
+          out.push(
+            flagged(
+              `${stage.name} is taken into a variable by a pattern, which this reading does not follow`,
+              stage.at,
+            ),
+          );
+        return;
       case 'proto':
         // Set, compared or deleted (`delete o.__proto__` is how a library keeps the prototype out), it leads nowhere.
         if (!(token.kind === 'punct' && OPERATORS.has(token.text)) && !stage.deleted)
@@ -220,16 +243,15 @@ export class Occurrences {
     }
     if (token.kind === 'punct' && OPERATORS.has(token.text)) return;
     if (isPunct(token, '(')) return;
-    // A key (`{ process: 1 }`), or a label at the start of a statement (`process: for (;;) {}`).
-    if (
-      isPunct(token, ':') &&
-      (before === null ||
-        isPunct(before, '{') ||
-        isPunct(before, ',') ||
-        isPunct(before, ';') ||
-        isPunct(before, '}'))
-    )
-      return;
+    // A key (`{ process: 1 }`), whose value decides whether it is a name or the source of a pattern's target, or a label
+    // at the start of a statement (`process: for (;;) {}`).
+    if (isPunct(token, ':')) {
+      if (isPunct(before, '{') || isPunct(before, ',')) {
+        this.stage = { stage: 'key-target', name, at };
+        return;
+      }
+      if (before === null || isPunct(before, ';') || isPunct(before, '}')) return;
+    }
     const finding = flagged(`passes ${name} on as a value, which this reading does not follow`, at);
     const argumentLike = isPunct(before, '(') || isPunct(before, ',');
     const group = this.groups.at(-1);
@@ -244,12 +266,17 @@ export class Occurrences {
   private punctuation(token: Token): void {
     if (isPunct(token, '{') || isPunct(token, '${')) {
       this.heritage = false;
-      if (this.braces.length < GROUPS_MAX && this.braceOverflow === 0)
+      if (this.braces.length < GROUPS_MAX && this.braceOverflow === 0) {
         this.braces.push(this.shadow);
-      else this.braceOverflow += 1;
+        // `prev` is still the token before the brace here.
+        this.literals.push(isPunct(token, '{') && opensLiteral(this.prev, this.inLiteral()));
+      } else this.braceOverflow += 1;
     } else if (isPunct(token, '}')) {
       if (this.braceOverflow > 0) this.braceOverflow -= 1;
-      else this.braces.pop();
+      else {
+        this.braces.pop();
+        this.literals.pop();
+      }
     } else if (isPunct(token, '?')) {
       // `??` is two of them and is no choice.
       if (isPunct(this.prev, '?')) this.ternary = Math.max(0, this.ternary - 1);

@@ -360,6 +360,74 @@ const SNIPPETS: readonly Snippet[] = [
     'require taken out of module by a pattern',
     'var { require: r } = module; r.call(module, "zzpkg")',
   ),
+  // Patterns that bind what they are handed: a parameter, a catch, a for head, a default, a rest, an array.
+  script(
+    'require bound by a parameter pattern',
+    'function f({ require: r }) { return r("zzpkg") }\nf({ require })',
+  ),
+  script(
+    'require bound by an arrow parameter pattern',
+    '(({ require: r }) => r("zzpkg"))({ require })',
+  ),
+  script(
+    'require bound by an async arrow parameter pattern',
+    '(async ({ require: r }) => r("zzpkg"))({ require })',
+  ),
+  script(
+    'require bound by a catch pattern',
+    'try { throw { require } } catch ({ require: r }) { r("zzpkg") }',
+  ),
+  script(
+    'require bound by the head of a for of',
+    'for (const { require: r } of [{ require }]) r("zzpkg")',
+  ),
+  script(
+    'require assigned by the head of a for of',
+    'var r; for ({ require: r } of [{ require }]) r("zzpkg")',
+  ),
+  script(
+    'require as the default of a parameter',
+    'function f(r = require) { return r("zzpkg") }\nf()',
+  ),
+  script('require in a rest pattern', 'const { ...o } = { require }; o.require("zzpkg")'),
+  script('require in an array pattern', 'const [r] = [require]; r("zzpkg")'),
+  script('require as the default of an array pattern', 'const [r = require] = []; r("zzpkg")'),
+  script(
+    'require bound by an assignment pattern',
+    'var r; ({ require: r } = { require }); r("zzpkg")',
+  ),
+  script(
+    'process taken out of the global object by a pattern',
+    'const { process: p } = globalThis; p.mainModule.require("zzpkg")',
+  ),
+  script(
+    'process assigned out of the global object by a pattern',
+    'var p; ({ process: p } = globalThis); p.mainModule.require("zzpkg")',
+  ),
+  script(
+    'a nested pattern taking mainModule out of the global process',
+    'const { process: { mainModule: m } } = globalThis; m.require("zzpkg")',
+  ),
+  script(
+    'a parameter pattern whose default is the global object',
+    'function f({ process: p } = globalThis) { return p.mainModule.require("zzpkg") }\nf()',
+  ),
+  script(
+    'a parameter pattern handed the global object',
+    'function f({ process: p }) { return p.mainModule.require("zzpkg") }\nf(globalThis)',
+  ),
+  script(
+    'eval taken out of the global object by a pattern',
+    'const { eval: e } = globalThis; e(\'process.mainModule.require("zzpkg")\')',
+  ),
+  script(
+    'Function taken out of the global object by a pattern',
+    'const { Function: F } = globalThis; F(\'return process.mainModule.require("zzpkg")\')()',
+  ),
+  script(
+    'the constructor taken out of a function by a pattern',
+    'const { constructor: C } = function () {}; C(\'return process.mainModule.require("zzpkg")\')()',
+  ),
   script(
     'the constructor of new.target',
     'function F() { return new.target.constructor("return process.mainModule.require(\'zzpkg\')")() }\nnew F()',

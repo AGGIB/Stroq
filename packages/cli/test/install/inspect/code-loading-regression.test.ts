@@ -22,6 +22,7 @@ describe('no shape that an earlier reader flagged is lost', () => {
       'the aliasing list',
       'the first reader',
       'the identifiers list',
+      'the pattern list',
       'the registry reader',
       'the reviewer probe',
     ]);

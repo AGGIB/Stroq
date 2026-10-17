@@ -10,6 +10,8 @@
 // not load or run JavaScript. Starting another program is not a refusal; starting Node itself with a script
 // given as text, or a package runner that loads code by name from a registry, is (see the spawning rules below).
 
+import type { Token } from './js-lexer.js';
+
 /** What a name does, for the sentence that says why a file is not read: "uses createRequire, which ...". */
 export interface Entry {
   readonly name: string;
@@ -237,6 +239,28 @@ export const HARMLESS_MEMBERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
       'report',
       'features',
       'config',
+      'getuid',
+      'geteuid',
+      'getgid',
+      'getegid',
+      'getgroups',
+      'addListener',
+      'prependListener',
+      'prependOnceListener',
+      'listeners',
+      'rawListeners',
+      'eventNames',
+      'setMaxListeners',
+      'getMaxListeners',
+      'send',
+      'connected',
+      'channel',
+      'disconnect',
+      'allowedNodeEnvironmentFlags',
+      'constrainedMemory',
+      'availableMemory',
+      'resourceUsage',
+      'getActiveResourcesInfo',
     ]),
   ],
   ['module', new Set(['exports'])],
@@ -245,3 +269,40 @@ export const HARMLESS_MEMBERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
 
 /** Names that are watched as a member of anything: `x.eval`, `x.Function`. (`x.constructor` and `x.__proto__` wait for what follows.) */
 export const WATCHED_MEMBERS: ReadonlySet<string> = new Set(['eval', 'Function']);
+
+/** Words that start a value written out: after a colon they give the key a value and bind nothing. */
+const LITERAL_WORDS: ReadonlySet<string> = new Set([
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'void',
+  'typeof',
+  'new',
+  'function',
+  'class',
+  'async',
+  'this',
+  'delete',
+]);
+
+/**
+ * A token that starts a value written out (a string, a number, `true`, `-1`, an arrow function in parentheses), as
+ * against a name a pattern could bind. (A target in parentheses, `({ process: (p) } = globalThis)`, is a known limit.)
+ */
+export const isLiteralValue = (token: Token): boolean =>
+  token.kind === 'string' ||
+  token.kind === 'other' ||
+  (token.kind === 'word' && LITERAL_WORDS.has(token.text)) ||
+  (token.kind === 'punct' && ['-', '+', '!', '~', '('].includes(token.text));
+
+/**
+ * Whether a brace that opens after `before` is an object written out as a value and not a pattern: it follows an
+ * assignment (`x = {`) or a `return`, or it is the value of a key of such an object. A pattern never opens there, except
+ * as the target of a chained assignment (`a = { process: p } = globalThis`, a known limit). `within` is whether the
+ * brace around it is itself such an object.
+ */
+export const opensLiteral = (before: Token | null, within: boolean): boolean =>
+  before !== null &&
+  ((before.kind === 'punct' && (before.text === '=' || (before.text === ':' && within))) ||
+    (before.kind === 'word' && before.text === 'return'));

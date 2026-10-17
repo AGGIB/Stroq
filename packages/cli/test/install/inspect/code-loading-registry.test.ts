@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ENVIRONMENT_NAMES,
   GLOBAL_MEMBERS,
+  HARMLESS_MEMBERS,
   LOADER_NAMES,
   LOOKUP_MEMBERS,
   MODULE_ONLY_NAMES,
@@ -144,8 +145,30 @@ describe('the members of process', () => {
     'const { env } = process',
     'x.process[name]',
     'process.on("exit", f)',
+    'const { FOO, BAR = 1 } = process.env',
+    'const { npm_config_user_agent } = process.env',
+    'let { HOME } = process.env',
+    'const { formatters } = module.exports',
+    'const { geteuid: f } = process, id = f ? f() : 1',
   ])('is not a concern: %s', (text) => {
     expect(flagged(text), text).toBe(false);
+  });
+
+  it('flags a pattern on the process object itself at the end of the text', () => {
+    expect(flagged('const { binding } = process')).toBe(true);
+    expect(flagged('const { binding } = process;')).toBe(true);
+    expect(flagged('const { a } = process || {}')).toBe(true);
+    expect(flagged('const { binding } = process.env, { x } = process')).toBe(true);
+  });
+
+  describe.each([...(HARMLESS_MEMBERS.get('process') ?? [])])('the harmless member %s', (name) => {
+    it.each([
+      ['a member', `process.${name}`],
+      ['a string in brackets', `process['${name}']`],
+      ['taken out by a pattern', `const { ${name} } = process`],
+    ])('is not a concern as %s', (_how, text) => {
+      expect(flagged(text), text).toBe(false);
+    });
   });
 });
 
@@ -348,6 +371,14 @@ describe('the identifiers that are a concern in any position', () => {
     ['the constructor of a name, called with new', 'new obj.constructor()'],
     ['the constructor of a name, called through call', 'f.constructor.call(null, "1")'],
     ['a key called Function taken out by a pattern', 'const { Function: F } = x; F("1")'],
+    [
+      'a key called Function, given a name, in a pattern',
+      'const { Function: inspectFunction } = o',
+    ],
+    [
+      'a key called Function, given a name, in a parameter',
+      'function f({ Function: g }) { g("1") }',
+    ],
   ])('is a concern: %s', (_how, text) => {
     expect(flagged(text), text).toBe(true);
   });
@@ -421,7 +452,93 @@ describe('the identifiers that are a concern in any position', () => {
       'a constructor compared',
       'a.constructor === b.constructor; typeof a.constructor === "function"',
     ],
-    ['a key called Function', 'const o = { function: 1, Function: inspectFunction }'],
+    ['a key called Function, given a value', "const o = { function: 1, Function: 'x' }"],
+    [
+      'a key called Function, given a name, in an object written out',
+      'const o = { Function: inspectFunction }',
+    ],
+    ['a key called process, given an arrow function', 'const o = { process: () => 1 }'],
+    [
+      'keys called module and process, given values',
+      'const o = { module: "index.mjs", process: true, global: -1 }',
+    ],
+  ])('is not a concern: %s', (_how, text) => {
+    expect(flagged(text), text).toBe(false);
+  });
+});
+
+/**
+ * Every identifier that is a concern, in every place a pattern, a default value or an object that is destructured later
+ * can hold it: a parameter, a catch, a for head, a default, a rest, an array, a nested pattern, a method. (A key called
+ * `constructor` in a parameter pattern is the known limit: it cannot be told from `{ constructor: Foo }` handed to a call.)
+ */
+const PATTERN_IDENTIFIERS = [
+  'require',
+  'module',
+  'process',
+  'globalThis',
+  'global',
+  'eval',
+  'Function',
+] as const;
+const PATTERN_PLACES: readonly string[] = [
+  'function f({ ID: r }) { return r }',
+  '(({ ID: r }) => r)',
+  '(async ({ ID: r }) => r)',
+  'function f({ ID: r } = x) { return r }',
+  'try {} catch ({ ID: r }) { r }',
+  'for (const { ID: r } of x) r',
+  'var r; for ({ ID: r } of x) r',
+  'var r; ({ ID: r } = x)',
+  'function f(r = ID) { return r }',
+  '(r = ID) => r',
+  'const { r = ID } = {}',
+  'const [r = ID] = []',
+  'const [r] = [ID]',
+  'const { ...o } = { ID }',
+  'const { ID: { a } } = x',
+  'const { ID } = x',
+  'var r; ({ ID } = x)',
+  'const { ID: r, ...rest } = x',
+  'const { a: { ID: r } } = x',
+  'const [{ ID: r }] = x',
+  'function f([{ ID: r }]) { return r }',
+  'try {} catch ([r = ID]) { r }',
+  'for (const [r = ID] of x) r',
+  'function f(...[r = ID]) { return r }',
+  'function f({ r = ID }) { return r }',
+  'class A { m({ ID: r }) { return r } }',
+  'class A { static m(r = ID) { return r } }',
+  'const o = { m({ ID: r }) { return r } }',
+  'const o = { m(r = ID) { return r } }',
+  'function* g({ ID: r }) { yield r }',
+  'async function g({ ID: r }) { await r }',
+];
+
+describe('a pattern, a default or a destructured object that holds one of the identifiers', () => {
+  it.each(
+    PATTERN_IDENTIFIERS.flatMap((id) =>
+      PATTERN_PLACES.map((place) => [id, place.replaceAll('ID', id)] as const),
+    ),
+  )('is a concern: %s in %s', (_id, text) => {
+    expect(flagged(text), text).toBe(true);
+  });
+
+  it.each([
+    ['a harmless member of process taken out', 'const { env, argv } = process'],
+    ['exports taken out of module', 'const { exports } = module'],
+    ['data taken out of the global object', 'const { fetch, navigator } = globalThis'],
+    ['a parameter pattern for data', 'function f({ env }) { return env } f({ env: 1 })'],
+    ['a pattern of names', 'const { a: { b }, c = 1 } = obj'],
+    ['an array pattern of names', 'const [a, [b = 2]] = obj'],
+    ['a catch pattern of names', 'try {} catch ({ message }) { message }'],
+    ['a for head of names', 'for (const { id } of list) id'],
+    [
+      'an object written out with keys called like the identifiers',
+      'x = { require: a, process: b, module: c }',
+    ],
+    ['the same, returned', 'function g() { return { require: a, Function: b } }'],
+    ['the same, nested', 'x = { a: { global: g2, globalThis: g3 } }'],
   ])('is not a concern: %s', (_how, text) => {
     expect(flagged(text), text).toBe(false);
   });

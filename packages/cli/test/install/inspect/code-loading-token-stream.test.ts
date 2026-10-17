@@ -75,6 +75,75 @@ const REFUSED: readonly Row[] = [
     'a wrapper called with the real process',
     '(function (process) { process.binding("x") })(process)',
   ],
+  // Patterns that bind what they are handed: a parameter, a catch, a for head, a default, a rest, an array.
+  [
+    'require bound by a parameter pattern',
+    "function f({ require: r }) { return r('x') } f({ require })",
+  ],
+  ['require bound by an arrow parameter pattern', "(({ require: r }) => r('x'))({ require })"],
+  [
+    'require bound by an async arrow parameter pattern',
+    "(async ({ require: r }) => r('x'))({ require })",
+  ],
+  [
+    'require bound by a parameter pattern with a default',
+    "function f({ require: r } = module) { return r.call(module, 'x') }",
+  ],
+  [
+    'require bound by a catch pattern',
+    "try { throw { require } } catch ({ require: r }) { r('x') }",
+  ],
+  ['require bound by the head of a for of', "for (const { require: r } of [{ require }]) r('x')"],
+  [
+    'require assigned by the head of a for of',
+    "var r; for ({ require: r } of [{ require }]) r('x')",
+  ],
+  ['require as the default of a parameter', "function f(r = require) { return r('x') }"],
+  [
+    'require as the default of a parameter, among others',
+    'function f(r = require, p = process) {}',
+  ],
+  ['require in a rest pattern', "const { ...o } = { require }; o.require('x')"],
+  ['require in an array pattern', "const [r] = [require]; r('x')"],
+  ['require as the default of an array pattern', "const [r = require] = []; r('x')"],
+  ['require as the default of a name in a pattern', "const { r = require } = {}; r('x')"],
+  ['require bound by an assignment pattern', "var r; ({ require: r } = { require }); r('x')"],
+  ['require bound next to a rest', "const { require: r, ...rest } = module; r.call(module, 'x')"],
+  ['process taken out of the global object', "const { process: p } = globalThis; p.binding('x')"],
+  [
+    'process assigned out of the global object',
+    "var p; ({ process: p } = globalThis); p.binding('x')",
+  ],
+  ['process taken out of global', 'const { process: p } = global; p.mainModule'],
+  [
+    'process taken out of the global object, one level down',
+    "const { process: { binding: b } } = globalThis; b('x')",
+  ],
+  [
+    'process taken out of an object that holds the global object',
+    "const { a: { process: p } } = { a: globalThis }; p.binding('x')",
+  ],
+  [
+    'a parameter pattern for process, handed the global object',
+    "function f({ process: p }) { return p.binding('x') } f(globalThis)",
+  ],
+  [
+    'a parameter pattern for process, whose default is the global object',
+    "function f({ process: p } = globalThis) { return p.binding('x') } f()",
+  ],
+  [
+    'a parameter pattern for process, whose default holds process',
+    "function f({ process: p } = { process }) { return p.binding('x') } f()",
+  ],
+  ['module taken out of the global object', "const { module: m } = globalThis; m.require('x')"],
+  ['process in an array pattern', "const [p] = [process]; p.binding('x')"],
+  ['process as the default of a name in a pattern', "const { p = process } = {}; p.binding('x')"],
+  ['eval taken out of the global object', "const { eval: e } = globalThis; e('1')"],
+  ['Function taken out of the global object', "const { Function: F } = globalThis; F('1')"],
+  ['the constructor taken out of a function', "const { constructor: C } = function () {}; C('1')"],
+  ['the constructor taken out of an arrow', "const { constructor: C } = () => {}; C('1')"],
+  ['a pattern that is the value of a chained assignment', 'var x; x = { process: p } = globalThis'],
+  ['a key before a name in a pattern, among others', 'const { a, process: p } = o'],
 ];
 
 const ORDINARY: readonly Row[] = [
@@ -96,12 +165,31 @@ const ORDINARY: readonly Row[] = [
   ['a line break before a harmless member', 'process\n.env.X'],
   ['a string in brackets that is a harmless member', 'process["env"].X'],
   ['a template literal in brackets that is a harmless member', 'process[`env`].X'],
+  // Patterns that take data, and objects written out whose keys have the names of watched identifiers.
+  ['harmless members of process taken out by a pattern', 'const { env, argv } = process'],
+  ['exports taken out of module by a pattern', 'const { exports } = module'],
+  ['data taken out of the global object by a pattern', 'const { fetch, navigator } = globalThis'],
+  ['a parameter pattern for data', 'function f({ env }) { return env } f({ env: 1 })'],
+  ['a nested pattern of names', 'const { a: { b } } = obj'],
+  [
+    'watched names as keys of an object written out, with names as values',
+    'var lit = { process: handler, Function: fn, module: info, require: loader }',
+  ],
+  [
+    'watched names as keys of a returned object',
+    'function g() { return { process: p, module: m } }',
+  ],
+  ['a watched name as a key of a nested object written out', 'var o = { a: { process: p } }'],
+  [
+    'watched names as keys with arrow functions as values',
+    'var o = { process: () => 1, module: (a) => a }',
+  ],
 ];
 
 describe('the reading follows the stream of tokens', () => {
   it('holds a table of rows in both directions', () => {
-    expect(REFUSED.length).toBeGreaterThanOrEqual(45);
-    expect(ORDINARY.length).toBeGreaterThanOrEqual(15);
+    expect(REFUSED.length).toBeGreaterThanOrEqual(75);
+    expect(ORDINARY.length).toBeGreaterThanOrEqual(24);
     expect(new Set([...REFUSED, ...ORDINARY].map(([name]) => name)).size).toBe(
       REFUSED.length + ORDINARY.length,
     );
