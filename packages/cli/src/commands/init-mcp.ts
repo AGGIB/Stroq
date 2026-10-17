@@ -102,7 +102,7 @@ async function confirmedNames(file: string): Promise<ReadonlySet<string>> {
 }
 
 /** Why a wrapper that `add` confirmed was not rewritten, and the one command that applies what this run would have changed. */
-const keptNote = (name: string, cloak: boolean): string =>
+export const keptNote = (name: string, cloak: boolean): string =>
   `  ${outsideLine(name)} is pinned by stroq add and the pin holds its wrapper exactly as add wrote it, so this run left it alone` +
   `${cloak ? ' (the cloak is not on for it)' : ''}. To rewrite it for this directory, node and flags, confirm it again: ${reconfirmCommand(name)}`;
 

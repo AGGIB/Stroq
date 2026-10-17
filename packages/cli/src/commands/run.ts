@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
 import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
+import { commandLine, type Piece } from '../shell-quote.js';
 import { pluginCliDirIn, secretsFile, stroqHome } from '../paths.js';
 import { outsideLine } from '../ui/layout.js';
 import { AGENT_STATE_DIRS, OWN_SANDBOX_AGENTS, agentIdFor } from '../run/agent-name.js';
@@ -100,7 +101,7 @@ export function parseRunArgv(argv: readonly string[]): RunArgvResult {
         ok: false,
         error: token.startsWith('-')
           ? `unknown option "${token}"`
-          : `the agent command must follow "--" — did you mean: stroq run -- ${argv.join(' ')}`,
+          : `the agent command must follow "--" — did you mean: ${commandLine(['stroq', 'run', '--', ...argv.map((word): Piece => ({ word }))])}`,
       };
     const value = argv[i + 1];
     // A value that starts with `--` is the next flag or the separator, never a

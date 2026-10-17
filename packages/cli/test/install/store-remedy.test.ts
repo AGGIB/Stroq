@@ -153,13 +153,15 @@ describe('an MCP server whose stored copy is damaged', () => {
     expect(((failure as Error).cause as Error).message).not.toBe('');
   });
 
-  it('shows no control character of a path in the lock: it is written out and the line is for reading', async () => {
-    const { failure } = await damagedServer({ folder: 'srv\u001b[2J‮' });
+  it('prints a path with a control character in the lock as a placeholder, never as itself', async () => {
+    const { failure } = await damagedServer({ folder: 'srv\u001b[2J\u202e' });
     const message = (failure as Error).message;
 
-    expect(message).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/);
-    expect(message).toContain('\\u001b');
-    expect(message).toContain('\\u{202e}');
+    expect(message).not.toMatch(
+      /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/,
+    );
+    expect(message).toContain('stroq add <unprintable-path> --kind mcp');
+    expect(message).not.toContain('[2J');
   });
 });
 

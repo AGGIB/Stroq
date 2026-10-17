@@ -12,6 +12,7 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openclawPluginDirIn } from '../paths.js';
+import { commandLine, type Piece } from '../shell-quote.js';
 import { onInterrupt } from '../ui/cleanup.js';
 import { killTree } from './process-tree.js';
 import { isPlainObject, writeJsonObject } from './config-file.js';
@@ -151,14 +152,14 @@ export const openclawInstallArgv = (dir: string): readonly (readonly string[])[]
   ['plugins', 'enable', OPENCLAW_PLUGIN_ID],
 ];
 
-/** Characters a POSIX shell reads as text; anything else makes the word need quoting. */
-const SAFE_WORD = /^[\w@%+=:,./-]+$/;
-const shellQuote = (arg: string): string =>
-  SAFE_WORD.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
-
-/** The same two commands as lines a user can paste, derived from the argv above. */
+/** The same two commands as lines a user can paste, derived from the argv above: only the folder is not Stroq's word. */
 export const openclawInstallCommands = (dir: string): readonly string[] =>
-  openclawInstallArgv(dir).map((argv) => [OPENCLAW_BIN, ...argv].map(shellQuote).join(' '));
+  openclawInstallArgv(dir).map((argv) =>
+    commandLine([
+      OPENCLAW_BIN,
+      ...argv.map((word, i): Piece => (argv[i - 1] === '--link' ? { word, what: 'path' } : word)),
+    ]),
+  );
 
 /**
  * The `openclaw` binary on `PATH`, or `null`. A filesystem probe rather than a

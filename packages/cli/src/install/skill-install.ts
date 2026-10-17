@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { assertWriteAllowed } from '../harden/atomic.js';
+import { commandLine } from '../shell-quote.js';
 import { labelOf } from '../commands/vet-flow.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
@@ -256,7 +257,7 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const previous = prior?.status === 'revoked' ? undefined : prior;
   if (previous !== undefined && installed === undefined && resolve(previous.source) !== source)
     throw new Error(
-      `this path is not ${name}'s recorded source; use stroq add ${name} or remove it first`,
+      `this path is not ${name}'s recorded source; use ${commandLine(['stroq', 'add', { positional: name, what: 'name' }])} or remove it first`,
     );
   const target = targetOf(name, options, previous);
   if (previous === undefined && (await assertPlainDirectory(target.path)))

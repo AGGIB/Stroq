@@ -1,5 +1,4 @@
-import { SKILL_NAME } from '../install/names.js';
-import { commandWord } from '../shell-word.js';
+import { commandLine } from '../shell-quote.js';
 
 /** Kept separate from filesystem verification so unpinned hooks do not load Safe Install. */
 export const MCP_PIN = /^sha256:[0-9a-f]{64}$/;
@@ -24,14 +23,10 @@ export const BIND = {
 } as const;
 export const BIND_PHRASES: readonly string[] = Object.values(BIND);
 
-const NAME_UNITS = 64;
-
 /**
  * The one command that confirms a changed wrapper again, with the real name of the server: what `init`, the proxy
- * and `doctor` tell a person to run. A name `add` could have written is a plain word. Any other name (a lock
- * written by hand) goes through `commandWord`, since a name in a lock or a config is not trusted text.
+ * and `doctor` tell a person to run. The name comes from a lock or a config, so it is quoted by `commandLine` and
+ * never becomes a second command.
  */
-export function reconfirmCommand(name: string): string {
-  const word = SKILL_NAME.test(name) ? name : commandWord(name, NAME_UNITS);
-  return `stroq add ${word} --kind mcp --force`;
-}
+export const reconfirmCommand = (name: string): string =>
+  commandLine(['stroq', 'add', { positional: name, what: 'name' }, '--kind', 'mcp', '--force']);

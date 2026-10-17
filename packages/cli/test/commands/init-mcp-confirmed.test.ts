@@ -130,13 +130,19 @@ describe('the command that confirms a wrapper again', () => {
     expect(reconfirmCommand(name)).toBe(line);
   });
 
-  it.each(['a\nb', 'a\u001b[2Jb', 'a‮b', '', 'x'.repeat(200)])(
-    'does not print %j as a command or let it move the terminal',
-    (name) => {
-      const text = reconfirmCommand(name);
-      expect(text).not.toMatch(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/);
-      expect(text.length).toBeLessThan(200);
-      expect(text).toMatch(/--kind mcp --force/);
-    },
-  );
+  it.each([
+    ['a\nb', '<unprintable-name>'],
+    ['a\u001b[2Jb', '<unprintable-name>'],
+    ['a\u202eb', '<unprintable-name>'],
+    ['x'.repeat(5000), '<name-too-long>'],
+  ])('does not print %j as a command or let it move the terminal', (name, shown) => {
+    const text = reconfirmCommand(name);
+
+    expect(text).toBe(`stroq add ${shown} --kind mcp --force`);
+    expect(text).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
+  });
+
+  it('prints the empty name as an empty argument', () => {
+    expect(reconfirmCommand('')).toBe("stroq add '' --kind mcp --force");
+  });
 });

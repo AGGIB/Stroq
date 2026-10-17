@@ -4,13 +4,9 @@
 // it with `--force` and add it again from its source. The commands are built from the lock record, so that they put it
 // back where and as it was: a server in the same client config, with the same start file, variables and directory; a
 // skill in the same scope. They are text for a person to read and paste, and everything that comes from the lock goes
-// through `commandWord`, since a path in a lock is not trusted text.
+// through `commandLine`, since a path in a lock is not trusted text.
 import { resolve } from 'node:path';
-import { commandWord } from '../shell-word.js';
-
-/** The most of a path or a name that is quoted into a command. */
-const PATH_UNITS = 1024;
-const word = (text: string): string => commandWord(text, PATH_UNITS);
+import { commandLine, quoteWord } from '../shell-quote.js';
 
 /** What of an MCP record the commands need. */
 export interface McpRemedyRecord {
@@ -31,28 +27,68 @@ export interface SkillRemedyPlace {
   readonly project: string;
 }
 
-/** `stroq remove <name> --kind mcp --force`, then `stroq add <source> --kind mcp` with what the record holds. */
-export function mcpRemedy(name: string, record: McpRemedyRecord): string {
-  const flags = [
-    `--kind mcp`,
-    `--name ${word(name)}`,
-    `--config ${word(record.config)}`,
-    `--entrypoint ${word(record.entrypoint)}`,
-    ...(record.passEnv.length > 0 ? [`--pass-env ${word(record.passEnv.join(','))}`] : []),
-    ...(record.cwd === undefined ? [] : [`--cwd ${word(record.cwd)}`]),
-  ];
-  return `stroq remove ${word(name)} --kind mcp --force, then stroq add ${word(record.source)} ${flags.join(' ')}`;
+/** `stroq remove <name> --kind mcp --force` and `stroq add <source> --kind mcp` with what the record holds. */
+export function mcpRemedyCommands(
+  name: string,
+  record: McpRemedyRecord,
+): readonly [remove: string, add: string] {
+  const remove = commandLine([
+    'stroq',
+    'remove',
+    { positional: name, what: 'name' },
+    '--kind',
+    'mcp',
+    '--force',
+  ]);
+  const add = commandLine([
+    'stroq',
+    'add',
+    { positional: record.source, what: 'path' },
+    '--kind',
+    'mcp',
+    { flag: '--name', value: name, what: 'name' },
+    { flag: '--config', value: record.config, what: 'path' },
+    { flag: '--entrypoint', value: record.entrypoint, what: 'path' },
+    ...(record.passEnv.length > 0
+      ? [{ flag: '--pass-env', value: record.passEnv.join(','), what: 'name' } as const]
+      : []),
+    ...(record.cwd === undefined
+      ? []
+      : [{ flag: '--cwd', value: record.cwd, what: 'path' } as const]),
+  ]);
+  return [remove, add];
 }
 
-/** `stroq remove <name> --force`, then `stroq add <source>`, in the scope the skill is in. */
+/** The two commands for a server, as one sentence. */
+export const mcpRemedy = (name: string, record: McpRemedyRecord): string =>
+  mcpRemedyCommands(name, record).join(', then ');
+
+/** `stroq remove <name> --force` and `stroq add <source>`, in the scope the skill is in. */
+export function skillRemedyCommands(
+  name: string,
+  record: SkillRemedyRecord,
+  place: SkillRemedyPlace,
+): readonly [remove: string, add: string] {
+  const user = resolve(record.root) === resolve(place.home);
+  return [
+    commandLine(['stroq', 'remove', { positional: name, what: 'name' }, '--force']),
+    commandLine([
+      'stroq',
+      'add',
+      { positional: record.source, what: 'path' },
+      ...(user ? ['--user'] : []),
+    ]),
+  ];
+}
+
+/** The two commands for a skill, as one sentence; a skill of another project is added from that project's folder. */
 export function skillRemedy(
   name: string,
   record: SkillRemedyRecord,
   place: SkillRemedyPlace,
 ): string {
   const root = resolve(record.root);
-  const user = root === resolve(place.home);
-  const elsewhere = !user && root !== resolve(place.project);
-  const add = `stroq add ${word(record.source)}${user ? ' --user' : ''}`;
-  return `stroq remove ${word(name)} --force, then ${elsewhere ? `from the folder ${word(root)} ` : ''}${add}`;
+  const elsewhere = root !== resolve(place.home) && root !== resolve(place.project);
+  const [remove, add] = skillRemedyCommands(name, record, place);
+  return `${remove}, then ${elsewhere ? `from the folder ${quoteWord(root, 'path')} ` : ''}${add}`;
 }
