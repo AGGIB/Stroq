@@ -9,7 +9,11 @@ import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
 import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
-import { MAX_STORED_CHARS, ProvenanceRecorder } from './provenance/record.js';
+import {
+  MAX_STORED_CHARS,
+  ProvenanceRecorder,
+  type ProvenanceReading,
+} from './provenance/record.js';
 import { percentDecodedLeniently } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
@@ -341,6 +345,69 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
+/** A process-local capability for the sequential readings of one logical result. */
+declare const postReadingsBrand: unique symbol;
+export interface PostReadings {
+  readonly [postReadingsBrand]: true;
+}
+
+interface PostReadingsState {
+  identity: { engine: StroqEngine; sessionId: string; toolName: string; cwd: string } | undefined;
+  busy: boolean;
+  closed: boolean;
+  suspect: boolean;
+  pendingOwner: string | undefined;
+  extraReadings: { text: string; unread: boolean }[];
+}
+
+// The capability is passed separately from the event, never accepted from a tool payload.
+// Only objects made here have state; copying or deserialising one cannot recover that state.
+const readingStates = new WeakMap<PostReadings, PostReadingsState>();
+
+/**
+ * Creates one result's reading scope. Its primary (non-extra) post consumes it; abandoning
+ * the scope after a suspect extra leaves that result's pending marker in place.
+ */
+export function createPostReadings(): PostReadings {
+  const readings = Object.freeze({}) as PostReadings;
+  readingStates.set(readings, {
+    identity: undefined,
+    busy: false,
+    closed: false,
+    suspect: false,
+    pendingOwner: undefined,
+    extraReadings: [],
+  });
+  return readings;
+}
+
+/**
+ * Each reading gets its own extraction cap and its own source for secret redaction. Loss
+ * is accumulated before deduplication: even a reading whose atoms all repeat may be cut.
+ */
+function atomsOfReadings(texts: readonly string[]): {
+  readings: ProvenanceReading[];
+  lost: boolean;
+} {
+  const seen = new Set<string>();
+  let lost = false;
+  const readings = texts.map((text) => {
+    const extracted = extractAtomsDeepWithLoss(normalizeText(text));
+    // Hosts clip at this length; an exact-length reading may have lost a suffix too.
+    lost ||= extracted.truncated || text.length >= DEFAULT_MAX_CHARS;
+    return {
+      text,
+      atoms: extracted.atoms.filter((atom) => {
+        const hash = atomHash(atom);
+        if (seen.has(hash)) return false;
+        seen.add(hash);
+        return true;
+      }),
+    };
+  });
+  return { readings, lost };
+}
+
 export class StroqEngine {
   private readonly recorder: ProvenanceRecorder;
 
@@ -574,7 +641,47 @@ export class StroqEngine {
     };
   }
 
-  async post(event: PostToolEvent): Promise<PostResult> {
+  async post(event: PostToolEvent, readings?: PostReadings): Promise<PostResult> {
+    if (readings === undefined) return this.postReading(event);
+    const state = readingStates.get(readings);
+    if (state === undefined) throw new Error('post: invalid result reading scope');
+    const identity = state.identity;
+    if (
+      identity !== undefined &&
+      (identity.engine !== this ||
+        identity.sessionId !== event.sessionId ||
+        identity.toolName !== event.toolName ||
+        identity.cwd !== event.cwd)
+    )
+      throw new Error('post: result reading scope belongs to another result source');
+    if (state.closed || state.busy) throw new Error('post: result reading scope is not open');
+    state.identity ??= {
+      engine: this,
+      sessionId: event.sessionId,
+      toolName: event.toolName,
+      cwd: event.cwd,
+    };
+    state.busy = true;
+    // Consume before the first await: another primary must never settle this owner twice.
+    if (event.extraReading !== true) state.closed = true;
+    try {
+      return await this.postReading(event, state);
+    } catch (err) {
+      // A failed reading abandons the logical result. A later primary must not turn its
+      // pending marker into an apparently complete record after that failure.
+      state.closed = true;
+      throw err;
+    } finally {
+      state.busy = false;
+      // Closed scopes cannot be retried; keep no result payload alive through the capability.
+      if (state.closed) state.extraReadings.length = 0;
+    }
+  }
+
+  private async postReading(
+    event: PostToolEvent,
+    readingsState?: PostReadingsState,
+  ): Promise<PostResult> {
     const call = {
       ...(event.resultFailed === true ? { outcome: 'failed' as const } : {}),
       ...(event.callId === undefined ? {} : { callId: event.callId }),
@@ -621,8 +728,13 @@ export class StroqEngine {
         ...scanFieldsForTool(event.toolName, event.toolResultText),
       },
     );
+    if (event.extraReading === true && readingsState !== undefined)
+      readingsState.extraReadings.push({
+        text: event.toolResultText,
+        unread: event.resultUnread === true,
+      });
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
-    // Same derivation as a provenance record's `source` (see recordProvenance):
+    // Same derivation as a provenance record's `source` (see ProvenanceRecorder):
     // structurally redacted and clipped, so a taint source can no more carry a secret
     // into ~/.stroq than a provenance record can.
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
@@ -634,18 +746,32 @@ export class StroqEngine {
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
     // record explaining why.
-    await this.opts.audit.append({
-      sessionId: event.sessionId,
-      phase: 'post',
-      ...call,
-      tool: event.toolName,
-      summary,
-      scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },
-    });
+    // An extra reading is audited only when it matched; the primary writes the usual line.
+    if (event.extraReading !== true || scan.verdict === 'suspect')
+      await this.opts.audit.append({
+        sessionId: event.sessionId,
+        phase: 'post',
+        ...call,
+        tool: event.toolName,
+        summary,
+        scan: {
+          verdict: scan.verdict,
+          score: scan.score,
+          ruleIds,
+          ...(trusted ? { trusted } : {}),
+        },
+      });
     const taints = scan.verdict === 'suspect' && !trusted;
-    // The taint is written before the records, with a lookup and a lock between the two: a
-    // process that goes in that gap must not leave a session that is flagged and has no trace.
-    const pendingOwner = taints ? await this.recorder.begin(event.sessionId) : undefined;
+    let pendingOwner = readingsState?.pendingOwner;
+    if (taints) {
+      // The first suspect reading puts the marker down before tainting. All readings of
+      // this logical result share it; an extra alone never takes it off.
+      pendingOwner ??= await this.recorder.begin(event.sessionId);
+      if (readingsState !== undefined) {
+        readingsState.pendingOwner = pendingOwner;
+        readingsState.suspect = true;
+      }
+    }
     const state = taints
       ? await this.opts.sessions.markSuspect(event.sessionId, {
           tool: event.toolName,
@@ -654,6 +780,8 @@ export class StroqEngine {
           source,
         })
       : await this.opts.sessions.get(event.sessionId);
+    if (event.extraReading === true)
+      return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
     // like `atomsForAction` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
@@ -661,24 +789,29 @@ export class StroqEngine {
     // Deep, not raw: a tool result the agent is told to "decode and run" hides
     // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
     // them the same way the scanner already does via expandVariants.
-    const { atoms, truncated } = extractAtomsDeepWithLoss(normalizeText(event.toolResultText));
-    // The hosts clip a result at `DEFAULT_MAX_CHARS` before it gets here, so text of exactly
-    // that length may have been cut off, and the atoms in the cut part were never seen.
-    const lost =
-      truncated || event.toolResultText.length >= DEFAULT_MAX_CHARS || event.resultUnread === true;
+    const actualExtras = readingsState?.extraReadings ?? [];
+    const extracted = atomsOfReadings([
+      ...new Set([
+        event.toolResultText,
+        ...actualExtras.map((reading) => reading.text),
+        ...(event.otherReadings ?? []),
+      ]),
+    ]);
     const recorded = await this.recorder.record(
       event,
       summary,
-      atoms,
-      scan.verdict === 'suspect' && !trusted,
-      lost,
+      extracted.readings,
+      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true,
+      extracted.lost ||
+        event.resultUnread === true ||
+        actualExtras.some((reading) => reading.unread),
       pendingOwner,
     );
     return {
       scan,
       taint: state.taint,
       scanned: true,
-      atoms,
+      atoms: extracted.readings.flatMap((reading) => reading.atoms),
       provenanceError: recorded.error,
       provenanceIncomplete: recorded.incomplete,
       trusted,

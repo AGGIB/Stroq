@@ -4,7 +4,7 @@ import type { SecretIndex } from '../secrets/index.js';
 import type { Atom, PostToolEvent, PreToolEvent, ProvenanceGap } from '../types.js';
 import { atomHash } from './atoms.js';
 import { candidatesOfVariants, excerptRedactor } from './excerpt.js';
-import type { ProvenanceStore } from './store.js';
+import type { ProvenanceInput, ProvenanceStore } from './store.js';
 
 /** The longest an excerpt or a source is kept, as stored and as audited. */
 export const MAX_STORED_CHARS = 120;
@@ -16,6 +16,12 @@ const MAX_GAPS_AUDITED = 3;
 export interface ProvenanceOutcome {
   readonly error: string | null;
   readonly incomplete: boolean;
+}
+
+/** Atoms credited to one reading, whose text is the source for secret redaction. */
+export interface ProvenanceReading {
+  readonly text: string;
+  readonly atoms: readonly Atom[];
 }
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -104,7 +110,7 @@ export class ProvenanceRecorder {
   }
 
   /**
-   * Persists provenance for `atoms`.
+   * Persists provenance for the atoms of all readings, settling their shared owner once.
    *
    * Recording is also evidence, and what is not recorded reads, to a later lookup, as
    * not read. So `lost` (the extraction left atoms out) and a failed write both mark the
@@ -113,7 +119,7 @@ export class ProvenanceRecorder {
   async record(
     event: PostToolEvent,
     summary: string,
-    atoms: readonly Atom[],
+    readings: readonly ProvenanceReading[],
     suspect: boolean,
     lost: boolean,
     pendingOwner?: string,
@@ -124,24 +130,29 @@ export class ProvenanceRecorder {
     // Report whether the permanent loss note was written. If it failed, an operation marker
     // can still keep the session reading as incomplete, and the failure is logged.
     const marked = lost && noted === null;
-    if (atoms.length === 0) {
+    if (readings.every((reading) => reading.atoms.length === 0)) {
       if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted, incomplete: marked };
     }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
-    const excerpts = await this.excerpts(event.toolResultText, event.cwd, atoms);
-    try {
-      await store.record(
-        event.sessionId,
-        atoms.map((atom, i) => ({
+    // The secret index must read the text each atom came from, including extra readings:
+    // a value echoed in just one of them cannot be checked against the primary alone.
+    const inputs: ProvenanceInput[] = [];
+    for (const reading of readings) {
+      const excerpts = await this.excerpts(reading.text, event.cwd, reading.atoms);
+      reading.atoms.forEach((atom, i) =>
+        inputs.push({
           tool: event.toolName,
           source,
           kind: atom.kind,
           hash: atomHash(atom),
           excerpt: excerpts[i] ?? '',
           suspect,
-        })),
+        }),
       );
+    }
+    try {
+      await store.record(event.sessionId, inputs);
       if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted, incomplete: marked };
     } catch (err) {

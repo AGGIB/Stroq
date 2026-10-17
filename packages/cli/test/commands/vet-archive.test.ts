@@ -308,7 +308,7 @@ describe('the other forms of output, for an archive', () => {
 
     expect(run.code, run.stderr).toBe(0);
     expect(run.stdout).toContain(
-      `Reproduce: \`stroq vet --from <archive> --expect sha256:${SKILL_DIGEST}\``,
+      `Reproduce: \`stroq vet --from <archive> --expect=sha256:${SKILL_DIGEST}\``,
     );
     expect(run.stdout).not.toContain('platform-dependent');
   });

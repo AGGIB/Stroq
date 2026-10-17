@@ -53,6 +53,7 @@ describe('skill confirmation output', () => {
     };
     await confirmSkill(terminal, {
       name: 'demo',
+      source: '/src/demo',
       target: { path: '/project/\u202edemo' },
       previous,
       restoring: false,

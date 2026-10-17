@@ -1,14 +1,16 @@
-import { renderPassport } from '../commands/vet-render.js';
+import { confirmationScreen } from '../commands/vet-render.js';
 import { confirm, confirmTyped } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
 import type { Terminal } from '../ui/terminal.js';
 import { outsideLine } from '../ui/layout.js';
 import type { SkillRecord } from './lock.js';
-import { changedFiles } from './material.js';
+import { updateDiffLines } from './update-diff.js';
 import type { Passport, Tree } from './types.js';
 
 interface SkillConfirmation {
   readonly name: string;
+  /** Where the bytes were read from, for the command that lists everything when the screen cannot. */
+  readonly source: string;
   readonly target: { readonly path: string };
   readonly previous: SkillRecord | undefined;
   readonly restoring: boolean;
@@ -18,16 +20,17 @@ interface SkillConfirmation {
 }
 
 export async function confirmSkill(terminal: Terminal, prepared: SkillConfirmation): Promise<void> {
-  const { name, target, previous, restoring, made, material, oldTree } = prepared;
+  const { name, source, target, previous, restoring, made, material, oldTree } = prepared;
   const passport = made.passport;
+  // Before a word is written: an artifact whose sensitive lines do not all fit is not asked about.
+  const screen = confirmationScreen(passport, source);
   terminal.write(`Install ${name} to ${outsideLine(JSON.stringify(target.path))}\n`);
   if (previous !== undefined) {
     terminal.write(
       `Replaces ${name} from ${outsideLine(JSON.stringify(previous.source))}\nPrevious sha256:${previous.digest}\n`,
     );
     if (oldTree !== undefined) {
-      for (const file of changedFiles(oldTree, made.tree))
-        terminal.write(`  ${file.change} ${file.path}\n`);
+      for (const line of updateDiffLines(oldTree, made.tree)) terminal.write(`${line}\n`);
     }
     const oldLines = new Set(previous.passport.lines.map((line) => JSON.stringify(line)));
     for (const line of passport.lines.filter((line) => !oldLines.has(JSON.stringify(line))))
@@ -39,7 +42,7 @@ export async function confirmSkill(terminal: Terminal, prepared: SkillConfirmati
     terminal.write(
       'Restore replaces the installed folder and discards outside edits permanently.\n',
     );
-  terminal.write(renderPassport(passport));
+  terminal.write(screen);
   const confirmed =
     material || restoring
       ? await confirmTyped(terminal, passport.artifact.digest)

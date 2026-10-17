@@ -4,14 +4,17 @@ import { stroqHome } from '../paths.js';
 import { parseArgsProblem, usageError } from '../help.js';
 import { currentTerminal } from '../ui/terminal.js';
 
+/** The options of the command, written out here where the tests of the printed command lines read them too. */
+export const REMOVE_OPTIONS = {
+  force: { type: 'boolean' },
+  kind: { type: 'string' },
+  user: { type: 'boolean' },
+} as const;
+
 export async function runRemove(args: readonly string[]): Promise<number> {
   let parsed;
   try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      options: { force: { type: 'boolean' }, kind: { type: 'string' }, user: { type: 'boolean' } },
-    });
+    parsed = parseArgs({ args: [...args], allowPositionals: true, options: REMOVE_OPTIONS });
   } catch (error) {
     const problem = parseArgsProblem(error);
     if (problem === null) throw error;

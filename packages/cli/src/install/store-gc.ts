@@ -1,5 +1,6 @@
 import { rm } from 'node:fs/promises';
 import { assertWriteAllowed } from '../harden/atomic.js';
+import { outsideLine } from '../ui/layout.js';
 import type { Passports, SkillRecord } from './lock.js';
 import { assertPlainDirectory, storePath } from './store.js';
 
@@ -51,4 +52,24 @@ export async function collectMcpStore(
   const stored = storePath(home, digest);
   assertWriteAllowed(stored, { root: home, initRule: false });
   if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
+}
+
+/**
+ * Clearing the old copy is the last step of a removal or an update, after the config and the lock were written. The
+ * command has done what was asked by then, so a copy that cannot be cleared (a link where its folder should be, a
+ * folder that cannot be written) is a leftover and not a failure: it is kept, and the person is told.
+ */
+export async function tidyStore(
+  terminal: { write(text: string): void },
+  digest: string,
+  clear: () => Promise<void>,
+): Promise<void> {
+  try {
+    await clear();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'it could not be cleared';
+    terminal.write(
+      `warning: the old stored copy sha256:${digest.slice(0, 12)} was not removed (${outsideLine(reason)}); it is not used any more and can be deleted by hand\n`,
+    );
+  }
 }

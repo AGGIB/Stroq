@@ -31,7 +31,7 @@ describe('stroq vet --card', () => {
       expect(run.stdout).toContain(`${passport.signals.length} signal`);
       expect(run.stdout).toContain(`${passport.blindSpots.length} blind spots`);
       expect(run.stdout).toContain(
-        `Reproduce: \`stroq vet --from <dir> --expect sha256:${SKILL_DIGEST}\``,
+        `Reproduce: \`stroq vet --from <dir> --expect=sha256:${SKILL_DIGEST}\``,
       );
       expect(run.stdout.trimEnd().endsWith('Not a security certificate.')).toBe(true);
     },

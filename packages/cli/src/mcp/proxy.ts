@@ -3,10 +3,21 @@ import type { StroqEngine } from '@stroq/core';
 import { logError } from '../log.js';
 import { createMcpCloak } from './cloak-factory.js';
 import { childEnv } from './child-env.js';
-import { PendingTable, createLineSplitter } from './framing.js';
+import { PendingTable, createLineSplitter, type SplitLine } from './framing.js';
 import type { McpContext } from './judge.js';
 import { killChildTree } from './kill-child.js';
-import { OrderedQueue, createPump } from './proxy-pump.js';
+import { BIND_PHRASES, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
+import type { Launch } from './pin-binding.js';
+import { OrderedQueue, createPump, type StrictPumpDeps } from './proxy-pump.js';
+import { StrictLedger } from './strict-ledger.js';
+import {
+  DEFAULT_STRICT_MAX_WITHHELD,
+  STRICT_MAX_QUEUED_CHARS,
+  STRICT_MAX_QUEUED_LINES,
+  STRICT_SCAN_DEADLINE_MS,
+} from './strict-limits.js';
+import { createQueueGate } from './strict-queue.js';
+import { createBoundedScan } from './strict-scan.js';
 
 /**
  * Spawn, signal handling and shutdown lifecycle for the MCP proxy. The per-line
@@ -50,7 +61,23 @@ export interface McpProxyOptions {
    * dictionary to disk; both are decisions to be asked for, not defaults.
    */
   readonly cloak?: boolean;
+  /**
+   * `--strict`: never deliver to the client a server message Stroq could not fully
+   * read and scan; withhold it, answer the client's request with a fixed error, audit
+   * it and count it against `strictMaxWithheld`. OFF by default, because it refuses
+   * messages the default proxy forwards and re-serialises the ones it delivers. See
+   * `strict-handler.ts`.
+   */
+  readonly strict?: boolean;
+  /** How many withheld messages end a strict server; `DEFAULT_STRICT_MAX_WITHHELD` when absent. */
+  readonly strictMaxWithheld?: number;
+  /** Overrides `STRICT_SCAN_DEADLINE_MS`, the hard time bound on scanning one message; tests only. */
+  readonly strictScanMs?: number;
+  /** Overrides `STRICT_MAX_BENIGN_WITHHELD`, the cap for the withheld kinds a benign server also sends; tests only. */
+  readonly strictMaxBenign?: number;
   readonly pin?: string;
+  /** The command line this proxy was started with, whole; the pin compares it with what `add` wrote. */
+  readonly launch?: Launch;
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
@@ -60,7 +87,7 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     const { preparePin } = await import('./pin.js');
     pinned = await preparePin({ ...options, pin: options.pin });
   } catch (error) {
-    options.stderr.write(`stroq mcp: ${pinRefusal(error)}; refusing to start\n`);
+    options.stderr.write(`stroq mcp: ${pinRefusal(error, options.server)}; refusing to start\n`);
     return 1;
   }
   try {
@@ -78,13 +105,17 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
 }
 
 /** Only fixed diagnostic phrases may reach stderr; filesystem errors can contain untrusted paths. */
-function pinRefusal(error: unknown): string {
+function pinRefusal(error: unknown, server: string): string {
   const message = error instanceof Error ? error.message : '';
   if (message === 'the local confirmation lock exceeds the size limit') return message;
   if (message === 'the local MCP confirmation lock is missing or invalid') return message;
   if (message === 'this server and digest are not confirmed on this machine') return message;
   if (message === 'the pinned server files changed (digest mismatch)') return message;
   if (message === 'the stored manifest digest changed') return message;
+  // A wrapper that is not the one confirmed: the phrase, and the command that confirms the wrapper as it stands.
+  if (BIND_PHRASES.includes(message))
+    return `${message} (to confirm it again run: ${reconfirmCommand(server)})`;
+  if (PIN_SANDBOX_PHRASES.some((phrase) => phrase === message)) return message;
   return 'pinned server cannot be verified';
 }
 
@@ -124,6 +155,19 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   // whole (the default below) — a `tools/call` is exactly what Stroq exists to judge,
   // and streaming a big one through unparsed would be exactly the bypass.
   const serverLines = createLineSplitter({ streamOversize: true });
+  // `terminate` runs well after this function has defined `onSigterm` below: it is only
+  // ever called from a server line, never while this setup is still running.
+  const strict: StrictPumpDeps | null =
+    options.strict === true
+      ? {
+          ledger: new StrictLedger(),
+          maxWithheld: options.strictMaxWithheld ?? DEFAULT_STRICT_MAX_WITHHELD,
+          ...(options.strictMaxBenign === undefined ? {} : { maxBenign: options.strictMaxBenign }),
+          scan: createBoundedScan(options.strictScanMs ?? STRICT_SCAN_DEADLINE_MS),
+          terminate: () => onSigterm(),
+          note: (text) => options.stderr.write(text),
+        }
+      : null;
   const pump = createPump({
     ctx,
     pending,
@@ -132,7 +176,28 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
     serverOut,
     clientOut: options.stdout,
     cloak: options.cloak === true ? createMcpCloak(ctx) : null,
+    strict,
   });
+  // Strict mode only: the default proxy is bounded by write backpressure, which a
+  // withheld (never written) line does not exercise. See `strict-queue.ts`.
+  const gate =
+    strict === null
+      ? null
+      : createQueueGate(serverOut, STRICT_MAX_QUEUED_LINES, STRICT_MAX_QUEUED_CHARS);
+  const queueServerLine = (line: SplitLine): void => {
+    if (gate === null) {
+      toClient.run(() => pump.onServerLine(line));
+      return;
+    }
+    gate.enter(line.text.length);
+    toClient.run(async () => {
+      try {
+        await pump.onServerLine(line);
+      } finally {
+        gate.leave(line.text.length);
+      }
+    });
+  };
 
   // A server that dies mid-write makes these emit `EPIPE`; an unhandled `error` on a
   // stream is a crash, and a crashed proxy is a client with no firewall.
@@ -146,7 +211,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   };
   options.stdin.on('data', onStdinData);
   serverOut.on('data', (chunk: string) => {
-    for (const line of serverLines.push(chunk)) toClient.run(() => pump.onServerLine(line));
+    for (const line of serverLines.push(chunk)) queueServerLine(line);
   });
 
   // Set once the child has closed, right before the timers below are first cleared.
@@ -179,6 +244,12 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   // second, redundant timer.
   let signalKillTimer: NodeJS.Timeout | null = null;
   const relay = (signal: NodeJS.Signals) => (): void => {
+    // The server has closed: there is nothing left to signal, and a signal sent to its
+    // process id now could reach whatever has taken that id. Strict mode asks for the
+    // server to be stopped while the lines it wrote before closing are still being
+    // worked through, which is after the close; this is also what stops that from
+    // arming a kill timer nothing would clear.
+    if (shuttingDown) return;
     killChildTree(child, signal);
     if (signalKillTimer === null)
       signalKillTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), graceMs);
@@ -209,7 +280,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   process.off('SIGINT', onSigint);
   process.off('SIGTERM', onSigterm);
   process.off('SIGHUP', onSighup);
-  for (const line of serverLines.flush()) toClient.run(() => pump.onServerLine(line));
+  for (const line of serverLines.flush()) queueServerLine(line);
   await toClient.idle();
   await toServer.idle();
   // Cleared a second time, now that both queues have drained. The guard above and
@@ -219,11 +290,14 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   // than by reasoning about which task ran in which turn.
   if (termTimer !== null) clearTimeout(termTimer);
   if (killTimer !== null) clearTimeout(killTimer);
+  if (signalKillTimer !== null) clearTimeout(signalKillTimer);
   // A client whose own stdin is still open would keep this process alive forever,
   // now that there is no server left to talk to. Removes only the ONE listener this
   // function registered — `options.stdin` is caller-supplied, and a caller may have
   // its own instrumentation on the same stream.
   options.stdin.off('data', onStdinData);
   options.stdin.pause();
-  return code;
+  // A strict server that was ended for too many withheld messages exits non-zero even
+  // when it said goodbye politely on the way out.
+  return pump.strictTerminated?.() === true && code === 0 ? 1 : code;
 }

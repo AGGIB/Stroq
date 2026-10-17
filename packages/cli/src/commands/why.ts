@@ -8,6 +8,7 @@ import {
   type AuditEntry,
   type SessionState,
 } from '@stroq/core';
+import { commandLine } from '../shell-quote.js';
 import { auditFile, sessionsDir } from '../paths.js';
 import { formatEntry } from './log.js';
 
@@ -37,23 +38,19 @@ function taintLines(state: SessionState): string[] {
   ];
 }
 
-const SAFE_WORD = /^[\w@%+=:,./-]+$/;
-const shellQuote = (word: string): string =>
-  SAFE_WORD.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
-
 /**
  * The way out of a call the user thinks was wrong, where they are reading about it:
  * the command that clears the session, with its real id, and the form that reports it
  * — pre-titled with the rule, so the report starts with the one fact it needs. No
  * issue had ever been filed, and nothing in the CLI said where one would go.
  */
-function wrongCallLines(entry: AuditEntry): string[] {
+export function wrongCallLines(entry: AuditEntry): string[] {
   const decision = entry.decision;
   if (decision === undefined || decision.effect === 'allow') return [];
   const title = encodeURIComponent(`[False positive]: ${decision.ruleId ?? 'default'}`);
   return [
     '',
-    `  Wrong call? Clear the session yourself, outside the agent: stroq untaint --session ${shellQuote(entry.sessionId)}`,
+    `  Wrong call? Clear the session yourself, outside the agent: ${commandLine(['stroq', 'untaint', { flag: '--session', value: entry.sessionId, what: 'id' }])}`,
     `  and tell us: https://github.com/AGGIB/Stroq/issues/new?template=false_positive.yml&title=${title}`,
   ];
 }

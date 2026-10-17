@@ -24,14 +24,14 @@ async function clearAll(): Promise<void> {
  * fully cleared. Neither flag prints usage and fails, since silently doing
  * nothing would look like success.
  */
+/** The options of the command, written out here where the tests of the printed command lines read them too. */
+export const UNTAINT_OPTIONS = {
+  session: { type: 'string' },
+  all: { type: 'boolean', default: false },
+} as const;
+
 export async function runUntaint(args: readonly string[]): Promise<number> {
-  const { values } = parseArgs({
-    args: [...args],
-    options: {
-      session: { type: 'string' },
-      all: { type: 'boolean', default: false },
-    },
-  });
+  const { values } = parseArgs({ args: [...args], options: UNTAINT_OPTIONS });
   if (values.all) {
     await clearAll();
     process.stdout.write('cleared taint and provenance for all sessions\n');

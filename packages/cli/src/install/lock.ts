@@ -3,6 +3,7 @@ import { readRegularFile, withLock } from '@stroq/core';
 import { z } from 'zod';
 import { writeFileAtomic } from '../harden/atomic.js';
 import { passportsFileIn, passportsLockDirIn } from '../paths.js';
+import { SKILL_NAME } from './names.js';
 import { rawMember } from './opaque-json.js';
 import { PassportSchema } from './types.js';
 import { PassportLockSchema, MAX_PASSPORT_LOCK_BYTES } from './passports-schema.js';
@@ -10,7 +11,7 @@ import { PassportLockSchema, MAX_PASSPORT_LOCK_BYTES } from './passports-schema.
 export { PassportLockSchema, McpPinSchema, MAX_PASSPORT_LOCK_BYTES } from './passports-schema.js';
 export { readPassportLock } from './lock-reader.js';
 
-export const SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+export { SKILL_NAME };
 const MAX_LOCK_BYTES = MAX_PASSPORT_LOCK_BYTES;
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const ReceiptSchema = z.strictObject({

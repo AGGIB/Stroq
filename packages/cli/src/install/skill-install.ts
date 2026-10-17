@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { assertWriteAllowed } from '../harden/atomic.js';
+import { commandLine } from '../shell-quote.js';
 import { labelOf } from '../commands/vet-flow.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
@@ -8,7 +9,12 @@ import { outsideLine } from '../ui/layout.js';
 import type { Terminal } from '../ui/terminal.js';
 import { stroqVersion } from '../version.js';
 import { readArchiveFile } from './archive-file.js';
-import { inspectTree, INSPECT_RULES_ID, passportIsIncomplete } from './inspect/index.js';
+import {
+  inspectTree,
+  INSPECT_RULES_ID,
+  InspectError,
+  passportIsIncomplete,
+} from './inspect/index.js';
 import {
   readPassports,
   SKILL_NAME,
@@ -24,16 +30,17 @@ import { confirmSkill } from './skill-confirm.js';
 import { sourceTypeOf } from './read-source.js';
 import { checkEntryPath } from './safe-path.js';
 import { auditReceipt } from './receipt.js';
-import { collectSkillStore } from './store-gc.js';
+import { collectSkillStore, tidyStore } from './store-gc.js';
 import {
   assertPlainDirectory,
   assertInstallablePlatform,
   assertWritableTree,
   putStore,
-  readStoredTree,
-  storePath,
+  readStoredTreeOf,
   writeTree,
+  type StoredSubject,
 } from './store.js';
+import { skillRemedy } from './remedy.js';
 import { treeDigest } from './tree.js';
 import type { Passport, Tree } from './types.js';
 
@@ -45,6 +52,8 @@ export interface SkillOptions {
   readonly user?: boolean;
   readonly restore?: boolean;
   readonly force?: boolean;
+  /** `--kind skill`: the person says what the folder is, for files that look like more than one kind of artifact. */
+  readonly kind?: 'skill';
 }
 
 function requirePerson(options: SkillOptions): void {
@@ -53,6 +62,17 @@ function requirePerson(options: SkillOptions): void {
       'add and remove need a person at a terminal; use stroq vet --from <path> to read without installing',
     );
 }
+
+/** Who a stored copy is for, with the commands that put it back in the scope the lock record has. */
+const subjectOf = (
+  name: string,
+  record: SkillRecord,
+  options: Pick<SkillOptions, 'home' | 'project'>,
+): StoredSubject => ({
+  kind: 'skill',
+  name,
+  remedy: skillRemedy(name, record, { home: options.home, project: options.project }),
+});
 
 function nameOf(name: string): string {
   if (!SKILL_NAME.test(name) || !checkEntryPath(name).ok)
@@ -77,21 +97,50 @@ function targetOf(
   return { root, path };
 }
 
-async function inspectSource(source: string): Promise<{ tree: Tree; passport: Passport }> {
+/** The passport of a tree as a skill's: the kind the person gave, or the one the files say. */
+function passportOfSkill(
+  tree: Tree,
+  source: string,
+  type: 'dir' | 'tarball',
+  blindSpots: readonly string[],
+  kind: 'skill' | undefined,
+): Passport {
+  try {
+    return inspectTree(tree, {
+      kind: kind ?? 'auto',
+      source: { type, label: labelOf(source, type) },
+      extraBlindSpots: blindSpots,
+      stroqVersion: stroqVersion(),
+      rulesId: INSPECT_RULES_ID,
+    });
+  } catch (error) {
+    // The message of the inspector says to "say which kind it is"; for add, this is how.
+    if (error instanceof InspectError && error.code === 'cannot-tell-kind')
+      throw new Error(
+        `${error.message}; give --kind skill (or --kind mcp for a server) to stroq add`,
+      );
+    throw error;
+  }
+}
+
+async function inspectSource(
+  source: string,
+  kind: 'skill' | undefined,
+): Promise<{ tree: Tree; passport: Passport }> {
   const type = await sourceTypeOf(source);
   const { tree, blindSpots } =
     type === 'dir'
       ? await readDirTree(source, { rejectNestedRepositories: true })
       : await readArchiveFile(source);
-  const passport = inspectTree(tree, {
-    kind: 'auto',
-    source: { type, label: labelOf(source, type) },
-    extraBlindSpots: blindSpots,
-    stroqVersion: stroqVersion(),
-    rulesId: INSPECT_RULES_ID,
-  });
+  const passport = passportOfSkill(tree, source, type, blindSpots, kind);
+  if (passport.artifact.kind === 'mcp')
+    throw new Error(
+      'this folder is an MCP server, not a skill: add it with --kind mcp and the client it is for (--client <name> or --config <path>)',
+    );
   if (passport.artifact.kind !== 'skill')
-    throw new Error('add currently installs skills only; use vet for an MCP server or plugin');
+    throw new Error(
+      `this folder is a ${passport.artifact.kind}, which add does not install: read it with stroq vet --from <folder>`,
+    );
   if (passportIsIncomplete(passport))
     throw new Error('the passport is incomplete; refusing to install');
   assertWritableTree(tree, passport.artifact.digest);
@@ -195,19 +244,20 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const source = installed?.source ?? resolve(sourceOrName);
   const made = restoring
     ? {
-        tree: await readStoredTree(
-          storePath(options.stroqHome, installed!.digest),
+        tree: await readStoredTreeOf(
+          options.stroqHome,
           installed!.digest,
+          subjectOf(sourceOrName, installed!, options),
         ),
         passport: installed!.passport,
       }
-    : await inspectSource(source);
+    : await inspectSource(source, options.kind);
   const name = nameOf(installed === undefined ? made.passport.artifact.name : sourceOrName);
   const prior = Object.hasOwn(initial.skills, name) ? initial.skills[name] : undefined;
   const previous = prior?.status === 'revoked' ? undefined : prior;
   if (previous !== undefined && installed === undefined && resolve(previous.source) !== source)
     throw new Error(
-      `this path is not ${name}'s recorded source; use stroq add ${name} or remove it first`,
+      `this path is not ${name}'s recorded source; use ${commandLine(['stroq', 'add', { positional: name, what: 'name' }])} or remove it first`,
     );
   const target = targetOf(name, options, previous);
   if (previous === undefined && (await assertPlainDirectory(target.path)))
@@ -215,7 +265,11 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const oldTree =
     previous === undefined
       ? undefined
-      : await readStoredTree(storePath(options.stroqHome, previous.digest), previous.digest);
+      : await readStoredTreeOf(
+          options.stroqHome,
+          previous.digest,
+          subjectOf(name, previous, options),
+        );
   const material =
     previous === undefined ||
     previous.source !== source ||
@@ -270,11 +324,13 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
     );
     await auditReceipt(options.stroqHome, record);
     if (previous !== undefined)
-      await collectSkillStore(
-        options.stroqHome,
-        { ...lock, skills: { ...lock.skills, [name]: next } },
-        '',
-        previous,
+      await tidyStore(options.terminal, previous.digest, () =>
+        collectSkillStore(
+          options.stroqHome,
+          { ...lock, skills: { ...lock.skills, [name]: next } },
+          '',
+          previous,
+        ),
       );
     return next;
   });
@@ -339,6 +395,8 @@ export async function removeSkill(name: string, options: SkillOptions): Promise<
     }
     if (stage !== null) await rm(stage, { recursive: true });
     await auditReceipt(options.stroqHome, record);
-    await collectSkillStore(options.stroqHome, lock, name, previous);
+    await tidyStore(options.terminal, previous.digest, () =>
+      collectSkillStore(options.stroqHome, lock, name, previous),
+    );
   });
 }

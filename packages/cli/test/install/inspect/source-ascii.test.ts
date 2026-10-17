@@ -12,9 +12,13 @@ import { describe, expect, it } from 'vitest';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const SOURCES = [fileURLToPath(new URL('../../../src/install/inspect/', import.meta.url)), here];
 /** The helpers written for these readers; the other helpers of the suite are not looked at. */
-const HELPERS = ['inspect.ts', 'inspect-fixtures.ts', 'install-dir.ts'].map((name) =>
-  fileURLToPath(new URL(`../../helpers/${name}`, import.meta.url)),
-);
+const HELPERS = [
+  'inspect.ts',
+  'inspect-fixtures.ts',
+  'install-dir.ts',
+  'v8-reads.ts',
+  'v8-reads.mjs',
+].map((name) => fileURLToPath(new URL(`../../helpers/${name}`, import.meta.url)));
 
 function typescriptFiles(folder: string): string[] {
   return readdirSync(folder, { withFileTypes: true })

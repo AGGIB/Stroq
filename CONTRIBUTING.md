@@ -25,6 +25,14 @@ pnpm check:rules     # verify the committed bundle deterministically, the same w
 ./examples/demo/run-demo.sh
 ```
 
+### JavaScript Import Oracle
+
+The Safe Install import tests compare the scanner with V8 in script and module contexts. The regular suite includes registry spellings and representative Unicode whitespace and identifier characters. The exhaustive Unicode sweep is slower and opt-in:
+
+```bash
+STROQ_EXHAUSTIVE_V8_ORACLE=1 pnpm exec vitest run packages/cli/test/install/inspect/code-loading-registry-oracle.test.ts --maxWorkers=1
+```
+
 ### Python Oracle Tests
 
 The test suite in `packages/core/test/actions/inline-python-oracle.test.ts` validates Python AST classification against a real CPython runtime with audit hooks (`sys.addaudithook`). On POSIX/macOS systems, it searches for a compatible Python interpreter (`>= 3.8`).

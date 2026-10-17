@@ -3,6 +3,7 @@ import {
   taintSource,
   warningFor,
   type Decision,
+  type PostReadings,
   type ProvenanceHit,
   type SecretHit,
   type StroqEngine,
@@ -188,6 +189,24 @@ export interface PostOutcome {
   readonly scanned: boolean;
   readonly verdict: 'clean' | 'suspect';
   readonly warning: string | null;
+  /**
+   * Present, and true, only when the scan stopped on its own wall-clock budget rather
+   * than finishing: the verdict is then `suspect` because an unfinished scan fails
+   * closed, which says nothing about what the text holds. `stroq mcp --strict` withholds
+   * a result in that state; every other caller has no use for the distinction.
+   */
+  readonly timedOut?: boolean;
+}
+
+/**
+ * Which look at a result this `post` is, for a caller that reads one result as several
+ * texts (`stroq mcp --strict`). Absent, the call is the record of the result, as every
+ * call always was; see `PostToolEvent` in core for what each field changes.
+ */
+export interface PostReading {
+  readonly extraReading?: true;
+  readonly suspectInAnotherReading?: true;
+  readonly otherReadings?: readonly string[];
 }
 
 /**
@@ -200,16 +219,22 @@ export async function scanPostResult(
   engine: StroqEngine,
   event: EngineEvent,
   toolResultText: string,
+  reading: PostReading = {},
+  readings?: PostReadings,
 ): Promise<PostOutcome> {
-  const result = await engine.post({ ...event, toolResultText });
+  const post = { ...event, toolResultText, ...reading };
+  const result =
+    readings === undefined ? await engine.post(post) : await engine.post(post, readings);
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
+  const timedOut = result.scan.timedOut === true ? { timedOut: true } : {};
   if (result.scan.verdict !== 'suspect' || result.trusted === true)
-    return { scanned: true, verdict: 'clean', warning: null };
+    return { scanned: true, verdict: 'clean', warning: null, ...timedOut };
   return {
     scanned: true,
     verdict: 'suspect',
     warning: warningFor(result.scan, event.toolName, taintSource(result)),
+    ...timedOut,
   };
 }
 
