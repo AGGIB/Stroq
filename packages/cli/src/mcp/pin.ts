@@ -1,4 +1,4 @@
-import { readRegularFile } from '@stroq/core';
+import { readRegularFile, SEALED_SOURCES_ENV } from '@stroq/core';
 import { lstatSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -7,7 +7,7 @@ import { readDirTree, READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
 import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
-import { MCP_PIN } from './pin-argument.js';
+import { MCP_PIN, PIN_SANDBOX_PHRASES } from './pin-argument.js';
 import { assertBound, PinBindError, type Launch } from './pin-binding.js';
 
 export interface PinOptions {
@@ -161,10 +161,28 @@ async function copyEntry(folder: string, entry: TreeEntry): Promise<void> {
   await writeFile(target, entry.bytes!, { flag: 'wx', mode: entry.exec ? 0o700 : 0o600 });
 }
 
+/** An error that says the disk would not let the folder be made or written: a permission, not a fault of the pin. */
+const denied = (error: unknown): boolean =>
+  ['EPERM', 'EACCES', 'EROFS'].includes((error as NodeJS.ErrnoException | undefined)?.code ?? '');
+
+/**
+ * The folder for the copy. Under `stroq run --sandbox` it is denied on purpose, so a pinned server cannot be
+ * prepared there; that is said in its own words, and not as a server that "cannot be verified".
+ */
+async function copyFolder(home: string): Promise<string> {
+  try {
+    return await mkdtemp(join(await privateRunDir(home), 'stroq-mcp-pin-'));
+  } catch (error) {
+    if (!denied(error)) throw error;
+    const sandboxed = process.env[SEALED_SOURCES_ENV] === '1';
+    throw new Error(PIN_SANDBOX_PHRASES[sandboxed ? 0 : 1]);
+  }
+}
+
 /** The verified code is never started from a mutable store path. */
 export async function preparePin(options: PinOptions): Promise<PinnedLaunch> {
   const { tree, args, home } = await checked(options);
-  const folder = await mkdtemp(join(await privateRunDir(home), 'stroq-mcp-pin-'));
+  const folder = await copyFolder(home);
   const cleanup = async (): Promise<void> => {
     await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   };

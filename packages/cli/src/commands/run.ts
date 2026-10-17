@@ -2,7 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
+import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
 import { pluginCliDirIn, secretsFile, stroqHome } from '../paths.js';
+import { outsideLine } from '../ui/layout.js';
 import { AGENT_STATE_DIRS, OWN_SANDBOX_AGENTS, agentIdFor } from '../run/agent-name.js';
 import { launch as realLaunch } from '../run/launch.js';
 import { preflight, type PreflightResult } from '../run/preflight.js';
@@ -286,6 +288,18 @@ function reportSandbox(
   process.stderr.write(`${NOT_COVERED}\n`);
   const copy = pluginCopyNote(home, plat);
   if (copy !== null) process.stderr.write(`${copy}\n`);
+  const pinned = pinnedServers(home);
+  if (pinned.length > 0)
+    process.stderr.write(
+      `  sandbox: ${sandboxPinNote(
+        pinned
+          .slice(0, 5)
+          .map((name) => JSON.stringify(outsideLine(name)))
+          .join(', '),
+        pinned.length,
+        home,
+      )}.\n`,
+    );
   if (sandbox.settings.network.allowedDomains.length === 0) {
     line(
       '  sandbox: all network is denied. The agent cannot reach its own API, and neither can anything it runs, until you name the hosts with --allow-domain.',

@@ -13,6 +13,8 @@ import {
   passportsFileIn,
   passportsLockDirIn,
   pluginCliDirIn,
+  homeManifestFileIn,
+  homeModulesDirIn,
   policyFileIn,
   runDirIn,
   secretsFileIn,
@@ -251,6 +253,9 @@ const protectedState = (home: string): readonly string[] => [
   // measured with a real srt: a pinned server that is started inside this sandbox cannot make its copy
   // here, the same cost as `plugin-cli` above.
   runDirIn(home),
+  // The folders and the file above it that Node also reads when it looks for a package or a package.json.
+  homeModulesDirIn(home),
+  homeManifestFileIn(home),
   passportsFileIn(home),
   passportsLockDirIn(home),
   tasksDirIn(home),

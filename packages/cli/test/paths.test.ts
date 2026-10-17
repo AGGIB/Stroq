@@ -16,6 +16,8 @@ import {
   stroqHome,
   storeDirIn,
   runDirIn,
+  homeModulesDirIn,
+  homeManifestFileIn,
   tasksDirIn,
 } from '../src/paths.js';
 
@@ -69,6 +71,8 @@ describe('the layout of a Stroq home', () => {
     expect(backupsDirIn(HOME)).toBe(join(HOME, 'backups'));
     expect(storeDirIn(HOME)).toBe(join(HOME, 'store'));
     expect(runDirIn(HOME)).toBe(join(HOME, 'run'));
+    expect(homeModulesDirIn(HOME)).toBe(join(HOME, 'node_modules'));
+    expect(homeManifestFileIn(HOME)).toBe(join(HOME, 'package.json'));
     expect(passportsFileIn(HOME)).toBe(join(HOME, 'passports.json'));
     expect(tasksDirIn(HOME)).toBe(join(HOME, 'tasks'));
     expect(bindingsFileIn(HOME)).toBe(join(HOME, 'bindings.yaml'));
@@ -92,6 +96,8 @@ describe('the layout of a Stroq home', () => {
       backupsDirIn,
       storeDirIn,
       runDirIn,
+      homeModulesDirIn,
+      homeManifestFileIn,
       passportsFileIn,
       tasksDirIn,
       bindingsFileIn,

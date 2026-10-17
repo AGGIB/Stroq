@@ -6,7 +6,7 @@ import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
 import { killChildTree } from './kill-child.js';
-import { BIND_PHRASES } from './pin-argument.js';
+import { BIND_PHRASES, PIN_SANDBOX_PHRASES } from './pin-argument.js';
 import { OrderedQueue, createPump } from './proxy-pump.js';
 
 /**
@@ -89,6 +89,7 @@ function pinRefusal(error: unknown): string {
   if (message === 'the pinned server files changed (digest mismatch)') return message;
   if (message === 'the stored manifest digest changed') return message;
   if (BIND_PHRASES.some((phrase) => phrase === message)) return message;
+  if (PIN_SANDBOX_PHRASES.some((phrase) => phrase === message)) return message;
   return 'pinned server cannot be verified';
 }
 
