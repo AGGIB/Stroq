@@ -32,8 +32,8 @@ interface Snippet {
   readonly asks: readonly string[];
   /** Also run it as a `.js` file under a `package.json` of the matching type. */
   readonly alsoAsJs?: true;
-  /** Syntax that only some versions of Node parse: where this one does not, Node asks for nothing. */
-  readonly needs?: 'source' | 'defer';
+  /** Syntax or resolve hooks that only some Node versions support; the reader must cover the name on all versions. */
+  readonly needs?: 'source' | 'defer' | 'requireResolveHooks';
   /** Node's hooks cannot see what the snippet loads (another process, a vm), so the reader must flag it all the same. */
   readonly mustFlag?: true;
 }
@@ -136,8 +136,8 @@ const SNIPPETS: readonly Snippet[] = [
     "var a = 1\nimport('zzpkg').catch(() => {})",
   ),
   script('module.require', "module.require('zzpkg')"),
-  // Node's resolve hooks do not see `require.resolve`, so Node is not heard to ask; the reader still reads it.
-  script('require.resolve', "require.resolve('zzpkg')", []),
+  // Older Node versions bypass resolve hooks for `require.resolve`; the reader must read it either way.
+  { ...script('require.resolve', "require.resolve('zzpkg')"), needs: 'requireResolveHooks' },
   script('template literal specifier', 'require(`zzpkg`)'),
   // Names with escapes and line continuations.
   script('hex escape in the name', "require('\\x7azzpkg')", ['zzzpkg']),
@@ -518,11 +518,12 @@ const setOf = (names: readonly string[]): string[] => [...new Set(names)].sort()
 
 describe.skipIf(!oracleAvailable)('the reader of module names against Node', () => {
   it('asks Node about every snippet and gets answers it can compare', async () => {
-    // Syntax that only some versions of Node take is asked of this Node first, so that a row is held to
-    // what this Node does and not to what another one did.
-    const parses = {
+    // Version-dependent syntax and hook behavior are probed with a separate package name. The probe
+    // cannot supply an answer for the snippets, which each have their own child process and log.
+    const capabilities = {
       source: await nodeParses("import source x from 'zzprobe'"),
       defer: await nodeParses("import defer * as ns from 'zzprobe'"),
+      requireResolveHooks: (await askNode("require.resolve('zzprobe')", 'cjs')).includes('zzprobe'),
     };
     const jobs = SNIPPETS.flatMap((snippet) =>
       variantsOf(snippet).map((variant) => ({ snippet, variant })),
@@ -544,7 +545,7 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
     for (const { snippet, variant } of jobs) {
       const names = setOf(bare(asked.get(`${snippet.name}|${variant}`) ?? []));
       const label = `${snippet.name} (${variant})`;
-      const supported = snippet.needs === undefined || parses[snippet.needs];
+      const supported = snippet.needs === undefined || capabilities[snippet.needs];
       const expected = supported ? setOf(snippet.asks) : [];
       // The oracle saw what the table says it should: a snippet that Node cannot run is part of the table.
       if (JSON.stringify(names) !== JSON.stringify(expected))
@@ -556,8 +557,9 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
         if (!covers(snippet.code, name)) problems.push(`${label}: the reader missed ${name}`);
       if (snippet.mustFlag === true && !flagged(snippet.code))
         problems.push(`${label}: the reader did not flag what Node's hooks cannot see`);
-      // A row about syntax that this Node does not take still has to be read by the reader.
-      if (!supported) expect(covers(snippet.code, NAME), `${label}: read all the same`).toBe(true);
+      // The reader covers a version-dependent row independently of whether this Node can observe it.
+      if (snippet.needs !== undefined)
+        expect(covers(snippet.code, NAME), `${label}: read across Node versions`).toBe(true);
     }
 
     expect(problems).toEqual([]);

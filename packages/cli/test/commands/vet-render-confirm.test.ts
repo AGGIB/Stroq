@@ -90,23 +90,32 @@ describe('the screen a person types a digest against', () => {
       /7 sensitive lines would be hidden/,
     );
     expect(() => confirmationScreen(passport, '/src/my skill')).toThrow(
-      /stroq vet --from='\/src\/my skill' --json/,
+      process.platform === 'win32'
+        ? 'stroq vet --from="/src/my skill" --json'
+        : "stroq vet --from='/src/my skill' --json",
     );
   });
 
   it.each([
-    ['/src/$(touch x)', `'/src/$(touch x)'`],
-    ['/src/`id`', "'/src/`id`'"],
-    ['/src/a;b', `'/src/a;b'`],
-    ['/src/-x', '/src/-x'],
-  ])(
-    'quotes the source %s so that a shell reads it as one word and runs nothing',
-    (source, word) => {
+    ['/src/$(touch x)', `'/src/$(touch x)'`, null],
+    ['/src/`id`', "'/src/`id`'", null],
+    ['/src/a;b', `'/src/a;b'`, '"/src/a;b"'],
+    ['/src/-x', '/src/-x', '/src/-x'],
+    ["/src/it's", null, '"/src/it\'s"'],
+    ['/src/a\\b', null, '/src/a\\b'],
+  ] as const)(
+    'prints one source argument or refuses it for this platform: %s',
+    (source, posixWord, windowsWord) => {
       const passport = passportWith(
         many(CONFIRM_SENSITIVE_MAX + 1, (i) => ({ subject: `s${i}`, sensitive: true })),
       );
 
-      expect(() => confirmationScreen(passport, source)).toThrow(`stroq vet --from=${word} --json`);
+      const word = process.platform === 'win32' ? windowsWord : posixWord;
+      expect(() => confirmationScreen(passport, source)).toThrow(
+        word === null
+          ? 'the path has characters that cannot be quoted safely for a shell, so no command is shown'
+          : `stroq vet --from=${word} --json`,
+      );
     },
   );
 
@@ -120,7 +129,7 @@ describe('the screen a person types a digest against', () => {
     );
   });
 
-  it.each(["/src/it's", '/src/a\\b', '/src/a!b', '/src/a\nb'])(
+  it.each(['/src/a!b', '/src/a\nb'])(
     'prints no command for the source %j, only a sentence',
     (source) => {
       const passport = passportWith(

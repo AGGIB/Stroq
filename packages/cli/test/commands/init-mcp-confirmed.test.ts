@@ -4,7 +4,6 @@ import { initMcp } from '../../src/commands/init-mcp.js';
 import { addMcp } from '../../src/install/mcp-install.js';
 import { configPinStatus } from '../../src/mcp/pin-status.js';
 import { reconfirmCommand } from '../../src/mcp/pin-argument.js';
-import { unprintableSentence } from '../../src/shell-quote.js';
 import { mcpFixture } from '../helpers/mcp-install.js';
 
 /**
@@ -143,6 +142,8 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
 });
 
 describe('the command that confirms a wrapper again', () => {
+  const refused =
+    'the name has characters that cannot be quoted safely for a shell, so no command is shown, and stroq doctor lists the installed names';
   it.each([
     ['demo', 'stroq add demo --kind mcp --force'],
     ['weather-2_a', 'stroq add weather-2_a --kind mcp --force'],
@@ -151,15 +152,19 @@ describe('the command that confirms a wrapper again', () => {
   });
 
   it.each([
-    ['a b', "stroq add 'a b' --kind mcp --force"],
-    ['$(touch x)', "stroq add '$(touch x)' --kind mcp --force"],
-  ])('quotes %j for a shell', (name, line) => {
-    expect(reconfirmCommand(name)).toBe(line);
-  });
+    ['a b', "stroq add 'a b' --kind mcp --force", 'stroq add "a b" --kind mcp --force'],
+    ['$(touch x)', "stroq add '$(touch x)' --kind mcp --force", null],
+    ["it's", null, 'stroq add "it\'s" --kind mcp --force'],
+    ['a\\b', null, 'stroq add a\\b --kind mcp --force'],
+  ] as const)(
+    'quotes %j for this platform, or prints no command',
+    (name, posixLine, windowsLine) => {
+      const line = process.platform === 'win32' ? windowsLine : posixLine;
+      expect(reconfirmCommand(name)).toBe(line ?? refused);
+    },
+  );
 
   it.each([
-    ['a quote', "it's"],
-    ['a backslash', 'a\\b'],
     ['a bang', 'a!b'],
     ['a newline', 'a\nb'],
     ['escape', 'a\u001b[2Jb'],
@@ -168,11 +173,15 @@ describe('the command that confirms a wrapper again', () => {
   ])('prints no command for a name with %s, only a sentence', (_what, name) => {
     const text = reconfirmCommand(name);
 
-    expect(text).toBe(unprintableSentence('name'));
+    expect(text).toBe(refused);
     expect(text).toMatch(/^[A-Za-z ,.]+$/);
   });
 
   it('prints the empty name as an empty argument', () => {
-    expect(reconfirmCommand('')).toBe("stroq add '' --kind mcp --force");
+    expect(reconfirmCommand('')).toBe(
+      process.platform === 'win32'
+        ? 'stroq add "" --kind mcp --force'
+        : "stroq add '' --kind mcp --force",
+    );
   });
 });

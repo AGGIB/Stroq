@@ -4,13 +4,13 @@ import { parseArgs } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { ADD_OPTIONS } from '../../src/commands/add.js';
 import { unknownOption } from '../../src/help.js';
-import { readPassports } from '../../src/install/lock.js';
+import { readPassports, writePassports } from '../../src/install/lock.js';
 import { addMcp, removeMcp, type McpInstallOptions } from '../../src/install/mcp-install.js';
 import { mcpRemedy, mcpRemedyCommands, skillRemedy } from '../../src/install/remedy.js';
 import { addSkill } from '../../src/install/skill-install.js';
 import { storePath } from '../../src/install/store.js';
 import { unprintableSentence } from '../../src/shell-quote.js';
-import { mcpFixture, mcpServer } from '../helpers/mcp-install.js';
+import { mcpFixture } from '../helpers/mcp-install.js';
 import { setup } from '../helpers/skill-install.js';
 
 /**
@@ -20,9 +20,11 @@ import { setup } from '../helpers/skill-install.js';
  * a skill), and not the first words of advice.
  */
 
-/** The words of a printed command line, read as a POSIX shell reads single quotes and a backslash. */
+/** Read the renderer's restricted shell syntax: POSIX single quotes or Windows double quotes. */
 function words(line: string): string[] {
   const out: string[] = [];
+  const windows = process.platform === 'win32';
+  const quote = windows ? '"' : "'";
   let i = 0;
   while (i < line.length) {
     if (line[i] === ' ') {
@@ -31,11 +33,12 @@ function words(line: string): string[] {
     }
     let word = '';
     while (i < line.length && line[i] !== ' ') {
-      if (line[i] === "'") {
+      if (line[i] === quote) {
         i += 1;
-        while (line[i] !== "'") word += line[i++];
+        while (i < line.length && line[i] !== quote) word += line[i++];
+        expect(line[i]).toBe(quote);
         i += 1;
-      } else if (line[i] === '\\') {
+      } else if (!windows && line[i] === '\\') {
         word += line[i + 1];
         i += 2;
       } else word += line[i++];
@@ -75,9 +78,9 @@ function mcpOptionsOf(argv: string[], base: McpInstallOptions) {
   };
 }
 
-async function damagedServer(over: { folder?: string; passEnv?: string[]; cwd?: string } = {}) {
+async function damagedServer(over: { passEnv?: string[]; cwd?: string } = {}) {
   const f = await mcpFixture();
-  const dir = over.folder === undefined ? f.dir : await mcpServer(f.root, {}, {}, over.folder);
+  const dir = f.dir;
   const config = join(f.root, 'my configs', 'it here.json');
   await mkdir(dirname(config), { recursive: true });
   await writeFile(config, JSON.stringify({ mcpServers: {} }));
@@ -143,7 +146,17 @@ describe('an MCP server whose stored copy is damaged', () => {
   });
 
   it('prints no command for a path with a control character in the lock, only a sentence', async () => {
-    const { failure } = await damagedServer({ folder: 'srv\u001b[2J\u202e' });
+    const { f, options, record } = await damagedServer();
+    // A lock can hold a path that this filesystem cannot create (notably on Windows).
+    const lock = await readPassports(f.options.stroqHome);
+    await writePassports(f.options.stroqHome, {
+      ...lock,
+      mcp: { ...lock.mcp, demo: { ...record, source: '/src/srv\u001b[2J\u202e' } },
+    });
+    const failure = await addMcp('demo', { ...options, restore: true }).then(
+      () => null,
+      (error: unknown) => error,
+    );
     const message = (failure as Error).message;
 
     expect(message).not.toMatch(
@@ -168,8 +181,9 @@ describe('the commands for an MCP record', () => {
 
     expect(line).not.toContain('--pass-env');
     expect(line).not.toContain('--cwd');
+    const source = process.platform === 'win32' ? '"/src/a server"' : "'/src/a server'";
     expect(line).toBe(
-      "stroq remove demo --kind mcp --force, then stroq add '/src/a server' --kind mcp --name=demo --config=/etc/client.json --entrypoint=dist/main.js",
+      `stroq remove demo --kind mcp --force, then stroq add ${source} --kind mcp --name=demo --config=/etc/client.json --entrypoint=dist/main.js`,
     );
   });
 
@@ -181,12 +195,14 @@ describe('the commands for an MCP record', () => {
     });
 
     expect(line).toContain('--pass-env=A,B');
-    expect(line).toContain(`--cwd='/my dir/it here'`);
+    expect(line).toContain(
+      process.platform === 'win32' ? '--cwd="/my dir/it here"' : "--cwd='/my dir/it here'",
+    );
   });
 });
 
-describe('the commands for an MCP record with a character that cannot be quoted', () => {
-  it('are one sentence and no command: a quote in a path is not quoted around', () => {
+describe('the commands for an MCP record with an apostrophe in its source', () => {
+  it('quotes it on Windows and prints only a refusal sentence on POSIX', () => {
     const commands = mcpRemedyCommands('demo', {
       source: "/src/it's",
       config: '/c.json',
@@ -194,7 +210,14 @@ describe('the commands for an MCP record with a character that cannot be quoted'
       passEnv: [],
     });
 
-    expect(commands).toEqual([unprintableSentence('path')]);
+    expect(commands).toEqual(
+      process.platform === 'win32'
+        ? [
+            'stroq remove demo --kind mcp --force',
+            'stroq add "/src/it\'s" --kind mcp --name=demo --config=/c.json --entrypoint=a.js',
+          ]
+        : [unprintableSentence('path')],
+    );
   });
 });
 
@@ -238,7 +261,7 @@ describe('a skill whose stored copy is damaged', () => {
     );
 
     expect(line).toBe(
-      'stroq remove demo --force, then from the folder /work/app stroq add /src/demo',
+      `stroq remove demo --force, then from the folder ${resolve('/work/app')} stroq add /src/demo`,
     );
   });
 

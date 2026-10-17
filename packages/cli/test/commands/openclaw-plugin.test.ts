@@ -201,7 +201,9 @@ describe('the two openclaw commands', () => {
       'openclaw plugins enable stroq',
     ]);
     expect(openclawInstallCommands('/home/my dev/.stroq/openclaw-plugin')[0]).toBe(
-      "openclaw plugins install --link '/home/my dev/.stroq/openclaw-plugin'",
+      process.platform === 'win32'
+        ? 'openclaw plugins install --link "/home/my dev/.stroq/openclaw-plugin"'
+        : "openclaw plugins install --link '/home/my dev/.stroq/openclaw-plugin'",
     );
   });
 
