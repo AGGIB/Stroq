@@ -161,7 +161,9 @@ describe('skill install review regressions', () => {
     await expect(addSkill(archive, f.options)).rejects.toThrow(/refused/);
     await mkdir(join(f.source, '.claude-plugin'));
     await writeFile(join(f.source, '.claude-plugin', 'plugin.json'), '{"name":"demo"}');
-    await expect(addSkill(f.source, f.options)).rejects.toThrow(/skills only/);
+    await expect(addSkill(f.source, f.options)).rejects.toThrow(
+      /plugin, which add does not install/,
+    );
     expect(f.prompts()).toBe(0);
   });
 

@@ -4,6 +4,7 @@ import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { storeDirIn } from '../paths.js';
 import { outsideLine } from '../ui/layout.js';
+import { inNodeModules } from './path-names.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from './read-dir.js';
 import { buildTree, treeDigest } from './tree.js';
 import type { Tree, TreeEntry } from './types.js';
@@ -26,10 +27,6 @@ export async function assertPlainDirectory(path: string): Promise<boolean> {
     throw error;
   }
 }
-
-/** The folder the directory reader leaves out, in any case: `NODE_MODULES` is `node_modules` on a disk that folds case. */
-const inNodeModules = (path: string): boolean =>
-  path.split('/').some((part) => part.toLowerCase() === 'node_modules');
 
 /**
  * Never materialise links or nested repositories; a silent omission would change the inspected tree. The same

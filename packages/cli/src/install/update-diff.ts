@@ -14,6 +14,7 @@
 // left out. A part that is still longer than 2,000 characters is cut, and the last line says so; the words
 // "every changed line is shown" are said only when nothing was left out and nothing was cut.
 import { lineText } from '../commands/vet-text.js';
+import { textOf } from './text-of.js';
 import { changedFiles } from './material.js';
 import type { Tree, TreeEntry } from './types.js';
 
@@ -62,13 +63,8 @@ const countLines = (bytes: Uint8Array): number =>
 function contentOf(entry: TreeEntry | undefined): Content {
   const bytes = entry?.bytes ?? new Uint8Array();
   if (bytes.byteLength > TEXT_MAX_BYTES) return { kind: 'large', lines: countLines(bytes) };
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    return { kind: 'binary' };
-  }
-  if (text.includes('\u0000')) return { kind: 'binary' };
+  const text = textOf(bytes);
+  if (text === null) return { kind: 'binary' };
   const lines = text.split('\n');
   if (lines[lines.length - 1] === '') lines.pop();
   return { kind: 'text', lines };

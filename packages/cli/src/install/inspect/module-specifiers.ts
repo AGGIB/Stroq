@@ -11,13 +11,14 @@
 // a name written with escapes. A file with a concern is a file whose imports are not known, and the caller
 // treats it as one that may load code from outside its tree. Each concern comes with a reason and a line.
 import { builtinModules } from 'node:module';
+import { WINDOWS_PATH } from '../path-names.js';
 import { LoadingWatch, type Concern } from './code-loading.js';
 import { Lexer, lineOf, type Token } from './js-lexer.js';
 
 export type { Concern } from './code-loading.js';
 
 /** The most distinct specifiers one file is read for; a file with more is a concern. */
-export const MAX_SPECIFIERS = 2000;
+const MAX_SPECIFIERS = 2000;
 /** The most tokens an import or export clause may take before it is given up as something else. */
 const MAX_CLAUSE_TOKENS = 2000;
 
@@ -255,14 +256,7 @@ export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
   };
 }
 
-/** The specifiers of a text, for a caller that wants only those. */
-export const moduleSpecifiers = (text: string, limit = MAX_SPECIFIERS): string[] => [
-  ...scanModules(text, limit).specifiers,
-];
-
 const BUILTINS: ReadonlySet<string> = new Set(builtinModules);
-/** A drive letter or a backslash start: a path on Windows, which Node reads as one. */
-const WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|\\)/;
 /** A scheme: letters, then a colon. */
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
@@ -279,6 +273,10 @@ export type SpecifierKind =
   /** A `data:` URL: the module is the text of the specifier, and it can import any URL. */
   | 'data';
 
+/**
+ * How Node looks the specifier up. A scheme that Node cannot load (`https:`) or that belongs to another runtime
+ * (`npm:`) is `bare`: its code comes from outside the tree as well.
+ */
 export function classifySpecifier(specifier: string): SpecifierKind {
   if (specifier === '' || specifier === '.' || specifier === '..') return 'relative';
   if (specifier.startsWith('./') || specifier.startsWith('../')) return 'relative';
@@ -291,14 +289,6 @@ export function classifySpecifier(specifier: string): SpecifierKind {
   if (scheme === 'data:') return 'data';
   return scheme?.toLowerCase() === 'file:' ? 'absolute' : 'bare';
 }
-
-/**
- * Whether Node looks the specifier up by name in folders above the file that asks. A scheme that Node
- * cannot load (`https:`) or that belongs to another runtime (`npm:`) is counted: its code comes from outside
- * the tree as well.
- */
-export const isBareSpecifier = (specifier: string): boolean =>
-  classifySpecifier(specifier) === 'bare';
 
 /**
  * The package a bare specifier names: `@scope/name` or `name`, without the path inside it. A specifier with a

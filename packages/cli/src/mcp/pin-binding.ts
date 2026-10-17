@@ -12,6 +12,7 @@
 // comparison is on the lock's `written`, never on the client config, and the refusals are fixed phrases that
 // hold nothing of the wrapper. A record without `written` (one written by hand) is held to what it has.
 import { isDeepStrictEqual } from 'node:util';
+import { isRecord } from '../adapters/tool-input.js';
 import { BIND } from './pin-argument.js';
 
 /** A wrapper that is not the one that was confirmed. The message is a fixed phrase, safe to print. */
@@ -33,8 +34,6 @@ export interface Launch {
   readonly argv: readonly string[];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 

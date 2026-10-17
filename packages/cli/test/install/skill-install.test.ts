@@ -329,7 +329,7 @@ describe('confirmed skill install', () => {
       join(f.source, 'package.json'),
       '{"name":"demo","main":"server.js","dependencies":{"@modelcontextprotocol/sdk":"1"}}',
     );
-    await expect(addSkill(f.source, f.options)).rejects.toThrow(/skills only/);
+    await expect(addSkill(f.source, f.options)).rejects.toThrow(/--kind mcp/);
     expect(f.prompts()).toBe(0);
   });
 

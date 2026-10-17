@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifySpecifier,
-  isBareSpecifier,
-  moduleSpecifiers,
   packageNameOf,
   scanModules,
 } from '../../../src/install/inspect/module-specifiers.js';
 
 // Every string below is text for the scanner to read. None of it is run, evaluated or turned into a function.
-const specs = (text: string): string[] => moduleSpecifiers(text);
+const specs = (text: string): string[] => [...scanModules(text).specifiers];
 const concernsOf = (text: string): string[] => [...scanModules(text).concerns];
 /** Found, or the file is flagged: the two ways a reading is not "nothing here". */
 const seen = (text: string, name: string): boolean => {
@@ -428,13 +426,11 @@ describe('how a specifier is looked up', () => {
     '%s is a package, looked up by name',
     (spec) => {
       expect(classifySpecifier(spec)).toBe('bare');
-      expect(isBareSpecifier(spec)).toBe(true);
     },
   );
 
   it.each(['./a.js', '../a.js', '.', '..', '', './', '../'])('%j is relative', (spec) => {
     expect(classifySpecifier(spec)).toBe('relative');
-    expect(isBareSpecifier(spec)).toBe(false);
   });
 
   it.each([
@@ -446,7 +442,6 @@ describe('how a specifier is looked up', () => {
     'FILE:///abs/a.js',
   ])('%j is absolute, a place outside any tree', (spec) => {
     expect(classifySpecifier(spec)).toBe('absolute');
-    expect(isBareSpecifier(spec)).toBe(false);
   });
 
   it.each([
@@ -460,14 +455,12 @@ describe('how a specifier is looked up', () => {
     '#internal/thing',
   ])('%j is a built-in of Node, or a # import of the package', (spec) => {
     expect(classifySpecifier(spec)).toBe('inside');
-    expect(isBareSpecifier(spec)).toBe(false);
   });
 
   it.each(['data:text/javascript,export default 1', 'data:,1'])(
     '%j is a data: URL, which is the text of a module and can import any URL',
     (spec) => {
       expect(classifySpecifier(spec)).toBe('data');
-      expect(isBareSpecifier(spec)).toBe(false);
     },
   );
 
@@ -479,8 +472,8 @@ describe('how a specifier is looked up', () => {
   );
 
   it('counts a URL scheme node cannot load, and a package-manager scheme, as outside the tree', () => {
-    expect(isBareSpecifier('https://example.com/a.js')).toBe(true);
-    expect(isBareSpecifier('npm:left-pad')).toBe(true);
+    expect(classifySpecifier('https://example.com/a.js')).toBe('bare');
+    expect(classifySpecifier('npm:left-pad')).toBe('bare');
   });
 });
 

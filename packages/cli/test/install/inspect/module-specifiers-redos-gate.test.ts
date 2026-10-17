@@ -1,8 +1,8 @@
 import { describe, it } from 'vitest';
+import { scanModules } from '../../../src/install/inspect/module-specifiers.js';
 import { outsideImports } from '../../../src/install/inspect/imports.js';
 import { buildInput } from '../../../src/install/inspect/input.js';
 import { Findings } from '../../../src/install/inspect/findings.js';
-import { moduleSpecifiers } from '../../../src/install/inspect/module-specifiers.js';
 import { buildTree } from '../../../src/install/tree.js';
 import { expectLinear, repeat, SIZES, type EntryPoint } from '../../helpers/linear-gate.js';
 import { fileEntry } from '../../helpers/install-tree.js';
@@ -124,7 +124,7 @@ const asTree = (path: string, text: string) =>
   buildTree([fileEntry(path, text)], { complete: true });
 
 const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
-  ['moduleSpecifiers', (text) => moduleSpecifiers(text)],
+  ['the scanner of modules', (text) => scanModules(text)],
   [
     'the reading of a server file',
     (text) => outsideImports(buildInput(asTree('server.js', text), new Findings())),

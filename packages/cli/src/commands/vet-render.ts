@@ -16,7 +16,7 @@
 // artifact with more of them than a person can be asked about is refused instead of cut.
 import { failedReadings } from '../install/inspect/index.js';
 import { bySeverity } from '../install/inspect/severity.js';
-import { outsideLine } from '../ui/layout.js';
+import { commandWord } from '../shell-word.js';
 import { READING_PHRASES } from '../install/inspect/blind-spots.js';
 import { READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import type { Passport, PassportLine } from '../install/types.js';
@@ -35,6 +35,8 @@ const SIGNAL_RULES_SHOWN = 3;
 const BASIS_WIDTH = '[declared]'.length;
 /** The most sensitive rows a confirmation shows; an artifact with more is refused, not cut. */
 export const CONFIRM_SENSITIVE_MAX = 80;
+/** The most of a source path that is quoted into the command that reads every line. */
+const SOURCE_UNITS = 1024;
 
 export const CLOSING =
   'This is a reading of the files, not a security certificate: an absent line means nothing was seen, not that nothing is there.';
@@ -214,7 +216,7 @@ export function confirmationScreen(passport: Passport, source: string): string {
     throw new Error(
       `this has ${sensitive} sensitive lines and a confirmation shows at most ${CONFIRM_SENSITIVE_MAX}: ` +
         `${count(hidden, 'sensitive line')} would be hidden, so no digest is asked for. ` +
-        `Read every line with: stroq vet --from ${outsideLine(JSON.stringify(source))} --json`,
+        `Read every line with: stroq vet --from ${commandWord(source, SOURCE_UNITS)} --json`,
     );
   return renderPassport(passport, { allSensitive: true });
 }

@@ -1,3 +1,4 @@
+import { isRecord } from '../adapters/tool-input.js';
 import { parseMcpArgv } from '../commands/mcp.js';
 import { readMcpConfig, wrapperIndex } from '../commands/mcp-config.js';
 import { reconfirmCommand } from './pin-argument.js';
@@ -7,9 +8,6 @@ export interface PinStatus {
   readonly ok: boolean;
   readonly detail: string;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isWrapperWithPin = (
   entry: unknown,

@@ -1,3 +1,4 @@
+import { textOf } from './text-of.js';
 import type { Passport, Tree, TreeEntry } from './types.js';
 
 const STRENGTH = { unknown: 0, declared: 1, observed: 2, limited: 3 } as const;
@@ -15,15 +16,8 @@ const DOCUMENT = /^(?:README|CHANGELOG|LICENSE|CONTRIBUTING)\.(?:md|txt)$/i;
 
 export const isDocumentation = (path: string): boolean => DOCUMENT.test(path);
 
-/** Text a person can read: valid UTF-8 with no NUL. A document that turns into anything else is not a document. */
-function isPlainText(bytes: Uint8Array | undefined): boolean {
-  if (bytes === undefined) return false;
-  try {
-    return !new TextDecoder('utf-8', { fatal: true }).decode(bytes).includes('\u0000');
-  } catch {
-    return false;
-  }
-}
+/** Text a person can read. A document that turns into anything else is not a document. */
+const isPlainText = (bytes: Uint8Array | undefined): boolean => textOf(bytes) !== null;
 
 /** The files that differ between two trees, and how. */
 export function changedFiles(before: Tree, after: Tree): { path: string; change: string }[] {

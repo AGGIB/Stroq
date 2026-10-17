@@ -7,6 +7,7 @@ import { PendingTable, createLineSplitter } from './framing.js';
 import type { McpContext } from './judge.js';
 import { killChildTree } from './kill-child.js';
 import { BIND_PHRASES, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
+import type { Launch } from './pin-binding.js';
 import { OrderedQueue, createPump } from './proxy-pump.js';
 
 /**
@@ -53,7 +54,7 @@ export interface McpProxyOptions {
   readonly cloak?: boolean;
   readonly pin?: string;
   /** The command line this proxy was started with, whole; the pin compares it with what `add` wrote. */
-  readonly launch?: { readonly command: string; readonly argv: readonly string[] };
+  readonly launch?: Launch;
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {

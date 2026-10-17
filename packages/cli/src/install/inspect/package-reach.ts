@@ -7,14 +7,13 @@
 import { posix } from 'node:path';
 import type { InspectInput } from './input.js';
 import { entriesOf, isObject, own, ownObject, ownString, parseJsonObject } from './json.js';
+import { inNodeModules, isNodeModules, WINDOWS_PATH } from '../path-names.js';
 import type { JsonObject } from './json.js';
 
 /** The fields of a package.json that name what must be installed for the package to run. */
 const RUNTIME_DEPENDENCY_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies'];
-const WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|\\)/;
 const MANIFEST_LEAVES_MAX = 1000;
 const MANIFEST_DEPTH_MAX = 10;
-const IN_MODULES = /(?:^|\/)node_modules\//;
 
 /** What was wrong with a manifest: it points out of the tree, or could not be read, or has too much to read. */
 export type ManifestConcern = 'outside' | 'unreadable' | 'doubt';
@@ -33,7 +32,7 @@ const pointsOut = (target: string, mustStartInside: boolean): boolean => {
     target.startsWith('/') ||
     WINDOWS_PATH.test(target) ||
     segments.includes('..') ||
-    segments.includes('node_modules') ||
+    segments.some(isNodeModules) ||
     (mustStartInside && !target.startsWith('./'))
   );
 };
@@ -52,7 +51,7 @@ function leavesOf(value: unknown): { leaves: string[]; cut: boolean } {
   return { leaves, cut };
 }
 
-export function manifestPointsOut(manifest: JsonObject): ManifestConcern | null {
+function manifestPointsOut(manifest: JsonObject): ManifestConcern | null {
   const direct = ['main', 'module'].map((key) => ownString(manifest, key));
   const bin = own(manifest, 'bin');
   const bins = typeof bin === 'string' ? [bin] : isObject(bin) ? Object.values(bin) : [];
@@ -89,7 +88,7 @@ export function readManifest(input: InspectInput): Manifest {
 }
 
 const isManifest = (path: string): boolean =>
-  (path === 'package.json' || path.endsWith('/package.json')) && !IN_MODULES.test(path);
+  (path === 'package.json' || path.endsWith('/package.json')) && !inNodeModules(path);
 
 /**
  * Every other package.json of the tree. A folder with one of its own is a package of its own to Node: its

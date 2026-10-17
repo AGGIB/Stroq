@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAdd } from '../../src/commands/add.js';
@@ -66,5 +66,33 @@ describe('add --kind skill', () => {
     const updated = await addSkill('demo', { ...f.options, kind: 'skill' });
 
     expect(updated.history.map((h) => h.action)).toEqual(['add', 'update']);
+  });
+});
+
+describe('add of a folder that is not a skill', () => {
+  it('points an MCP server at --kind mcp, with the flags that name its client', async () => {
+    const f = await setup();
+    await rm(join(f.source, 'SKILL.md'));
+    await writeFile(join(f.source, '.mcp.json'), JSON.stringify({ mcpServers: {} }));
+
+    const error = await addSkill(f.source, f.options).catch((e: Error) => e);
+
+    expect((error as Error).message).toMatch(/MCP server/);
+    expect((error as Error).message).toContain('--kind mcp');
+    expect((error as Error).message).toMatch(/--client <name>|--config <path>/);
+    expect(f.prompts()).toBe(0);
+  });
+
+  it('says that a plugin is read with vet and is not installed by add', async () => {
+    const f = await setup();
+    await rm(join(f.source, 'SKILL.md'));
+    await mkdir(join(f.source, '.claude-plugin'));
+    await writeFile(join(f.source, '.claude-plugin', 'plugin.json'), '{"name":"p"}');
+
+    const error = await addSkill(f.source, f.options).catch((e: Error) => e);
+
+    expect((error as Error).message).toMatch(/plugin/);
+    expect((error as Error).message).toContain('stroq vet');
+    expect((error as Error).message).not.toContain('--kind mcp');
   });
 });

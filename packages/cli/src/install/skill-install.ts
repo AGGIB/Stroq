@@ -132,8 +132,14 @@ async function inspectSource(
       ? await readDirTree(source, { rejectNestedRepositories: true })
       : await readArchiveFile(source);
   const passport = passportOfSkill(tree, source, type, blindSpots, kind);
+  if (passport.artifact.kind === 'mcp')
+    throw new Error(
+      'this folder is an MCP server, not a skill: add it with --kind mcp and the client it is for (--client <name> or --config <path>)',
+    );
   if (passport.artifact.kind !== 'skill')
-    throw new Error('add currently installs skills only; use vet for an MCP server or plugin');
+    throw new Error(
+      `this folder is a ${passport.artifact.kind}, which add does not install: read it with stroq vet --from <folder>`,
+    );
   if (passportIsIncomplete(passport))
     throw new Error('the passport is incomplete; refusing to install');
   assertWritableTree(tree, passport.artifact.digest);

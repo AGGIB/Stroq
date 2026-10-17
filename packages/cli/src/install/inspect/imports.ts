@@ -15,6 +15,8 @@
 // write-protected for a sandboxed agent, and the pin itself is tamper-evident and not a proof that no import
 // escapes.
 import { posix } from 'node:path';
+import { inNodeModules } from '../path-names.js';
+import { textOf } from '../text-of.js';
 import type { ArtifactKind, Tree, TreeEntry } from '../types.js';
 import { Findings } from './findings.js';
 import { buildInput, type InspectInput } from './input.js';
@@ -28,12 +30,11 @@ import {
 import { hasPackageScope, nestedManifestConcerns, readManifest } from './package-reach.js';
 
 /** The most package names and files one tree is reported for. */
-export const MAX_MODULES = 50;
+const MAX_MODULES = 50;
 const MAX_FILES_PER_CONCERN = 5;
 /** The most text, in bytes, that one tree is read for; a file past it is a concern. The tree limit is 32 MiB. */
-export const SCAN_BUDGET_BYTES = 24 * 1024 * 1024;
+const SCAN_BUDGET_BYTES = 24 * 1024 * 1024;
 const NODE_FILE = /\.(?:js|mjs|cjs)$/i;
-const IN_MODULES = /(?:^|\/)node_modules\//i;
 /** The extensions that Node loads as code or data without a loader. A `.json` is data and loads nothing. */
 const LOADED_BY_NODE: ReadonlySet<string> = new Set(['.js', '.mjs', '.cjs', '.json']);
 /** Modules of Node that run code from text. */
@@ -154,17 +155,6 @@ class Reading {
   }
 }
 
-/** The text of a file of the tree, or null when it is not valid UTF-8 text. */
-function textOf(entry: TreeEntry): string | null {
-  if (entry.bytes === undefined) return null;
-  try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes);
-    return text.includes('\u0000') ? null : text;
-  } catch {
-    return null;
-  }
-}
-
 /** A relative specifier: does it name a file Node loads on its own, and does it stay in the tree. */
 function checkRelative(
   reading: Reading,
@@ -236,7 +226,7 @@ function readSpecifier(
 
 function readFile(reading: Reading, entry: TreeEntry, input: InspectInput, context: Context): void {
   try {
-    const text = textOf(entry);
+    const text = textOf(entry.bytes);
     if (text === null)
       return reading.note('unreadable', entry.path, { reason: 'not valid UTF-8 text' });
     const scan = scanModules(text);
@@ -272,8 +262,7 @@ function readTree(input: InspectInput, options: ReadOptions): OutsideImports {
       reading.note('outside', entry.path, { reason: 'a link to a script is not followed' });
   let budget = options.budgetBytes ?? SCAN_BUDGET_BYTES;
   for (const entry of input.tree.entries) {
-    if (entry.kind !== 'file' || !NODE_FILE.test(entry.path) || IN_MODULES.test(entry.path))
-      continue;
+    if (entry.kind !== 'file' || !NODE_FILE.test(entry.path) || inNodeModules(entry.path)) continue;
     budget -= entry.size;
     if (budget < 0) reading.note('budget', entry.path);
     else readFile(reading, entry, input, context);

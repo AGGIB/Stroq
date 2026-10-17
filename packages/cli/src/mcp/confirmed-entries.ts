@@ -1,9 +1,7 @@
 import { resolve } from 'node:path';
+import { isRecord } from '../adapters/tool-input.js';
 import { readPassportLock } from '../install/lock-reader.js';
 import { passportsFileIn, stroqHome } from '../paths.js';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * What `add --kind mcp` wrote for each server it confirmed in this config file, by name, taken from the lock and
