@@ -18,6 +18,7 @@ import { posix } from 'node:path';
 import { inNodeModules } from '../path-names.js';
 import { textOf } from '../text-of.js';
 import type { ArtifactKind, Tree, TreeEntry } from '../types.js';
+import { RUNS_TEXT_MODULES } from './code-loading-registry.js';
 import { Findings } from './findings.js';
 import { buildInput, type InspectInput } from './input.js';
 import {
@@ -37,8 +38,6 @@ const SCAN_BUDGET_BYTES = 24 * 1024 * 1024;
 const NODE_FILE = /\.(?:js|mjs|cjs)$/i;
 /** The extensions that Node loads as code or data without a loader. A `.json` is data and loads nothing. */
 const LOADED_BY_NODE: ReadonlySet<string> = new Set(['.js', '.mjs', '.cjs', '.json']);
-/** Modules of Node that run code from text. */
-const RUNS_TEXT: ReadonlySet<string> = new Set(['vm', 'node:vm']);
 
 /** What a reading could not settle in a file, beyond what the scanner says of its text. */
 export type ImportsConcern = Concern | 'loader' | 'outside' | 'unreadable' | 'budget';
@@ -47,7 +46,7 @@ export const CONCERN_PHRASES: Readonly<Record<ImportsConcern, string>> = {
   doubt: 'its text could not be read with certainty',
   computed: 'it requests a module by a name built at run time, or uses require as a value',
   'dynamic-code':
-    'it loads or builds code in a way that has no module name in the text (createRequire, process.binding, eval, new Function, vm)',
+    'it loads or builds code in a way that has no module name in the text (createRequire, process.binding, eval, new Function, vm, a node started with a script as text, a file written and then loaded)',
   escaped: 'it writes a module name with escapes',
   loader:
     'it loads a file that Node runs natively or through a loader (.node, .wasm, .ts, a file with no extension)',
@@ -196,9 +195,9 @@ function readSpecifier(
   input: InspectInput,
   context: Context,
 ): void {
-  if (RUNS_TEXT.has(specifier))
+  if (RUNS_TEXT_MODULES.has(specifier))
     return reading.note('dynamic-code', path, {
-      reason: 'loads the vm module, which runs code from text',
+      reason: `loads the ${specifier.replace(/^node:/, '')} module, which runs code from text`,
     });
   switch (classifySpecifier(specifier)) {
     case 'absolute':

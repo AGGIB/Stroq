@@ -34,6 +34,8 @@ interface Snippet {
   readonly alsoAsJs?: true;
   /** Syntax that only some versions of Node parse: where this one does not, Node asks for nothing. */
   readonly needs?: 'source' | 'defer';
+  /** Node's hooks cannot see what the snippet loads (another process, a vm), so the reader must flag it all the same. */
+  readonly mustFlag?: true;
 }
 
 const script = (name: string, code: string, asks: readonly string[] = [NAME]): Snippet => ({
@@ -226,6 +228,96 @@ const SNIPPETS: readonly Snippet[] = [
     "require('vm').runInThisContext(\"process.mainModule.require('zzpkg')\")",
     [],
   ),
+  // The same machinery reached by another name, a string built in pieces, or another route to the same object.
+  script(
+    'eval through an alias of the global object',
+    'var g = globalThis; g.eval("process.mainModule.require(\'zzpkg\')")',
+  ),
+  script(
+    'eval through an alias of the global object, by a name in pieces',
+    'var g = global; g["ev" + "al"]("process.mainModule.require(\'zzpkg\')")',
+  ),
+  script(
+    'eval picked with Reflect',
+    'Reflect.get(globalThis, "eval")("process.mainModule.require(\'zzpkg\')")',
+  ),
+  script(
+    'eval written with a hex escape in a string',
+    'globalThis["\\x65val"]("process.mainModule.require(\'zzpkg\')")',
+  ),
+  script(
+    'eval written with an escaped identifier',
+    'globalThis.\\u0065val("process.mainModule.require(\'zzpkg\')")',
+  ),
+  script(
+    'a comma expression that gives eval',
+    '(0, eval)("process.mainModule.require(\'zzpkg\')")',
+  ),
+  {
+    ...script(
+      'eval as a tagged template (Node does not evaluate the strings, the reader still flags eval)',
+      "eval`process.mainModule.require('zzpkg')`",
+      [],
+    ),
+    mustFlag: true,
+  },
+  script(
+    'the constructor of a function value',
+    '(function () {}).constructor("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  script(
+    'the constructor of an async function value, by strings',
+    '(async function () {})["constructor"]["constructor"]("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  script(
+    'Function.prototype.constructor',
+    'Function.prototype.constructor("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  script(
+    'the main module through an alias of process',
+    'var p = process; p.mainModule.require("zzpkg")',
+  ),
+  script(
+    'createRequire through the module taken from process',
+    'process.getBuiltinModule("module").createRequire(__filename)("zzpkg")',
+  ),
+  script('require through a comma expression', '(0, require)("zzpkg")'),
+  script('require called with an optional call', 'require?.("zzpkg")'),
+  script('require passed to Reflect.apply', 'Reflect.apply(require, null, ["zzpkg"])'),
+  script('module.require', 'module.require("zzpkg")'),
+  script('require.main.require', 'require.main.require("zzpkg")'),
+  {
+    ...script(
+      'the vm module taken from process',
+      'process.getBuiltinModule("vm").runInThisContext("1")',
+      [],
+    ),
+    mustFlag: true,
+  },
+  {
+    ...script(
+      'node started with text, by name',
+      "require('child_process').spawnSync('node', ['-e', 'require(\"zzpkg\")'])",
+      [],
+    ),
+    mustFlag: true,
+  },
+  {
+    ...script(
+      'a package runner',
+      "require('child_process').spawnSync('npx', ['--no-install', 'zzpkg'], { stdio: 'ignore' })",
+      [],
+    ),
+    mustFlag: true,
+  },
+  {
+    ...script(
+      'a script written and then loaded',
+      "var fs = require('fs'); fs.writeFileSync('zz-gen.cjs', 'module.exports = 1'); require('./zz-gen.cjs')",
+      [],
+    ),
+    mustFlag: true,
+  },
   script(
     'a data: URL that imports',
     'import(\'data:text/javascript,import "zzpkg"\').catch(() => {})',
@@ -264,6 +356,11 @@ const covers = (code: string, name: string): boolean => {
   const found = outsideImportsOfTree(tree);
   return found.concerns.length > 0 || found.modules.includes(packageNameOf(name));
 };
+
+/** Whether the reader says that the file is one it cannot read. */
+const flagged = (code: string): boolean =>
+  outsideImportsOfTree(buildTree([fileEntry('entry.cjs', code)], { complete: true })).concerns
+    .length > 0;
 
 /** The names as a set: Node asks twice for a module that two statements of one file both name. */
 const setOf = (names: readonly string[]): string[] => [...new Set(names)].sort();
@@ -306,6 +403,8 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
       // The reader reports each of them, or flags the file.
       for (const name of names)
         if (!covers(snippet.code, name)) problems.push(`${label}: the reader missed ${name}`);
+      if (snippet.mustFlag === true && !flagged(snippet.code))
+        problems.push(`${label}: the reader did not flag what Node's hooks cannot see`);
       // A row about syntax that this Node does not take still has to be read by the reader.
       if (!supported) expect(covers(snippet.code, NAME), `${label}: read all the same`).toBe(true);
     }

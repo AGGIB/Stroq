@@ -101,6 +101,35 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['a long line after an ambiguous slash', (size) => `x = (a) / ${'b '.repeat(size / 2)}`],
   ['a long run of nested templates', (size) => '`${'.repeat(size / 3)],
   ['a long run of closing braces', (size) => '}'.repeat(size)],
+  // The rules of code-loading.ts: aliases, braces, chains, writers and the strings read as command lines.
+  ['many names set to the global object', (size) => aliasLines(size)],
+  [
+    'many names set to the global object, all the same',
+    (size) => 'a = globalThis;\n'.repeat(size / 16),
+  ],
+  ['many open braces with words in them', (size) => '{ binding, execPath '.repeat(size / 20)],
+  [
+    'many destructurings of process',
+    (size) => 'const { a, binding } = process;\n'.repeat(size / 33),
+  ],
+  ['a long chain of members', (size) => `x${'.a'.repeat(size / 2)}`],
+  ['a long chain of members written as strings', (size) => `x${"['a']".repeat(size / 5)}`],
+  [
+    'many writers with names that are not files',
+    (size) => "fs.writeFile('a.txt', 'b');\n".repeat(size / 27),
+  ],
+  ['a long string of blanks after node', (size) => `x = 'node${' '.repeat(size)}-e'`],
+  ['a long string of words after node', (size) => `x = 'node ${'a '.repeat(size / 2)}-e'`],
+  [
+    'a long string that starts at the root and has no end of script',
+    (size) => `x = '/${'a'.repeat(size)}'`,
+  ],
+  ['many strings of node options', (size) => "a = ['-e', '--eval', '-p'];\n".repeat(size / 28)],
+  [
+    'a long run of Reflect calls on the global object',
+    (size) => 'Reflect.get(globalThis, k);\n'.repeat(size / 28),
+  ],
+  ['a long run of escapes in strings', (size) => `x['${'\\x41'.repeat(size / 4)}']`],
   ['a long run of blank lines then a require', (size) => `${'\n'.repeat(size)}require('a')`],
 ];
 
@@ -108,6 +137,17 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
 function longLines(unit: string, size: number): string {
   const line = `${unit.repeat(Math.floor(4000 / unit.length))}\n`;
   return line.repeat(Math.ceil(size / line.length));
+}
+
+/** Many different names set to the global object, which is where the aliases are capped. */
+function aliasLines(size: number): string {
+  const lines: string[] = [];
+  for (let length = 0, i = 0; length < size; i += 1) {
+    const line = `var a${i} = globalThis;\n`;
+    lines.push(line);
+    length += line.length;
+  }
+  return lines.join('');
 }
 
 function repeatNames(size: number): string {

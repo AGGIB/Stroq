@@ -620,3 +620,67 @@ export function lineOf(text: string, at: number): number {
   for (let i = text.indexOf('\n'); i !== -1 && i < at; i = text.indexOf('\n', i + 1)) line += 1;
   return line;
 }
+
+const SIMPLE_ESCAPES: Readonly<Record<string, string>> = {
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  b: '\b',
+  f: '\f',
+  v: '\v',
+  '0': '\0',
+};
+
+/**
+ * The value of the text of a string token, the way JavaScript reads its escapes: `\x65val` is `eval`, `eval` is
+ * `eval`, `\u{65}val` is `eval`, a backslash before a line break is nothing. Null when an escape is malformed, so that
+ * the caller cannot take it for any name. Single pass and linear; a legacy octal escape is read as the character it
+ * spells, since a name that is written that way is still the name.
+ */
+export function cookString(raw: string): string | null {
+  if (!raw.includes('\\')) return raw;
+  let out = '';
+  let at = 0;
+  while (at < raw.length) {
+    const char = raw[at]!;
+    if (char !== '\\') {
+      out += char;
+      at += 1;
+      continue;
+    }
+    const next = raw[at + 1];
+    if (next === undefined) return null;
+    if (next === 'x') {
+      const hex = raw.slice(at + 2, at + 4);
+      if (!/^[0-9A-Fa-f]{2}$/.test(hex)) return null;
+      out += String.fromCharCode(Number.parseInt(hex, 16));
+      at += 4;
+    } else if (next === 'u') {
+      if (raw[at + 2] === '{') {
+        const close = raw.indexOf('}', at + 3);
+        const hex = close === -1 ? '' : raw.slice(at + 3, close);
+        if (!/^[0-9A-Fa-f]{1,6}$/.test(hex) || Number.parseInt(hex, 16) > 0x10ffff) return null;
+        out += String.fromCodePoint(Number.parseInt(hex, 16));
+        at = close + 1;
+      } else {
+        const hex = raw.slice(at + 2, at + 6);
+        if (!/^[0-9A-Fa-f]{4}$/.test(hex)) return null;
+        out += String.fromCharCode(Number.parseInt(hex, 16));
+        at += 6;
+      }
+    } else if (isLineTerminator(next.charCodeAt(0))) {
+      at += next === '\r' && raw[at + 2] === '\n' ? 3 : 2;
+    } else if (next >= '0' && next <= '7' && next !== '0') {
+      // A legacy octal escape: up to three digits, at most 255.
+      const digits = /^[0-7]{1,3}/.exec(raw.slice(at + 1))![0];
+      const value = Number.parseInt(digits, 8);
+      const used = value > 255 ? digits.length - 1 : digits.length;
+      out += String.fromCharCode(Number.parseInt(digits.slice(0, used), 8));
+      at += 1 + used;
+    } else {
+      out += SIMPLE_ESCAPES[next] ?? next;
+      at += 2;
+    }
+  }
+  return out;
+}

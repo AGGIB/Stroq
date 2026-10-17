@@ -12,7 +12,8 @@
 // treats it as one that may load code from outside its tree. Each concern comes with a reason and a line.
 import { builtinModules } from 'node:module';
 import { WINDOWS_PATH } from '../path-names.js';
-import { LoadingWatch, type Concern } from './code-loading.js';
+import { LoadingWatch, type Concern, type Facts, type Finding } from './code-loading.js';
+import { MODULE_SPECIFIERS, SPAWNING_MODULES } from './code-loading-registry.js';
 import { Lexer, lineOf, type Token } from './js-lexer.js';
 
 export type { Concern } from './code-loading.js';
@@ -48,7 +49,7 @@ interface ClauseState {
 
 type State =
   | { readonly at: 'idle' }
-  | { readonly at: 'require'; readonly guarded: boolean }
+  | { readonly at: 'require'; readonly guarded: boolean; readonly name: string }
   | { readonly at: 'requireMember' }
   | { readonly at: 'resolve' }
   | { readonly at: 'call' }
@@ -78,10 +79,10 @@ const COMPUTED_NAME = [
   'computed',
   'a module is requested by a name that is built at run time',
 ] as const;
-const REQUIRE_VALUE = [
+const requireValue = (name: string): readonly [Concern, string] => [
   'computed',
-  'require is used as a value, so what it loads is not written out',
-] as const;
+  `${name} is used as a value, so what it loads is not written out`,
+];
 const ESCAPED_NAME = ['escaped', 'a module name is written with escapes'] as const;
 
 /** What follows `import` or `export` when it starts a clause that ends in `from 'x'`. */
@@ -142,16 +143,16 @@ function stepRequire(state: State, token: Token): Step | null {
       // of calling it that no later `require(` shows.
       return state.guarded
         ? { state: IDLE, again: true }
-        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
+        : { state: IDLE, concern: requireValue(state.name), again: true };
     case 'requireMember':
       if (isWord(token, 'main')) return { state: IDLE };
       return isWord(token, 'resolve')
         ? { state: { at: 'resolve' } }
-        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
+        : { state: IDLE, concern: requireValue('require'), again: true };
     case 'resolve':
       return isPunct(token, '(')
         ? { state: { at: 'call' } }
-        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
+        : { state: IDLE, concern: requireValue('require'), again: true };
     default:
       return null;
   }
@@ -183,7 +184,12 @@ function stepIdle(token: Token, before: Token | null): Step {
   const member = isPunct(before, '.') || isPunct(before, '?.');
   switch (token.text) {
     case 'require':
-      return { state: { at: 'require', guarded: isWord(before, 'typeof') } };
+      return { state: { at: 'require', guarded: isWord(before, 'typeof'), name: 'require' } };
+    case 'getBuiltinModule':
+      // `process.getBuiltinModule('vm')` hands over a built-in module without an import that names it.
+      return {
+        state: { at: 'require', guarded: isWord(before, 'typeof'), name: 'getBuiltinModule' },
+      };
     case 'import':
       return member ? { state: IDLE } : { state: { at: 'import' } };
     case 'export':
@@ -243,10 +249,12 @@ export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
   }
   const end = watch.end();
   if (end !== null) notes.add(end.concern, end.reason, end.at);
+  for (const fact of factsOf(watch.collected(), found))
+    notes.add(fact.concern, fact.reason, fact.at);
   // The text ended in the middle of something that asks for a module: `require` and a bracket, nothing more.
   if (['call', 'callEnd', 'requireMember', 'resolve'].includes(state.at))
     notes.add('computed', 'the text ends in the middle of a request for a module', text.length);
-  if (state.at === 'require' && !state.guarded) notes.add(...REQUIRE_VALUE, text.length);
+  if (state.at === 'require' && !state.guarded) notes.add(...requireValue(state.name), text.length);
   if (lexer.doubt !== null) notes.add('doubt', lexer.doubt.reason, lexer.doubt.at);
   const list = notes.list(text);
   return {
@@ -254,6 +262,19 @@ export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
     concerns: list.map((note) => note.concern),
     notes: list,
   };
+}
+
+/**
+ * What the facts of the watch mean with the imports of the file. A node option as a string is an option only where a
+ * program is started, and `register` is Node's only where `module` is imported; elsewhere they are ordinary words.
+ */
+function factsOf(facts: Facts, imported: ReadonlySet<string>): Finding[] {
+  const some = (names: ReadonlySet<string>): boolean => [...imported].some((m) => names.has(m));
+  const found: (Finding | undefined)[] = [];
+  if (some(MODULE_SPECIFIERS)) found.push(facts.moduleUse);
+  if (some(SPAWNING_MODULES))
+    found.push(facts.nodeOption, facts.runner, facts.outsideScript, facts.environment);
+  return found.filter((finding): finding is Finding => finding !== undefined);
 }
 
 const BUILTINS: ReadonlySet<string> = new Set(builtinModules);
