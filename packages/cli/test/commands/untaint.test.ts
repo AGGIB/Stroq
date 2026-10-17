@@ -61,6 +61,56 @@ describe('stroq untaint', () => {
     expect(existsSync(provFile('s2'))).toBe(true);
   });
 
+  it('clears the note that provenance was incomplete with --session, for that session only', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await provenance.markIncomplete('s1');
+    await provenance.markIncomplete('s2');
+    expect(await provenance.isIncomplete('s1')).toBe(true);
+
+    expect(await runUntaint(['--session', 's1'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect(await provenance.isIncomplete('s2')).toBe(true);
+  });
+
+  it('clears the note that provenance was incomplete for every session with --all', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await provenance.markIncomplete('s1');
+    await provenance.markIncomplete('s2');
+
+    expect(await runUntaint(['--all'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect(await provenance.isIncomplete('s2')).toBe(false);
+  });
+
+  it('clears legacy and abandoned operation markers with --all', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    await provenance.setPending('s1', true);
+    await provenance.setPending('s1', true, 'crashed-operation');
+    await provenance.setPending('s2', true, 'other-operation');
+
+    expect(await runUntaint(['--all'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect(await provenance.isIncomplete('s2')).toBe(false);
+    expect(existsSync(join(sessionsDir(), `${sessionKey('s1')}.prov.pending.d`))).toBe(false);
+    expect(existsSync(join(sessionsDir(), `${sessionKey('s2')}.prov.pending.d`))).toBe(false);
+  });
+
+  it('clears the note and the taint together for a session that has both', async () => {
+    const provenance = new FileProvenanceStore(sessionsDir());
+    const sessions = new FileSessionStore(sessionsDir());
+    await sessions.markSuspect('s1', src);
+    await provenance.markIncomplete('s1');
+    expect(await provenance.isIncomplete('s1')).toBe(true);
+
+    expect(await runUntaint(['--session', 's1'])).toBe(0);
+
+    expect(await provenance.isIncomplete('s1')).toBe(false);
+    expect((await sessions.get('s1')).taint).toBeNull();
+  });
+
   it('clears every session with --all', async () => {
     const store = new FileSessionStore(sessionsDir());
     await store.markSuspect('s1', src);

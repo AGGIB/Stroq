@@ -94,6 +94,27 @@ describe('stroq why', () => {
     expect(out.lines.join('')).toContain('no audit entry with seq 9');
   });
 
+  it('says provenance was incomplete when that is why a call was asked about', async () => {
+    const log = new AuditLog(auditFile());
+    await log.append({
+      sessionId: 's',
+      phase: 'pre',
+      tool: 'Bash',
+      summary: 'npx evil-helper-fix',
+      classes: ['origin.untrusted'],
+      decision: { effect: 'ask', ruleId: 'ask-origin-untrusted', reason: 'confirm' },
+      provenanceIncomplete: [{ kind: 'pkg', excerpt: 'evil-helper-fix' }],
+    });
+    const out = capture();
+    expect(await runWhy([])).toBe(0);
+    out.restore();
+    const text = out.lines.join('');
+    expect(text).toContain(
+      'because: provenance for this session is incomplete, so the package "evil-helper-fix" could not be ruled out as copied from content the agent read.',
+    );
+    expect(text).not.toContain('no untrusted content was involved');
+  });
+
   it('explains a secret egress denial', async () => {
     const log = new AuditLog(auditFile());
     await log.append({

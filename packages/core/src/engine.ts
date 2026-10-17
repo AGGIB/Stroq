@@ -6,19 +6,20 @@ import { redact, type AuditLog } from './audit/audit-log.js';
 import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
-import { withWayOut } from './policy/way-out.js';
-import { atomsForAction, originClasses } from './provenance/action-atoms.js';
-import { atomHash, extractAtomsDeep } from './provenance/atoms.js';
+import { withIncompleteNote, withWayOut } from './policy/way-out.js';
+import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
+import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
 import {
-  candidatesOfVariants,
-  excerptRedactor,
-  percentDecodedLeniently,
-} from './provenance/excerpt.js';
+  MAX_STORED_CHARS,
+  ProvenanceRecorder,
+  type ProvenanceReading,
+} from './provenance/record.js';
+import { percentDecodedLeniently } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
-import type { ProvenanceInput, ProvenanceStore } from './provenance/store.js';
+import type { ProvenanceStore } from './provenance/store.js';
 import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
-import { scanContent } from './scan/scanner.js';
+import { DEFAULT_MAX_CHARS, scanContent } from './scan/scanner.js';
 import { evaluateScope } from './scope/engine-gate.js';
 import type { ScopeGate } from './scope/types.js';
 import {
@@ -36,6 +37,7 @@ import type {
   Decision,
   PostToolEvent,
   PreToolEvent,
+  ProvenanceGap,
   ProvenanceHit,
   ScanResult,
   SecretHit,
@@ -71,6 +73,12 @@ export interface PreResult {
   readonly taint: Taint | null;
   /** Provenance hits that contributed `origin.*` classes (empty when none). */
   readonly provenance: readonly ProvenanceHit[];
+  /**
+   * The atoms of the call that no record accounts for in a session whose provenance is
+   * incomplete, which is what made it `origin.untrusted` when `provenance` is empty. Absent
+   * when there were none.
+   */
+  readonly provenanceGaps?: readonly ProvenanceGap[];
   /** Known secrets whose values appeared in the arguments (never the values). */
   readonly secrets: readonly SecretHit[];
   /**
@@ -96,6 +104,12 @@ export interface PostResult {
    * suppress the scan verdict or taint above.
    */
   readonly provenanceError: string | null;
+  /**
+   * True when this result left evidence unrecorded (atoms past a cap, text past the characters
+   * read, or a store that failed), so the session now reads as incomplete. Absent for a result
+   * that was not scanned, and false when there is no provenance store to be incomplete.
+   */
+  readonly provenanceIncomplete?: boolean;
   /**
    * True when the scan said suspect and a trusted entry, pinned to these exact bytes
    * from this exact source, stopped it tainting the session. The verdict in `scan` is
@@ -196,7 +210,6 @@ export function scanFieldsForTool(
 const INSTRUCTION_WRITE_THRESHOLD = 0.4;
 
 const CLEAN: ScanResult = { verdict: 'clean', score: 0, matches: [] };
-const MAX_STORED_CHARS = 120;
 
 /** Action classes that send data somewhere: the only ones checked for secret values. */
 const EGRESS_CLASSES: readonly ActionClass[] = [
@@ -209,6 +222,14 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
 ];
 const CANARY_RULE_ID = 'STROQ-CANARY';
 const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
+
+/** What the provenance store knew about the atoms of one proposed action. */
+interface ProvenanceLookup {
+  readonly hits: readonly ProvenanceHit[];
+  /** Atoms with no record, while the session's records are incomplete; empty otherwise. */
+  readonly unrecorded: readonly Atom[];
+}
+const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [] };
 
 /**
  * The secret guard's verdict on one action: the known values found in its arguments,
@@ -324,43 +345,90 @@ export function warningFor(scan: ScanResult, toolName: string, source?: string):
   );
 }
 
-/** The atoms one text of a result holds, and the text they were read from. */
-interface ReadingAtoms {
-  readonly text: string;
-  readonly atoms: readonly Atom[];
+/** A process-local capability for the sequential readings of one logical result. */
+declare const postReadingsBrand: unique symbol;
+export interface PostReadings {
+  readonly [postReadingsBrand]: true;
+}
+
+interface PostReadingsState {
+  identity: { engine: StroqEngine; sessionId: string; toolName: string; cwd: string } | undefined;
+  busy: boolean;
+  closed: boolean;
+  suspect: boolean;
+  pendingOwner: string | undefined;
+  extraReadings: { text: string; unread: boolean }[];
+}
+
+// The capability is passed separately from the event, never accepted from a tool payload.
+// Only objects made here have state; copying or deserialising one cannot recover that state.
+const readingStates = new WeakMap<PostReadings, PostReadingsState>();
+
+/**
+ * Creates one result's reading scope. Its primary (non-extra) post consumes it; abandoning
+ * the scope after a suspect extra leaves that result's pending marker in place.
+ */
+export function createPostReadings(): PostReadings {
+  const readings = Object.freeze({}) as PostReadings;
+  readingStates.set(readings, {
+    identity: undefined,
+    busy: false,
+    closed: false,
+    suspect: false,
+    pendingOwner: undefined,
+    extraReadings: [],
+  });
+  return readings;
 }
 
 /**
- * The atoms of the texts a result is read as, each atom credited to the first text that
- * has it, so an atom several texts hold is one. Every text is read the way `post` has
- * always read its own: normalised, then up to `MAX_ATOMS` atoms from it.
+ * Each reading gets its own extraction cap and its own source for secret redaction. Loss
+ * is accumulated before deduplication: even a reading whose atoms all repeat may be cut.
  */
-function atomsOfReadings(texts: readonly string[]): ReadingAtoms[] {
+function atomsOfReadings(texts: readonly string[]): {
+  readings: ProvenanceReading[];
+  lost: boolean;
+} {
   const seen = new Set<string>();
-  return texts.map((text) => ({
-    text,
-    atoms: extractAtomsDeep(normalizeText(text)).filter((atom) => {
-      const hash = atomHash(atom);
-      if (seen.has(hash)) return false;
-      seen.add(hash);
-      return true;
-    }),
-  }));
+  let lost = false;
+  const readings = texts.map((text) => {
+    const extracted = extractAtomsDeepWithLoss(normalizeText(text));
+    // Hosts clip at this length; an exact-length reading may have lost a suffix too.
+    lost ||= extracted.truncated || text.length >= DEFAULT_MAX_CHARS;
+    return {
+      text,
+      atoms: extracted.atoms.filter((atom) => {
+        const hash = atomHash(atom);
+        if (seen.has(hash)) return false;
+        seen.add(hash);
+        return true;
+      }),
+    };
+  });
+  return { readings, lost };
 }
 
 export class StroqEngine {
-  constructor(private readonly opts: EngineOptions) {}
+  private readonly recorder: ProvenanceRecorder;
+
+  constructor(private readonly opts: EngineOptions) {
+    this.recorder = new ProvenanceRecorder(opts.provenance, opts.secrets);
+  }
 
   private now(): string {
     return (this.opts.now ?? (() => new Date()))().toISOString();
   }
 
-  /** One hit per distinct atom of the proposed action, most recent record wins. */
-  private async findProvenance(event: PreToolEvent): Promise<ProvenanceHit[]> {
+  /**
+   * One hit per distinct atom of the proposed action, most recent record wins. And, when the
+   * session's records are known to be incomplete, the atoms that no record holds: those are
+   * not "never read", they are "cannot say".
+   */
+  private async findProvenance(event: PreToolEvent): Promise<ProvenanceLookup> {
     const store = this.opts.provenance;
-    if (!store) return [];
+    if (!store) return NO_LOOKUP;
     const atoms = atomsForAction(event.toolName, event.toolInput, event.cwd);
-    if (atoms.length === 0) return [];
+    if (atoms.length === 0) return NO_LOOKUP;
     const byHash = new Map(atoms.map((atom) => [atomHash(atom), atom] as const));
     const records = await store.lookup(event.sessionId, [...byHash.keys()]);
     const seen = new Set<string>();
@@ -371,7 +439,11 @@ export class StroqEngine {
       seen.add(record.hash);
       hits.push({ atom, record });
     }
-    return hits;
+    // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
+    const unrecorded = (await store.isIncomplete(event.sessionId))
+      ? [...byHash].filter(([hash]) => !seen.has(hash)).map(([, atom]) => atom)
+      : [];
+    return { hits, unrecorded };
   }
 
   /**
@@ -433,70 +505,6 @@ export class StroqEngine {
   }
 
   /**
-   * The text each atom is stored under, `atoms[i]` at `[i]`: structurally redacted, clipped,
-   * and with every value the secret index knows taken out (see `excerptRedactor` for the
-   * spellings an atom can hold one in). The values are looked up in every form the atoms
-   * were read from. A failing index withholds the excerpt rather than storing it unchecked,
-   * and so does a result that holds too many known values to check.
-   */
-  private async safeExcerpts(event: PostToolEvent, atoms: readonly Atom[]): Promise<string[]> {
-    const clip = (value: string): string => redact(value).slice(0, MAX_STORED_CHARS);
-    const index = this.opts.secrets;
-    if (!index) return atoms.map((atom) => clip(atom.value));
-    try {
-      const matches = await index.lookup(candidatesOfVariants(event.toolResultText), event.cwd);
-      if (matches.length === 0) return atoms.map((atom) => clip(atom.value));
-      const scrub = excerptRedactor(event.toolResultText, matches);
-      if (scrub === null) return atoms.map(() => '[REDACTED:too-many-secrets]');
-      return atoms.map((atom) => clip(scrub(atom)));
-    } catch {
-      return atoms.map(() => '[REDACTED:secret-index-unavailable]');
-    }
-  }
-
-  /**
-   * Persists provenance for `atoms`, never throwing: recording is enrichment,
-   * so a store failure (corrupt state, ENOSPC, lock timeout) must not cost
-   * the caller the scan verdict and taint already computed in `post()`.
-   * Returns the error message on failure, or null on success / no-op.
-   */
-  private async recordProvenance(
-    event: PostToolEvent,
-    summary: string,
-    readings: readonly ReadingAtoms[],
-    suspect: boolean,
-  ): Promise<string | null> {
-    const store = this.opts.provenance;
-    if (!store || readings.every((reading) => reading.atoms.length === 0)) return null;
-    const source = redact(summary).slice(0, MAX_STORED_CHARS);
-    // Each atom's excerpt is scrubbed against the text the atom came from: a credential
-    // echoed in one reading of a result is not in the others, and so not in their index.
-    const inputs: ProvenanceInput[] = [];
-    for (const reading of readings) {
-      const excerpts = await this.safeExcerpts(
-        { ...event, toolResultText: reading.text },
-        reading.atoms,
-      );
-      reading.atoms.forEach((atom, i) =>
-        inputs.push({
-          tool: event.toolName,
-          source,
-          kind: atom.kind,
-          hash: atomHash(atom),
-          excerpt: excerpts[i] ?? '',
-          suspect,
-        }),
-      );
-    }
-    try {
-      await store.record(event.sessionId, inputs);
-      return null;
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  /**
    * Whether the text a write to an instruction file puts there trips a rule, scanned
    * as an instruction file would be when it is read back. Only the new text counts:
    * an Edit's `old_string` is what is being removed, and removing an injection is the
@@ -522,7 +530,9 @@ export class StroqEngine {
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
-    const origin = originClasses(await this.findProvenance(event), classification.classes);
+    const lookup = await this.findProvenance(event);
+    const unverified = floorAtoms(lookup.unrecorded);
+    const origin = originClasses(lookup.hits, classification.classes, unverified);
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
     const injection = classification.classes.includes('config.instructions')
@@ -546,13 +556,19 @@ export class StroqEngine {
       ...(secrets.length > 0 ? (['secret.egress'] as const) : []),
       ...(unscannable ? (['secret.unscannable'] as const) : []),
     ];
-    const policyDecision = withWayOut(
+    const evaluated = withWayOut(
       evaluatePolicy(this.opts.policy, classes, state.taint?.level ?? null),
       this.opts.policy,
       state.taint,
       event.sessionId,
       new Date(this.now()),
     );
+    // With a record in hand the evidence says why. Without one the only reason there is
+    // is that the session lost some, and the decision should not claim more than that.
+    const policyDecision =
+      origin.counted.length === 0 && unverified.length > 0
+        ? withIncompleteNote(evaluated, this.opts.policy, event.sessionId, state.taint !== null)
+        : evaluated;
     const gated = await evaluateScope(this.opts.scope, {
       event,
       classification,
@@ -561,6 +577,7 @@ export class StroqEngine {
     });
     const decision = gated?.decision ?? policyDecision;
     const provenance = origin.counted.map(toEvidence);
+    const gaps = await this.recorder.gaps(unverified, event);
     const summary = await this.safeSummary(
       summarizeInput(event.toolName, event.auditInput ?? event.toolInput),
       event.cwd,
@@ -591,6 +608,7 @@ export class StroqEngine {
       ...(gated === null ? {} : { taskId: gated.taskId, scope: gated.evidence }),
       ...(event.callId === undefined ? {} : { callId: event.callId }),
       ...(provenance.length > 0 ? { provenance } : {}),
+      ...(gaps.length > 0 ? { provenanceIncomplete: gaps } : {}),
       ...(secrets.length > 0 ? { secrets } : {}),
     });
     // A canary value on its way out, or a decoy file opened: either way something the
@@ -615,6 +633,7 @@ export class StroqEngine {
       hosts: classification.hosts,
       taint,
       provenance: origin.counted,
+      ...(gaps.length > 0 ? { provenanceGaps: gaps } : {}),
       secrets,
       signals: injection.timedOut
         ? [...classification.signals, INSTRUCTION_SCAN_CLOCK_SIGNAL]
@@ -622,7 +641,47 @@ export class StroqEngine {
     };
   }
 
-  async post(event: PostToolEvent): Promise<PostResult> {
+  async post(event: PostToolEvent, readings?: PostReadings): Promise<PostResult> {
+    if (readings === undefined) return this.postReading(event);
+    const state = readingStates.get(readings);
+    if (state === undefined) throw new Error('post: invalid result reading scope');
+    const identity = state.identity;
+    if (
+      identity !== undefined &&
+      (identity.engine !== this ||
+        identity.sessionId !== event.sessionId ||
+        identity.toolName !== event.toolName ||
+        identity.cwd !== event.cwd)
+    )
+      throw new Error('post: result reading scope belongs to another result source');
+    if (state.closed || state.busy) throw new Error('post: result reading scope is not open');
+    state.identity ??= {
+      engine: this,
+      sessionId: event.sessionId,
+      toolName: event.toolName,
+      cwd: event.cwd,
+    };
+    state.busy = true;
+    // Consume before the first await: another primary must never settle this owner twice.
+    if (event.extraReading !== true) state.closed = true;
+    try {
+      return await this.postReading(event, state);
+    } catch (err) {
+      // A failed reading abandons the logical result. A later primary must not turn its
+      // pending marker into an apparently complete record after that failure.
+      state.closed = true;
+      throw err;
+    } finally {
+      state.busy = false;
+      // Closed scopes cannot be retried; keep no result payload alive through the capability.
+      if (state.closed) state.extraReadings.length = 0;
+    }
+  }
+
+  private async postReading(
+    event: PostToolEvent,
+    readingsState?: PostReadingsState,
+  ): Promise<PostResult> {
     const call = {
       ...(event.resultFailed === true ? { outcome: 'failed' as const } : {}),
       ...(event.callId === undefined ? {} : { callId: event.callId }),
@@ -669,8 +728,13 @@ export class StroqEngine {
         ...scanFieldsForTool(event.toolName, event.toolResultText),
       },
     );
+    if (event.extraReading === true && readingsState !== undefined)
+      readingsState.extraReadings.push({
+        text: event.toolResultText,
+        unread: event.resultUnread === true,
+      });
     const ruleIds = [...new Set(scan.matches.map((m) => m.ruleId))];
-    // Same derivation as a provenance record's `source` (see recordProvenance):
+    // Same derivation as a provenance record's `source` (see ProvenanceRecorder):
     // structurally redacted and clipped, so a taint source can no more carry a secret
     // into ~/.stroq than a provenance record can.
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
@@ -682,8 +746,7 @@ export class StroqEngine {
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
     // record explaining why.
-    // An extra reading of a result is audited only when it matched: the call that records
-    // the result writes the line every result has.
+    // An extra reading is audited only when it matched; the primary writes the usual line.
     if (event.extraReading !== true || scan.verdict === 'suspect')
       await this.opts.audit.append({
         sessionId: event.sessionId,
@@ -698,16 +761,25 @@ export class StroqEngine {
           ...(trusted ? { trusted } : {}),
         },
       });
-    const state =
-      scan.verdict === 'suspect' && !trusted
-        ? await this.opts.sessions.markSuspect(event.sessionId, {
-            tool: event.toolName,
-            ruleIds,
-            at: this.now(),
-            source,
-          })
-        : await this.opts.sessions.get(event.sessionId);
-    // The call that records a result is the only one that remembers it.
+    const taints = scan.verdict === 'suspect' && !trusted;
+    let pendingOwner = readingsState?.pendingOwner;
+    if (taints) {
+      // The first suspect reading puts the marker down before tainting. All readings of
+      // this logical result share it; an extra alone never takes it off.
+      pendingOwner ??= await this.recorder.begin(event.sessionId);
+      if (readingsState !== undefined) {
+        readingsState.pendingOwner = pendingOwner;
+        readingsState.suspect = true;
+      }
+    }
+    const state = taints
+      ? await this.opts.sessions.markSuspect(event.sessionId, {
+          tool: event.toolName,
+          ruleIds,
+          at: this.now(),
+          source,
+        })
+      : await this.opts.sessions.get(event.sessionId);
     if (event.extraReading === true)
       return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
@@ -717,14 +789,32 @@ export class StroqEngine {
     // Deep, not raw: a tool result the agent is told to "decode and run" hides
     // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
     // them the same way the scanner already does via expandVariants.
-    const readings = atomsOfReadings([event.toolResultText, ...(event.otherReadings ?? [])]);
-    const provenanceError = await this.recordProvenance(
+    const actualExtras = readingsState?.extraReadings ?? [];
+    const extracted = atomsOfReadings([
+      ...new Set([
+        event.toolResultText,
+        ...actualExtras.map((reading) => reading.text),
+        ...(event.otherReadings ?? []),
+      ]),
+    ]);
+    const recorded = await this.recorder.record(
       event,
       summary,
-      readings,
-      (scan.verdict === 'suspect' && !trusted) || event.suspectInAnotherReading === true,
+      extracted.readings,
+      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true,
+      extracted.lost ||
+        event.resultUnread === true ||
+        actualExtras.some((reading) => reading.unread),
+      pendingOwner,
     );
-    const atoms = readings.flatMap((reading) => reading.atoms);
-    return { scan, taint: state.taint, scanned: true, atoms, provenanceError, trusted };
+    return {
+      scan,
+      taint: state.taint,
+      scanned: true,
+      atoms: extracted.readings.flatMap((reading) => reading.atoms),
+      provenanceError: recorded.error,
+      provenanceIncomplete: recorded.incomplete,
+      trusted,
+    };
   }
 }

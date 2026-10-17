@@ -1,4 +1,6 @@
 import {
+  DEFAULT_MAX_CHARS,
+  collectStrings,
   describeEvidence,
   describeSecretHit,
   toEvidence,
@@ -49,7 +51,9 @@ export type ClaudeHookEvent = z.input<typeof ClaudeHookInputSchema>;
 
 export const HIGH_IMPACT_TOOL =
   /^(Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|WebFetch|mcp__)/;
-const MAX_RESULT_CHARS = 200_000;
+// The engine reads a result of exactly this length as possibly cut short here, so every place
+// that clips a result clips at the one number (`DEFAULT_MAX_CHARS`, which the scan reads to).
+const MAX_RESULT_CHARS = DEFAULT_MAX_CHARS;
 
 export interface HookOutput {
   readonly stdout: string;
@@ -138,23 +142,100 @@ function streamsOf(obj: Record<string, unknown>): string | null {
   return parts.join('\n');
 }
 
-function objectToText(obj: Record<string, unknown>): string {
-  if (typeof obj['text'] === 'string') return obj['text'];
+/** The text of a tool result, and whether it had to be serialised because it held none. */
+export interface ResultReading {
+  readonly text: string;
+  readonly serialised: boolean;
+}
+
+const plain = (value: string): ResultReading => ({ text: value, serialised: false });
+
+const MEDIA_KINDS: ReadonlySet<unknown> = new Set(['image', 'audio', 'video']);
+/** How deep a result is looked into for media; a result nested deeper keeps what it holds. */
+const MEDIA_SCAN_DEPTH = 32;
+
+/**
+ * `value` without its media: an object whose `type` is an image, audio or video is reduced to
+ * that kind, and a `base64` field is dropped. What a screenshot returns is its bytes in
+ * base64 (hundreds of thousands of characters for a large one). It is not text anything is
+ * copied from, and it would otherwise be read as text, scanned, and, past the clip, make the
+ * session look as if a result had been cut short.
+ */
+function withoutMedia(value: unknown, depth = 0): unknown {
+  if (depth > MEDIA_SCAN_DEPTH || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1));
+  const record = value as Record<string, unknown>;
+  const kind = record['type'];
+  if (typeof kind === 'string' && MEDIA_KINDS.has(kind)) return { type: kind };
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => key !== 'base64')
+      .map(([key, item]) => [key, withoutMedia(item, depth + 1)]),
+  );
+}
+
+/** The most of the serialised form that is added after the text, and the longest string in it. */
+const JSON_FORM_CHARS = 32_768;
+const JSON_FORM_STRING_CHARS = 2_000;
+
+/** `value` serialised, its long strings cut (their text is read in full beside it), and the whole kept short. */
+const jsonForm = (value: unknown): string =>
+  (
+    JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
+        ? item.slice(0, JSON_FORM_STRING_CHARS)
+        : item,
+    ) ?? ''
+  ).slice(0, JSON_FORM_CHARS);
+
+/**
+ * An object that is none of the shapes above, read as the string values in it, one to a line,
+ * and then as the object serialised. A web fetch's result is such an object (`{bytes, code,
+ * codeText, result, durationMs, url}`), and only serialised it turned every line break in the
+ * page into the two characters backslash and `n`: the patterns that need the start of a line
+ * then missed what the page said. Only the values, though, left out the keys, and about a
+ * hundred rules are written for JSON syntax (a key, a colon, a value); so both are there, the
+ * text first, and the serialised form only as far as the clip leaves room. An object with no
+ * string at all is serialised alone, and said to be.
+ */
+function objectReading(obj: Record<string, unknown>): ResultReading {
+  if (typeof obj['text'] === 'string') return plain(obj['text']);
   const file = fileContentOf(obj);
-  if (file !== null) return file;
+  if (file !== null) return plain(file);
   const streams = streamsOf(obj);
-  if (streams !== null) return streams;
-  if (Array.isArray(obj['content'])) return toolResultToText(obj['content']);
-  return JSON.stringify(obj);
+  if (streams !== null) return plain(streams);
+  if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
+  const readable = withoutMedia(obj);
+  const strings = collectStrings(readable).filter((value) => value !== '');
+  const serialised = jsonForm(readable);
+  if (strings.length === 0) return { text: serialised, serialised: true };
+  const joined = strings.join('\n');
+  const room = MAX_RESULT_CHARS - 1 - joined.length - 1;
+  return plain(room > 0 ? `${joined}\n${serialised.slice(0, room)}` : joined);
+}
+
+export function toolResultReading(result: unknown): ResultReading {
+  if (typeof result === 'string') return plain(clip(result));
+  if (Array.isArray(result)) {
+    const parts = result.map(toolResultReading);
+    return {
+      text: clip(parts.map((part) => part.text).join('\n')),
+      serialised: parts.some((part) => part.serialised),
+    };
+  }
+  if (result && typeof result === 'object') {
+    const reading = objectReading(result as Record<string, unknown>);
+    return { ...reading, text: clip(reading.text) };
+  }
+  return plain(result === undefined || result === null ? '' : String(result));
 }
 
 export function toolResultToText(result: unknown): string {
-  if (typeof result === 'string') return clip(result);
-  if (Array.isArray(result)) return clip(result.map(toolResultToText).join('\n'));
-  if (result && typeof result === 'object')
-    return clip(objectToText(result as Record<string, unknown>));
-  return result === undefined || result === null ? '' : String(result);
+  return toolResultReading(result).text;
 }
+
+/** Tools whose output is prose: a result of one that held no text is not a result Stroq has read. */
+const PROSE_TOOL = /^(WebFetch|WebSearch|Grep)$/;
 
 function preOutput(decision: 'deny' | 'ask', reason: string): HookOutput {
   return {
@@ -206,10 +287,14 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const failed = input.hook_event_name === 'PostToolUseFailure';
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
+  const reading = toolResultReading(response);
   const result = await engine.post({
     ...base,
     ...(failed ? { resultFailed: true as const } : {}),
-    toolResultText: toolResultToText(response),
+    toolResultText: reading.text,
+    ...(reading.serialised && PROSE_TOOL.test(input.tool_name)
+      ? { resultUnread: true as const }
+      : {}),
     // No result field at all is not an empty result: it is a payload shape this
     // adapter does not know, and the audit says so instead of recording a clean scan.
     ...(response === undefined ? { resultMissing: Object.keys(input).sort() } : {}),

@@ -6,6 +6,7 @@ import {
   MAX_SCAN_CHARS,
   SCAN_OVERLAP,
   candidateTokens,
+  candidatesFromText,
   exceedsSecretScan,
 } from '../../src/secrets/candidates.js';
 
@@ -453,5 +454,75 @@ describe('the tools that run a shell command', () => {
     for (const tool of probes)
       expect(tokensOf(tool, send).includes(VALUE), tool).toBe(isShellTool(tool));
     expect(probes.filter(isShellTool)).toEqual(['Bash', 'PowerShell', 'Monitor']);
+  });
+});
+
+// In the JSON an MCP call is read as, a line break or a tab in a string is a backslash and a
+// letter, and splitting on the backslash leaves the next word glued to that letter: the value
+// after "hello\n" was the token "nVALUE". The escapes that stand for white space are read as a
+// space, so the value after one is a token of its own, and the text neither grows nor loses depth.
+describe('candidates of an MCP call whose string holds a line break', () => {
+  const VALUE = 'Zq8xK2mPvL9nR4tY7wB3cD6fG1hJ5kN0';
+
+  it.each([
+    ['a line feed', `hello\n${VALUE}`],
+    ['a tab', `hello\t${VALUE}`],
+    ['a carriage return and a line feed', `hello\r\n${VALUE}`],
+    ['a backspace', `hello\b${VALUE}`],
+    ['a form feed', `hello\f${VALUE}`],
+    ['a vertical tab, which JSON writes as \\u000b', `hello\u000b${VALUE}`],
+    ['a control character, which JSON writes as \\u0001', `hello\u0001${VALUE}`],
+    ['a line feed before more text', `hello\n${VALUE} and the rest`],
+    ['a quote mark', `say "hello"\n${VALUE}`],
+  ])('finds the value after %s', (_name, body) => {
+    expect(tokensOf('mcp__srv__send_message', { body })).toContain(VALUE);
+  });
+
+  it('finds the value in a nested array and object', () => {
+    expect(tokensOf('mcp__srv__send', { rows: [['a', `x\n${VALUE}`]] })).toContain(VALUE);
+    expect(tokensOf('mcp__srv__send', { a: { b: `x\t${VALUE}` } })).toContain(VALUE);
+  });
+
+  it('finds the value however deep the string is nested', () => {
+    const nest = (depth: number, leaf: unknown): unknown =>
+      depth === 0 ? leaf : { next: nest(depth - 1, leaf) };
+    const input = nest(200, `x\n${VALUE}`) as Record<string, unknown>;
+    expect(tokensOf('mcp__srv__send', input)).toContain(VALUE);
+  });
+
+  it('keeps a string of a megabyte and a half scannable, and finds the value in it', () => {
+    const line = 'a line of the file body that is long enough to be a line\n';
+    const body = `${line.repeat(Math.ceil((1.5 * 1024 * 1024) / line.length))}tail\n${VALUE}`;
+    expect(body.length).toBeGreaterThan(1.5 * 1024 * 1024);
+    expect(exceedsSecretScan('mcp__srv__send', { body })).toBe(false);
+    expect(tokensOf('mcp__srv__send', { body })).toContain(VALUE);
+  });
+
+  it('does not make a call longer to scan than the call is', () => {
+    const body = 'one line of the body\n'.repeat(60_000);
+    const input = { body };
+    expect(body.length).toBeGreaterThan(MAX_SCAN_CHARS / 2);
+    expect(exceedsSecretScan('mcp__srv__send', input)).toBe(false);
+  });
+
+  it('reads the candidates of a call with nothing to unescape exactly as before', () => {
+    const plain = { body: `hello ${VALUE}`, rows: [['a', 'b']] };
+    expect(candidateTokens('mcp__srv__send', plain)).toEqual(
+      candidatesFromText(JSON.stringify(plain)),
+    );
+  });
+
+  it('leaves an escaped backslash and an escaped quote as they were', () => {
+    const withBackslash = { path: 'C:\\Users\\dev\\n', secret: `pre\\${VALUE}`, said: 'a "q" b' };
+    expect(candidateTokens('mcp__srv__send', withBackslash)).toEqual(
+      candidatesFromText(JSON.stringify(withBackslash)),
+    );
+  });
+
+  it('still finds a value whose own text holds a backslash by the paths it was found by', () => {
+    const SECRET = 'Ab3dEfGh1jKlMnOpQ\\rStUvWx9';
+    const input = { body: `token ${SECRET} end` };
+    const before = candidatesFromText(JSON.stringify(input)).map((c) => c.token);
+    expect(tokensOf('mcp__srv__send', input)).toEqual(before);
   });
 });

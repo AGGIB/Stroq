@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_CHARS } from '@stroq/core';
 import { isRecord } from '../adapters/tool-input.js';
 import type { ScannedMethod } from './framing.js';
 
@@ -8,8 +9,11 @@ import type { ScannedMethod } from './framing.js';
  * needs to know the split exists. Pure text shaping: no engine call, no I/O.
  */
 
-/** The same bound `toolResultToText` clips a tool result to in the Claude Code adapter. */
-export const MCP_MAX_RESULT_CHARS = 200_000;
+/**
+ * The same bound `toolResultToText` clips a tool result to in the Claude Code adapter: the
+ * engine reads a result of exactly this length as possibly clipped, so the clips share one number.
+ */
+export const MCP_MAX_RESULT_CHARS = DEFAULT_MAX_CHARS;
 
 const clip = (text: string): string => text.slice(0, MCP_MAX_RESULT_CHARS);
 

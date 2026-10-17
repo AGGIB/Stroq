@@ -158,18 +158,28 @@ export interface PostToolEvent extends PreToolEvent {
    */
   readonly resultMissing?: readonly string[];
   /**
+   * Set by an adapter when it could not read text out of the result: a tool that returns
+   * prose gave an object with no string in it, so what was scanned is the object serialised.
+   * Text a pattern needs at the start of a line is not at the start of one there, and atoms
+   * in the result may be missing, so the session is noted as incomplete.
+   */
+  readonly resultUnread?: true;
+  /**
    * This call is one more reading of a result that ANOTHER call to `post` records: the
    * same result as a different text (`stroq mcp --strict` scans several texts of one
    * server result). It is scanned by the same rules and taints the session when it
    * matches, and nothing else: no provenance is recorded for it (the other call does
    * that, once) and no audit line is written unless it matched. Absent, `post` records
-   * and audits every call, as it always has.
+   * and audits every call, as it always has. Callers that use multiple readings should
+   * pass one `createPostReadings()` scope as the separate second argument to `post`, so a
+   * suspect extra and the primary share one pending marker until all readings are recorded.
    */
   readonly extraReading?: true;
   /**
    * Set on the call that records a result when an extra reading of the same result
    * matched: what is remembered of the result is then flagged as suspect, as it would
-   * be had the recorded text matched itself. Absent, only this call's own verdict counts.
+   * be had the recorded text matched itself. A `createPostReadings()` scope also remembers
+   * its suspect extras automatically. Absent both, only this call's own verdict counts.
    */
   readonly suspectInAnotherReading?: true;
   /**
@@ -177,7 +187,8 @@ export interface PostToolEvent extends PreToolEvent {
    * remembered of the result is the atoms of all of them, once each (an atom more than one
    * text holds is one record), each text read as `toolResultText` is: the same cap of
    * atoms per text, and a known secret taken out of an atom's excerpt by the text the atom
-   * came from. Absent, only `toolResultText` is remembered.
+   * came from. A `createPostReadings()` scope automatically includes its scanned extra
+   * texts as well. Absent both, only `toolResultText` is remembered.
    */
   readonly otherReadings?: readonly string[];
 }
@@ -248,6 +259,17 @@ export interface ProvenanceEvidence {
   readonly source: string;
   readonly at: string;
   readonly suspect: boolean;
+}
+
+/**
+ * An atom of a proposed action that no record accounts for, in a session whose records are
+ * known to be incomplete. Where `ProvenanceEvidence` says what a record showed, this says
+ * what no record could: the atom may have been read, and the evidence that would say so is gone.
+ */
+export interface ProvenanceGap {
+  readonly kind: AtomKind;
+  /** Redacted atom value, ≤ 120 chars, for explanations. */
+  readonly excerpt: string;
 }
 
 /** A known secret whose value appeared in an outbound tool call. Never carries the value. */

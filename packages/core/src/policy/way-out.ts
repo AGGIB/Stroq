@@ -47,3 +47,35 @@ export function withWayOut(
     reason: `${decision.reason.replace(/\.$/, '')}.${what} If that was a false positive, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(sessionId)}${trust}`,
   };
 }
+
+/**
+ * A decision that rests only on provenance being incomplete, with that said in its reason.
+ *
+ * Without it the reason is the policy rule's own ("copied from content the agent read"),
+ * which is not what Stroq knows: it has no record that this was read, only a session that
+ * lost some. So the reason says that, and the exact command that starts the session over
+ * with its real id, for the same reason `withWayOut` names one.
+ *
+ * Applied only when the rule that decided fires on `origin.untrusted`: a call denied or
+ * asked for another reason keeps that reason, whatever else is true of the session.
+ *
+ * A tainted session is not sent to `stroq untaint`: it clears the taint and every flagged
+ * record along with the note, which is far more than one unrecorded package is worth. There
+ * the user is left with approving the call.
+ */
+export function withIncompleteNote(
+  decision: Decision,
+  policy: Policy,
+  sessionId: string,
+  tainted: boolean,
+): Decision {
+  if (decision.effect === 'allow' || decision.ruleId === null) return decision;
+  const rule = policy.rules.find((r) => r.id === decision.ruleId);
+  if (rule === undefined || !rule.when.classes.includes('origin.untrusted' satisfies ActionClass))
+    return decision;
+  const incomplete = `${decision.reason.replace(/\.$/, '')}. Stroq's provenance for this session is incomplete (some of what it read is no longer on record), so it cannot rule out that this came from content the agent read.`;
+  const wayOut = tainted
+    ? 'If this is the call you wanted, approve it.'
+    : `If that is a false alarm, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(sessionId)}`;
+  return { ...decision, reason: `${incomplete} ${wayOut}` };
+}

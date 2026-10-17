@@ -3,6 +3,7 @@ import {
   taintSource,
   warningFor,
   type Decision,
+  type PostReadings,
   type ProvenanceHit,
   type SecretHit,
   type StroqEngine,
@@ -219,8 +220,11 @@ export async function scanPostResult(
   event: EngineEvent,
   toolResultText: string,
   reading: PostReading = {},
+  readings?: PostReadings,
 ): Promise<PostOutcome> {
-  const result = await engine.post({ ...event, toolResultText, ...reading });
+  const post = { ...event, toolResultText, ...reading };
+  const result =
+    readings === undefined ? await engine.post(post) : await engine.post(post, readings);
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
   const timedOut = result.scan.timedOut === true ? { timedOut: true } : {};

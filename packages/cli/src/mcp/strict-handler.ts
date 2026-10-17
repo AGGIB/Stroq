@@ -1,3 +1,4 @@
+import { createPostReadings, type PostReadings } from '@stroq/core';
 import { isRecord } from '../adapters/tool-input.js';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
 import {
@@ -270,6 +271,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     entry: TrackedRequest,
     view: ScanView,
     reading: PostReading,
+    readings: PostReadings,
   ): Promise<PostOutcome | WithholdReason> {
     const outcome = await scanPostResult(
       ctx.engine,
@@ -285,6 +287,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       },
       view.text,
       reading,
+      readings,
     );
     if (!outcome.scanned) return 'scan-failed';
     return outcome.timedOut === true ? 'scan-timeout' : outcome;
@@ -316,17 +319,23 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       );
       if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
       const [recorded, ...extras] = views as readonly [ScanView, ...ScanView[]];
+      const readings = createPostReadings();
       const extraOutcomes: PostOutcome[] = [];
       for (const view of extras) {
-        const outcome = await scanView(entry, view, { extraReading: true });
+        const outcome = await scanView(entry, view, { extraReading: true }, readings);
         if (typeof outcome === 'string') return outcome;
         extraOutcomes.push(outcome);
       }
       const matched = extraOutcomes.some((outcome) => outcome.warning !== null);
-      const first = await scanView(entry, recorded, {
-        ...(extras.length === 0 ? {} : { otherReadings: extras.map((view) => view.text) }),
-        ...(matched ? { suspectInAnotherReading: true } : {}),
-      });
+      const first = await scanView(
+        entry,
+        recorded,
+        {
+          ...(extras.length === 0 ? {} : { otherReadings: extras.map((view) => view.text) }),
+          ...(matched ? { suspectInAnotherReading: true } : {}),
+        },
+        readings,
+      );
       if (typeof first === 'string') return first;
       return [first, ...extraOutcomes].find((outcome) => outcome.warning !== null) ?? first;
     } catch (err) {

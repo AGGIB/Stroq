@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Provenance now records when its evidence is incomplete and asks rather than treating the source as clean.** A session notes when a trace record was dropped at the per-session cap, a result held more than the atoms kept or the characters read, a wrapped command ran past the part of a line that is read, a prose tool's result had no text in it, or a write failed. Until `stroq untaint`, a package spec, pipe-to-shell or encoded blob with no record is asked about (`origin.untrusted`); a record still on hand keeps its class, and `stroq why` names the reason.
 - **Harden undo removes empty directories created by apply.** Cleanup preserves the project root, existing or non-empty directories and paths reached through symlinks. A failed first apply also removes an empty manifest; rollback failures preserve the original error. Thanks @Nari-Ab (#189).
 - **Harden recognizes single-dash password flags.** Credential-shaped values under those flags are masked instead of copied into diffs; the parser remains bounded on long input. Thanks @Nari-Ab (#190).
 

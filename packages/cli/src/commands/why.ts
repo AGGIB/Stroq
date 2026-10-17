@@ -3,6 +3,7 @@ import {
   AuditLog,
   FileSessionStore,
   describeEvidence,
+  describeGap,
   describeSecretHit,
   type AuditEntry,
   type SessionState,
@@ -56,9 +57,10 @@ export function wrongCallLines(entry: AuditEntry): string[] {
 
 export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): string {
   const because = (entry.provenance ?? []).map((e) => `  because: ${describeEvidence(e, now)}`);
+  const gapLines = (entry.provenanceIncomplete ?? []).map((g) => `  because: ${describeGap(g)}`);
   const secretLines = (entry.secrets ?? []).map((s) => `  because: ${describeSecretHit(s)}`);
   const fallback =
-    because.length === 0 && secretLines.length === 0 && !state.taint
+    because.length === 0 && gapLines.length === 0 && secretLines.length === 0 && !state.taint
       ? ['  because: the action itself matches the rule; no untrusted content was involved']
       : [];
   return `${[
@@ -66,6 +68,7 @@ export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): st
     `  action:  ${entry.summary}`,
     `  verdict: ${verdictLine(entry)}`,
     ...because,
+    ...gapLines,
     ...secretLines,
     ...fallback,
     ...taintLines(state),

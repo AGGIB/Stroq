@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, open, readFile, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { ActionClass, Decision, ProvenanceEvidence, SecretHit } from '../types.js';
+import type {
+  ActionClass,
+  Decision,
+  ProvenanceEvidence,
+  ProvenanceGap,
+  SecretHit,
+} from '../types.js';
 import type { ScopeEvidence } from '../scope/types.js';
 import { withLock } from '../util/lock.js';
 
@@ -47,6 +53,12 @@ export interface AuditEntryInput {
   };
   /** Provenance evidence that contributed `origin.*` classes to `decision`. */
   readonly provenance?: readonly ProvenanceEvidence[];
+  /**
+   * Atoms of the action that no record accounts for while the session's provenance was
+   * incomplete: why the action is treated as possibly copied from content the agent read
+   * when there is no record that says so.
+   */
+  readonly provenanceIncomplete?: readonly ProvenanceGap[];
   /** Known secrets whose values appeared in the arguments (names and sources only). */
   readonly secrets?: readonly SecretHit[];
   /** Cloak substitutions this message carried (kinds and placeholders only). */

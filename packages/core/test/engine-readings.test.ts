@@ -166,6 +166,8 @@ describe('the call that records a result, given the texts of its other readings'
   /** Keeps what the engine would write to ~/.stroq/provenance, so a test can read it. */
   function recorder(): { store: ProvenanceStore; recorded: ProvenanceInput[] } {
     const recorded: ProvenanceInput[] = [];
+    let incomplete = false;
+    const pending = new Set<string>();
     return {
       recorded,
       store: {
@@ -173,7 +175,18 @@ describe('the call that records a result, given the texts of its other readings'
           recorded.push(...inputs);
         },
         lookup: async () => [],
-        clear: async () => {},
+        clear: async () => {
+          incomplete = false;
+          pending.clear();
+        },
+        isIncomplete: async () => incomplete || pending.size > 0,
+        markIncomplete: async () => {
+          incomplete = true;
+        },
+        setPending: async (_session, active, owner = 'legacy') => {
+          if (active) pending.add(owner);
+          else pending.delete(owner);
+        },
       },
     };
   }
