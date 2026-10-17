@@ -4,6 +4,7 @@ import { initMcp } from '../../src/commands/init-mcp.js';
 import { addMcp } from '../../src/install/mcp-install.js';
 import { configPinStatus } from '../../src/mcp/pin-status.js';
 import { reconfirmCommand } from '../../src/mcp/pin-argument.js';
+import { unprintableSentence } from '../../src/shell-quote.js';
 import { mcpFixture } from '../helpers/mcp-install.js';
 
 /**
@@ -123,7 +124,6 @@ describe('the command that confirms a wrapper again', () => {
   });
 
   it.each([
-    ["it's", "stroq add 'it'\\''s' --kind mcp --force"],
     ['a b', "stroq add 'a b' --kind mcp --force"],
     ['$(touch x)', "stroq add '$(touch x)' --kind mcp --force"],
   ])('quotes %j for a shell', (name, line) => {
@@ -131,15 +131,18 @@ describe('the command that confirms a wrapper again', () => {
   });
 
   it.each([
-    ['a\nb', '<unprintable-name>'],
-    ['a\u001b[2Jb', '<unprintable-name>'],
-    ['a\u202eb', '<unprintable-name>'],
-    ['x'.repeat(5000), '<name-too-long>'],
-  ])('does not print %j as a command or let it move the terminal', (name, shown) => {
+    ['a quote', "it's"],
+    ['a backslash', 'a\\b'],
+    ['a bang', 'a!b'],
+    ['a newline', 'a\nb'],
+    ['escape', 'a\u001b[2Jb'],
+    ['a right-to-left override', 'a\u202eb'],
+    ['too many characters', 'x'.repeat(5000)],
+  ])('prints no command for a name with %s, only a sentence', (_what, name) => {
     const text = reconfirmCommand(name);
 
-    expect(text).toBe(`stroq add ${shown} --kind mcp --force`);
-    expect(text).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
+    expect(text).toBe(unprintableSentence('name'));
+    expect(text).toMatch(/^[A-Za-z ,.]+$/);
   });
 
   it('prints the empty name as an empty argument', () => {

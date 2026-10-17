@@ -97,7 +97,6 @@ describe('the screen a person types a digest against', () => {
   it.each([
     ['/src/$(touch x)', `'/src/$(touch x)'`],
     ['/src/`id`', "'/src/`id`'"],
-    ["/src/it's", `'/src/it'\\''s'`],
     ['/src/a;b', `'/src/a;b'`],
   ])(
     'quotes the source %s so that a shell reads it as one word and runs nothing',
@@ -119,6 +118,19 @@ describe('the screen a person types a digest against', () => {
       `SENSITIVE (${CONFIRM_SENSITIVE_MAX})`,
     );
   });
+
+  it.each(["/src/it's", '/src/a\\b', '/src/a!b', '/src/a\nb'])(
+    'prints no command for the source %j, only a sentence',
+    (source) => {
+      const passport = passportWith(
+        many(CONFIRM_SENSITIVE_MAX + 1, (i) => ({ subject: `s${i}`, sensitive: true })),
+      );
+
+      expect(() => confirmationScreen(passport, source)).toThrow(
+        /the path has characters that cannot be quoted safely for a shell, so no command is shown$/,
+      );
+    },
+  );
 
   it('writes a source that holds a control character out in the refusal, never raw', () => {
     const passport = passportWith(

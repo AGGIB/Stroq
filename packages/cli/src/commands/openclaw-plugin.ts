@@ -157,7 +157,9 @@ export const openclawInstallCommands = (dir: string): readonly string[] =>
   openclawInstallArgv(dir).map((argv) =>
     commandLine([
       OPENCLAW_BIN,
-      ...argv.map((word, i): Piece => (argv[i - 1] === '--link' ? { word, what: 'path' } : word)),
+      ...argv.map((word, i): Piece =>
+        argv[i - 1] === '--link' ? { positional: word, what: 'path' } : word,
+      ),
     ]),
   );
 

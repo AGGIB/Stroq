@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 import { unknownOption } from '../../src/help.js';
 import { readPassports } from '../../src/install/lock.js';
 import { addMcp, removeMcp, type McpInstallOptions } from '../../src/install/mcp-install.js';
-import { mcpRemedy, skillRemedy } from '../../src/install/remedy.js';
+import { mcpRemedy, mcpRemedyCommands, skillRemedy } from '../../src/install/remedy.js';
 import { addSkill } from '../../src/install/skill-install.js';
 import { storePath } from '../../src/install/store.js';
+import { unprintableSentence } from '../../src/shell-quote.js';
 import { mcpFixture, mcpServer } from '../helpers/mcp-install.js';
 import { setup } from '../helpers/skill-install.js';
 
@@ -89,7 +90,7 @@ function mcpOptionsOf(argv: string[], base: McpInstallOptions) {
 async function damagedServer(over: { folder?: string; passEnv?: string[]; cwd?: string } = {}) {
   const f = await mcpFixture();
   const dir = over.folder === undefined ? f.dir : await mcpServer(f.root, {}, {}, over.folder);
-  const config = join(f.root, 'my configs', "it's here.json");
+  const config = join(f.root, 'my configs', 'it here.json');
   await mkdir(dirname(config), { recursive: true });
   await writeFile(config, JSON.stringify({ mcpServers: {} }));
   const options = {
@@ -153,14 +154,15 @@ describe('an MCP server whose stored copy is damaged', () => {
     expect(((failure as Error).cause as Error).message).not.toBe('');
   });
 
-  it('prints a path with a control character in the lock as a placeholder, never as itself', async () => {
+  it('prints no command for a path with a control character in the lock, only a sentence', async () => {
     const { failure } = await damagedServer({ folder: 'srv\u001b[2J\u202e' });
     const message = (failure as Error).message;
 
     expect(message).not.toMatch(
       /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/,
     );
-    expect(message).toContain('stroq add <unprintable-path> --kind mcp');
+    expect(message).toContain(unprintableSentence('path'));
+    expect(message).not.toContain('stroq add');
     expect(message).not.toContain('[2J');
   });
 });
@@ -187,11 +189,24 @@ describe('the commands for an MCP record', () => {
     const line = mcpRemedy('demo', {
       ...record,
       passEnv: ['A', 'B'],
-      cwd: "/my dir/it's",
+      cwd: '/my dir/it here',
     });
 
     expect(line).toContain('--pass-env A,B');
-    expect(line).toContain(`--cwd '/my dir/it'\\''s'`);
+    expect(line).toContain(`--cwd '/my dir/it here'`);
+  });
+});
+
+describe('the commands for an MCP record with a character that cannot be quoted', () => {
+  it('are one sentence and no command: a quote in a path is not quoted around', () => {
+    const commands = mcpRemedyCommands('demo', {
+      source: "/src/it's",
+      config: '/c.json',
+      entrypoint: 'a.js',
+      passEnv: [],
+    });
+
+    expect(commands).toEqual([unprintableSentence('path')]);
   });
 });
 

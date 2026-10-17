@@ -6,7 +6,7 @@
 // skill in the same scope. They are text for a person to read and paste, and everything that comes from the lock goes
 // through `commandLine`, since a path in a lock is not trusted text.
 import { resolve } from 'node:path';
-import { commandLine, quoteWord } from '../shell-quote.js';
+import { quoteWord, tryCommandLine, unprintableSentence } from '../shell-quote.js';
 
 /** What of an MCP record the commands need. */
 export interface McpRemedyRecord {
@@ -27,12 +27,21 @@ export interface SkillRemedyPlace {
   readonly project: string;
 }
 
+type Printed = ReturnType<typeof tryCommandLine>;
+
+/**
+ * The two commands, or one element with the sentence that says why there is none: a command that cannot be printed
+ * safely is not printed with a stand-in, and the other one is not printed alone.
+ */
+function bothOrSentence(first: Printed, second: Printed): readonly string[] {
+  for (const printed of [first, second])
+    if (printed.line === null) return [unprintableSentence(printed.unprintable)];
+  return [first.line!, second.line!];
+}
+
 /** `stroq remove <name> --kind mcp --force` and `stroq add <source> --kind mcp` with what the record holds. */
-export function mcpRemedyCommands(
-  name: string,
-  record: McpRemedyRecord,
-): readonly [remove: string, add: string] {
-  const remove = commandLine([
+export function mcpRemedyCommands(name: string, record: McpRemedyRecord): readonly string[] {
+  const remove = tryCommandLine([
     'stroq',
     'remove',
     { positional: name, what: 'name' },
@@ -40,7 +49,7 @@ export function mcpRemedyCommands(
     'mcp',
     '--force',
   ]);
-  const add = commandLine([
+  const add = tryCommandLine([
     'stroq',
     'add',
     { positional: record.source, what: 'path' },
@@ -56,7 +65,7 @@ export function mcpRemedyCommands(
       ? []
       : [{ flag: '--cwd', value: record.cwd, what: 'path' } as const]),
   ]);
-  return [remove, add];
+  return bothOrSentence(remove, add);
 }
 
 /** The two commands for a server, as one sentence. */
@@ -68,17 +77,17 @@ export function skillRemedyCommands(
   name: string,
   record: SkillRemedyRecord,
   place: SkillRemedyPlace,
-): readonly [remove: string, add: string] {
+): readonly string[] {
   const user = resolve(record.root) === resolve(place.home);
-  return [
-    commandLine(['stroq', 'remove', { positional: name, what: 'name' }, '--force']),
-    commandLine([
+  return bothOrSentence(
+    tryCommandLine(['stroq', 'remove', { positional: name, what: 'name' }, '--force']),
+    tryCommandLine([
       'stroq',
       'add',
       { positional: record.source, what: 'path' },
       ...(user ? ['--user'] : []),
     ]),
-  ];
+  );
 }
 
 /** The two commands for a skill, as one sentence; a skill of another project is added from that project's folder. */
@@ -89,6 +98,9 @@ export function skillRemedy(
 ): string {
   const root = resolve(record.root);
   const elsewhere = root !== resolve(place.home) && root !== resolve(place.project);
-  const [remove, add] = skillRemedyCommands(name, record, place);
-  return `${remove}, then ${elsewhere ? `from the folder ${quoteWord(root, 'path')} ` : ''}${add}`;
+  const commands = skillRemedyCommands(name, record, place);
+  if (commands.length !== 2) return commands.join(', then ');
+  const folder = elsewhere ? quoteWord(root) : '';
+  if (folder === null) return unprintableSentence('path');
+  return `${commands[0]}, then ${elsewhere ? `from the folder ${folder} ` : ''}${commands[1]}`;
 }

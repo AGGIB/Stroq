@@ -6,7 +6,7 @@
 // author wrote and a README is where it would be believed. The name is the one string that comes from the
 // artifact, and it is made safe (one line, no control character, cut) and put in a code span that it
 // cannot close.
-import { commandLine, type Piece } from '../shell-quote.js';
+import { tryCommandLine, type Piece } from '../shell-quote.js';
 import { failedReadings } from '../install/inspect/index.js';
 import type { Passport } from '../install/types.js';
 import { isPlatformDependent } from './vet-render.js';
@@ -20,10 +20,15 @@ const code = (text: string): string => `\`${text.replaceAll('`', "'")}\``;
 
 /**
  * A command to paste, for Markdown: the values in it come from the passport, which may have been written by
- * somebody else, so they are quoted for a shell and a value with a backtick (which could end the code span) is a
- * placeholder.
+ * somebody else, so they are quoted for a shell, and a value that cannot be (or that holds a backtick, which could
+ * end the code span) leaves no command at all.
  */
-const command = (pieces: readonly Piece[]): string => code(commandLine(pieces, { forbid: '`' }));
+const command = (pieces: readonly Piece[]): string => {
+  const printed = tryCommandLine(pieces, { forbid: '`' });
+  return printed.line === null
+    ? 'not shown, because the source has characters that cannot be quoted safely for a shell'
+    : code(printed.line);
+};
 
 /** The command that gives the same digest, or why there is none where the digest depends on the platform. */
 function reproduceLine(passport: Passport): string {
