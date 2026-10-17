@@ -45,6 +45,19 @@ function expectWithheld(rig: Rig, answer: Record<string, unknown>, reason: strin
   expect(audited).not.toContain(POISON_HOST);
 }
 
+/** Newer V8 versions serialize this fixture iteratively, so its default fallback cannot occur. */
+function deepJsonOverflowsSerialisation(): boolean {
+  const depth = 60_000; // Match the deepjson fixture in strict-server.mjs.
+  const value: unknown = JSON.parse(`${'['.repeat(depth)}${']'.repeat(depth)}`);
+  try {
+    JSON.stringify(value);
+    return false;
+  } catch (error) {
+    if (error instanceof RangeError) return true;
+    throw error;
+  }
+}
+
 describe('a result larger than the proxy parses (8 MiB)', () => {
   it('is forwarded whole and unscanned by default', async () => {
     const rig = await defaultRun('big');
@@ -139,7 +152,7 @@ describe('a JSON-RPC error that carries text', () => {
 });
 
 describe('a result Stroq cannot finish reading (nesting that overflows serialisation)', () => {
-  it('is forwarded unscanned by default', async () => {
+  it.skipIf(!deepJsonOverflowsSerialisation())('is forwarded unscanned by default', async () => {
     const rig = await defaultRun('deepjson');
     await rig.answerFor(3);
     // The raw line: the parsed value is too deep for the test to serialise either.
