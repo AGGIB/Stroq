@@ -4,17 +4,31 @@
 // agent follows, so one added sentence in `SKILL.md` is the whole change, and a server that gains one
 // `net.connect` has the same passport as before. So each changed text file is shown as a diff against the
 // version in the store: removed lines marked `-`, added lines marked `+`, no context. The view is bounded
-// (40 lines of one file, 200 in all) and says how many lines it did not show, and every line goes through
-// the same helper as the passport screen, so a control or direction character in a changed line is written
-// out and cannot act on the terminal.
+// (40 lines of one file, 200 in all, 20,000 characters in all) and says how many lines it did not show, and
+// every line goes through the same helper as the passport screen, so a control or direction character in a
+// changed line is written out and cannot act on the terminal.
+//
+// A long line is not cut at its start: one sentence added to a paragraph of 300 characters would be past any
+// cut that keeps a screen readable. A removed line and the added line that replaces it are compared, and what
+// is shown is the part that differs, with a little of the text on each side and `\u2026` where unchanged text was
+// left out. A part that is still longer than 2,000 characters is cut, and the last line says so; the words
+// "every changed line is shown" are said only when nothing was left out and nothing was cut.
 import { lineText } from '../commands/vet-text.js';
 import { changedFiles } from './material.js';
 import type { Tree, TreeEntry } from './types.js';
 
 export const DIFF_LINES_PER_FILE = 40;
 export const DIFF_LINES_TOTAL = 200;
-const LINE_MAX = 160;
 const PATH_MAX = 260;
+/** A row is wrapped at this width. */
+const WRAP = 160;
+/** How much of a changed part of a line is shown; a longer part is cut and counted. */
+const SPAN_MAX = 2000;
+/** The unchanged text kept on each side of the changed part of a line. */
+const CONTEXT = 30;
+/** All the characters of changed lines one update shows. */
+const CHARS_TOTAL = 20_000;
+const ELLIPSIS = '\u2026';
 /** A text file over this is named and not compared. */
 const TEXT_MAX_BYTES = 1024 * 1024;
 /** The table of one comparison, in cells (lines of one file times lines of the other, after the common ends are cut). */
@@ -26,6 +40,8 @@ const NEWLINE = 0x0a;
 interface Row {
   readonly mark: '+' | '-';
   readonly text: string;
+  /** Rows of one run of changes between lines that are the same: a removed line is paired with an added one. */
+  readonly hunk: number;
 }
 
 interface Compared {
@@ -59,7 +75,7 @@ function contentOf(entry: TreeEntry | undefined): Content {
 }
 
 const marked = (mark: Row['mark'], lines: readonly string[], room: number): Row[] =>
-  lines.slice(0, Math.max(0, room)).map((text) => ({ mark, text }));
+  lines.slice(0, Math.max(0, room)).map((text) => ({ mark, text, hunk: 0 }));
 
 /** Cuts the lines both versions start and end with, and compares what is left. */
 function compare(
@@ -105,22 +121,27 @@ function walk(x: readonly string[], y: readonly string[], room: number): Compare
   let total = 0;
   let i = 0;
   let j = 0;
-  const push = (row: Row): void => {
+  let hunk = 0;
+  let changing = false;
+  const push = (mark: Row['mark'], text: string): void => {
     total += 1;
-    if (rows.length < room) rows.push(row);
+    changing = true;
+    if (rows.length < room) rows.push({ mark, text, hunk });
   };
   while (i < x.length || j < y.length) {
     if (i < x.length && j < y.length && x[i] === y[j]) {
+      if (changing) hunk += 1;
+      changing = false;
       i += 1;
       j += 1;
     } else if (
       j >= y.length ||
       (i < x.length && (common[(i + 1) * width + j] ?? 0) >= (common[i * width + j + 1] ?? 0))
     ) {
-      push({ mark: '-', text: x[i] ?? '' });
+      push('-', x[i] ?? '');
       i += 1;
     } else {
-      push({ mark: '+', text: y[j] ?? '' });
+      push('+', y[j] ?? '');
       j += 1;
     }
   }
@@ -137,7 +158,95 @@ const execNote = (before: TreeEntry | undefined, after: TreeEntry | undefined): 
 
 interface FileView {
   readonly lines: string[];
+  /** Diff lines left out: more than the room, more than the characters, or a file that was not compared. */
   readonly hidden: number;
+  /** Diff lines shown with their changed part cut. */
+  readonly cut: number;
+  /** Diff lines shown. */
+  readonly shown: number;
+}
+
+interface Budget {
+  cells: number;
+  chars: number;
+}
+
+/** The common start and end of two strings, never inside a surrogate pair. */
+function commonEnds(a: string, b: string): { start: number; end: number } {
+  const most = Math.min(a.length, b.length);
+  let start = 0;
+  while (start < most && a.charCodeAt(start) === b.charCodeAt(start)) start += 1;
+  if (start > 0 && (a.charCodeAt(start - 1) & 0xfc00) === 0xd800) start -= 1;
+  let end = 0;
+  while (
+    end < most - start &&
+    a.charCodeAt(a.length - 1 - end) === b.charCodeAt(b.length - 1 - end)
+  )
+    end += 1;
+  if (end > 0 && (a.charCodeAt(a.length - end) & 0xfc00) === 0xdc00) end -= 1;
+  return { start, end };
+}
+
+/** What of a line is shown: the part that differs from its partner, with some of the text around it. */
+function windowOf(text: string, partner: string | null): { shown: string; cut: boolean } {
+  const { start, end } = partner === null ? { start: 0, end: 0 } : commonEnds(text, partner);
+  const span = text.slice(start, text.length - end);
+  const lead =
+    start > CONTEXT ? `${ELLIPSIS}${text.slice(start - CONTEXT, start)}` : text.slice(0, start);
+  if (span.length > SPAN_MAX)
+    return { shown: `${lead}${span.slice(0, SPAN_MAX)}${ELLIPSIS}`, cut: true };
+  const rest = text.slice(text.length - end);
+  const trail = rest.length > CONTEXT ? `${rest.slice(0, CONTEXT)}${ELLIPSIS}` : rest;
+  return { shown: `${lead}${span}${trail}`, cut: false };
+}
+
+/** The partner of each row: the nth removed line of a run of changes is paired with the nth added one. */
+function partners(rows: readonly Row[]): (string | null)[] {
+  const byHunk = new Map<number, { removed: number[]; added: number[] }>();
+  rows.forEach((row, at) => {
+    const group = byHunk.get(row.hunk) ?? { removed: [], added: [] };
+    (row.mark === '-' ? group.removed : group.added).push(at);
+    byHunk.set(row.hunk, group);
+  });
+  const out: (string | null)[] = rows.map(() => null);
+  for (const { removed, added } of byHunk.values()) {
+    removed.forEach((at, n) => {
+      const other = added[n];
+      if (other !== undefined) {
+        out[at] = rows[other]?.text ?? null;
+        out[other] = rows[at]?.text ?? null;
+      }
+    });
+  }
+  return out;
+}
+
+/** A neutralised line cut into rows of the width of a screen; the continuation rows have no mark. */
+function wrapped(mark: string, text: string): string[] {
+  const rows: string[] = [];
+  for (let at = 0; at < Math.max(text.length, 1); at += WRAP)
+    rows.push(`${at === 0 ? `    ${mark} ` : '      '}${text.slice(at, at + WRAP)}`);
+  return rows;
+}
+
+function renderRows(
+  rows: readonly Row[],
+  budget: Budget,
+): Omit<FileView, 'hidden'> & { dropped: number } {
+  const pair = partners(rows);
+  const lines: string[] = [];
+  let cut = 0;
+  let shown = 0;
+  rows.forEach((row, at) => {
+    const view = windowOf(row.text, pair[at] ?? null);
+    const text = lineText(view.shown, 12 * SPAN_MAX);
+    if (text.length > budget.chars) return;
+    budget.chars -= text.length;
+    lines.push(...wrapped(row.mark, text));
+    shown += 1;
+    if (view.cut) cut += 1;
+  });
+  return { lines, cut, shown, dropped: rows.length - shown };
 }
 
 function viewFile(
@@ -146,30 +255,38 @@ function viewFile(
   before: TreeEntry | undefined,
   after: TreeEntry | undefined,
   room: number,
-  cells: { left: number },
+  budget: Budget,
 ): FileView {
-  const lines = [`  ${change} ${lineText(path, PATH_MAX)}`, ...execNote(before, after)];
+  const head = [`  ${change} ${lineText(path, PATH_MAX)}`, ...execNote(before, after)];
   const old = contentOf(before);
   const next = contentOf(after);
-  if (old.kind === 'binary' || next.kind === 'binary') {
-    return { lines: [...lines, '    (not text: not compared)'], hidden: 0 };
-  }
+  if (old.kind === 'binary' || next.kind === 'binary')
+    return { lines: [...head, '    (not text: not compared)'], hidden: 0, cut: 0, shown: 0 };
   if (old.kind === 'large' || next.kind === 'large') {
     const count = (c: Exclude<Content, { kind: 'binary' }>): number =>
       c.kind === 'large' ? c.lines : c.lines.length;
     return {
-      lines: [...lines, `    (over ${TEXT_MAX_BYTES} bytes: not compared)`],
+      lines: [...head, `    (over ${TEXT_MAX_BYTES} bytes: not compared)`],
       hidden: count(old) + count(next),
+      cut: 0,
+      shown: 0,
     };
   }
+  const cells = { left: budget.cells };
   const { rows, total } = compare(
     old.lines,
     next.lines,
     Math.min(room, DIFF_LINES_PER_FILE),
     cells,
   );
-  const shown = rows.map((row) => `    ${row.mark} ${lineText(row.text, LINE_MAX)}`);
-  return { lines: [...lines, ...shown], hidden: total - rows.length };
+  budget.cells = cells.left;
+  const drawn = renderRows(rows, budget);
+  return {
+    lines: [...head, ...drawn.lines],
+    hidden: total - rows.length + drawn.dropped,
+    cut: drawn.cut,
+    shown: drawn.shown,
+  };
 }
 
 /**
@@ -182,20 +299,36 @@ export function updateDiffLines(before: Tree, after: Tree): string[] {
   const next = new Map(after.entries.map((entry) => [entry.path, entry]));
   const files = changedFiles(before, after);
   if (files.length === 0) return [];
-  const cells = { left: CELLS_TOTAL };
+  const budget: Budget = { cells: CELLS_TOTAL, chars: CHARS_TOTAL };
   let room = DIFF_LINES_TOTAL;
   let hidden = 0;
+  let cut = 0;
   const out: string[] = [];
   for (const { path, change } of files) {
-    const view = viewFile(change, path, old.get(path), next.get(path), room, cells);
+    const view = viewFile(change, path, old.get(path), next.get(path), room, budget);
     out.push(...view.lines);
-    room -= view.lines.filter((line) => /^ {4}[+-] /.test(line)).length;
+    room -= view.shown;
     hidden += view.hidden;
+    cut += view.cut;
   }
-  out.push(
-    hidden === 0
-      ? '  every changed line is shown'
-      : `  ${hidden} diff ${hidden === 1 ? 'line' : 'lines'} not shown (at most ${DIFF_LINES_PER_FILE} per file and ${DIFF_LINES_TOTAL} in all)`,
-  );
+  out.push(footer(hidden, cut));
   return out;
+}
+
+/** The last line: what was left out and what was cut, or that nothing was. */
+function footer(hidden: number, cut: number): string {
+  if (hidden === 0 && cut === 0) return '  every changed line is shown';
+  const parts = [
+    ...(hidden > 0
+      ? [
+          `${hidden} diff ${hidden === 1 ? 'line' : 'lines'} not shown (at most ${DIFF_LINES_PER_FILE} per file, ${DIFF_LINES_TOTAL} in all and ${CHARS_TOTAL} characters)`,
+        ]
+      : []),
+    ...(cut > 0
+      ? [
+          `${cut} shown ${cut === 1 ? 'line is' : 'lines are'} cut where the changed part passes ${SPAN_MAX} characters`,
+        ]
+      : []),
+  ];
+  return `  ${parts.join('; ')}`;
 }
