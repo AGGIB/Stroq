@@ -126,12 +126,12 @@ describe('the screen a person types a digest against', () => {
     );
     let message = '';
     try {
-      confirmationScreen(passport, '/src/\u001b[31mred‮');
+      confirmationScreen(passport, '/src/\u001b[31mred\u202e');
     } catch (error) {
       message = (error as Error).message;
     }
 
     expect(message).toMatch(/1 sensitive line would be hidden/);
-    expect(message).not.toMatch(/[\u001b‮]/u);
+    expect(message).not.toMatch(/[\u001b\u202e]/u);
   });
 });

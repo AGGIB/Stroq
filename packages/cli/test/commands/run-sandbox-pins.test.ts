@@ -65,12 +65,12 @@ describe('what stroq run --sandbox says about pinned MCP servers', () => {
     const w = world();
     writeFileSync(
       passportsFileIn(w.home),
-      JSON.stringify({ v: 1, skills: {}, mcp: { 'a\u001b[31m‮b': pinned() } }),
+      JSON.stringify({ v: 1, skills: {}, mcp: { 'a\u001b[31m\u202eb': pinned() } }),
     );
 
     const text = await sandboxRun(w, { plat: 'linux' });
 
-    expect(text).not.toMatch(/[\u001b‮]/u);
+    expect(text).not.toMatch(/[\u001b\u202e]/u);
     expect(text).toMatch(/pinned MCP server/);
   });
 

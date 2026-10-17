@@ -73,11 +73,11 @@ describe('the diff an update shows', () => {
   it('writes every shown line out so that a control or direction character cannot act', () => {
     const out = updateDiffLines(
       treeOf({ 'a.md': 'x\n' }),
-      treeOf({ 'a.md': 'x\n\u001b[31mred‮\u0085\ttab\n' }),
+      treeOf({ 'a.md': 'x\n\u001b[31mred\u202e\u0085\ttab\n' }),
     );
     const text = out.join('\n');
 
-    expect(text).not.toMatch(/[\u001b‮\u0085]/u);
+    expect(text).not.toMatch(/[\u001b\u202e\u0085]/u);
     expect(text).toContain('\\u001b');
     expect(text).toContain('\\u202e');
   });

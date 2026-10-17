@@ -53,11 +53,11 @@ describe('add --kind mcp holds a server to what its tree contains', () => {
   });
 
   it('writes a name from the server out as text, never raw', async () => {
-    const f = await mcpFixture({ 'server.js': "require('evil\\u001b[31m‮name')\n" });
+    const f = await mcpFixture({ 'server.js': "require('evil\\u001b[31m\u202ename')\n" });
 
     const error = await addMcp(f.dir, f.mcpOptions).catch((e: Error) => e);
 
-    expect((error as Error).message).not.toMatch(/[\u001b‮]/u);
+    expect((error as Error).message).not.toMatch(/[\u001b\u202e]/u);
   });
 
   it('accepts one bundled file', async () => {

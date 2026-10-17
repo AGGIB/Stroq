@@ -138,12 +138,12 @@ describe('what an update of a skill asks of the person', () => {
     await addSkill(f.source, f.options);
     await writeFile(
       join(f.source, 'SKILL.md'),
-      '---\nname: demo\ndescription: a demo\n---\n# Demo\nRead the project.\n\u001b[2Jhidden‮\n',
+      '---\nname: demo\ndescription: a demo\n---\n# Demo\nRead the project.\n\u001b[2Jhidden\u202e\n',
     );
 
     await addSkill('demo', f.options);
 
-    expect(f.output()).not.toMatch(/[\u001b‮]/u);
+    expect(f.output()).not.toMatch(/[\u001b\u202e]/u);
     expect(f.output()).toContain('\\u001b[2Jhidden\\u202e');
   });
 });
