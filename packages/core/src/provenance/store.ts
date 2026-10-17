@@ -5,11 +5,12 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
 import { withLock } from '../util/lock.js';
@@ -47,9 +48,11 @@ export interface ProvenanceStore {
    * Marks that a result is about to be recorded (`true`) and that it has been (`false`). While
    * it is marked the session reads as incomplete: a process that goes between the two leaves
    * the marker behind, where it would otherwise leave a session that was flagged and has no
-   * trace and no note. Unlike the note it is taken off by the one that put it on.
+   * trace and no note. Unlike the note it is taken off by the one that put it on. Each result
+   * supplies its own `owner` and settles only that owner's marker; omitting it addresses the
+   * legacy shared marker, which newer callers must leave alone.
    */
-  setPending(sessionId: string, pending: boolean): Promise<void>;
+  setPending(sessionId: string, pending: boolean, owner?: string): Promise<void>;
 }
 
 /** Oldest records are dropped beyond this many per session. */
@@ -127,8 +130,14 @@ export class FileProvenanceStore implements ProvenanceStore {
     return join(this.dir, `${sessionKey(sessionId)}${INCOMPLETE_SUFFIX}`);
   }
 
-  private pendingFile(sessionId: string): string {
-    return join(this.dir, `${sessionKey(sessionId)}${PENDING_SUFFIX}`);
+  private pendingDir(sessionId: string): string {
+    return join(this.dir, `${sessionKey(sessionId)}${PENDING_SUFFIX}.d`);
+  }
+
+  private pendingFile(sessionId: string, owner?: string): string {
+    return owner === undefined
+      ? join(this.dir, `${sessionKey(sessionId)}${PENDING_SUFFIX}`)
+      : join(this.pendingDir(sessionId), sessionKey(owner));
   }
 
   private async read(sessionId: string): Promise<ProvenanceRecord[]> {
@@ -227,7 +236,7 @@ export class FileProvenanceStore implements ProvenanceStore {
   private async writeNote(target: string, body: string): Promise<void> {
     // Idempotent, so it needs no lock: whoever writes it writes the same thing.
     if (await exists(target)) return;
-    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    await mkdir(dirname(target), { recursive: true, mode: PRIVATE_DIR_MODE });
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
       await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
@@ -246,13 +255,14 @@ export class FileProvenanceStore implements ProvenanceStore {
     await this.writeNote(this.incompleteFile(sessionId), body);
   }
 
-  async setPending(sessionId: string, pending: boolean): Promise<void> {
+  async setPending(sessionId: string, pending: boolean, owner?: string): Promise<void> {
     if (!pending) {
-      await rm(this.pendingFile(sessionId), { force: true });
+      // Keep the empty directory: removing it could race another operation beginning in it.
+      await rm(this.pendingFile(sessionId, owner), { force: true });
       return;
     }
     await this.writeNote(
-      this.pendingFile(sessionId),
+      this.pendingFile(sessionId, owner),
       JSON.stringify({ pending: true, since: this.now().toISOString() }),
     );
   }
@@ -261,6 +271,11 @@ export class FileProvenanceStore implements ProvenanceStore {
     try {
       if (await exists(this.incompleteFile(sessionId))) return true;
       if (await exists(this.pendingFile(sessionId))) return true;
+      try {
+        if ((await readdir(this.pendingDir(sessionId))).length > 0) return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
       // A loss is noted by writing a file here. Where that cannot be done the note cannot
       // exist, and its absence says nothing.
       return !(await canWriteIn(this.dir));
@@ -281,6 +296,7 @@ export class FileProvenanceStore implements ProvenanceStore {
       await rm(this.file(sessionId), { force: true });
       await rm(this.incompleteFile(sessionId), { force: true });
       await rm(this.pendingFile(sessionId), { force: true });
+      await rm(this.pendingDir(sessionId), { recursive: true, force: true });
     });
   }
 }

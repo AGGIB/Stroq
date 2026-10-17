@@ -296,6 +296,48 @@ describe('FileProvenanceStore under concurrent callers', () => {
 });
 
 describe('FileProvenanceStore pending marker', () => {
+  it('settles only its own operation, including across store instances', async () => {
+    const { dir, store } = fresh();
+    const other = new FileProvenanceStore(dir);
+    await Promise.all([
+      store.setPending('s1', true, 'operation-a'),
+      other.setPending('s1', true, 'operation-b'),
+    ]);
+    await store.setPending('s1', false, 'operation-a');
+    expect(await new FileProvenanceStore(dir).isIncomplete('s1')).toBe(true);
+    await other.setPending('s1', false, 'operation-b');
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('leaves a legacy marker in place when a new operation settles', async () => {
+    const { store } = fresh();
+    await store.setPending('s1', true);
+    await store.setPending('s1', true, 'operation-a');
+    await store.setPending('s1', false, 'operation-a');
+    expect(await store.isIncomplete('s1')).toBe(true);
+    await store.clear('s1');
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('removes abandoned operation markers only when clear starts the session over', async () => {
+    const { dir, store } = fresh();
+    await store.setPending('s1', true, 'crashed-operation');
+    await store.setPending('other', true, 'other-operation');
+    expect(await new FileProvenanceStore(dir).isIncomplete('s1')).toBe(true);
+    await store.clear('s1');
+    expect(await store.isIncomplete('s1')).toBe(false);
+    expect(await store.isIncomplete('other')).toBe(true);
+  });
+
+  it('keeps operation directories and markers private', async () => {
+    if (process.platform === 'win32') return;
+    const { dir, store } = fresh();
+    await store.setPending('s1', true, 'operation-a');
+    const pending = join(dir, `${sessionKey('s1')}.prov.pending.d`);
+    expect(statSync(pending).mode & 0o777).toBe(0o700);
+    expect(statSync(join(pending, sessionKey('operation-a'))).mode & 0o777).toBe(0o600);
+  });
+
   it('reads a session as incomplete from the time a result is about to be recorded until it is settled', async () => {
     const { store } = fresh();
     await store.setPending('s1', true);

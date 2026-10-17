@@ -645,7 +645,7 @@ export class StroqEngine {
     const taints = scan.verdict === 'suspect' && !trusted;
     // The taint is written before the records, with a lookup and a lock between the two: a
     // process that goes in that gap must not leave a session that is flagged and has no trace.
-    if (taints) await this.recorder.begin(event.sessionId);
+    const pendingOwner = taints ? await this.recorder.begin(event.sessionId) : undefined;
     const state = taints
       ? await this.opts.sessions.markSuspect(event.sessionId, {
           tool: event.toolName,
@@ -672,6 +672,7 @@ export class StroqEngine {
       atoms,
       scan.verdict === 'suspect' && !trusted,
       lost,
+      pendingOwner,
     );
     return {
       scan,

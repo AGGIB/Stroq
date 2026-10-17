@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { redact } from '../audit/audit-log.js';
 import type { SecretIndex } from '../secrets/index.js';
 import type { Atom, PostToolEvent, PreToolEvent, ProvenanceGap } from '../types.js';
@@ -83,17 +84,23 @@ export class ProvenanceRecorder {
   /**
    * Marks that a result which taints the session is about to be recorded. The taint is written
    * first and the records after, with a secret-index lookup and a lock between; a process that
-   * goes in that gap would leave a session that is flagged and has no trace. Never throws: where
-   * the marker cannot be written the sessions directory is unwritable, which already reads as
-   * incomplete.
+   * goes in that gap would leave a session that is flagged and has no trace. Never throws:
+   * failure to write the marker must not prevent the taint or the attempt to write records.
    */
-  async begin(sessionId: string): Promise<void> {
-    await this.store?.setPending(sessionId, true).catch(() => undefined);
+  async begin(sessionId: string): Promise<string | undefined> {
+    if (!this.store) return undefined;
+    const owner = randomUUID();
+    await this.store.setPending(sessionId, true, owner).catch(() => undefined);
+    return owner;
   }
 
-  /** Takes the marker `begin` put on off again, whether or not the records were written. */
-  private async settle(store: ProvenanceStore, sessionId: string): Promise<void> {
-    await store.setPending(sessionId, false).catch(() => undefined);
+  /** Takes off only this operation's marker, once its records or loss note are durable. */
+  private async settle(
+    store: ProvenanceStore,
+    sessionId: string,
+    owner: string | undefined,
+  ): Promise<void> {
+    if (owner !== undefined) await store.setPending(sessionId, false, owner).catch(() => undefined);
   }
 
   /**
@@ -109,15 +116,16 @@ export class ProvenanceRecorder {
     atoms: readonly Atom[],
     suspect: boolean,
     lost: boolean,
+    pendingOwner?: string,
   ): Promise<ProvenanceOutcome> {
     const store = this.store;
     if (!store) return { error: null, incomplete: false };
     const noted = lost ? await this.note(store, event.sessionId) : null;
-    // Only a note that was written makes the session incomplete: one that could not be leaves
-    // it reading as it did, and the failure is the error that gets logged.
+    // Report whether the permanent loss note was written. If it failed, an operation marker
+    // can still keep the session reading as incomplete, and the failure is logged.
     const marked = lost && noted === null;
     if (atoms.length === 0) {
-      await this.settle(store, event.sessionId);
+      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted, incomplete: marked };
     }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
@@ -134,11 +142,12 @@ export class ProvenanceRecorder {
           suspect,
         })),
       );
-      await this.settle(store, event.sessionId);
+      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted, incomplete: marked };
     } catch (err) {
       const failed = await this.note(store, event.sessionId);
-      await this.settle(store, event.sessionId);
+      // If the permanent note failed too, the operation's marker is the evidence that remains.
+      if (failed === null) await this.settle(store, event.sessionId, pendingOwner);
       return { error: messageOf(err), incomplete: failed === null };
     }
   }

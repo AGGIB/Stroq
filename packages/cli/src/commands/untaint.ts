@@ -10,13 +10,15 @@ const USAGE = 'usage: stroq untaint --session <id> | --all\n';
 async function clearAll(): Promise<void> {
   const dir = sessionsDir();
   if (!existsSync(dir)) return;
-  await Promise.all(readdirSync(dir).map((f) => rm(join(dir, f), { force: true })));
+  await Promise.all(
+    readdirSync(dir).map((f) => rm(join(dir, f), { recursive: true, force: true })),
+  );
 }
 
 /**
  * Clears taint and provenance for a false-positive session (`--session <id>`,
  * the id shown in `stroq log`) or for every known session (`--all`, which
- * already removes every file in the sessions dir, provenance included).
+ * already removes every entry in the sessions dir, provenance included).
  * Clearing only taint would leave `origin.suspect` firing forever from the
  * session's stored provenance records, so a false positive could never be
  * fully cleared. Neither flag prints usage and fails, since silently doing
