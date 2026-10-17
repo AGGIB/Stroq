@@ -205,6 +205,7 @@ export interface PostOutcome {
 export interface PostReading {
   readonly extraReading?: true;
   readonly suspectInAnotherReading?: true;
+  readonly otherReadings?: readonly string[];
 }
 
 /**

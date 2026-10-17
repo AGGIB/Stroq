@@ -172,6 +172,14 @@ export interface PostToolEvent extends PreToolEvent {
    * be had the recorded text matched itself. Absent, only this call's own verdict counts.
    */
   readonly suspectInAnotherReading?: true;
+  /**
+   * Set on the call that records a result: the texts of its other readings. What is
+   * remembered of the result is the atoms of all of them, once each (an atom more than one
+   * text holds is one record), each text read as `toolResultText` is: the same cap of
+   * atoms per text, and a known secret taken out of an atom's excerpt by the text the atom
+   * came from. Absent, only `toolResultText` is remembered.
+   */
+  readonly otherReadings?: readonly string[];
 }
 
 /**

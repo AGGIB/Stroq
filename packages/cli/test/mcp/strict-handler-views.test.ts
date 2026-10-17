@@ -21,6 +21,7 @@ interface Posted {
   readonly toolInput: unknown;
   readonly extraReading: boolean;
   readonly suspectInAnotherReading: boolean;
+  readonly otherReadings: readonly string[] | undefined;
 }
 
 type Judge = (posted: Posted, index: number) => 'clean' | 'suspect' | 'timeout';
@@ -34,12 +35,14 @@ function recordingEngine(judge: Judge): { engine: StroqEngine; posted: Posted[] 
       toolInput: unknown;
       extraReading?: true;
       suspectInAnotherReading?: true;
+      otherReadings?: readonly string[];
     }) => {
       const entry = {
         text: event.toolResultText,
         toolInput: event.toolInput,
         extraReading: event.extraReading === true,
         suspectInAnotherReading: event.suspectInAnotherReading === true,
+        otherReadings: event.otherReadings,
       };
       const verdict = judge(entry, posted.length);
       posted.push(entry);
@@ -122,6 +125,35 @@ describe('the views of a result in the handler', () => {
     await rig.feed(line());
     expect(posted.map((entry) => entry.extraReading)).toEqual([true, true, false]);
     expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, false]);
+  });
+});
+
+describe('the call that records the result, and what only another view held', () => {
+  it('is handed the texts of the other views, so the atoms only they hold are remembered too', async () => {
+    const { rig, posted } = rigWith(() => 'clean');
+    track(rig, 3);
+    await rig.feed(line());
+    const [first, ...extras] = viewTexts();
+    const recording = posted.at(-1);
+    expect(recording?.text).toBe(first);
+    expect(recording?.otherReadings).toEqual(extras);
+    expect(extras.length).toBe(2);
+  });
+
+  it('is the only call that is handed them: an extra reading remembers nothing', async () => {
+    const { rig, posted } = rigWith(() => 'clean');
+    track(rig, 3);
+    await rig.feed(line());
+    expect(posted.slice(0, -1).map((entry) => entry.otherReadings)).toEqual([undefined, undefined]);
+  });
+
+  it('is handed nothing when the result has only one view', async () => {
+    const { rig, posted } = rigWith(() => 'clean');
+    track(rig, 3);
+    // An empty-ish result: a ping-like answer for a scanned method has one empty default view.
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 3, result: {} }));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.otherReadings).toBeUndefined();
   });
 });
 

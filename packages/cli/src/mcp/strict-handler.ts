@@ -296,11 +296,14 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * deadline; the engine then scans them one after the other. The result is as suspect as
    * its worst view, and carries ONE warning: the first suspect view's.
    *
-   * Only one call to the engine is the record of the result, so that what is remembered of
-   * it, and what is audited, is what the default proxy remembers and audits: the first
-   * view's. The others are extra readings, scanned FIRST so the record can be told if any
-   * of them matched (what is remembered of a result that was suspect in any view is
-   * flagged as suspect), and audited only when they matched.
+   * Only one call to the engine is the record of the result, so that what is audited is
+   * what the default proxy audits (one line) and what is remembered is each atom once: the
+   * first view's. The others are extra readings, scanned FIRST so the record can be told if
+   * any of them matched (what is remembered of a result that was suspect in any view is
+   * flagged as suspect), and audited only when they matched. The record is handed their
+   * texts as well, because a view can hold what the first does not (an embedded resource's
+   * text behind an outer text, `_meta`, a key): the atoms of every view are remembered, with
+   * the cap of atoms per text each always had.
    */
   async function scanned(
     entry: TrackedRequest,
@@ -320,11 +323,10 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         extraOutcomes.push(outcome);
       }
       const matched = extraOutcomes.some((outcome) => outcome.warning !== null);
-      const first = await scanView(
-        entry,
-        recorded,
-        matched ? { suspectInAnotherReading: true } : {},
-      );
+      const first = await scanView(entry, recorded, {
+        ...(extras.length === 0 ? {} : { otherReadings: extras.map((view) => view.text) }),
+        ...(matched ? { suspectInAnotherReading: true } : {}),
+      });
       if (typeof first === 'string') return first;
       return [first, ...extraOutcomes].find((outcome) => outcome.warning !== null) ?? first;
     } catch (err) {
