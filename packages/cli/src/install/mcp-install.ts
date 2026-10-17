@@ -34,7 +34,9 @@ import {
   putStore,
   readStoredTreeOf,
   storePath,
+  type StoredSubject,
 } from './store.js';
+import { mcpRemedy } from './remedy.js';
 import type { Passport, Tree } from './types.js';
 
 export interface McpInstallOptions {
@@ -87,6 +89,13 @@ function requirePerson(options: McpInstallOptions): void {
       'add and remove need a person at a terminal; use stroq vet --from <path> to read without installing',
     );
 }
+
+/** Who a stored copy is for, with the commands that put it back as the lock record has it. */
+const subjectOf = (name: string, record: McpRecord): StoredSubject => ({
+  kind: 'mcp',
+  name,
+  remedy: mcpRemedy(name, record),
+});
 
 function nameOf(name: string): string {
   if (!SKILL_NAME.test(name))
@@ -280,11 +289,11 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const source = named?.source ?? resolve(sourceOrName);
   const made = options.restore
     ? {
-        tree: await readStoredTreeOf(options.stroqHome, named!.digest, {
-          kind: 'mcp',
-          name: sourceOrName,
-          source: named!.source,
-        }),
+        tree: await readStoredTreeOf(
+          options.stroqHome,
+          named!.digest,
+          subjectOf(sourceOrName, named!),
+        ),
         passport: named!.passport,
       }
     : await inspectSource(source);
@@ -299,11 +308,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   const oldTree =
     previous === undefined
       ? undefined
-      : await readStoredTreeOf(options.stroqHome, previous.digest, {
-          kind: 'mcp',
-          name,
-          source: previous.source,
-        });
+      : await readStoredTreeOf(options.stroqHome, previous.digest, subjectOf(name, previous));
   if (previous !== undefined && resolve(previous.source) !== source)
     throw new Error(`this path is not ${name}'s recorded source; remove it first`);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
@@ -366,11 +371,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
       throw new Error('the lock changed while confirming; read and confirm again');
     if (previous !== undefined)
-      await readStoredTreeOf(options.stroqHome, previous.digest, {
-        kind: 'mcp',
-        name,
-        source: previous.source,
-      });
+      await readStoredTreeOf(options.stroqHome, previous.digest, subjectOf(name, previous));
     await putStore(options.stroqHome, made.tree, digest);
     assertWriteAllowed(file, targetRules(selected));
     const fresh = loadConfig(file);

@@ -14,7 +14,9 @@ import { setup } from '../helpers/skill-install.js';
  * that do need the stored bytes (an update compares with them, a restore writes them) refuse with the way
  * out: remove it with --force, then add it again from its source.
  */
-const REMEDY = /remove .*--force[^]*add .* again/;
+const MCP_REMEDY =
+  /stroq remove demo --kind mcp --force, then stroq add \S+ --kind mcp --name demo --config \S+ --entrypoint server\.js/;
+const SKILL_REMEDY = /stroq remove demo --force, then stroq add \S+$/;
 
 const damages = [
   [
@@ -62,7 +64,7 @@ describe.each(damages)('an MCP server whose stored copy has %s', (_what, damage)
     await damage(store);
     const config = await readFile(f.config, 'utf8');
 
-    await expect(addMcp('demo', { ...f.mcpOptions, restore: true })).rejects.toThrow(REMEDY);
+    await expect(addMcp('demo', { ...f.mcpOptions, restore: true })).rejects.toThrow(MCP_REMEDY);
 
     expect(await readFile(f.config, 'utf8')).toBe(config);
     expect(await entries()).toContain('demo');
@@ -75,7 +77,7 @@ describe.each(damages)('an MCP server whose stored copy has %s', (_what, damage)
     const config = await readFile(f.config, 'utf8');
     const lock = await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8');
 
-    await expect(addMcp('demo', f.mcpOptions)).rejects.toThrow(REMEDY);
+    await expect(addMcp('demo', f.mcpOptions)).rejects.toThrow(MCP_REMEDY);
 
     expect(await readFile(f.config, 'utf8')).toBe(config);
     expect(await readFile(join(f.options.stroqHome, 'passports.json'), 'utf8')).toBe(lock);
@@ -118,8 +120,8 @@ describe.each(damages.slice(0, 3))('a skill whose stored copy has %s', (_what, d
     const { f } = await installedSkill();
     await writeFile(join(f.source, 'README.md'), 'more\n');
 
-    await expect(addSkill('demo', { ...f.options, restore: true })).rejects.toThrow(REMEDY);
-    await expect(addSkill('demo', f.options)).rejects.toThrow(REMEDY);
+    await expect(addSkill('demo', { ...f.options, restore: true })).rejects.toThrow(SKILL_REMEDY);
+    await expect(addSkill('demo', f.options)).rejects.toThrow(SKILL_REMEDY);
     expect((await readPassports(f.options.stroqHome)).skills['demo']?.status).toBe('confirmed');
   });
 });

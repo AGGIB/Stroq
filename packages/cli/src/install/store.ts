@@ -109,18 +109,18 @@ export async function readStoredTree(folder: string, digest: string): Promise<Tr
   return verified;
 }
 
-/** Who a stored copy is for, to name the way out when the copy is damaged. */
+/** Who a stored copy is for, and the commands that take it out and put it back, to name the way out when it is damaged. */
 export interface StoredSubject {
   readonly kind: 'skill' | 'mcp';
   readonly name: string;
-  /** Where it was added from, as the lock records it. */
-  readonly source: string;
+  /** From `remedy.ts`, built from the lock record: what to run to remove it with `--force` and add it again. */
+  readonly remedy: string;
 }
 
 /**
  * The stored tree of an installed skill or server, or an error that says what is wrong with the copy and what
  * to do: a damaged store cannot be restored or compared with, and removing needs no bytes at all, so the way
- * out is to remove it with `--force` and add it again from its source.
+ * out is to remove it with `--force` and add it again from its source. The error keeps the cause.
  */
 export async function readStoredTreeOf(
   home: string,
@@ -131,10 +131,9 @@ export async function readStoredTreeOf(
     return await readStoredTree(storePath(home, digest), digest);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'it could not be read';
-    const mcp = subject.kind === 'mcp' ? ' --kind mcp' : '';
     throw new Error(
-      `the stored copy of ${subject.kind} ${subject.name} is damaged (${outsideLine(reason)}); ` +
-        `run stroq remove ${subject.name}${mcp} --force, then stroq add ${outsideLine(JSON.stringify(subject.source))}${mcp} again from its source`,
+      `the stored copy of ${subject.kind} ${outsideLine(subject.name)} is damaged (${outsideLine(reason)}); run ${subject.remedy}`,
+      { cause: error },
     );
   }
 }

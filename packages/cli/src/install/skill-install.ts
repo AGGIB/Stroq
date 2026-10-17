@@ -37,7 +37,9 @@ import {
   putStore,
   readStoredTreeOf,
   writeTree,
+  type StoredSubject,
 } from './store.js';
+import { skillRemedy } from './remedy.js';
 import { treeDigest } from './tree.js';
 import type { Passport, Tree } from './types.js';
 
@@ -59,6 +61,17 @@ function requirePerson(options: SkillOptions): void {
       'add and remove need a person at a terminal; use stroq vet --from <path> to read without installing',
     );
 }
+
+/** Who a stored copy is for, with the commands that put it back in the scope the lock record has. */
+const subjectOf = (
+  name: string,
+  record: SkillRecord,
+  options: Pick<SkillOptions, 'home' | 'project'>,
+): StoredSubject => ({
+  kind: 'skill',
+  name,
+  remedy: skillRemedy(name, record, { home: options.home, project: options.project }),
+});
 
 function nameOf(name: string): string {
   if (!SKILL_NAME.test(name) || !checkEntryPath(name).ok)
@@ -224,11 +237,11 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const source = installed?.source ?? resolve(sourceOrName);
   const made = restoring
     ? {
-        tree: await readStoredTreeOf(options.stroqHome, installed!.digest, {
-          kind: 'skill',
-          name: sourceOrName,
-          source: installed!.source,
-        }),
+        tree: await readStoredTreeOf(
+          options.stroqHome,
+          installed!.digest,
+          subjectOf(sourceOrName, installed!, options),
+        ),
         passport: installed!.passport,
       }
     : await inspectSource(source, options.kind);
@@ -245,11 +258,11 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   const oldTree =
     previous === undefined
       ? undefined
-      : await readStoredTreeOf(options.stroqHome, previous.digest, {
-          kind: 'skill',
-          name,
-          source: previous.source,
-        });
+      : await readStoredTreeOf(
+          options.stroqHome,
+          previous.digest,
+          subjectOf(name, previous, options),
+        );
   const material =
     previous === undefined ||
     previous.source !== source ||
