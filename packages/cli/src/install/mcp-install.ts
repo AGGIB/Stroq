@@ -27,7 +27,7 @@ import { updateDiffLines } from './update-diff.js';
 import { auditReceipt } from './receipt.js';
 import { readDirTree } from './read-dir.js';
 import { sourceTypeOf } from './read-source.js';
-import { collectMcpStore } from './store-gc.js';
+import { collectMcpStore, tidyStore } from './store-gc.js';
 import {
   assertWritableTree,
   assertInstallablePlatform,
@@ -413,7 +413,10 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       { ...targetRules(selected), before: fresh.text },
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
-    if (previous !== undefined) await collectMcpStore(options.stroqHome, next, previous.digest);
+    if (previous !== undefined)
+      await tidyStore(options.terminal, previous.digest, () =>
+        collectMcpStore(options.stroqHome, next, previous.digest),
+      );
     return record;
   });
 }
@@ -475,6 +478,8 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
       { ...targetRules(selected), before: fresh.text },
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
-    await collectMcpStore(options.stroqHome, next, previous.digest);
+    await tidyStore(options.terminal, previous.digest, () =>
+      collectMcpStore(options.stroqHome, next, previous.digest),
+    );
   });
 }

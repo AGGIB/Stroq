@@ -29,7 +29,7 @@ import { confirmSkill } from './skill-confirm.js';
 import { sourceTypeOf } from './read-source.js';
 import { checkEntryPath } from './safe-path.js';
 import { auditReceipt } from './receipt.js';
-import { collectSkillStore } from './store-gc.js';
+import { collectSkillStore, tidyStore } from './store-gc.js';
 import {
   assertPlainDirectory,
   assertInstallablePlatform,
@@ -317,11 +317,13 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
     );
     await auditReceipt(options.stroqHome, record);
     if (previous !== undefined)
-      await collectSkillStore(
-        options.stroqHome,
-        { ...lock, skills: { ...lock.skills, [name]: next } },
-        '',
-        previous,
+      await tidyStore(options.terminal, previous.digest, () =>
+        collectSkillStore(
+          options.stroqHome,
+          { ...lock, skills: { ...lock.skills, [name]: next } },
+          '',
+          previous,
+        ),
       );
     return next;
   });
@@ -386,6 +388,8 @@ export async function removeSkill(name: string, options: SkillOptions): Promise<
     }
     if (stage !== null) await rm(stage, { recursive: true });
     await auditReceipt(options.stroqHome, record);
-    await collectSkillStore(options.stroqHome, lock, name, previous);
+    await tidyStore(options.terminal, previous.digest, () =>
+      collectSkillStore(options.stroqHome, lock, name, previous),
+    );
   });
 }
