@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parseMcpArgv } from '../../src/commands/mcp.js';
 import {
   countStrict,
   countWrapped,
@@ -137,6 +138,56 @@ describe('wrapMcpConfig with strict mode', () => {
     const strict = wrapMcpConfig(plain.config, { ...opts, strict: true });
     expect(argsOf(strict.config, 'a')).toContain('--strict');
     expect(unwrapArgs(argsOf(strict.config, 'a'))).toEqual({ command: 'srv', args: [] });
+  });
+
+  it.each(['7', '0', 'junk', ''])(
+    'keeps an inline limit %j exactly, including a spelling the proxy refuses',
+    (limit) => {
+      const inline = `--strict-max-withheld=${limit}`;
+      const wrapped = config({
+        a: {
+          command: '/usr/bin/node',
+          args: [
+            realEntry,
+            'mcp',
+            '--server',
+            'a',
+            '--client',
+            'c',
+            '--strict',
+            inline,
+            '--',
+            'srv',
+          ],
+        },
+      });
+      const before = argsOf(wrapped, 'a') as string[];
+      const again = wrapMcpConfig(wrapped, opts);
+      const after = argsOf(again.config, 'a') as string[];
+      expect(wrapperStrictArgs(after)).toEqual(['--strict', inline]);
+      // A rewrite must not turn an option the parser refused into a runnable, weaker default.
+      expect(parseMcpArgv(after.slice(after.indexOf('mcp') + 1)).ok).toBe(
+        parseMcpArgv(before.slice(before.indexOf('mcp') + 1)).ok,
+      );
+      expect(unwrapArgs(after)).toEqual({ command: 'srv', args: [] });
+    },
+  );
+
+  it('does not inherit an inline strict limit belonging to the server', () => {
+    const wrapped = wrapMcpConfig(
+      config({
+        a: {
+          command: 'srv',
+          args: ['--strict-max-withheld=7'],
+        },
+      }),
+      opts,
+    );
+    expect(wrapperStrictArgs(argsOf(wrapped.config, 'a'))).toEqual([]);
+    expect(unwrapArgs(argsOf(wrapped.config, 'a'))).toEqual({
+      command: 'srv',
+      args: ['--strict-max-withheld=7'],
+    });
   });
 
   it('does not read a --strict that belongs to the wrapped server', () => {

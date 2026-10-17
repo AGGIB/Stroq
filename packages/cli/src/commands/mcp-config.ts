@@ -140,8 +140,8 @@ export function wrapperPinArgs(args: readonly unknown[]): readonly string[] {
 }
 
 /**
- * The strict-mode arguments a wrapper already carries: `--strict` and, with its value,
- * `--strict-max-withheld`. Read only from the wrapper's own arguments, before its `--`,
+ * The strict-mode arguments a wrapper already carries: `--strict` and `--strict-max-withheld` with its value,
+ * split or inline. Read only from the wrapper's own arguments, before its `--`,
  * so a `--strict` that belongs to the wrapped server is never mistaken for Stroq's.
  * Kept as written, malformed limits included, for the reason pins are: a rewrite must
  * not silently take a check off, and a limit the proxy refuses stops it starting.
@@ -150,8 +150,9 @@ export function wrapperStrictArgs(args: readonly unknown[]): readonly string[] {
   const at = wrapperIndex(args);
   const before = at === null ? [] : args.slice(at, args.indexOf('--', at));
   return before.flatMap((value, i) =>
-    value === '--strict'
-      ? ['--strict']
+    value === '--strict' ||
+    (typeof value === 'string' && value.startsWith('--strict-max-withheld='))
+      ? [value]
       : value === '--strict-max-withheld'
         ? ['--strict-max-withheld', String(before[i + 1] ?? '')]
         : [],
