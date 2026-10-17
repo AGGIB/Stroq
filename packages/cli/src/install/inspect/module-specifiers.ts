@@ -247,8 +247,7 @@ export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
       break;
     }
   }
-  const end = watch.end();
-  if (end !== null) notes.add(end.concern, end.reason, end.at);
+  for (const end of watch.end()) notes.add(end.concern, end.reason, end.at);
   for (const fact of factsOf(watch.collected(), found))
     notes.add(fact.concern, fact.reason, fact.at);
   // The text ended in the middle of something that asks for a module: `require` and a bracket, nothing more.

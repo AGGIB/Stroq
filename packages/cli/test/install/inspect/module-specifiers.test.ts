@@ -47,7 +47,6 @@ describe('the module specifiers a JavaScript file asks for', () => {
     ['const x = require("a")', ['a']],
     ["const x = require( 'a' )", ['a']],
     ['const x = require(`a`)', ['a']],
-    ["module.require('a')", ['a']],
     ["const m = await import('a')", ['a']],
     ["import('a').then(f)", ['a']],
     ["import(\n  'a'\n)", ['a']],
@@ -64,6 +63,15 @@ describe('the module specifiers a JavaScript file asks for', () => {
   ] as const)('finds the specifiers of %j', (text, expected) => {
     expect(specs(text)).toEqual(expected);
     expect(concernsOf(text)).toEqual([]);
+  });
+
+  it.each([
+    ["module.require('a')", ['a']],
+    ["process.getBuiltinModule('fs')", ['fs']],
+    ["require.main.require('a')", ['a']],
+  ])('finds %j, and says that the way it asks is not one to read', (text, expected) => {
+    expect(specs(text)).toEqual(expected);
+    expect(concernsOf(text)).toEqual(['dynamic-code']);
   });
 
   describe('with comments, blanks and line breaks between the tokens', () => {
@@ -396,8 +404,6 @@ describe('what the reading cannot settle is a concern, never an empty list', () 
     'Function.prototype.call.bind(x)',
     'Function.prototype.toString.call(f)',
     // eval or Function as a property of an object that is not the global one is that object's own business.
-    'obj.eval(1)',
-    'a.Function(1)',
     'x.constructor.name',
     'new this.constructor(a)',
     'this.constructor(a)',

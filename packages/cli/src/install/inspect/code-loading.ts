@@ -17,6 +17,7 @@
 // or `module`; an object that reaches the global object some other way (`(function () { return this })()`) is not
 // followed; a file written under a name built at run time is not seen.
 import { cookString, type Token } from './js-lexer.js';
+import { Occurrences } from './code-loading-general.js';
 import {
   ABSOLUTE_SCRIPT,
   ENVIRONMENT_NAMES,
@@ -148,13 +149,13 @@ export interface Facts {
 }
 
 type Pending =
-  | { readonly kind: 'function'; readonly at: number }
+  | { readonly kind: 'function'; readonly at: number; readonly key: boolean }
   | { readonly kind: 'member-string'; readonly name: string; readonly at: number }
   | { readonly kind: 'machinery'; readonly object: string; readonly at: number }
   | { readonly kind: 'machinery-end'; readonly object: string; readonly at: number }
   | { readonly kind: 'passed'; readonly object: string; readonly at: number }
   /** `f().constructor`: used as a value or called, it is the Function constructor; `.name` after it is not. */
-  | { readonly kind: 'constructor-value'; readonly at: number }
+  | { readonly kind: 'constructor-value'; readonly at: number; readonly expression: boolean }
   | { readonly kind: 'constructor-member'; readonly at: number };
 
 const found = (reason: string, at: number): Finding => ({ concern: 'dynamic-code', reason, at });
@@ -168,6 +169,8 @@ interface Alias {
 interface Scope {
   readonly named: Set<string>;
   readonly aliases: string[];
+  /** Keys called `Function`, held until the brace closes: `{ Function: f } = x` takes the constructor out, a literal does not. */
+  readonly keys: Finding[];
 }
 
 export class LoadingWatch {
@@ -181,7 +184,9 @@ export class LoadingWatch {
   private candidate: { readonly name: string; readonly receiver: Receiver } | null = null;
   private aliasesFull = false;
   /** The open braces: the members of process named inside each, and the aliases declared in it with let or const. */
-  private readonly scopes: Scope[] = [{ named: new Set(), aliases: [] }];
+  private readonly scopes: Scope[] = [{ named: new Set(), aliases: [], keys: [] }];
+  /** The keys that the brace which closed last held, until the next token shows whether it was a pattern. */
+  private closedKeys: Finding[] = [];
   /** Braces deeper than `SCOPES_MAX`, which are counted and not kept. */
   private overflow = 0;
   /** The members of process named inside the brace that closed last. */
@@ -189,6 +194,8 @@ export class LoadingWatch {
   /** The declaration the last token is part of: `let`, `const` or `var`, and how deep it stands. */
   private declaration: { readonly keyword: string; readonly depth: number } | null = null;
   private write: { left: number } | null = null;
+  /** The identifiers that are a concern in any position. */
+  private readonly occurrences = new Occurrences();
   private facts: {
     -readonly [K in keyof Facts]: Facts[K];
   } = {};
@@ -197,9 +204,14 @@ export class LoadingWatch {
   see(token: Token): Finding[] {
     const out: Finding[] = [];
     this.settleAlias(token);
+    if (this.closedKeys.length > 0) {
+      if (isPunct(token, '=')) out.push(...this.closedKeys);
+      this.closedKeys = [];
+    }
     const resolved = this.resolve(token);
     if (resolved !== null) out.push(resolved);
     out.push(...this.own(token));
+    out.push(...this.occurrences.see(token));
     this.advance(token);
     return out;
   }
@@ -240,13 +252,15 @@ export class LoadingWatch {
   /** The braces: where an alias declared with `let` or `const` ends, and the members of process named in a pattern. */
   private advanceScopes(token: Token): void {
     if (isPunct(token, '{') || isPunct(token, '${')) {
-      if (this.scopes.length < SCOPES_MAX) this.scopes.push({ named: new Set(), aliases: [] });
+      if (this.scopes.length < SCOPES_MAX)
+        this.scopes.push({ named: new Set(), aliases: [], keys: [] });
       else this.overflow += 1;
     } else if (isPunct(token, '}')) {
       if (this.overflow > 0) this.overflow -= 1;
       else if (this.scopes.length > 1) {
         const scope = this.scopes.pop()!;
         this.closed = scope.named;
+        this.closedKeys = scope.keys;
         for (const name of scope.aliases)
           if (this.aliases.get(name)?.scoped === true) this.aliases.delete(name);
       } else this.closed = new Set();
@@ -289,9 +303,18 @@ export class LoadingWatch {
     switch (pending.kind) {
       case 'function':
         // `Function.prototype` reads a property of the constructor; any other use makes code from text.
-        return isPunct(token, '.')
-          ? null
-          : found('uses the Function constructor, which makes code from text', pending.at);
+        if (isPunct(token, '.')) return null;
+        // A key called `Function` (`{ Function: inspectFunction }`) is a name and not the constructor, unless the
+        // braces are a pattern that takes it out of an object: that is told by the `=` after the closing brace.
+        if (pending.key && isPunct(token, ':') && this.overflow === 0) {
+          this.scopes
+            .at(-1)!
+            .keys.push(
+              found('uses the Function constructor, which makes code from text', pending.at),
+            );
+          return null;
+        }
+        return found('uses the Function constructor, which makes code from text', pending.at);
       case 'member-string':
         return isPunct(token, ']')
           ? found(`reaches ${pending.name} by a string, which hides it from a reader`, pending.at)
@@ -320,7 +343,11 @@ export class LoadingWatch {
           this.pending = { kind: 'constructor-member', at: pending.at };
           return null;
         }
-        return CONSTRUCTOR_USED.has(token.text) || token.kind === 'string'
+        // The constructor of an expression (a function value, a call) used or handed on is in use; the constructor of a
+        // name, only when it is called: `Error.captureStackTrace(this, e.constructor)` is a class.
+        return (pending.expression &&
+          (CONSTRUCTOR_USED.has(token.text) || token.kind === 'string')) ||
+          isPunct(token, '(')
           ? found('uses .constructor.constructor, which makes code from text', pending.at)
           : null;
       case 'constructor-member':
@@ -376,6 +403,15 @@ export class LoadingWatch {
       if (value === 'constructor' && this.chain.at(-1) === 'constructor')
         out.push(found('uses .constructor.constructor, which makes code from text', token.at));
     }
+    // `const p = require('node:process')` is process under another name.
+    if (
+      (value === 'process' || value === 'node:process') &&
+      isPunct(this.prev, '(') &&
+      isWord(this.prev2, 'require') &&
+      isPunct(this.prev3, '=') &&
+      isWord(this.prev4)
+    )
+      this.setAlias((this.prev4 as Token).text, 'process', false);
     if (value !== null) this.stringFacts(token, value, out);
     return out;
   }
@@ -447,10 +483,6 @@ export class LoadingWatch {
     this.candidate = null;
     if (candidate === null) return;
     if (isMember(token) || isPunct(token, '[') || isPunct(token, '(')) return;
-    if (this.aliases.size >= ALIASES_MAX && !this.aliases.has(candidate.name)) {
-      this.aliasesFull = true;
-      return;
-    }
     // A `let` or `const` of this block is gone at its end; a `var`, or an assignment, is kept to the end of the file.
     const declaration = this.declaration;
     const scoped =
@@ -458,8 +490,16 @@ export class LoadingWatch {
       declaration.keyword !== 'var' &&
       declaration.depth === this.depth() &&
       this.overflow === 0;
-    this.aliases.set(candidate.name, { receiver: candidate.receiver, scoped });
-    if (scoped) this.scopes.at(-1)!.aliases.push(candidate.name);
+    this.setAlias(candidate.name, candidate.receiver, scoped);
+  }
+
+  private setAlias(name: string, receiver: Receiver, scoped: boolean): void {
+    if (this.aliases.size >= ALIASES_MAX && !this.aliases.has(name)) {
+      this.aliasesFull = true;
+      return;
+    }
+    this.aliases.set(name, { receiver, scoped });
+    if (scoped) this.scopes.at(-1)!.aliases.push(name);
   }
 
   /** The finding for a word by its position: the plain names `eval` and `Function`, and what hangs off a receiver. */
@@ -473,6 +513,14 @@ export class LoadingWatch {
         return this.functionWord(token, member);
       case 'constructor':
         return this.constructorWord(token, member);
+      case 'require':
+        // `require.main.require('x')` loads through the main module, with its lookup paths.
+        return member && this.chain[0] === 'require' && this.chain.at(-1) === 'main'
+          ? found(
+              'uses require.main.require, which loads a module through the main module',
+              token.at,
+            )
+          : null;
       case 'resolve':
         return member && isWord(this.prev2, 'meta') && isPunct(this.prev, '.')
           ? { concern: 'computed', reason: 'uses import.meta.resolve', at: token.at }
@@ -506,8 +554,15 @@ export class LoadingWatch {
     if (!member) return null;
     if (this.chain.at(-1) === 'constructor' || this.chain[0] === 'Function')
       return found('uses .constructor.constructor, which makes code from text', token.at);
-    // `(function () {}).constructor` and `f().constructor`: the constructor of a value that is not a name, once it is used.
-    if (isPunct(this.prev2, ')')) this.pending = { kind: 'constructor-value', at: token.at };
+    // The constructor of any value is the Function constructor if the value is a function: once it is called it is a
+    // use, and `.name`, `.prototype` and a comparison are not. For a value that is written as an expression, the call
+    // of a function or `(async () => {})`, handing it on is a use as well. `this` is an instance (`this.constructor`).
+    if (!isWord(this.prev2, 'this'))
+      this.pending = {
+        kind: 'constructor-value',
+        at: token.at,
+        expression: isPunct(this.prev2, ')') || isPunct(this.prev2, ']'),
+      };
     return null;
   }
 
@@ -520,24 +575,29 @@ export class LoadingWatch {
     }
     if (isWord(this.prev, 'new'))
       return found('uses the Function constructor, which makes code from text', token.at);
-    this.pending = { kind: 'function', at: token.at };
+    this.pending = {
+      kind: 'function',
+      at: token.at,
+      key: isPunct(this.prev, '{') || isPunct(this.prev, ','),
+    };
     return null;
   }
 
   /** The text ended: a rule that waited for another token has nothing to wait for. */
-  end(): Finding | null {
+  end(): Finding[] {
+    const out = this.occurrences.end();
     const pending = this.pending;
     this.pending = null;
     if (this.aliasesFull)
-      return {
+      out.push({
         concern: 'doubt',
         reason: `more than ${ALIASES_MAX} names are set to the global object, process or module`,
         at: 0,
-      };
-    if (pending?.kind === 'constructor-value')
-      return found('uses .constructor.constructor, which makes code from text', pending.at);
-    return pending?.kind === 'function'
-      ? found('uses the Function constructor, which makes code from text', pending.at)
-      : null;
+      });
+    if (pending?.kind === 'constructor-value' && pending.expression)
+      out.push(found('uses .constructor.constructor, which makes code from text', pending.at));
+    if (pending?.kind === 'function')
+      out.push(found('uses the Function constructor, which makes code from text', pending.at));
+    return out;
   }
 }

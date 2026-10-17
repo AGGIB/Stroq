@@ -46,7 +46,7 @@ const STATEMENTS: readonly (readonly string[])[] = [
   ['const', 'x', '=', 'require', '(', `'${NAME}'`, ')', ';'],
   ['const', 'x', '=', 'require', '(', `"${NAME}"`, ')', ';'],
   ['require', '(', `\`${NAME}\``, ')', ';'],
-  ['x', '=', 'module', '.', 'require', '(', `'${NAME}'`, ')', ';'],
+  ['x', '=', 'require', '(', `'${NAME}'`, ')', ';'],
   ['import', 'x', 'from', `'${NAME}'`, ';'],
   ['import', '{', 'a', ',', 'b', '}', 'from', `"${NAME}"`, ';'],
   ['import', '*', 'as', 'ns', 'from', `'${NAME}'`, ';'],
@@ -189,7 +189,6 @@ describe('against V8: if the call runs, the reader found it or flagged the file'
     `require('${NAME}');`,
     `require /*c*/ ('${NAME}');`,
     `\nrequire\n("${NAME}");`,
-    `module.require('${NAME}');`,
     `require(\`${NAME}\`);`,
   ] as const;
 

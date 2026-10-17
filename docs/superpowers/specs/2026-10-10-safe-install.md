@@ -283,6 +283,10 @@ Needs `srt` and refuses without it (unlike `run --sandbox`, which only warns). T
 - A passport is the same for the same artifact only when it is read by the same Stroq with the same rules; another version may read the same files differently (section 5).
 - The commit id GitHub sends is a claim of the server. The Cisco and Snyk report formats are unchecked until there are samples. Real registry and GitHub answers are covered by fixtures until the first `--online` run on public repositories.
 
+## 14a. Future work: let Node enforce the pin
+
+The reading of the text in section 10 is best-effort against innocent servers and planted packages, not against an author who runs arbitrary code anyway, and it keeps a list of known limits (the global object reached without being named, a name built from pieces on an object that is not one of the watched ones, a file written under a name made at run time). The enforcement that does not depend on reading is to **start a pinned server under Node's permission model**: `node --permission --allow-fs-read=<the private copy>` on Node 24 and later, `--experimental-permission` on 22. Resolving or loading anything outside the pinned copy, starting a child process, starting a worker or loading a native addon then fails at run time, whatever the text says. The grants the server needs (a file-reading server needs `--allow-fs-read` for the paths it must see, a server that starts programs needs `--allow-child-process`) would be recorded in the lock, shown on the confirmation screen next to the passport, and held by the pin the way `--pass-env` is. This is **not built**: it is the next step for the pin, and when it exists the best-effort reading becomes advice to the person who bundles the server and no longer the barrier.
+
 ## 15. Who builds what
 
 | Task | Part | Files |

@@ -177,3 +177,71 @@ export const LOADED_FILE = /(?:\.(?:c|m)?js|\.node|\.wasm)$|(?:^|[\\/])package\.
 
 /** A path of a script that starts at the root of a disk: a file outside the tree. */
 export const ABSOLUTE_SCRIPT = /^(?:\/|[A-Za-z]:[\\/]|\\\\).*\.(?:c|m)?js$/;
+
+// ---------------------------------------------------------------------------------------------
+// The identifiers that are a concern in any position
+// ---------------------------------------------------------------------------------------------
+//
+// A rule for each shape is a list that never ends, so these are watched as names: where one stands in a way that is
+// not one of its harmless forms, it is a concern, whether it is a member, a computed name, taken out by a pattern, set
+// to a variable or handed on as a value. That over-approximates on purpose: the reading is best-effort and the cost of
+// a refusal is a bundle that is written differently, where the cost of a miss is code that no digest covers. What a
+// harmless form is, is the whole of this list: a member that is data (`process.env`), `typeof` and a comparison, the
+// name of a parameter, a key of an object, a method called `constructor`.
+
+/**
+ * The harmless members of each name that is watched, by what follows `NAME.` or `NAME['...']`: data and events, nothing
+ * that loads or starts. `Reflect` and `Proxy` are not watched by themselves: what they do is done to the objects they are
+ * handed, and handing over the global object, `process` or `module` is a use that is seen where it is written. A member
+ * of `globalThis` or `global` is harmless, except the ones that are watched on any object, and `process`, which is read
+ * as `process`.
+ */
+export const HARMLESS_MEMBERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'process',
+    new Set([
+      'env',
+      'argv',
+      'argv0',
+      'arch',
+      'platform',
+      'cwd',
+      'chdir',
+      'exit',
+      'exitCode',
+      'on',
+      'once',
+      'off',
+      'emit',
+      'removeListener',
+      'removeAllListeners',
+      'listenerCount',
+      'stdout',
+      'stderr',
+      'stdin',
+      'nextTick',
+      'version',
+      'versions',
+      'release',
+      'hrtime',
+      'memoryUsage',
+      'cpuUsage',
+      'uptime',
+      'pid',
+      'ppid',
+      'title',
+      'execArgv',
+      'emitWarning',
+      'kill',
+      'umask',
+      'report',
+      'features',
+      'config',
+    ]),
+  ],
+  ['module', new Set(['exports'])],
+  ['import.meta', new Set(['url', 'dirname', 'filename'])],
+]);
+
+/** Names that are watched as a member of anything: `x.eval`, `x.Function`. (`x.constructor` and `x.__proto__` wait for what follows.) */
+export const WATCHED_MEMBERS: ReadonlySet<string> = new Set(['eval', 'Function']);

@@ -201,8 +201,6 @@ describe('eval and Function', () => {
   });
 
   it.each([
-    'obj.eval(1)',
-    'a.Function(1)',
     'x instanceof Function',
     'typeof Function === "function"',
     'const f = Function.prototype',
@@ -261,23 +259,24 @@ describe('eval and Function', () => {
 });
 
 describe('an identifier set to the global object, process or module', () => {
+  // Setting a variable to `globalThis` or `process` is itself a concern, so what is followed here is the one way left to do
+  // it unseen: `process || {}`, where the name is an operand and not yet a use.
   it.each([
-    ['a const', 'const g = globalThis; g.eval("1")'],
-    ['a let', 'let g = globalThis; g.eval("1")'],
-    ['a var', 'var g = globalThis; g.eval("1")'],
-    ['a plain assignment', 'g = globalThis; g.eval("1")'],
-    ['a declaration with other declarators', 'let a = 1, g = globalThis, b = 2; g.eval("1")'],
-    ['a block that has ended, when it is a var', '{ var g = globalThis; } g.eval("1")'],
-    ['a block that has ended, when it is an assignment', '{ g = globalThis; } g.eval("1")'],
-    ['an inner block', 'const g = globalThis; { g.eval("1") }'],
-    ['a function inside', 'const g = globalThis; function f() { return g.eval("1") }'],
-    ['a name built in pieces', 'const g = global; g["ev" + "al"]("1")'],
-    ['a name made at run time', 'const p = process; p[name]'],
-    ['an alias of an alias', 'const g = globalThis; const h = g; h.eval("1")'],
-    ['an alias in a template hole', 'const t = `${(g = globalThis)}`; g.eval("1")'],
+    ['a const', 'const p = process || {}; p.binding("x")'],
+    ['a let', 'let p = process || {}; p[name]'],
+    ['a var', 'var p = process || {}; p[name]'],
+    ['a plain assignment', 'p = process || {}; p[name]'],
+    ['a declaration with other declarators', 'let a = 1, p = process || {}, b = 2; p[name]'],
+    ['a block that has ended, when it is a var', '{ var p = process || {}; } p[name]'],
+    ['a block that has ended, when it is an assignment', '{ p = process || {}; } p[name]'],
+    ['an inner block', 'const p = process || {}; { p[name] }'],
+    ['a function inside', 'const p = process || {}; function f() { return p[name] }'],
+    ['a name built in pieces', 'const g = global || {}; g["ev" + "al"]'],
+    ['an alias of an alias', 'const p = process || {}; const q = p || {}; q[name]'],
+    ['an alias of the global object', 'const g = globalThis || {}; g[name]'],
     [
       'the same short name in a parameter, which is not told from the alias',
-      'var t = globalThis; function f(t) { return t.eval("1") }',
+      'var t = process || {}; function f(t) { return t[name] }',
     ],
   ])('is followed through %s', (_how, text) => {
     expect(flagged(text), text).toBe(true);
@@ -291,16 +290,139 @@ describe('an identifier set to the global object, process or module', () => {
     ['a call on process', 'const s = process.cwd(); s[0]'],
     [
       'an alias that ended with its block',
-      'function f() { const g = globalThis; return g.x } g.eval(1)',
+      'function f() { const p = process || {}; return p.x } p[name]',
     ],
     [
       'a let that ended with its block, and the name used as a parameter',
-      'function a() { let t = globalThis; return t.x } function b(t) { return t[e] }',
+      'function a() { let t = process || {}; return t.x } function b(t) { return t[e] }',
     ],
-    ['a name set to something else after', 'let g = globalThis; g = other(); g.eval(1)'],
-    ['a name set to something else after, in minified form', 'var t=globalThis;t=f();t[e]'],
-    ['a name that is only compared', 'if (g == globalThis) { g.eval(1) }'],
+    ['a name set to something else after', 'let p = process || {}; p = other(); p[name]'],
+    ['a name set to something else after, in minified form', 'var t=process||{};t=f();t[e]'],
+    ['a name that is only compared', 'if (p == process) { p[name] }'],
   ])('is not followed through %s', (_how, text) => {
+    expect(flagged(text), text).toBe(false);
+  });
+});
+
+describe('the identifiers that are a concern in any position', () => {
+  it.each([
+    ['process handed on', 'f(process)'],
+    ['process set to a variable', 'const p = process; use(p)'],
+    ['process returned', 'function f() { return process }'],
+    ['process in an array', 'const a = [process]'],
+    ['process in an object', 'const o = { p: process }'],
+    ['process as a shorthand property', 'const o = { process }'],
+    ['a member that is not data', 'process.binding("x")'],
+    ['a member that is not data, written as a string', 'process["binding"]'],
+    ['a name made at run time', 'process[name]'],
+    [
+      'process taken from the module of that name',
+      "const p = require('node:process'); p.binding('x')",
+    ],
+    [
+      'process taken from the module of that name, by a name made at run time',
+      "const p = require('process'); p[name]",
+    ],
+    ['require.main.require', "require.main.require('x')"],
+    ['module handed on', 'f(module)'],
+    [
+      'a local variable called module, which is not told from the object',
+      'const module = 1; module + 1',
+    ],
+    ['module set to a variable', 'const m = module; use(m)'],
+    ['a member of module that is not exports', 'module.children'],
+    ['a name of module made at run time', 'module[name]'],
+    ['globalThis handed on', 'f(globalThis)'],
+    ['globalThis set to a variable', 'const g = globalThis; use(g)'],
+    ['global handed on', 'f(global)'],
+    ['global returned', 'function f() { return global }'],
+    ['a name of globalThis made at run time', 'globalThis[name]'],
+    ['import.meta handed on', 'f(import.meta)'],
+    ['a member of import.meta that is not a path', 'import.meta.resolve("x")'],
+    ['a member of import.meta that is not a path, another', 'import.meta.env'],
+    ['eval as a member of anything', 'obj.eval(1)'],
+    ['Function as a member of anything', 'a.Function(1)'],
+    ['__proto__ read', 'x.__proto__.y'],
+    ['the constructor of an expression, handed on', 'f((() => {}).constructor)'],
+    ['the constructor of a name, called', 'f.constructor("1")'],
+    ['the constructor of a name, called with new', 'new obj.constructor()'],
+    ['the constructor of a name, called through call', 'f.constructor.call(null, "1")'],
+    ['a key called Function taken out by a pattern', 'const { Function: F } = x; F("1")'],
+  ])('is a concern: %s', (_how, text) => {
+    expect(flagged(text), text).toBe(true);
+  });
+
+  it.each([
+    ['typeof process', 'typeof process !== "undefined"'],
+    ['typeof module', 'typeof module !== "undefined" && module.exports'],
+    ['process imported by name', "import process from 'node:process'; process.env.X"],
+    ['process imported as a namespace', "import * as process from 'node:process'; process.cwd()"],
+    [
+      'data taken from the module of that name',
+      "const p = require('node:process'); p.env.X; p.argv",
+    ],
+    ['a choice with a key and a ternary', 'const o = { a: x ? process : void 0 }'],
+    ['typeof globalThis', 'typeof globalThis !== "undefined"'],
+    ['a key in process', '"env" in process'],
+    ['a key in globalThis', '"Bun" in globalThis'],
+    ['an instance test', 'x instanceof Proxy'],
+    ['data members of process', 'process.env.X; process.argv[2]; process.platform; process.cwd()'],
+    ['events of process', 'process.on("exit", f); process.once("SIGINT", g); process.nextTick(h)'],
+    [
+      'the streams of process',
+      'process.stdout.write(s); process.stderr.write(s); process.stdin.on("data", f)',
+    ],
+    [
+      'versions of process',
+      'process.version; process.versions.node; process.hrtime(); process.uptime()',
+    ],
+    [
+      'process in a choice of the global object',
+      'const g = typeof process !== "undefined" ? process : void 0',
+    ],
+    ['process or an empty object', 'const p = process || {}; p.argv; p.env'],
+    [
+      'the global object chosen by feature detection',
+      'const root = typeof globalThis !== "undefined" ? globalThis : global || self',
+    ],
+    [
+      'a member of globalThis that is data',
+      'globalThis.fetch; globalThis.navigator; globalThis.document',
+    ],
+    ['globalThis.process and then data', 'const e = globalThis.process?.env || {}'],
+    ['a pattern that takes data out of process', 'const { env, argv } = process'],
+    ['module.exports', 'module.exports = f; module.exports.x = 1'],
+    ['module as a parameter', '(function (exports, module) { module.exports = 1 })'],
+    ['module as a parameter of an arrow', '((exports, module) => { module.exports = 1 })'],
+    ['module as the only parameter', 'function f(module) { return module.exports }'],
+    ['module as a single arrow parameter', 'const f = module => module.exports'],
+    ['process as a parameter', 'function f(process) { return process.env }'],
+    ['global as a parameter', '(function (global, factory) { factory(global) })(this, f)'],
+    ['module compared', 'require.main === module'],
+    ['module compared the other way', 'module === require.main'],
+    ['a key called module', 'const o = { module: "index.mjs", process: 1, global: 2 }'],
+    ['a function called process', 'function process(x) { return x } process(1)'],
+    ['a method called process', 'class A { process(x) { return x } }'],
+    ['import.meta.url', 'import.meta.url'],
+    ['import.meta.dirname and filename', 'import.meta.dirname; import.meta.filename'],
+    ['a property called module', 'pkg.module; entry.process; cfg.global'],
+    ['Reflect and Proxy by themselves', 'Reflect.get(obj, k); Reflect.ownKeys(o); new Proxy(t, h)'],
+    ['__proto__ set', 'd.__proto__ = b'],
+    ['__proto__ deleted', 'delete newObj.__proto__'],
+    ['__proto__ compared', 'if (a.__proto__ === b) f()'],
+    ['__proto__ as a key', 'const o = { __proto__: null }'],
+    ['a method called constructor', 'class A { constructor(a) { this.a = a } }'],
+    [
+      'the class of this',
+      'Error.captureStackTrace(this, this.constructor); new this.constructor(a)',
+    ],
+    ['the name and the prototype of a constructor', 'x.constructor.name; x.constructor.prototype'],
+    [
+      'a constructor compared',
+      'a.constructor === b.constructor; typeof a.constructor === "function"',
+    ],
+    ['a key called Function', 'const o = { function: 1, Function: inspectFunction }'],
+  ])('is not a concern: %s', (_how, text) => {
     expect(flagged(text), text).toBe(false);
   });
 });
@@ -421,13 +543,13 @@ describe('the modules that run text as code', () => {
 
 describe('getBuiltinModule', () => {
   it.each([
-    ["process.getBuiltinModule('fs')", ['fs'], []],
-    ["process.getBuiltinModule('node:vm')", ['node:vm'], []],
-    ['process.getBuiltinModule(name)', [], ['computed']],
-    ["process.getBuiltinModule('f' + 's')", [], ['computed']],
-    ['const g = process.getBuiltinModule; g("vm")', [], ['computed']],
-    ['process.getBuiltinModule.call(process, "vm")', [], ['computed']],
-    ["process?.getBuiltinModule('fs')", ['fs'], []],
+    ["process.getBuiltinModule('fs')", ['fs'], ['dynamic-code']],
+    ["process.getBuiltinModule('node:vm')", ['node:vm'], ['dynamic-code']],
+    ['process.getBuiltinModule(name)', [], ['computed', 'dynamic-code']],
+    ["process.getBuiltinModule('f' + 's')", [], ['computed', 'dynamic-code']],
+    ['const g = process.getBuiltinModule; g("vm")', [], ['computed', 'dynamic-code']],
+    ['process.getBuiltinModule.call(process, "vm")', [], ['computed', 'dynamic-code']],
+    ["process?.getBuiltinModule('fs')", ['fs'], ['dynamic-code']],
   ])('%s is read like a require', (text, specifiers, concerns) => {
     const scan = scanModules(text);
     expect([...scan.specifiers]).toEqual(specifiers);

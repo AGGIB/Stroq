@@ -281,6 +281,31 @@ const SNIPPETS: readonly Snippet[] = [
     'createRequire through the module taken from process',
     'process.getBuiltinModule("module").createRequire(__filename)("zzpkg")',
   ),
+  script(
+    'process kept in a variable with ||',
+    'var p = process || {}; p.mainModule.require("zzpkg")',
+  ),
+  script(
+    'process handed to a function',
+    '(function (q) { return q.mainModule.require("zzpkg") })(process)',
+  ),
+  script(
+    'the global object handed to a function',
+    '(function (g) { return g["eval"]("process.mainModule.require(\'zzpkg\')") })(globalThis)',
+  ),
+  script(
+    'the constructor of a function in a variable, called',
+    'var f = function () {}; f.constructor("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  {
+    ...script(
+      'the module object handed on',
+      '(function (m) { return m.constructor._load("zzpkg") })(module)',
+      [],
+    ),
+    mustFlag: true,
+  },
+  module_('import.meta.resolve', "import.meta.resolve('zzpkg')"),
   script('require through a comma expression', '(0, require)("zzpkg")'),
   script('require called with an optional call', 'require?.("zzpkg")'),
   script('require passed to Reflect.apply', 'Reflect.apply(require, null, ["zzpkg"])'),
@@ -441,7 +466,7 @@ describe.skipIf(!oracleAvailable)('the reader of module names against Node', () 
     ] as const;
     const statements: readonly (readonly [Snippet['goal'], readonly string[]])[] = [
       ['script', ['var x', '=', 'require', '(', `'${NAME}'`, ')', ';']],
-      ['script', ['module', '.', 'require', '(', `"${NAME}"`, ')', ';']],
+      ['script', ['var y', '=', 'require', '(', `"${NAME}"`, ')', ';']],
       ['script', ['import', '(', `'${NAME}'`, ')', '.', 'catch', '(', 'f', ')', ';']],
       ['module', ['import', 'x', 'from', `'${NAME}'`, ';']],
       ['module', ['import', '*', 'as', 'ns', 'from', `'${NAME}'`, ';']],
