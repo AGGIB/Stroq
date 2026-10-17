@@ -2,7 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ADD_OPTIONS } from '../src/commands/add.js';
+import { REMOVE_OPTIONS } from '../src/commands/remove.js';
+import { UNTAINT_OPTIONS } from '../src/commands/untaint.js';
+import { VET_OPTIONS } from '../src/commands/vet.js';
+import { unknownOption, wantsHelp } from '../src/help.js';
 import { keptNote } from '../src/commands/init-mcp.js';
 import { openclawInstallCommands } from '../src/commands/openclaw-plugin.js';
 import { parseRunArgv } from '../src/commands/run.js';
@@ -83,7 +89,11 @@ function argvIn(shell: string, flags: readonly string[], line: string): string[]
 
 type Verdict = 'print' | 'fallback';
 
-/** Values from outside, each of them written to break out of a line, one way or another, and what the rule says of it. */
+/**
+ * Values from outside, each of them written to break out of a line, one way or another, and what the rule says of it.
+ * A value that begins with `-` is printed only where it is the value of an option (`--from=-x`); where it would be a
+ * positional it is refused, and the printers say which they are.
+ */
 const hostile = (): readonly (readonly [label: string, value: string, verdict: Verdict])[] => [
   ['semicolon', `x; printf pwned > ${marker}`, 'print'],
   ['command substitution', `$(printf pwned > ${marker})`, 'print'],
@@ -105,7 +115,13 @@ const hostile = (): readonly (readonly [label: string, value: string, verdict: V
   ['dollar variable', '$HOME ${IFS}', 'print'],
   ['glob', '*', 'print'],
   ['tilde', '~root', 'print'],
+  ['a home path', '~/x', 'print'],
+  ['a response file', '@file', 'print'],
+  ['a response file by path', '@/tmp/args.txt', 'print'],
+  ['an equals sign inside', 'a=b', 'print'],
   ['equals first, which zsh expands', '=ls', 'print'],
+  ['the name of a subcommand', 'add', 'print'],
+  ['the name of another subcommand', 'remove', 'print'],
   ['brace', '{a,b}', 'print'],
   ['space', 'a b  c', 'print'],
   ['hash', 'a #b', 'print'],
@@ -115,8 +131,12 @@ const hostile = (): readonly (readonly [label: string, value: string, verdict: V
   ['only a double quote', '"', 'print'],
   ['a quote and a backslash', `\\'`, 'fallback'],
   ['the empty string', '', 'print'],
-  ['a leading dash', '-rf', 'print'],
-  ['an option', '--force', 'print'],
+  ['a short option', '-x', 'print'],
+  ['a long option', '--force', 'print'],
+  ['the help option', '--help', 'print'],
+  ['the short help option', '-h', 'print'],
+  ['an option with a value', '--kind=mcp', 'print'],
+  ['a dash alone', '-', 'print'],
   ['a leading dash with a space', '-x y', 'print'],
   ['the separator', '--', 'print'],
   ['a newline', `x\nprintf pwned > ${marker}`, 'fallback'],
@@ -126,10 +146,10 @@ const hostile = (): readonly (readonly [label: string, value: string, verdict: V
   ['a bell', 'a\u0007', 'fallback'],
   ['DEL', 'a\u007fb', 'fallback'],
   ['a next-line control', 'a\u0085b', 'fallback'],
-  ['a line separator', 'a\u2028b', 'fallback'],
-  ['a paragraph separator', 'a\u2029b', 'fallback'],
-  ['a right-to-left override', 'abc\u202edef', 'fallback'],
-  ['a zero-width space', 'a\u200bb', 'fallback'],
+  ['a line separator', 'a b', 'fallback'],
+  ['a paragraph separator', 'a b', 'fallback'],
+  ['a right-to-left override', 'abc‮def', 'fallback'],
+  ['a zero-width space', 'a​b', 'fallback'],
   ['a lone surrogate', 'a\ud800b', 'fallback'],
   ['a long value', 'a'.repeat(5000), 'fallback'],
   ['a very long value', 'a'.repeat(10_000), 'fallback'],
@@ -146,15 +166,48 @@ const isCommand = (text: string): boolean => /^(?:stroq|openclaw) /.test(text);
 /** Nothing in it means anything to a shell. */
 const SENTENCE = /^[A-Za-z ,.]+$/;
 
+/** What the parser of a command makes of its arguments. */
+interface Parsed {
+  readonly positionals: readonly string[];
+  readonly values: Record<string, unknown>;
+}
+
+/**
+ * The arguments as the command reads them: first Stroq's own look at every argument before the command runs (help,
+ * an option the command does not have), then the real option table of the command with `util.parseArgs`.
+ */
+function parsedBy(argv: readonly string[]): Parsed | null {
+  const [command = '', ...rest] = argv;
+  expect(wantsHelp(command, rest), argv.join(' ')).toBe(false);
+  expect(unknownOption(command, rest), argv.join(' ')).toBeNull();
+  switch (command) {
+    case 'add':
+      return parseArgs({ args: rest, allowPositionals: true, options: ADD_OPTIONS });
+    case 'remove':
+      return parseArgs({ args: rest, allowPositionals: true, options: REMOVE_OPTIONS });
+    case 'untaint':
+      return parseArgs({ args: rest, options: UNTAINT_OPTIONS });
+    case 'vet':
+      return parseArgs({ args: rest, options: VET_OPTIONS });
+    default:
+      return null;
+  }
+}
+
 interface Printer {
   readonly name: string;
   /** Characters this printer cannot carry because the line goes into text where they mean something. */
   readonly forbid?: string;
-  /** The command or the sentence for a value, and the arguments a program should get from the command. */
-  readonly print: (value: string) => { text: string; argv: (shown: string) => string[] };
+  /** The value is a positional of the command, so one that begins with a dash is not printed. */
+  readonly positional?: true;
+  /** The command or the sentence for a value, the arguments a program should get, and how the command should read them. */
+  readonly print: (value: string) => {
+    text: string;
+    argv: (shown: string) => string[];
+    parsed?: (shown: string) => Parsed;
+  };
 }
 
-const leading = (shown: string) => shown.startsWith('-');
 const record = (value: string) => ({
   source: value,
   config: value,
@@ -171,82 +224,90 @@ const emptyPassport = () =>
     rulesId: 'test',
   });
 
+const reconfirm = {
+  argv: (shown: string) => ['add', shown, '--kind', 'mcp', '--force'],
+  parsed: (shown: string): Parsed => ({
+    positionals: [shown],
+    values: { kind: 'mcp', force: true },
+  }),
+};
+
 const printers: readonly Printer[] = [
   {
     name: 'the line that confirms a wrapper again (init, the proxy, doctor)',
-    print: (value) => ({
-      text: reconfirmCommand(value),
-      argv: (shown) =>
-        leading(shown)
-          ? ['add', '--kind', 'mcp', '--force', '--', shown]
-          : ['add', shown, '--kind', 'mcp', '--force'],
-    }),
+    positional: true,
+    print: (value) => ({ text: reconfirmCommand(value), ...reconfirm }),
   },
   {
     name: 'the note init prints for a wrapper it kept',
+    positional: true,
     print: (value) => ({
       text: keptNote(value, false).split('confirm it again: ')[1]!,
-      argv: (shown) =>
-        leading(shown)
-          ? ['add', '--kind', 'mcp', '--force', '--', shown]
-          : ['add', shown, '--kind', 'mcp', '--force'],
+      ...reconfirm,
     }),
   },
   {
     name: 'the remove line for a damaged server',
+    positional: true,
     print: (value) => ({
       text: mcpRemedyCommands(value, record(value))[0]!,
-      argv: (shown) =>
-        leading(shown)
-          ? ['remove', '--kind', 'mcp', '--force', '--', shown]
-          : ['remove', shown, '--kind', 'mcp', '--force'],
+      argv: (shown) => ['remove', shown, '--kind', 'mcp', '--force'],
+      parsed: (shown) => ({ positionals: [shown], values: { kind: 'mcp', force: true } }),
     }),
   },
   {
     name: 'the add line for a damaged server',
-    print: (value) => {
-      const commands = mcpRemedyCommands(value, record(value));
-      return {
-        text: commands.at(-1)!,
-        argv: (shown) => {
-          const pair = (flag: string): string[] =>
-            leading(shown) ? [`${flag}=${shown}`] : [flag, shown];
-          const rest = [
-            '--kind',
-            'mcp',
-            ...pair('--name'),
-            ...pair('--config'),
-            ...pair('--entrypoint'),
-            '--pass-env',
-            'A,B',
-            ...pair('--cwd'),
-          ];
-          return leading(shown) ? ['add', ...rest, '--', shown] : ['add', shown, ...rest];
+    positional: true,
+    print: (value) => ({
+      text: mcpRemedyCommands(value, record(value)).at(-1)!,
+      argv: (shown) => [
+        'add',
+        shown,
+        '--kind',
+        'mcp',
+        `--name=${shown}`,
+        `--config=${shown}`,
+        `--entrypoint=${shown}`,
+        '--pass-env=A,B',
+        `--cwd=${shown}`,
+      ],
+      parsed: (shown) => ({
+        positionals: [shown],
+        values: {
+          kind: 'mcp',
+          name: shown,
+          config: shown,
+          entrypoint: shown,
+          'pass-env': 'A,B',
+          cwd: shown,
         },
-      };
-    },
+      }),
+    }),
   },
   {
     name: 'the remove line for a damaged skill',
+    positional: true,
     print: (value) => ({
       text: skillRemedyCommands(
         value,
         { source: value, root: '/p' },
         { home: '/h', project: '/p' },
       )[0]!,
-      argv: (shown) =>
-        leading(shown) ? ['remove', '--force', '--', shown] : ['remove', shown, '--force'],
+      argv: (shown) => ['remove', shown, '--force'],
+      parsed: (shown) => ({ positionals: [shown], values: { force: true } }),
     }),
   },
   {
     name: 'the add line for a damaged skill',
+    positional: true,
     print: (value) => ({
       text: skillRemedyCommands(
         value,
         { source: value, root: '/h' },
         { home: '/h', project: '/p' },
       ).at(-1)!,
-      argv: (shown) => (leading(shown) ? ['add', '--user', '--', shown] : ['add', shown, '--user']),
+      argv: (shown) => ['add', shown, '--user'],
+      parsed: (shown) => ({ positionals: [shown], values: { user: true } }),
     }),
   },
   {
@@ -269,10 +330,8 @@ const printers: readonly Printer[] = [
       }
       return {
         text: message.split('Read every line with: ')[1]!,
-        argv: (shown) =>
-          leading(shown)
-            ? ['vet', `--from=${shown}`, '--json']
-            : ['vet', '--from', shown, '--json'],
+        argv: (shown) => ['vet', `--from=${shown}`, '--json'],
+        parsed: (shown) => ({ positionals: [], values: { from: shown, json: true } }),
       };
     },
   },
@@ -282,19 +341,18 @@ const printers: readonly Printer[] = [
       const entry = { sessionId: value, decision: { effect: 'deny', ruleId: 'r' } } as never;
       return {
         text: wrongCallLines(entry)[1]!.split('outside the agent: ')[1]!,
-        argv: (shown) =>
-          leading(shown) ? ['untaint', `--session=${shown}`] : ['untaint', '--session', shown],
+        argv: (shown) => ['untaint', `--session=${shown}`],
+        parsed: (shown) => ({ positionals: [], values: { session: shown } }),
       };
     },
   },
   {
+    // The command is another program's (OpenClaw's): there is no parser of ours to check it with, so a dash first is refused.
     name: 'the commands that register the OpenClaw plugin',
+    positional: true,
     print: (value) => ({
       text: openclawInstallCommands(value)[0]!,
-      argv: (shown) =>
-        leading(shown)
-          ? ['plugins', 'install', '--link', '--', shown]
-          : ['plugins', 'install', '--link', shown],
+      argv: (shown) => ['plugins', 'install', '--link', shown],
     }),
   },
   {
@@ -321,26 +379,31 @@ const printers: readonly Printer[] = [
         },
       } as never);
       const line = /Reproduce: (.*)$/m.exec(card)![1]!;
+      // An empty subdirectory is none.
+      const spec = (shown: string) => `github:o/r#main${shown === '' ? '' : `:${shown}`}`;
       return {
         text: line.startsWith('`') ? line.slice(1, -1) : line,
         argv: (shown) => [
           'vet',
-          '--online',
-          // an empty subdirectory is none
-          `github:o/r#main${shown === '' ? '' : `:${shown}`}`,
-          '--expect',
-          `sha256:${passport.artifact.digest}`,
+          `--online=${spec(shown)}`,
+          `--expect=sha256:${passport.artifact.digest}`,
         ],
+        parsed: (shown) => ({
+          positionals: [],
+          values: { online: spec(shown), expect: `sha256:${passport.artifact.digest}` },
+        }),
       };
     },
   },
 ];
 
-describe.skipIf(!posix).each(printers)('$name', ({ print, forbid = '' }) => {
-  it.each(hostile())('keeps %s as one argument, or prints no command', (_label, value, verdict) => {
-    const { text, argv } = print(value);
+describe.skipIf(!posix).each(printers)('$name', ({ print, forbid = '', positional = false }) => {
+  it.each(hostile())('keeps %s as one argument, or prints no command', (_label, value, said) => {
+    const { text, argv, parsed } = print(value);
     const printed = isCommand(text);
     const carried = ![...forbid].some((char) => value.includes(char));
+    // A positional that begins with a dash would be read as an option: it is not printed.
+    const verdict = positional && value.startsWith('-') ? 'fallback' : said;
 
     // Nothing in the text is a raw control or invisible character, or a placeholder in angle brackets.
     expect(text).not.toMatch(/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u);
@@ -358,6 +421,12 @@ describe.skipIf(!posix).each(printers)('$name', ({ print, forbid = '' }) => {
       expect(existsSync(marker), `${shell}: ${text}`).toBe(false);
       // The program was started once, with exactly the arguments that were meant, the value being one of them.
       expect(run, `${shell}: ${text}`).toEqual(argv(value));
+    }
+    // And the command reads them as meant: the value is the positional or the value of the option, not an option.
+    if (parsed !== undefined) {
+      const read = parsedBy(argv(value));
+      expect(read?.positionals, text).toEqual(parsed(value).positionals);
+      expect(read?.values, text).toMatchObject(parsed(value).values);
     }
   });
 });
@@ -443,7 +512,7 @@ describe('quoteWord for cmd.exe and PowerShell', () => {
       commandLine(['stroq', 'vet', { flag: '--from', value: 'C:\\My Files' }], {
         platform: 'win32',
       }),
-    ).toBe('stroq vet --from "C:\\My Files"');
+    ).toBe('stroq vet --from="C:\\My Files"');
   });
 });
 
@@ -454,20 +523,43 @@ describe('commandLine', () => {
     ).toBe('stroq add demo --kind mcp');
   });
 
-  it('puts every positional after -- when one starts with a dash', () => {
+  it('writes the value of an option as --flag=value, and quotes it', () => {
     expect(
-      commandLine(['stroq', 'add', { positional: '-x' }, '--kind', 'mcp', { positional: 'y' }], {
+      commandLine(['stroq', 'vet', { flag: '--from', value: '/my dir' }, '--json'], {
         platform: 'linux',
       }),
-    ).toBe(`stroq add --kind mcp -- '-x' y`);
+    ).toBe(`stroq vet --from='/my dir' --json`);
   });
 
-  it('writes an option value that starts with a dash as --flag=value', () => {
+  it('writes the value of an option that begins with a dash after the equals sign', () => {
     expect(
       commandLine(['stroq', 'vet', { flag: '--from', value: '-x y' }, '--json'], {
         platform: 'linux',
       }),
     ).toBe(`stroq vet --from='-x y' --json`);
+    expect(
+      commandLine(['stroq', 'vet', { flag: '--from', value: '--help' }], { platform: 'linux' }),
+    ).toBe("stroq vet --from='--help'");
+  });
+
+  it('prints no command for a positional that begins with a dash, and no -- before it', () => {
+    const line = commandLine(
+      ['stroq', 'add', { positional: '-x', what: 'name' }, '--kind', 'mcp'],
+      {
+        platform: 'linux',
+      },
+    );
+
+    expect(line).toBe(unprintableSentence('name'));
+    expect(line).not.toContain('--');
+  });
+
+  it('writes the words after a -- that hands the rest to another program as they are', () => {
+    expect(
+      commandLine(['stroq', 'run', '--', { word: 'claude' }, { word: '-p' }, { word: 'a b' }], {
+        platform: 'linux',
+      }),
+    ).toBe(`stroq run -- claude '-p' 'a b'`);
   });
 
   it('prints a sentence, and no command, when one value cannot be quoted', () => {
@@ -497,5 +589,52 @@ describe('commandLine', () => {
     expect(
       tryCommandLine(['stroq', { positional: 'a\nb', what: 'source' }], { platform: 'linux' }),
     ).toEqual({ line: null, unprintable: 'source' });
+  });
+});
+
+describe('the parsers of the commands that print lines', () => {
+  it.each([
+    ['add', ADD_OPTIONS, '--name'],
+    ['add', ADD_OPTIONS, '--config'],
+    ['add', ADD_OPTIONS, '--entrypoint'],
+    ['add', ADD_OPTIONS, '--cwd'],
+    ['add', ADD_OPTIONS, '--pass-env'],
+    ['add', ADD_OPTIONS, '--client'],
+    ['vet', VET_OPTIONS, '--from'],
+    ['vet', VET_OPTIONS, '--online'],
+    ['vet', VET_OPTIONS, '--expect'],
+    ['untaint', UNTAINT_OPTIONS, '--session'],
+  ] as const)('%s reads %s=<anything> as the value of the option', (command, options, flag) => {
+    for (const value of ['-x', '--help', '--force', '-', '--', '-h', '@file', '~/x', 'a=b', '=x']) {
+      const rest = [`${flag}=${value}`];
+      expect(wantsHelp(command, rest), `${flag}=${value}`).toBe(false);
+      expect(unknownOption(command, rest), `${flag}=${value}`).toBeNull();
+      const { values } = parseArgs({ args: rest, allowPositionals: true, options });
+      expect((values as Record<string, unknown>)[flag.slice(2)]).toBe(value);
+    }
+  });
+
+  it('does not read the same values after a space as a value, which is why they are not printed that way', () => {
+    for (const value of ['-x', '--force', '-h']) {
+      expect(() => parseArgs({ args: ['--session', value], options: UNTAINT_OPTIONS })).toThrow();
+    }
+  });
+
+  it('does not take a -- before a positional that begins with a dash as enough: Stroq looks at it first', () => {
+    // `stroq add --kind mcp -- -x` stops at the check for an option `add` does not have; `-h` shows the help.
+    expect(unknownOption('add', ['--kind', 'mcp', '--', '-x'])).toBe('-x');
+    expect(wantsHelp('add', ['--kind', 'mcp', '--', '-h'])).toBe(true);
+  });
+
+  it('has no response file and no tilde of its own in the arguments it prints', () => {
+    // `@file` and `~/x` are values like any other to the parsers; the shell expands a tilde only when it is bare.
+    const { positionals } = parseArgs({
+      args: ['@file', '~/x'],
+      allowPositionals: true,
+      options: ADD_OPTIONS,
+    });
+    expect(positionals).toEqual(['@file', '~/x']);
+    expect(quoteWord('~/x', 'linux')).toBe("'~/x'");
+    expect(quoteWord('@file', 'linux')).toBe('@file');
   });
 });

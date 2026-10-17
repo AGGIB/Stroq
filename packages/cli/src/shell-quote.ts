@@ -18,8 +18,12 @@
 // - A value that cannot be written that way makes the whole line a plain sentence that says so, in letters, spaces,
 //   commas and periods only, so that nothing in it means anything to a shell. There is no placeholder inside a command
 //   line: a placeholder is text, and `<` and `>` are redirections.
-// - A positional that begins with `-` would be read as an option, so the line puts `--` before every positional, and
-//   an option's value that begins with `-` is written `--flag=value`.
+// - A value is never read as an option. An option's value is always written `--flag=value`, so that a leading `-` in it
+//   is part of the value (`util.parseArgs` reads `--flag -x` as two options). A positional that begins with `-` is
+//   not printed: `--` before it would not do, since Stroq looks at every argument for an option it does not have
+//   (and for `--help`) before the command reads them, after a `--` as well, and an external command's parser is not
+//   ours to rely on. Only the words after a `--` that hands the rest to another program (`stroq run -- claude`)
+//   are written as they are.
 
 /** What a value is, for the sentence that says it cannot be printed. */
 export type Kind = 'name' | 'path' | 'source' | 'id' | 'value';
@@ -60,11 +64,11 @@ export function quoteWord(
 /** What a piece of a command line is. A string is a word that Stroq wrote; the others are values from outside. */
 export type Piece =
   | string
-  /** A positional argument. */
+  /** A positional argument; one that begins with `-` is not printed. */
   | { readonly positional: string; readonly what?: Kind }
-  /** An option with a value: `--flag value`. */
+  /** An option with a value, written `--flag=value`. */
   | { readonly flag: string; readonly value: string; readonly what?: Kind }
-  /** A word in a place that is already past `--`, so that it is never read as an option. */
+  /** A word in a place that is already past a `--` that hands the rest to another program. */
   | { readonly word: string; readonly what?: Kind };
 
 export interface LineOptions {
@@ -72,9 +76,6 @@ export interface LineOptions {
   /** Characters that make a value unprintable, for a line that goes into text where they mean something (a backtick in Markdown). */
   readonly forbid?: string;
 }
-
-/** The place of a positional in the words of a line, until it is known whether they all stay where they are. */
-const HOLE = Symbol('positional');
 
 /**
  * The command line of the pieces with every value quoted, in the order given, or null when a value cannot be printed
@@ -85,9 +86,7 @@ export function tryCommandLine(
   options: LineOptions = {},
 ): { readonly line: string } | { readonly line: null; readonly unprintable: Kind } {
   const { platform = process.platform, forbid = '' } = options;
-  const words: (string | typeof HOLE)[] = [];
-  const positionals: string[] = [];
-  let leadingDash = false;
+  const words: string[] = [];
   const unprintable = (what: Kind | undefined) =>
     ({ line: null, unprintable: what ?? 'value' }) as const;
   for (const piece of pieces) {
@@ -98,21 +97,12 @@ export function tryCommandLine(
     const value = 'flag' in piece ? piece.value : 'word' in piece ? piece.word : piece.positional;
     const word = quoteWord(value, platform, forbid);
     if (word === null) return unprintable(piece.what);
-    if ('flag' in piece) {
-      if (value.startsWith('-')) words.push(`${piece.flag}=${word}`);
-      else words.push(piece.flag, word);
-    } else if ('word' in piece) words.push(word);
-    else {
-      leadingDash ||= value.startsWith('-');
-      positionals.push(word);
-      words.push(HOLE);
-    }
+    if ('flag' in piece) words.push(`${piece.flag}=${word}`);
+    else if ('word' in piece) words.push(word);
+    else if (value.startsWith('-')) return unprintable(piece.what);
+    else words.push(word);
   }
-  // A positional stays where it was written, unless one starts with `-`: then all of them go after `--`.
-  if (leadingDash)
-    return { line: [...words.filter((word) => word !== HOLE), '--', ...positionals].join(' ') };
-  let next = 0;
-  return { line: words.map((word) => (word === HOLE ? positionals[next++]! : word)).join(' ') };
+  return { line: words.join(' ') };
 }
 
 /** What a person is told in place of a command that cannot be printed safely: letters, spaces, commas and periods. */

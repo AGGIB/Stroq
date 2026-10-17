@@ -90,7 +90,7 @@ describe('the screen a person types a digest against', () => {
       /7 sensitive lines would be hidden/,
     );
     expect(() => confirmationScreen(passport, '/src/my skill')).toThrow(
-      /stroq vet --from '\/src\/my skill' --json/,
+      /stroq vet --from='\/src\/my skill' --json/,
     );
   });
 
@@ -98,6 +98,7 @@ describe('the screen a person types a digest against', () => {
     ['/src/$(touch x)', `'/src/$(touch x)'`],
     ['/src/`id`', "'/src/`id`'"],
     ['/src/a;b', `'/src/a;b'`],
+    ['/src/-x', '/src/-x'],
   ])(
     'quotes the source %s so that a shell reads it as one word and runs nothing',
     (source, word) => {
@@ -105,7 +106,7 @@ describe('the screen a person types a digest against', () => {
         many(CONFIRM_SENSITIVE_MAX + 1, (i) => ({ subject: `s${i}`, sensitive: true })),
       );
 
-      expect(() => confirmationScreen(passport, source)).toThrow(`stroq vet --from ${word} --json`);
+      expect(() => confirmationScreen(passport, source)).toThrow(`stroq vet --from=${word} --json`);
     },
   );
 

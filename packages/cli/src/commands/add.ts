@@ -5,25 +5,24 @@ import { stroqHome } from '../paths.js';
 import { parseArgsProblem, usageError } from '../help.js';
 import { currentTerminal } from '../ui/terminal.js';
 
+/** The options of the command, written out here where the tests of the printed command lines read them too. */
+export const ADD_OPTIONS = {
+  user: { type: 'boolean' },
+  restore: { type: 'boolean' },
+  kind: { type: 'string' },
+  client: { type: 'string' },
+  config: { type: 'string' },
+  entrypoint: { type: 'string' },
+  'pass-env': { type: 'string' },
+  name: { type: 'string' },
+  cwd: { type: 'string' },
+  force: { type: 'boolean' },
+} as const;
+
 export async function runAdd(args: readonly string[]): Promise<number> {
   let parsed;
   try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      options: {
-        user: { type: 'boolean' },
-        restore: { type: 'boolean' },
-        kind: { type: 'string' },
-        client: { type: 'string' },
-        config: { type: 'string' },
-        entrypoint: { type: 'string' },
-        'pass-env': { type: 'string' },
-        name: { type: 'string' },
-        cwd: { type: 'string' },
-        force: { type: 'boolean' },
-      },
-    });
+    parsed = parseArgs({ args: [...args], allowPositionals: true, options: ADD_OPTIONS });
   } catch (error) {
     const problem = parseArgsProblem(error);
     if (problem === null) throw error;

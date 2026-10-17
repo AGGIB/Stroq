@@ -15,7 +15,7 @@ import { setup } from '../helpers/skill-install.js';
  * out: remove it with --force, then add it again from its source.
  */
 const MCP_REMEDY =
-  /stroq remove demo --kind mcp --force, then stroq add \S+ --kind mcp --name demo --config \S+ --entrypoint server\.js/;
+  /stroq remove demo --kind mcp --force, then stroq add \S+ --kind mcp --name=demo --config=\S+ --entrypoint=server\.js/;
 const SKILL_REMEDY = /stroq remove demo --force, then stroq add \S+$/;
 
 /** The ways a stored copy is damaged, by what is done to the file `file` of its tree or to the copy as a whole. */

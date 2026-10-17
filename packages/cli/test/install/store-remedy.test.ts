@@ -2,6 +2,7 @@ import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { ADD_OPTIONS } from '../../src/commands/add.js';
 import { unknownOption } from '../../src/help.js';
 import { readPassports } from '../../src/install/lock.js';
 import { addMcp, removeMcp, type McpInstallOptions } from '../../src/install/mcp-install.js';
@@ -51,19 +52,6 @@ function commandsIn(error: unknown): [string[], string[]] {
   const [remove, add] = tail!.split(/, then (?:from the folder \S+ )?/);
   return [words(remove!), words(add!)];
 }
-
-const ADD_OPTIONS = {
-  user: { type: 'boolean' },
-  restore: { type: 'boolean' },
-  kind: { type: 'string' },
-  client: { type: 'string' },
-  config: { type: 'string' },
-  entrypoint: { type: 'string' },
-  'pass-env': { type: 'string' },
-  name: { type: 'string' },
-  cwd: { type: 'string' },
-  force: { type: 'boolean' },
-} as const;
 
 /** What `stroq add <argv>` hands to `addMcp`, the way commands/add.ts reads it. */
 function mcpOptionsOf(argv: string[], base: McpInstallOptions) {
@@ -119,7 +107,7 @@ describe('an MCP server whose stored copy is damaged', () => {
     expect(add.slice(0, 2)).toEqual(['stroq', 'add']);
     expect(unknownOption('add', add.slice(2))).toBeNull();
     expect(add).toEqual(
-      expect.arrayContaining(['--kind', 'mcp', '--name', 'demo', '--entrypoint', 'server.js']),
+      expect.arrayContaining(['--kind', 'mcp', '--name=demo', '--entrypoint=server.js']),
     );
   });
 
@@ -181,7 +169,7 @@ describe('the commands for an MCP record', () => {
     expect(line).not.toContain('--pass-env');
     expect(line).not.toContain('--cwd');
     expect(line).toBe(
-      "stroq remove demo --kind mcp --force, then stroq add '/src/a server' --kind mcp --name demo --config /etc/client.json --entrypoint dist/main.js",
+      "stroq remove demo --kind mcp --force, then stroq add '/src/a server' --kind mcp --name=demo --config=/etc/client.json --entrypoint=dist/main.js",
     );
   });
 
@@ -192,8 +180,8 @@ describe('the commands for an MCP record', () => {
       cwd: '/my dir/it here',
     });
 
-    expect(line).toContain('--pass-env A,B');
-    expect(line).toContain(`--cwd '/my dir/it here'`);
+    expect(line).toContain('--pass-env=A,B');
+    expect(line).toContain(`--cwd='/my dir/it here'`);
   });
 });
 
