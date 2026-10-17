@@ -30,7 +30,10 @@ import {
 } from './module-specifiers.js';
 import { hasPackageScope, nestedManifestConcerns, readManifest } from './package-reach.js';
 
-/** The most package names and files one tree is reported for. */
+/**
+ * The most package names and files one tree is listed for. A list is only what is shown: whether a tree is refused
+ * is decided by whether anything was found at all, and what is cut is counted (`moduleCount`, `count`).
+ */
 const MAX_MODULES = 50;
 const MAX_FILES_PER_CONCERN = 5;
 /** The most text, in bytes, that one tree is read for; a file past it is a concern. The tree limit is 32 MiB. */
@@ -69,13 +72,17 @@ export interface ConcernedFiles {
   readonly files: readonly string[];
   /** The same files, with the reason and the line of the first place. */
   readonly details: readonly ConcernedFile[];
+  /** How many files have this concern; `files` and `details` list the first few. */
+  readonly count: number;
 }
 
 export interface OutsideImports {
   /** The fields of the package.json that list dependencies, by name. */
   readonly declared: readonly string[];
-  /** Packages that files of the tree ask for by name and that the tree does not hold, sorted. */
+  /** Packages that files of the tree ask for by name and that the tree does not hold, sorted; the first few. */
   readonly modules: readonly string[];
+  /** How many such packages there are in all. */
+  readonly moduleCount: number;
   /** What could not be read with certainty, by concern, sorted. */
   readonly concerns: readonly ConcernedFiles[];
 }
@@ -141,6 +148,7 @@ class Reading {
     return {
       declared,
       modules: [...this.modules].sort().slice(0, MAX_MODULES),
+      moduleCount: this.modules.size,
       concerns: [...this.concerns]
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([concern, files]) => {
@@ -148,7 +156,7 @@ class Reading {
           const details = shown
             .slice(0, MAX_FILES_PER_CONCERN)
             .map(([path, detail]) => ({ path, ...detail }));
-          return { concern, files: details.map((d) => d.path), details };
+          return { concern, files: details.map((d) => d.path), details, count: shown.length };
         }),
     };
   }
@@ -282,8 +290,9 @@ export function outsideImports(input: InspectInput, options: ReadOptions = {}): 
   return read;
 }
 
+/** Whether anything was found. It looks at the counts, never at a list that was cut. */
 export const hasOutsideImports = (found: OutsideImports): boolean =>
-  found.declared.length > 0 || found.modules.length > 0 || found.concerns.length > 0;
+  found.declared.length > 0 || found.moduleCount > 0 || found.concerns.length > 0;
 
 /** For the readings of a passport: an MCP server whose code the pin cannot hold says so as a blind spot. */
 export function inspectImports(input: InspectInput, findings: Findings, kind: ArtifactKind): void {

@@ -29,7 +29,7 @@ describe('what an MCP server asks for that its tree does not hold', () => {
       'server.js': 'console.log(1)\n',
     });
 
-    expect(found).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(found).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
   });
 
   it('finds a package the sources import by name even when package.json lists none', () => {
@@ -65,7 +65,7 @@ describe('what an MCP server asks for that its tree does not hold', () => {
       'vendor/other.mjs': 'export default 2\n',
     };
 
-    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(files)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
     expect(spotOf(files)).toBe(false);
   });
 
@@ -266,7 +266,7 @@ describe('a file whose imports cannot be read is never read as one with none', (
       },
     );
 
-    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(files)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
   });
 
   it('flags an import of a place outside the tree: an absolute path, a file: URL, a path that climbs out', () => {
@@ -329,7 +329,7 @@ describe('a file whose imports cannot be read is never read as one with none', (
       'lib/a.js': '1',
     };
 
-    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(files)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
   });
 
   it('flags a package.json that is not valid JSON', () => {
@@ -354,7 +354,7 @@ describe('a file whose imports cannot be read is never read as one with none', (
       'node_modules/held/index.js': 'require(name)',
     });
 
-    expect(outside(files)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(files)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
   });
 });
 
@@ -476,7 +476,7 @@ describe('the specifiers are judged as Node would look them up', () => {
       }),
     };
 
-    expect(outside(inside)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(inside)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
     expect(concernsOfFiles(outsidePattern)).toHaveProperty('outside', ['package.json']);
   });
 
@@ -538,8 +538,8 @@ describe('more ways to load code that the reading must flag', () => {
     };
 
     expect(concernsOfFiles(without)).toHaveProperty('outside', ['server.js']);
-    expect(outside(withRoot)).toEqual({ declared: [], modules: [], concerns: [] });
-    expect(outside(nested)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(withRoot)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
+    expect(outside(nested)).toEqual({ declared: [], modules: [], moduleCount: 0, concerns: [] });
   });
 
   it('flags a # import in a folder that has no package.json of its own only if none is above it either', () => {

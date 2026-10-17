@@ -354,4 +354,78 @@ export const SHAPES: readonly Shape[] = [
   { group: 'the pattern list', text: "const { constructor: C } = function () {}; C('1')" },
   { group: 'the pattern list', text: "const { constructor: C } = () => {}; C('1')" },
   { group: 'the pattern list', text: 'var x; x = { process: p } = globalThis' },
+  { group: 'the limits and spellings list', text: "x?.['createRequire'](1)" },
+  { group: 'the limits and spellings list', text: "x.y?.['createRequire'](1)" },
+  { group: 'the limits and spellings list', text: "x['\\u{000000063}reateRequire'](1)" },
+  { group: 'the limits and spellings list', text: "x['\\143reateRequire'](1)" },
+  { group: 'the limits and spellings list', text: 'x.\\u{000000063}reateRequire(1)' },
+  { group: 'the limits and spellings list', text: "f['constructor']('return 1')()" },
+  { group: 'the limits and spellings list', text: "f?.['constructor']('1')" },
+  { group: 'the limits and spellings list', text: "f.constructor?.('return 1')()" },
+  { group: 'the limits and spellings list', text: "f['constructor']?.('return 1')()" },
+  { group: 'the limits and spellings list', text: "f?.['constructor']?.('return 1')()" },
+  {
+    group: 'the limits and spellings list',
+    text: "const { sin: { ['constructor']: C } } = Math; C('return 42')()",
+  },
+  {
+    group: 'the limits and spellings list',
+    text: "const { sin: { constructor: C }, cos: other } = Math; C('return 42')()",
+  },
+  {
+    group: 'the limits and spellings list',
+    text: "let C; ({ sin: { 'constructor': C } } = Math); C('return 42')()",
+  },
+  { group: 'the limits and spellings list', text: "f()['constructor']('1')" },
+  { group: 'the limits and spellings list', text: 'f.constructor`return 1`' },
+  { group: 'the limits and spellings list', text: 'f.constructor`a${b}c`' },
+  { group: 'the limits and spellings list', text: "const { 'createRequire': c } = x" },
+  { group: 'the limits and spellings list', text: "const { ['createRequire']: c } = x" },
+  {
+    group: 'the limits and spellings list',
+    text: "const { 'constructor': C } = function () {}; C('1')",
+  },
+  {
+    group: 'the limits and spellings list',
+    text: "const { ['constructor']: C } = function () {}; C('1')",
+  },
+  { group: 'the limits and spellings list', text: "const { ['require']: r } = f; r('x')" },
+  { group: 'the limits and spellings list', text: "const { 'Function': F } = f; F('1')" },
+  { group: 'the limits and spellings list', text: "const { 'binding': b } = process" },
+  {
+    group: 'the limits and spellings list',
+    text: `${'{'.repeat(300)} const { constructor: C } = function () {}; C('1') ${'}'.repeat(300)}`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `${'{'.repeat(300)} const { binding } = process; ${'}'.repeat(300)}`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `${'('.repeat(511)} function k(a = (h(1, process))) {} ${')'.repeat(511)}`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `const { ${Array.from({ length: 70 }, (_, i) => `k${i}`).join(', ')} } = globalThis;`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `fs.writeFileSync(join(a, b, c, d, e, f, g, h, i, j, k, l, m, 'x.js'), data);`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `require('child_process').execSync('node${' '.repeat(5000)}-e "1"');`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `${Array.from({ length: 2001 }, (_, i) => `require('./m${i}');`).join('')}`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `${'`${'.repeat(70)}1${'}`'.repeat(70)}; var a = 1`,
+  },
+  {
+    group: 'the limits and spellings list',
+    text: `${'('.repeat(5000)}${')'.repeat(5000)}; var a = 1`,
+  },
 ];

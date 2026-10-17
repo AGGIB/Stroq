@@ -74,18 +74,16 @@ const RECEIVERS: ReadonlyMap<string, Receiver> = new Map([
 const ALIASES_MAX = 1000;
 /** The deepest nesting of braces that is followed for the scope of an alias; deeper, an alias is kept to the end of the file. */
 const SCOPES_MAX = 256;
-/** The most keys of one pair of braces that are kept. */
+/** The most keys of one pair of braces that are kept; with more, a pattern on the global object, process or module is a concern. */
 const KEYS_MAX = 64;
-/** The longest chain of members that is remembered. */
+/** The longest chain of members that is remembered; the first and the last eight are kept, which is all a rule looks at. */
 const CHAIN_MAX = 16;
-/** The most tokens after a writer in which the name of the file is looked for. */
+/** The most tokens after a writer, when no call opens, in which the name of the file is looked for. */
 const WRITE_WINDOW = 12;
 /** After the constructor of a value, these make it the Function constructor in use: a call, or handing it on. */
 const CONSTRUCTOR_USED: ReadonlySet<string> = new Set(['(', ';', ',', ')', ']', '}']);
 /** Members of a function that call it with text. */
 const CALLS: ReadonlySet<string> = new Set(['call', 'apply', 'bind', 'constructor']);
-/** The longest string that is read as a command line. */
-const COMMAND_MAX = 4096;
 
 const byName = (entries: readonly Entry[]): ReadonlyMap<string, string> =>
   new Map(entries.map((entry) => [entry.name, entry.does]));
@@ -95,7 +93,14 @@ const GLOBAL_CODE = byName(GLOBAL_MEMBERS);
 const LOOKUP = byName(LOOKUP_MEMBERS);
 const MODULE_ONLY = byName(MODULE_ONLY_NAMES);
 
-/** Names that are a finding when written as a string in brackets: `module['require']`, `x['eval']`. */
+/**
+ * Names that are a concern as a key written as a string, `const { 'createRequire': c } = x`, as the bare word is: the
+ * ones that load code wherever they stand, and `eval`. (`require`, `constructor` and `Function` wait for what the key is
+ * given, as the bare words do.)
+ */
+const KEY_CONCERNS: ReadonlySet<string> = new Set([...LOADERS.keys(), 'eval']);
+
+/** Names that are a concern as a member written as a string in brackets: `module['require']`, `x['eval']`. */
 const MEMBER_STRINGS: ReadonlySet<string> = new Set([
   ...LOADERS.keys(),
   ...PROCESS.keys(),
@@ -141,11 +146,22 @@ const valueOf = (token: Token): string | null =>
  * `/usr/bin/node --require x`. The words are split on blanks and the options after `node` are looked at one by one.
  */
 export function commandRunsNodeCode(command: string): boolean {
-  if (command.length > COMMAND_MAX) return false;
-  const words = command.split(/\s+/);
-  const at = words.findIndex((word) => /(?:^|[\\/])node(?:\.exe)?$/.test(word));
-  return at !== -1 && words.slice(at + 1).some(isNodeFlag);
+  // Word by word and without a length limit: a command padded to any length is read to its end, and nothing is
+  // allocated for the words that are not looked at.
+  let afterNode = false;
+  for (const [word] of command.matchAll(/\S+/g)) {
+    if (afterNode) {
+      if (isNodeFlag(word)) return true;
+    } else if (NODE_PROGRAM.test(word)) afterNode = true;
+  }
+  return false;
 }
+
+/** A word that names the node program: `node`, `/usr/bin/node`, `C:\\node.exe`. */
+const NODE_PROGRAM = /(?:^|[\\/])node(?:\.exe)?$/;
+
+/** The first word of a string, which is the program when the string is a command line. */
+const firstWordOf = (text: string): string => /^\s*(\S*)/.exec(text)?.[1] ?? '';
 
 const isNodeFlag = (word: string): boolean =>
   NODE_FLAGS.has(word) || NODE_FLAG_PREFIXES.some((prefix) => word.startsWith(prefix));
@@ -167,7 +183,15 @@ export interface Facts {
 type Pending =
   | { readonly kind: 'function'; readonly at: number; readonly key: boolean }
   /** A key called `require` or `constructor`: a name, unless what follows the colon binds it to a variable. */
-  | { readonly kind: 'key'; readonly name: string; readonly at: number }
+  | {
+      readonly kind: 'key';
+      readonly name: string;
+      readonly at: number;
+      /** A computed key, `['require']`: the closing bracket comes before the colon. */
+      readonly computed?: boolean;
+      /** Written as a string: any name is noted among the keys of its braces, and a few are a concern. */
+      readonly quoted?: true;
+    }
   /** After `require:` or `Function:`: a value that is written out is a literal; a name is a pattern's target. */
   | { readonly kind: 'key-target'; readonly name: string; readonly at: number }
   /** `const { a } = process`: a pattern that takes `a` out of the object itself; `process.env` after it makes it a pattern on a member. */
@@ -177,8 +201,14 @@ type Pending =
   | { readonly kind: 'machinery-end'; readonly object: string; readonly at: number }
   | { readonly kind: 'passed'; readonly object: string; readonly at: number }
   /** `f().constructor`: used as a value or called, it is the Function constructor; `.name` after it is not. */
-  | { readonly kind: 'constructor-value'; readonly at: number; readonly expression: boolean }
-  | { readonly kind: 'constructor-member'; readonly at: number };
+  | {
+      readonly kind: 'constructor-value';
+      readonly at: number;
+      readonly expression: boolean;
+      /** Written as a string in brackets: the closing bracket comes before what decides. */
+      readonly bracket?: boolean;
+    }
+  | { readonly kind: 'constructor-member'; readonly at: number; readonly optional: boolean };
 
 const found = (reason: string, at: number): Finding => ({ concern: 'dynamic-code', reason, at });
 
@@ -192,6 +222,8 @@ interface Scope {
   /** An object written out as a value (`x = { ... }`), whose keys name properties and bind nothing. */
   readonly literal: boolean;
   readonly named: Set<string>;
+  /** More keys than `KEYS_MAX` were named: the ones past it are not known. */
+  namesFull: boolean;
   readonly aliases: string[];
   /** Keys called `Function`, held until the brace closes: `{ Function: f } = x` takes the constructor out, a literal does not. */
   readonly keys: Finding[];
@@ -208,17 +240,25 @@ export class LoadingWatch {
   private candidate: { readonly name: string; readonly receiver: Receiver } | null = null;
   private aliasesFull = false;
   /** The open braces: the members of process named inside each, and the aliases declared in it with let or const. */
-  private readonly scopes: Scope[] = [{ literal: false, named: new Set(), aliases: [], keys: [] }];
+  private readonly scopes: Scope[] = [
+    { literal: false, named: new Set(), namesFull: false, aliases: [], keys: [] },
+  ];
   /** The keys that the brace which closed last held, until the next token shows whether it was a pattern. */
   private closedKeys: Finding[] = [];
   /** Braces deeper than `SCOPES_MAX`, which are counted and not kept. */
   private overflow = 0;
   private keyCandidate: string | null = null;
-  /** The keys named inside the brace that closed last. */
+  /** The keys named inside the brace that closed last, and whether they are all known (a brace deeper than `SCOPES_MAX` or with more than `KEYS_MAX` keys is not). */
   private closed: ReadonlySet<string> = new Set();
+  private closedKnown = true;
   /** The declaration the last token is part of: `let`, `const` or `var`, and how deep it stands. */
   private declaration: { readonly keyword: string; readonly depth: number } | null = null;
-  private write: { left: number } | null = null;
+  /**
+   * A call of a writer is looked at to its closing bracket, however long its arguments are (`open` is how deep the
+   * brackets stood before it); a writer that no call follows, for the next few tokens.
+   */
+  private write: { left: number; open: number | null } | null = null;
+  private parens = 0;
   /** The identifiers that are a concern in any position. */
   private readonly occurrences = new Occurrences();
   private facts: {
@@ -231,6 +271,10 @@ export class LoadingWatch {
     this.settleAlias(token);
     if (this.closedKeys.length > 0) {
       if (isPunct(token, '=')) out.push(...this.closedKeys);
+      // An inner pattern closes before its parent does. Keep its constructor keys with the parent until the outer
+      // brace shows whether this is a pattern (`=`) or an object literal. A comma can separate sibling patterns.
+      else if (this.scopes.length > 1 && (isPunct(token, '}') || isPunct(token, ',')))
+        this.scopes.at(-1)!.keys.push(...this.closedKeys);
       this.closedKeys = [];
     }
     const resolved = this.resolve(token);
@@ -263,11 +307,26 @@ export class LoadingWatch {
   private advance(token: Token): void {
     this.recent = [token, this.recent[0] ?? null, this.recent[1] ?? null, this.recent[2] ?? null];
     this.advanceChain(token);
-    if (this.write !== null) {
-      this.write.left -= 1;
-      if (this.write.left <= 0 || isPunct(token, ';')) this.write = null;
-    }
+    this.advanceWrite(token);
     this.advanceScopes(token);
+  }
+
+  /** The brackets of a call of a writer, and the few tokens after one that is not called. */
+  private advanceWrite(token: Token): void {
+    if (isPunct(token, '(')) this.parens += 1;
+    else if (isPunct(token, ')')) this.parens = Math.max(0, this.parens - 1);
+    const write = this.write;
+    if (write === null) return;
+    if (write.open !== null) {
+      if (this.parens <= write.open) this.write = null;
+      return;
+    }
+    if (isPunct(token, '(') && write.left < WRITE_WINDOW) {
+      write.open = this.parens - 1;
+      return;
+    }
+    write.left -= 1;
+    if (write.left <= 0 || isPunct(token, ';')) this.write = null;
   }
 
   /** Whether the brace the last token stands in is an object written out as a value (a deeper nesting is not trusted). */
@@ -286,22 +345,36 @@ export class LoadingWatch {
       if (this.scopes.length < SCOPES_MAX) {
         // `prev` is the brace itself here, so the token before it is `prev2`.
         const literal = isPunct(token, '{') && opensLiteral(this.prev2, this.inLiteral());
-        this.scopes.push({ literal, named: new Set(), aliases: [], keys: [] });
+        this.scopes.push({ literal, named: new Set(), namesFull: false, aliases: [], keys: [] });
       } else this.overflow += 1;
     } else if (isPunct(token, '}')) {
-      if (this.overflow > 0) this.overflow -= 1;
-      else if (this.scopes.length > 1) {
+      if (this.overflow > 0) {
+        // A brace this deep keeps no keys of its own: what a pattern took out of it is not known.
+        this.overflow -= 1;
+        this.closedKnown = false;
+      } else if (this.scopes.length > 1) {
         const scope = this.scopes.pop()!;
         this.closed = scope.named;
+        this.closedKnown = !scope.namesFull;
         this.closedKeys = scope.keys;
         for (const name of scope.aliases)
           if (this.aliases.get(name)?.scoped === true) this.aliases.delete(name);
-      } else this.closed = new Set();
+      } else {
+        this.closed = new Set();
+        this.closedKnown = true;
+      }
     } else if (isPunct(token, ';')) this.declaration = null;
     else if (token.kind === 'word') {
       if (token.text === 'let' || token.text === 'const' || token.text === 'var')
         this.declaration = { keyword: token.text, depth: this.depth() };
     }
+  }
+
+  /** A key named inside the braces that are open. */
+  private noteNamed(name: string): void {
+    const scope = this.scopes.at(-1)!;
+    if (scope.named.size < KEYS_MAX) scope.named.add(name);
+    else if (!scope.named.has(name)) scope.namesFull = true;
   }
 
   /** The keys of the braces: a word after `{` or `,` that is followed by `:`, `,`, `}` or `=`. */
@@ -313,8 +386,7 @@ export class LoadingWatch {
       token.kind === 'punct' &&
       (token.text === ':' || token.text === ',' || token.text === '}' || token.text === '=')
     ) {
-      const named = this.scopes.at(-1)!.named;
-      if (named.size < KEYS_MAX) named.add(candidate);
+      this.noteNamed(candidate);
     }
     // `prev` is already the token itself here: the one before it is `prev2`.
     if (token.kind === 'word' && (isPunct(this.prev2, '{') || isPunct(this.prev2, ',')))
@@ -360,14 +432,32 @@ export class LoadingWatch {
         }
         return found('uses the Function constructor, which makes code from text', pending.at);
       case 'key':
+        if (pending.computed === true && isPunct(token, ']')) {
+          this.pending = { ...pending, computed: false };
+          return null;
+        }
         if (!isPunct(token, ':')) return null;
+        if (pending.quoted === true) this.noteNamed(pending.name);
+        if (KEY_CONCERNS.has(pending.name))
+          return this.inLiteral()
+            ? null
+            : found(
+                `takes ${pending.name} out of a value by a pattern, which this reading does not follow`,
+                pending.at,
+              );
+        if (
+          pending.name !== 'require' &&
+          pending.name !== 'constructor' &&
+          pending.name !== 'Function'
+        )
+          return null;
         if (pending.name === 'constructor') {
           // `{ constructor: C } = x` takes the constructor out of a value; `{ constructor: Foo }` as a literal does not.
           // The braces show which when they close: an `=` after them is a pattern.
-          if (this.overflow === 0)
-            this.scopes
-              .at(-1)!
-              .keys.push(found('takes .constructor out of a value by a pattern', pending.at));
+          const taken = found('takes .constructor out of a value by a pattern', pending.at);
+          // Braces deeper than `SCOPES_MAX` are not followed to their end: the key is a concern at once.
+          if (this.overflow > 0) return taken;
+          this.scopes.at(-1)!.keys.push(taken);
           return null;
         }
         this.pending = { kind: 'key-target', name: pending.name, at: pending.at };
@@ -409,19 +499,30 @@ export class LoadingWatch {
           ? null
           : found(`reaches a member of ${pending.object} by a name made at run time`, pending.at);
       case 'constructor-value':
+        if (pending.bracket === true) {
+          if (!isPunct(token, ']')) return null;
+          this.pending = { ...pending, bracket: false };
+          return null;
+        }
         if (isMember(token)) {
-          this.pending = { kind: 'constructor-member', at: pending.at };
+          this.pending = {
+            kind: 'constructor-member',
+            at: pending.at,
+            optional: isPunct(token, '?.'),
+          };
           return null;
         }
         // The constructor of an expression (a function value, a call) used or handed on is in use; the constructor of a
         // name, only when it is called: `Error.captureStackTrace(this, e.constructor)` is a class.
-        return (pending.expression &&
-          (CONSTRUCTOR_USED.has(token.text) || token.kind === 'string')) ||
-          isPunct(token, '(')
+        // A template right after it is a tagged call: `f.constructor\`return 1\``.
+        return token.kind === 'string' ||
+          isPunct(token, '${') ||
+          isPunct(token, '(') ||
+          (pending.expression && CONSTRUCTOR_USED.has(token.text))
           ? found('uses .constructor.constructor, which makes code from text', pending.at)
           : null;
       case 'constructor-member':
-        return isWord(token) && CALLS.has(token.text)
+        return (isWord(token) && CALLS.has(token.text)) || (pending.optional && isPunct(token, '('))
           ? found('uses .constructor.constructor, which makes code from text', pending.at)
           : null;
       case 'passed':
@@ -463,16 +564,30 @@ export class LoadingWatch {
   private string(token: Token): Finding[] {
     const out: Finding[] = [];
     const value = valueOf(token);
-    // `x['eval']` is a member access (an operand before the bracket), `['eval', 'arguments']` is a list.
-    if (isPunct(this.prev, '[') && endsOperand(this.prev2)) {
+    // `x['eval']` and `x?.['eval']` are member accesses (an operand or `?.` before the bracket), `['eval', 'arguments']`
+    // is a list.
+    if (isPunct(this.prev, '[') && (endsOperand(this.prev2) || isPunct(this.prev2, '?.'))) {
       if (value !== null && MEMBER_STRINGS.has(value))
         this.pending = { kind: 'member-string', name: value, at: token.at };
       const lookup = value === null ? undefined : LOOKUP.get(value);
       if (lookup !== undefined && this.receiverOf(this.prev2) === 'module')
         out.push(found(`uses module.${value}, which ${lookup}`, token.at));
-      if (value === 'constructor' && this.chain.at(-1) === 'constructor')
-        out.push(found('uses .constructor.constructor, which makes code from text', token.at));
+      if (value === 'constructor') {
+        if (this.chain.at(-1) === 'constructor')
+          out.push(found('uses .constructor.constructor, which makes code from text', token.at));
+        // `f['constructor']('1')` is `f.constructor('1')`: the name is read when its bracket closes.
+        else if (!isWord(this.prev2, 'this'))
+          this.pending = {
+            kind: 'constructor-value',
+            at: token.at,
+            expression: isPunct(this.prev2, ')') || isPunct(this.prev2, ']'),
+            bracket: true,
+          };
+      }
     }
+    // A key written as a string or as a computed string takes the place of the bare word: `{ 'constructor': C } = f`,
+    // `{ ['require']: r } = module`.
+    this.quotedKey(value, token);
     // `const p = require('node:process')` is process under another name.
     if (
       (value === 'process' || value === 'node:process') &&
@@ -486,11 +601,20 @@ export class LoadingWatch {
     return out;
   }
 
+  /** A string that is a key (`{ 'constructor': C }`, `{ ['require']: r }`) is read as the bare word would be. */
+  private quotedKey(value: string | null, token: Token): void {
+    if (value === null || this.pending !== null) return;
+    const computed =
+      isPunct(this.prev, '[') && (isPunct(this.prev2, '{') || isPunct(this.prev2, ','));
+    if (computed || isPunct(this.prev, '{') || isPunct(this.prev, ','))
+      this.pending = { kind: 'key', name: value, at: token.at, computed, quoted: true };
+  }
+
   /** Facts that matter with the imports of the file, and the name of a file that is written. */
   private stringFacts(token: Token, value: string, out: Finding[]): void {
     if (this.write !== null && LOADED_FILE.test(value))
       out.push(found('writes a file that Node can load as code', token.at));
-    const first = value.length <= COMMAND_MAX ? (value.split(/\s+/)[0] ?? '') : '';
+    const first = firstWordOf(value);
     if (isNodeFlag(value) || commandRunsNodeCode(value))
       this.facts.nodeOption ??= found('starts node with text to run or code to load', token.at);
     if (RUNNERS.has(value) || RUNNERS.has(first))
@@ -514,8 +638,9 @@ export class LoadingWatch {
       this.facts.moduleUse ??= found(`uses ${name}, which ${moduleOnly}`, token.at);
     if (ENVIRONMENT_NAMES.has(name))
       this.facts.environment ??= found('sets how a Node process loads code', token.at);
-    if (WRITERS.has(name) && (member || !MEMBER_ONLY_WRITERS.has(name)))
-      this.write = { left: WRITE_WINDOW };
+    // A writer inside the call of another is covered by it: the outer call is looked at to its end.
+    if (WRITERS.has(name) && (member || !MEMBER_ONLY_WRITERS.has(name)) && this.write?.open == null)
+      this.write = { left: WRITE_WINDOW, open: null };
     const finding = this.rule(token, member);
     if (finding !== null) out.push(finding);
     if (
@@ -622,6 +747,16 @@ export class LoadingWatch {
     if (receiver === null || !isPunct(this.prev, '=') || !isPunct(this.prev2, '}')) return null;
     const harmless = HARMLESS_MEMBERS.get(receiver === 'process' ? 'process' : 'module');
     const global = receiver === 'global' || receiver === 'loose';
+    if (!this.closedKnown) {
+      this.pending ??= {
+        kind: 'destructured',
+        finding: found(
+          `takes names out of ${token.text} by a pattern with more keys than this reading follows`,
+          token.at,
+        ),
+      };
+      return null;
+    }
     for (const key of this.closed) {
       // The global object has no harmless members to list: the names that lead to code are the ones refused.
       const bad = global ? TAKEN_FROM_GLOBAL.has(key) : harmless?.has(key) !== true;

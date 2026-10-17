@@ -19,18 +19,23 @@ const quoted = (text: string): string => `"${lineText(text, NAME_MAX)}"`;
 function findingsOf(found: OutsideImports): string[] {
   const lines: string[] = [];
   if (found.declared.length > 0) lines.push(`package.json lists ${found.declared.join(', ')}`);
-  if (found.modules.length > 0) {
+  if (found.moduleCount > 0) {
     const shown = found.modules.slice(0, NAMES_SHOWN).map(quoted);
-    const rest = found.modules.length - shown.length;
+    const rest = found.moduleCount - shown.length;
     lines.push(
       `the sources import ${shown.join(', ')}${rest > 0 ? ` and ${rest} more` : ''} by name`,
     );
   }
-  for (const { concern, details } of found.concerns) {
+  for (const { concern, details, count } of found.concerns) {
     for (const { path, reason, line } of details) {
       const where = `${quoted(path)}${line === undefined ? '' : ` line ${line}`}`;
       lines.push(`${where}: ${reason ?? CONCERN_PHRASES[concern]}`);
     }
+    // The list is the first few files; the rest are counted, since they are refused all the same.
+    if (count > details.length)
+      lines.push(
+        `${count - details.length} more ${count - details.length === 1 ? 'file' : 'files'}: ${CONCERN_PHRASES[concern]}`,
+      );
   }
   return lines;
 }

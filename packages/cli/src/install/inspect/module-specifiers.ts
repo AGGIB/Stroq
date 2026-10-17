@@ -20,8 +20,6 @@ export type { Concern } from './code-loading.js';
 
 /** The most distinct specifiers one file is read for; a file with more is a concern. */
 const MAX_SPECIFIERS = 2000;
-/** The most tokens an import or export clause may take before it is given up as something else. */
-const MAX_CLAUSE_TOKENS = 2000;
 
 /** Why a file is not fully read, and where. */
 export interface Note {
@@ -40,11 +38,14 @@ export interface ModuleScan {
   readonly notes: readonly Note[];
 }
 
+/**
+ * Where a clause that ends in `from 'x'` stands. It has no limit on how long it is: a clause is read token by token in
+ * constant space, and a limit would let a long list of names hide the module that follows it.
+ */
 interface ClauseState {
   readonly at: 'clause';
   readonly depth: number;
   readonly closed: boolean;
-  readonly used: number;
 }
 
 type State =
@@ -68,7 +69,7 @@ type State =
   | ClauseState;
 
 const IDLE: State = { at: 'idle' };
-const CLAUSE_START: ClauseState = { at: 'clause', depth: 0, closed: false, used: 0 };
+const CLAUSE_START: ClauseState = { at: 'clause', depth: 0, closed: false };
 const isPunct = (token: Token | null, text: string): boolean =>
   token?.kind === 'punct' && token.text === text;
 const isWord = (token: Token | null, text: string): boolean =>
@@ -94,20 +95,18 @@ const ESCAPED_NAME = ['escaped', 'a module name is written with escapes'] as con
 
 /** What follows `import` or `export` when it starts a clause that ends in `from 'x'`. */
 function clauseStep(state: ClauseState, token: Token): State | 'abort' {
-  const used = state.used + 1;
-  if (used > MAX_CLAUSE_TOKENS) return 'abort';
   if (token.kind === 'word' && state.depth === 0 && token.text === 'from')
-    return { at: 'from', clause: { ...state, used } };
+    return { at: 'from', clause: state };
   if (state.closed) return 'abort';
-  if (isPunct(token, '{')) return { ...state, depth: state.depth + 1, used };
+  if (isPunct(token, '{')) return { ...state, depth: state.depth + 1 };
   if (isPunct(token, '}'))
     return state.depth === 1
-      ? { at: 'clause', depth: 0, closed: true, used }
-      : { ...state, depth: Math.max(0, state.depth - 1), used };
-  if (token.kind === 'string') return state.depth > 0 ? { ...state, used } : 'abort';
+      ? { at: 'clause', depth: 0, closed: true }
+      : { ...state, depth: Math.max(0, state.depth - 1) };
+  if (token.kind === 'string') return state.depth > 0 ? state : 'abort';
   if (token.kind === 'word')
-    return ['import', 'export', 'require'].includes(token.text) ? 'abort' : { ...state, used };
-  return isPunct(token, ',') || isPunct(token, '*') ? { ...state, used } : 'abort';
+    return ['import', 'export', 'require'].includes(token.text) ? 'abort' : state;
+  return isPunct(token, ',') || isPunct(token, '*') ? state : 'abort';
 }
 
 function stepClause(state: ClauseState, token: Token): Step {

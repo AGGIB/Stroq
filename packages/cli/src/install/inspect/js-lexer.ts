@@ -628,7 +628,6 @@ const SIMPLE_ESCAPES: Readonly<Record<string, string>> = {
   b: '\b',
   f: '\f',
   v: '\v',
-  '0': '\0',
 };
 
 /**
@@ -659,7 +658,8 @@ export function cookString(raw: string): string | null {
       if (raw[at + 2] === '{') {
         const close = raw.indexOf('}', at + 3);
         const hex = close === -1 ? '' : raw.slice(at + 3, close);
-        if (!/^[0-9A-Fa-f]{1,6}$/.test(hex) || Number.parseInt(hex, 16) > 0x10ffff) return null;
+        // Any number of leading zeros is the same code point (`\u{000000065}` is `e`); the value is what is limited.
+        if (!/^[0-9A-Fa-f]+$/.test(hex) || Number.parseInt(hex, 16) > 0x10ffff) return null;
         out += String.fromCodePoint(Number.parseInt(hex, 16));
         at = close + 1;
       } else {
@@ -670,13 +670,11 @@ export function cookString(raw: string): string | null {
       }
     } else if (isLineTerminator(next.charCodeAt(0))) {
       at += next === '\r' && raw[at + 2] === '\n' ? 3 : 2;
-    } else if (next >= '0' && next <= '7' && next !== '0') {
-      // A legacy octal escape: up to three digits, at most 255.
-      const digits = /^[0-7]{1,3}/.exec(raw.slice(at + 1))![0];
-      const value = Number.parseInt(digits, 8);
-      const used = value > 255 ? digits.length - 1 : digits.length;
-      out += String.fromCharCode(Number.parseInt(digits.slice(0, used), 8));
-      at += 1 + used;
+    } else if (next >= '0' && next <= '7') {
+      // An octal escape, `\0` included: a digit from 0 to 3 takes up to two more, a digit from 4 to 7 takes one more.
+      const digits = /^(?:[0-3][0-7]{0,2}|[4-7][0-7]?)/.exec(raw.slice(at + 1, at + 4))![0];
+      out += String.fromCharCode(Number.parseInt(digits, 8));
+      at += 1 + digits.length;
     } else {
       out += SIMPLE_ESCAPES[next] ?? next;
       at += 2;

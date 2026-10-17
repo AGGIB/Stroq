@@ -254,7 +254,9 @@ export class Occurrences {
     }
     const finding = flagged(`passes ${name} on as a value, which this reading does not follow`, at);
     const argumentLike = isPunct(before, '(') || isPunct(before, ',');
-    const group = this.groups.at(-1);
+    // Brackets deeper than `GROUPS_MAX` are counted and not kept: a name in one cannot be held until its bracket closes,
+    // so it is a use at once.
+    const group = this.overflow === 0 ? this.groups.at(-1) : undefined;
     if (argumentLike && (isPunct(token, ',') || isPunct(token, ')')) && group !== undefined) {
       group.held.push({ name, finding });
       return;

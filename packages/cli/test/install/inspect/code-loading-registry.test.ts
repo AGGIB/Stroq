@@ -276,6 +276,9 @@ describe('eval and Function', () => {
     'Foo.prototype.constructor = Foo',
     'obj.constructor.prototype',
     'const c = obj.constructor',
+    'const o = { sin: { constructor: C } };',
+    'const o = { sin: { ["constructor"]: C }, cos: other };',
+    'fn({ sin: { constructor: C } });',
   ])('does not take an ordinary constructor for the Function constructor: %s', (text) => {
     expect(flagged(text), text).toBe(false);
   });
@@ -757,7 +760,9 @@ describe('starting other programs', () => {
     expect(commandRunsNodeCode('node server.js')).toBe(false);
     expect(commandRunsNodeCode('git log -p')).toBe(false);
     expect(commandRunsNodeCode('nodemon -e js')).toBe(false);
-    expect(commandRunsNodeCode(`node ${'-x '.repeat(5000)}-e`)).toBe(false);
+    // A command is read to its end, however long: padding does not move a flag out of sight.
+    expect(commandRunsNodeCode(`node ${'-x '.repeat(5000)}-e`)).toBe(true);
+    expect(commandRunsNodeCode(`node ${'-x '.repeat(5000)}server.js`)).toBe(false);
   });
 });
 
@@ -788,7 +793,15 @@ describe('writing a file that Node can load', () => {
 
     it('does not read a name that is made at run time, or one outside the call', () => {
       expect(flagged(call(name, 'target, data'))).toBe(false);
-      expect(flagged(`fs.${name}(a, b, c, d, e, f, g, h, i, 'x.js')`)).toBe(false);
+      expect(flagged(`fs.${name}(a, b); var other = 'x.js'`)).toBe(false);
+      expect(flagged(`fs.${name}(a, b)\nvar other = 'x.js'`)).toBe(false);
+    });
+
+    it('reads to the end of the call, however long its arguments are', () => {
+      expect(flagged(`fs.${name}(a, b, c, d, e, f, g, h, i, j, k, l, m, n, 'x.js')`)).toBe(true);
+      expect(
+        flagged(`fs.${name}(path.join(a, b, c, d, e, f, g, h, i, j, k, l, 'x.js'), data)`),
+      ).toBe(true);
     });
   });
 
