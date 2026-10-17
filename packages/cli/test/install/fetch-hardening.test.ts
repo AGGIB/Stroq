@@ -3,13 +3,14 @@ import { gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { FetchError, fetchSourceTree, type Transport } from '../../src/install/fetch.js';
 import { parseOnlineSource, SourceSyntaxError } from '../../src/install/source.js';
+import { SourceRefSchema } from '../../src/install/types.js';
 import { tarOf } from '../helpers/tar-writer.js';
 
 /**
  * What a fetch will follow and what it will ask for. Every hop of a redirect is held to the host, the
- * scheme, the port and the user information of the first request, and a GitHub ref that would change the
- * path of the request (`.` or `..`, or one with a separator) is refused where the source is read and again
- * where the URL is made. Only injected transports are used: nothing here reaches a network.
+ * scheme, the port and the user information of the first request. A GitHub ref may hold slashes (`feature/x`), and
+ * stays raw in the path of the request; one with an empty, `.` or `..` segment, a backslash or a control character
+ * is refused where the source is read and again where the URL is made. Only injected transports are used: nothing here reaches a network.
  */
 const good = gzipSync(
   tarOf([
@@ -121,14 +122,37 @@ describe('a redirect is held to the first request', () => {
   });
 });
 
-describe('a GitHub ref that would change the path', () => {
-  it.each(['.', '..', '../x', 'a/../b', 'a..b', 'feature/x', 'a\\b', '/', 'x/', '/x', '...'])(
-    'is refused where the source is read: %j',
-    (ref) => {
-      expect(() => parseOnlineSource(`github:o/r#${ref}`)).toThrow(SourceSyntaxError);
-      expect(() => parseOnlineSource(`github:o/r#${ref}`)).toThrow(/ref/);
-    },
-  );
+describe('a GitHub ref and the path of the request', () => {
+  it.each([
+    '.',
+    '..',
+    '../x',
+    'a/../b',
+    'a/./b',
+    'a/..',
+    '/',
+    '/x',
+    'x/',
+    'a//b',
+    'a\\b',
+    '\\',
+    'x\\y',
+    'a\u0007b',
+    'a b',
+  ])('is refused where the source is read: %j', (ref) => {
+    expect(() => parseOnlineSource(`github:o/r#${ref}`)).toThrow(SourceSyntaxError);
+    expect(() => parseOnlineSource(`github:o/r#${ref}`)).toThrow(/ref/);
+  });
+
+  it('says what is wrong with a segment', () => {
+    expect(() => parseOnlineSource('github:o/r#a//b')).toThrow(
+      'a ref segment may not be empty, . or ..',
+    );
+    expect(() => parseOnlineSource('github:o/r#a/../b')).toThrow(
+      'a ref segment may not be empty, . or ..',
+    );
+    expect(() => parseOnlineSource('github:o/r#a\\b')).toThrow('a ref may not contain a backslash');
+  });
 
   it.each([
     'main',
@@ -137,12 +161,17 @@ describe('a GitHub ref that would change the path', () => {
     'a.b',
     'HEAD',
     'feature_x',
+    'feature/x',
+    'release/1.0/rc.1',
+    'refs/tags/v1',
+    'a..b',
+    '...',
     '0123456789abcdef0123456789abcdef01234567',
   ])('accepts %j', (ref) => {
     expect(parseOnlineSource(`github:o/r#${ref}`)).toMatchObject({ type: 'github', ref });
   });
 
-  it.each(['.', '..', 'a/../b', 'x/y', 'x\\y'])(
+  it.each(['.', '..', 'a/../b', 'a/./b', 'x//y', '/x', 'x/', '', 'x\\y', 'x\ny', 'x\u202ey'])(
     'is refused where the URL is made, for a source that was not read by the parser: %j',
     async (ref) => {
       const { transport, requests } = recording(() => answer(200, good));
@@ -162,5 +191,32 @@ describe('a GitHub ref that would change the path', () => {
     await fetchSourceTree(parseOnlineSource('github:o/r#main'), { transport });
 
     expect(requests).toEqual(['https://codeload.github.com/o/r/tar.gz/main']);
+  });
+
+  it.each([
+    ['feature/x', 'feature/x'],
+    ['release/1.0/rc.1', 'release/1.0/rc.1'],
+    ['feat%2Fx', 'feat%252Fx'],
+    ['a?b#c', 'a%3Fb%23c'],
+  ])(
+    'keeps the slash of %j in the path and encodes everything else in a segment',
+    async (ref, path) => {
+      const { transport, requests } = recording(() => answer(200, good));
+
+      await fetchSourceTree({ type: 'github', owner: 'o', repo: 'r', ref }, { transport });
+
+      expect(requests).toEqual([`https://codeload.github.com/o/r/tar.gz/${path}`]);
+    },
+  );
+
+  it('is recorded in the passport as it was written, slashes and all', async () => {
+    const { transport } = recording(() => answer(200, good));
+
+    const fetched = await fetchSourceTree(parseOnlineSource('github:o/r#feature/x'), {
+      transport,
+    });
+
+    expect(fetched.sourceRef).toMatchObject({ type: 'github', ref: 'feature/x' });
+    expect(SourceRefSchema.safeParse(fetched.sourceRef).success).toBe(true);
   });
 });

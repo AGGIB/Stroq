@@ -11,7 +11,7 @@ import {
   type NpmSource,
   type OnlineSource,
   type UrlSource,
-  refChangesAddress,
+  refProblem,
 } from './source.js';
 import { buildTree } from './tree.js';
 import { LIMITS, type SourceRef, type Tree, type TreeEntry } from './types.js';
@@ -442,10 +442,12 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
 }
 
 async function fetchGitHub(source: GitHubSource, state: FetchState): Promise<FetchedTree> {
-  const path = `/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/tar.gz/${encodeURIComponent(source.ref)}`;
+  // The slash of a ref stays a slash (`feature/x`); each segment is encoded. A URL collapses `.` and `..` and an
+  // empty segment: a ref that does is another address than the one that would be recorded.
+  const ref = source.ref.split('/').map(encodeURIComponent).join('/');
+  const path = `/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/tar.gz/${ref}`;
   const codeloadUrl = new URL(`https://${GITHUB_CODELOAD_HOST}${path}`);
-  // A URL collapses `.` and `..`: a ref that does is another address than the one that would be recorded.
-  if (codeloadUrl.pathname !== path || refChangesAddress(source.ref)) {
+  if (codeloadUrl.pathname !== path || refProblem(source.ref) !== null) {
     throw new FetchError('bad-source', 'the GitHub ref would change the address that is fetched');
   }
 

@@ -113,12 +113,22 @@ function parseNpmSource(spec: string): NpmSource {
   return { type: 'npm', name, version };
 }
 
+/** What a ref may not hold: whitespace, controls and invisible characters. */
+const REF_UNSHOWABLE = /[\p{Cc}\p{Cf}\p{Cs}\s]/u;
+
 /**
- * Whether a ref would change which address is fetched: `.` and `..` are collapsed by a URL, and a separator
- * makes it a path. Checked where the source is read and again where the request is made.
+ * Why a ref cannot be used, or null when it can. A ref may hold slashes (`feature/x` is a branch), and the slash
+ * stays a slash in the path of the request. What a URL would collapse or read as another path is refused: a segment
+ * that is empty, `.` or `..`, and a backslash. Whitespace and controls are refused so that the ref that is recorded
+ * is one that can be read. Checked where the source is read and again where the request is made.
  */
-export const refChangesAddress = (ref: string): boolean =>
-  ref === '.' || ref.includes('..') || /[\\/]/.test(ref);
+export function refProblem(ref: string): string | null {
+  if (REF_UNSHOWABLE.test(ref)) return 'ref cannot contain whitespace or control characters';
+  if (ref.includes('\\')) return 'a ref may not contain a backslash';
+  if (ref.split('/').some((segment) => segment === '' || segment === '.' || segment === '..'))
+    return 'a ref segment may not be empty, . or ..';
+  return null;
+}
 
 const GITHUB_OWNER = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const GITHUB_REPO = /^[a-zA-Z0-9_.-]+$/;
@@ -161,16 +171,8 @@ function parseGitHubSource(spec: string): GitHubSource {
     if (ref.length > SOURCE_PART_MAX.ref) {
       throw new SourceSyntaxError(`ref is over ${SOURCE_PART_MAX.ref} characters`);
     }
-    if (/[\p{Cc}\p{Cf}\p{Cs}\s]/u.test(ref)) {
-      throw new SourceSyntaxError('ref cannot contain whitespace or control characters');
-    }
-    // `.` and `..` are collapsed by a URL, and a separator is a path: either changes which address is fetched
-    // while the ref that is recorded stays as written.
-    if (refChangesAddress(ref)) {
-      throw new SourceSyntaxError(
-        'ref cannot be "." or contain ".." or a path separator: it would change the address that is fetched',
-      );
-    }
+    const problem = refProblem(ref);
+    if (problem !== null) throw new SourceSyntaxError(problem);
   }
 
   const slash = repoPart.indexOf('/');
