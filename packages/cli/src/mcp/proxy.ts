@@ -236,6 +236,12 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   // second, redundant timer.
   let signalKillTimer: NodeJS.Timeout | null = null;
   const relay = (signal: NodeJS.Signals) => (): void => {
+    // The server has closed: there is nothing left to signal, and a signal sent to its
+    // process id now could reach whatever has taken that id. Strict mode asks for the
+    // server to be stopped while the lines it wrote before closing are still being
+    // worked through, which is after the close; this is also what stops that from
+    // arming a kill timer nothing would clear.
+    if (shuttingDown) return;
     killChildTree(child, signal);
     if (signalKillTimer === null)
       signalKillTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), graceMs);
@@ -276,6 +282,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   // than by reasoning about which task ran in which turn.
   if (termTimer !== null) clearTimeout(termTimer);
   if (killTimer !== null) clearTimeout(killTimer);
+  if (signalKillTimer !== null) clearTimeout(signalKillTimer);
   // A client whose own stdin is still open would keep this process alive forever,
   // now that there is no server left to talk to. Removes only the ONE listener this
   // function registered — `options.stdin` is caller-supplied, and a caller may have
