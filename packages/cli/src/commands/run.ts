@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
+import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
+import { commandLine, type Piece } from '../shell-quote.js';
 import { pluginCliDirIn, secretsFile, stroqHome } from '../paths.js';
+import { outsideLine } from '../ui/layout.js';
 import { AGENT_STATE_DIRS, OWN_SANDBOX_AGENTS, agentIdFor } from '../run/agent-name.js';
 import { launch as realLaunch } from '../run/launch.js';
 import { preflight, type PreflightResult } from '../run/preflight.js';
@@ -98,7 +101,7 @@ export function parseRunArgv(argv: readonly string[]): RunArgvResult {
         ok: false,
         error: token.startsWith('-')
           ? `unknown option "${token}"`
-          : `the agent command must follow "--" — did you mean: stroq run -- ${argv.join(' ')}`,
+          : `the agent command must follow "--" — did you mean: ${commandLine(['stroq', 'run', '--', ...argv.map((word): Piece => ({ word }))])}`,
       };
     const value = argv[i + 1];
     // A value that starts with `--` is the next flag or the separator, never a
@@ -247,13 +250,13 @@ function pluginCopyNote(home: string, plat: NodeJS.Platform): string | null {
   return `  sandbox: ${copy} is not installed, and the sandbox does not let the Claude Code plugin's hook wrapper make it (a denied directory cannot be made): run once without the sandbox so the wrapper can install its pinned copy, if you use the plugin.`;
 }
 
-function reportSandbox(
+async function reportSandbox(
   sandbox: GeneratedSandbox,
   agent: string | null,
   plat: NodeJS.Platform,
   isTTY: boolean,
   home: string,
-): void {
+): Promise<void> {
   const fs = sandbox.settings.filesystem;
   line(
     `  sandbox: ${fs.denyRead.length} credential file${fs.denyRead.length === 1 ? '' : 's'} unreadable, writes limited to ${fs.allowWrite.length} paths`,
@@ -286,6 +289,18 @@ function reportSandbox(
   process.stderr.write(`${NOT_COVERED}\n`);
   const copy = pluginCopyNote(home, plat);
   if (copy !== null) process.stderr.write(`${copy}\n`);
+  const pinned = await pinnedServers(home);
+  if (pinned.length > 0)
+    process.stderr.write(
+      `  sandbox: ${sandboxPinNote(
+        pinned
+          .slice(0, 5)
+          .map((name) => JSON.stringify(outsideLine(name)))
+          .join(', '),
+        pinned.length,
+        home,
+      )}.\n`,
+    );
   if (sandbox.settings.network.allowedDomains.length === 0) {
     line(
       '  sandbox: all network is denied. The agent cannot reach its own API, and neither can anything it runs, until you name the hosts with --allow-domain.',
@@ -345,7 +360,13 @@ export async function runRun(
       ? null
       : await buildSandbox(invocation, agent, workspace, userHome, !invocation.dryRun, plat);
   if (sandbox !== null)
-    reportSandbox(sandbox, agent, plat, deps.isTTY ?? process.stdin.isTTY === true, stroqHome());
+    await reportSandbox(
+      sandbox,
+      agent,
+      plat,
+      deps.isTTY ?? process.stdin.isTTY === true,
+      stroqHome(),
+    );
 
   const childEnvironment: NodeJS.ProcessEnv = {
     ...env,

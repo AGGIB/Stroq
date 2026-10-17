@@ -90,12 +90,12 @@ describe('skill install review regressions', () => {
   it('shows the target, replaced source, old digest, changes and restore loss before asking', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
-    await writeFile(join(f.source, 'notes.md'), 'more docs');
+    await writeFile(join(f.source, 'README.md'), 'more docs');
     await addSkill('demo', f.options);
     expect(f.output()).toContain(JSON.stringify(first.installedTo));
     expect(f.output()).toContain(`Replaces demo from ${JSON.stringify(f.source)}`);
     expect(f.output()).toContain(`Previous sha256:${first.digest}`);
-    expect(f.output()).toContain('added notes.md');
+    expect(f.output()).toContain('added README.md');
     await writeFile(join(first.installedTo, 'outside.txt'), 'outside');
     await addSkill('demo', { ...f.options, restore: true });
     expect(f.output()).toContain('discards outside edits');
@@ -161,7 +161,9 @@ describe('skill install review regressions', () => {
     await expect(addSkill(archive, f.options)).rejects.toThrow(/refused/);
     await mkdir(join(f.source, '.claude-plugin'));
     await writeFile(join(f.source, '.claude-plugin', 'plugin.json'), '{"name":"demo"}');
-    await expect(addSkill(f.source, f.options)).rejects.toThrow(/skills only/);
+    await expect(addSkill(f.source, f.options)).rejects.toThrow(
+      /plugin, which add does not install/,
+    );
     expect(f.prompts()).toBe(0);
   });
 

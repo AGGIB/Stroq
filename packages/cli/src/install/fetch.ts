@@ -11,6 +11,7 @@ import {
   type NpmSource,
   type OnlineSource,
   type UrlSource,
+  refProblem,
 } from './source.js';
 import { buildTree } from './tree.js';
 import { LIMITS, type SourceRef, type Tree, type TreeEntry } from './types.js';
@@ -161,6 +162,20 @@ interface FetchState {
   readonly customSignal?: AbortSignal;
 }
 
+/**
+ * A request goes to the default https port of a host, with no user information. The host is compared with the
+ * allowlist by itself, so a redirect to the same host on another port, or to a URL that carries a name and a
+ * password, would pass the host check and still be a different place, or a credential in a request. Nothing of
+ * the URL is repeated in the message.
+ */
+function checkOrigin(url: URL, redirected: boolean): void {
+  const code = redirected ? 'bad-redirect' : 'bad-source';
+  if (url.username !== '' || url.password !== '')
+    throw new FetchError(code, 'a URL with user information is refused');
+  if (url.port !== '')
+    throw new FetchError(code, 'a URL with a port is refused: only the default https port is used');
+}
+
 function checkHostSafety(host: string, allowlist: readonly string[]): void {
   if (host === 'localhost' || !isHostName(host)) {
     throw new FetchError(
@@ -235,6 +250,7 @@ async function requestWithPolicy(
     if (currentUrl.protocol !== 'https:') {
       throw new FetchError('https-only', 'https only: non-https URLs are refused');
     }
+    checkOrigin(currentUrl, redirects > 0);
     checkHostSafety(currentUrl.hostname, allowlist);
 
     if (!state.reportedHosts.has(currentUrl.hostname)) {
@@ -426,9 +442,14 @@ async function fetchNpm(source: NpmSource, state: FetchState): Promise<FetchedTr
 }
 
 async function fetchGitHub(source: GitHubSource, state: FetchState): Promise<FetchedTree> {
-  const codeloadUrl = new URL(
-    `https://${GITHUB_CODELOAD_HOST}/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/tar.gz/${encodeURIComponent(source.ref)}`,
-  );
+  // The slash of a ref stays a slash (`feature/x`); each segment is encoded. A URL collapses `.` and `..` and an
+  // empty segment: a ref that does is another address than the one that would be recorded.
+  const ref = source.ref.split('/').map(encodeURIComponent).join('/');
+  const path = `/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/tar.gz/${ref}`;
+  const codeloadUrl = new URL(`https://${GITHUB_CODELOAD_HOST}${path}`);
+  if (codeloadUrl.pathname !== path || refProblem(source.ref) !== null) {
+    throw new FetchError('bad-source', 'the GitHub ref would change the address that is fetched');
+  }
 
   const tarballRes = await requestWithPolicy(codeloadUrl, [GITHUB_CODELOAD_HOST], {}, state);
 

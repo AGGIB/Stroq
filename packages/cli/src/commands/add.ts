@@ -5,25 +5,25 @@ import { stroqHome } from '../paths.js';
 import { parseArgsProblem, usageError } from '../help.js';
 import { currentTerminal } from '../ui/terminal.js';
 
+/** The options of the command, written out here where the tests of the printed command lines read them too. */
+export const ADD_OPTIONS = {
+  user: { type: 'boolean' },
+  restore: { type: 'boolean' },
+  kind: { type: 'string' },
+  client: { type: 'string' },
+  config: { type: 'string' },
+  entrypoint: { type: 'string' },
+  'pass-env': { type: 'string' },
+  name: { type: 'string' },
+  cwd: { type: 'string' },
+  force: { type: 'boolean' },
+  strict: { type: 'boolean' },
+} as const;
+
 export async function runAdd(args: readonly string[]): Promise<number> {
   let parsed;
   try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      options: {
-        user: { type: 'boolean' },
-        restore: { type: 'boolean' },
-        kind: { type: 'string' },
-        client: { type: 'string' },
-        config: { type: 'string' },
-        entrypoint: { type: 'string' },
-        'pass-env': { type: 'string' },
-        name: { type: 'string' },
-        cwd: { type: 'string' },
-        force: { type: 'boolean' },
-      },
-    });
+    parsed = parseArgs({ args: [...args], allowPositionals: true, options: ADD_OPTIONS });
   } catch (error) {
     const problem = parseArgsProblem(error);
     if (problem === null) throw error;
@@ -42,7 +42,16 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     return 2;
   }
   if (kind === 'skill') {
-    const mcpOnly = ['client', 'config', 'entrypoint', 'pass-env', 'name', 'cwd', 'force'] as const;
+    const mcpOnly = [
+      'client',
+      'config',
+      'entrypoint',
+      'pass-env',
+      'name',
+      'cwd',
+      'force',
+      'strict',
+    ] as const;
     const invalid = mcpOnly.find((name) => parsed.values[name] !== undefined);
     if (invalid !== undefined) {
       process.stderr.write(usageError('add', `unknown option --${invalid} for --kind skill`));
@@ -69,6 +78,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
       ...(parsed.values.name === undefined ? {} : { name: parsed.values.name }),
       ...(parsed.values.cwd === undefined ? {} : { cwd: parsed.values.cwd }),
       force: parsed.values.force === true,
+      ...(parsed.values.strict === undefined ? {} : { strict: parsed.values.strict }),
     });
     process.stdout.write(`confirmed sha256:${added.digest}\n`);
     return 0;
@@ -81,6 +91,8 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     terminal: currentTerminal(),
     user: parsed.values.user === true,
     restore: parsed.values.restore === true,
+    // Only what the person said: without --kind the files tell what the folder is.
+    ...(parsed.values.kind === 'skill' ? { kind: 'skill' as const } : {}),
   });
   process.stdout.write(`confirmed sha256:${added.digest}\n`);
   return 0;

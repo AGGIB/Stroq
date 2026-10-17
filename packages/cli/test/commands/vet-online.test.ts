@@ -171,7 +171,7 @@ describe('stroq vet --online', () => {
       expect(run.stderr).toBe('registry.npmjs.org\n');
       expect(run.stdout).toContain('**Stroq vet** `my-skill` (skill)');
       expect(run.stdout).toContain(
-        `Reproduce: \`stroq vet --online npm:my-skill@1.0.0 --expect sha256:`,
+        `Reproduce: \`stroq vet --online=npm:my-skill@1.0.0 --expect=sha256:`,
       );
     });
   });

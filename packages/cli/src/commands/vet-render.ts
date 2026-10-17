@@ -9,7 +9,14 @@
 // and the screen says how many it left out and that `--json` lists them all. Nothing else is ever left out:
 // the blind spots are all there, however many, because a short list of what was not looked at would
 // be the one place where "nothing" could be taken for "all".
+//
+// Within a group the rows are ranked by what a person must see first (credentials, the network, execution,
+// hooks, install scripts, then the tools), not by the alphabet of the passport. The screen a person types a
+// digest against (`confirmationScreen`) is different in one respect: every sensitive row is on it, and an
+// artifact with more of them than a person can be asked about is refused instead of cut.
 import { failedReadings } from '../install/inspect/index.js';
+import { bySeverity } from '../install/inspect/severity.js';
+import { commandLine } from '../shell-quote.js';
 import { READING_PHRASES } from '../install/inspect/blind-spots.js';
 import { READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import type { Passport, PassportLine } from '../install/types.js';
@@ -26,6 +33,8 @@ const FILE_MAX = 40;
 const RULE_MAX = 48;
 const SIGNAL_RULES_SHOWN = 3;
 const BASIS_WIDTH = '[declared]'.length;
+/** The most sensitive rows a confirmation shows; an artifact with more is refused, not cut. */
+export const CONFIRM_SENSITIVE_MAX = 80;
 
 export const CLOSING =
   'This is a reading of the files, not a security certificate: an absent line means nothing was seen, not that nothing is there.';
@@ -33,6 +42,8 @@ export const CLOSING =
 export interface RenderOptions {
   /** The digest was compared with `--expect` and is the one expected. */
   readonly matchedExpect?: boolean;
+  /** Every sensitive row is shown, up to `CONFIRM_SENSITIVE_MAX`, however long that makes the screen. */
+  readonly allSensitive?: boolean;
 }
 
 /** Whether the digest was taken from a folder read where the executable bit is not known. */
@@ -159,21 +170,23 @@ function blindSpotLines(passport: Passport): string[] {
 }
 
 /** The lines of the passport to put on the screen: how many, so that the screen is about `SCREEN_LINES`. */
-function shownCount(total: number, fixed: number): number {
+function shownCount(total: number, fixed: number, mustShow: number): number {
   const budget = Math.max(MIN_ROWS, SCREEN_LINES - fixed);
-  return total <= budget ? total : Math.max(MIN_ROWS, budget - 1);
+  const fitted = total <= budget ? total : Math.max(MIN_ROWS, budget - 1);
+  return Math.max(fitted, Math.min(mustShow, total));
 }
 
 /** The text of the screen. A passport is read as it is: nothing is looked up, nothing is run. */
 export function renderPassport(passport: Passport, options: RenderOptions = {}): string {
-  const sensitive = passport.lines.filter((line) => line.sensitive);
-  const plain = passport.lines.filter((line) => !line.sensitive);
+  const sensitive = bySeverity(passport.lines.filter((line) => line.sensitive));
+  const plain = bySeverity(passport.lines.filter((line) => !line.sensitive));
   const head = [titleLine(passport), digestLine(passport, options), ...incompleteLines(passport)];
   const tail = [signalsLine(passport), ...blindSpotLines(passport), '', CLOSING];
   const headings = (sensitive.length > 0 ? 1 : 0) + (plain.length > 0 ? 1 : 0);
   const shown = shownCount(
     passport.lines.length,
     head.length + Math.max(1, headings) + tail.length,
+    options.allSensitive === true ? Math.min(sensitive.length, CONFIRM_SENSITIVE_MAX) : 0,
   );
   const ordered = [...sensitive, ...plain];
   const rows = aligned(ordered.slice(0, shown).map(rowOf));
@@ -186,4 +199,22 @@ export function renderPassport(passport: Passport, options: RenderOptions = {}):
   if (shown > sensitive.length) body.push(`OTHER (${plain.length})`, ...rows.slice(inSensitive));
   if (shown < ordered.length) body.push(moreLine(ordered.slice(shown)));
   return [...head, ...body, ...tail].join('\n') + '\n';
+}
+
+/**
+ * The screen a person is asked to confirm a digest against. Every sensitive row is on it: a confirmation
+ * that hides a credential file or a host below a fold is a confirmation of something that was not read. An
+ * artifact with more sensitive rows than `CONFIRM_SENSITIVE_MAX` is refused, with the count of what would
+ * have been hidden, and the way to read all of them. `source` is where the artifact was read from.
+ */
+export function confirmationScreen(passport: Passport, source: string): string {
+  const sensitive = passport.lines.filter((line) => line.sensitive).length;
+  const hidden = sensitive - CONFIRM_SENSITIVE_MAX;
+  if (hidden > 0)
+    throw new Error(
+      `this has ${sensitive} sensitive lines and a confirmation shows at most ${CONFIRM_SENSITIVE_MAX}: ` +
+        `${count(hidden, 'sensitive line')} would be hidden, so no digest is asked for. ` +
+        `Read every line with: ${commandLine(['stroq', 'vet', { flag: '--from', value: source, what: 'path' }, '--json'])}`,
+    );
+  return renderPassport(passport, { allSensitive: true });
 }

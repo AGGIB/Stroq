@@ -27,6 +27,7 @@
 import { constants, type BigIntStats } from 'node:fs';
 import { lstat, open, opendir, readlink, realpath, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isNodeModules } from './path-names.js';
 import { nameKey } from './path-collision.js';
 import { checkEntryPath, quotePath } from './safe-path.js';
 import { buildTree, fileDigestOf, TreeError, type TreeErrorCode } from './tree.js';
@@ -205,7 +206,6 @@ async function namesIn(abs: string, rel: string, walk: Walk): Promise<string[]> 
 
 /** `.git` as a disk that ignores case and Unicode form would open it: the folding of the path rules. */
 const isGitName = (name: string): boolean => nameKey(name) === '.git';
-const isNodeModules = (name: string): boolean => name.toLowerCase() === 'node_modules';
 
 /** Throws when one more entry would be over the limit; asked before a file is read, so the limit stops the reading. */
 function ensureRoom(walk: Walk): void {

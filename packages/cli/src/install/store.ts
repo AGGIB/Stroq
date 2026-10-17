@@ -3,6 +3,8 @@ import { dirname, join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { storeDirIn } from '../paths.js';
+import { outsideLine } from '../ui/layout.js';
+import { inNodeModules } from './path-names.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from './read-dir.js';
 import { buildTree, treeDigest } from './tree.js';
 import type { Tree, TreeEntry } from './types.js';
@@ -26,11 +28,20 @@ export async function assertPlainDirectory(path: string): Promise<boolean> {
   }
 }
 
-/** Never materialise links or nested repositories; a silent omission would change the inspected tree. */
+/**
+ * Never materialise links or nested repositories; a silent omission would change the inspected tree. The same
+ * goes for `node_modules`: the stored copy is read back through the reader that leaves it out, so a tree that
+ * holds one (an archive made with bundled dependencies) would be confirmed by its digest and then refused by
+ * the store. It is refused here, at inspection, before anyone is asked.
+ */
 export function assertWritableTree(tree: Tree, digest: string): void {
   if (treeDigest(tree) !== digest) throw new Error('the inspected bytes changed before writing');
   if (tree.entries.some((entry) => entry.kind !== 'file' || entry.bytes === undefined))
     throw new Error('a skill with links, nested repositories or missing bytes cannot be installed');
+  if (tree.entries.some((entry) => inNodeModules(entry.path)))
+    throw new Error(
+      'a source that holds a node_modules folder cannot be installed: the copy Stroq keeps leaves node_modules out, so it would not be the bytes you confirmed (leave it out of the archive; a server must be self-contained)',
+    );
 }
 
 /** Explicit platform input keeps the Windows refusal covered on every test runner. */
@@ -93,6 +104,35 @@ export async function readStoredTree(folder: string, digest: string): Promise<Tr
   const verified = buildTree(entries, { complete: true });
   assertWritableTree(verified, digest);
   return verified;
+}
+
+/** Who a stored copy is for, and the commands that take it out and put it back, to name the way out when it is damaged. */
+export interface StoredSubject {
+  readonly kind: 'skill' | 'mcp';
+  readonly name: string;
+  /** From `remedy.ts`, built from the lock record: what to run to remove it with `--force` and add it again. */
+  readonly remedy: string;
+}
+
+/**
+ * The stored tree of an installed skill or server, or an error that says what is wrong with the copy and what
+ * to do: a damaged store cannot be restored or compared with, and removing needs no bytes at all, so the way
+ * out is to remove it with `--force` and add it again from its source. The error keeps the cause.
+ */
+export async function readStoredTreeOf(
+  home: string,
+  digest: string,
+  subject: StoredSubject,
+): Promise<Tree> {
+  try {
+    return await readStoredTree(storePath(home, digest), digest);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'it could not be read';
+    throw new Error(
+      `the stored copy of ${subject.kind} ${outsideLine(subject.name)} is damaged (${outsideLine(reason)}); run ${subject.remedy}`,
+      { cause: error },
+    );
+  }
 }
 
 export async function putStore(home: string, tree: Tree, digest: string): Promise<string> {

@@ -21,13 +21,15 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'add',
     synopsis:
-      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>]',
+      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
     about: [
       'read a local skill directory or tar archive, show its passport and require a person',
       'to type the first 12 hex digits of its digest before installing the inspected bytes.',
       'An installed name updates from its recorded source. A passport is not a security certificate.',
       'With --kind mcp, a local Node server folder is stored by digest and its entry in the client',
       'config is written to start only those bytes (--pin); only node servers are supported.',
+      'Add --strict to confirm a wrapper that withholds unread server messages; changing the',
+      'confirmed launch requires the typed digest. Updates keep its recorded strict arguments.',
     ],
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
@@ -39,6 +41,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--pass-env <names>', 'with --kind mcp: comma-separated variables the server may see'],
       ['--name <name>', 'with --kind mcp: the server name in the config'],
       ['--cwd <dir>', 'with --kind mcp: the project directory decisions are made for'],
+      ['--strict', 'with --kind mcp: confirm strict mode in the pinned wrapper'],
       ['--force', 'with --kind mcp: update an entry changed outside Stroq'],
     ],
   },
@@ -92,7 +95,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
       [
         '--strict',
-        'with --agent mcp: withhold any server message Stroq could not fully read and scan, and answer the request with an error',
+        'with --agent mcp: withhold any server message Stroq could not fully read and scan; keeps wrappers confirmed by add unchanged and prints the add --strict --force confirmation command',
       ],
     ],
   },
