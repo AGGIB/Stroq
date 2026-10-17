@@ -219,7 +219,7 @@ describe('a file whose imports cannot be read is never read as one with none', (
     const files = server("require('./a.js')\n", { 'a.js': 'module.exports = 1\n' });
     const found = outsideImportsOfTree(completeTree(files), { budgetBytes: 20 });
 
-    expect(found.concerns).toEqual([{ concern: 'budget', files: ['server.js'] }]);
+    expect(found.concerns).toMatchObject([{ concern: 'budget', files: ['server.js'] }]);
   });
 
   it('reads a file that is longer than the one megabyte the other readings take, to its end', () => {
@@ -365,9 +365,9 @@ describe('the specifiers are judged as Node would look them up', () => {
     ["require('NODE:fs')", 'NODE:fs'],
     ["require('Node:fs')", 'Node:fs'],
     ["require('FS')", 'FS'],
-    ["require('DATA:text/javascript,1')", 'DATA:text'],
-    ["import 'https://example.com/x.js'", 'https:'],
-    ["import 'http://example.com/x.js'", 'http:'],
+    ["require('DATA:text/javascript,1')", 'DATA:text/javascript,1'],
+    ["import 'https://example.com/x.js'", 'https://example.com/x.js'],
+    ["import 'http://example.com/x.js'", 'http://example.com/x.js'],
     ["require('npm:left-pad')", 'npm:left-pad'],
     ["require('..\\\\..\\\\x')", null],
   ])('%s is looked up by name, or flagged', (request, name) => {
@@ -382,7 +382,6 @@ describe('the specifiers are judged as Node would look them up', () => {
     "require('fs')",
     "require('fs/promises')",
     "require('node:test')",
-    "import 'data:text/javascript,export default 1'",
     "require('#internal')",
   ])('%s is a built-in of Node or a # import of the package', (request) => {
     expect(asks(request, { 'lib.js': '1' }).modules).toEqual([]);
@@ -504,5 +503,74 @@ describe('the specifiers are judged as Node would look them up', () => {
 
     expect(found.modules).toEqual(['is-odd', 'left-pad']);
     expect(concernsOfFiles(files)).toHaveProperty('unreadable', ['a.js']);
+  });
+});
+
+describe('more ways to load code that the reading must flag', () => {
+  it.each([
+    ["require('vm').runInThisContext('1')", 'dynamic-code'],
+    ["require('node:vm')", 'dynamic-code'],
+    ["import vm from 'vm'", 'dynamic-code'],
+    ["import 'node:vm'", 'dynamic-code'],
+    ["import('data:text/javascript,export default 1')", 'dynamic-code'],
+    ['import \'data:text/javascript,import "file:///etc/x.mjs"\'', 'dynamic-code'],
+    ["require('./%2e%2e/%2e%2e/planted/evil.mjs')", 'outside'],
+    ["import './%2e%2e/x.mjs'", 'outside'],
+    ["import './a%2Fb.js'", 'outside'],
+    ["import './a%20b.js'", 'outside'],
+  ])('%s is flagged as %s', (request, concern) => {
+    expect(concernsOfFiles(server(request, { 'a/b.js': '1' }))).toHaveProperty(concern);
+  });
+
+  it('flags a # import when no package.json of the tree is its scope, and not when one is', () => {
+    const without = { 'server.js': "require('#internal')" };
+    const withRoot = {
+      'package.json': manifest({ imports: { '#internal': './lib.js' } }),
+      'server.js': "require('#internal')",
+      'lib.js': '1',
+    };
+    const nested = {
+      'package.json': manifest(),
+      'server.js': "require('./sub/a.js')",
+      'sub/package.json': JSON.stringify({ imports: { '#x': './x.js' } }),
+      'sub/a.js': "require('#x')",
+      'sub/x.js': '1',
+    };
+
+    expect(concernsOfFiles(without)).toHaveProperty('outside', ['server.js']);
+    expect(outside(withRoot)).toEqual({ declared: [], modules: [], concerns: [] });
+    expect(outside(nested)).toEqual({ declared: [], modules: [], concerns: [] });
+  });
+
+  it('flags a # import in a folder that has no package.json of its own only if none is above it either', () => {
+    const files = {
+      'lib/package.json': JSON.stringify({ imports: { '#x': './x.js' } }),
+      'lib/a.js': "require('#x')",
+      'lib/x.js': '1',
+      'other.js': "require('#x')",
+    };
+
+    expect(concernsOfFiles(files)).toHaveProperty('outside', ['other.js']);
+  });
+
+  it('says what it saw and where: the reason and the line of the first place', () => {
+    const found = outside(
+      server("var a = 1;\nvar b = 2;\nmodule[name]('x');\n", {
+        'lib/a.js': "\n\nconst s = 'open\n",
+      }),
+    );
+    const detail = (concern: string, path: string) =>
+      found.concerns.find((c) => c.concern === concern)?.details.find((d) => d.path === path);
+
+    expect(detail('dynamic-code', 'server.js')).toMatchObject({ line: 3 });
+    expect(detail('dynamic-code', 'server.js')?.reason).toMatch(/module/);
+    expect(detail('doubt', 'lib/a.js')).toMatchObject({ line: 3 });
+    expect(detail('doubt', 'lib/a.js')?.reason).toMatch(/string is not closed/);
+  });
+
+  it('reads a tree once: a second reading of the same tree is the first one', () => {
+    const tree = completeTree(server("require('left-pad')"));
+
+    expect(outsideImportsOfTree(tree)).toBe(outsideImportsOfTree(tree));
   });
 });

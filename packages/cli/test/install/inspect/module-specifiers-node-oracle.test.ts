@@ -1,6 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { classifySpecifier, scanModules } from '../../../src/install/inspect/module-specifiers.js';
+import { outsideImportsOfTree } from '../../../src/install/inspect/imports.js';
+import {
+  classifySpecifier,
+  packageNameOf,
+  scanModules,
+} from '../../../src/install/inspect/module-specifiers.js';
+import { buildTree } from '../../../src/install/tree.js';
+import { fileEntry } from '../../helpers/install-tree.js';
 import { askNode, nodeParses, oracleAvailable, type Variant } from '../../helpers/node-oracle.js';
 
 /**
@@ -155,6 +162,79 @@ const SNIPPETS: readonly Snippet[] = [
   module_('shebang in a module', "#!/usr/bin/env node\nimport 'zzpkg'"),
   script('byte order mark', "\ufeffrequire('zzpkg')"),
   module_('byte order mark in a module', "\ufeffimport 'zzpkg'"),
+  // Names that are bound as `from`, and the slash in the places a reader gets wrong.
+  module_('a default import named from', "import from from 'zzpkg'"),
+  module_('a namespace import named from', "import * as from from 'zzpkg'"),
+  module_('a namespace export named from', "export * as from from 'zzpkg'"),
+  script(
+    'a keyword as a property, then a division',
+    "var a = {default: 4}, y; y = a.default /2; require('zzpkg') /*/ x */",
+  ),
+  script(
+    'delete as a property, then a division',
+    "var a = {}, y; y = a.delete /2; require('zzpkg') /*/ x */",
+  ),
+  script(
+    'of as a variable, then a division',
+    "var of = 4, y; y = of /2; require('zzpkg') /*/ x */",
+  ),
+  script(
+    'yield as a variable, then a division',
+    "var yield = 4, y; y = yield /2; require('zzpkg') /*/ x */",
+  ),
+  script(
+    'a regex after an if head, with a class holding slashes',
+    "var a = 1, b = 'x'; if (a) /[//]/.test(b); require('zzpkg');",
+  ),
+  script('a regex whose class opens a comment', "var r = /[/*]/; require('zzpkg') /* c */"),
+  script(
+    'a block, then a regex, then a division',
+    "{}\n/a*/.test(1); require('zzpkg'); var x = function(){} / 2;",
+  ),
+  script(
+    'a regex right after a template hole opens',
+    "var a = 'x'; var t = `${ /'/.test(a) + require('zzpkg') + /'/.source }`;",
+  ),
+  script('a regex in the head of a for of', "for (var x of /a/.source) {} require('zzpkg')"),
+  script(
+    'a function declaration, then a regex',
+    "function f(){}\n/'/.test('a'); require('zzpkg'); var q = '/'",
+  ),
+  script(
+    'a function value, then a division',
+    "var f = function(){} / 2; require('zzpkg'); var q = 3 / 1;",
+  ),
+  script('an object, then a division', "var o = {} / 2; require('zzpkg'); var q = 3 / 1;"),
+  script(
+    'a postfix increment, then a division',
+    "var a = 4; a++ / 2 / 3; require('zzpkg'); var q = 3 / 1;",
+  ),
+  // More ways to load code.
+  script('a member written as a string', 'module["require"]("zzpkg")'),
+  script('global.eval of text', 'global.eval("process.mainModule.require(\'zzpkg\')")'),
+  script(
+    'globalThis.Function of text',
+    'globalThis.Function("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  script(
+    'the constructor of a constructor',
+    '[].constructor.constructor("return process.mainModule.require(\'zzpkg\')")()',
+  ),
+  // Node's hooks do not see a require made from inside vm text; the reader flags the vm module by its name.
+  script(
+    'the vm module',
+    "require('vm').runInThisContext(\"process.mainModule.require('zzpkg')\")",
+    [],
+  ),
+  script(
+    'a data: URL that imports',
+    'import(\'data:text/javascript,import "zzpkg"\').catch(() => {})',
+  ),
+  script(
+    'node started with text',
+    "require('child_process').spawnSync(process.execPath, ['-e', 'require(\"zzpkg\")'])",
+    [],
+  ),
   // Size and depth.
   script('a huge line', `${FILLER}require('zzpkg')`),
   module_('a huge file of comments', `${HUGE_LINE_COMMENTS}import 'zzpkg'`),
@@ -174,10 +254,15 @@ const variantsOf = (snippet: Snippet): readonly Variant[] => {
 const bare = (asked: readonly string[]): string[] =>
   asked.filter((name) => classifySpecifier(name) === 'bare');
 
-/** The reader reports the package, or says the file is one it cannot read. */
+/**
+ * The reader reports the package, or says the file is one it cannot read. It is asked as `add` asks it: of
+ * a tree that holds the file alone, so that what is said of a `data:` URL, the vm module or a `#` import
+ * counts as well as what the scanner says of the text.
+ */
 const covers = (code: string, name: string): boolean => {
-  const scan = scanModules(code);
-  return scan.concerns.length > 0 || scan.specifiers.includes(name);
+  const tree = buildTree([fileEntry('entry.cjs', code)], { complete: true });
+  const found = outsideImportsOfTree(tree);
+  return found.concerns.length > 0 || found.modules.includes(packageNameOf(name));
 };
 
 /** The names as a set: Node asks twice for a module that two statements of one file both name. */

@@ -114,8 +114,8 @@ describe('add --kind mcp holds a server to what its tree contains', () => {
     ['createRequire', 'import { createRequire } from "node:module"\n', /createRequire/],
     ['text that cannot be read with certainty', "const s = 'open\nrequire('a')\n", /certainty/],
     ['an escaped module name', "require('\\x70kg')\n", /escapes/],
-    ['an import of a path outside the tree', "require('../other.js')\n", /outside the tree/],
-    ['a file Node runs through a loader', "require('./tool.ts')\n", /loader/],
+    ['an import of a path outside the tree', "require('../other.js')\n", /climbs out of the tree/],
+    ['a file Node runs through a loader', "require('./tool.ts')\n", /does not read as a script/],
   ])('refuses a server with %s, naming the file', async (_what, code, why) => {
     const f = await mcpFixture({ 'server.js': code, 'tool.ts': 'x' });
     const before = await readFile(f.config, 'utf8');
@@ -132,6 +132,47 @@ describe('add --kind mcp holds a server to what its tree contains', () => {
   it('refuses a package.json whose entries point out of the tree', async () => {
     const f = await mcpFixture({}, { exports: { '.': '../elsewhere.js' } });
 
-    await expect(addMcp(f.dir, f.mcpOptions)).rejects.toThrow(/"package.json".*outside the tree/);
+    await expect(addMcp(f.dir, f.mcpOptions)).rejects.toThrow(
+      /"package.json": package.json points out of the tree/,
+    );
+  });
+
+  it('says what was found, on which line, and why, for a person to act on', async () => {
+    const f = await mcpFixture({
+      'server.js':
+        "const a = 1;\nconst { createRequire } = require('module');\nconst z = require('zod');\n",
+    });
+
+    const message = ((await addMcp(f.dir, f.mcpOptions).catch((e: Error) => e)) as Error).message;
+
+    expect(message).toMatch(/"server.js" line 2: uses createRequire/);
+    expect(message).toContain('the sources import "zod" by name');
+    expect(message).toContain('esbuild --bundle --platform=node --format=cjs');
+    expect(message).toMatch(/Remove "dependencies" from the package.json/);
+    expect(message).toMatch(/__require shim that esbuild --format=esm adds/);
+    expect(message).toMatch(/minified code that the reader cannot parse/);
+    expect(message).toMatch(/eval or new Function/);
+  });
+
+  it('names a package, not a scheme, when a URL is imported', async () => {
+    const f = await mcpFixture({ 'server.js': "import 'https://example.com/a.js'\n" });
+
+    const message = ((await addMcp(f.dir, f.mcpOptions).catch((e: Error) => e)) as Error).message;
+
+    expect(message).toContain('"https://example.com/a.js"');
+    expect(message).not.toContain('"https:"');
+  });
+
+  it('writes a very long or hostile module name out cut and neutralised', async () => {
+    const long = 'a'.repeat(5000);
+    const f = await mcpFixture({
+      'server.js': `require('${long}\u202e')\n`.replace('\\u202e', '\u202e'),
+    });
+
+    const message = ((await addMcp(f.dir, f.mcpOptions).catch((e: Error) => e)) as Error).message;
+
+    expect(message).not.toContain(long);
+    expect(message).not.toMatch(/[\u202e\u001b]/u);
+    expect(message.length).toBeLessThan(3000);
   });
 });

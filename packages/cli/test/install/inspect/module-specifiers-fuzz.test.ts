@@ -169,6 +169,21 @@ describe('against V8: if the call runs, the reader found it or flagged the file'
     'typeof ',
     'void ',
     'a / b',
+    'a.default ',
+    'a.delete ',
+    'of ',
+    'yield ',
+    'await ',
+    'if (a) ',
+    'while (b) ',
+    'else ',
+    'return ',
+    '++ ',
+    '-- ',
+    '{} ',
+    'function () {} ',
+    '${',
+    '`${ ',
   ] as const;
   const CALLS = [
     `require('${NAME}');`,
@@ -217,7 +232,7 @@ describe('against V8: if the call runs, the reader found it or flagged the file'
           expect(scan.specifiers.includes(NAME) || scan.concerns.length > 0, source).toBe(true);
         },
       ),
-      { numRuns: 4000 },
+      { numRuns: 6000 },
     );
     // The property is only worth something if V8 ran a good share of the texts.
     expect(ran).toBeGreaterThan(200);

@@ -83,6 +83,19 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['many strings that are not closed on their line', (size) => "x = 'a\n".repeat(size / 7)],
   ['many holes that are not closed', (size) => '`${'.repeat(size / 3)],
   ['many requires of different names', (size) => repeatNames(size)],
+  // Lines of about four thousand characters, which is where a look-ahead per slash used to be quadratic.
+  ['lines of 4000 characters of +/[', (size) => longLines('+/[', size)],
+  ['lines of 4000 characters of )/[', (size) => longLines(')/[', size)],
+  ['lines of 4000 characters of a/b/', (size) => longLines('a/b/', size)],
+  ["lines of 4000 characters of /'/", (size) => longLines("/'/", size)],
+  ['lines of 4000 characters of ]/{', (size) => longLines(']/{', size)],
+  ['lines of 4000 characters of }/(', (size) => longLines('}/(', size)],
+  ['lines of 4000 characters of if(a)/', (size) => longLines('if(a)/', size)],
+  ['lines of 4000 characters of ${/', (size) => longLines('`${/', size)],
+  ['lines of 4000 characters of x;(', (size) => longLines('x;(', size)],
+  ['a long run of divisions', (size) => `x = a${' / b'.repeat(size / 4)};`],
+  ['a long run of nested parentheses', (size) => `${'('.repeat(size / 2)}${')'.repeat(size / 2)}`],
+  ['a long run of closing brackets', (size) => ')]}'.repeat(size / 3)],
   ['a long line of divisions', (size) => 'a = (b) / c; '.repeat(size / 13)],
   ['a long line of ambiguous slashes with no end', (size) => `x = ${')/['.repeat(size / 3)}`],
   ['a long line after an ambiguous slash', (size) => `x = (a) / ${'b '.repeat(size / 2)}`],
@@ -90,6 +103,12 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['a long run of closing braces', (size) => '}'.repeat(size)],
   ['a long run of blank lines then a require', (size) => `${'\n'.repeat(size)}require('a')`],
 ];
+
+/** Text made of lines of 4000 characters, each the unit repeated. */
+function longLines(unit: string, size: number): string {
+  const line = `${unit.repeat(Math.floor(4000 / unit.length))}\n`;
+  return line.repeat(Math.ceil(size / line.length));
+}
 
 function repeatNames(size: number): string {
   const lines: string[] = [];

@@ -7,34 +7,35 @@
 // The reading is best-effort and is built to say so. It lists the specifiers it can read (`import 'x'`,
 // `import ... from 'x'`, `export ... from 'x'`, `require('x')` and `import('x')` with a string written out),
 // and it names a *concern* for everything it cannot settle: a text it could not lex with certainty, a module
-// requested by a name built at run time, a way of loading code that has no name in the text (`createRequire`,
-// `process.binding`, `eval`, `new Function`, `require` used as a value), a name written with escapes. A file
-// with a concern is a file whose imports are not known, and the caller treats it as one that may load code
-// from outside its tree.
+// requested by a name built at run time, a way of loading code that has no name in the text (`code-loading.ts`),
+// a name written with escapes. A file with a concern is a file whose imports are not known, and the caller
+// treats it as one that may load code from outside its tree. Each concern comes with a reason and a line.
 import { builtinModules } from 'node:module';
-import { Lexer, type Token } from './js-lexer.js';
+import { LoadingWatch, type Concern } from './code-loading.js';
+import { Lexer, lineOf, type Token } from './js-lexer.js';
+
+export type { Concern } from './code-loading.js';
 
 /** The most distinct specifiers one file is read for; a file with more is a concern. */
 export const MAX_SPECIFIERS = 2000;
 /** The most tokens an import or export clause may take before it is given up as something else. */
 const MAX_CLAUSE_TOKENS = 2000;
 
-/** What a reading could not settle. */
-export type Concern =
-  /** The text could not be lexed with certainty, or has more than the reading takes. */
-  | 'doubt'
-  /** A module is requested by a name built at run time, or `require` is used as a value. */
-  | 'computed'
-  /** Code is loaded or built in a way that has no module name in the text. */
-  | 'dynamic-code'
-  /** A module name is written with escapes, so the text is not the name. */
-  | 'escaped';
+/** Why a file is not fully read, and where. */
+export interface Note {
+  readonly concern: Concern;
+  readonly reason: string;
+  /** The line of the first place, counting `\n`. */
+  readonly line: number;
+}
 
 export interface ModuleScan {
   /** The specifiers asked for, each once, in the order they first appear. */
   readonly specifiers: readonly string[];
   /** Why the file is not fully read, sorted; empty when it is. */
   readonly concerns: readonly Concern[];
+  /** One note for each concern, with the first reason and place. */
+  readonly notes: readonly Note[];
 }
 
 interface ClauseState {
@@ -53,8 +54,8 @@ type State =
   | { readonly at: 'callEnd'; readonly specifier: string }
   | { readonly at: 'import' }
   | { readonly at: 'export' }
-  | { readonly at: 'from' }
-  | { readonly at: 'function' }
+  /** After a `from` that may be the keyword or a name that is imported: the clause to go on with if it is a name. */
+  | { readonly at: 'from'; readonly clause: ClauseState }
   | ClauseState;
 
 const IDLE: State = { at: 'idle' };
@@ -67,16 +68,27 @@ const isWord = (token: Token | null, text: string): boolean =>
 interface Step {
   readonly state: State;
   readonly found?: string;
-  readonly concern?: Concern;
+  readonly concern?: readonly [Concern, string];
   /** The token must be read again in the new state. */
   readonly again?: true;
 }
+
+const COMPUTED_NAME = [
+  'computed',
+  'a module is requested by a name that is built at run time',
+] as const;
+const REQUIRE_VALUE = [
+  'computed',
+  'require is used as a value, so what it loads is not written out',
+] as const;
+const ESCAPED_NAME = ['escaped', 'a module name is written with escapes'] as const;
 
 /** What follows `import` or `export` when it starts a clause that ends in `from 'x'`. */
 function clauseStep(state: ClauseState, token: Token): State | 'abort' {
   const used = state.used + 1;
   if (used > MAX_CLAUSE_TOKENS) return 'abort';
-  if (token.kind === 'word' && state.depth === 0 && token.text === 'from') return { at: 'from' };
+  if (token.kind === 'word' && state.depth === 0 && token.text === 'from')
+    return { at: 'from', clause: { ...state, used } };
   if (state.closed) return 'abort';
   if (isPunct(token, '{')) return { ...state, depth: state.depth + 1, used };
   if (isPunct(token, '}'))
@@ -96,11 +108,8 @@ function stepClause(state: ClauseState, token: Token): Step {
 
 /** A string where a module name is expected: a name with escapes is not the name it spells. */
 function named(token: Token, after: State): Step {
-  return token.escaped === true
-    ? { state: IDLE, concern: 'escaped' }
-    : after.at === 'callEnd'
-      ? { state: after }
-      : { state: IDLE, found: token.text };
+  if (token.escaped === true) return { state: IDLE, concern: ESCAPED_NAME };
+  return after.at === 'callEnd' ? { state: after } : { state: IDLE, found: token.text };
 }
 
 function stepRequest(state: State, token: Token): Step | null {
@@ -108,14 +117,16 @@ function stepRequest(state: State, token: Token): Step | null {
     case 'call':
       return token.kind === 'string'
         ? named(token, { at: 'callEnd', specifier: token.text })
-        : { state: IDLE, concern: 'computed', again: true };
+        : { state: IDLE, concern: COMPUTED_NAME, again: true };
     case 'callEnd':
       // `require('a' + b)` names no module: the string is closed by `)`, or by `,` before options.
       return isPunct(token, ')') || isPunct(token, ',')
         ? { state: IDLE, found: state.specifier }
-        : { state: IDLE, concern: 'computed', again: true };
+        : { state: IDLE, concern: COMPUTED_NAME, again: true };
     case 'from':
-      return token.kind === 'string' ? named(token, IDLE) : { state: IDLE, again: true };
+      // `from` is the keyword when a string follows. When anything else does, it was a name (`import from from
+      // 'x'`, `import * as from from 'x'`) and the clause goes on from it.
+      return token.kind === 'string' ? named(token, IDLE) : stepClause(state.clause, token);
     default:
       return null;
   }
@@ -130,16 +141,16 @@ function stepRequire(state: State, token: Token): Step | null {
       // of calling it that no later `require(` shows.
       return state.guarded
         ? { state: IDLE, again: true }
-        : { state: IDLE, concern: 'computed', again: true };
+        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
     case 'requireMember':
       if (isWord(token, 'main')) return { state: IDLE };
       return isWord(token, 'resolve')
         ? { state: { at: 'resolve' } }
-        : { state: IDLE, concern: 'computed', again: true };
+        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
     case 'resolve':
       return isPunct(token, '(')
         ? { state: { at: 'call' } }
-        : { state: IDLE, concern: 'computed', again: true };
+        : { state: IDLE, concern: REQUIRE_VALUE, again: true };
     default:
       return null;
   }
@@ -165,36 +176,10 @@ function stepImport(state: State, token: Token): Step | null {
   }
 }
 
-/**
- * A word that is a concern on its own, wherever it stands (an import clause included): a way of loading or
- * building code that leaves no module name in the text.
- */
-function wordConcern(token: Token, before: Token | null, beforeThat: Token | null): Concern | null {
-  if (token.kind !== 'word') return null;
-  const member = isPunct(before, '.');
-  switch (token.text) {
-    case 'createRequire':
-    case '_load':
-    case '_resolveFilename':
-      return 'dynamic-code';
-    case 'eval':
-      return member ? null : 'dynamic-code';
-    case 'Function':
-      return !member && isWord(before, 'new') ? 'dynamic-code' : null;
-    case 'binding':
-    case 'dlopen':
-      return member && isWord(beforeThat, 'process') ? 'dynamic-code' : null;
-    case 'resolve':
-      return member && isWord(beforeThat, 'meta') ? 'computed' : null;
-    default:
-      return null;
-  }
-}
-
 /** A word that starts something: the next state. */
 function stepIdle(token: Token, before: Token | null): Step {
   if (token.kind !== 'word') return { state: IDLE };
-  const member = isPunct(before, '.');
+  const member = isPunct(before, '.') || isPunct(before, '?.');
   switch (token.text) {
     case 'require':
       return { state: { at: 'require', guarded: isWord(before, 'typeof') } };
@@ -202,18 +187,12 @@ function stepIdle(token: Token, before: Token | null): Step {
       return member ? { state: IDLE } : { state: { at: 'import' } };
     case 'export':
       return member ? { state: IDLE } : { state: { at: 'export' } };
-    case 'Function':
-      return member || isWord(before, 'new') ? { state: IDLE } : { state: { at: 'function' } };
     default:
       return { state: IDLE };
   }
 }
 
 function step(state: State, token: Token, before: Token | null): Step {
-  if (state.at === 'function')
-    return isPunct(token, '(')
-      ? { state: IDLE, concern: 'dynamic-code' }
-      : { state: IDLE, again: true };
   return (
     stepRequest(state, token) ??
     stepRequire(state, token) ??
@@ -222,37 +201,58 @@ function step(state: State, token: Token, before: Token | null): Step {
   );
 }
 
+/** The first reason and place of each concern, in the order they came. */
+class Notes {
+  private readonly first = new Map<Concern, { reason: string; at: number }>();
+
+  add(concern: Concern, reason: string, at: number): void {
+    if (!this.first.has(concern)) this.first.set(concern, { reason, at });
+  }
+
+  list(text: string): Note[] {
+    return [...this.first]
+      .map(([concern, { reason, at }]) => ({ concern, reason, line: lineOf(text, at) }))
+      .sort((a, b) => (a.concern < b.concern ? -1 : a.concern > b.concern ? 1 : 0));
+  }
+}
+
 /** Reads the text of one JavaScript file for the modules it asks for, and for what it does not let be read. */
 export function scanModules(text: string, limit = MAX_SPECIFIERS): ModuleScan {
   const lexer = new Lexer(text);
+  const watch = new LoadingWatch();
   const found = new Set<string>();
-  const concerns = new Set<Concern>();
+  const notes = new Notes();
   let state: State = IDLE;
   let before: Token | null = null;
-  let beforeThat: Token | null = null;
   for (let token = lexer.next(); token !== null; token = lexer.next()) {
-    const own = wordConcern(token, before, beforeThat);
-    if (own !== null) concerns.add(own);
+    for (const finding of watch.see(token)) notes.add(finding.concern, finding.reason, finding.at);
     let result = step(state, token, before);
-    if (result.concern !== undefined) concerns.add(result.concern);
+    if (result.concern !== undefined) notes.add(result.concern[0], result.concern[1], token.at);
     if (result.again === true) {
       result = step(result.state, token, before);
-      if (result.concern !== undefined) concerns.add(result.concern);
+      if (result.concern !== undefined) notes.add(result.concern[0], result.concern[1], token.at);
     }
     state = result.state;
     if (result.found !== undefined) found.add(result.found);
-    beforeThat = before;
     before = token;
     if (found.size > limit) {
-      concerns.add('doubt');
+      notes.add('doubt', `the file asks for more than ${limit} different modules`, token.at);
       break;
     }
   }
+  const end = watch.end();
+  if (end !== null) notes.add(end.concern, end.reason, end.at);
   // The text ended in the middle of something that asks for a module: `require` and a bracket, nothing more.
-  if (['call', 'callEnd', 'requireMember', 'resolve'].includes(state.at)) concerns.add('computed');
-  if (state.at === 'require' && !state.guarded) concerns.add('computed');
-  if (lexer.doubt !== null) concerns.add('doubt');
-  return { specifiers: [...found].slice(0, limit), concerns: [...concerns].sort() };
+  if (['call', 'callEnd', 'requireMember', 'resolve'].includes(state.at))
+    notes.add('computed', 'the text ends in the middle of a request for a module', text.length);
+  if (state.at === 'require' && !state.guarded) notes.add(...REQUIRE_VALUE, text.length);
+  if (lexer.doubt !== null) notes.add('doubt', lexer.doubt.reason, lexer.doubt.at);
+  const list = notes.list(text);
+  return {
+    specifiers: [...found].slice(0, limit),
+    concerns: list.map((note) => note.concern),
+    notes: list,
+  };
 }
 
 /** The specifiers of a text, for a caller that wants only those. */
@@ -274,18 +274,21 @@ export type SpecifierKind =
   | 'relative'
   /** A path from the root, or a `file:` URL: it names a place outside any tree. */
   | 'absolute'
-  /** Node's own, or `data:`, or a `#` import that the package maps itself. */
-  | 'inside';
+  /** Node's own, or a `#` import that the package maps itself. */
+  | 'inside'
+  /** A `data:` URL: the module is the text of the specifier, and it can import any URL. */
+  | 'data';
 
 export function classifySpecifier(specifier: string): SpecifierKind {
   if (specifier === '' || specifier === '.' || specifier === '..') return 'relative';
   if (specifier.startsWith('./') || specifier.startsWith('../')) return 'relative';
   if (specifier.startsWith('/') || WINDOWS_PATH.test(specifier)) return 'absolute';
   if (specifier.startsWith('#') || BUILTINS.has(specifier)) return 'inside';
-  // Only the lower-case `node:` and `data:` are Node's own. `NODE:fs` is a package name to `require`, which
+  // Only the lower-case `node:` and `data:` are what Node takes them for. `NODE:fs` is a package name to `require`, which
   // looks it up in the folders above the file; a scheme is compared as written, and anything else is by name.
   const scheme = SCHEME.exec(specifier)?.[0];
-  if (scheme === 'node:' || scheme === 'data:') return 'inside';
+  if (scheme === 'node:') return 'inside';
+  if (scheme === 'data:') return 'data';
   return scheme?.toLowerCase() === 'file:' ? 'absolute' : 'bare';
 }
 
@@ -297,8 +300,12 @@ export function classifySpecifier(specifier: string): SpecifierKind {
 export const isBareSpecifier = (specifier: string): boolean =>
   classifySpecifier(specifier) === 'bare';
 
-/** The package a bare specifier names: `@scope/name` or `name`, without the path inside it. */
+/**
+ * The package a bare specifier names: `@scope/name` or `name`, without the path inside it. A specifier with a
+ * scheme (`https://x/a.js`, `npm:left-pad`) is not a package name and is kept whole.
+ */
 export function packageNameOf(specifier: string): string {
+  if (SCHEME.test(specifier)) return specifier;
   const parts = specifier.split('/');
   return specifier.startsWith('@') && parts.length > 1
     ? `${parts[0]}/${parts[1]}`
