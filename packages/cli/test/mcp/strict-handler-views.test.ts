@@ -6,8 +6,11 @@ import { handlerRig, track, type HandlerRig } from './strict-handler-rig.js';
 /**
  * The handler scans every view of a result (see `strict-views.ts`): the bounded dry run
  * gets all of their texts at once, so they share one deadline, and the engine then scans
- * each, one after the other. The verdict is the worst of them, one warning is added however
- * many views were suspect, and a view that ran out of time withholds the result.
+ * each, one after the other: the extra views first, as extra readings (they scan and taint,
+ * remember nothing and are audited only when they match), and the first view last, as the
+ * call that records the result, flagged when an extra reading of it was suspect. The verdict
+ * is the worst of them, one warning is added however many views were suspect, and a view
+ * that ran out of time withholds the result.
  */
 
 const RESULT = { content: [{ type: 'text', text: 'hello' }] };
@@ -16,6 +19,8 @@ const line = (id: unknown = 3): string => JSON.stringify({ jsonrpc: '2.0', id, r
 interface Posted {
   readonly text: string;
   readonly toolInput: unknown;
+  readonly extraReading: boolean;
+  readonly suspectInAnotherReading: boolean;
 }
 
 type Judge = (posted: Posted, index: number) => 'clean' | 'suspect' | 'timeout';
@@ -24,8 +29,18 @@ type Judge = (posted: Posted, index: number) => 'clean' | 'suspect' | 'timeout';
 function recordingEngine(judge: Judge): { engine: StroqEngine; posted: Posted[] } {
   const posted: Posted[] = [];
   const engine = {
-    post: async (event: { toolResultText: string; toolInput: unknown }) => {
-      const entry = { text: event.toolResultText, toolInput: event.toolInput };
+    post: async (event: {
+      toolResultText: string;
+      toolInput: unknown;
+      extraReading?: true;
+      suspectInAnotherReading?: true;
+    }) => {
+      const entry = {
+        text: event.toolResultText,
+        toolInput: event.toolInput,
+        extraReading: event.extraReading === true,
+        suspectInAnotherReading: event.suspectInAnotherReading === true,
+      };
       const verdict = judge(entry, posted.length);
       posted.push(entry);
       const suspect = verdict !== 'clean';
@@ -81,11 +96,12 @@ describe('the views of a result in the handler', () => {
     expect(asked[0]).toHaveLength(3);
   });
 
-  it('are scanned by the engine one after the other, each text as it is', async () => {
+  it('are scanned by the engine one after the other, each text as it is: the extra views first, the first view last', async () => {
     const { rig, posted } = rigWith(() => 'clean');
     track(rig, 3);
     await rig.feed(line());
-    expect(posted.map((entry) => entry.text)).toEqual(viewTexts());
+    const [first, ...extras] = viewTexts();
+    expect(posted.map((entry) => entry.text)).toEqual([...extras, first]);
     expect(rig.lines).toHaveLength(1);
   });
 
@@ -94,10 +110,48 @@ describe('the views of a result in the handler', () => {
     track(rig, 3);
     await rig.feed(line());
     expect(posted.map((entry) => entry.toolInput)).toEqual([
-      { method: 'tools/call' },
       { method: 'tools/call', view: 'strings' },
       { method: 'tools/call', view: 'json' },
+      { method: 'tools/call' },
     ]);
+  });
+
+  it('make every view but the first an extra reading, and the first the one that records', async () => {
+    const { rig, posted } = rigWith(() => 'clean');
+    track(rig, 3);
+    await rig.feed(line());
+    expect(posted.map((entry) => entry.extraReading)).toEqual([true, true, false]);
+    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, false]);
+  });
+});
+
+describe('the call that records the result', () => {
+  it.each([[0], [1]])(
+    'is told when extra reading %i was suspect, so what it remembers is flagged',
+    async (which) => {
+      const { rig, posted } = rigWith((_posted, index) => (index === which ? 'suspect' : 'clean'));
+      track(rig, 3);
+      await rig.feed(line());
+      expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, true]);
+    },
+  );
+
+  it('is not told when only it was suspect: its own verdict is what flags', async () => {
+    const { rig, posted } = rigWith((_posted, index) => (index === 2 ? 'suspect' : 'clean'));
+    track(rig, 3);
+    await rig.feed(line());
+    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, false]);
+    expect(warningsIn(rig.lines)).toBe(1);
+  });
+
+  it('is not run at all when an extra reading ran out of time: the result is withheld unrecorded', async () => {
+    const { rig, posted } = rigWith((_posted, index) => (index === 1 ? 'timeout' : 'clean'));
+    track(rig, 3);
+    await rig.feed(line());
+    expect(posted).toHaveLength(2);
+    expect(posted.every((entry) => entry.extraReading)).toBe(true);
+    expect(rig.lines).toEqual([]);
+    expect(JSON.stringify(rig.sent)).toContain('(scan-timeout)');
   });
 });
 

@@ -198,6 +198,16 @@ export interface PostOutcome {
 }
 
 /**
+ * Which look at a result this `post` is, for a caller that reads one result as several
+ * texts (`stroq mcp --strict`). Absent, the call is the record of the result, as every
+ * call always was; see `PostToolEvent` in core for what each field changes.
+ */
+export interface PostReading {
+  readonly extraReading?: true;
+  readonly suspectInAnotherReading?: true;
+}
+
+/**
  * The whole `post` path — scan the result text, record provenance, taint the session —
  * with the outcome returned rather than rendered. Shared for the same reason as
  * `decideWithGuards`: the three adapters differ only in how they read the result text
@@ -207,8 +217,9 @@ export async function scanPostResult(
   engine: StroqEngine,
   event: EngineEvent,
   toolResultText: string,
+  reading: PostReading = {},
 ): Promise<PostOutcome> {
-  const result = await engine.post({ ...event, toolResultText });
+  const result = await engine.post({ ...event, toolResultText, ...reading });
   if (result.provenanceError) logError('provenance', result.provenanceError);
   if (!result.scanned) return { scanned: false, verdict: 'clean', warning: null };
   const timedOut = result.scan.timedOut === true ? { timedOut: true } : {};

@@ -78,6 +78,11 @@ describe('the --strict section of docs/AGENTS.md', () => {
     expect(section).toContain('are not counted, audited or rate-limited');
   });
 
+  it('says what is audited and remembered of a result once, and what the extra views add', () => {
+    expect(section).toContain('audited with one line and remembered once');
+    expect(section).toContain('extra readings');
+  });
+
   it('says why the views are separate texts and that the default proxy’s own text is one', () => {
     expect(section).toContain('the same reader, unchanged');
     expect(section).toContain('at least what the default scans');

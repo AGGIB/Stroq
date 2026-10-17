@@ -650,14 +650,22 @@ export class StroqEngine {
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
     // record explaining why.
-    await this.opts.audit.append({
-      sessionId: event.sessionId,
-      phase: 'post',
-      ...call,
-      tool: event.toolName,
-      summary,
-      scan: { verdict: scan.verdict, score: scan.score, ruleIds, ...(trusted ? { trusted } : {}) },
-    });
+    // An extra reading of a result is audited only when it matched: the call that records
+    // the result writes the line every result has.
+    if (event.extraReading !== true || scan.verdict === 'suspect')
+      await this.opts.audit.append({
+        sessionId: event.sessionId,
+        phase: 'post',
+        ...call,
+        tool: event.toolName,
+        summary,
+        scan: {
+          verdict: scan.verdict,
+          score: scan.score,
+          ruleIds,
+          ...(trusted ? { trusted } : {}),
+        },
+      });
     const state =
       scan.verdict === 'suspect' && !trusted
         ? await this.opts.sessions.markSuspect(event.sessionId, {
@@ -667,6 +675,9 @@ export class StroqEngine {
             source,
           })
         : await this.opts.sessions.get(event.sessionId);
+    // The call that records a result is the only one that remembers it.
+    if (event.extraReading === true)
+      return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
     // like `atomsForAction` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
@@ -679,7 +690,7 @@ export class StroqEngine {
       event,
       summary,
       atoms,
-      scan.verdict === 'suspect' && !trusted,
+      (scan.verdict === 'suspect' && !trusted) || event.suspectInAnotherReading === true,
     );
     return { scan, taint: state.taint, scanned: true, atoms, provenanceError, trusted };
   }

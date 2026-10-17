@@ -1,6 +1,11 @@
 import { isRecord } from '../adapters/tool-input.js';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
-import { denyDirectly, scanPostResult, type PostOutcome } from '../adapters/pre-decision.js';
+import {
+  denyDirectly,
+  scanPostResult,
+  type PostOutcome,
+  type PostReading,
+} from '../adapters/pre-decision.js';
 import { logError } from '../log.js';
 import { cloakNotice, type McpCloak } from './cloak.js';
 import {
@@ -257,11 +262,45 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   }
 
   /**
+   * One view through the engine: its outcome, or why the result cannot be delivered. A
+   * result the engine declined to scan is one nobody read, and one it ran out of time on
+   * was not read to the end: neither is a clean result.
+   */
+  async function scanView(
+    entry: TrackedRequest,
+    view: ScanView,
+    reading: PostReading,
+  ): Promise<PostOutcome | WithholdReason> {
+    const outcome = await scanPostResult(
+      ctx.engine,
+      {
+        sessionId: ctx.sessionId,
+        toolName: entry.toolName,
+        // The default proxy's audit line names the method alone; the other views say which they are.
+        toolInput:
+          view.name === 'default'
+            ? { method: entry.method }
+            : { method: entry.method, view: view.name },
+        cwd: ctx.cwd,
+      },
+      view.text,
+      reading,
+    );
+    if (!outcome.scanned) return 'scan-failed';
+    return outcome.timedOut === true ? 'scan-timeout' : outcome;
+  }
+
+  /**
    * Scans every view of a result and returns the engine's outcome for it, or the reason
    * it cannot be delivered. The dry run takes all the texts together, so they share one
    * deadline; the engine then scans them one after the other. The result is as suspect as
-   * its worst view, and carries ONE warning: the first suspect view's. A view the engine
-   * did not scan or ran out of time on makes the result one nobody read in full.
+   * its worst view, and carries ONE warning: the first suspect view's.
+   *
+   * Only one call to the engine is the record of the result, so that what is remembered of
+   * it, and what is audited, is what the default proxy remembers and audits: the first
+   * view's. The others are extra readings, scanned FIRST so the record can be told if any
+   * of them matched (what is remembered of a result that was suspect in any view is
+   * flagged as suspect), and audited only when they matched.
    */
   async function scanned(
     entry: TrackedRequest,
@@ -273,28 +312,21 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         entry.toolName,
       );
       if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
-      const outcomes: PostOutcome[] = [];
-      for (const view of views) {
-        const outcome = await scanPostResult(
-          ctx.engine,
-          {
-            sessionId: ctx.sessionId,
-            toolName: entry.toolName,
-            // The default proxy's audit line names the method alone; the other views say which they are.
-            toolInput:
-              view.name === 'default'
-                ? { method: entry.method }
-                : { method: entry.method, view: view.name },
-            cwd: ctx.cwd,
-          },
-          view.text,
-        );
-        // A result the engine declined to scan is one nobody read: not a clean result.
-        if (!outcome.scanned) return 'scan-failed';
-        if (outcome.timedOut === true) return 'scan-timeout';
-        outcomes.push(outcome);
+      const [recorded, ...extras] = views as readonly [ScanView, ...ScanView[]];
+      const extraOutcomes: PostOutcome[] = [];
+      for (const view of extras) {
+        const outcome = await scanView(entry, view, { extraReading: true });
+        if (typeof outcome === 'string') return outcome;
+        extraOutcomes.push(outcome);
       }
-      return outcomes.find((outcome) => outcome.warning !== null) ?? (outcomes[0] as PostOutcome);
+      const matched = extraOutcomes.some((outcome) => outcome.warning !== null);
+      const first = await scanView(
+        entry,
+        recorded,
+        matched ? { suspectInAnotherReading: true } : {},
+      );
+      if (typeof first === 'string') return first;
+      return [first, ...extraOutcomes].find((outcome) => outcome.warning !== null) ?? first;
     } catch (err) {
       logError('mcp strict scan', err);
       return 'scan-failed';
