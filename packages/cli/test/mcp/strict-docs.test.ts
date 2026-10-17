@@ -122,7 +122,9 @@ describe('the --strict section of docs/AGENTS.md', () => {
         fileURLToPath(new URL('../../../../SECURITY.md', import.meta.url)),
         'utf8',
       );
-      expect(security).toContain('make the SCAN of a message run past its 4-second hard deadline');
+      expect(security).toContain(
+        'make the dry-run SCAN of a message run past its 4-second hard deadline',
+      );
       expect(security).not.toContain('stall the proxy past the deadline');
       expect(security).toContain('which is an availability effect on that wrapper');
     });
