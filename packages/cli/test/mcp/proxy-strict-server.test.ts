@@ -162,25 +162,30 @@ describe('a server that has been ended', () => {
   }, 60_000);
 });
 
-describe('a server strict mode has ended but that is still running', () => {
-  it('is not sent what the client asks next: the request is answered, and never forwarded', async () => {
-    const rig = startRig({
-      strict: true,
-      strictMaxWithheld: 1,
-      shutdownGraceMs: 4000,
-      env: { STRICT_SERVER_IGNORE_TERM: '1' },
-    });
-    await rig.handshake();
-    rig.call(3, 'notif');
-    expect(errorText(await rig.answerFor(3))).toContain('more than 1 withheld');
-    // The server ignores the first signal and is still alive for the grace period.
-    rig.call(9, 'benign');
-    const late = await rig.answerFor(9);
-    expect(errorText(late)).toContain('ended this server');
-    expect(rig.serverLog().some((line) => line.includes('"id":9'))).toBe(false);
-    expect(await rig.done).toBe(1);
-  }, 60_000);
-});
+// Windows terminates the child outright: it cannot ignore SIGTERM and linger for this scenario.
+// The deterministic pump-gate tests exercise post-termination requests on every platform.
+describe.runIf(process.platform !== 'win32')(
+  'a server strict mode has ended but that is still running',
+  () => {
+    it('is not sent what the client asks next: the request is answered, and never forwarded', async () => {
+      const rig = startRig({
+        strict: true,
+        strictMaxWithheld: 1,
+        shutdownGraceMs: 4000,
+        env: { STRICT_SERVER_IGNORE_TERM: '1' },
+      });
+      await rig.handshake();
+      rig.call(3, 'notif');
+      expect(errorText(await rig.answerFor(3))).toContain('more than 1 withheld');
+      // The server ignores the first signal and is still alive for the grace period.
+      rig.call(9, 'benign');
+      const late = await rig.answerFor(9);
+      expect(errorText(late)).toContain('ended this server');
+      expect(rig.serverLog().some((line) => line.includes('"id":9'))).toBe(false);
+      expect(await rig.done).toBe(1);
+    }, 60_000);
+  },
+);
 
 describe('a request the client cancelled', () => {
   it('has its late answer dropped without counting against the server', async () => {
