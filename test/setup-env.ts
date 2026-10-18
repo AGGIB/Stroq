@@ -14,6 +14,9 @@ import { join } from 'node:path';
 const fakeHome = mkdtempSync(join(tmpdir(), 'stroq-home-'));
 process.env['HOME'] = fakeHome;
 process.env['USERPROFILE'] = fakeHome;
+// Cursor reads APPDATA on Windows even when USERPROFILE is isolated. Never inspect
+// the developer's real state.vscdb while looking for a fixture session.
+process.env['APPDATA'] = join(fakeHome, 'AppData', 'Roaming');
 process.env['STROQ_HOME'] = mkdtempSync(join(tmpdir(), 'stroq-stroq-home-'));
 
 /**
