@@ -238,7 +238,9 @@ describe('after a page that was not flagged and named a package', () => {
     const r = await f.pre(`pip install ${'a '.repeat(1500)}`);
     expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
     expect(r.decision.reason).toMatch(/longer than .*reads/i);
-    expect(r.decision.reason).toContain('stroq untaint --session s1');
+    // It is a doubt about this one call, and untaint would wipe the whole trace of the session.
+    expect(r.decision.reason).not.toContain('untaint');
+    expect(r.decision.reason).toMatch(/approve/i);
   });
 });
 

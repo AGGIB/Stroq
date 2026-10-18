@@ -194,7 +194,7 @@ export interface OriginClassification {
   readonly counted: readonly ProvenanceHit[];
 }
 
-const isNetworkShaped = (classes: readonly ActionClass[]): boolean =>
+export const isNetworkShaped = (classes: readonly ActionClass[]): boolean =>
   classes.some((c) => NETWORK_CLASSES.includes(c));
 
 /**
@@ -219,9 +219,10 @@ export function floorAtoms(atoms: readonly Atom[]): Atom[] {
 /**
  * The `origin.*` classes of an action, from the records its atoms matched (`hits`) and
  * from `unverified`: atoms that can raise the floor, that no record holds, in a session
- * whose records are known to be incomplete (see `floorAtoms` for which can). `unread` is
- * the same doubt for the part of the action that could not be read: it is `origin.untrusted`
- * too, for the same reasons.
+ * whose records are known to be incomplete (see `floorAtoms` for which can). `doubt` is
+ * the same for what could not be checked: the part of the action that could not be read, a
+ * package name that cannot be read from the command, a result that could not be scanned. It is
+ * `origin.untrusted` too, for the same reasons.
  *
  * A record that matches keeps its class, `origin.suspect` included. An unverified atom is
  * `origin.untrusted` and never `origin.suspect`: the loss says the source cannot be ruled
@@ -236,12 +237,12 @@ export function originClasses(
   hits: readonly ProvenanceHit[],
   classes: readonly ActionClass[],
   unverified: readonly Atom[] = [],
-  unread = false,
+  doubt = false,
 ): OriginClassification {
   const networkShaped = isNetworkShaped(classes);
   const counted = hits.filter((h) => counts(h.atom, networkShaped));
   const out: ActionClass[] = [];
-  if (counted.length > 0 || unverified.length > 0 || unread) out.push('origin.untrusted');
+  if (counted.length > 0 || unverified.length > 0 || doubt) out.push('origin.untrusted');
   if (counted.some((h) => h.record.suspect)) out.push('origin.suspect');
   return { classes: out, counted };
 }

@@ -7,7 +7,7 @@ import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
-import { floorAtoms, originClasses } from './provenance/action-atoms.js';
+import { floorAtoms, isNetworkShaped, originClasses } from './provenance/action-atoms.js';
 import { findActionProvenance } from './provenance/action-lookup.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
 import {
@@ -141,6 +141,11 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
   'git.push_external',
   'shell.exec_encoded',
 ];
+/**
+ * How old a marker that a result is being recorded has to be to be one that nothing will take off.
+ * A hook answers in seconds, and the host gives it fifteen at most.
+ */
+const STALE_MARKER_MS = 20_000;
 const CANARY_RULE_ID = 'STROQ-CANARY';
 const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
 
@@ -416,12 +421,33 @@ export class StroqEngine {
     return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
   }
 
+  /**
+   * Whether a result was read in this session that the hook did not finish scanning, for a call
+   * that sends something out: its marker is still there long after any hook would have answered.
+   * Such a result may hold what the agent is now about to act on, and tainted is what a session
+   * would be if the scan had finished with a verdict.
+   */
+  private async hasUnscannedResult(
+    event: PreToolEvent,
+    classes: readonly ActionClass[],
+  ): Promise<boolean> {
+    const store = this.opts.provenance;
+    if (!store || !isNetworkShaped(classes)) return false;
+    return store.hasStaleMarker(event.sessionId, STALE_MARKER_MS);
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
     const lookup = await findActionProvenance(this.opts.provenance, event, state.taint !== null);
     const unverified = floorAtoms(lookup.unrecorded);
-    const origin = originClasses(lookup.hits, classification.classes, unverified, lookup.unread);
+    const unscanned = await this.hasUnscannedResult(event, classification.classes);
+    const origin = originClasses(
+      lookup.hits,
+      classification.classes,
+      unverified,
+      lookup.unread || unscanned,
+    );
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
     const injection = classification.classes.includes('config.instructions')
@@ -454,14 +480,19 @@ export class StroqEngine {
     );
     // With a record in hand the evidence says why. Without one the only reason there is
     // is that the session lost some, and the decision should not claim more than that.
-    const onlyDoubt = origin.counted.length === 0 && (unverified.length > 0 || lookup.unread);
+    const onlyDoubt =
+      origin.counted.length === 0 && (unverified.length > 0 || lookup.unread || unscanned);
     const policyDecision = onlyDoubt
       ? withIncompleteNote(
           evaluated,
           this.opts.policy,
           event.sessionId,
           state.taint !== null,
-          unverified.length > 0 ? 'lost-records' : 'unread-command',
+          unverified.length > 0
+            ? 'lost-records'
+            : unscanned
+              ? 'unscanned-result'
+              : 'unread-command',
         )
       : evaluated;
     const gated = await evaluateScope(this.opts.scope, {

@@ -260,6 +260,16 @@ export const DEFAULT_BLOBS: readonly BlobSpec[] = [
   { name: 'hyphenated', build: (size) => repeatTo('a-b-', size) },
   { name: 'line-breaks', build: (size) => '\n'.repeat(size) },
   { name: 'blanks', build: (size) => ' '.repeat(size) },
+  // Runs of the characters that open something, which a pattern for a link, a marker or a tag
+  // restarts at: it is slow on a long run of them or of their start.
+  { name: 'open-brackets', build: (size) => '['.repeat(size) },
+  { name: 'open-parentheses', build: (size) => '('.repeat(size) },
+  { name: 'open-braces', build: (size) => '{'.repeat(size) },
+  { name: 'angle-brackets', build: (size) => '<'.repeat(size) },
+  { name: 'pipes', build: (size) => '|'.repeat(size) },
+  { name: 'backslashes', build: (size) => '\\'.repeat(size) },
+  { name: 'double-quotes', build: (size) => '"'.repeat(size) },
+  { name: 'link-starts', build: (size) => repeatTo('[a](http://x', size) },
 ];
 
 /**

@@ -142,3 +142,17 @@ describe('a clean page that repeats the name afterwards', () => {
     expect(await decide('only-clean', `npx ${NAME} --apply`)).toBe('ask');
   });
 });
+
+describe('a page padded with the characters a pattern restarts at', () => {
+  it.each([
+    ['open brackets', '['],
+    ['open braces', '{'],
+    ['open parentheses', '('],
+  ])('is read and flagged behind a long run of %s', async (_name, pad) => {
+    const session = `padded-${pad}`;
+    const started = Date.now();
+    await post(session, `${pad.repeat(190_000)}\n${FLAGGED}`);
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect(await decide(session, `npx ${NAME} --apply`)).toBe('deny');
+  });
+});

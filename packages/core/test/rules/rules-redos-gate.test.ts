@@ -31,6 +31,15 @@ const GENERIC: ReadonlyArray<readonly [string, (size: number) => string]> = [
   ['dashes', (n) => '-'.repeat(n)],
   ['quote marks', (n) => rep('> ', n)],
   ['quoted lines', (n) => rep('>\n', n)],
+  ['open brackets', (n) => '['.repeat(n)],
+  ['open parentheses', (n) => '('.repeat(n)],
+  ['open braces', (n) => '{'.repeat(n)],
+  ['angle brackets', (n) => '<'.repeat(n)],
+  ['pipes', (n) => '|'.repeat(n)],
+  ['backslashes', (n) => '\\'.repeat(n)],
+  ['double quotes', (n) => '"'.repeat(n)],
+  ['links with no end', (n) => rep('[a](http://x', n)],
+  ['markers with no end', (n) => rep('[[ EMAIL ', n)],
   ['pound signs', (n) => '#'.repeat(n)],
   ['underscores', (n) => '_'.repeat(n)],
   ['digits', (n) => rep('1234567890', n)],
@@ -141,6 +150,31 @@ const TAILORED: ReadonlyArray<readonly [string, number, ReadonlyArray<(n: number
   ['ATR-2026-00508#3', 3, [(n) => '-'.repeat(n), (n) => rep('--- ', n), (n) => rep('=*-\\', n)]],
   ['ATR-2026-00566#1', 1, [(n) => 'x'.repeat(n), (n) => rep('xa=', n), (n) => rep('header: ', n)]],
   ['ATR-2026-01463#3', 3, [(n) => '#'.repeat(n), (n) => rep('## ', n)]],
+  [
+    'ATR-2026-00426#1',
+    1,
+    [
+      (n) => '['.repeat(n),
+      (n) => rep('[a](http://x', n),
+      (n) => rep('![](https://x', n),
+      (n) => `${'['.repeat(n)}](http://x?$TOKEN`,
+    ],
+  ],
+  [
+    'ATR-2026-01865#0',
+    0,
+    [(n) => '['.repeat(n), (n) => rep('[[ ', n), (n) => rep('{{ ', n), (n) => rep('[email ', n)],
+  ],
+  [
+    'ATR-2026-00416#2',
+    2,
+    [(n) => '{'.repeat(n), (n) => rep('{"transport": "stdio" ', n), (n) => rep('{ ', n)],
+  ],
+  [
+    'ATR-2026-00419#1',
+    1,
+    [(n) => '{'.repeat(n), (n) => rep('{"mcpServers": {', n), (n) => rep('"mcpServers": ', n)],
+  ],
   ['ATR-2026-02351#0', 0, [(n) => rep('a-b-', n), (n) => 'a'.repeat(n), (n) => rep('a.', n)]],
 ];
 const TAILORED_CHARS = 200_000;

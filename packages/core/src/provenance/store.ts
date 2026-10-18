@@ -17,6 +17,7 @@ import type { AtomKind, ProvenanceRecord } from '../types.js';
 import { neutralizeControls } from '../util/controls.js';
 import { withLock } from '../util/lock.js';
 import { shellQuote } from '../util/shell-quote.js';
+import { isFloorKind } from './atom-kinds.js';
 import { retain } from './retain.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
@@ -45,11 +46,17 @@ export interface ProvenanceStore {
    */
   isIncomplete(sessionId: string): Promise<boolean>;
   /**
-   * Whether this session has recorded anything at all. A record is an atom that came from a tool
-   * result the agent read; every such record is a candidate for `origin.untrusted`, a flagged one
-   * for `origin.suspect`. A session with none has nothing a command could be matched against.
+   * Whether this session has recorded something a command could be matched against: an atom that
+   * can raise the floor (a package, a pipe-to-shell, an encoded blob), or any flagged record.
+   * The records of URLs and hosts, and of hashes, do not count: nearly every session has them.
    */
-  hasRecords(sessionId: string): Promise<boolean>;
+  hasEvidence(sessionId: string): Promise<boolean>;
+  /**
+   * Whether a marker that a result is being recorded (see `setPending`) is older than `olderThanMs`
+   * at `nowMs`, or has no readable time: a result the agent read and the hook did not finish
+   * scanning, since a hook that is running answers in seconds.
+   */
+  hasStaleMarker(sessionId: string, olderThanMs: number, nowMs?: number): Promise<boolean>;
   /**
    * Notes that evidence for this session was lost or never recorded. Permanent until
    * `clear`: a later short result does not make an earlier loss any less of one.
@@ -317,8 +324,34 @@ export class FileProvenanceStore implements ProvenanceStore {
     }
   }
 
-  async hasRecords(sessionId: string): Promise<boolean> {
-    return (await this.read(sessionId)).length > 0;
+  async hasEvidence(sessionId: string): Promise<boolean> {
+    return (await this.read(sessionId)).some((r) => r.suspect || isFloorKind(r.kind));
+  }
+
+  async hasStaleMarker(
+    sessionId: string,
+    olderThanMs: number,
+    nowMs: number = Date.now(),
+  ): Promise<boolean> {
+    const files = [this.pendingFile(sessionId)];
+    try {
+      const owners = await readdir(this.pendingDir(sessionId));
+      files.push(...owners.map((owner) => join(this.pendingDir(sessionId), owner)));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return true;
+    }
+    for (const file of files) {
+      let since = Number.NaN;
+      try {
+        since = Date.parse(
+          (JSON.parse(await readFile(file, 'utf8')) as { since?: string }).since ?? '',
+        );
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      }
+      if (Number.isNaN(since) || nowMs - since > olderThanMs) return true;
+    }
+    return false;
   }
 
   async lookup(sessionId: string, hashes: readonly string[]): Promise<ProvenanceRecord[]> {

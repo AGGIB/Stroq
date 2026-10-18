@@ -178,7 +178,8 @@ describe('StroqEngine provenance', () => {
       lookup: async () => [],
       clear: async () => {},
       isIncomplete: async () => false,
-      hasRecords: async () => false,
+      hasEvidence: async () => false,
+      hasStaleMarker: async () => false,
       markIncomplete: async () => {},
       setPending: async () => {},
     };

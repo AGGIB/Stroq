@@ -78,6 +78,6 @@ export async function findActionProvenance(
   const incomplete = await store.isIncomplete(event.sessionId);
   const unrecorded = incomplete ? atoms.filter((atom) => !seen.has(atomKey(atom))) : [];
   const unreadCounts =
-    unread && (tainted || incomplete || (await store.hasRecords(event.sessionId)));
+    unread && (tainted || incomplete || (await store.hasEvidence(event.sessionId)));
   return { hits, unrecorded, unread: unreadCounts };
 }

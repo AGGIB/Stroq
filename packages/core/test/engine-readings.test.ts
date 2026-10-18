@@ -180,7 +180,8 @@ describe('the call that records a result, given the texts of its other readings'
           pending.clear();
         },
         isIncomplete: async () => incomplete || pending.size > 0,
-        hasRecords: async () => false,
+        hasEvidence: async () => false,
+        hasStaleMarker: async () => false,
         markIncomplete: async () => {
           incomplete = true;
         },

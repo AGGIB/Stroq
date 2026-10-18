@@ -83,6 +83,22 @@ const T: Record<string, () => string> = {
         `[SYSTEM${ws0()}${pick(['PROMPT', 'MESSAGE', 'OVERRIDE', 'X'])}]${pick(['', '('])}`,
       ]),
     ),
+  'ATR-2026-00426#1': () =>
+    caps(
+      `${pick(['', '!', 'x '])}[${gap(10, false)}${pick(['', '[', 'a['])}${gap(5, false)}](${ws0()}${pick(['http://', 'https://', 'ftp://'])}${gap(30, false)}${pick(['$API_KEY', '${TOKEN}', '{{ api_key', '{{token', '$SECRET', '$NOPE', 'x'])}${pick(['', ' ', ')', 'b'])}`,
+    ),
+  'ATR-2026-01865#0': () =>
+    caps(
+      `${pick(['', 'x ', 'a ['])}${pick(['[', '[[', '[[[', '{{'])}${ws0()}${pick(['EMAIL', 'MAIL', 'MSG', 'MESSAGE', 'email', 'message', 'msg', 'mail', 'x'])}${pick(['_', ' ', ''])}${pick(['END', 'START', 'BOUNDARY', 'SEPARATOR', 'DIVIDER', '2', '12', ' 3', ''])}${pick(['_', ' ', ''])}${pick(['INDICATOR', 'MARKER', 'SEPARATOR', ''])}${ws0()}${pick([']', '}}', ']]]', '', ')'])}`,
+    ),
+  'ATR-2026-00416#2': () =>
+    caps(
+      `${pick(['', '{', '{{', 'x'])}${gap(40, false)}${pick(['', '{', '}'])}"transport"${ws0()}:${ws0()}"${pick(['stdio', 'http'])}"${gap(40, false)}${pick(['', '}'])}"command"${ws0()}:${ws0()}"${pick(['bash', 'sh', 'node', 'ruby'])}"`,
+    ),
+  'ATR-2026-00419#1': () =>
+    caps(
+      `${pick(['', '{', '{{', 'x'])}${gap(60, false)}${pick(['', '}'])}"${pick(['mcpServers', 'mcpServer', 'mcp_servers', 'mcp_server', 'mcpx'])}"${ws0()}:${ws0()}${pick(['{', '[', ''])}${gap(60, false)}${pick(['', '}'])}"command"${ws0()}:${ws0()}"${pick(['curl', 'wget', 'ls'])}"`,
+    ),
   'ATR-2026-02351#0': () =>
     `${pick(['', 'a.', 'a-b.', 'a.b.c.d.e.f.', 'a.b.c.d.e.f.g.'])}${pick(['169', '16', 'x169'])}${pick(['.', '-'])}254${pick(['.', '-'])}169${pick(['.', '-'])}254.${pick(['nip.io', 'sslip.io', 'xip.io', 'traefik.me', 'foo.io'])}${pick(['', 'x', ' ', '-'])}`,
 };

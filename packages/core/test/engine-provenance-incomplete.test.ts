@@ -256,7 +256,8 @@ describe('a result whose atoms could not be written', () => {
       lookup: (session, hashes) => real.lookup(session, hashes),
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
-      hasRecords: (session) => real.hasRecords(session),
+      hasEvidence: (session) => real.hasEvidence(session),
+      hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -313,7 +314,8 @@ describe('a flagged result whose recording was cut short', () => {
       lookup: (session, hashes) => real.lookup(session, hashes),
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
-      hasRecords: (session) => real.hasRecords(session),
+      hasEvidence: (session) => real.hasEvidence(session),
+      hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -350,7 +352,8 @@ describe('a flagged result whose recording was cut short', () => {
       lookup: (session, hashes) => real.lookup(session, hashes),
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
-      hasRecords: (session) => real.hasRecords(session),
+      hasEvidence: (session) => real.hasEvidence(session),
+      hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -383,7 +386,8 @@ describe('a flagged result whose recording was cut short', () => {
       lookup: (session, hashes) => real.lookup(session, hashes),
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
-      hasRecords: (session) => real.hasRecords(session),
+      hasEvidence: (session) => real.hasEvidence(session),
+      hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -428,7 +432,8 @@ describe('a flagged result whose recording was cut short', () => {
         lookup: (session, hashes) => real.lookup(session, hashes),
         clear: (session) => real.clear(session),
         isIncomplete: (session) => real.isIncomplete(session),
-        hasRecords: (session) => real.hasRecords(session),
+        hasEvidence: (session) => real.hasEvidence(session),
+        hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
         markIncomplete: async () => {
           throw new Error('disk full');
         },
@@ -466,7 +471,8 @@ describe('a flagged result whose recording was cut short', () => {
       lookup: (session, hashes) => real.lookup(session, hashes),
       clear: (session) => real.clear(session),
       isIncomplete: (session) => real.isIncomplete(session),
-      hasRecords: (session) => real.hasRecords(session),
+      hasEvidence: (session) => real.hasEvidence(session),
+      hasStaleMarker: (session, age, now) => real.hasStaleMarker(session, age, now),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));

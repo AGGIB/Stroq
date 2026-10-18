@@ -340,3 +340,53 @@ ATR-2026-02351:
         \b(?:[\w-]+\.){0,5}169[.-]254[.-]169[.-]254\.(?:nip\.io|sslip\.io|xip\.io|traefik\.me)\b
       to: |-
         \b(?:[\w-]{1,63}\.){0,5}169[.-]254[.-]169[.-]254\.(?:nip\.io|sslip\.io|xip\.io|traefik\.me)\b
+
+ATR-2026-00426:
+  reason: >-
+    The link text `[^\]]*` restarts at every `[` of a run of them and reads to the end of
+    the text, and the address `[^)]*` after each link start reads to the end of the text
+    too. The link text may not hold a `[` (a match from the last `[` before the `]` is the
+    same match), the leading `!?` changes nothing about whether it matches, and the address
+    is bounded to 400 characters before the key. The same text is matched.
+  conditions:
+    - index: 1
+      from: |-
+        (?i)!?\[[^\]]*\]\(\s*https?:\/\/[^)]*(?:\$\{?(?:API_KEY|ACCESS_TOKEN|SECRET|PASSWORD|TOKEN|CREDENTIAL|BEARER|AUTH)\b|\{\{\s*(?:api_key|access_token|secret|password|token|credential|env)\b)
+      to: |-
+        (?i)\[[^\][]*\]\(\s*https?:\/\/[^)]{0,400}(?:\$\{?(?:API_KEY|ACCESS_TOKEN|SECRET|PASSWORD|TOKEN|CREDENTIAL|BEARER|AUTH)\b|\{\{\s*(?:api_key|access_token|secret|password|token|credential|env)\b)
+
+ATR-2026-01865:
+  reason: >-
+    `\[+` restarts at every `[` of a run of them and reads to the end of the run. One
+    bracket on each side is enough, since a match with longer runs also matches from the
+    last `[` and up to the first `]`, so the same text is matched.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)\[+\s*(?:EMAIL|MAIL|MSG|MESSAGE)[_ ]?(?:END|START|BOUNDARY|SEPARATOR|DIVIDER)[_ ]?(?:INDICATOR|MARKER|SEPARATOR)?\s*\]+|\{\{\s*(?:email|message|msg)\s*\d+\s*\}\}|\[+\s*(?:email|message|msg)\s*\d+\s*\]+
+      to: |-
+        (?i)\[\s*(?:EMAIL|MAIL|MSG|MESSAGE)[_ ]?(?:END|START|BOUNDARY|SEPARATOR|DIVIDER)[_ ]?(?:INDICATOR|MARKER|SEPARATOR)?\s*\]|\{\{\s*(?:email|message|msg)\s*\d+\s*\}\}|\[\s*(?:email|message|msg)\s*\d+\s*\]
+
+ATR-2026-00416:
+  reason: >-
+    `\{[^}]{0,300}` tries up to 300 characters after every `{` of a run of them. The pattern
+    now begins at the key, which is rare, and looks back for the `{` and the characters
+    between, at most 300 and none of them `}`. The same text is matched.
+  conditions:
+    - index: 2
+      from: |-
+        (?i)\{[^}]{0,300}"transport"\s*:\s*"stdio"[^}]{0,300}"command"\s*:\s*"(?:bash|sh|cmd|powershell|curl|wget|python|node)"
+      to: |-
+        (?i)(?="transport"\s*:\s*"stdio")(?<=\{[^}]{0,300})"transport"\s*:\s*"stdio"[^}]{0,300}"command"\s*:\s*"(?:bash|sh|cmd|powershell|curl|wget|python|node)"
+
+ATR-2026-00419:
+  reason: >-
+    `\{[^}]{0,400}` tries up to 400 characters after every `{` of a run of them. The pattern
+    now begins at the key, which is rare, and looks back for the `{` and the characters
+    between, at most 400 and none of them `}`. The same text is matched.
+  conditions:
+    - index: 1
+      from: |-
+        (?i)\{[^}]{0,400}"mcp(?:Servers?|_servers?)"\s*:\s*\{[^}]{0,800}"command"\s*:\s*"(?:curl|wget)"
+      to: |-
+        (?i)(?="mcp(?:Servers?|_servers?)"\s*:\s*\{)(?<=\{[^}]{0,400})"mcp(?:Servers?|_servers?)"\s*:\s*\{[^}]{0,800}"command"\s*:\s*"(?:curl|wget)"
