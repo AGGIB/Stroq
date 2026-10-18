@@ -14,7 +14,9 @@ import {
 import { dirname, join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
+import { neutralizeControls } from '../util/controls.js';
 import { withLock } from '../util/lock.js';
+import { shellQuote } from '../util/shell-quote.js';
 import { retain } from './retain.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
@@ -129,6 +131,20 @@ function isProvenanceRecord(value: unknown): value is ProvenanceRecord {
   );
 }
 
+/**
+ * The error for a records file that does not parse. Nothing can be said of what the session read
+ * and every command with an atom is denied, so it names the session and the command that starts it
+ * over, which the person runs outside the agent: the id is what `stroq log` and the hook's own
+ * messages show, and the path holds only a hash of it.
+ */
+function corruptState(file: string, sessionId: string, cause?: unknown): Error {
+  const shown = neutralizeControls(sessionId);
+  const message =
+    `corrupt provenance state: ${file} (session ${shown}). Stroq cannot say what this session read; ` +
+    `to start it over, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(shown)}`;
+  return cause === undefined ? new Error(message) : new Error(message, { cause });
+}
+
 export class FileProvenanceStore implements ProvenanceStore {
   constructor(
     private readonly dir: string,
@@ -169,13 +185,13 @@ export class FileProvenanceStore implements ProvenanceStore {
     } catch (err) {
       // Fail closed, like the session store: the CLI turns this into `deny`
       // on high-impact tools rather than silently forgetting what was read.
-      throw new Error(`corrupt provenance state: ${this.file(sessionId)}`, { cause: err });
+      throw corruptState(this.file(sessionId), sessionId, err);
     }
     if (!Array.isArray(parsed) || !parsed.every(isProvenanceRecord)) {
       // Valid JSON but the wrong shape is corruption too: silently treating it
       // as an empty list would let `record` fold it away on the next write, and a
       // record whose `suspect` is not a boolean would read as a clean origin.
-      throw new Error(`corrupt provenance state: ${this.file(sessionId)}`);
+      throw corruptState(this.file(sessionId), sessionId);
     }
     return parsed;
   }

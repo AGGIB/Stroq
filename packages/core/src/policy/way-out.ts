@@ -1,12 +1,8 @@
 import { ageLabel } from '../provenance/describe.js';
 import type { ActionClass, Decision, Taint } from '../types.js';
 import { neutralizeControls } from '../util/controls.js';
+import { shellQuote } from '../util/shell-quote.js';
 import type { Policy } from './policy-types.js';
-
-/** Characters a POSIX shell reads as text; anything else makes the word need quoting. */
-const SAFE_WORD = /^[\w@%+=:,./-]+$/;
-const shellQuote = (word: string): string =>
-  SAFE_WORD.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
 
 /**
  * A deny or ask that the session's taint caused, with the way out of a false positive
