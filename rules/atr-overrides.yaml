@@ -128,3 +128,215 @@ ATR-2026-00032:
         (?i)(?:skip\s+(?:the|that|this)\s+(?:original|assigned|first|required|previous|remaining)\s+(?:step|part|task|analysis|work)|skip\s+(?:the|that|this)\s+(?:step|part|task|analysis)\s+(?:and\s+(?:just|instead|directly)|entirely\s+and)|don'?t\s+(?:bother|worry)\s+(?:about|with)\s+(?:the|that|this)\s+(?:original|first|assigned))
       to: |-
         (?i)(?:(?<!(?:\b(?:not|never|cannot)|n't)\s)skip\s+(?:the|that|this)\s+(?:original|assigned)\s+(?:step|part|task|analysis|work)|(?<!(?:\b(?:not|never|cannot)|n't)\s)skip\s+(?:the|that|this)\s+(?:(?:original|assigned|first|required|previous|remaining)\s+)?(?:step|part|task|analysis|work)s?\s+(?:and\s+(?:just|instead|directly)|entirely\s+and)|don'?t\s+(?:bother|worry)\s+(?:about|with)\s+(?:the|that|this)\s+(?:original|first|assigned))
+
+# Performance overrides. Each entry below replaces a pattern that is super-linear in the length
+# of a repetitive or whitespace-heavy text with one that matches the same strings (or, where
+# the reason says so, the same strings up to a stated bound) in time linear in it. The build's
+# timing gate only times a condition on `content`, which is why they were not found by it: every
+# one of these reads a tool's response, or reads the text after a line break.
+
+ATR-2026-00139:
+  reason: >-
+    The leading `(?:fyi|btw|heads up)?\s*` can never change whether the pattern matches,
+    because both parts are optional and the role that follows is what the pattern needs, yet
+    it restarts at every blank of a long run of them. It is dropped. The two `.*` that join
+    the clauses are bounded to 200 characters of the same line, as the sibling rules bound
+    their gaps, so a line that repeats the first clause is not read again from the end of
+    the line for each one. The rule's own examples are unaffected.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)(?:fyi|btw|heads up)?\s*(?:the\s+)?(?:orchestrator|coordinator|manager|admin|boss|supervisor|lead)\s+(?:wants?|said|told|instructed|requires?|decided).*(?:append|send|redirect|forward|pipe|write|log)\s+(?:all\s+)?(?:data|output|results?|logs?|info).*(?://|https?://|\d{1,3}\.\d{1,3})
+      to: |-
+        (?i)(?:the\s+)?(?:orchestrator|coordinator|manager|admin|boss|supervisor|lead)\s+(?:wants?|said|told|instructed|requires?|decided).{0,200}(?:append|send|redirect|forward|pipe|write|log)\s+(?:all\s+)?(?:data|output|results?|logs?|info).{0,200}(?://|https?://|\d{1,3}\.\d{1,3})
+
+ATR-2026-00256:
+  reason: >-
+    A line start followed by `\s*` and a run of base64 restarts at every line break of a run
+    of them, and each restart reads the rest of the run. The pattern is now anchored on the
+    run of base64 itself (cheap to refuse at any other position) and looks back for the line
+    start and the blanks before it, which is read once for a run. The same text is matched.
+  conditions:
+    - index: 4
+      from: |-
+        (?:^|\\n|\n)\s*[A-Za-z0-9+/]{80,}={0,3}(?:\\n|\s)+(?:\w+\s+){0,2}(?:decode|decoded|translate|interpret|execute|run|follow)\b
+      to: |-
+        (?=[A-Za-z0-9+/]{80})(?<=(?:^|\\n|\n)\s*)[A-Za-z0-9+/]{80,}={0,3}(?:\\n|\s)+(?:\w+\s+){0,2}(?:decode|decoded|translate|interpret|execute|run|follow)\b
+
+ATR-2026-00265:
+  reason: >-
+    A line start followed by `\s*` restarts at every line break of a run of them, and the
+    `\s*\n\s*` after the dashes tries every way of splitting a run of blanks. The pattern
+    now begins at the dashes and looks back for the line start, and takes the blanks between
+    the dashes and the label as one run that has a line break in it. The same text is
+    matched.
+  conditions:
+    - index: 2
+      from: |-
+        (?:^|\n)\s*---+\s*\n\s*(?:CONFIDENTIAL|INTERNAL|HIDDEN|IMPORTANT|NOTE|INSTRUCTION)\s*:\s*(?:ignore|disregard|forget|you\s+(?:must|should|are\s+required))
+      to: |-
+        (?=---)(?<=(?:^|\n)\s*)---+(?=\s*\n)\s+(?:CONFIDENTIAL|INTERNAL|HIDDEN|IMPORTANT|NOTE|INSTRUCTION)\s*:\s*(?:ignore|disregard|forget|you\s+(?:must|should|are\s+required))
+
+ATR-2026-00277:
+  reason: >-
+    A line start followed by `\s*` restarts at every line break of a run of them. The
+    pattern now begins at the keyword and looks back for the line start and the blanks
+    before it. The same text is matched.
+  conditions:
+    - index: 1
+      from: |-
+        (?:^|\n)\s*ECHO\s*:\s*(?:\{\{[^}]{1,200}\}\}|[`$]\([^)]{1,200}\)|\$\{[^}]{1,200}\}|<\?(?:php|=)[^?]{1,200}\?>|import\s+os|__import__|subprocess|eval\s*\(|exec\s*\()
+      to: |-
+        (?=ECHO)(?<=(?:^|\n)\s*)ECHO\s*:\s*(?:\{\{[^}]{1,200}\}\}|[`$]\([^)]{1,200}\)|\$\{[^}]{1,200}\}|<\?(?:php|=)[^?]{1,200}\?>|import\s+os|__import__|subprocess|eval\s*\(|exec\s*\()
+
+ATR-2026-00282:
+  reason: >-
+    Three of its conditions begin with a line start and `\s*`, which restarts at every line
+    break of a run of them, and the quote condition is `(?:\s*>\s*)+`, whose blanks between
+    two `>` can be given to either neighbour, so a line of `>` marks is tried in a number of
+    ways that grows much faster than its length. Each now begins at the keyword and looks
+    back for the line start, the blanks and the marks, which is read once for a run (a run
+    of blanks and `>` with at least one `>` is the same set of strings as the repeated
+    group). The same text is matched.
+  conditions:
+    - index: 0
+      from: |-
+        (?:^|\n)\s*(?:IGNORE|DISREGARD|FORGET|OVERRIDE)\s+(?:ALL\s+)?(?:PREVIOUS|PRIOR|ABOVE|EARLIER|THE\s+(?:PREVIOUS|ABOVE|PRIOR))\s+(?:INSTRUCTIONS?|PROMPTS?|CONTEXT|TEXT|DIRECTIONS?|GUIDELINES?|RULES?|CONSTRAINTS?)\b
+      to: |-
+        (?=(?:IGNORE|DISREGARD|FORGET|OVERRIDE))(?<=(?:^|\n)\s*)(?:IGNORE|DISREGARD|FORGET|OVERRIDE)\s+(?:ALL\s+)?(?:PREVIOUS|PRIOR|ABOVE|EARLIER|THE\s+(?:PREVIOUS|ABOVE|PRIOR))\s+(?:INSTRUCTIONS?|PROMPTS?|CONTEXT|TEXT|DIRECTIONS?|GUIDELINES?|RULES?|CONSTRAINTS?)\b
+    - index: 1
+      from: |-
+        (?:\n\s*-{3,}\s*\n|\n\s*={3,}\s*\n|\n\s*\*{3,}\s*\n|\n\s*#{3,}\s*\n)\s*(?:IGNORE|DISREGARD|NEW\s+(?:TASK|INSTRUCTION|OBJECTIVE)|ACTUALLY)
+      to: |-
+        (?:(?=---)(?<=\n\s*)-{3,}|(?====)(?<=\n\s*)={3,}|(?=\*\*\*)(?<=\n\s*)\*{3,}|(?=###)(?<=\n\s*)#{3,})(?=\s*\n)\s+(?:IGNORE|DISREGARD|NEW\s+(?:TASK|INSTRUCTION|OBJECTIVE)|ACTUALLY)
+    - index: 4
+      from: |-
+        (?:^|\n)(?:\s*>\s*)+\s*(?:IGNORE|DISREGARD|NEW\s+INSTRUCTION|OVERRIDE|SYSTEM\s*:)
+      to: |-
+        (?=(?:IGNORE|DISREGARD|NEW\s+INSTRUCTION|OVERRIDE|SYSTEM\s*:))(?<=(?:^|\n)\s*>[\s>]*)(?:IGNORE|DISREGARD|NEW\s+INSTRUCTION|OVERRIDE|SYSTEM\s*:)
+
+ATR-2026-00290:
+  reason: >-
+    The repeated-word condition, `(?:\w+\s+){40,}` and then `\1{3,}`, restarts at every word
+    of a long repetition and reads to the end of it, so it is quadratic in the length of a
+    repetitive text. It has no capture group, so `\1` is the control character U+0001 (an
+    octal escape), and that is what it has always matched: forty words, then three of those.
+    It now begins at the control characters, which a text of words does not have, and looks
+    back for the words, read once for a run. The same text is matched.
+  conditions:
+    - index: 3
+      from: |-
+        (?:(?:\w+\s+){40,})\1{3,}
+      to: |-
+        (?=\x01{3})(?<=(?:\w+\s+){40,})\x01{3,}
+
+ATR-2026-00321:
+  reason: >-
+    `_+\s*\{` restarts at every underscore of a run of them, and `_+\s*_+` tries every way
+    of splitting a run between the two. The start is now the beginning of the run, and the
+    two runs are written as the two shapes they can have: two or more underscores together,
+    or underscores, blanks and underscores. The same text is matched.
+  conditions:
+    - index: 4
+      from: |-
+        (?:_+\s*\{|>>)\s*_+\s*_+\s*System\s+annou
+      to: |-
+        (?:(?<!_)_+\s*\{|>>)\s*(?:_{2,}|_+\s+_+)\s*System\s+annou
+
+ATR-2026-00328:
+  reason: >-
+    `\w+\s+Mode` restarts at every letter of a long word and reads to the end of it. The
+    word is now matched from its beginning only, which finds the same text, since a match
+    that starts inside a word also starts at its first letter.
+  conditions:
+    - index: 3
+      from: |-
+        \w+\s+Mode\s+(?:output|responses?)[\s\S]{0,200}(?:generating\s+any\s+kind\s+of\s+content|ignoring\s+OpenA[Il]\s*['`]?s?\s+content\s+polic)
+      to: |-
+        (?<!\w)\w+\s+Mode\s+(?:output|responses?)[\s\S]{0,200}(?:generating\s+any\s+kind\s+of\s+content|ignoring\s+OpenA[Il]\s*['`]?s?\s+content\s+polic)
+
+ATR-2026-00330:
+  reason: >-
+    `[A-Z][A-Z0-9]+` restarts at every capital of a long run of them and reads to the end of
+    it. The name is bounded to 65 characters, which is far longer than the name of a
+    persona.
+  conditions:
+    - index: 2
+      from: |-
+        [A-Z][A-Z0-9]+\s+(?:respond|always\s+respond|will\s+respond)\s+as\s+the\s+character[\s\S]{0,50}[A-Z][A-Z0-9]+\s+always\s+respond\s+as\s+the\s+character
+      to: |-
+        [A-Z][A-Z0-9]{1,64}\s+(?:respond|always\s+respond|will\s+respond)\s+as\s+the\s+character[\s\S]{0,50}[A-Z][A-Z0-9]{1,64}\s+always\s+respond\s+as\s+the\s+character
+
+ATR-2026-00418:
+  reason: >-
+    Three of its conditions begin with a line start and `\s*`, which restarts at every line
+    break of a run of them, and take `\s*\n\s*` between two lines, which tries every way of
+    splitting a run of blanks. Each now begins at the keyword, looks back for the line start
+    and the blanks before it, and takes the blanks between the two lines as one run that has
+    a line break in it. The same text is matched.
+  conditions:
+    - index: 3
+      from: |-
+        (?i)(?:^|\n)\s*command\s*:\s*[\x27"]?(?:curl|wget)[\x27"]?\s*\n\s*args?\s*:
+      to: |-
+        (?i)(?=command)(?<=(?:^|\n)\s*)command\s*:\s*[\x27"]?(?:curl|wget)[\x27"]?(?=\s*\n)\s+args?\s*:
+    - index: 4
+      from: |-
+        (?i)(?:^|\n)\s*command\s*:\s*[\x27"]?(?:bash|sh|cmd|powershell)[\x27"]?\s*\n\s*args?\s*:[\s\S]{0,300}(?:https?://|\|\s*(?:ba)?sh\b|-enc(?:odedcommand)?\b|base64|iwr\b|invoke-webrequest)
+      to: |-
+        (?i)(?=command)(?<=(?:^|\n)\s*)command\s*:\s*[\x27"]?(?:bash|sh|cmd|powershell)[\x27"]?(?=\s*\n)\s+args?\s*:[\s\S]{0,300}(?:https?://|\|\s*(?:ba)?sh\b|-enc(?:odedcommand)?\b|base64|iwr\b|invoke-webrequest)
+    - index: 8
+      from: |-
+        (?i)(?:^|\n)\s+-\s+-(?:c|e|-eval|-command)\s*$
+      to: |-
+        (?i)(?=-\s+-(?:c|e|-eval|-command)\s*$)(?<=(?:^|\n)\s+)-\s+-(?:c|e|-eval|-command)\s*$
+
+ATR-2026-00508:
+  reason: >-
+    `[=*\-\\]{3,}` followed by a gap that can hold the same characters restarts at every
+    character of a long run of them and tries every length of the run. Three of them are
+    enough, since a match with a longer run also matches from the last three, so the same
+    text is matched. `\*{3,}` is part of the class and adds nothing.
+  conditions:
+    - index: 3
+      from: |-
+        (?i)(?:[=*\-\\]{3,}|\*{3,})[\s\S]{0,100}(?:stop\s+everything|ignore\s+(?:any|all|the|your)?\s*(?:previous|following|prior|above)[\s\S]{0,40}(?:and\s+(?:following|previous)\s+)?instructions?)
+      to: |-
+        (?i)[=*\-\\]{3}[\s\S]{0,100}(?:stop\s+everything|ignore\s+(?:any|all|the|your)?\s*(?:previous|following|prior|above)[\s\S]{0,40}(?:and\s+(?:following|previous)\s+)?instructions?)
+
+ATR-2026-00566:
+  reason: >-
+    The header name `x[-_]?[a-z0-9\-]+` restarts at every `x` of a long run and reads to the
+    end of it, and the `[^\n]*` before the template marks is read to the end of the line
+    from every assignment on it. The name is bounded to 64 characters and the gap to 300 of
+    the same line.
+  conditions:
+    - index: 1
+      from: |-
+        (?i)(?:headers?|HTTP[-_]?headers?|x[-_]?[a-z0-9\-]+)\s*[=:]\s*[^\n]*{{\s*[A-Z_]*(?:TOKEN|SECRET|CREDENTIAL|PASSWORD|AUTH|API[-_]?KEY)\s*}}
+      to: |-
+        (?i)(?:headers?|HTTP[-_]?headers?|x[-_]?[a-z0-9\-]{1,64})\s*[=:]\s*[^\n]{0,300}{{\s*[A-Z_]*(?:TOKEN|SECRET|CREDENTIAL|PASSWORD|AUTH|API[-_]?KEY)\s*}}
+
+ATR-2026-01463:
+  reason: >-
+    `#{2,}\s*\[SYSTEM` restarts at every `#` of a long run and reads to the end of it. Two
+    are enough, since a match with a longer run also matches from the last two, so the same
+    text is matched.
+  conditions:
+    - index: 3
+      from: |-
+        (?i)(#{2,}\s*\[SYSTEM[:\]](?!\()|<\|system\|>|\[SYSTEM\s*(?:PROMPT|MESSAGE|OVERRIDE)\](?!\())
+      to: |-
+        (?i)(#{2}\s*\[SYSTEM[:\]](?!\()|<\|system\|>|\[SYSTEM\s*(?:PROMPT|MESSAGE|OVERRIDE)\](?!\())
+
+ATR-2026-02351:
+  reason: >-
+    `(?:[\w-]+\.){0,5}` restarts at every word boundary of a long run of word characters and
+    reads to the end of it. A label of a host name is at most 63 characters, and it is
+    bounded to that.
+  conditions:
+    - index: 0
+      from: |-
+        \b(?:[\w-]+\.){0,5}169[.-]254[.-]169[.-]254\.(?:nip\.io|sslip\.io|xip\.io|traefik\.me)\b
+      to: |-
+        \b(?:[\w-]{1,63}\.){0,5}169[.-]254[.-]169[.-]254\.(?:nip\.io|sslip\.io|xip\.io|traefik\.me)\b

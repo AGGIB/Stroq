@@ -253,6 +253,13 @@ export const DEFAULT_BLOBS: readonly BlobSpec[] = [
   { name: 'base64-alphabet', build: (size) => repeatTo(BASE64_ALPHABET, size) },
   { name: 'letter-a', build: (size) => 'a'.repeat(size) },
   { name: 'urls', build: (size) => repeatTo('http://a.example/x ', size) },
+  // Repetitive prose and runs of blanks or line breaks: what a pattern that restarts at every
+  // word, blank or line break of a run is slow on, and what the three above do not contain.
+  { name: 'short-words', build: (size) => repeatTo('A ', size) },
+  { name: 'prose', build: (size) => repeatTo('lorem ipsum dolor sit amet ', size) },
+  { name: 'hyphenated', build: (size) => repeatTo('a-b-', size) },
+  { name: 'line-breaks', build: (size) => '\n'.repeat(size) },
+  { name: 'blanks', build: (size) => ' '.repeat(size) },
 ];
 
 /**
@@ -349,8 +356,12 @@ export function measureRuleTimings(
     let worst: RuleTiming = { ruleId: rule.id, ms: -1, blob: '', size: 0 };
     for (const blob of blobs) {
       for (const size of stages) {
+        const text = blob.build(size);
         const started = performance.now();
-        matchRules([rule], blob.build(size));
+        // Every field Stroq supplies is the text, as it is in production: a condition on the
+        // response of a tool or on a tool's description is timed too, and was not when only
+        // `content` was given.
+        matchRules([rule], text, { tool_response: text, tool_description: text });
         const ms = performance.now() - started;
         if (ms > worst.ms) worst = { ruleId: rule.id, ms, blob: blob.name, size };
         if (ms > thresholdMs) return worst;
