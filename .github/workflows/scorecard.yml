@@ -8,6 +8,7 @@
 name: Scorecard
 
 on:
+  workflow_dispatch:
   # So a change to branch protection is re-scored straight away.
   branch_protection_rule:
   schedule:
