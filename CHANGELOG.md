@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Reading a lockfile, a page of links, a registry's JSON or a long wrapped install list no longer marks a session's provenance incomplete.** Only a package, a pipe-to-shell or an encoded blob can raise the floor of an incomplete session, so only losing one of those marks it: 200 or more in one result, text past the 200,000 characters read, a runner or installer line longer than the 2,048 characters read after it, or a failed write. URLs and hosts have a budget of their own and a subresource-integrity string (`sha256-`, `sha384-` or `sha512-` and its hash) is no longer read as an encoded blob. When a session holds more than the 2,000 records it keeps, the oldest URL and host records go first, and the session is marked only if a record that can raise the floor goes.
+
 ## [0.26.0] - 2026-10-18
 
 ### Added

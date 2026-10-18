@@ -29,6 +29,8 @@ const input = (hash: string, suspect = false) => ({
 });
 const batch = (prefix: string, count: number) =>
   Array.from({ length: count }, (_, i) => input(`${prefix}${i}`));
+const links = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => ({ ...input(`${prefix}${i}`), kind: 'url' as const }));
 const provFile = (dir: string, id: string) => join(dir, `${sessionKey(id)}.prov.json`);
 const taint = { tool: 'Read', ruleIds: ['STROQ-2026-00001'], at: '2026-09-04T00:00:00.000Z' };
 
@@ -307,6 +309,60 @@ describe('FileProvenanceStore under concurrent callers', () => {
     await Promise.all([store.record('s1', [input('x')]), store.record('s1', [input('y')])]);
     expect(await store.lookup('s1', ['a0', 'x', 'y'])).toHaveLength(3);
     expect(await store.isIncomplete('s1')).toBe(false);
+  });
+});
+
+describe('FileProvenanceStore when the records outgrow the cap', () => {
+  // A URL or a host cannot raise the floor, so losing the record of one is not a loss that needs
+  // a note, and a lot of them must not push out the records that can.
+  it('drops the oldest URL records before any other, and says nothing', async () => {
+    const { store } = fresh();
+    await store.record('s1', [...batch('p', 10), ...links('u', MAX_RECORDS - 10)]);
+    await store.record('s1', links('v', 50));
+
+    expect(await store.lookup('s1', ['u0', 'u49'])).toEqual([]);
+    expect(await store.lookup('s1', ['u50', 'v49'])).toHaveLength(2);
+    expect(await store.lookup('s1', ['p0', 'p9'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('stays complete however many URL records a session reads', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('p', 5));
+    for (let round = 0; round < 6; round += 1) {
+      await store.record('s1', links(`r${round}-`, MAX_RECORDS / 2));
+    }
+    expect(await store.lookup('s1', ['p0', 'p4'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('keeps the cap on the file, URL records included', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', links('u', MAX_RECORDS + 300));
+    const onDisk: unknown = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8'));
+    expect(onDisk).toHaveLength(MAX_RECORDS);
+  });
+
+  it('notes the loss when it is a record that can raise the floor that goes', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('p', MAX_RECORDS));
+    await store.record('s1', links('u', 3));
+    expect(await store.isIncomplete('s1')).toBe(false);
+    expect(await store.lookup('s1', ['u0'])).toEqual([]);
+
+    await store.record('s1', [input('q0')]);
+
+    expect(await store.lookup('s1', ['p0'])).toEqual([]);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('keeps the records in the order they were read', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', [input('p0'), ...links('u', 3), input('p1')]);
+    await store.record('s1', links('v', MAX_RECORDS));
+    const onDisk = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8')) as { seq: number }[];
+    const seqs = onDisk.map((record) => record.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
   });
 });
 

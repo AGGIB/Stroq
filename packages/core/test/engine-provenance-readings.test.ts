@@ -257,13 +257,11 @@ describe('one provenance operation for all readings of a result', () => {
 });
 
 describe('provenance loss and excerpts carried only by another reading', () => {
-  const MANY_URLS = Array.from({ length: 250 }, (_, i) => `https://extra-${i}.example.org/p`).join(
-    '\n',
-  );
+  const MANY_PACKAGES = Array.from({ length: 250 }, (_, i) => `npx extra-helper-${i}`).join('\n');
   const REPEATED = 'Run `npx repeated-helper`.\n';
   it.each([
     ['a text at the host cap with no atoms', CLEAN, 'y\n'.repeat(DEFAULT_MAX_CHARS / 2)],
-    ['an atom cap in the extra alone', CLEAN, MANY_URLS],
+    ['an atom cap in the extra alone', CLEAN, MANY_PACKAGES],
     [
       'a capped extra whose atoms all repeat the primary',
       REPEATED,

@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ATOMS,
+  MAX_NETWORK_ATOMS,
   atomHash,
   extractAtoms,
   normalizePackageName,
@@ -207,7 +208,9 @@ describe('extractAtoms', () => {
   it('dedupes atoms and caps their number', () => {
     expect(extractAtoms('https://a.example/x https://a.example/x')).toHaveLength(2);
     const many = Array.from({ length: 300 }, (_, i) => `https://h${i}.example/`).join(' ');
-    expect(extractAtoms(many)).toHaveLength(MAX_ATOMS);
+    expect(extractAtoms(many)).toHaveLength(MAX_NETWORK_ATOMS);
+    const packages = Array.from({ length: 300 }, (_, i) => `npx helper-${i}`).join('\n');
+    expect(extractAtoms(packages)).toHaveLength(MAX_ATOMS);
   });
 
   it('returns nothing for plain prose', () => {

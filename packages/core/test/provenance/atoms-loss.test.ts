@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ATOMS,
+  MAX_NETWORK_ATOMS,
   extractAtoms,
   extractAtomsDeep,
   extractAtomsDeepWithLoss,
@@ -9,6 +10,8 @@ import { DEFAULT_MAX_CHARS } from '../../src/scan/scanner.js';
 
 const urls = (count: number, prefix = 'd'): string =>
   Array.from({ length: count }, (_, i) => `https://${prefix}${i}.example.org/p`).join('\n');
+const runners = (count: number, prefix = 'pad'): string =>
+  Array.from({ length: count }, (_, i) => `npx ${prefix}${i}`).join('\n');
 
 describe('extractAtomsDeepWithLoss', () => {
   it('returns what extractAtomsDeep returns, and no loss, for an ordinary result', () => {
@@ -31,20 +34,20 @@ describe('extractAtomsDeepWithLoss', () => {
   });
 
   it('reports the loss when more distinct atoms were found than the cap keeps', () => {
-    const { atoms, truncated } = extractAtomsDeepWithLoss(`${urls(250)}\nnpx evil-helper-fix`);
+    const { atoms, truncated } = extractAtomsDeepWithLoss(`${runners(250)}\nnpx evil-helper-fix`);
     expect(atoms).toHaveLength(MAX_ATOMS);
     expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
     expect(truncated).toBe(true);
   });
 
   it('reads a result that fills the cap exactly as cut, since it cannot tell', () => {
-    const { atoms, truncated } = extractAtomsDeepWithLoss(urls(MAX_ATOMS / 2));
+    const { atoms, truncated } = extractAtomsDeepWithLoss(runners(MAX_ATOMS));
     expect(atoms).toHaveLength(MAX_ATOMS);
     expect(truncated).toBe(true);
   });
 
   it('reports the loss when a decoded variant is what overflows the cap', () => {
-    const encoded = Buffer.from(urls(300, 'e'), 'utf8').toString('base64');
+    const encoded = Buffer.from(runners(300, 'e'), 'utf8').toString('base64');
     const { truncated } = extractAtomsDeepWithLoss(`see https://one.example.org/\n${encoded}`);
     expect(truncated).toBe(true);
   });
@@ -66,7 +69,7 @@ describe('extractAtomsDeepWithLoss', () => {
 });
 
 describe('extractAtomsDeepWithLoss on a line longer than the part of it that is read', () => {
-  const longLine = (head: string) => `${head} ${'a'.repeat(600)} evil-helper-fix`;
+  const longLine = (head: string) => `${head} ${'a'.repeat(2100)} evil-helper-fix`;
 
   it.each(['npm install', 'npx', 'pip install'])(
     'reports the loss after a %s whose line runs on past the window',
@@ -79,8 +82,8 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
 
   it.each([
     ['a short line', 'npm install lodash'],
-    ['a line that ends at a newline inside the window', `npm install lodash\n${'b'.repeat(900)}`],
-    ['a command that ends at a separator inside the window', `npx tool; ${'b'.repeat(900)}`],
+    ['a line that ends at a newline inside the window', `npm install lodash\n${'b'.repeat(3000)}`],
+    ['a command that ends at a separator inside the window', `npx tool; ${'b'.repeat(3000)}`],
   ])('reports no loss for %s', (_name, text) => {
     expect(extractAtomsDeepWithLoss(text).truncated).toBe(false);
   });
@@ -89,7 +92,7 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
     `Install with:\n\nnpm install\n${'  --loglevel=silent\n'.repeat(flags)}  evil-helper-fix\n`;
 
   it('reports the loss when a wrapped command runs on past the window once its lines are joined', () => {
-    const { atoms, truncated } = extractAtomsDeepWithLoss(wrappedInstall(40));
+    const { atoms, truncated } = extractAtomsDeepWithLoss(wrappedInstall(120));
     expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
     expect(truncated).toBe(true);
   });
@@ -101,7 +104,7 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
   });
 
   it('reports the loss when the wrapped lines end each with a backslash', () => {
-    const text = `npm install \\\n${'  --save-exact \\\n'.repeat(40)}  evil-helper-fix\n`;
+    const text = `npm install \\\n${'  --save-exact \\\n'.repeat(170)}  evil-helper-fix\n`;
     const { atoms, truncated } = extractAtomsDeepWithLoss(text);
     expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
     expect(truncated).toBe(true);
@@ -115,27 +118,27 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
       '\n',
     );
   it.each([
-    ['a workflow step', `jobs:\n  build:\n    steps:\n      - run: npm install\n${steps(20)}\n`],
+    ['a workflow step', `jobs:\n  build:\n    steps:\n      - run: npm install\n${steps(60)}\n`],
     [
       'a Makefile recipe',
-      `install:\n\tnpm install\n${Array.from({ length: 20 }, (_, i) => `\tnode scripts/build-${i}.js --minify --sourcemap`).join('\n')}\n`,
+      `install:\n\tnpm install\n${Array.from({ length: 60 }, (_, i) => `\tnode scripts/build-${i}.js --minify --sourcemap`).join('\n')}\n`,
     ],
     [
       'an indented README block',
-      `## Install\n\n    npm install widgets\n${Array.from({ length: 12 }, (_, i) => `    node dist/index.js --config ./config/production-${i}.json --port 80${i}`).join('\n')}\n`,
+      `## Install\n\n    npm install widgets\n${Array.from({ length: 40 }, (_, i) => `    node dist/index.js --config ./config/production-${i}.json --port 80${i}`).join('\n')}\n`,
     ],
-    ['an installer with its flag on its own line', `    npm install -g typescript\n${steps(20)}\n`],
-    ['a runner with a dash-list after it', `steps:\n  npx tool\n${steps(20)}\n`],
+    ['an installer with its flag on its own line', `    npm install -g typescript\n${steps(60)}\n`],
+    ['a runner with a dash-list after it', `steps:\n  npx tool\n${steps(60)}\n`],
   ])('reports no loss for %s followed by a long indented block', (_name, text) => {
-    expect(text.length).toBeGreaterThan(600);
+    expect(text.length).toBeGreaterThan(2_048);
     expect(extractAtomsDeepWithLoss(text).truncated).toBe(false);
   });
 
   // `npm install` ends at its last letter, and the part of the line that is read starts there:
-  // a space and 511 characters are 512, the whole window; one more character is past it.
+  // a space and 2,047 characters are 2,048, the whole window; one more character is past it.
   it.each([
-    ['512 characters after the installer', 511, false],
-    ['513 characters after the installer', 512, true],
+    ['2,048 characters after the installer', 2047, false],
+    ['2,049 characters after the installer', 2048, true],
   ])('reports the window boundary at %s', (_name, length, cut) => {
     const text = `npm install ${'a'.repeat(length)}`;
     expect(text.length - 'npm install'.length).toBe(length + 1);
@@ -143,14 +146,14 @@ describe('extractAtomsDeepWithLoss on a line longer than the part of it that is 
   });
 
   it('reports no loss for a long line that names no runner or installer', () => {
-    expect(extractAtomsDeepWithLoss(`${'word '.repeat(400)}`).truncated).toBe(false);
+    expect(extractAtomsDeepWithLoss(`${'word '.repeat(1000)}`).truncated).toBe(false);
   });
 });
 
 describe('extractAtoms keeps its own contract', () => {
-  it('still returns at most MAX_ATOMS atoms in text order', () => {
+  it('still returns at most MAX_NETWORK_ATOMS url and host atoms in text order', () => {
     const atoms = extractAtoms(urls(250));
-    expect(atoms).toHaveLength(MAX_ATOMS);
+    expect(atoms).toHaveLength(MAX_NETWORK_ATOMS);
     expect(atoms[0]).toEqual({ kind: 'url', value: 'https://d0.example.org/p' });
   });
 });

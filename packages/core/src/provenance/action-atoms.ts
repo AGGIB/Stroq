@@ -5,6 +5,7 @@ import { normalizeText } from '../normalize/normalizer.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { collectStrings } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
+import { FLOOR_KINDS } from './atom-kinds.js';
 import { extractAtoms, normalizePackageName } from './atoms.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
@@ -15,7 +16,7 @@ const NETWORK_CLASSES: readonly ActionClass[] = [
   'git.push_external',
   'shell.exec_encoded',
 ];
-const ALWAYS_COUNTED: readonly AtomKind[] = ['pkg', 'pipe_shell', 'encoded'];
+const ALWAYS_COUNTED: readonly AtomKind[] = FLOOR_KINDS;
 const DEPENDENCY_SECTIONS = [
   'dependencies',
   'devDependencies',

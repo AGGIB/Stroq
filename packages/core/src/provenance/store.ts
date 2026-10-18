@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
 import { withLock } from '../util/lock.js';
+import { retain } from './retain.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
 
@@ -29,8 +30,9 @@ export interface ProvenanceStore {
    */
   clear(sessionId: string): Promise<void>;
   /**
-   * Whether this session may have read something that is no longer on record: a record
-   * was dropped to stay within the cap, or a result was only partly recorded; or the
+   * Whether this session may have read something that is no longer on record: a record that
+   * can raise the floor (a package, a pipe-to-shell, an encoded blob; not a URL or a host) was
+   * dropped to stay within the cap, or a result was only partly recorded; or the
    * directory the note would go in cannot be written, so a loss could not be noted. A
    * lookup that finds nothing means "not read" only when this is false.
    *
@@ -56,7 +58,7 @@ export interface ProvenanceStore {
   setPending(sessionId: string, pending: boolean, owner?: string): Promise<void>;
 }
 
-/** Oldest records are dropped beyond this many per session. */
+/** Oldest records are dropped beyond this many per session, URL and host records before any other. */
 export const MAX_RECORDS = 2000;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
@@ -221,13 +223,13 @@ export class FileProvenanceStore implements ProvenanceStore {
       const at = this.now().toISOString();
       const start = existing[existing.length - 1]?.seq ?? 0;
       const added = inputs.map((input, i) => ({ ...input, seq: start + i + 1, at }));
-      const all = [...existing, ...added];
-      const kept = all.slice(-MAX_RECORDS);
+      const { kept, floorLost } = retain([...existing, ...added], MAX_RECORDS);
       // The note first, the records second: a crash between the two leaves a session
       // that says it is incomplete and is not, never one that is and does not say so.
       // A note that cannot be written (the disk is full) does not stop the records going in,
       // and leaves the file failing closed, since nothing else would say a record was dropped.
-      const noteError = kept.length < all.length ? await this.tryNote(sessionId) : null;
+      // Only the loss of a record that can raise the floor is one to note (see `retain`).
+      const noteError = floorLost ? await this.tryNote(sessionId) : null;
       let writeError: unknown = null;
       try {
         await this.write(sessionId, kept);
