@@ -205,30 +205,51 @@ function installerPackages(tokens: readonly string[]): string[] {
 /** Atoms one extractor found, and whether it stopped reading a line before the line ended. */
 interface Found {
   readonly positioned: Positioned[];
+  /** A line went on past the window, with no package found before it ended. */
   readonly cut: boolean;
+  /** The pass spent its reading budget, so some matches were not read at all. */
+  readonly budgetSpent: boolean;
 }
 
 /** A runner or installer match with the rest of its line, positioned at the match's start. */
 type LineAfter = (m: RegExpMatchArray) => { index: number; scan: LineScan };
 
+/** Reads the line after each match, and says whether the budget ran out so some were skipped. */
+interface LineReader {
+  readonly after: LineAfter;
+  readonly skipped: () => boolean;
+}
+
 /**
  * Reads the line after each match in turn, out of one budget for the pass (`MAX_LINE_WORK`). A
- * match that finds the budget spent is given an empty line that was cut: it was not read.
+ * match that finds the budget spent is given an empty line that was cut: it was not read, and the
+ * reader says so through `skipped`, apart from a line that is merely longer than the window. Every
+ * pass over a text (the text as written, a decoded variant, the text with its continuation lines
+ * joined) makes its own reader and so has its own budget, and the caller counts a spent budget as
+ * a loss in every one of them: the joined pass is the one that reads a block of indented lines as
+ * a single long line, which is where the budget goes first.
  */
-function lineReader(text: string): LineAfter {
+function lineReader(text: string): LineReader {
   let budget = MAX_LINE_WORK;
-  return (m) => {
-    const index = m.index ?? 0;
-    if (budget <= 0) return { index, scan: { line: '', cut: true, read: 0 } };
-    const scan = restOfLine(text, index + m[0].length);
-    budget -= scan.read + 1;
-    return { index, scan };
+  let skipped = false;
+  return {
+    after: (m) => {
+      const index = m.index ?? 0;
+      if (budget <= 0) {
+        skipped = true;
+        return { index, scan: { line: '', cut: true, read: 0 } };
+      }
+      const scan = restOfLine(text, index + m[0].length);
+      budget -= scan.read + 1;
+      return { index, scan };
+    },
+    skipped: () => skipped,
   };
 }
 
 /** Every package named after a runner match, positioned at that match's start index. */
-function runnerPackages(text: string, lineAfter: LineAfter): Found {
-  const lines = [...text.matchAll(RUNNER)].map(lineAfter);
+function runnerPackages(text: string, reader: LineReader): Found {
+  const lines = [...text.matchAll(RUNNER)].map(reader.after);
   return {
     positioned: lines.flatMap(({ index, scan }): Positioned[] => {
       const pkg = runnerPackage(scan.line.split(/\s+/));
@@ -237,12 +258,13 @@ function runnerPackages(text: string, lineAfter: LineAfter): Found {
       return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
     }),
     cut: lines.some(({ scan }) => scan.cut),
+    budgetSpent: reader.skipped(),
   };
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installedPackages(text: string, lineAfter: LineAfter): Found {
-  const lines = [...text.matchAll(INSTALLER)].map(lineAfter);
+function installedPackages(text: string, reader: LineReader): Found {
+  const lines = [...text.matchAll(INSTALLER)].map(reader.after);
   return {
     positioned: lines.flatMap(({ index, scan }): Positioned[] =>
       installerPackages(scan.line.split(/\s+/)).flatMap((pkg): Positioned[] => {
@@ -251,6 +273,7 @@ function installedPackages(text: string, lineAfter: LineAfter): Found {
       }),
     ),
     cut: lines.some(({ scan }) => scan.cut),
+    budgetSpent: reader.skipped(),
   };
 }
 
@@ -357,12 +380,13 @@ function wrappedCommandCut(text: string): boolean {
 }
 
 function packageAtoms(text: string): Found {
-  const lineAfter = lineReader(text);
-  const runners = runnerPackages(text, lineAfter);
-  const installers = installedPackages(text, lineAfter);
+  const reader = lineReader(text);
+  const runners = runnerPackages(text, reader);
+  const installers = installedPackages(text, reader);
   return {
     positioned: [...runners.positioned, ...installers.positioned],
     cut: runners.cut || installers.cut,
+    budgetSpent: reader.skipped(),
   };
 }
 
@@ -400,6 +424,8 @@ interface Extraction {
   readonly capped: boolean;
   /** A runner or installer line went on past the part of it that is read. */
   readonly lineCut: boolean;
+  /** The pass ran out of the budget for reading lines, so the matches that were left were not read. */
+  readonly budgetSpent: boolean;
 }
 
 function extractBounded(text: string): Extraction {
@@ -415,7 +441,12 @@ function extractBounded(text: string): Extraction {
   for (const { atom } of positioned) {
     set.add({ kind: atom.kind, value: atom.value.slice(0, MAX_VALUE_CHARS) });
   }
-  return { atoms: set.atoms, capped: set.floorLeftOut, lineCut: packages.cut };
+  return {
+    atoms: set.atoms,
+    capped: set.floorLeftOut,
+    lineCut: packages.cut,
+    budgetSpent: packages.budgetSpent,
+  };
 }
 
 /**
@@ -510,7 +541,10 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
   let truncated = cutText;
   const merge = (extraction: Extraction, byLine = true): void => {
-    truncated = truncated || extraction.capped || (byLine && extraction.lineCut);
+    // A spent budget is a loss in every pass, the joined one included; a line longer than the
+    // window is one only where it is not just a block of indented lines read as a single line.
+    truncated =
+      truncated || extraction.capped || extraction.budgetSpent || (byLine && extraction.lineCut);
     for (const atom of extraction.atoms) set.add(atom);
   };
 

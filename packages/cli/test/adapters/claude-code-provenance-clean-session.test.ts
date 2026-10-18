@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,7 +42,9 @@ const decide = async (session: string, command: string): Promise<string> => {
   return json.hookSpecificOutput.permissionDecision;
 };
 
-const integrity = (): string => `sha512-${randomBytes(64).toString('base64')}`;
+let digests = 0;
+const integrity = (): string =>
+  `sha512-${createHash('sha512').update(`stroq-clean-session-${digests++}`).digest('base64')}`;
 const lockfile = (entries: number): string => {
   const body = Array.from(
     { length: entries },

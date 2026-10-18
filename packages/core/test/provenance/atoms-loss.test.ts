@@ -157,3 +157,32 @@ describe('extractAtoms keeps its own contract', () => {
     expect(atoms[0]).toEqual({ kind: 'url', value: 'https://d0.example.org/p' });
   });
 });
+
+// Reading the lines after runners and installers is held to a budget for the pass (see
+// `MAX_LINE_WORK`). The pass over the text with its continuation lines joined reads a block of
+// indented lines as one long line, so its matches overlap and it spends the budget first; whatever
+// it did not read is a loss all the same, though a long joined line is not one.
+describe('extractAtomsDeepWithLoss when a pass spends its budget for reading lines', () => {
+  const indentedBlock = (lines: number): string => '  npm i a\n'.repeat(lines);
+  const wrappedTail = 'npm install \\\n  evil-helper-fix\n';
+
+  it('reports the loss when only the joined pass ran out, and the package it left unread', () => {
+    const text = `Notes:\n${indentedBlock(15_000)}${wrappedTail}`;
+    expect(text.length).toBeLessThan(DEFAULT_MAX_CHARS);
+    const { atoms, truncated } = extractAtomsDeepWithLoss(text);
+    expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
+    expect(truncated).toBe(true);
+  });
+
+  it('reports no loss for the same text when it stays inside the budget, and reads the package', () => {
+    const text = `Notes:\n${indentedBlock(100)}${wrappedTail}`;
+    const { atoms, truncated } = extractAtomsDeepWithLoss(text);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'evil-helper-fix' });
+    expect(truncated).toBe(false);
+  });
+
+  it('reports the loss when the text as written ran out', () => {
+    const text = 'npm i a '.repeat(25_000);
+    expect(extractAtomsDeepWithLoss(text).truncated).toBe(true);
+  });
+});

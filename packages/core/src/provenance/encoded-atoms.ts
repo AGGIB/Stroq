@@ -54,18 +54,72 @@ const INTEGRITY: ReadonlyMap<
 ]);
 const LABEL_LENGTH = 7;
 
+/** The share of printable ASCII (with the whitespace of text) from which bytes are read as text. */
+const TEXT_SHARE = 0.9;
+/** A run of this many printable bytes in a row is text however much else is there. */
+const TEXT_RUN = 16;
+
+const isPrintableByte = (byte: number): boolean =>
+  (byte >= 0x20 && byte <= 0x7e) || byte === 0x09 || byte === 0x0a || byte === 0x0d;
+const isPaddingByte = (byte: number): boolean =>
+  byte === 0x00 || byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
+
+function longestPrintableRun(bytes: Uint8Array): number {
+  let longest = 0;
+  let run = 0;
+  for (const byte of bytes) {
+    run = isPrintableByte(byte) ? run + 1 : 0;
+    longest = Math.max(longest, run);
+  }
+  return longest;
+}
+
+/** Whether the bytes are valid UTF-8 and most of what they decode to is not a control character. */
+function isPrintableUtf8(bytes: Uint8Array): boolean {
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const characters = [...decoded];
+    return characters.filter((c) => !/\p{C}/u.test(c)).length * 2 > characters.length;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether bytes are text and not a digest: a digest is high-entropy, so no more than a third of
+ * its bytes are printable and it has no run of sixteen of them, where text is mostly printable
+ * (90% or more of the bytes, or valid UTF-8 that is mostly not control characters) or holds such
+ * a run. The padding at the end (NUL, blanks) is not counted: a command filled out to the length
+ * of a hash with either is still the command.
+ */
+function decodesToText(bytes: Uint8Array): boolean {
+  let end = bytes.length;
+  while (end > 0 && isPaddingByte(bytes[end - 1] ?? 0)) end -= 1;
+  const body = bytes.subarray(0, end);
+  if (body.length === 0) return true;
+  const printable = body.filter(isPrintableByte).length;
+  return (
+    printable >= body.length * TEXT_SHARE ||
+    longestPrintableRun(body) >= TEXT_RUN ||
+    isPrintableUtf8(body)
+  );
+}
+
 /**
  * Whether the token that starts at `index` of `text` is exactly an integrity string: one of the
  * three labels (`sha256-`, `sha384-`, `sha512-`, lowercase) straight before a standard base64
- * hash of that label's length, padded as its length is padded, and ending as a digest ends.
- * Nothing near it is exempt: another label, another length or other padding is a blob like any.
+ * hash of that label's length, padded as its length is padded, ending as a digest ends, and
+ * decoding to bytes that are not text. Nothing near it is exempt: another label, another length,
+ * other padding, or a body that decodes to a command is a blob like any. The label alone is
+ * not enough, because it is the one thing in the token that anyone can write.
  */
 function isIntegrity(text: string, index: number, token: string): boolean {
   const shape = INTEGRITY.get(text.slice(Math.max(0, index - LABEL_LENGTH), index));
   if (shape === undefined || token.length !== shape.length) return false;
   const body = token.replace(/=+$/, '');
   if (token.length - body.length !== shape.pad) return false;
-  return shape.last.includes(body.charAt(body.length - 1));
+  if (!shape.last.includes(body.charAt(body.length - 1))) return false;
+  return !decodesToText(Buffer.from(token, 'base64'));
 }
 
 export function encodedAtoms(text: string): Positioned[] {
