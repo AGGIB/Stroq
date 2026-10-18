@@ -105,7 +105,8 @@ describe('the --strict section of docs/AGENTS.md', () => {
 
     it('says what is shared with the default proxy: end-anchored rules and the window', () => {
       expect(section).toContain('ATR-2026-02009');
-      expect(section).toContain('in strict mode and in the default proxy alike');
+      expect(section).toContain('in the default proxy');
+      expect(section).toContain('per-string');
       expect(section).toContain(
         `past the ${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')}-character window`,
       );
