@@ -3,6 +3,11 @@ export interface ShellWord {
   readonly word: string;
   /** A quote in it was never closed. */
   readonly open: boolean;
+  /**
+   * For each character of `word`: it stood inside quotes or after a backslash, so it is text and
+   * not shell syntax. A `)`, `&`, `;` or `|` that is quoted or escaped ends nothing.
+   */
+  readonly literal: readonly boolean[];
 }
 
 /** What the quote that opens at `at` holds, and where it closes (-1 if it never does). */
@@ -35,28 +40,35 @@ function quoted(token: string, at: number): { piece: string; end: number } {
  * left in the word, with the rest of the token after it, and the word is `open`.
  *
  * What the word holds is left as it is, `$` and backticks included: whether a character in it is
- * part of a package's name, or of what comes after the name, is for `readPackageWord` to say.
+ * part of a package's name, or of what comes after the name, is for `readPackageWord` to say, and
+ * `literal` says which characters are text because a quote or a backslash made them so.
  */
 export function shellWord(token: string): ShellWord {
   let word = '';
+  const literal: boolean[] = [];
   let open = false;
+  const add = (text: string, isLiteral: boolean): void => {
+    word += text;
+    for (let k = 0; k < text.length; k += 1) literal.push(isLiteral);
+  };
   for (let i = 0; i < token.length; i += 1) {
     const char = token.charAt(i);
     if (char === '\\') {
-      word += i + 1 < token.length ? token.charAt(i + 1) : char;
+      if (i + 1 < token.length) add(token.charAt(i + 1), true);
+      else add(char, false);
       i += 1;
     } else if (char === "'" || char === '"') {
       const { piece, end } = quoted(token, i);
       if (end === -1) {
-        word += token.slice(i);
+        add(token.slice(i), true);
         open = true;
         break;
       }
-      word += piece;
+      add(piece, true);
       i = end;
     } else {
-      word += char;
+      add(char, false);
     }
   }
-  return { word, open };
+  return { word, open, literal };
 }

@@ -79,9 +79,12 @@ function packageFlagValue(
 function flagPackages(value: ShellWord, command: boolean): { packages: string[]; doubt: boolean } {
   const packages: string[] = [];
   let doubt = command && value.word === '';
+  let from = 0;
   for (const piece of value.word.split(',')) {
+    const literal = value.literal.slice(from, from + piece.length);
+    from += piece.length + 1;
     if (piece === '') continue;
-    const word = readPackageWord({ ...value, word: piece });
+    const word = readPackageWord({ word: piece, open: value.open, literal });
     if (word.name !== undefined) packages.push(word.name);
     doubt = doubt || (command && word.doubt);
   }

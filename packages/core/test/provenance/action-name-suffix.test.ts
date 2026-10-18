@@ -109,6 +109,71 @@ describe('the characters that end a word end the command it was read in', () => 
   });
 });
 
+describe('only a closer that nothing quoted or escaped ends the command', () => {
+  it.each([
+    ['an ampersand in double quotes', `npm install "a&b" ${NAME}`],
+    ['a parenthesis in single quotes', `npm install 'a)' ${NAME}`],
+    ['an escaped ampersand', `npm install a\\&b ${NAME}`],
+    ['an escaped parenthesis', `npm install a\\) ${NAME}`],
+  ])('reads on past %s', (_what, command) => {
+    expect(packages(command)).toContain(NAME);
+  });
+
+  it('does not read on past the same closers where nothing quotes them', () => {
+    expect(packages(`npm install a&b ${NAME}`)).toEqual(['a']);
+    expect(packages(`npm install a) ${NAME}`)).toEqual(['a']);
+  });
+
+  it('counts a semicolon in quotes before a flagged package as unread, not as a package that was not there', () => {
+    const { atoms, unread } = extractActionAtoms(`npx -p "a;b" -p ${NAME}`);
+    expect(atoms.some((a) => a.value === NAME) || unread).toBe(true);
+  });
+});
+
+describe('extras are read as extras are written', () => {
+  it.each(['[socks]', '[a,b]', '[dev-tools]', '[x_y.z]', '[socks]>=2', '[socks]==1.*'])(
+    'reads %s after a name',
+    (extras) => {
+      const { atoms, unread } = extractActionAtoms(`pip install ${NAME}${extras}`);
+      expect(atoms).toContainEqual(pkg);
+      expect(unread).toBe(false);
+    },
+  );
+
+  it.each([
+    ['a glob inside the brackets', '[a*]'],
+    ['a negation', '[!x]'],
+    ['a variable', '[$V]'],
+    ['empty brackets', '[]'],
+    ['a range that goes on into the name', '[ab]cd'],
+    ['a bracket that never closes', '[ab'],
+    ['a parenthesis', '(x)'],
+    ['a brace', '{a,b}'],
+    ['a star', '*'],
+  ])('counts %s touching the name as unread, and records no half of it', (_what, tail) => {
+    const { atoms, unread } = extractActionAtoms(`pip install ${NAME}${tail}`);
+    expect(unread).toBe(true);
+    expect(atoms.filter((a) => a.kind === 'pkg')).toEqual([]);
+  });
+});
+
+describe('a question mark at the end of a word', () => {
+  it('is a glob in a command: unread, though the name before it is still recorded', () => {
+    const { atoms, unread } = extractActionAtoms(`pip install ${NAME}?`);
+    expect(unread).toBe(true);
+    expect(atoms).toContainEqual(pkg);
+  });
+});
+
+describe('a command substitution in the version', () => {
+  it('does not change which package is read, and reads the command inside it as its own', () => {
+    const { atoms, unread } = extractActionAtoms(`npm i foo@$(npx ${NAME})`);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'foo' });
+    expect(atoms).toContainEqual(pkg);
+    expect(unread).toBe(false);
+  });
+});
+
 describe('a page names the same package as a command does', () => {
   it.each([
     ['a ampersand', `Run npx ${NAME}& in the background.`],

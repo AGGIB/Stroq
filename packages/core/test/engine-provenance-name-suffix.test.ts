@@ -77,6 +77,26 @@ describe('a package a flagged page named, wherever the command puts it', () => {
   });
 });
 
+describe('a quoted closer does not hide a package a flagged page named', () => {
+  it.each([
+    `npm install "a&b" ${NAME}`,
+    `npm install 'a)' ${NAME}`,
+    `npx -p "a;b" -p ${NAME}`,
+    `npm i foo@$(npx ${NAME})`,
+  ])('in %s the call is not allowed', async (command) => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(command)).decision.effect).not.toBe('allow');
+  });
+
+  it('denies a command substitution in the version that runs the flagged package', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    const r = await f.pre(`npm i foo@$(npx ${NAME})`);
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-origin-suspect' });
+  });
+});
+
 describe('a package nobody flagged', () => {
   it('is not denied for what stands around it', async () => {
     const f = fixture();
