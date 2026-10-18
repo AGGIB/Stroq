@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
+
 - **Unaddressable strict replies no longer leave clients waiting for their own timeout.** Malformed replies beyond the bounded id reader and responses with unknown ids fail the outstanding requests with fixed errors. This can also fail unrelated concurrent requests on that wrapper; duplicate completed replies do not fail newer requests.
 - **POSIX shutdown escalation reaches descendants after the launcher exits.** The process group still receives SIGKILL while inherited pipes remain open. Benign-message cap errors now identify the shared forwarded/withheld counter consistently in client responses, stderr and audit records.
 - **Strict scan cost documentation includes per-string views.** Each distinct decoded string adds a scan view; the 0.26.0 measurements below describe the original three aggregate views, not the current scan count or latency.
