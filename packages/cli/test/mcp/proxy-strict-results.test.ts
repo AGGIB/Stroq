@@ -229,16 +229,18 @@ describe('text beyond the 200,000 characters the scan reads', () => {
   });
 });
 
-describe('a result the scanner is slow on', () => {
-  it('is withheld at the deadline, not after the 12 to 18 seconds the scan takes', async () => {
-    // 100 KB of ordinary prose takes the real scanner several seconds; a 400 ms deadline
-    // has to stop it. With the deadline taken out this answer is a delivered result (or
-    // arrives much later), and the reason check below fails.
+describe('a result the scanner cannot read within the deadline', () => {
+  it('is withheld at the deadline, whatever the scanner is doing when it passes', async () => {
+    // 100 KB of ordinary prose used to hold the real scanner for seconds, which was a pattern
+    // that was quadratic in the length of the text and no longer is. The deadline is the same
+    // guard against any pattern that is, so it is tried with one that not even a linear scan of
+    // this text fits in. With the deadline taken out this answer is a delivered result, and the
+    // reason check below fails.
     const started = Date.now();
-    const { rig, answer } = await strictRun('heavy', { strictScanMs: 400 });
+    const { rig, answer } = await strictRun('heavy', { strictScanMs: 2 });
     const took = Date.now() - started;
     expectWithheld(rig, answer, 'scan-timeout');
-    // Generous on purpose: this machine may be loaded; the scan alone takes several times this.
+    // Generous on purpose: this machine may be loaded.
     expect(took).toBeLessThan(12_000);
     await rig.finish();
   }, 60_000);
