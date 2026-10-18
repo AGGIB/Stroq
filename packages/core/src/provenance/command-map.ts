@@ -15,13 +15,13 @@ import {
 } from '../actions/shell-skip.js';
 import { LOCAL_WRAPPERS, PREFIX_WORDS, optionTakesValue } from '../actions/shell-wrappers.js';
 import {
-  COMPOUND_WORDS,
   FIND_RUNS,
+  NAMES_A_PROGRAM_VARIABLE,
   PRINTERS,
   RUNS_A_COMMAND_STRING,
   RUNS_ITS_ARGUMENTS,
-  STRING_RUNNERS,
   gitSubcommand,
+  isClosedSetCommand,
   isGitConfigOption,
   isGitMessageCommand,
   isMessageFlag,
@@ -36,8 +36,8 @@ import { canonicalCommand } from './tool-phrases.js';
  * arguments of another command is a mention of one, and is no doubt about what will run only when
  * the line PROVES it inert, by a closed and tiny rule (see `inert` below): the message of `git
  * commit`, `git tag` or `git notes add`, the arguments of `echo` and `printf`, a line that is only a
- * comment, on a command line that has no pipe, redirection, substitution, group, condition or
- * string-running word anywhere.
+ * comment, on a command line EVERY command of which is in that closed set (and `true` and `:`), with
+ * no pipe, redirection, substitution, group, condition or assignment of a variable that names a program.
  *
  * It is not a shell. It knows quotes, `$'…'`, substitutions, backticks, comments, here-documents,
  * separators, subshells and the string a shell is given with `-c`. Whatever it does not model, and
@@ -66,11 +66,11 @@ export interface CommandMap {
   /** Something was left open or hard to read: nothing here is known to be a mention. */
   readonly uncertain: boolean;
   /**
-   * Of the mentions asked about, the ones the line proves inert. Empty when anything on the line
-   * could make an inert-looking command run what it is given: a pipe, a redirection (a here-document
-   * to `git commit` aside), a substitution or backtick, a group or condition or function, a word
-   * that runs a string (`eval`, `source`, `.`, `xargs`, a shell, `ssh`, `su`, `watch`, ...), or an
-   * option of git that can name a command (`-c`, `--config-env`). Meaningful only when the reading is not `uncertain`.
+   * Of the mentions asked about, the ones the line proves inert. Deny by default for the whole
+   * line: empty as soon as any command on it (in a list, a pipeline, a group or a substitution) is
+   * not in the closed set, or a pipe, a redirection (a here-document to `git commit` aside), a
+   * substitution, a group or condition or function, or an assignment of a variable that names a
+   * program is on it. Meaningful only when the reading is not `uncertain`.
    */
   readonly inert: ReadonlySet<number>;
 }
@@ -94,6 +94,8 @@ interface Current {
   readonly args: string[];
   /** Mentions in the arguments that the command is known to only print or carry as a message. */
   readonly hits: number[];
+  /** More words than are kept were given: an option among them cannot be ruled out. */
+  overflowed: boolean;
   /** Nothing prefixed it: no assignment, no `sudo`, no `env`. */
   readonly plain: boolean;
   readonly wanted: { readonly start: number; readonly words: number[]; truncated: boolean } | null;
@@ -102,7 +104,7 @@ interface Current {
 /** Nested constructs deeper than this are not read: the answer is that the reading is not sure. */
 const MAX_NESTING = 24;
 /** How many of the first arguments of a command are kept to tell what it is (`git commit`). */
-const MAX_KEPT_ARGS = 8;
+const MAX_KEPT_ARGS = 64;
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 /** Words after which a command begins, which are not commands themselves. */
 const OPENERS: ReadonlySet<string> = new Set([
@@ -362,6 +364,8 @@ class RangeLexer {
     const raw = this.ctx.text.slice(start, end);
     if (ENV_ASSIGNMENT.test(raw)) {
       this.sawPrefix = true;
+      // An assignment of a variable that names a program changes what git or an editor runs.
+      if (NAMES_A_PROGRAM_VARIABLE.test(raw)) this.ctx.inertAllowed = false;
       return;
     }
     const name = canonicalCommand(raw);
@@ -372,7 +376,8 @@ class RangeLexer {
     }
     if (isPrefixWord(name)) {
       this.sawPrefix = true;
-      if (STRING_RUNNERS.has(name)) this.ctx.inertAllowed = false;
+      // A wrapper is a command word of the line that is not in the closed set.
+      this.ctx.inertAllowed = false;
       this.prefix = name;
       this.plainWords = LOCAL_WRAPPERS[name] ?? 0;
       if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
@@ -405,21 +410,9 @@ class RangeLexer {
     if (this.piped && SHELL_WORDS.has(name)) this.ctx.uncertain = true;
     this.piped = false;
     if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
-    if (this.runsAString(name)) this.ctx.inertAllowed = false;
     const wanted = this.ctx.wanted(name) ? { start, words: [start, end], truncated: false } : null;
-    this.cur = { name, args: [], hits: [], plain: !this.sawPrefix, wanted };
+    this.cur = { name, args: [], hits: [], overflowed: false, plain: !this.sawPrefix, wanted };
     this.previous = '';
-  }
-
-  /** Whether the command word is one that runs a string, a program or another command, or makes the line one. */
-  private runsAString(name: string): boolean {
-    return (
-      STRING_RUNNERS.has(name) ||
-      COMPOUND_WORDS.has(name) ||
-      SHELL_WORDS.has(name) ||
-      RUNS_A_COMMAND_STRING.has(name) ||
-      RUNS_ITS_ARGUMENTS.has(name)
-    );
   }
 
   private argument(start: number, end: number): void {
@@ -437,6 +430,7 @@ class RangeLexer {
     if (cur.name === 'git' && gitSubcommand(cur.args) === undefined && isGitConfigOption(word))
       this.ctx.inertAllowed = false;
     if (cur.args.length < MAX_KEPT_ARGS) cur.args.push(word);
+    else cur.overflowed = true;
     this.previous = word;
     this.watch(cur.name, raw, start, end);
   }
@@ -491,6 +485,7 @@ class RangeLexer {
   private close(at: number): void {
     const { cur } = this;
     if (cur !== null) {
+      if (!isClosedSetCommand(cur.name, cur.args, !cur.overflowed)) this.ctx.inertAllowed = false;
       if (cur.wanted !== null)
         this.ctx.commands.set(cur.wanted.start, {
           end: at,

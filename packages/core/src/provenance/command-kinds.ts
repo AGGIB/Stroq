@@ -4,11 +4,15 @@
  * The set of commands whose arguments are PROVEN to be only text is closed and tiny on purpose: a
  * launcher named in what a command is given is no doubt about what will run only when nothing can
  * run it, and every command that has ever been added to such a list has had an option, a pipe or
- * an alias that does. Everything outside the set keeps the doubt.
+ * an alias that does. The leniency is deny-by-default for the whole line: it holds only if EVERY
+ * command on the line is in the set. Everything else keeps the doubt.
  */
 
 /** Commands that print what they are given. */
 export const PRINTERS: ReadonlySet<string> = new Set(['echo', 'printf']);
+
+/** Commands that do nothing: they may stand on a line without making it a program. */
+const DOES_NOTHING: ReadonlySet<string> = new Set(['true', ':']);
 
 /** The options of git that take a value before the subcommand: `git -C app commit`. */
 const GIT_VALUE_OPTIONS: ReadonlySet<string> = new Set(['-C', '--git-dir', '--work-tree']);
@@ -41,29 +45,6 @@ export function isGitMessageCommand(args: readonly string[]): boolean {
 export const isMessageFlag = (word: string): boolean =>
   word === '--message' || /^-[A-Za-z]*m$/.test(word);
 
-/** Commands that run a string they are given, or other commands: nothing on a line that holds one is proven inert. */
-export const STRING_RUNNERS: ReadonlySet<string> = new Set(['eval', 'source', '.', 'xargs']);
-
-/** Words that make a command line a program: conditions, loops, groups and function bodies. */
-export const COMPOUND_WORDS: ReadonlySet<string> = new Set([
-  'if',
-  'then',
-  'else',
-  'elif',
-  'fi',
-  'while',
-  'until',
-  'do',
-  'done',
-  'for',
-  'select',
-  'case',
-  'esac',
-  'function',
-  '{',
-  '}',
-]);
-
 /** Commands that run a string given with `-c` or `--command`. */
 export const RUNS_A_COMMAND_STRING: ReadonlySet<string> = new Set([
   'su',
@@ -77,3 +58,34 @@ export const RUNS_ITS_ARGUMENTS: ReadonlySet<string> = new Set(['watch', 'parall
 
 /** The options of `find` that run a command. */
 export const FIND_RUNS: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+
+/** An option of git that opens an editor, whose command a setting or a variable can name. */
+const isEditOption = (word: string): boolean =>
+  word === '--edit' || /^-[A-Za-z]*e[A-Za-z]*$/.test(word);
+
+/**
+ * Whether a command is in the closed set the line may be made of: `echo`, `printf` (not `-v`, which
+ * assigns), `git commit`, `git tag` and `git notes add` with no option that opens an editor or
+ * names a setting, `true` and `:`. Any other command word, a dynamic one (an expansion is no name)
+ * and a function included, is not. `args` are its words, unquoted, and `complete` is whether they
+ * are all of them: an option that is not seen cannot be ruled out.
+ */
+export function isClosedSetCommand(
+  name: string,
+  args: readonly string[],
+  complete = true,
+): boolean {
+  if (DOES_NOTHING.has(name)) return true;
+  if (name === 'echo') return true;
+  if (name === 'printf')
+    return complete && !args.some((arg) => arg === '-v' || arg.startsWith('-v'));
+  if (name !== 'git') return false;
+  return (
+    complete &&
+    isGitMessageCommand(args) &&
+    !args.some((arg) => isGitConfigOption(arg) || (arg.startsWith('-') && isEditOption(arg)))
+  );
+}
+
+/** An assignment of a variable that decides what git, an editor or a pager runs. */
+export const NAMES_A_PROGRAM_VARIABLE = /^(?:GIT_[A-Za-z0-9_]*|EDITOR|VISUAL|PAGER)\+?=/;
