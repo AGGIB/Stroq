@@ -77,6 +77,7 @@ it.each([
     'the pinned server files changed (digest mismatch)',
     'the pinned server files changed (digest mismatch)',
   ],
+  ['cannot verify a linked store folder', 'cannot verify a linked store folder'],
   ['unsafe\nfilesystem path', 'pinned server cannot be verified'],
 ])('reports a fixed refusal reason for %s', async (reason, expected) => {
   const config = options();

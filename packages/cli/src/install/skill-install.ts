@@ -33,6 +33,7 @@ import { auditReceipt } from './receipt.js';
 import { collectSkillStore, tidyStore } from './store-gc.js';
 import {
   assertPlainDirectory,
+  assertPlainStoreHome,
   assertInstallablePlatform,
   assertWritableTree,
   putStore,
@@ -178,25 +179,23 @@ async function markDrift(
   });
 }
 
-function receipt(
+const receipt = (
   name: string,
   action: Receipt['action'],
   from: string | null,
   to: string | null,
   material: boolean,
-): Receipt {
-  return {
-    v: 1,
-    at: new Date().toISOString(),
-    action,
-    name,
-    from,
-    to,
-    material,
-    confirmed: true,
-    stroq: stroqVersion(),
-  };
-}
+): Receipt => ({
+  v: 1,
+  at: new Date().toISOString(),
+  action,
+  name,
+  from,
+  to,
+  material,
+  confirmed: true,
+  stroq: stroqVersion(),
+});
 
 /** Stage on the same filesystem, outside the host's skills directory. */
 async function replaceSkill(
@@ -234,6 +233,7 @@ async function replaceSkill(
 }
 
 async function prepareSkill(sourceOrName: string, options: SkillOptions) {
+  await assertPlainStoreHome(options.stroqHome);
   const initial = await readPassports(options.stroqHome);
   const installed = Object.hasOwn(initial.skills, sourceOrName)
     ? initial.skills[sourceOrName]
@@ -277,6 +277,9 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   return { name, prior, previous, target, material, restoring, source, made, oldTree };
 }
 
+const DRIFT_RESTORE_ERROR =
+  'the installed skill drifted; use add <name> --restore to restore the confirmed bytes';
+
 export async function addSkill(sourceOrName: string, options: SkillOptions): Promise<SkillRecord> {
   requirePerson(options);
   const prepared = await prepareSkill(sourceOrName, options);
@@ -287,21 +290,16 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
         throw new Error('the lock changed before confirming; read and confirm again');
       await markDrift(options.stroqHome, lock, name, previous);
     });
-    throw new Error(
-      'the installed skill drifted; use add <name> --restore to restore the confirmed bytes',
-    );
+    throw new Error(DRIFT_RESTORE_ERROR);
   }
   await confirmSkill(options.terminal, prepared);
   return withPassports(options.stroqHome, async (lock) => {
     if (JSON.stringify(lock.skills[name]) !== JSON.stringify(prior))
       throw new Error('the lock changed while confirming; read and confirm again');
     targetOf(name, options, previous);
-    const drift = previous !== undefined && (await isDrifted(previous));
-    if (drift && !restoring) {
+    if (previous !== undefined && (await isDrifted(previous)) && !restoring) {
       await markDrift(options.stroqHome, lock, name, previous);
-      throw new Error(
-        'the installed skill drifted; use add <name> --restore to restore the confirmed bytes',
-      );
+      throw new Error(DRIFT_RESTORE_ERROR);
     }
     if (previous === undefined && (await assertPlainDirectory(target.path)))
       throw new Error('the skill directory now exists; refusing to replace it');
@@ -319,18 +317,14 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
       root: target.root,
       history: [...(prior?.history ?? []), record],
     };
-    await replaceSkill(made.tree, digest, target.path, async () =>
-      writePassports(options.stroqHome, { ...lock, skills: { ...lock.skills, [name]: next } }),
+    const nextLock = { ...lock, skills: { ...lock.skills, [name]: next } };
+    await replaceSkill(made.tree, digest, target.path, () =>
+      writePassports(options.stroqHome, nextLock),
     );
     await auditReceipt(options.stroqHome, record);
     if (previous !== undefined)
       await tidyStore(options.terminal, previous.digest, () =>
-        collectSkillStore(
-          options.stroqHome,
-          { ...lock, skills: { ...lock.skills, [name]: next } },
-          '',
-          previous,
-        ),
+        collectSkillStore(options.stroqHome, nextLock, '', previous),
       );
     return next;
   });

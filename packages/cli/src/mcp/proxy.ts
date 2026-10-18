@@ -112,6 +112,11 @@ function pinRefusal(error: unknown, server: string): string {
   if (message === 'this server and digest are not confirmed on this machine') return message;
   if (message === 'the pinned server files changed (digest mismatch)') return message;
   if (message === 'the stored manifest digest changed') return message;
+  if (message === 'cannot verify a linked store folder') return message;
+  if (message === 'cannot verify a linked pin record') return message;
+  if (message === 'cannot verify a bounded regular pin record') return message;
+  if (message === 'cannot verify all files of the pinned tree') return message;
+  if (message === 'cannot use a runtime folder owned by another user') return message;
   // A wrapper that is not the one confirmed: the phrase, and the command that confirms the wrapper as it stands.
   if (BIND_PHRASES.includes(message))
     return `${message} (to confirm it again run: ${reconfirmCommand(server)})`;

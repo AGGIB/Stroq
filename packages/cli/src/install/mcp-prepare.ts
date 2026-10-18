@@ -24,7 +24,12 @@ import {
 import { recordedCwd, recordedTarget, target, targetRules, type McpTarget } from './mcp-target.js';
 import { readDirTree } from './read-dir.js';
 import { sourceTypeOf } from './read-source.js';
-import { assertInstallablePlatform, assertWritableTree, readStoredTreeOf } from './store.js';
+import {
+  assertInstallablePlatform,
+  assertPlainStoreHome,
+  assertWritableTree,
+  readStoredTreeOf,
+} from './store.js';
 import type { Passport, Tree } from './types.js';
 
 async function inspectSource(source: string): Promise<{ tree: Tree; passport: Passport }> {
@@ -141,6 +146,7 @@ export async function prepareMcp(
   options: McpInstallOptions,
   initial: Passports,
 ): Promise<PreparedMcp> {
+  await assertPlainStoreHome(options.stroqHome);
   const named = recordOf(initial, sourceOrName);
   if (options.restore && named === undefined)
     throw new Error('--restore needs the name of an installed MCP server');

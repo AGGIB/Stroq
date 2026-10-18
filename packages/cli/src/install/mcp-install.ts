@@ -20,7 +20,7 @@ import {
 import { showMcpScreen } from './mcp-screen.js';
 import { recordedTarget, targetRules } from './mcp-target.js';
 import { collectMcpStore, tidyStore } from './store-gc.js';
-import { putStore, readStoredTreeOf } from './store.js';
+import { assertPlainStoreHome, putStore, readStoredTreeOf } from './store.js';
 
 export { entrypointOf } from '../mcp/entrypoint.js';
 export type { McpInstallOptions, McpRecord } from './mcp-record.js';
@@ -34,6 +34,7 @@ async function confirmed(options: McpInstallOptions, prepared: PreparedMcp): Pro
 
 export async function addMcp(sourceOrName: string, options: McpInstallOptions): Promise<McpRecord> {
   requirePerson(options);
+  await assertPlainStoreHome(options.stroqHome);
   const initial = await readPassports(options.stroqHome);
   const prepared = await prepareMcp(sourceOrName, options, initial);
   const { name, previous, made, digest, selected, current, written, material } = prepared;

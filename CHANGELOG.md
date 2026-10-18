@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`stroq add` refuses a symlinked `~/.stroq`, `store` or `run` folder before asking for confirmation, and the runtime pin surfaces its fixed refusal phrase without changing the mode of existing folders.** Previously `stroq add --kind mcp` succeeded when `STROQ_HOME` was a symbolic link while the runtime pin then refused to start (`cannot verify a linked store folder`) behind the generic proxy refusal, and `privateRunDir` changed the mode of `~/.stroq` to `0700` even when it did not create the directory.
+
 ## [0.26.0] - 2026-10-18
 
 ### Added
