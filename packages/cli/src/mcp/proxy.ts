@@ -131,6 +131,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
     ...(serverCwd === undefined ? {} : { cwd: serverCwd }),
     ...(options.passEnv === null ? {} : { env: childEnv(options.passEnv) }),
     stdio: ['pipe', 'pipe', 'inherit'],
+    detached: process.platform !== 'win32',
   });
   const serverIn = child.stdin;
   const serverOut = child.stdout;

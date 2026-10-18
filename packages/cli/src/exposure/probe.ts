@@ -80,6 +80,7 @@ async function probeOne(spec: ServerSpec, timeoutMs: number): Promise<ProbeResul
       // passes it and what `stroq mcp` does too.
       env: { ...childEnv([]), ...spec.env },
       stdio: ['pipe', 'pipe', 'ignore'],
+      detached: process.platform !== 'win32',
     });
   } catch (err) {
     return { server: spec.name, tools: 0, flagged: [], error: (err as Error).message };

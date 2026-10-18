@@ -98,8 +98,10 @@ describe('the --strict section of docs/AGENTS.md', () => {
       expect(section).toContain('The dry run uses the bundled rules');
     });
 
-    it('says ending the server signals the direct child on POSIX and the tree on Windows', () => {
-      expect(section).toContain('Ending the server signals the direct child');
+    it('says ending the server signals the process group on POSIX and the tree on Windows', () => {
+      expect(section).toContain(
+        'Ending the server signals the process group on POSIX and the tree on Windows',
+      );
       expect(section).toContain('`sh -c` or `npx`');
       expect(section).toContain('On Windows the whole tree is killed');
     });

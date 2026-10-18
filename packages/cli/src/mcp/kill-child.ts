@@ -28,6 +28,9 @@ export type KillSpawn = (
   options: { readonly stdio: 'ignore'; readonly windowsHide: true },
 ) => { on: (event: 'error', listener: (err: Error) => void) => unknown; unref: () => unknown };
 
+/** Sends a signal to a process or process group; injected so tests never send real signals. */
+export type KillSignal = (pid: number, signal: NodeJS.Signals) => void;
+
 /** The subset of `ChildProcess` this module needs, so callers need not own a real one. */
 export interface Killable {
   readonly pid?: number | undefined;
@@ -38,13 +41,16 @@ export interface Killable {
 }
 
 /**
- * Ends `child` and, on Windows, everything it started. `plat` and `spawnFn` default
- * to the real process; a test overrides them to exercise one platform's rules on the
- * other, the way `childEnv` does.
+ * Ends `child` and everything it started. On Windows, `taskkill /T` walks the process
+ * tree; on POSIX, signalling `-pid` terminates the entire process group created when
+ * the child was spawned detached. `plat`, `spawnFn` and `killGroupFn` default to the
+ * real platform and process calls; tests override them to exercise cross-platform
+ * rules without starting real processes.
  *
  * The direct signal is sent on both platforms, Windows included: `taskkill` can be
  * missing from a stripped image or blocked by policy, and a failed tree kill must
- * still leave the shim dead rather than leave everything alive. Sending it as well
+ * still leave the shim dead rather than leave everything alive. On POSIX it also acts
+ * as a fallback if the process was not detached or group signalling fails. Sending it
  * costs nothing — terminating an already-terminated process is a no-op that Node
  * reports through `ESRCH`, which `kill` swallows.
  */
@@ -53,6 +59,7 @@ export function killChildTree(
   signal: NodeJS.Signals,
   plat: NodeJS.Platform = process.platform,
   spawnFn: KillSpawn = spawn as unknown as KillSpawn,
+  killGroupFn: KillSignal = (pid, sig) => process.kill(pid, sig),
 ): void {
   // A child that has already exited has nothing left to stop, and on Windows its pid may belong to
   // another process by now: `taskkill /pid` would end that one. (`close` can lag `exit` when a
@@ -72,6 +79,12 @@ export function killChildTree(
     } catch {
       // `taskkill` is not on PATH, or spawning is refused outright. The direct
       // signal below is the fallback, and the shim at least does not survive.
+    }
+  } else if (pid !== undefined) {
+    try {
+      killGroupFn(-pid, signal);
+    } catch {
+      // The process group is already gone, or the child was not spawned detached.
     }
   }
   try {
