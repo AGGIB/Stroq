@@ -26,12 +26,14 @@ GitHub Actions usage remains subject to GitHub's runner limits and billing.
 4. Open a representative PR and confirm that Codex actually completes a review.
 
 See the [official Codex GitHub integration documentation](https://learn.chatgpt.com/docs/third-party/github).
-The native integration does not document a machine-readable successful review
-signal. A missing comment, an emoji reaction, or a successful CI job is not a
-Codex approval. The proposed merge gate therefore requires an explicit approval
-from a trusted human reviewer on the current PR commit. Fully autonomous semantic
-issue triage and a machine-readable AI merge verdict are not enabled by this
-subscription-only setup.
+The native integration does not document a stable machine-readable successful
+review API. A live review in this repository emitted a versioned
+`codex-review-state:v1` summary containing the reviewed commit SHA, but its completed
+state and provenance must be verified before it can authorize autonomous merges.
+A missing comment, an emoji reaction, or a successful CI job is not a Codex
+approval. This proposal therefore requires an explicit approval from a trusted
+human reviewer on the current PR commit. Fully autonomous semantic issue triage
+and an AI merge verdict are not enabled by this preview.
 
 ## Review the preview
 
@@ -76,6 +78,6 @@ Before enabling a writer, add explicit manual-dispatch support to CI, CodeQL and
 Scorecard and verify the post-merge dispatches. The preview does not make those
 changes or dispatch those workflows.
 
-The previous Mac-based Codex heartbeat is paused during migration. Neither this
-preview nor a draft PR is evidence that the native cloud Codex setting or a writer
-has been enabled. Verify those settings separately before relying on them.
+Neither this preview nor a draft PR enables native cloud Codex settings or a
+writer. Verify those settings separately before relying on them, and avoid running
+a second maintainer with mutation rights during migration.
