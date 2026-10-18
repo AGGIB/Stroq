@@ -1,68 +1,24 @@
 /**
- * What is known about commands by name, for the reading of a command line (`command-map.ts`): which
- * ones only show their arguments and so make a launcher in them a mention that does nothing, and
- * which ones run a string they are given, so that nothing in a line that holds one is proven
- * inert.
+ * What is known about commands by name, for the reading of a command line (`command-map.ts`).
+ *
+ * The set of commands whose arguments are PROVEN to be only text is closed and tiny on purpose: a
+ * launcher named in what a command is given is no doubt about what will run only when nothing can
+ * run it, and every command that has ever been added to such a list has had an option, a pipe or
+ * an alias that does. Everything outside the set keeps the doubt.
  */
 
-/** Commands that print, search, copy or list what they are given and run none of it. */
-const INERT_COMMANDS: ReadonlySet<string> = new Set([
-  'echo',
-  'printf',
-  'cat',
-  'tee',
-  'head',
-  'tail',
-  'grep',
-  'egrep',
-  'fgrep',
-  'rg',
-  'wc',
-  'ls',
-  'cp',
-  'mv',
-  'rm',
-  'mkdir',
-  'touch',
-  'test',
-  '[',
-  '[[',
-  'sort',
-  'uniq',
-  'cut',
-  'tr',
-  'diff',
-  'cmp',
-  'basename',
-  'dirname',
-  'realpath',
-  'date',
-  'jq',
-]);
-
-/** The subcommands of git that take a message or a pattern and run none of it. */
-const INERT_GIT: ReadonlySet<string> = new Set([
-  'commit',
-  'tag',
-  'notes',
-  'merge',
-  'log',
-  'grep',
-  'show',
-  'diff',
-  'add',
-  'status',
-  'stash',
-]);
-
-/** The command groups of gh that take a title or a body and send it to GitHub as text. */
-const INERT_GH: ReadonlySet<string> = new Set(['pr', 'issue', 'release', 'gist', 'api']);
+/** Commands that print what they are given. */
+export const PRINTERS: ReadonlySet<string> = new Set(['echo', 'printf']);
 
 /** The options of git that take a value before the subcommand: `git -C app commit`. */
-const GIT_VALUE_OPTIONS: ReadonlySet<string> = new Set(['-C', '-c', '--git-dir', '--work-tree']);
+const GIT_VALUE_OPTIONS: ReadonlySet<string> = new Set(['-C', '--git-dir', '--work-tree']);
+
+/** The options of git that make a command line a program: a setting can name a command to run. */
+export const isGitConfigOption = (word: string): boolean =>
+  word === '-c' || word === '--config-env' || word.startsWith('--config-env=');
 
 /** The first word of `args` that is not an option of git, skipping the values of those that take one. */
-function gitSubcommand(args: readonly string[]): string | undefined {
+export function gitSubcommand(args: readonly string[]): string | undefined {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] ?? '';
     if (GIT_VALUE_OPTIONS.has(arg)) i += 1;
@@ -71,18 +27,42 @@ function gitSubcommand(args: readonly string[]): string | undefined {
   return undefined;
 }
 
-/**
- * Whether a command is known to run nothing of the words it is given: it is on a short list of
- * commands that print or search them, or it is git or gh doing so with a message. A command that
- * is not known to is not proven to. `args` are its first words, unquoted.
- */
-export function isInertCommand(name: string, args: readonly string[]): boolean {
-  if (INERT_COMMANDS.has(name)) return true;
-  if (name === 'git') return INERT_GIT.has(gitSubcommand(args) ?? '');
-  if (name === 'gh')
-    return INERT_GH.has((args.find((a) => !a.startsWith('-')) ?? '').toLowerCase());
-  return false;
+/** Whether the words so far are those of a git command that takes a message: `commit`, `tag`, `notes add`. */
+export function isGitMessageCommand(args: readonly string[]): boolean {
+  const subcommand = gitSubcommand(args);
+  return (
+    subcommand === 'commit' ||
+    subcommand === 'tag' ||
+    (subcommand === 'notes' && args.some((arg) => arg.toLowerCase() === 'add'))
+  );
 }
+
+/** A flag that gives git a message: `-m`, `-am`, `--message`. */
+export const isMessageFlag = (word: string): boolean =>
+  word === '--message' || /^-[A-Za-z]*m$/.test(word);
+
+/** Commands that run a string they are given, or other commands: nothing on a line that holds one is proven inert. */
+export const STRING_RUNNERS: ReadonlySet<string> = new Set(['eval', 'source', '.', 'xargs']);
+
+/** Words that make a command line a program: conditions, loops, groups and function bodies. */
+export const COMPOUND_WORDS: ReadonlySet<string> = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'while',
+  'until',
+  'do',
+  'done',
+  'for',
+  'select',
+  'case',
+  'esac',
+  'function',
+  '{',
+  '}',
+]);
 
 /** Commands that run a string given with `-c` or `--command`. */
 export const RUNS_A_COMMAND_STRING: ReadonlySet<string> = new Set([

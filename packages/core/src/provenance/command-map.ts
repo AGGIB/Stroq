@@ -15,10 +15,16 @@ import {
 } from '../actions/shell-skip.js';
 import { LOCAL_WRAPPERS, PREFIX_WORDS, optionTakesValue } from '../actions/shell-wrappers.js';
 import {
+  COMPOUND_WORDS,
   FIND_RUNS,
+  PRINTERS,
   RUNS_A_COMMAND_STRING,
   RUNS_ITS_ARGUMENTS,
-  isInertCommand,
+  STRING_RUNNERS,
+  gitSubcommand,
+  isGitConfigOption,
+  isGitMessageCommand,
+  isMessageFlag,
 } from './command-kinds.js';
 import { shellWord } from './shell-word.js';
 import { canonicalCommand } from './tool-phrases.js';
@@ -28,8 +34,10 @@ import { canonicalCommand } from './tool-phrases.js';
  * command (after the words that only prefix it), the words that follow, and where it ends. A
  * runner or installer that stands there is a command that will run. One that stands among the
  * arguments of another command is a mention of one, and is no doubt about what will run only when
- * the line PROVES it inert: the arguments of a command known to run none of them (`echo`, `git
- * commit -m`), the text of a here-document or a here-string given to one, a comment.
+ * the line PROVES it inert, by a closed and tiny rule (see `inert` below): the message of `git
+ * commit`, `git tag` or `git notes add`, the arguments of `echo` and `printf`, a line that is only a
+ * comment, on a command line that has no pipe, redirection, substitution, group, condition or
+ * string-running word anywhere.
  *
  * It is not a shell. It knows quotes, `$'…'`, substitutions, backticks, comments, here-documents,
  * separators, subshells and the string a shell is given with `-c`. Whatever it does not model, and
@@ -57,7 +65,13 @@ export interface CommandMap {
   readonly commands: ReadonlyMap<number, LexedCommand>;
   /** Something was left open or hard to read: nothing here is known to be a mention. */
   readonly uncertain: boolean;
-  /** Of the mentions asked about, the ones the line proves inert. Meaningful only when it is not `uncertain`. */
+  /**
+   * Of the mentions asked about, the ones the line proves inert. Empty when anything on the line
+   * could make an inert-looking command run what it is given: a pipe, a redirection (a here-document
+   * to `git commit` aside), a substitution or backtick, a group or condition or function, a word
+   * that runs a string (`eval`, `source`, `.`, `xargs`, a shell, `ssh`, `su`, `watch`, ...), or an
+   * option of git that can name a command (`-c`, `--config-env`). Meaningful only when the reading is not `uncertain`.
+   */
   readonly inert: ReadonlySet<number>;
 }
 
@@ -69,6 +83,8 @@ interface Context {
   readonly mentions: readonly number[];
   readonly commands: Map<number, LexedCommand>;
   readonly inert: Set<number>;
+  /** Nothing on the line has made an inert-looking command able to run what it is given. */
+  inertAllowed: boolean;
   uncertain: boolean;
 }
 
@@ -76,7 +92,10 @@ interface Context {
 interface Current {
   readonly name: string;
   readonly args: string[];
+  /** Mentions in the arguments that the command is known to only print or carry as a message. */
   readonly hits: number[];
+  /** Nothing prefixed it: no assignment, no `sudo`, no `env`. */
+  readonly plain: boolean;
   readonly wanted: { readonly start: number; readonly words: number[]; truncated: boolean } | null;
 }
 
@@ -134,8 +153,9 @@ class RangeLexer {
   private plainWords = 0;
   private skipValue = false;
   private target = false;
-  private targetInert = false;
   private piped = false;
+  private sawPrefix = false;
+  private previous = '';
   private cur: Current | null = null;
   private codeNext = false;
   private sawOperand = false;
@@ -167,8 +187,10 @@ class RangeLexer {
     else if (char === '\n') this.newline();
     else if (char === '#' && startsComment(text, this.i, this.from)) this.comment();
     else if (char === ';') this.endAfter(text.charAt(this.i + 1) === ';' ? 2 : 1);
-    else if (char === '(' || char === ')') this.endAfter(1);
-    else if (char === '|') this.pipe();
+    else if (char === '(' || char === ')') {
+      this.ctx.inertAllowed = false;
+      this.endAfter(1);
+    } else if (char === '|') this.pipe();
     else if (char === '&' && text.charAt(this.i + 1) === '&') this.endAfter(2);
     else if (char === '&' && text.charAt(this.i + 1) !== '>') this.endAfter(1);
     else if (char === '<' || char === '>' || char === '&') this.redirect();
@@ -192,6 +214,7 @@ class RangeLexer {
     const next = this.ctx.text.charAt(this.i + 1);
     this.endAfter(next === '|' || next === '&' ? 2 : 1);
     this.piped = next !== '|';
+    if (this.piped) this.ctx.inertAllowed = false;
   }
 
   private newline(): void {
@@ -222,17 +245,25 @@ class RangeLexer {
     this.close(this.i);
     const eol = this.ctx.text.indexOf('\n', this.i);
     const end = eol === -1 || eol > this.to ? this.to : eol;
-    this.markInert(this.i, end);
+    if (this.startsItsLine(this.i)) this.markInert(this.i, end);
     this.i = end;
+  }
+
+  /** Whether only blanks stand before `at` on its line: the comment is the whole line. */
+  private startsItsLine(at: number): boolean {
+    const { text } = this.ctx;
+    const lineStart = text.lastIndexOf('\n', at - 1) + 1;
+    return text.slice(lineStart, at).trim() === '';
   }
 
   private markInert(from: number, to: number): void {
     for (const mention of mentionsIn(this.ctx, from, to)) this.ctx.inert.add(mention);
   }
 
-  /** Whether the command being read is known to run nothing of what it is given. */
-  private currentIsInert(): boolean {
-    return this.cur !== null && isInertCommand(this.cur.name, this.cur.args);
+  /** Whether the command being read is a git command that takes a message, with nothing prefixed to it. */
+  private takesAMessage(): boolean {
+    const { cur } = this;
+    return cur !== null && cur.plain && cur.name === 'git' && isGitMessageCommand(cur.args);
   }
 
   /** A here-document or here-string given to a shell is a program the line does not show. */
@@ -240,15 +271,19 @@ class RangeLexer {
     if (this.cur !== null && SHELL_WORDS.has(this.cur.name)) this.ctx.uncertain = true;
   }
 
-  /** A redirection: a here-document is read for its body; any other puts the word after it aside. */
+  /**
+   * A redirection: a here-document is read for its body; any other puts the word after it aside.
+   * Only a here-document given to a git command that takes a message leaves a line inert; every
+   * other redirection of any kind may carry what a command printed to somewhere it runs.
+   */
   private redirect(): void {
     const { text } = this.ctx;
     const at = this.i;
     if (text.startsWith('<<<', at)) {
       this.feedsAShell();
+      this.ctx.inertAllowed = false;
       this.i += 3;
       this.target = true;
-      this.targetInert = this.currentIsInert();
     } else if (text.startsWith('<<', at)) {
       this.feedsAShell();
       const open = readOpener(text, at);
@@ -256,21 +291,24 @@ class RangeLexer {
         this.ctx.uncertain = true;
         this.i += 2;
       } else {
+        const inert = this.takesAMessage();
+        if (!inert) this.ctx.inertAllowed = false;
         this.pending.push(open);
-        this.pendingInert.push(this.currentIsInert());
+        this.pendingInert.push(inert);
         this.i = open.end;
       }
     } else if (
       (text.charAt(at) === '<' || text.charAt(at) === '>') &&
       text.charAt(at + 1) === '('
     ) {
+      this.ctx.inertAllowed = false;
       this.word();
     } else {
+      this.ctx.inertAllowed = false;
       REDIRECTION.lastIndex = at;
       const operator = REDIRECTION.exec(text);
       this.i += operator === null ? 1 : operator[0].length;
       this.target = true;
-      this.targetInert = false;
     }
   }
 
@@ -280,7 +318,6 @@ class RangeLexer {
     this.i = end;
     if (this.target) {
       this.target = false;
-      if (this.targetInert) this.markInert(start, end);
       return;
     }
     if (this.isDescriptor(start, end)) return;
@@ -323,11 +360,19 @@ class RangeLexer {
   /** A word where a command may begin: an assignment, a keyword or a prefix is passed over; anything else is the command. */
   private leading(start: number, end: number): void {
     const raw = this.ctx.text.slice(start, end);
-    if (ENV_ASSIGNMENT.test(raw)) return;
+    if (ENV_ASSIGNMENT.test(raw)) {
+      this.sawPrefix = true;
+      return;
+    }
     const name = canonicalCommand(raw);
     if (this.prefix !== null && this.passesOver(raw)) return;
-    if (this.prefix === null && OPENERS.has(name)) return;
+    if (this.prefix === null && OPENERS.has(name)) {
+      this.ctx.inertAllowed = false;
+      return;
+    }
     if (isPrefixWord(name)) {
+      this.sawPrefix = true;
+      if (STRING_RUNNERS.has(name)) this.ctx.inertAllowed = false;
       this.prefix = name;
       this.plainWords = LOCAL_WRAPPERS[name] ?? 0;
       if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
@@ -360,8 +405,21 @@ class RangeLexer {
     if (this.piped && SHELL_WORDS.has(name)) this.ctx.uncertain = true;
     this.piped = false;
     if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
+    if (this.runsAString(name)) this.ctx.inertAllowed = false;
     const wanted = this.ctx.wanted(name) ? { start, words: [start, end], truncated: false } : null;
-    this.cur = { name, args: [], hits: [], wanted };
+    this.cur = { name, args: [], hits: [], plain: !this.sawPrefix, wanted };
+    this.previous = '';
+  }
+
+  /** Whether the command word is one that runs a string, a program or another command, or makes the line one. */
+  private runsAString(name: string): boolean {
+    return (
+      STRING_RUNNERS.has(name) ||
+      COMPOUND_WORDS.has(name) ||
+      SHELL_WORDS.has(name) ||
+      RUNS_A_COMMAND_STRING.has(name) ||
+      RUNS_ITS_ARGUMENTS.has(name)
+    );
   }
 
   private argument(start: number, end: number): void {
@@ -371,10 +429,31 @@ class RangeLexer {
       if (start - cur.wanted.start >= this.ctx.window) cur.wanted.truncated = true;
       else cur.wanted.words.push(start, end);
     }
-    if (this.ctx.mentions.length > 0) cur.hits.push(...mentionsIn(this.ctx, start, end));
     const raw = this.ctx.text.slice(start, end);
-    if (cur.args.length < MAX_KEPT_ARGS) cur.args.push(shellWord(raw).word);
+    if (this.ctx.mentions.length > 0 && this.isOnlyCarried(cur, start, end))
+      cur.hits.push(...mentionsIn(this.ctx, start, end));
+    const word = shellWord(raw).word;
+    // An option of git that can name a command to run makes the line a program.
+    if (cur.name === 'git' && gitSubcommand(cur.args) === undefined && isGitConfigOption(word))
+      this.ctx.inertAllowed = false;
+    if (cur.args.length < MAX_KEPT_ARGS) cur.args.push(word);
+    this.previous = word;
     this.watch(cur.name, raw, start, end);
+  }
+
+  /**
+   * Whether the word is only printed or carried: any argument of `echo` and `printf`, and the one
+   * quoted string that is the message of a git command that takes one (`git commit -m "…"`).
+   */
+  private isOnlyCarried(cur: Current, start: number, end: number): boolean {
+    if (!cur.plain) return false;
+    if (PRINTERS.has(cur.name)) return true;
+    return (
+      cur.name === 'git' &&
+      isGitMessageCommand(cur.args) &&
+      isMessageFlag(this.previous) &&
+      this.isWholeQuotedString(start, end)
+    );
   }
 
   /** What an argument of a command that runs a string does to the reading. */
@@ -429,16 +508,13 @@ class RangeLexer {
     this.piped = false;
     this.codeNext = false;
     this.sawOperand = false;
+    this.sawPrefix = false;
+    this.previous = '';
   }
 
-  /** Says, of the mentions among a command's arguments, whether the command is known to run none of them. */
+  /** Marks the mentions that the command only prints or carries as a message. */
   private settle(cur: Current): void {
-    if (cur.hits.length === 0) return;
-    const inert = isInertCommand(cur.name, cur.args);
-    for (const hit of cur.hits) {
-      if (inert) this.ctx.inert.add(hit);
-      else this.ctx.inert.delete(hit);
-    }
+    for (const hit of cur.hits) this.ctx.inert.add(hit);
   }
 
   /** The commands that run inside this stretch, read as stretches of their own. */
@@ -449,6 +525,8 @@ class RangeLexer {
       ...this.strings,
     ];
     if (inner.length === 0) return;
+    // A command that runs inside another could be given what an inert command printed.
+    this.ctx.inertAllowed = false;
     if (this.depth >= MAX_NESTING) {
       this.ctx.uncertain = true;
       return;
@@ -476,8 +554,13 @@ export function commandMap(
     mentions,
     commands: new Map(),
     inert: new Set(),
+    inertAllowed: true,
     uncertain: false,
   };
   new RangeLexer(ctx, 0, text.length, 0).run();
-  return { commands: ctx.commands, uncertain: ctx.uncertain, inert: ctx.inert };
+  return {
+    commands: ctx.commands,
+    uncertain: ctx.uncertain,
+    inert: ctx.inertAllowed && !ctx.uncertain ? ctx.inert : new Set(),
+  };
 }

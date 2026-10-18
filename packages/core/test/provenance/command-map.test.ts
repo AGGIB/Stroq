@@ -228,3 +228,90 @@ describe('the cost of reading', () => {
     }
   });
 });
+
+// A mention is inert only by a closed and tiny rule: the message of `git commit`, `git tag` or
+// `git notes add`, the arguments of `echo` and `printf`, a line that is only a comment, on a line
+// that has no pipe, redirection, substitution, group, condition or string-running word anywhere.
+describe('what a line proves inert', () => {
+  const mentionsOf = (text: string): number[] =>
+    [...text.matchAll(/npx|npm install/g)].map((m) => m.index ?? 0);
+  const inertOf = (text: string): boolean[] => {
+    const mentions = mentionsOf(text);
+    const { inert } = commandMap(text, wanted, WINDOW, mentions);
+    return mentions.map((index) => inert.has(index));
+  };
+
+  it.each([
+    ['a commit message', 'git commit -m "npx x"'],
+    ['a commit message with -am', 'git commit -am "npx x"'],
+    ['a commit message in single quotes', "git commit -m 'npm install x'"],
+    ['a tag message', 'git tag -a v1 -m "npx x"'],
+    ['a note', 'git notes add -m "npx x"'],
+    ['a commit message under an option with a value', 'git -C app commit -m "npx x"'],
+    ['a commit message after another command', 'git add . && git commit -m "npm install x"'],
+    ['a message from a here-document', 'git commit -F - <<EOF\nnpx x\nEOF'],
+    ['an echo', 'echo "npx x"'],
+    ['an echo with words', 'echo run npx x now'],
+    ['a printf', "printf '%s\\n' 'npm install x'"],
+    ['a comment line', '# npx x'],
+    ['a comment line after another line', 'ls\n  # npx x'],
+  ])('is inert in %s', (_what, text) => {
+    expect(inertOf(text).every(Boolean)).toBe(true);
+    expect(inertOf(text).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['a cat', 'cat <<EOF\nnpx x\nEOF'],
+    ['a here-string', 'cat <<< "npx x"'],
+    ['a tee', 'tee notes <<EOF\nnpx x\nEOF'],
+    ['a grep', 'grep "npx x" f'],
+    ['a pull request body', 'gh pr create --body "npx x"'],
+    ['a log search', 'git log --grep="npx x"'],
+    ['a comment after a command', 'ls # npx x'],
+    ['an argument of a command that is not known', 'foo "npx x"'],
+    ['an ssh', 'ssh host "npx x"'],
+    ['a git message that is not the one after -m', 'git commit -m ok "npx x"'],
+    ['a message of git status', 'git status "npx x"'],
+    ['a message under sudo', 'sudo git commit -m "npx x"'],
+    ['a message after an assignment', 'A=1 git commit -m "npx x"'],
+    ['an echo under env', 'env echo "npx x"'],
+  ])('is not inert in %s', (_what, text) => {
+    expect(inertOf(text).some(Boolean)).toBe(false);
+  });
+
+  it.each([
+    ['a pipe', 'echo "npx x" | cat'],
+    ['a pipe into a shell', 'echo "npx x" | sh'],
+    ['a pipe elsewhere on the line', 'ls | wc; echo "npx x"'],
+    ['an output redirection', 'echo "npx x" > f'],
+    ['an append', 'echo "npx x" >> f'],
+    ['an input redirection elsewhere', 'echo "npx x"; cat < f'],
+    ['a stderr redirection', 'git commit -m "npx x" 2>&1'],
+    ['a process substitution', 'echo "npx x"; diff <(ls) f'],
+    ['a command substitution', 'echo "npx x" $(date)'],
+    ['a command substitution elsewhere', 'git commit -m "npx x"; echo $(date)'],
+    ['a backtick', 'git commit -m "npx x"; echo `date`'],
+    ['an eval', 'git commit -m "npx x"; eval ls'],
+    ['a source', 'echo "npx x"; source f'],
+    ['a dot', 'echo "npx x"; . f'],
+    ['an xargs', 'echo "npx x"; xargs ls'],
+    ['a shell', 'echo "npx x"; bash f'],
+    ['a shell with -c', 'echo "npx x"; sh -c ls'],
+    ['an ssh', 'echo "npx x"; ssh host ls'],
+    ['an su', 'echo "npx x"; su root'],
+    ['a watch', 'echo "npx x"; watch ls'],
+    ['a function', 'f() { echo "npx x"; }'],
+    ['a group', '{ echo "npx x"; }'],
+    ['a subshell', '(echo "npx x")'],
+    ['a condition', 'if echo "npx x"; then ls; fi'],
+    ['a loop', 'for i in 1; do echo "npx x"; done'],
+    ['a while', 'while echo "npx x"; do ls; done'],
+    ['a case', 'case x in x) echo "npx x";; esac'],
+    ['a setting of git that names a command', 'git -c core.pager=\'sh -c x\' commit -m "npx x"'],
+    ['a config-env option of git', 'git --config-env=core.pager=P commit -m "npx x"'],
+    ['a setting of git on another command of the line', 'git -c a=b status; echo "npx x"'],
+    ['a here-document given to something that is not git', 'cat <<EOF\nx\nEOF\necho "npx x"'],
+  ])('is not inert when the line holds %s', (_what, text) => {
+    expect(inertOf(text).some(Boolean)).toBe(false);
+  });
+});
