@@ -67,7 +67,9 @@ const LINE_END = /[\n|;`]|&&|\|\|/;
 // starts a new, unrelated command and must stay a hard stop: that is what
 // `LINE_END` is for, and this pass never touches it. Indentation is the
 // discriminator between "the same command, wrapped" and "a new command".
-const CONTINUATION_NEWLINE = /\r?\n[ \t]+/g;
+// A backslash before a line break continues the line whatever follows it, indented or not, and the
+// shell joins it to the next; an indented line is read as a continuation of the one before it.
+const CONTINUATION_NEWLINE = /\\\r?\n[ \t]*|\r?\n[ \t]+/g;
 const FLAGS_WITH_VALUE = new Set([
   '-r',
   '--requirement',
@@ -161,6 +163,7 @@ function isPackageToken(token: string): boolean {
   return (
     token !== '' &&
     !token.startsWith('-') &&
+    !token.startsWith('\\') &&
     !token.startsWith('.') &&
     !token.startsWith('/') &&
     !token.startsWith('$') &&
@@ -247,17 +250,31 @@ function lineReader(text: string): LineReader {
   };
 }
 
-/** Every package named after a runner match, positioned at that match's start index. */
+/**
+ * The words of the line that was read, without the last one when the line went on past the
+ * window: that one may have been cut in the middle, and a name that is half of one is not a name.
+ */
+function readTokens(scan: LineScan): string[] {
+  const tokens = scan.line.split(/\s+/);
+  return scan.cut ? tokens.slice(0, -1) : tokens;
+}
+
+/**
+ * Every package named after a runner match, positioned at that match's start index. A runner's
+ * package is the first word that is not a flag (or the value of `-p`), so a line that goes on
+ * past the window after it was found has lost nothing: it is cut only where none was found.
+ */
 function runnerPackages(text: string, reader: LineReader): Found {
-  const lines = [...text.matchAll(RUNNER)].map(reader.after);
+  const lines = [...text.matchAll(RUNNER)]
+    .map(reader.after)
+    .map((line) => ({ ...line, pkg: runnerPackage(readTokens(line.scan)) }));
   return {
-    positioned: lines.flatMap(({ index, scan }): Positioned[] => {
-      const pkg = runnerPackage(scan.line.split(/\s+/));
+    positioned: lines.flatMap(({ index, pkg }): Positioned[] => {
       if (pkg === null) return [];
       const value = normalizePackageName(pkg);
       return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
     }),
-    cut: lines.some(({ scan }) => scan.cut),
+    cut: lines.some(({ scan, pkg }) => scan.cut && pkg === null),
     budgetSpent: reader.skipped(),
   };
 }
@@ -267,7 +284,7 @@ function installedPackages(text: string, reader: LineReader): Found {
   const lines = [...text.matchAll(INSTALLER)].map(reader.after);
   return {
     positioned: lines.flatMap(({ index, scan }): Positioned[] =>
-      installerPackages(scan.line.split(/\s+/)).flatMap((pkg): Positioned[] => {
+      installerPackages(readTokens(scan)).flatMap((pkg): Positioned[] => {
         const value = normalizePackageName(pkg);
         return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
       }),
@@ -307,8 +324,8 @@ const skipBlanks = (text: string, from: number): number => {
 
 /**
  * Whether what follows a runner or installer is a wrapped command: the rest of its line is
- * empty, or only a backslash, and the next line is indented and either follows that backslash
- * or starts with a flag (`-x`, `--long`). A dash and a space is a list item, not a flag.
+ * empty, or only a backslash, and the next line either follows that backslash or is indented and
+ * starts with a flag (`-x`, `--long`). A dash and a space is a list item, not a flag.
  * Written without a pattern so that a long run of blanks costs a pass, not a square.
  */
 function startsWrapped(tail: string): boolean {
@@ -318,7 +335,7 @@ function startsWrapped(tail: string): boolean {
   if (tail.charAt(at) === '\r') at += 1;
   if (tail.charAt(at) !== '\n') return false;
   const next = skipBlanks(tail, at + 1);
-  if (next === at + 1) return false;
+  if (next === at + 1 && !backslash) return false;
   return backslash || (tail.charAt(next) === '-' && /[-A-Za-z]/.test(tail.charAt(next + 1)));
 }
 
@@ -334,11 +351,13 @@ function joinedLineOutgrows(text: string, from: number): boolean {
   let length = 0;
   while (at < text.length) {
     if (length >= MAX_LINE_SCAN) return true;
-    const char = text.charAt(at);
-    const newline = char === '\r' && text.charAt(at + 1) === '\n' ? at + 1 : at;
-    if (text.charAt(newline) === '\n') {
-      const next = skipBlanks(text, newline + 1);
-      if (next === newline + 1) return false;
+    const backslash = text.charAt(at) === '\\';
+    const breakAt = backslash ? at + 1 : at;
+    const afterBreak = lineBreakEnd(text, breakAt);
+    if (afterBreak !== -1) {
+      const next = skipBlanks(text, afterBreak);
+      // An indented line continues the one before it, and so does any line after a backslash.
+      if (next === afterBreak && !backslash) return false;
       at = next;
     } else {
       if (isLineEnd(text, at)) return false;
@@ -347,6 +366,12 @@ function joinedLineOutgrows(text: string, from: number): boolean {
     length += 1;
   }
   return false;
+}
+
+/** The index after the line break at `at` (`\n` or `\r\n`), or -1 when there is none there. */
+function lineBreakEnd(text: string, at: number): number {
+  if (text.charAt(at) === '\n') return at + 1;
+  return text.charAt(at) === '\r' && text.charAt(at + 1) === '\n' ? at + 2 : -1;
 }
 
 /** Whether `LINE_END` matches at `at` (a line break aside), which is what ends the part of a command that is read. */
@@ -463,6 +488,44 @@ function extractBounded(text: string): Extraction {
  */
 export function extractAtoms(text: string): Atom[] {
   return extractBounded(text).atoms;
+}
+
+/** The atoms of a proposed action, and whether some part of it could not be read. */
+export interface ActionExtraction {
+  readonly atoms: Atom[];
+  /**
+   * True when a runner or installer line, or what it names, went on past what could be read: a
+   * line longer than the window with no package found before the end of what was read, a wrapped
+   * command that outgrows it, more packages than are kept, a pass that spent its budget for reading
+   * lines, or text past the characters read. Whatever is in the part that was not read cannot be
+   * matched against what the session recorded.
+   */
+  readonly unread: boolean;
+}
+
+/**
+ * The atoms of an action, read the way a result is read: the command as written, then with its
+ * continuation lines joined (a backslash before a line break, or an indented line), so a command
+ * spelled across lines names the same package as the plain one. It is not decoded: an action is
+ * what is about to run, not content to decode. The two passes share the budgets of a result's, and
+ * an indented block read as one long line is not a command that was cut (see `wrappedCommandCut`).
+ */
+export function extractActionAtoms(text: string): ActionExtraction {
+  const cutText = text.length > DEFAULT_MAX_CHARS;
+  const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
+  const plain = extractBounded(bounded);
+  for (const atom of plain.atoms) set.add(atom);
+  let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent;
+  if (!set.floorFull) {
+    const collapsed = collapseContinuations(bounded);
+    if (collapsed !== bounded) {
+      const joined = extractBounded(collapsed);
+      for (const atom of joined.atoms) set.add(atom);
+      unread = unread || joined.capped || joined.budgetSpent || wrappedCommandCut(bounded);
+    }
+  }
+  return { atoms: set.atoms, unread: unread || set.floorFull || set.floorLeftOut };
 }
 
 /**

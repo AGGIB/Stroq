@@ -7,7 +7,8 @@ import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
-import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
+import { floorAtoms, originClasses } from './provenance/action-atoms.js';
+import { findActionProvenance } from './provenance/action-lookup.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
 import {
   MAX_STORED_CHARS,
@@ -142,14 +143,6 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
 ];
 const CANARY_RULE_ID = 'STROQ-CANARY';
 const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
-
-/** What the provenance store knew about the atoms of one proposed action. */
-interface ProvenanceLookup {
-  readonly hits: readonly ProvenanceHit[];
-  /** Atoms with no record, while the session's records are incomplete; empty otherwise. */
-  readonly unrecorded: readonly Atom[];
-}
-const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [] };
 
 /**
  * The secret guard's verdict on one action: the known values found in its arguments,
@@ -340,33 +333,6 @@ export class StroqEngine {
   }
 
   /**
-   * One hit per distinct atom of the proposed action, most recent record wins. And, when the
-   * session's records are known to be incomplete, the atoms that no record holds: those are
-   * not "never read", they are "cannot say".
-   */
-  private async findProvenance(event: PreToolEvent): Promise<ProvenanceLookup> {
-    const store = this.opts.provenance;
-    if (!store) return NO_LOOKUP;
-    const atoms = atomsForAction(event.toolName, event.toolInput, event.cwd);
-    if (atoms.length === 0) return NO_LOOKUP;
-    const byHash = new Map(atoms.map((atom) => [atomHash(atom), atom] as const));
-    const records = await store.lookup(event.sessionId, [...byHash.keys()]);
-    const seen = new Set<string>();
-    const hits: ProvenanceHit[] = [];
-    for (const record of records) {
-      const atom = byHash.get(record.hash);
-      if (!atom || seen.has(record.hash)) continue;
-      seen.add(record.hash);
-      hits.push({ atom, record });
-    }
-    // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
-    const unrecorded = (await store.isIncomplete(event.sessionId))
-      ? [...byHash].filter(([hash]) => !seen.has(hash)).map(([, atom]) => atom)
-      : [];
-    return { hits, unrecorded };
-  }
-
-  /**
    * The secret guard applied to an egress-shaped action: the known values in its
    * arguments, and whether those arguments ran past `MAX_SCAN_CHARS`, in which case
    * the matches above came from a prefix of the input and the policy is told so.
@@ -450,9 +416,9 @@ export class StroqEngine {
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
-    const lookup = await this.findProvenance(event);
+    const lookup = await findActionProvenance(this.opts.provenance, event, state.taint !== null);
     const unverified = floorAtoms(lookup.unrecorded);
-    const origin = originClasses(lookup.hits, classification.classes, unverified);
+    const origin = originClasses(lookup.hits, classification.classes, unverified, lookup.unread);
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
     const injection = classification.classes.includes('config.instructions')
@@ -485,10 +451,16 @@ export class StroqEngine {
     );
     // With a record in hand the evidence says why. Without one the only reason there is
     // is that the session lost some, and the decision should not claim more than that.
-    const policyDecision =
-      origin.counted.length === 0 && unverified.length > 0
-        ? withIncompleteNote(evaluated, this.opts.policy, event.sessionId, state.taint !== null)
-        : evaluated;
+    const onlyDoubt = origin.counted.length === 0 && (unverified.length > 0 || lookup.unread);
+    const policyDecision = onlyDoubt
+      ? withIncompleteNote(
+          evaluated,
+          this.opts.policy,
+          event.sessionId,
+          state.taint !== null,
+          unverified.length > 0 ? 'lost-records' : 'unread-command',
+        )
+      : evaluated;
     const gated = await evaluateScope(this.opts.scope, {
       event,
       classification,
@@ -716,7 +688,7 @@ export class StroqEngine {
     if (event.extraReading === true)
       return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
-    // like `atomsForAction` on the PreToolUse side: a package name split by a
+    // like `readActionAtoms` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
     // same atom as the plain command the agent then runs, in both directions.
     // Deep, not raw: a tool result the agent is told to "decode and run" hides

@@ -162,10 +162,11 @@ describe('the marker of a result that is being scanned', () => {
   it('stays for a result whose scan the process never finishes, even when nothing was recorded', async () => {
     const f = fixture();
     const stalled = stallNextAudit(f.audit);
-    void f.engine.post(f.event('A result with no command in it.'));
+    const post = f.engine.post(f.event('A result with no command in it.'));
     await stalled.reached;
     expect((await f.pre('npx unrecorded-helper')).decision.ruleId).toBe('ask-origin-untrusted');
     stalled.release();
+    await post;
   });
 
   it('keeps the markers of two overlapping posts apart', async () => {

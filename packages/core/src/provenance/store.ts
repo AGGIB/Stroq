@@ -43,6 +43,12 @@ export interface ProvenanceStore {
    */
   isIncomplete(sessionId: string): Promise<boolean>;
   /**
+   * Whether this session has recorded anything at all. A record is an atom that came from a tool
+   * result the agent read; every such record is a candidate for `origin.untrusted`, a flagged one
+   * for `origin.suspect`. A session with none has nothing a command could be matched against.
+   */
+  hasRecords(sessionId: string): Promise<boolean>;
+  /**
    * Notes that evidence for this session was lost or never recorded. Permanent until
    * `clear`: a later short result does not make an earlier loss any less of one.
    */
@@ -292,6 +298,10 @@ export class FileProvenanceStore implements ProvenanceStore {
       // A file Stroq cannot even stat is not evidence that nothing was lost.
       return true;
     }
+  }
+
+  async hasRecords(sessionId: string): Promise<boolean> {
+    return (await this.read(sessionId)).length > 0;
   }
 
   async lookup(sessionId: string, hashes: readonly string[]): Promise<ProvenanceRecord[]> {

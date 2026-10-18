@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { extractAtoms, extractAtomsDeepWithLoss } from '../../src/provenance/atoms.js';
+import {
+  extractActionAtoms,
+  extractAtoms,
+  extractAtomsDeepWithLoss,
+} from '../../src/provenance/atoms.js';
 import { cpuNow } from '../cpu-time.js';
 
 /**
@@ -29,6 +33,10 @@ const SHAPES: ReadonlyArray<readonly [string, string]> = [
   ['npm install, wrapped, one package', repeat('npm install \\\n  a\n')],
   ['npm install and blanks', `npm install${' '.repeat(SIZE)}`.slice(0, SIZE)],
   ['npm install and backslash lines', repeat(' \\\n', 'npm install')],
+  ['npx and backslash breaks with no indent', repeat('npx \\\n')],
+  ['backslash breaks and flags', repeat('\\\n-y ', 'npx ')],
+  ['carriage returns and backslashes', repeat('npm install \\\r\n  a\r\n')],
+  ['an installer and backslash breaks with blanks', repeat('\\\n  ', 'pip install ')],
   ['curl, repeated', repeat('curl a ')],
   ['sh <(curl, repeated', repeat('sh <(curl a ')],
   ['urls, repeated', repeat('http://a.example/x ')],
@@ -39,6 +47,7 @@ const SHAPES: ReadonlyArray<readonly [string, string]> = [
 const EXTRACTORS: ReadonlyArray<readonly [string, (text: string) => unknown]> = [
   ['extractAtoms', extractAtoms],
   ['extractAtomsDeepWithLoss', extractAtomsDeepWithLoss],
+  ['extractActionAtoms', extractActionAtoms],
 ];
 
 describe.each(EXTRACTORS)('%s on 200,000 characters of an adversarial shape', (_name, extract) => {

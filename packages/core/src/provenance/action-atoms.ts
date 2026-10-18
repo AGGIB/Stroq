@@ -6,7 +6,7 @@ import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { collectStrings } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { FLOOR_KINDS } from './atom-kinds.js';
-import { extractAtoms, normalizePackageName } from './atoms.js';
+import { extractActionAtoms, normalizePackageName } from './atoms.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
 // into curl/ssh/git push (or a pipe-to-shell) is evidence; a URL copied into
@@ -145,27 +145,47 @@ function textOfInput(toolInput: Readonly<Record<string, unknown>>): string {
   return strings.length > 0 ? strings.join('\n') : JSON.stringify(toolInput);
 }
 
+/** The atoms of a proposed action, and whether some part of it could not be read (see `ActionExtraction`). */
+export interface ReadAction {
+  readonly atoms: Atom[];
+  readonly unread: boolean;
+}
+
+const NOTHING_READ: ReadAction = { atoms: [], unread: false };
+
 /**
- * Atoms of a proposed action that could have been copied from earlier tool output.
- * The action text is normalized first, exactly like the scanned output it is matched
- * against: otherwise a command carrying a zero-width space or a homoglyph would hash
- * differently from the very content it was copied from, and vice versa.
+ * Atoms of a proposed action that could have been copied from earlier tool output, and whether
+ * the action could be read to its end. The action text is normalized first, exactly like the
+ * scanned output it is matched against: otherwise a command carrying a zero-width space or a
+ * homoglyph would hash differently from the very content it was copied from, and vice versa.
  */
+export function readActionAtoms(
+  toolName: string,
+  toolInput: Readonly<Record<string, unknown>>,
+  cwd: string,
+): ReadAction {
+  if (isShellTool(toolName)) {
+    const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
+    if (command === '') return NOTHING_READ;
+    const known = knownPackages(cwd);
+    const read = extractActionAtoms(normalizeText(command));
+    return {
+      atoms: read.atoms.filter((atom) => atom.kind !== 'pkg' || !known.has(atom.value)),
+      unread: read.unread,
+    };
+  }
+  if (toolName.startsWith('mcp__'))
+    return extractActionAtoms(normalizeText(textOfInput(toolInput)));
+  return NOTHING_READ;
+}
+
+/** The atoms alone: see `readActionAtoms`. */
 export function atomsForAction(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): Atom[] {
-  if (isShellTool(toolName)) {
-    const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
-    if (command === '') return [];
-    const known = knownPackages(cwd);
-    return extractAtoms(normalizeText(command)).filter(
-      (atom) => atom.kind !== 'pkg' || !known.has(atom.value),
-    );
-  }
-  if (toolName.startsWith('mcp__')) return extractAtoms(normalizeText(textOfInput(toolInput)));
-  return [];
+  return readActionAtoms(toolName, toolInput, cwd).atoms;
 }
 
 export interface OriginClassification {
@@ -199,7 +219,9 @@ export function floorAtoms(atoms: readonly Atom[]): Atom[] {
 /**
  * The `origin.*` classes of an action, from the records its atoms matched (`hits`) and
  * from `unverified`: atoms that can raise the floor, that no record holds, in a session
- * whose records are known to be incomplete (see `floorAtoms` for which can).
+ * whose records are known to be incomplete (see `floorAtoms` for which can). `unread` is
+ * the same doubt for the part of the action that could not be read: it is `origin.untrusted`
+ * too, for the same reasons.
  *
  * A record that matches keeps its class, `origin.suspect` included. An unverified atom is
  * `origin.untrusted` and never `origin.suspect`: the loss says the source cannot be ruled
@@ -214,11 +236,12 @@ export function originClasses(
   hits: readonly ProvenanceHit[],
   classes: readonly ActionClass[],
   unverified: readonly Atom[] = [],
+  unread = false,
 ): OriginClassification {
   const networkShaped = isNetworkShaped(classes);
   const counted = hits.filter((h) => counts(h.atom, networkShaped));
   const out: ActionClass[] = [];
-  if (counted.length > 0 || unverified.length > 0) out.push('origin.untrusted');
+  if (counted.length > 0 || unverified.length > 0 || unread) out.push('origin.untrusted');
   if (counted.some((h) => h.record.suspect)) out.push('origin.suspect');
   return { classes: out, counted };
 }
