@@ -18,7 +18,8 @@ const readAgentsMd = (): string =>
 describe('hosts channel matrix', () => {
   it('has a bijective mapping between ATTACK_HOSTS and docs/AGENTS.md host sections', () => {
     const agentsMd = readAgentsMd();
-    const documentedHosts = [...agentsMd.matchAll(/^\| [^|]+ \| `([a-z-]+)` \|/gm)].map(
+    const overview = agentsMd.slice(0, agentsMd.indexOf('\n### '));
+    const documentedHosts = [...overview.matchAll(/^\| [^|]+ \| `([a-z-]+)` \|/gm)].map(
       (match) => match[1],
     );
     expect(documentedHosts.sort()).toEqual([...ATTACK_HOSTS].sort());
@@ -26,15 +27,7 @@ describe('hosts channel matrix', () => {
       const entry = HOST_CHANNELS[host];
       expect(entry).toBeDefined();
       expect(entry.id).toBe(host);
-      // Ensure the anchor or heading exists in docs/AGENTS.md
-      const headingOrAnchor = new RegExp(
-        `(#+\\s*.*${entry.label}|<a\\s+id="${entry.agentsAnchor}"|#${entry.agentsAnchor})`,
-        'i',
-      );
-      expect(
-        headingOrAnchor.test(agentsMd),
-        `docs/AGENTS.md must document host "${host}" (anchor: ${entry.agentsAnchor})`,
-      ).toBe(true);
+      expect(agentsMd.split('\n')).toContain(`### ${entry.label}`);
     }
   });
 
