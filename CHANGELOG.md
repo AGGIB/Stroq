@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq exposure` reports strict wrappers separately.** Matches `stroq doctor` by counting and displaying the number of wrapped MCP servers running under `--strict` in the `wrapped by Stroq` row.
+- **Process-group termination on POSIX.** MCP server processes are spawned detached on POSIX so that `killChildTree` terminates descendants by signalling the entire process group (`-pid`), preventing orphaned grandchildren when commands are launched via `sh -c` or `npx`.
+- **Decoded strings view for end-anchored rules under `--strict`.** Strict mode scans individual decoded strings in isolation so that rules requiring sentence-end matches (`$`) cannot be evaded by subsequent result fields.
+- **Forwarded server messages are counted, audited, and limited.** Server-initiated messages permitted in strict mode (`ping`, `list_changed`, plain `progress`) are audited as `mcp-strict-forwarded` and counted against the benign message limit.
+
+### Fixed
+
+- **Answer waiting client requests on batch server messages in strict mode.** A server message carrying an array is withheld whole as `invalid-shape`, and all waiting client requests whose IDs it contains are promptly answered with fixed errors rather than left waiting.
+
 ## [0.26.0] - 2026-10-18
 
 ### Added
