@@ -105,7 +105,8 @@ describe('extractAtoms', () => {
     expect(kinds('npx --yes create-thing@2 my-app', 'pkg')).toEqual(['create-thing']);
     expect(kinds('pnpm dlx shadcn init', 'pkg')).toEqual(['shadcn']);
     expect(kinds('uvx ruff check .', 'pkg')).toEqual(['ruff']);
-    expect(kinds('npx -p typescript tsc --init', 'pkg')).toEqual(['typescript']);
+    // The word after the flags is named too: it is a command, and a candidate for a package.
+    expect(kinds('npx -p typescript tsc --init', 'pkg')).toEqual(['typescript', 'tsc']);
   });
 
   it('finds runners and installers regardless of case', () => {

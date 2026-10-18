@@ -208,10 +208,10 @@ describe('extractActionAtoms and the quotes in a word', () => {
     expect(extractActionAtoms(command).atoms).toContainEqual(pkg);
   });
 
-  it('reads a backslash that escapes a quote inside double quotes as the shell does', () => {
-    expect(extractActionAtoms('npx "evil\\"x"').atoms.some((a) => a.value.includes('evil'))).toBe(
-      true,
-    );
+  it('reads a quote that a backslash escapes inside double quotes as part of the word, which is no name', () => {
+    const { atoms, unread } = extractActionAtoms('npx "evil\\"x"');
+    expect(atoms.some((a) => a.value.includes('evil'))).toBe(false);
+    expect(unread).toBe(true);
   });
 
   it('is in doubt about a quote that is never closed inside a word', () => {
@@ -273,9 +273,9 @@ describe('extractActionAtoms and a runner with several package names', () => {
     expect(atoms).toContainEqual({ kind: 'pkg', value: 'ok-pkg' });
   });
 
-  it('does not name the command when -p names the packages', () => {
+  it('names the command that follows the -p flags too, as a candidate', () => {
     const { atoms } = extractActionAtoms(`npx -p ${NAME} run-this`);
-    expect(atoms.some((a) => a.value === 'run-this')).toBe(false);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'run-this' });
   });
 
   it('names the first word that is not a flag when no -p is given, as before', () => {
@@ -298,5 +298,87 @@ describe('extractActionAtoms and a command wrapped after its first words', () =>
     const { atoms, unread } = extractActionAtoms(`npx -y \\\n  ${NAME}`);
     expect(atoms).toContainEqual(pkg);
     expect(unread).toBe(false);
+  });
+});
+
+// One rule for a word in the place of a package: it is read when, once unquoted, it is made of the
+// characters of a package name and had no character in it that the shell would expand (a variable,
+// a command, a brace, a glob, a redirection); any other is a doubt, and never a package that was
+// silently not there.
+describe('extractActionAtoms and a word that is made of characters the shell expands', () => {
+  it.each([
+    ['a brace', 'npx ev{il,x}-helper-fix'],
+    ['a glob', 'npx ev*l-helper-fix'],
+    ['a question mark', 'npx evi?-helper-fix'],
+    ['a bracket', 'npx ev[i]l-helper-fix'],
+    ['a command in backticks cut into the name', 'npx e`x`vil-helper-fix'],
+    ['a variable', 'npx ev$X-helper-fix'],
+    ['a command substitution', 'npx ev$(echo il)-helper-fix'],
+    ['a tilde at the start', 'npm install ~evil'],
+    ['an exclamation mark', 'npx ev!l-helper-fix'],
+    ['a name that is a variable, in an installer', 'pip install ev$X'],
+    ['a name with a character no package has', 'npx evil%helper-fix'],
+    ['a flag value that is empty', 'npx --package= run'],
+    ['a flag value that is a variable', 'npx -p=$PKG run'],
+  ])('is in doubt about %s', (_name, command) => {
+    expect(extractActionAtoms(command).unread).toBe(true);
+  });
+
+  it('keeps a backtick whole in the words of a line, however the word goes on', () => {
+    expect(extractActionAtoms('npx ev`echo il`-helper-fix --apply').unread).toBe(true);
+    expect(extractActionAtoms('npm install a `cat names` b').unread).toBe(true);
+  });
+
+  it.each([
+    'npx eslint .',
+    'npx tsx ./script.ts --flag',
+    'npm install lodash@4.17.21 left-pad',
+    'npm install "lodash@^4" "@scope/pkg@>=1"',
+    'pip install "requests[security]>=2.0" -r requirements.txt',
+    'pip install foo==1.0 bar~=2.1',
+    'npm install foo 2>&1 | tail -5',
+    'npm install foo > /tmp/out.txt 2>&1',
+    'pip install foo &> /dev/null',
+    'npm install foo & npm run build &',
+    'npm install foo; npm run build',
+    '(npm install foo)',
+    '$(npm install foo)',
+    'npx --yes --package=left-pad left-pad',
+    'echo "run npx prettier"',
+    'git commit -m "Run `npx prettier` to format."',
+    "git commit -m 'use pip install requests, then npx tsc'",
+  ])('is not in doubt about %s', (command) => {
+    expect(extractActionAtoms(command).unread).toBe(false);
+  });
+});
+
+describe('extractActionAtoms and the flags of each kind of runner', () => {
+  it.each([
+    ['-p=', `npx -p=${NAME} run`],
+    ['-p stuck to the name', `npx -p${NAME} run`],
+    ['--package=', `npx --package=${NAME} run`],
+    ['-p with the name after it', `npx -p ${NAME} run`],
+    ['pnpm dlx', `pnpm dlx --package ${NAME} run`],
+    ['bunx', `bunx --package=${NAME} run`],
+    ['npm exec', `npm exec --package ${NAME} -- run`],
+    ['uvx --from', `uvx --from ${NAME} tool`],
+    ['uvx --from=', `uvx --from=${NAME} tool`],
+    ['uvx --with', `uvx --with ${NAME} tool`],
+    ['pipx run --spec', `pipx run --spec ${NAME} tool`],
+    ['uv tool run --from', `uv tool run --from ${NAME} tool`],
+  ])('names the package of %s', (_name, command) => {
+    expect(extractActionAtoms(command).atoms).toContainEqual(pkg);
+  });
+
+  it('names the first word that is not a flag as well, whenever a package flag is there', () => {
+    const { atoms } = extractActionAtoms(`npx -p ok-pkg ${NAME}`);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'ok-pkg' });
+    expect(atoms).toContainEqual(pkg);
+    expect(extractActionAtoms(`uvx --from ok-pkg ${NAME}`).atoms).toContainEqual(pkg);
+  });
+
+  it('does not take -p of uvx for a package, since it names a Python', () => {
+    const { atoms } = extractActionAtoms(`uvx -p 3.12 ${NAME}`);
+    expect(atoms.map((a) => a.value)).toEqual([NAME]);
   });
 });

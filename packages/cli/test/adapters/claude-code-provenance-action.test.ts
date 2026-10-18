@@ -61,6 +61,9 @@ const SPELLINGS: readonly string[] = [
   `npx -p ok-pkg -p ${NAME} run`,
   `npx --package=${NAME} run`,
   `npx -p${NAME} run`,
+  `npx -p=${NAME} run`,
+  `uvx --from ${NAME} tool`,
+  `npx -p ok-pkg ${NAME}`,
 ];
 
 describe('a flagged page that named a package', () => {
@@ -87,6 +90,10 @@ describe('a flagged page that named a package', () => {
     'npx ev`echo il`-helper-fix',
     'npx ev"il-helper-fix',
     'npx ${P}',
+    'npx ev{il,x}-helper-fix',
+    'npx ev*l-helper-fix',
+    'npx e`x`vil-helper-fix',
+    'npx --package= run',
   ])('asks about %s, a name it cannot read', async (command) => {
     await post('flagged-doubt', FLAGGED);
     expect(await decide('flagged-doubt', command)).toBe('ask');
@@ -98,6 +105,8 @@ describe('a flagged page that named a package', () => {
       'git commit -m "docs: use npx prettier"',
       'git commit -m "Run `npx prettier` to format."',
       'npm install lodash@$VERSION',
+      'npm install left-pad 2>&1 | tail -5',
+      'pip install "requests[security]>=2.0" -r requirements.txt',
     ]) {
       expect(await decide('flagged-quotes', command), command).toBe('allow');
     }

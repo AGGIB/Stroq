@@ -62,6 +62,20 @@ const BUILT_SPELLINGS: ReadonlyArray<readonly [string, string]> = [
   ['--package=', `npx --package=${NAME} run`],
 ];
 
+const SHELL_BUILT: ReadonlyArray<readonly [string, string]> = [
+  ['a brace', 'npx ev{il,x}-helper-fix'],
+  ['a glob', 'npx ev*l-helper-fix'],
+  ['a command cut into the name', 'npx e`x`vil-helper-fix'],
+  ['a variable', 'npx ev$X-helper-fix'],
+];
+
+const NAMED_BY_FLAG: ReadonlyArray<readonly [string, string]> = [
+  ['-p=', `npx -p=${NAME} run`],
+  ['-p stuck to the name', `npx -p${NAME} run`],
+  ['uvx --from', `uvx --from ${NAME} tool`],
+  ['a package flag and then the name', `npx -p ok-pkg ${NAME}`],
+];
+
 const DOUBTS: ReadonlyArray<readonly [string, string]> = [
   ['a variable inside the name', 'npx ev$IL-helper-fix'],
   ['a name in braces', 'npx ${P}'],
@@ -128,6 +142,28 @@ describe('after a page that was flagged and named a package, as the shell reads 
       expect((await f.pre(command)).decision.effect, command).toBe('allow');
     }
   });
+});
+
+describe('after a page that was flagged and named a package, as a package flag names it', () => {
+  it.each(NAMED_BY_FLAG)('denies %s', async (_name, command) => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(command)).decision.ruleId).toBe('deny-origin-suspect');
+  });
+
+  it.each(SHELL_BUILT)('asks about %s, which it cannot read', async (_name, command) => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(command)).decision.ruleId).toBe('ask-origin-untrusted');
+  });
+
+  it.each(SHELL_BUILT)(
+    'leaves %s alone in a session that has read nothing',
+    async (_name, command) => {
+      const f = fixture();
+      expect((await f.pre(command)).decision.effect).toBe('allow');
+    },
+  );
 });
 
 describe('after a page that was flagged and named a package, as the shell builds a word', () => {

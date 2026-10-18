@@ -5,7 +5,7 @@ import type { Atom } from '../types.js';
 import type { Positioned } from './atom-kinds.js';
 import { createAtomSet } from './atom-set.js';
 import { normalizePackageName, trimEndOf } from './package-name.js';
-import { readInstaller, readRunner } from './shell-words.js';
+import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
 import { encodedAtoms } from './encoded-atoms.js';
 export { normalizePackageName };
 
@@ -50,11 +50,18 @@ const URL_HOST = /^https?:\/\/(?:[^@/\s]+@)?([^/:?#\s]+)/;
 // `user@host.tld` — ssh/scp targets and git ssh remotes.
 const SSH_TARGET = /(?<![\w.-])[\w.-]+@((?:[\w-]+\.)+[a-z]{2,})(?![\w.-])/gi;
 // Package runners: the first positional token after them is the package.
-const RUNNER = /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run)(?=\s)/gi;
+const RUNNER =
+  /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run|npm\s+exec|uv\s+tool\s+run)(?=\s)/gi;
 // Package installers: every positional token after them is a package.
 const INSTALLER =
   /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/gi;
 const LINE_END = /[\n|;`]|&&|\|\|/;
+// Where a command ends, as a shell reads it: a backtick does not end it, it opens a substitution
+// in the middle of a word. A page is not a command, and there a backtick closes the code span that
+// a package is named in (`npx foo`), so `LINE_END` stays for the text of a result.
+const COMMAND_END = /[\n|;]|&&|\|\|/;
+// How far back on its line a runner or installer is looked at to see if a code span is open.
+const SPAN_LOOKBACK = 256;
 // A newline immediately followed by indentation (a space or tab) is a wrapped
 // continuation of the same command, not a new one — the `split-across-lines`
 // mutation (and ordinary word-wrapping) produces exactly this shape by turning
@@ -80,31 +87,31 @@ interface LineScan {
   readonly cut: boolean;
   /** How many characters of the text were looked at to find it. */
   readonly read: number;
-  /**
-   * The line stopped at a backtick that opens a command substitution: one that follows a blank (a
-   * word is about to be made by a command) or sits against a word that goes on after it. A backtick
-   * that closes the one a command is written in (`npx prettier` in a sentence) is not.
-   */
-  readonly substitution: boolean;
-  /** The substitution is against the last word of the line, which goes on after it: that word is half of one. */
-  readonly abutting: boolean;
 }
 
-/** Whether a word goes on in the character after a backtick. */
-const WORD_CONTINUES = /[\w$'"\\-]/;
+/** Whether `from` is inside a code span of its line: an odd number of backticks stand before it. */
+function insideCodeSpan(text: string, from: number): boolean {
+  let backticks = 0;
+  for (let i = from - 1; i >= Math.max(0, from - SPAN_LOOKBACK); i -= 1) {
+    const char = text.charAt(i);
+    if (char === '\n') break;
+    if (char === '`') backticks += 1;
+  }
+  return backticks % 2 === 1;
+}
 
-function restOfLine(text: string, from: number): LineScan {
+/**
+ * The rest of the line after `from`. For a command a backtick is part of a word (`ev`x`il`), unless
+ * the line is inside a code span (a sentence that quotes the command), which the next backtick closes.
+ */
+function restOfLine(text: string, from: number, command: boolean): LineScan {
   const rest = text.slice(from, from + MAX_LINE_SCAN);
-  const stop = rest.search(LINE_END);
-  const atBacktick = stop !== -1 && rest.charAt(stop) === '`';
-  const against = atBacktick && stop > 0 && !/\s/.test(rest.charAt(stop - 1));
-  const goesOn = against && WORD_CONTINUES.test(text.charAt(from + stop + 1));
+  const end = command && !insideCodeSpan(text, from) ? COMMAND_END : LINE_END;
+  const stop = rest.search(end);
   return {
     line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),
     cut: stop === -1 && text.length > from + MAX_LINE_SCAN,
     read: stop === -1 ? rest.length : stop,
-    substitution: atBacktick && (!against || goesOn),
-    abutting: goesOn,
   };
 }
 
@@ -159,7 +166,7 @@ interface LineReader {
  * a loss in every one of them: the joined pass is the one that reads a block of indented lines as
  * a single long line, which is where the budget goes first.
  */
-function lineReader(text: string): LineReader {
+function lineReader(text: string, command: boolean): LineReader {
   let budget = MAX_LINE_WORK;
   let skipped = false;
   return {
@@ -167,12 +174,9 @@ function lineReader(text: string): LineReader {
       const index = m.index ?? 0;
       if (budget <= 0) {
         skipped = true;
-        return {
-          index,
-          scan: { line: '', cut: true, read: 0, substitution: false, abutting: false },
-        };
+        return { index, scan: { line: '', cut: true, read: 0 } };
       }
-      const scan = restOfLine(text, index + m[0].length);
+      const scan = restOfLine(text, index + m[0].length, command);
       budget -= scan.read + 1;
       return { index, scan };
     },
@@ -182,24 +186,23 @@ function lineReader(text: string): LineReader {
 
 /**
  * The words of the line that was read, without the last one when the line went on past the
- * window or into a command substitution: that one may have been cut in the middle, and a name that
- * is half of one is not a name.
+ * window: that one may have been cut in the middle, and a name that is half of one is not a name.
  */
 function readTokens(scan: LineScan): string[] {
   const tokens = scan.line === '' ? [] : scan.line.split(/\s+/);
-  return scan.cut || scan.abutting ? tokens.slice(0, -1) : tokens;
+  return scan.cut ? tokens.slice(0, -1) : tokens;
 }
 
 /**
  * Every package named after a runner match, positioned at that match's start index. A runner's
  * packages are the values of every `-p`, or else the first word that is not a flag, so a line that
  * goes on past the window after that word was reached has lost nothing. A line cut before it is
- * cut, and so is one that stopped at a command substitution before it (see `LineScan`).
+ * cut.
  */
-function runnerPackages(text: string, reader: LineReader): Found {
+function runnerPackages(text: string, reader: LineReader, command: boolean): Found {
   const lines = [...text.matchAll(RUNNER)]
-    .map(reader.after)
-    .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan)) }));
+    .map((m) => ({ ...reader.after(m), family: runnerFamily(m[0]) }))
+    .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan), line.family, command) }));
   return {
     positioned: lines.flatMap(({ index, reading }): Positioned[] =>
       reading.packages.flatMap((pkg): Positioned[] => {
@@ -209,15 +212,15 @@ function runnerPackages(text: string, reader: LineReader): Found {
     ),
     cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
-    doubt: lines.some(({ scan, reading }) => reading.doubt || (scan.substitution && !reading.sure)),
+    doubt: lines.some(({ reading }) => reading.doubt),
   };
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installedPackages(text: string, reader: LineReader): Found {
+function installedPackages(text: string, reader: LineReader, command: boolean): Found {
   const lines = [...text.matchAll(INSTALLER)]
     .map(reader.after)
-    .map((line) => ({ ...line, reading: readInstaller(readTokens(line.scan)) }));
+    .map((line) => ({ ...line, reading: readInstaller(readTokens(line.scan), command) }));
   return {
     positioned: lines.flatMap(({ index, reading }): Positioned[] =>
       reading.packages.flatMap((pkg): Positioned[] => {
@@ -227,7 +230,7 @@ function installedPackages(text: string, reader: LineReader): Found {
     ),
     cut: lines.some(({ scan }) => scan.cut),
     budgetSpent: reader.skipped(),
-    doubt: lines.some(({ scan, reading }) => reading.doubt || scan.substitution),
+    doubt: lines.some(({ reading }) => reading.doubt),
   };
 }
 
@@ -342,10 +345,10 @@ function wrappedCommandCut(text: string): boolean {
   return false;
 }
 
-function packageAtoms(text: string): Found {
-  const reader = lineReader(text);
-  const runners = runnerPackages(text, reader);
-  const installers = installedPackages(text, reader);
+function packageAtoms(text: string, command: boolean): Found {
+  const reader = lineReader(text, command);
+  const runners = runnerPackages(text, reader, command);
+  const installers = installedPackages(text, reader, command);
   return {
     positioned: [...runners.positioned, ...installers.positioned],
     cut: runners.cut || installers.cut,
@@ -394,8 +397,8 @@ interface Extraction {
   readonly doubt: boolean;
 }
 
-function extractBounded(text: string): Extraction {
-  const packages = packageAtoms(text);
+function extractBounded(text: string, command = false): Extraction {
+  const packages = packageAtoms(text, command);
   const positioned = [
     ...urlAtoms(text),
     ...packages.positioned,
@@ -456,12 +459,12 @@ export function extractActionAtoms(text: string): ActionExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
-  const plain = extractBounded(bounded);
+  const plain = extractBounded(bounded, true);
   for (const atom of plain.atoms) set.add(atom);
   let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent || plain.doubt;
   for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;
-    const extraction = extractBounded(reading.text);
+    const extraction = extractBounded(reading.text, true);
     for (const atom of extraction.atoms) set.add(atom);
     unread =
       unread ||
