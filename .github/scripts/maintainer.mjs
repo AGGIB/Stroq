@@ -157,6 +157,35 @@ function isCurrentRun(run, pr, workflow) {
   );
 }
 
+function hasStrictReviewProtection(protection, rules) {
+  const classic =
+    protection?.required_status_checks?.strict === true &&
+    protection?.required_pull_request_reviews?.dismiss_stale_reviews === true &&
+    protection?.required_pull_request_reviews?.required_approving_review_count >= 1 &&
+    protection?.required_conversation_resolution?.enabled === true;
+  // The branch-rules endpoint returns only active, applicable rules (including
+  // inherited ones), unlike listing configured rulesets. It needs metadata read,
+  // so Actions can verify enforcement without administration access.
+  const strictChecks = rules.some(
+    (rule) =>
+      rule.type === 'required_status_checks' &&
+      rule.parameters?.strict_required_status_checks_policy === true &&
+      Array.isArray(rule.parameters.required_status_checks) &&
+      rule.parameters.required_status_checks.length > 0 &&
+      rule.parameters.required_status_checks.every(
+        (check) => typeof check.context === 'string' && check.context.length > 0,
+      ),
+  );
+  const humanReviews = rules.some(
+    (rule) =>
+      rule.type === 'pull_request' &&
+      rule.parameters?.required_approving_review_count >= 1 &&
+      rule.parameters.dismiss_stale_reviews_on_push === true &&
+      rule.parameters.required_review_thread_resolution === true,
+  );
+  return classic || (strictChecks && humanReviews);
+}
+
 /** This is a merge gate, not an AI verdict. GitHub enforces protected-branch policy. */
 export function readiness(snapshot) {
   const {
@@ -185,12 +214,7 @@ export function readiness(snapshot) {
   if (repo.archived || !repo.allow_squash_merge) reasons.add('squash-unavailable');
   if (repo.permissions?.admin === true) reasons.add('admin-token-not-supported');
   if (!branch.protected) reasons.add('main-is-not-protected');
-  if (
-    protection?.required_status_checks?.strict !== true ||
-    protection?.required_pull_request_reviews?.dismiss_stale_reviews !== true ||
-    !(protection?.required_pull_request_reviews?.required_approving_review_count >= 1) ||
-    protection?.required_conversation_resolution?.enabled !== true
-  )
+  if (!hasStrictReviewProtection(protection, rules))
     reasons.add('strict-base-review-protection-required');
   if (dispatchReady !== true) reasons.add('post-merge-dispatch-not-configured');
   if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'main')
@@ -198,7 +222,8 @@ export function readiness(snapshot) {
   if (pr.mergeable !== true || pr.mergeable_state !== 'clean')
     reasons.add('github-merge-state-not-clean');
   if (
-    /^(?:wip|draft)\b|\[(?:wip|draft|do not merge)\]/i.test(pr.title) ||
+    /^(?:wip|draft)\b/i.test(pr.title) ||
+    /\[(?:wip|draft|do not merge)\]/i.test(pr.title) ||
     pr.labels.some((label) => HOLD.test(label.name))
   )
     reasons.add('human-hold');

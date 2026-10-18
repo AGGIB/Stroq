@@ -95,6 +95,100 @@ function fixture() {
   };
 }
 
+function strictRules() {
+  return [
+    {
+      type: 'required_status_checks',
+      ruleset_id: 17,
+      parameters: {
+        strict_required_status_checks_policy: true,
+        required_status_checks: [{ context: 'test (22)', integration_id: 15368 }],
+      },
+    },
+    {
+      type: 'pull_request',
+      ruleset_id: 18,
+      parameters: {
+        required_approving_review_count: 1,
+        dismiss_stale_reviews_on_push: true,
+        required_review_thread_resolution: true,
+      },
+    },
+  ];
+}
+
+test('effective active strict CI and review rules replace unreadable classic protection', () => {
+  const snapshot = fixture();
+  snapshot.protection = null;
+  snapshot.rules = strictRules();
+  assert.deepEqual(readiness(snapshot), []);
+});
+
+for (const [name, weaken] of [
+  [
+    'strict checks disabled',
+    (rules) => {
+      rules[0].parameters.strict_required_status_checks_policy = false;
+    },
+  ],
+  [
+    'empty required checks',
+    (rules) => {
+      rules[0].parameters.required_status_checks = [];
+    },
+  ],
+  [
+    'missing required checks',
+    (rules) => {
+      delete rules[0].parameters.required_status_checks;
+    },
+  ],
+  [
+    'zero human approvals',
+    (rules) => {
+      rules[1].parameters.required_approving_review_count = 0;
+    },
+  ],
+  [
+    'old approvals remain valid',
+    (rules) => {
+      rules[1].parameters.dismiss_stale_reviews_on_push = false;
+    },
+  ],
+  [
+    'unresolved threads allowed',
+    (rules) => {
+      rules[1].parameters.required_review_thread_resolution = false;
+    },
+  ],
+  [
+    'strict CI without review rule',
+    (rules) => {
+      rules.pop();
+    },
+  ],
+  [
+    'review rule without strict CI',
+    (rules) => {
+      rules.shift();
+    },
+  ],
+]) {
+  test(`effective rules fail closed when ${name}`, () => {
+    const snapshot = fixture();
+    snapshot.protection = null;
+    snapshot.rules = strictRules();
+    weaken(snapshot.rules);
+    assert.ok(readiness(snapshot).includes('strict-base-review-protection-required'));
+  });
+}
+
+test('hold marker in the middle of the title still blocks merging', () => {
+  const snapshot = fixture();
+  snapshot.pr.title = 'Classifier fix [do not merge] awaiting review';
+  assert.ok(readiness(snapshot).includes('human-hold'));
+});
+
 function fakeClient(snapshot = fixture()) {
   const calls = [];
   const routes = new Map([
@@ -635,4 +729,27 @@ test('dispatch support is verified on immutable trusted base before merging', as
   const decisions = await maintain(client, { mode: 'merge' });
   assert.ok(decisions[0].reasons.includes('post-merge-dispatch-not-configured'));
   assert.ok(!client.calls.some((call) => call.method === 'PUT'));
+});
+
+test('Actions can inspect an approved PR through effective rules when classic API returns 403', async () => {
+  const snapshot = fixture();
+  snapshot.protection = null;
+  snapshot.rules = strictRules();
+  const client = fakeClient(snapshot);
+  const original = client.request.bind(client);
+  client.request = async (...args) => {
+    if (args[0] === `${ROOT}/branches/main/protection`) throw new Error('GitHub API 403');
+    return original(...args);
+  };
+  const result = await inspectPull(client, 42);
+  assert.deepEqual(result.reasons, []);
+  assert.equal(result.protection, null);
+});
+
+test('effective strict rules do not substitute for an exact-head human approval', () => {
+  const snapshot = fixture();
+  snapshot.protection = null;
+  snapshot.rules = strictRules();
+  snapshot.reviews = [];
+  assert.ok(readiness(snapshot).includes('current-head-human-approval-required'));
 });

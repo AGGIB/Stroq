@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -254,7 +255,9 @@ jobs:
     name: stroq inspect (SARIF)
     runs-on: ubuntu-latest
     # A fork's and Dependabot's pull requests get a read-only token, which cannot upload.
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     permissions:
       contents: read
       security-events: write

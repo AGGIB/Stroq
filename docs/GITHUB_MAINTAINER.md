@@ -1,83 +1,84 @@
 # GitHub-hosted repository maintenance
 
-The proposed maintenance setup runs on GitHub-hosted Ubuntu runners. It does not
-use a developer's Mac, a self-hosted runner, or an OpenAI API key. Codex reviews
-use the connected account's existing subscription and its applicable limits;
-GitHub Actions usage remains subject to GitHub's runner limits and billing.
+Repository maintenance runs on GitHub-hosted Ubuntu runners, independently of a
+developer's Mac. It uses short-lived GitHub tokens and the existing native Codex
+subscription for code review; it needs no separate OpenAI API key.
 
-## What is included
+## What the workflow does
 
-- Root `AGENTS.md` gives cloud Codex repository-specific review rules.
-- `Repository maintainer preview` reads current PRs, checks, reviews and issue
-  metadata, and reports proposed decisions in the Actions log. Its token has only
-  read permissions and its API client rejects mutation requests.
-- The controller source and its tests make the proposed future writer behavior
-  reviewable. **This PR does not enable issue changes or automatic merging.**
+`Repository maintainer` runs every 15 minutes, after CI or CodeQL completes, and
+on issue activity. Both jobs check out trusted `main`, never a PR branch.
 
-## Enable native cloud Codex review
+- The scan job restores missing category labels only when an issue matches an
+  existing issue form and label. It maintains one deduplicated readiness comment
+  per PR. It does not guess diagnoses, promise fixes, close old issues or publish
+  exploit details.
+- The merge job independently fetches current state and squash-merges at most one
+  ready PR per run. It does not rely on the scan's comment as authorization.
+- Native Codex reviews inform the human reviewer. A missing comment, an emoji or
+  a bot's COMMENT review never substitutes for a human approval.
 
-1. Open <https://chatgpt.com/settings/code-review> and sign in to the existing
-   Codex account.
-2. Connect `AGGIB/Stroq` if it is not already connected. Check the requested
-   repository access before approving the connection.
-3. Select the repository, enable automatic code review for its PRs, and select
-   the available trigger for new pushes. This is a cloud setting, independent of
-   the desktop app.
-4. Open a representative PR and confirm that Codex actually completes a review.
+Normal GitHub `Closes #n` links continue closing issues on merge. Merging does
+not publish a release, create a tag, or approve npm publication.
+
+## Requirements for automatic merge
+
+The current PR commit must have an explicit APPROVED review from a different
+human collaborator with write, maintain or admin permission. Drafts, hold/WIP
+labels, effective change requests and unresolved review threads block merging.
+
+CI and CodeQL must finish successfully for the current head and current base.
+The controller verifies the GitHub Actions app, workflow path, run, matrix and
+test-merge parents; a matching check name alone is insufficient. It rereads every
+gate immediately before a merge and sends the expected head SHA to GitHub.
+
+The active server-side rules for `main` must require:
+
+- Up-to-date required GitHub Actions checks.
+- At least one independent approval, with stale approvals dismissed on push.
+- Resolved review conversations.
+
+The versioned policy is `.github/maintainer-ruleset.json`. It has no bypass actors.
+The controller reads effective active branch rules using metadata access, so it
+does not require the Administration permission unavailable to `GITHUB_TOKEN`.
+Classic protection may impose additional requirements; GitHub still enforces
+them. Missing permissions, unsupported rules or uncertain results stop merging.
+
+Changes to workflows, agent policy and release versions stay on a manual merge
+path even after approval. The controller never changes repository protection,
+force-pushes, deletes branches or modifies its own policy.
+
+## Permissions and checks after merge
+
+The scan job has issue/PR write permission and read access to contents, Actions,
+checks and commit statuses. The merge job additionally needs contents and Actions
+write permission. Neither job has model credentials or a persistent token.
+
+A merge made with `GITHUB_TOKEN` suppresses the usual subsequent push workflows.
+The writer verifies dispatch support before merging, then explicitly dispatches
+CI, CodeQL and Scorecard on `main`. A dispatch failure fails the maintenance run
+and needs maintainer attention; it is never reported as a fully checked merge.
+
+## Native cloud Codex review
+
+In <https://chatgpt.com/settings/code-review>, select `AGGIB/Stroq` and enable
+automatic review for all PRs. The configured review trigger determines re-review
+on subsequent pushes. Reviews use the connected subscription and its applicable
+limits, separately from the workflow's human approval condition.
 
 See the [official Codex GitHub integration documentation](https://learn.chatgpt.com/docs/third-party/github).
-The native integration does not document a stable machine-readable successful
-review API. A live review in this repository emitted a versioned
-`codex-review-state:v1` summary containing the reviewed commit SHA, but its completed
-state and provenance must be verified before it can authorize autonomous merges.
-A missing comment, an emoji reaction, or a successful CI job is not a Codex
-approval. This proposal therefore requires an explicit approval from a trusted
-human reviewer on the current PR commit. Fully autonomous semantic issue triage
-and an AI merge verdict are not enabled by this preview.
 
-## Review the preview
+## Manual verification
 
-After this PR is merged, open Actions → Repository maintainer preview → Run
-workflow, or wait for a scheduled run. It also runs after CI or CodeQL finishes.
-The preview reports readiness and missing requirements without posting comments,
-changing labels, closing issues, dispatching other workflows, or merging.
+In Actions → Repository maintainer → Run workflow, set `dry_run` to true for a
+read-only reconciliation. This forces the API client to reject mutations and
+skips the merge job. Normal runs use `dry_run: false`.
 
-For local policy tests, no credentials are needed:
+Offline policy and API-client tests need no credentials:
 
 ```sh
 node --test .github/scripts/maintainer.test.mjs
 ```
 
-## Proposed activation, requiring separate approval
-
-Activation is a separate change to the workflow, not a secret or an API payment.
-It would add a scan job with issue/PR write permission and a separate merge job
-with repository-content and Actions write permission. Both use short-lived
-`GITHUB_TOKEN` credentials, trusted `main` code, and GitHub-hosted runners.
-
-The writer would restore missing labels matching the existing issue forms,
-publish deduplicated PR readiness information, and squash-merge at most one ready
-PR per run. It would not independently diagnose bugs, close old issues, publish
-releases, create tags, or change repository protection. Normal GitHub `Closes #n`
-links would keep closing issues when their PR is merged.
-
-Merge readiness includes a current-commit approval from a trusted human, no open
-blocking review threads or change requests, successful trusted CI and CodeQL,
-fresh head/base commits, a protected `main`, and GitHub's normal merge-rule
-enforcement. Unknown or unreadable requirements block merging. Changes to the
-controller or its policy require human review.
-
-Before writer activation, server-side branch protection must also require
-up-to-date CI, at least one independent approval, dismissal of stale approvals,
-and resolved review conversations. Those protections close races between the
-controller's last read and its merge request. Current protection does not require
-these review and freshness guarantees; the preview does not change it.
-
-Merging with `GITHUB_TOKEN` does not trigger the usual subsequent push workflows.
-Before enabling a writer, add explicit manual-dispatch support to CI, CodeQL and
-Scorecard and verify the post-merge dispatches. The preview does not make those
-changes or dispatch those workflows.
-
-Neither this preview nor a draft PR enables native cloud Codex settings or a
-writer. Verify those settings separately before relying on them, and avoid running
-a second maintainer with mutation rights during migration.
+Keep any previous local maintainer paused to avoid duplicate writers. Enable the
+GitHub workflow only with the approved permissions and active protection policy.
