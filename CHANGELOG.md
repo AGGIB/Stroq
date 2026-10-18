@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
+
 - Garbage-collection warnings name the unreferenced copy that could not be removed, including orphaned copies, rather than a revision intentionally retained for rollback.
 
 ### Added
