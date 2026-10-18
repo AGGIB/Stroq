@@ -84,6 +84,10 @@ function packageFlagValue(
  * The packages in the value of a package flag, which may name several, separated by commas
  * (`--with a,b`), and whether the value is a doubt: it is empty, or one of them cannot be read.
  */
+/** The packages a word names: the one in it, and the one an alias in it stands for. */
+const namesOf = (word: PackageWord): string[] =>
+  [word.name, word.target].filter((name): name is string => name !== undefined);
+
 function flagPackages(value: ShellWord, command: boolean): { packages: string[]; doubt: boolean } {
   const packages: string[] = [];
   let doubt = command && value.word === '';
@@ -93,7 +97,7 @@ function flagPackages(value: ShellWord, command: boolean): { packages: string[];
     from += piece.length + 1;
     if (piece === '') continue;
     const word = readPackageWord({ word: piece, open: value.open, literal });
-    if (word.name !== undefined) packages.push(word.name);
+    packages.push(...namesOf(word));
     doubt = doubt || (command && word.doubt);
   }
   return { packages, doubt };
@@ -158,6 +162,7 @@ export function readRunner(
   family: RunnerFamily,
   doubts: boolean,
   lexed = false,
+  takesPositional = true,
 ): RunnerReading {
   const fromFlags: string[] = [];
   const packageFlags = PACKAGE_FLAGS[family];
@@ -197,7 +202,7 @@ export function readRunner(
     }
     const word = readPackageWord(read);
     return {
-      packages: word.name === undefined ? fromFlags : [...fromFlags, word.name],
+      packages: takesPositional ? [...fromFlags, ...namesOf(word)] : fromFlags,
       sure: true,
       doubt: doubt || (doubts && word.doubt),
     };
@@ -229,7 +234,7 @@ export function readInstaller(
       continue;
     }
     const word = readPackageWord(read);
-    if (word.name !== undefined) packages.push(word.name);
+    packages.push(...namesOf(word));
     doubt = doubt || (doubts && word.doubt);
     if (line.after(word)) break;
     if (word.skipsNext && line.syntaxIsKnown) i += 1;

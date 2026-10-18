@@ -27,6 +27,10 @@ const EXTRAS = /\[[\w.,-]+\]/y;
 const COMMAND_CLOSERS = ');|';
 /** A redirection operator left at the end of a word, whose target is the word after it. */
 const BARE_OPERATOR = /^(?:[0-9]*[<>]{1,2}|&>>?)$/;
+/** The prefix of a spec that names a package in a registry by it (`npm:left-pad`, `jsr:@std/path`). */
+const REGISTRY_SPEC = /^(?:npm|jsr):/i;
+/** Where an alias names the package it stands for: `alias@npm:real@1.2`. */
+const ALIAS_OF = /^@(?:npm|jsr):/i;
 /** A word that is a flag, a place or an address, not the name of a package in a registry. */
 const NOT_A_NAME_START = '.-/~\\';
 
@@ -34,6 +38,8 @@ const NOT_A_NAME_START = '.-/~\\';
 export interface PackageWord {
   /** The package it names, lower-cased and without its version; undefined when it names none. */
   readonly name: string | undefined;
+  /** The package an alias stands for (`alias@npm:real`), when the word is one. */
+  readonly target?: string;
   /** A word that should have named a package could not be read: see the note above. */
   readonly doubt: boolean;
   /**
@@ -113,15 +119,40 @@ export function readPackageWord(read: ShellWord): PackageWord {
   if (word === '') return { ...NONE, ends: closesAfterWord };
   if (NOT_A_NAME_START.includes(word.charAt(0)) || word.includes('://')) return NONE;
 
-  const end = nameEnd(word);
+  const spec = REGISTRY_SPEC.exec(word)?.[0].length ?? 0;
+  const end = spec + nameEnd(word.slice(spec));
   const readable = standsAlone(word, end);
-  const name = readable ? normalizePackageName(word.slice(0, end)) : '';
+  const name = readable ? normalizePackageName(word.slice(spec, end)) : '';
+  const target = readable ? aliasTarget(read, lead + end, word, end) : undefined;
   const opensQuote = read.open && (lead > 0 || /["']/.test(word));
   return {
     name: name === '' ? undefined : name,
-    doubt: opensQuote || !readable || trailer.includes('?') || (name === '' && end > 0),
+    ...(target?.name === undefined ? {} : { target: target.name }),
+    doubt:
+      opensQuote ||
+      !readable ||
+      trailer.includes('?') ||
+      (name === '' && end > spec) ||
+      target?.doubt === true,
     ends: (isCloser(word, end) && plain(end)) || closesAfterWord,
     skipsNext: BARE_OPERATOR.test(word.slice(end)) && plain(end),
     opensQuote,
   };
+}
+
+/** The package an alias (`alias@npm:real@1`) stands for, read as a word of its own. */
+function aliasTarget(
+  read: ShellWord,
+  at: number,
+  word: string,
+  end: number,
+): PackageWord | undefined {
+  const marker = ALIAS_OF.exec(word.slice(end))?.[0].length;
+  if (marker === undefined) return undefined;
+  const from = at + marker;
+  return readPackageWord({
+    word: read.word.slice(from),
+    open: read.open,
+    literal: read.literal.slice(from),
+  });
 }

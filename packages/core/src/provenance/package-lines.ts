@@ -1,8 +1,8 @@
 import type { Positioned } from './atom-kinds.js';
-import { commandMap, commandName, type CommandMap, type LexedCommand } from './command-map.js';
+import { commandMap, type CommandMap, type LexedCommand } from './command-map.js';
 import { normalizePackageName } from './package-name.js';
 import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
-import { INSTALLER, PHRASE_STARTS, RUNNER, matchPhrase } from './tool-phrases.js';
+import { INSTALLER, PHRASE_STARTS, RUNNER, matchCommand } from './tool-phrases.js';
 
 // `restOfLine` scans at most this many characters past a runner/installer match.
 // A command line longer than this is truncated (trailing packages are missed), which
@@ -104,6 +104,9 @@ function readTokens(scan: LineScan): string[] {
   return scan.cut ? tokens.slice(0, -1) : tokens;
 }
 
+/** The last word of a matched phrase, lower-cased. */
+const lastWord = (phrase: string): string => phrase.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
+
 /** Where a package was named, as atoms. */
 const atomsAt = (index: number, packages: readonly string[]): Positioned[] =>
   packages.flatMap((pkg): Positioned[] => {
@@ -132,10 +135,12 @@ interface Mentions {
 function runnerMentions({ text, reader, isMention, doubts }: Mentions): Found {
   const lines = [...text.matchAll(RUNNER)]
     .filter((m) => isMention(m.index ?? 0))
-    .map((m) => ({ ...reader.after(m), family: runnerFamily(m[0]) }))
+    .map((m) => ({ ...reader.after(m), family: runnerFamily(m[0]), verb: lastWord(m[0]) }))
     .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan), line.family, doubts) }));
   return {
-    positioned: lines.flatMap(({ index, reading }) => atomsAt(index, reading.packages)),
+    positioned: lines.flatMap(({ index, reading, verb }) =>
+      atomsAt(index, withCreated(reading.packages, verb)),
+    ),
     cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
     doubt: lines.some(({ reading }) => reading.doubt),
@@ -164,23 +169,36 @@ function wordsOf(text: string, command: LexedCommand): string[] {
   return words;
 }
 
+/** The name of the package a `create` runs: `create-<name>`, and `@scope/create-<name>` for a scoped one. */
+const createdBy = (name: string): string => {
+  const slash = name.startsWith('@') ? name.indexOf('/') : -1;
+  return slash === -1
+    ? `create-${name}`
+    : `${name.slice(0, slash + 1)}create-${name.slice(slash + 1)}`;
+};
+
+/** A `create` runs the package named `create-<name>`: both names are read. */
+const withCreated = (packages: readonly string[], verb: string): string[] =>
+  verb === 'create' ? [...packages, ...packages.map(createdBy)] : [...packages];
+
 /** What one command that runs a runner or an installer names, read from its words. */
 function readCommand(text: string, start: number, command: LexedCommand): Found | null {
   const words = wordsOf(text, command);
-  const match = matchPhrase(words.slice(0, 3).map(commandName));
+  const match = matchCommand(words);
   if (match === null) return null;
-  const rest = words.slice(match.length);
+  const rest = words.slice(match.consumed);
   const found = (packages: string[], doubt: boolean, cut: boolean): Found => ({
-    positioned: atomsAt(start, packages),
+    positioned: atomsAt(start, withCreated(packages, match.verb)),
     cut,
     budgetSpent: false,
-    doubt,
+    doubt: doubt || match.doubt,
   });
   if (match.phrase.kind === 'installer') {
     const reading = readInstaller(rest, true, true);
     return found(reading.packages, reading.doubt, command.truncated);
   }
-  const reading = readRunner(rest, runnerFamily(commandName(words[0] ?? '')), true, true);
+  const family = runnerFamily(words[0] ?? '');
+  const reading = readRunner(rest, family, true, true, match.phrase.kind === 'runner');
   return found(reading.packages, reading.doubt, command.truncated && !reading.sure);
 }
 

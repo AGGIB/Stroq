@@ -14,7 +14,7 @@ import {
   type LexState,
 } from '../actions/shell-skip.js';
 import { LOCAL_WRAPPERS, PREFIX_WORDS, optionTakesValue } from '../actions/shell-wrappers.js';
-import { shellWord } from './shell-word.js';
+import { canonicalCommand } from './tool-phrases.js';
 
 /**
  * Where the commands of a command line are, as a shell reads them: the first word of each simple
@@ -83,12 +83,6 @@ const REDIRECTION = /&>>?|[<>]{1,2}[&|]?/y;
 /** A flag that makes a shell run the next word as a command (`-c`, `-lc`). */
 const COMMAND_STRING_FLAG = /^-[a-z]*c[a-z]*$/i;
 const DURATION = /^\d[\d.]*[smhd]?$/;
-
-/** A word's name for the table of commands: unquoted and lower-cased; empty when it is an expansion. */
-export function commandName(raw: string): string {
-  const { word } = shellWord(raw);
-  return /[$`]/.test(word) ? '' : word.toLowerCase();
-}
 
 const isPrefixWord = (name: string): boolean =>
   PREFIX_WORDS.has(name) || Object.hasOwn(LOCAL_WRAPPERS, name);
@@ -254,7 +248,7 @@ class RangeLexer {
   private leading(start: number, end: number): void {
     const raw = this.ctx.text.slice(start, end);
     if (ENV_ASSIGNMENT.test(raw)) return;
-    const name = commandName(raw);
+    const name = canonicalCommand(raw);
     if (this.prefix !== null && this.passesOver(raw)) return;
     if (this.prefix === null && OPENERS.has(name)) return;
     if (isPrefixWord(name)) {
