@@ -189,29 +189,83 @@ const jsonForm = (value: unknown): string =>
   ).slice(0, JSON_FORM_CHARS);
 
 /**
- * An object that is none of the shapes above, read as the string values in it, one to a line,
- * and then as the object serialised. A web fetch's result is such an object (`{bytes, code,
- * codeText, result, durationMs, url}`), and only serialised it turned every line break in the
- * page into the two characters backslash and `n`: the patterns that need the start of a line
- * then missed what the page said. Only the values, though, left out the keys, and about a
- * hundred rules are written for JSON syntax (a key, a colon, a value); so both are there, the
- * text first, and the serialised form only as far as the clip leaves room. An object with no
- * string at all is serialised alone, and said to be.
+ * What the shapes of a result that are known read, each in its own way: the `text` of a text item,
+ * the `content` of a file, the streams of a command, the items of a `content` list. Every one that
+ * is there is read, and not only the first, in that order. `consumed` is the keys they read, which
+ * the rest of the object is read without.
  */
-function objectReading(obj: Record<string, unknown>): ResultReading {
-  if (typeof obj['text'] === 'string') return plain(obj['text']);
+interface KnownReading {
+  readonly pieces: string[];
+  readonly consumed: ReadonlySet<string>;
+  /** The text of the pieces is no text: a list of items that held none, and had to be serialised. */
+  readonly serialised: boolean;
+}
+
+function knownReading(obj: Record<string, unknown>): KnownReading {
+  const pieces: string[] = [];
+  const consumed = new Set<string>();
+  let serialised = false;
+  if (typeof obj['text'] === 'string') {
+    pieces.push(obj['text']);
+    consumed.add('text');
+  }
   const file = fileContentOf(obj);
-  if (file !== null) return plain(file);
+  if (file !== null) {
+    pieces.push(file);
+    consumed.add('file');
+  }
   const streams = streamsOf(obj);
-  if (streams !== null) return plain(streams);
-  if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
-  const readable = withoutMedia(obj);
-  const strings = collectStrings(readable).filter((value) => value !== '');
-  const serialised = jsonForm(readable);
-  if (strings.length === 0) return { text: serialised, serialised: true };
+  if (streams !== null) {
+    pieces.push(streams);
+    consumed.add('stdout').add('stderr');
+  }
+  if (Array.isArray(obj['content'])) {
+    const items = toolResultReading(obj['content']);
+    pieces.push(items.text);
+    consumed.add('content');
+    serialised = items.serialised;
+  }
+  return { pieces, consumed, serialised };
+}
+
+/** The string values of the object outside the keys a known shape read, and outside `type`, which only labels it. */
+function otherStrings(obj: Record<string, unknown>, consumed: ReadonlySet<string>): string[] {
+  return Object.entries(obj)
+    .filter(([key]) => key !== 'type' && !consumed.has(key))
+    .flatMap(([, value]) => collectStrings(withoutMedia(value)))
+    .filter((value) => value !== '');
+}
+
+/** The strings, one to a line, and then the serialised object as far as the clip leaves room. */
+function stringsAndJson(strings: readonly string[], readable: unknown): ResultReading {
   const joined = strings.join('\n');
   const room = MAX_RESULT_CHARS - 1 - joined.length - 1;
-  return plain(room > 0 ? `${joined}\n${serialised.slice(0, room)}` : joined);
+  return plain(room > 0 ? `${joined}\n${jsonForm(readable).slice(0, room)}` : joined);
+}
+
+/**
+ * An object, read as every string in it. The shapes that are known read what they hold in their
+ * own way (see `knownReading`); the rest of the object, whatever a sibling of them holds
+ * (`structuredContent` beside `content`, a note beside a file), is read as its string values. When
+ * the object is none of the known shapes, all of its strings are its text. Whenever strings were
+ * read that a known shape did not own, the serialised object follows them: about a hundred rules
+ * are written for JSON syntax (a key, a colon, a value), and a web fetch's result
+ * (`{bytes, code, codeText, result, durationMs, url}`) has no shape of its own and read only
+ * serialised turned every line break in the page into the two characters backslash and `n`. An
+ * object with no string at all is serialised alone, and said to be.
+ */
+function objectReading(obj: Record<string, unknown>): ResultReading {
+  const known = knownReading(obj);
+  if (known.pieces.length === 0) {
+    const readable = withoutMedia(obj);
+    const strings = collectStrings(readable).filter((value) => value !== '');
+    if (strings.length === 0) return { text: jsonForm(readable), serialised: true };
+    return stringsAndJson(strings, readable);
+  }
+  const primary = known.pieces.filter((piece) => piece !== '');
+  const others = otherStrings(obj, known.consumed);
+  if (others.length === 0) return { text: primary.join('\n'), serialised: known.serialised };
+  return stringsAndJson([...primary, ...others], withoutMedia(obj));
 }
 
 export function toolResultReading(result: unknown): ResultReading {
