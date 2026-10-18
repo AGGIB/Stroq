@@ -111,13 +111,42 @@ describe('a package a flagged page named with one tool', () => {
   });
 });
 
+const AWKWARD: readonly string[] = [
+  `pnpm -w add ${NAME}`,
+  `npm -w install install ${NAME}`,
+  `npm -C app install ${NAME}`,
+  `npm foo bar install ${NAME}`,
+  `npm ${'--a '.repeat(100)}install ${NAME}`,
+  `python -u -m pip install ${NAME}`,
+  `python -W ignore -m pip install ${NAME}`,
+  `python3 -mpip install ${NAME}`,
+  `py -3.11 -m pip install ${NAME}`,
+  `python --weird -m pip install ${NAME}`,
+  `uv run python -m pip install ${NAME}`,
+  `python script.py -m pip install ${NAME}`,
+];
+
+describe('a package a flagged page named, behind options and flags the table does not know', () => {
+  it.each(AWKWARD)('is denied: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+});
+
 describe('a command that is no launcher', () => {
-  it.each(['npm --prefix app run build', 'pip -q list', 'cargo +nightly build'])(
-    'is not denied for the name of a package on the page: %s',
-    async (command) => {
-      const f = fixture();
-      await f.post(pageWith(`npx ${NAME}`));
-      expect((await f.pre(command)).decision.effect).not.toBe('deny');
-    },
-  );
+  it.each([
+    'npm --prefix app run build',
+    'pip -q list',
+    'cargo +nightly build',
+    'python script.py',
+    'python -c "print(1)"',
+  ])('is not denied for the name of a package on the page: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision.effect).not.toBe('deny');
+  });
 });

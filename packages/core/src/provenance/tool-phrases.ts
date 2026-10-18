@@ -11,7 +11,7 @@ import { shellWord } from './shell-word.js';
 export type PhraseKind = 'runner' | 'installer' | 'with';
 
 /** One word of a phrase, with the spellings that stand for it (`i`, `install` and `add` are one verb of npm). */
-type Alternatives = readonly string[];
+export type Alternatives = readonly string[];
 
 export interface Phrase {
   readonly kind: PhraseKind;
@@ -40,6 +40,7 @@ const INSTALLER_PHRASES = [
   'bun add|install|i',
   'pip install',
   'python -m pip install',
+  'uv run python -m pip install',
   'poetry add|install',
   'pdm add|install',
   'conda install',
@@ -129,124 +130,4 @@ export function canonicalCommand(raw: string): string {
   for (const [name, spelling] of Object.entries(SPELLINGS))
     if (spelling.test.test(base)) return name;
   return base;
-}
-
-/**
- * The options before a verb that take the word after them as a value, in the tools that have a
- * verb. Words are compared lower-cased, so `-C` (the directory of pnpm and git) is `-c` here.
- */
-const VALUE_OPTIONS: ReadonlySet<string> = new Set([
-  '-c',
-  '--dir',
-  '--directory',
-  '--prefix',
-  '--filter',
-  '-w',
-  '--workspace',
-  '--cwd',
-  '--loglevel',
-  '--cache',
-  '--cache-dir',
-  '--registry',
-  '--store-dir',
-  '--reporter',
-  '--node-options',
-  '--before',
-  '--tag',
-  '--project',
-  '--env-file',
-  '--python',
-  '--python-preference',
-  '--refresh-package',
-  '--userconfig',
-  '--globalconfig',
-  '--index-url',
-  '--extra-index-url',
-  '--proxy',
-  '--cert',
-  '--trusted-host',
-  '--log',
-]);
-
-/** How many words are looked at, from the tool on, to find its verb. */
-const MAX_SKIPPED = 16;
-
-/** A phrase and how many of the words of a command it takes, the options before its verbs included. */
-export interface CommandMatch {
-  readonly phrase: Phrase;
-  readonly consumed: number;
-  /** An option with a value nobody knows stood before the verb, so what it took is a guess. */
-  readonly doubt: boolean;
-  /** The last word of the phrase, as written. */
-  readonly verb: string;
-}
-
-const plainWord = (raw: string | undefined): string => shellWord(raw ?? '').word.toLowerCase();
-
-const isOption = (word: string): boolean =>
-  word.startsWith('-') || (word.startsWith('+') && word.length > 1);
-
-/**
- * Where the verb `alternatives` stands in `words`, from `from` on, past the options that come
- * first: an option takes the word after it when it is one of those that take a value, and
- * otherwise stands alone. A word that is neither the verb nor an option is the value of an option
- * nobody knows when the verb follows it, and the match is then a doubt; otherwise it is another
- * command (`npm run`), and there is no match. A word that is itself an option (`-m`) stands where it is.
- */
-function findVerb(
-  words: readonly string[],
-  from: number,
-  alternatives: Alternatives,
-): { at: number; doubt: boolean; word: string } | null {
-  const literal = alternatives[0]?.startsWith('-') === true;
-  let at = from;
-  let doubt = false;
-  for (let steps = 0; at < words.length && steps < MAX_SKIPPED; steps += 1) {
-    const word = plainWord(words[at]);
-    if (alternatives.includes(word)) return { at, doubt, word };
-    if (literal) return null;
-    if (isOption(word)) {
-      at += !word.includes('=') && VALUE_OPTIONS.has(word) ? 2 : 1;
-      continue;
-    }
-    const after = plainWord(words[at + 1]);
-    if (at > from && isOption(plainWord(words[at - 1])) && alternatives.includes(after)) {
-      doubt = true;
-      at += 1;
-      continue;
-    }
-    return null;
-  }
-  return null;
-}
-
-function followPhrase(phrase: Phrase, words: readonly string[]): CommandMatch | null {
-  let at = 1;
-  let doubt = false;
-  let verb = '';
-  for (const alternatives of phrase.words.slice(1)) {
-    const found = findVerb(words, at, alternatives);
-    if (found === null) return null;
-    at = found.at + 1;
-    doubt = doubt || found.doubt;
-    verb = found.word;
-  }
-  return { phrase, consumed: at, doubt, verb };
-}
-
-/**
- * The phrase the words of a command begin with, the longest if several do, and how many of its
- * words it takes. The options between the tool and each verb are passed over (`npm --prefix app
- * install x`), and the tool may be spelled with a path or quotes (see `canonicalCommand`).
- */
-export function matchCommand(words: readonly string[]): CommandMatch | null {
-  const first = canonicalCommand(words[0] ?? '');
-  let best: CommandMatch | null = null;
-  for (const phrase of PHRASES) {
-    if (phrase.words[0]?.includes(first) !== true) continue;
-    const match = followPhrase(phrase, words);
-    if (match !== null && (best === null || phrase.words.length > best.phrase.words.length))
-      best = match;
-  }
-  return best;
 }

@@ -2,7 +2,8 @@ import type { Positioned } from './atom-kinds.js';
 import { commandMap, type CommandMap, type LexedCommand } from './command-map.js';
 import { normalizePackageName } from './package-name.js';
 import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
-import { INSTALLER, PHRASE_STARTS, RUNNER, matchCommand } from './tool-phrases.js';
+import { matchCommand } from './command-match.js';
+import { INSTALLER, PHRASE_STARTS, RUNNER } from './tool-phrases.js';
 
 // `restOfLine` scans at most this many characters past a runner/installer match.
 // A command line longer than this is truncated (trailing packages are missed), which
@@ -193,11 +194,18 @@ function readCommand(text: string, start: number, command: LexedCommand): Found 
     budgetSpent: false,
     doubt: doubt || match.doubt,
   });
+  const family = runnerFamily(words[0] ?? '');
+  // The verb was not reached (more options than are looked at): the rest is read as the words of
+  // either kind of launcher, and the packages of both are kept.
+  if (match.unreached === true) {
+    const installer = readInstaller(rest, true, true);
+    const runner = readRunner(rest, family, true, true);
+    return found([...installer.packages, ...runner.packages], true, command.truncated);
+  }
   if (match.phrase.kind === 'installer') {
     const reading = readInstaller(rest, true, true);
     return found(reading.packages, reading.doubt, command.truncated);
   }
-  const family = runnerFamily(words[0] ?? '');
   const reading = readRunner(rest, family, true, true, match.phrase.kind === 'runner');
   return found(reading.packages, reading.doubt, command.truncated && !reading.sure);
 }
