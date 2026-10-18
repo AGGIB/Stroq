@@ -51,6 +51,10 @@ const SPELLINGS: readonly string[] = [
   `npx ${'--no-install '.repeat(50)}${NAME}`,
   `pip install ${'--quiet '.repeat(70)}${NAME}`,
   `CI=1 npx ${NAME}`,
+  `npx \\${NAME}`,
+  `npx e\\vil-helper-fix`,
+  `npm install \\${NAME}`,
+  'npm install ev\\\nil-helper-fix',
 ];
 
 describe('a flagged page that named a package', () => {
@@ -62,6 +66,25 @@ describe('a flagged page that named a package', () => {
   it('asks about a command whose package is past what can be read', async () => {
     await post('flagged-long', FLAGGED);
     expect(await decide('flagged-long', `npx ${'-y '.repeat(1200)}${NAME}`)).toBe('ask');
+  });
+
+  it('asks about a second -p that is past what can be read, and about a variable', async () => {
+    await post('flagged-p', FLAGGED);
+    expect(await decide('flagged-p', `npx -p ok-pkg ${'-y '.repeat(800)}-p ${NAME} run`)).toBe(
+      'ask',
+    );
+    expect(await decide('flagged-p', 'npx $PKG --apply')).toBe('ask');
+  });
+
+  it('leaves ordinary wrapped commands alone after a flagged page', async () => {
+    await post('flagged-ok', FLAGGED);
+    for (const command of [
+      'npm install left-pad \\\n  lodash',
+      'npx eslint .',
+      'npx ./script.js',
+    ]) {
+      expect(await decide('flagged-ok', command), command).toBe('allow');
+    }
   });
 
   it('leaves an ordinary long command alone in a session that read nothing', async () => {

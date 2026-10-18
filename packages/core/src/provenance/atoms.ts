@@ -70,6 +70,10 @@ const LINE_END = /[\n|;`]|&&|\|\|/;
 // A backslash before a line break continues the line whatever follows it, indented or not, and the
 // shell joins it to the next; an indented line is read as a continuation of the one before it.
 const CONTINUATION_NEWLINE = /\\\r?\n[ \t]*|\r?\n[ \t]+/g;
+// What the shell takes out whole (a backslash and the line break after it), and the line that is
+// indented without one.
+const SHELL_BREAK = /\\\r?\n/g;
+const INDENTED_BREAK = /\r?\n[ \t]+/g;
 const FLAGS_WITH_VALUE = new Set([
   '-r',
   '--requirement',
@@ -159,6 +163,33 @@ function collapseContinuations(text: string): string {
   return text.replace(CONTINUATION_NEWLINE, ' ');
 }
 
+/**
+ * The text as the shell joins it: a backslash and the line break after it are removed, with
+ * nothing in their place (`ev\<newline>il` is `evil`), where `collapseContinuations` puts the
+ * space a word-wrapped page has. An indented line that does not follow a backslash is still
+ * joined by a space, as there. A command is read both ways, so that neither can hide a package.
+ */
+function shellJoin(text: string): string {
+  return text.replace(SHELL_BREAK, '').replace(INDENTED_BREAK, ' ');
+}
+
+/**
+ * A word as the shell reads it outside quotes: a backslash takes itself out in front of the
+ * character after it (`e\vil` is `evil`, `\pkg` is `pkg`, `\\` is `\`). A backslash that ends
+ * the word has nothing after it and stays: at the end of a line it is the mark of a continuation.
+ */
+const shellWord = (token: string): string => token.replace(/\\(.)/g, '$1');
+
+/** A word that is only the mark of a continuation, and is neither a flag nor a package. */
+const isContinuationMark = (word: string): boolean => word === '\\';
+
+/**
+ * A word that is the value of a variable or a command, whose package cannot be read from the
+ * command: `$PKG`, `"$PKG"`, `$(cat name)`. A doubt about an action, since what it expands to
+ * may be a name the session read; not about a page, which names nothing by saying `npx $PKG`.
+ */
+const isExpansion = (word: string): boolean => word.replace(LEADING_QUOTES, '').startsWith('$');
+
 function isPackageToken(token: string): boolean {
   return (
     token !== '' &&
@@ -171,14 +202,32 @@ function isPackageToken(token: string): boolean {
   );
 }
 
-/** The single package a runner (`npx`, `pnpm dlx`, …) resolves: `-p <pkg>` wins, else the first positional. */
-function runnerPackage(tokens: readonly string[]): string | null {
+/** What a runner's words say about its package. */
+interface RunnerReading {
+  readonly pkg: string | null;
+  /**
+   * The first word that is not a flag was reached, which settles the package: nothing after it
+   * can change it. False when the words ran out first, and a later `-p` may still name another.
+   */
+  readonly sure: boolean;
+  /** A word that should have named the package is a variable or a command, whose value is unknown. */
+  readonly doubt: boolean;
+}
+
+/**
+ * The single package a runner (`npx`, `pnpm dlx`, …) resolves: `-p <pkg>` wins, else the first
+ * positional. The words are read as the shell reads them (see `shellWord`).
+ */
+function runnerPackage(tokens: readonly string[]): RunnerReading {
   let fromFlag: string | null = null;
+  let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i] ?? '';
+    const token = shellWord(tokens[i] ?? '');
+    if (isContinuationMark(token)) continue;
     if (PACKAGE_FLAGS.has(token)) {
-      const value = tokens[i + 1] ?? '';
+      const value = shellWord(tokens[i + 1] ?? '');
       if (isPackageToken(value)) fromFlag = value;
+      else if (isExpansion(value)) doubt = true;
       i += 1;
       continue;
     }
@@ -187,22 +236,30 @@ function runnerPackage(tokens: readonly string[]): string | null {
       continue;
     }
     if (token.startsWith('-')) continue;
-    return fromFlag ?? (isPackageToken(token) ? token : null);
+    const positional = fromFlag ?? (isPackageToken(token) ? token : null);
+    return {
+      pkg: positional,
+      sure: true,
+      doubt: doubt || (fromFlag === null && isExpansion(token)),
+    };
   }
-  return fromFlag;
+  return { pkg: fromFlag, sure: false, doubt };
 }
 
-function installerPackages(tokens: readonly string[]): string[] {
-  const out: string[] = [];
+function installerPackages(tokens: readonly string[]): { packages: string[]; doubt: boolean } {
+  const packages: string[] = [];
+  let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i] ?? '';
+    const token = shellWord(tokens[i] ?? '');
+    if (isContinuationMark(token)) continue;
     if (FLAGS_WITH_VALUE.has(token)) {
       i += 1;
       continue;
     }
-    if (isPackageToken(token)) out.push(token);
+    if (isPackageToken(token)) packages.push(token);
+    else if (isExpansion(token)) doubt = true;
   }
-  return out;
+  return { packages, doubt };
 }
 
 /** Atoms one extractor found, and whether it stopped reading a line before the line ended. */
@@ -212,6 +269,8 @@ interface Found {
   readonly cut: boolean;
   /** The pass spent its reading budget, so some matches were not read at all. */
   readonly budgetSpent: boolean;
+  /** A word that should have named a package is a variable or a command (see `isExpansion`). */
+  readonly doubt: boolean;
 }
 
 /** A runner or installer match with the rest of its line, positioned at the match's start. */
@@ -261,36 +320,41 @@ function readTokens(scan: LineScan): string[] {
 
 /**
  * Every package named after a runner match, positioned at that match's start index. A runner's
- * package is the first word that is not a flag (or the value of `-p`), so a line that goes on
- * past the window after it was found has lost nothing: it is cut only where none was found.
+ * package is the first word that is not a flag (or the value of `-p`), so a line that goes on past
+ * the window after that word was reached has lost nothing. A line cut before it, or a package
+ * that came from `-p` while later words (a second `-p`) were not read, is cut.
  */
 function runnerPackages(text: string, reader: LineReader): Found {
   const lines = [...text.matchAll(RUNNER)]
     .map(reader.after)
-    .map((line) => ({ ...line, pkg: runnerPackage(readTokens(line.scan)) }));
+    .map((line) => ({ ...line, reading: runnerPackage(readTokens(line.scan)) }));
   return {
-    positioned: lines.flatMap(({ index, pkg }): Positioned[] => {
-      if (pkg === null) return [];
-      const value = normalizePackageName(pkg);
+    positioned: lines.flatMap(({ index, reading }): Positioned[] => {
+      if (reading.pkg === null) return [];
+      const value = normalizePackageName(reading.pkg);
       return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
     }),
-    cut: lines.some(({ scan, pkg }) => scan.cut && pkg === null),
+    cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
+    doubt: lines.some(({ reading }) => reading.doubt),
   };
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
 function installedPackages(text: string, reader: LineReader): Found {
-  const lines = [...text.matchAll(INSTALLER)].map(reader.after);
+  const lines = [...text.matchAll(INSTALLER)]
+    .map(reader.after)
+    .map((line) => ({ ...line, reading: installerPackages(readTokens(line.scan)) }));
   return {
-    positioned: lines.flatMap(({ index, scan }): Positioned[] =>
-      installerPackages(readTokens(scan)).flatMap((pkg): Positioned[] => {
+    positioned: lines.flatMap(({ index, reading }): Positioned[] =>
+      reading.packages.flatMap((pkg): Positioned[] => {
         const value = normalizePackageName(pkg);
         return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
       }),
     ),
     cut: lines.some(({ scan }) => scan.cut),
     budgetSpent: reader.skipped(),
+    doubt: lines.some(({ reading }) => reading.doubt),
   };
 }
 
@@ -412,6 +476,7 @@ function packageAtoms(text: string): Found {
     positioned: [...runners.positioned, ...installers.positioned],
     cut: runners.cut || installers.cut,
     budgetSpent: reader.skipped(),
+    doubt: runners.doubt || installers.doubt,
   };
 }
 
@@ -451,6 +516,8 @@ interface Extraction {
   readonly lineCut: boolean;
   /** The pass ran out of the budget for reading lines, so the matches that were left were not read. */
   readonly budgetSpent: boolean;
+  /** A word that should have named a package is a variable or a command (see `isExpansion`). */
+  readonly doubt: boolean;
 }
 
 function extractBounded(text: string): Extraction {
@@ -471,6 +538,7 @@ function extractBounded(text: string): Extraction {
     capped: set.floorLeftOut,
     lineCut: packages.cut,
     budgetSpent: packages.budgetSpent,
+    doubt: packages.doubt,
   };
 }
 
@@ -516,16 +584,25 @@ export function extractActionAtoms(text: string): ActionExtraction {
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
   const plain = extractBounded(bounded);
   for (const atom of plain.atoms) set.add(atom);
-  let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent;
-  if (!set.floorFull) {
-    const collapsed = collapseContinuations(bounded);
-    if (collapsed !== bounded) {
-      const joined = extractBounded(collapsed);
-      for (const atom of joined.atoms) set.add(atom);
-      unread = unread || joined.capped || joined.budgetSpent || wrappedCommandCut(bounded);
-    }
+  let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent || plain.doubt;
+  for (const joined of joinedReadings(bounded)) {
+    if (set.floorFull) break;
+    const extraction = extractBounded(joined);
+    for (const atom of extraction.atoms) set.add(atom);
+    unread = unread || extraction.capped || extraction.budgetSpent || extraction.doubt;
   }
+  unread = unread || wrappedCommandCut(bounded);
   return { atoms: set.atoms, unread: unread || set.floorFull || set.floorLeftOut };
+}
+
+/**
+ * The text with its continuation lines joined, in each way that is read: with a space where a line
+ * was wrapped (`collapseContinuations`), and as the shell joins them (`shellJoin`). The ones that
+ * are not different from the text itself are left out.
+ */
+function joinedReadings(text: string): string[] {
+  const readings = [collapseContinuations(text), shellJoin(text)];
+  return readings.filter((reading, i) => reading !== text && readings.indexOf(reading) === i);
 }
 
 /**
@@ -616,13 +693,12 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
     merge(extractBounded(variant.text));
   }
 
-  if (!set.floorFull) {
-    const collapsed = collapseContinuations(bounded);
-    if (collapsed !== bounded) {
-      merge(extractBounded(collapsed), false);
-      truncated = truncated || wrappedCommandCut(bounded);
-    }
+  const joinedTexts = joinedReadings(bounded);
+  for (const joined of joinedTexts) {
+    if (set.floorFull) break;
+    merge(extractBounded(joined), false);
   }
+  if (joinedTexts.length > 0 && !set.floorFull) truncated = truncated || wrappedCommandCut(bounded);
 
   return { atoms: set.atoms, truncated: truncated || set.floorFull || set.floorLeftOut };
 }
