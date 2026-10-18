@@ -11,7 +11,15 @@ const base: ExposureReport = {
     { agent: 'codex', detected: false, protected: false },
   ],
   mcp: [
-    { client: 'cursor', scope: 'user', file: '/h/.cursor/mcp.json', stdio: 3, wrapped: 1, http: 1 },
+    {
+      client: 'cursor',
+      scope: 'user',
+      file: '/h/.cursor/mcp.json',
+      stdio: 3,
+      wrapped: 1,
+      strict: 0,
+      http: 1,
+    },
   ],
   context: {
     instructionFiles: 2,
@@ -80,6 +88,24 @@ describe('formatExposure', () => {
     const out = formatExposure(base);
     expect(out).toMatch(/stdio, unwrapped\s+2/);
     expect(out).toMatch(/http \(out of reach\)\s+1/);
+  });
+
+  it('reports strict wrappers beside wrapped count when present', () => {
+    const out = formatExposure({
+      ...base,
+      mcp: [
+        {
+          client: 'cursor',
+          scope: 'user',
+          file: '/h/.cursor/mcp.json',
+          stdio: 3,
+          wrapped: 2,
+          strict: 1,
+          http: 0,
+        },
+      ],
+    });
+    expect(out).toMatch(/wrapped by Stroq\s+2\s+\(1 strict\)/);
   });
 
   it('lists findings most severe first, with the fix', () => {

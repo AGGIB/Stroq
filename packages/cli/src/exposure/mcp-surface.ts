@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { MCP_CONFIGS } from '../commands/doctor.js';
 import {
   countHttp,
+  countStrict,
   countWrapped,
   mcpConfigPath,
   readMcpConfig,
@@ -15,6 +16,7 @@ export interface McpSurface {
   readonly file: string;
   readonly stdio: number;
   readonly wrapped: number;
+  readonly strict: number;
   /** Entries carrying `url`/`serverUrl`: no subprocess exists, so the proxy cannot reach them. */
   readonly http: number;
 }
@@ -41,6 +43,7 @@ export function mcpSurface(cwd: string): readonly McpSurface[] {
         file,
         stdio: counted.stdio,
         wrapped: counted.wrapped,
+        strict: countStrict(config),
         http: countHttp(config),
       });
     } catch {
