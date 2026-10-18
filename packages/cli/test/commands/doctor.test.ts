@@ -1144,7 +1144,9 @@ describe('doctorReport mcp proxy', () => {
     // the detail says why, rather than silently reporting them as protected.
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('wrapped 0/2 stdio servers');
-    expect(check?.detail).toContain('2 stale wrappers: entry missing');
+    expect(check?.detail).toContain(
+      '2 stale wrappers: entry missing — run `stroq init --agent mcp --client claude-code` or `stroq add <name> --kind mcp --force`',
+    );
   });
 
   it('names a wrapper that predates env filtering, so the decision is visible', async () => {

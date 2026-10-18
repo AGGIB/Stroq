@@ -184,7 +184,7 @@ describe('pin startup and diagnostics', () => {
     vi.stubEnv('STROQ_HOME', f.home);
     const file = join(f.home, 'mcp.json');
     const args = [
-      '/stroq/dist/index.js',
+      join(import.meta.dirname, '../../src/index.ts'),
       'mcp',
       '--server',
       'demo',

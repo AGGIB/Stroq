@@ -35,12 +35,14 @@ export async function mcpFixture(
     config,
     JSON.stringify({ mcpServers: { other: { command: 'keep', args: ['1'] } }, extra: true }),
   );
+  const entry = join(f.root, 'index.js');
+  await writeFile(entry, '');
   const mcpOptions = {
     project: f.options.project,
     stroqHome: f.options.stroqHome,
     terminal: f.terminal,
     node: process.execPath,
-    entryArgv: ['/stroq/dist/index.js'],
+    entryArgv: [entry],
     config,
   };
   const servers = async () =>

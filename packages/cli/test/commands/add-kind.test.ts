@@ -92,6 +92,84 @@ describe('add --kind mcp --strict', () => {
   });
 });
 
+describe('add --kind mcp from an npx cache entry', () => {
+  it('writes a stable entry path outside _npx and records the same launch in the lock', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { mcpFixture } = await import('../helpers/mcp-install.js');
+    const { readPassports } = await import('../../src/install/lock.js');
+    const { storePath } = await import('../../src/install/store.js');
+    const { preparePin } = await import('../../src/mcp/pin.js');
+    const { configPinStatus } = await import('../../src/mcp/pin-status.js');
+    const { wrappedEntryPath } = await import('../../src/commands/mcp-config.js');
+    const terminal = await import('../../src/ui/terminal.js');
+
+    const f = await mcpFixture();
+    const npxEntry = join(
+      f.root,
+      '_npx',
+      'deadbeef',
+      'node_modules',
+      '@stroq',
+      'cli',
+      'dist',
+      'index.js',
+    );
+    await mkdir(join(npxEntry, '..'), { recursive: true });
+    await writeFile(npxEntry, '// cli entry\n');
+
+    vi.stubEnv('STROQ_HOME', f.options.stroqHome);
+    vi.spyOn(process, 'cwd').mockReturnValue(f.options.project);
+    vi.spyOn(terminal, 'currentTerminal').mockReturnValue(f.terminal);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const prevArgv1 = process.argv[1];
+    process.argv[1] = npxEntry;
+    try {
+      expect(await runAdd([f.dir, '--kind', 'mcp', '--config', f.config])).toBe(0);
+    } finally {
+      process.argv[1] = prevArgv1!;
+    }
+
+    // Even after npm prunes the temporary _npx cache folder, the installed wrapper's entry exists.
+    await rm(join(f.root, '_npx'), { recursive: true, force: true });
+
+    const servers = await f.servers();
+    const wrapper = servers['demo'] as { command: string; args: string[] };
+    const entryPath = wrappedEntryPath(wrapper.args)!;
+    expect(entryPath).toBeDefined();
+    expect(entryPath).not.toContain('_npx');
+    expect(entryPath).toContain(join(f.options.stroqHome, 'cli'));
+    expect(await readFile(entryPath, 'utf8')).toBe('// cli entry\n');
+
+    const lock = await readPassports(f.options.stroqHome);
+    const record = lock.mcp!['demo'] as { written: unknown; digest: string };
+    expect(record.written).toEqual(wrapper);
+
+    const pinned = await preparePin({
+      home: f.options.stroqHome,
+      server: 'demo',
+      pin: `sha256:${record.digest}`,
+      command: 'node',
+      args: [join(storePath(f.options.stroqHome, record.digest), 'tree', 'server.js')],
+      passEnv: [],
+      launch: { command: wrapper.command, argv: wrapper.args },
+    });
+    await pinned.cleanup();
+    expect(await configPinStatus(f.config)).toMatchObject([{ name: 'mcp pin "demo"', ok: true }]);
+
+    // If the recorded entry path is later deleted, configPinStatus fails and says what to run.
+    await rm(entryPath);
+    const broken = await configPinStatus(f.config);
+    expect(broken).toMatchObject([
+      {
+        name: 'mcp pin "demo"',
+        ok: false,
+        detail: expect.stringContaining('stroq add demo --kind mcp --force'),
+      },
+    ]);
+    expect(broken[0]!.detail).toContain('no longer exists');
+  });
+});
+
 describe('add of a folder that is not a skill', () => {
   it('points an MCP server at --kind mcp, with the flags that name its client', async () => {
     const f = await setup();

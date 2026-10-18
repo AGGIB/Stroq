@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`stroq add --kind mcp` now writes a stable Stroq entry path under `~/.stroq/cli/<version>` instead of a temporary `npx` cache path.** When `add` is run through `npx @stroq/cli`, the wrapper written to the client config and recorded in `passports.json` (`written`) points to the stable copy in `~/.stroq/cli/<version>`, matching `stroq init`, so pruning the `npx` cache no longer breaks the confirmed wrapper or forces a pin mismatch on re-init. When a wrapper's recorded entry path no longer exists on disk, `stroq doctor` fails the `mcp proxy` and `mcp pin` checks and prints the `stroq init --agent mcp` or `stroq add <name> --kind mcp --force` command to run (#245).
+
 ## [0.26.0] - 2026-10-18
 
 ### Added

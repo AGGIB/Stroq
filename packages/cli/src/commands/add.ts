@@ -60,12 +60,15 @@ export async function runAdd(args: readonly string[]): Promise<number> {
   }
   if (kind === 'mcp') {
     const { addMcp } = await import('../install/mcp-install.js');
-    const { hookArgv } = await import('./init.js');
-    const [node, ...entryArgv] = hookArgv(process.execPath, resolve(process.argv[1] ?? ''));
+    const { hookArgv, stableEntry } = await import('./init.js');
+    const { stroqVersion } = await import('../version.js');
+    const home = stroqHome();
+    const entry = stableEntry(resolve(process.argv[1] ?? ''), home, stroqVersion());
+    const [node, ...entryArgv] = hookArgv(process.execPath, entry);
     const names = parsed.values['pass-env'];
     const added = await addMcp(parsed.positionals[0]!, {
       project: process.cwd(),
-      stroqHome: stroqHome(),
+      stroqHome: home,
       terminal: currentTerminal(),
       node: node!,
       entryArgv,
