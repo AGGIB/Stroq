@@ -278,8 +278,10 @@ interface PostReadingsState {
 const readingStates = new WeakMap<PostReadings, PostReadingsState>();
 
 /**
- * Creates one result's reading scope. Its primary (non-extra) post consumes it; abandoning
- * the scope after a suspect extra leaves that result's pending marker in place.
+ * Creates one result's reading scope. Its primary (non-extra) post consumes it. An extra reading
+ * that is clean puts no marker down; one that is suspect does, and abandoning the scope after it
+ * leaves that result's pending marker in place, as a result that was delivered and not recorded
+ * is. A caller that WITHHOLDS the result instead says so with `StroqEngine.abandon`.
  */
 export function createPostReadings(): PostReadings {
   const readings = Object.freeze({}) as PostReadings;
@@ -565,6 +567,24 @@ export class StroqEngine {
     };
   }
 
+  /**
+   * Gives up on a result whose readings will not be completed because the result is not going to be
+   * delivered (a proxy withheld it). Nothing of it reached the model, so the marker its readings put
+   * down comes off; what a suspect reading already tainted stays. The scope cannot be used again.
+   */
+  async abandon(readings: PostReadings): Promise<void> {
+    const state = readingStates.get(readings);
+    if (state === undefined) throw new Error('abandon: invalid result reading scope');
+    if (state.busy) throw new Error('abandon: result reading scope is in use');
+    const owner = state.pendingOwner;
+    const sessionId = state.identity?.sessionId;
+    state.closed = true;
+    state.pendingOwner = undefined;
+    state.extraReadings.length = 0;
+    if (owner !== undefined && sessionId !== undefined)
+      await this.recorder.release(sessionId, owner);
+  }
+
   async post(event: PostToolEvent, readings?: PostReadings): Promise<PostResult> {
     if (readings === undefined) return this.postReading(event);
     const state = readingStates.get(readings);
@@ -664,7 +684,8 @@ export class StroqEngine {
     // session that reads as incomplete, not one with nothing recorded and nothing said. It comes
     // off when this result's records are written. The readings of one result share it, and an
     // extra with no scope to be settled in is not given one.
-    const pendingOwner = await this.markInFlight(event, readingsState);
+    const isExtra = event.extraReading === true && readingsState !== undefined;
+    let pendingOwner = isExtra ? undefined : await this.markInFlight(event, readingsState);
     const scan = scanContent(
       this.opts.rules,
       event.toolResultText,
@@ -688,6 +709,11 @@ export class StroqEngine {
     // about the text actually scanned, not about where it came from.
     const trusted =
       scan.verdict === 'suspect' && this.opts.trust?.trusts(event.toolResultText) === true;
+    // A clean extra reading puts no marker down: it is not recorded on its own, and a scope
+    // abandoned after it would leave the session reading as incomplete for nothing. One that
+    // taints does, before the taint is written, and the primary settles it.
+    if (isExtra && scan.verdict === 'suspect' && !trusted)
+      pendingOwner = await this.markInFlight(event, readingsState);
     // The audit entry is the forensic record and must be durable before we
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no

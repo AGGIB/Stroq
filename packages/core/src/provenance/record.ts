@@ -102,6 +102,14 @@ export class ProvenanceRecorder {
     return owner;
   }
 
+  /**
+   * Takes off the marker of an operation that was given up on: its result was never delivered, so
+   * nothing the session did not see is unrecorded. Never throws.
+   */
+  async release(sessionId: string, owner: string): Promise<void> {
+    if (this.store) await this.settle(this.store, sessionId, owner);
+  }
+
   /** Takes off only this operation's marker, once its records or loss note are durable. */
   private async settle(
     store: ProvenanceStore,

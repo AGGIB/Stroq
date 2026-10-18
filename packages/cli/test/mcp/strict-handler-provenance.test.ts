@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -56,14 +56,17 @@ function fixture(env: Record<string, string> = {}) {
     // The engine is real; the independent dry-run clock is outside these lifecycle tests.
     scan: () => 'ok',
   });
-  const pending = () =>
-    readdirSync(sessions).flatMap((name) =>
+  const pending = (): string[] => {
+    // Nothing is written to a home that nothing was recorded in.
+    if (!existsSync(sessions)) return [];
+    return readdirSync(sessions).flatMap((name) =>
       name.endsWith('.prov.pending.d')
         ? readdirSync(join(sessions, name)).map((owner) => `${name}/${owner}`)
         : name.endsWith('.prov.pending')
           ? [name]
           : [],
     );
+  };
   return { ...real, rig, home, sessions, pending, reload };
 }
 
@@ -93,7 +96,7 @@ describe('strict handler provenance across the real engine readings', () => {
     expect(next.provenance).toHaveLength(1);
   });
 
-  it('keeps durable incomplete evidence if a later view fails after the first suspect extra', async () => {
+  it('settles the marker of a withheld result when a later view fails after the first suspect extra', async () => {
     const f = fixture();
     const post = f.engine.post.bind(f.engine);
     let extras = 0;
@@ -109,12 +112,58 @@ describe('strict handler provenance across the real engine readings', () => {
     expect(extras).toBe(2);
     expect(f.rig.lines).toEqual([]);
     expect(JSON.stringify(f.rig.sent)).toContain('(scan-failed)');
-    expect(f.pending()).toHaveLength(1);
+    // Nothing was delivered to the model, so nothing it did not see is unrecorded.
+    expect(f.pending()).toEqual([]);
     const restarted = f.reload();
-    expect(await restarted.provenance.isIncomplete('s1')).toBe(true);
-    const next = await restarted.pre('npx first-helper-fix');
-    expect(next.decision.ruleId).toBe('ask-origin-untrusted');
-    expect(next.provenance).toEqual([]);
+    expect(await restarted.provenance.isIncomplete('s1')).toBe(false);
+  });
+
+  it('settles the marker of a withheld result when a later view times out', async () => {
+    const f = fixture();
+    const post = f.engine.post.bind(f.engine);
+    let extras = 0;
+    vi.spyOn(f.engine, 'post').mockImplementation(async (event, readings) => {
+      const result = await post(event, readings);
+      if (event.extraReading === true && ++extras === 2)
+        return { ...result, scan: { ...result.scan, timedOut: true } };
+      return result;
+    });
+    track(f.rig, 1);
+
+    await f.rig.feed(response(1, 'result-one'));
+
+    expect(JSON.stringify(f.rig.sent)).toContain('(scan-timeout)');
+    expect(f.pending()).toEqual([]);
+    expect(await f.reload().provenance.isIncomplete('s1')).toBe(false);
+  });
+
+  it('leaves no marker for a clean extra view that no primary follows', async () => {
+    const f = fixture();
+    const post = f.engine.post.bind(f.engine);
+    let primaries = 0;
+    vi.spyOn(f.engine, 'post').mockImplementation(async (event, readings) => {
+      if (event.extraReading !== true) {
+        primaries += 1;
+        throw new Error('the primary did not finish');
+      }
+      return post(event, readings);
+    });
+    track(f.rig, 1);
+
+    await f.rig.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          content: [{ type: 'text', text: 'Ordinary.' }],
+          _meta: { note: 'Also ordinary.' },
+        },
+      }),
+    );
+
+    expect(primaries).toBe(1);
+    expect(f.rig.lines).toEqual([]);
+    expect(f.pending()).toEqual([]);
   });
 
   it('does not settle an in-flight result when another result completes', async () => {
