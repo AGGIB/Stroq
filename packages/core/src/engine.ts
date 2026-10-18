@@ -17,9 +17,9 @@ import {
 import { percentDecodedLeniently } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
-import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { DEFAULT_MAX_CHARS, scanContent } from './scan/scanner.js';
+import { SCANNED_TOOLS, scanFieldsForTool, scanTargetForTool } from './scan/scan-target.js';
 import { evaluateScope } from './scope/engine-gate.js';
 import type { ScopeGate } from './scope/types.js';
 import {
@@ -118,88 +118,8 @@ export interface PostResult {
   readonly trusted?: boolean;
 }
 
-export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__)/;
+export { SCANNED_TOOLS, scanFieldsForTool, scanTargetForTool };
 
-/**
- * Names of files whose *content* is instructions to the agent rather than repository
- * material, so a `Read` of one is an `instruction_file` and not `repo_content`. The
- * distinction matters because a rule scoped to instruction files would otherwise go
- * dark exactly where those files are read at run time — the tool name alone cannot
- * tell `CLAUDE.md` from `README.md`, but the path can.
- *
- * Kept deliberately narrow (the well-known agent instruction files, plus anything under
- * a `.claude`/`.cursor`/`.codex`/`.windsurf` directory, plus `SKILL.md`): a file this
- * does not recognise is read as `repo_content`, which is the wider surface for the
- * rules that matter there and therefore the safe way to be wrong.
- */
-const INSTRUCTION_READ_PATH =
-  /(?:^|[/\\])(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]|(?:^|[/\\])\.github[/\\]instructions[/\\]/i;
-
-/**
- * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
- * about it — under which every rule fires, exactly as before surfaces existed.
- * A wrong narrow answer here is a hole, so each case below is one the tool name
- * settles, with one named exception:
- *
- * - `tools/list` through the MCP proxy returns the servers' tool *descriptions*, which
- *   is where tool poisoning lives; every other `mcp__` call returns `tool_result` —
- *   including `resources/read` and `prompts/get`, minted as
- *   `mcp__<srv>__resources_read` and `mcp__<srv>__prompts_get` by `MCP_METHOD_TOOL` in
- *   `packages/cli/src/mcp/judge.ts`. Those two are not actually settled by the tool
- *   name: a prompt template is text the agent is meant to obey, which by this
- *   codebase's own definition is `instruction_file`, and a resource read is closer to
- *   `repo_content` than to a tool call's own result. They share `tool_result` today as
- *   a placeholder, which costs nothing measurable because nothing is scoped to
- *   `instruction_file` or `repo_content` in a way that a stray `mcp__` result could
- *   wrongly feed — but the day a rule category such as `skill-compromise` is scoped
- *   away from `any`, these two need their own branch here rather than continuing to
- *   share `tool_result` with `tools/call`.
- * - `Bash` and Claude Code's `PowerShell` return a command's output.
- * - `Read` returns a file, classified by path (see `INSTRUCTION_READ_PATH`); `Grep` returns
- *   repository lines.
- * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
- *   the surface the published false-positive rate is measured on.
- */
-export function scanTargetForTool(
-  toolName: string,
-  toolInput: Readonly<Record<string, unknown>> = {},
-): ScanTarget {
-  if (toolName.startsWith('mcp__')) {
-    return toolName.endsWith('__tools_list') ? 'tool_description' : 'tool_result';
-  }
-  if (toolName === 'Bash' || toolName === 'PowerShell') return 'command_output';
-  if (toolName === 'Read') {
-    const path = toolInput.file_path ?? toolInput.notebook_path;
-    return typeof path === 'string' && INSTRUCTION_READ_PATH.test(path)
-      ? 'instruction_file'
-      : 'repo_content';
-  }
-  if (toolName === 'Grep' || toolName === 'WebFetch' || toolName === 'WebSearch') {
-    return 'repo_content';
-  }
-  return 'any';
-}
-
-/**
- * The fields of the rule format that the result of a tool fills in, beside `content`. The text of
- * what an MCP server returns, or a web fetch or search, is a tool's response, and the text of
- * `tools/list` is what a server says its tools are: about three hundred rules read those fields and
- * matched nothing while nobody supplied them (see `supplied-fields.ts`). A local result (a file, a
- * listing, a command's output) fills neither: those rules were written for what another party
- * answers, and on one's own work they fire as often as the rules on `content` do.
- *
- * A field that is the scanned text is read in each form the scanner makes of it.
- */
-export function scanFieldsForTool(
-  toolName: string,
-  text: string,
-): Readonly<Record<string, string>> {
-  if (toolName.startsWith('mcp__')) {
-    return toolName.endsWith('__tools_list') ? { tool_description: text } : { tool_response: text };
-  }
-  if (toolName === 'WebFetch' || toolName === 'WebSearch') return { tool_response: text };
-  return {};
-}
 /**
  * The score at which text written into an instruction file counts as a payload: a
  * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
@@ -678,6 +598,22 @@ export class StroqEngine {
     }
   }
 
+  /**
+   * The owner of the marker for this result, putting it down if it is not down yet. The readings
+   * of one logical result share one, and an extra alone never takes it off. An extra reading with
+   * no scope has nothing to settle it, so it is given none.
+   */
+  private async markInFlight(
+    event: PostToolEvent,
+    readingsState: PostReadingsState | undefined,
+  ): Promise<string | undefined> {
+    if (readingsState?.pendingOwner !== undefined) return readingsState.pendingOwner;
+    if (event.extraReading === true && readingsState === undefined) return undefined;
+    const owner = await this.recorder.begin(event.sessionId);
+    if (readingsState !== undefined) readingsState.pendingOwner = owner;
+    return owner;
+  }
+
   private async postReading(
     event: PostToolEvent,
     readingsState?: PostReadingsState,
@@ -719,6 +655,12 @@ export class StroqEngine {
       const state = await this.opts.sessions.get(event.sessionId);
       return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
+    // The marker goes down before anything that can take long or fail: a scan that does not
+    // finish (a pattern that does not come back, the hook's own deadline, a crash) must leave a
+    // session that reads as incomplete, not one with nothing recorded and nothing said. It comes
+    // off when this result's records are written. The readings of one result share it, and an
+    // extra with no scope to be settled in is not given one.
+    const pendingOwner = await this.markInFlight(event, readingsState);
     const scan = scanContent(
       this.opts.rules,
       event.toolResultText,
@@ -762,16 +704,7 @@ export class StroqEngine {
         },
       });
     const taints = scan.verdict === 'suspect' && !trusted;
-    let pendingOwner = readingsState?.pendingOwner;
-    if (taints) {
-      // The first suspect reading puts the marker down before tainting. All readings of
-      // this logical result share it; an extra alone never takes it off.
-      pendingOwner ??= await this.recorder.begin(event.sessionId);
-      if (readingsState !== undefined) {
-        readingsState.pendingOwner = pendingOwner;
-        readingsState.suspect = true;
-      }
-    }
+    if (taints && readingsState !== undefined) readingsState.suspect = true;
     const state = taints
       ? await this.opts.sessions.markSuspect(event.sessionId, {
           tool: event.toolName,

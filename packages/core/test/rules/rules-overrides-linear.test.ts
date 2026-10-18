@@ -90,9 +90,9 @@ const T: Record<string, () => string> = {
 const overrides = loadRuleOverrides(
   join(import.meta.dirname, '../../../../rules/atr-overrides.yaml'),
 );
-const original = new Map(
+const original = new Map<string, string>(
   loadBundledRules().flatMap((rule) =>
-    rule.tests.map((test, index) => [`${rule.id}#${index}`, test.value] as const),
+    rule.tests.map((test, index): [string, string] => [`${rule.id}#${index}`, test.value]),
   ),
 );
 

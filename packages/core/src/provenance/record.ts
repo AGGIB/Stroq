@@ -88,10 +88,12 @@ export class ProvenanceRecorder {
   }
 
   /**
-   * Marks that a result which taints the session is about to be recorded. The taint is written
-   * first and the records after, with a secret-index lookup and a lock between; a process that
-   * goes in that gap would leave a session that is flagged and has no trace. Never throws:
-   * failure to write the marker must not prevent the taint or the attempt to write records.
+   * Marks that a scanned result is about to be recorded, before it is scanned. The scan, the taint
+   * and the records come one after the other, with a secret-index lookup and a lock between; a
+   * process that stops anywhere in that stretch (a scan that does not finish, the hook's deadline,
+   * a crash) would leave a session that read the result and has no trace of it, and a flagged one
+   * that is not tainted. The marker stays and the session reads as incomplete. Never throws:
+   * failure to write the marker must not prevent the scan or the attempt to write records.
    */
   async begin(sessionId: string): Promise<string | undefined> {
     if (!this.store) return undefined;
