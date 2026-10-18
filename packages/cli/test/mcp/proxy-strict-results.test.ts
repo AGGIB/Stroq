@@ -152,14 +152,20 @@ describe('a JSON-RPC error that carries text', () => {
 });
 
 describe('a result Stroq cannot finish reading (nesting that overflows serialisation)', () => {
-  it.skipIf(!deepJsonOverflowsSerialisation())('is forwarded unscanned by default', async () => {
-    const rig = await defaultRun('deepjson');
-    await rig.answerFor(3);
-    // The raw line: the parsed value is too deep for the test to serialise either.
-    expect(rig.lines().some((line) => line.includes(POISON_OPENING))).toBe(true);
-    expect(rig.tainted()).toBe(false);
-    await rig.finish();
-  });
+  // The strings in it are read without serialising it, so the session is tainted by what the text
+  // item says; the warning cannot be written into a value that deep, and the answer is delivered as
+  // the server sent it rather than lost.
+  it.skipIf(!deepJsonOverflowsSerialisation())(
+    'is read and delivered as it came by default',
+    async () => {
+      const rig = await defaultRun('deepjson');
+      await rig.answerFor(3);
+      // The raw line: the parsed value is too deep for the test to serialise either.
+      expect(rig.lines().some((line) => line.includes(POISON_OPENING))).toBe(true);
+      expect(rig.tainted()).toBe(true);
+      await rig.finish();
+    },
+  );
 
   it('is withheld under --strict and the request is answered', async () => {
     const { rig, answer } = await strictRun('deepjson');
