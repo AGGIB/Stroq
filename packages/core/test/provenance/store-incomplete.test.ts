@@ -366,6 +366,78 @@ describe('FileProvenanceStore when the records outgrow the cap', () => {
   });
 });
 
+describe('FileProvenanceStore when flagged records meet the cap', () => {
+  // A flagged record wins over every later record of the same atom (see `action-lookup.ts`), but
+  // only among the records still kept. So the cap drops clean records before it drops a flagged one.
+  const flagged = (hash: string) => input(hash, true);
+
+  it('keeps a flagged record while clean records are dropped around it', async () => {
+    const { store } = fresh();
+    await store.record('s1', [flagged('x')]);
+    await store.record('s1', [...batch('c', MAX_RECORDS + 100), input('x')]);
+
+    const found = await store.lookup('s1', ['x']);
+    expect(found.map((record) => record.suspect).sort()).toEqual([false, true]);
+    expect(await store.lookup('s1', ['c0', 'c99'])).toEqual([]);
+    expect(await store.lookup('s1', ['c2099'])).toHaveLength(1);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('drops the oldest clean records first, as it always dropped the oldest', async () => {
+    const { store } = fresh();
+    await store.record('s1', [...batch('a', 10), flagged('x'), ...batch('b', MAX_RECORDS - 11)]);
+    await store.record('s1', batch('n', 5));
+    expect(await store.lookup('s1', ['a0', 'a4'])).toHaveLength(0);
+    expect(await store.lookup('s1', ['a5', 'x', 'n4'])).toHaveLength(3);
+  });
+
+  it('keeps the newest records of a session without a flagged one, as before', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('a', MAX_RECORDS));
+    await store.record('s1', batch('b', 50));
+    expect(await store.lookup('s1', ['a0', 'a49'])).toEqual([]);
+    expect(await store.lookup('s1', ['a50', 'b49'])).toHaveLength(2);
+  });
+
+  it('drops the oldest flagged records only when flagged records alone outgrow the cap, and says so', async () => {
+    const { store } = fresh();
+    await store.record(
+      's1',
+      Array.from({ length: MAX_RECORDS }, (_, i) => flagged(`f${i}`)),
+    );
+    expect(await store.isIncomplete('s1')).toBe(false);
+
+    await store.record('s1', [flagged('f-new')]);
+
+    expect(await store.lookup('s1', ['f0'])).toEqual([]);
+    expect(await store.lookup('s1', ['f1', 'f-new'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('drops a flagged record of a URL before a flagged package', async () => {
+    const { store } = fresh();
+    const link = { ...flagged('u0'), kind: 'url' as const };
+    await store.record('s1', [
+      link,
+      ...Array.from({ length: MAX_RECORDS - 1 }, (_, i) => flagged(`f${i}`)),
+    ]);
+    await store.record('s1', [flagged('f-new')]);
+    expect(await store.lookup('s1', ['u0'])).toEqual([]);
+    expect(await store.lookup('s1', ['f0'])).toHaveLength(1);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('keeps the file a bare array in the order records were read', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', [flagged('x'), ...batch('c', MAX_RECORDS + 20)]);
+    const onDisk = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8')) as { seq: number }[];
+    expect(Array.isArray(onDisk)).toBe(true);
+    expect(onDisk).toHaveLength(MAX_RECORDS);
+    const seqs = onDisk.map((record) => record.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+});
+
 describe('FileProvenanceStore pending marker', () => {
   it('settles only its own operation, including across store instances', async () => {
     const { dir, store } = fresh();

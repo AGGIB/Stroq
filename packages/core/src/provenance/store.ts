@@ -64,7 +64,7 @@ export interface ProvenanceStore {
   setPending(sessionId: string, pending: boolean, owner?: string): Promise<void>;
 }
 
-/** Oldest records are dropped beyond this many per session, URL and host records before any other. */
+/** Records beyond this many per session are dropped, the oldest of the least valuable first (see `retain`). */
 export const MAX_RECORDS = 2000;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;

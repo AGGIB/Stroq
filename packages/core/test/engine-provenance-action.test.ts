@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { AuditLog } from '../src/audit/audit-log.js';
 import { StroqEngine } from '../src/engine.js';
 import { DEFAULT_POLICY } from '../src/policy/default-policy.js';
-import { FileProvenanceStore } from '../src/provenance/store.js';
+import { atomHash } from '../src/provenance/atoms.js';
+import { FileProvenanceStore, MAX_RECORDS } from '../src/provenance/store.js';
 import { loadBundledRules } from '../src/rules/bundle.js';
 import { FileSessionStore } from '../src/taint/session-store.js';
 
@@ -217,6 +218,42 @@ describe('a later page that repeats the name of a package a flagged page named',
       effect: 'ask',
       ruleId: 'ask-origin-untrusted',
     });
+  });
+});
+
+describe('a flagged record and the cap on what a session keeps', () => {
+  const clean = (value: string) => ({
+    tool: 'Read',
+    source: 'notes.md',
+    kind: 'pkg' as const,
+    hash: atomHash({ kind: 'pkg', value }),
+    excerpt: value,
+    suspect: false,
+  });
+
+  it('still denies once more clean records were read than are kept, one of them repeating the name', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(`npx ${NAME}`)).decision.ruleId).toBe('deny-origin-suspect');
+
+    const filler = Array.from({ length: MAX_RECORDS + 100 }, (_, i) => clean(`filler-${i}`));
+    await f.provenance.record('s1', [...filler, clean(NAME)]);
+
+    expect(await f.provenance.isIncomplete('s1')).toBe(true);
+    const r = await f.pre(`npx ${NAME}`);
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-origin-suspect' });
+    expect(r.classes).toContain('origin.suspect');
+  });
+
+  it('asks, as before, about a name that was only ever in clean records', async () => {
+    const f = fixture();
+    await f.provenance.record('s1', [clean(NAME)]);
+    await f.provenance.record(
+      's1',
+      Array.from({ length: MAX_RECORDS }, (_, i) => clean(`filler-${i}`)),
+    );
+    await f.provenance.record('s1', [clean(NAME)]);
+    expect((await f.pre(`npx ${NAME}`)).decision.ruleId).toBe('ask-origin-untrusted');
   });
 });
 

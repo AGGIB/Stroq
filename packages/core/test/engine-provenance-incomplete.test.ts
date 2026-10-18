@@ -81,11 +81,35 @@ describe('a session whose records were evicted', () => {
     expect(r.decision.reason).toMatch(/provenance .*incomplete/i);
   });
 
-  it('asks rather than denies when the evicted record was a flagged one', async () => {
+  it('keeps denying when only clean records were pushed out: a flagged record is dropped last', async () => {
     const f = fixture();
     await f.post(payload(INJECTION));
     expect((await f.pre(REAL)).decision.ruleId).toBe('deny-origin-suspect');
     await f.readMany();
+
+    const r = await f.pre(REAL);
+
+    expect(await f.provenance.isIncomplete('s1')).toBe(true);
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-origin-suspect' });
+    expect(r.provenance).toHaveLength(1);
+  });
+
+  it('asks rather than denies when the evicted record was a flagged one', async () => {
+    const f = fixture();
+    await f.post(payload(INJECTION));
+    expect((await f.pre(REAL)).decision.ruleId).toBe('deny-origin-suspect');
+    // Only when flagged records alone outgrow what a session keeps does the oldest of them go.
+    await f.provenance.record(
+      's1',
+      Array.from({ length: MAX_RECORDS }, (_, i) => ({
+        tool: 'Read',
+        source: 'page.md',
+        kind: 'pkg' as const,
+        hash: `flagged-${i}`,
+        excerpt: `flagged-${i}`,
+        suspect: true,
+      })),
+    );
 
     const r = await f.pre(REAL);
 
