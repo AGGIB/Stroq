@@ -75,6 +75,7 @@ interface SkillConfirmation {
   readonly target: { readonly path: string };
   readonly previous: SkillRecord | undefined;
   readonly restoring: boolean;
+  readonly rollingBack: boolean;
   readonly made: { readonly passport: Passport; readonly tree: Tree };
   readonly material: boolean;
   readonly oldTree: Tree | undefined;
@@ -105,7 +106,7 @@ export async function confirmSkill(terminal: Terminal, prepared: SkillConfirmati
     );
   terminal.write(screen);
   const confirmed =
-    material || restoring
+    material || restoring || prepared.rollingBack
       ? await confirmTyped(terminal, passport.artifact.digest)
       : await confirm(terminal, styleFor(terminal), 'Apply this update?', false);
   if (!confirmed) throw new Error('not confirmed; the installed skill was kept');

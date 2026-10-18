@@ -5,7 +5,7 @@ import { isPlainObject } from '../commands/config-file.js';
 import { passportsFileIn } from '../paths.js';
 import { readPassports } from './lock.js';
 import { quotePath } from './safe-path.js';
-import { storePath } from './store.js';
+import { readStoredTree, storePath } from './store.js';
 
 const KIB = 1024;
 const HEX_DIGEST = /^[0-9a-f]{64}$/;
@@ -31,7 +31,7 @@ async function directoryBytes(folder: string): Promise<number> {
 
 /**
  * Computes the disk space (in bytes) used by a stored revision (`manifest.json` + `tree/`),
- * or `null` when the store directory is absent or unreadable.
+ * or `null` when the stored revision is absent, unreadable or fails digest verification.
  */
 export async function storedRevisionBytes(home: string, digest: string): Promise<number | null> {
   if (!HEX_DIGEST.test(digest)) return null;
@@ -39,22 +39,11 @@ export async function storedRevisionBytes(home: string, digest: string): Promise
     const folder = storePath(home, digest);
     const stat = await lstat(folder);
     if (stat.isSymbolicLink() || !stat.isDirectory()) return null;
+    await readStoredTree(folder, digest);
     return await directoryBytes(folder);
   } catch {
     return null;
   }
-}
-
-/** Formats the retained previous revision note for a skill or MCP pin check in `stroq doctor`. */
-export async function previousRevisionNote(
-  home: string,
-  digest: string,
-  rollbackCommand: string,
-): Promise<string> {
-  const bytes = await storedRevisionBytes(home, digest);
-  const short = `sha256:${digest.slice(0, 12)}`;
-  if (bytes === null) return `previous ${short} missing from store`;
-  return `previous ${short}, ${formatStoreBytes(bytes)}; rollback with "${rollbackCommand}"`;
 }
 
 export interface RetainedRevisionCheck {
@@ -114,7 +103,7 @@ export async function checkRetainedRevisions(
   const totalBytes = [...uniqueBytes.values()].reduce((sum, n) => sum + n, 0);
   const allPresent = items.every((item) => item.bytes !== null);
   const parts = items.map((item) => {
-    const size = item.bytes === null ? 'missing from store' : formatStoreBytes(item.bytes);
+    const size = item.bytes === null ? 'missing or damaged in store' : formatStoreBytes(item.bytes);
     return `${item.kind} ${quotePath(item.name)} sha256:${item.digest.slice(0, 12)} (${size})`;
   });
 

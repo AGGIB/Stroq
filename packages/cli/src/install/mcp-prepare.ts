@@ -169,14 +169,7 @@ export async function prepareMcp(
   const { selected, current } = configFor(name, previous, options);
   const digest = made.passport.artifact.digest;
   const original = previous === undefined ? null : previous.original;
-  const cwd = resolve(
-    options.cwd ??
-      (previous === undefined
-        ? options.project
-        : options.rollback && previous.previous?.cwd !== undefined
-          ? previous.previous.cwd
-          : recordedCwd(previous)),
-  );
+  const cwd = resolve(options.cwd ?? (base === undefined ? options.project : recordedCwd(base)));
   const written = entryFor(
     name,
     { digest, entrypoint, passEnv },

@@ -71,7 +71,7 @@ export function targetRules(target: McpTarget): { root?: string; initRule: false
   return { ...(target.root === null ? {} : { root: target.root }), initRule: false };
 }
 
-export function recordedCwd(record: McpRecord): string {
+export function recordedCwd(record: Pick<McpRecord, 'cwd' | 'written'>): string {
   if (record.cwd !== undefined) return resolve(record.cwd);
   const args = record.written['args'];
   const at = Array.isArray(args) ? wrapperIndex(args) : null;
