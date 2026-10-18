@@ -202,7 +202,10 @@ const jsonForm = (value: unknown): string =>
  */
 interface KnownReading {
   readonly pieces: string[];
+  /** The keys of the object a known shape read whole. */
   readonly consumed: ReadonlySet<string>;
+  /** The rest of a file object after its content, which is read like any other sibling. */
+  readonly fileRest: Readonly<Record<string, unknown>> | null;
   /** The text of the pieces is no text: a list of items that held none, and had to be serialised. */
   readonly serialised: boolean;
 }
@@ -210,6 +213,7 @@ interface KnownReading {
 function knownReading(obj: Record<string, unknown>): KnownReading {
   const pieces: string[] = [];
   const consumed = new Set<string>();
+  let fileRest: Record<string, unknown> | null = null;
   let serialised = false;
   if (typeof obj['text'] === 'string') {
     pieces.push(obj['text']);
@@ -218,12 +222,15 @@ function knownReading(obj: Record<string, unknown>): KnownReading {
   const file = fileContentOf(obj);
   if (file !== null) {
     pieces.push(file);
-    consumed.add('file');
+    const { content: _content, ...rest } = obj['file'] as Record<string, unknown>;
+    fileRest = rest;
   }
   const streams = streamsOf(obj);
   if (streams !== null) {
     pieces.push(streams);
-    consumed.add('stdout').add('stderr');
+    // Only a stream that was a string was read; any other is a sibling to read like the rest.
+    for (const stream of ['stdout', 'stderr'])
+      if (typeof obj[stream] === 'string') consumed.add(stream);
   }
   if (Array.isArray(obj['content'])) {
     const items = toolResultReading(obj['content']);
@@ -231,13 +238,45 @@ function knownReading(obj: Record<string, unknown>): KnownReading {
     consumed.add('content');
     serialised = items.serialised;
   }
-  return { pieces, consumed, serialised };
+  return { pieces, consumed, fileRest, serialised };
 }
 
-/** The string values of the object outside the keys a known shape read, and outside `type`, which only labels it. */
-function otherStrings(obj: Record<string, unknown>, consumed: ReadonlySet<string>): string[] {
-  return Object.entries(obj)
-    .filter(([key]) => key !== 'type' && !consumed.has(key))
+/** What `type` is when it only labels the kind of item an object is. */
+const TYPE_LABELS: ReadonlySet<string> = new Set([
+  'text',
+  'image',
+  'audio',
+  'video',
+  'resource',
+  'resource_link',
+  'file',
+  'tool_use',
+  'tool_result',
+]);
+
+/**
+ * The keys of a file object that only say which file it is: they echo the request, and a result
+ * that carried them into the text would put a path at the end of every file a person reads.
+ */
+const FILE_ECHO_KEYS: ReadonlySet<string> = new Set(['filePath', 'path']);
+
+/** A `type` whose value is one of the labels, which says what an item is and is not text anyone wrote. */
+const isTypeLabel = (key: string, value: unknown): boolean =>
+  key === 'type' && typeof value === 'string' && TYPE_LABELS.has(value);
+
+/**
+ * The string values of the object that no known shape read: the keys it did not read whole, and
+ * what a file object holds beside its content (a note, another key). A `type` that is one of the
+ * labels is left out; any other `type` is text like the rest. The bytes of media are left out.
+ */
+function otherStrings(obj: Record<string, unknown>, known: KnownReading): string[] {
+  const siblings = Object.entries(obj).filter(
+    ([key, value]) => !known.consumed.has(key) && key !== 'file' && !isTypeLabel(key, value),
+  );
+  const inFile = Object.entries(known.fileRest ?? {}).filter(([key]) => !FILE_ECHO_KEYS.has(key));
+  const unread =
+    known.fileRest === null ? Object.entries(obj).filter(([key]) => key === 'file') : [];
+  return [...siblings, ...inFile, ...unread]
     .flatMap(([, value]) => collectStrings(withoutMedia(value)))
     .filter((value) => value !== '');
 }
@@ -269,7 +308,7 @@ function objectReading(obj: Record<string, unknown>): ResultReading {
     return stringsAndJson(strings, readable);
   }
   const primary = known.pieces.filter((piece) => piece !== '');
-  const others = otherStrings(obj, known.consumed);
+  const others = otherStrings(obj, known);
   if (others.length === 0) return { text: primary.join('\n'), serialised: known.serialised };
   return stringsAndJson([...primary, ...others], withoutMedia(obj));
 }
