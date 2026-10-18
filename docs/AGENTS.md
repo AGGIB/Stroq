@@ -19,9 +19,9 @@ The [Coverage by agent](GUIDE.md#coverage-by-agent) table in the guide is the su
 npx @stroq/cli init                  # in your project: writes .claude/settings.local.json
 ```
 
-`--user` writes `~/.claude/settings.json` instead, `--dry-run` prints the merged file without writing it. Stroq installs `PreToolUse`, `PostToolUse` and `PostToolUseFailure` handlers matching `Bash|PowerShell|Monitor|Read|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*`.
+`--user` writes `~/.claude/settings.json` instead, `--dry-run` prints the merged file without writing it. Stroq installs `PreToolUse` for `Bash|PowerShell|Monitor|Write|Edit|MultiEdit|NotebookEdit|Read|Grep|WebFetch|mcp__.*`, and `PostToolUse` / `PostToolUseFailure` for `Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__.*`.
 
-- **`PreToolUse`** classifies shell commands (`Bash`, `PowerShell`, `Monitor`), file writes (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`), file reads (`Read`), web fetches (`WebFetch`, `WebSearch`) and MCP calls (`mcp__<server>__<tool>`) and returns `allow`, `ask` or `deny` via `hookSpecificOutput.permissionDecision`.
+- **`PreToolUse`** classifies shell commands (`Bash`, `PowerShell`, `Monitor`), file writes (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`), file reads (`Read`, `Grep`), web fetches (`WebFetch`) and MCP calls (`mcp__<server>__<tool>`) and returns `allow`, `ask` or `deny` via `hookSpecificOutput.permissionDecision`. The installed pre-hook matcher excludes `WebSearch`; its results are scanned only after the call.
 - **`PostToolUse` and `PostToolUseFailure`** scan the returned tool output (`Bash`, `PowerShell`, `Read`, `WebFetch`, `WebSearch`, `mcp__.*`), taint the session on a suspect match, record provenance atoms, and surface a warning via `hookSpecificOutput.additionalContext`.
 - **Limits.** Hook enforcement covers tool calls that pass through Claude Code's hook pipeline; OS-level process sandboxing requires `stroq run --sandbox`. Live enforcement was verified on Claude Code 2.1.271 (`packages/cli/test/fixtures/hosts/claude-code/2.1.271/deny.real.acceptEdits.jsonl`).
 

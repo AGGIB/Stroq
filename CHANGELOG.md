@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Host-filtered attack replay checks partial visibility by phase and tool; absent shell output, page bodies and Claude WebSearch pre-hooks are unsupported. Generated host evidence escapes Markdown table separators and HTML placeholders. Benchmark report paths use forward slashes on every OS so `check:reports` is reproducible across Windows and POSIX.
+
 ### Added
 
 - **Per-host channel reporting for `stroq attack` and generated `docs/HOSTS.md`.** `stroq attack --host <id>` filters scenario steps by the channels each host can actually see (shell commands, file writes, file reads, MCP calls, tool results, web fetches), counting steps a host never sends as `unsupported` rather than a defence. `docs/HOSTS.md` is generated from the machine-readable channel matrix and verified in CI alongside coverage and bench reports. Thanks @kok-o (#231).

@@ -131,7 +131,7 @@ The exit code is 1 whenever anything escapes: the mutation corpus has no known e
 
 ### Filter by what a host can actually see (`--host <id>`)
 
-`stroq attack --host <id>` filters the attack suite by the channels that host actually sends to Stroq (`shell command`, `file write`, `file read`, `MCP call`, `tool result`, `web fetch`). A step the host never sends is reported as `unsupported`, counted apart from `blocked`, `asked` and `passed`, and never counted as a protection. The per-host matrix lives in [`docs/HOSTS.md`](./HOSTS.md).
+`stroq attack --host <id>` filters the attack suite by the channels that host actually sends to Stroq (`shell command`, `file write`, `file read`, `MCP call`, `tool result`, `web fetch`). For partial channels it also checks the step's phase and tool: Windsurf sends MCP results but no shell output, and Antigravity sends web-fetch URLs but no returned page bodies. A step the host never sends is reported as `unsupported`, counted apart from `blocked`, `asked` and `passed`, and never counted as a protection. The per-host matrix lives in [`docs/HOSTS.md`](./HOSTS.md). This is a replay through the policy engine using documented adapter visibility; it does not establish that a particular installed host enforces the result. Live measurements remain limited to the versions and channels recorded in the cited fixtures.
 
 ## What the corpus proves, and doesn't
 

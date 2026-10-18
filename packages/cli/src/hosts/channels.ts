@@ -47,6 +47,8 @@ export interface HostChannelCell {
   readonly status: ChannelStatus;
   /** One-line citation pointing to `docs/AGENTS.md#<section>` or a recorded fixture path. */
   readonly evidence: string;
+  /** Restrict a partial channel to these canonical replay tools in each phase. */
+  readonly tools?: Readonly<Record<'pre' | 'post', readonly string[]>>;
 }
 
 export interface HostChannelEntry {
@@ -57,7 +59,11 @@ export interface HostChannelEntry {
   readonly channels: Readonly<Record<AttackChannel, HostChannelCell>>;
 }
 
-const c = (status: ChannelStatus, evidence: string): HostChannelCell => ({ status, evidence });
+const c = (
+  status: ChannelStatus,
+  evidence: string,
+  tools?: HostChannelCell['tools'],
+): HostChannelCell => ({ status, evidence, ...(tools === undefined ? {} : { tools }) });
 
 export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
   'claude-code': {
@@ -86,8 +92,9 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
         'docs/AGENTS.md#claude-code — PostToolUse and PostToolUseFailure scan Bash, PowerShell and mcp__.* output.',
       ),
       'web fetch': c(
-        'seen',
-        'docs/AGENTS.md#claude-code — PreToolUse classifies WebFetch/WebSearch URLs and PostToolUse scans fetched pages.',
+        'partial',
+        'docs/AGENTS.md#claude-code — PreToolUse classifies WebFetch URLs; PostToolUse scans WebFetch and WebSearch results. WebSearch has no installed pre-hook.',
+        { pre: ['WebFetch'], post: ['WebFetch', 'WebSearch'] },
       ),
     },
   },
@@ -98,7 +105,7 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
     channels: {
       'shell command': c(
         'seen',
-        'packages/cli/test/fixtures/hosts/cursor/3.24.18-win32/hooks.jsonl — beforeShellExecution classifies commands with deny and ask.',
+        'docs/AGENTS.md#cursor — beforeShellExecution classifies commands with deny and ask; the recorded Windows capture measured editor writes only.',
       ),
       'file write': c(
         'partial',
@@ -145,7 +152,7 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
       ),
       'tool result': c(
         'partial',
-        'docs/AGENTS.md#codex — PostToolUse scans Bash and mcp__.* output and warns via systemMessage.',
+        'docs/AGENTS.md#codex — PostToolUse scans Bash and mcp__.* output and warns via additionalContext.',
       ),
       'web fetch': c(
         'not seen',
@@ -239,6 +246,7 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
       'tool result': c(
         'partial',
         'docs/AGENTS.md#windsurf — post_mcp_tool_use scans MCP results; post_run_command carries no command output.',
+        { pre: [], post: ['mcp__.*'] },
       ),
       'web fetch': c(
         'not seen',
@@ -274,6 +282,7 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
       'web fetch': c(
         'partial',
         'docs/AGENTS.md#google-antigravity — PreToolUse classifies read_url_content and web_fetch URLs; PostToolUse carries no page body.',
+        { pre: ['WebFetch'], post: [] },
       ),
     },
   },
@@ -301,6 +310,7 @@ export const HOST_CHANNELS: Readonly<Record<AttackHost, HostChannelEntry>> = {
       'tool result': c(
         'partial',
         'docs/AGENTS.md#mcp-proxy-any-mcp-client — tools/call, tools/list, resources/read and prompts/get responses on wrapped servers are scanned.',
+        { pre: [], post: ['mcp__.*'] },
       ),
       'web fetch': c(
         'not seen',
@@ -355,6 +365,11 @@ export function hostStepSupport(
   return {
     channel,
     cell,
-    supported: isChannelSupported(cell.status),
+    supported:
+      isChannelSupported(cell.status) &&
+      (cell.tools === undefined ||
+        cell.tools[phase].some((name) =>
+          name === 'mcp__.*' ? tool.startsWith('mcp__') : name === tool,
+        )),
   };
 }

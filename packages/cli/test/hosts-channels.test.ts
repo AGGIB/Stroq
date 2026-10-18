@@ -18,6 +18,10 @@ const readAgentsMd = (): string =>
 describe('hosts channel matrix', () => {
   it('has a bijective mapping between ATTACK_HOSTS and docs/AGENTS.md host sections', () => {
     const agentsMd = readAgentsMd();
+    const documentedHosts = [...agentsMd.matchAll(/^\| [^|]+ \| `([a-z-]+)` \|/gm)].map(
+      (match) => match[1],
+    );
+    expect(documentedHosts.sort()).toEqual([...ATTACK_HOSTS].sort());
     for (const host of ATTACK_HOSTS) {
       const entry = HOST_CHANNELS[host];
       expect(entry).toBeDefined();

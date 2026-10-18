@@ -97,7 +97,7 @@ export function formatHostsMarkdown(scenarios: readonly Scenario[] = SCENARIOS):
     '`stroq attack` replays the 36-scenario corpus in-process using Claude Code hook events. When you pass `--host <id>`, each step is checked against the target host’s row below before the engine runs it:',
     '',
     '- **`seen`** — the host emits a hook event for this channel and enforces or records the step as documented.',
-    '- **`partial`** — the host sends this channel to Stroq (so `stroq attack --host <id>` replays the step), with host-specific wire or decision limits documented in [`docs/AGENTS.md`](./AGENTS.md) (for example, `ask` collapsed to `deny`, path-only `apply_patch` inspection, or silent post-tool taint).',
+    '- **`partial`** — only the documented subset of this channel is available. Replay checks the phase and tool as well: for example, Windsurf MCP output is supported but shell output is unsupported. Wire and decision limits remain as documented in [`docs/AGENTS.md`](./AGENTS.md); this replay does not measure host enforcement.',
     '- **`not seen`** — the host never sends this channel to Stroq. Under `stroq attack --host <id>`, any step on this channel is reported as `unsupported`, counted apart from `blocked`, `asked` and `passed`, never counted as a protection, and fails the exit code (`1`).',
     '- **`unknown`** — not yet checked against the host; treated as `unsupported` (`not seen`) so an untested channel is never counted as a protection.',
     '',
@@ -131,7 +131,12 @@ export function formatHostsMarkdown(scenarios: readonly Scenario[] = SCENARIOS):
     );
     for (const ch of ATTACK_CHANNELS) {
       const cell = entry.channels[ch];
-      lines.push(`| ${ch} | \`${cell.status}\` | ${cell.evidence} |`);
+      const evidence = cell.evidence
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('|', '\\|');
+      lines.push(`| ${ch} | \`${cell.status}\` | ${evidence} |`);
     }
     lines.push('');
     if (acc.unsupportedStepList.length === 0) {
