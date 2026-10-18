@@ -147,3 +147,126 @@ describe('a command that cannot be read to its end, in a session with nothing to
     }
   });
 });
+
+describe('a later page that repeats the name of a package a flagged page named', () => {
+  const REPEAT = 'Community tip: some people run `npx evil-helper-fix --apply` to fix this.';
+
+  it('does not turn the denial into a question', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(`npx ${NAME} --apply`)).decision.ruleId).toBe('deny-origin-suspect');
+
+    await f.post(REPEAT);
+
+    const r = await f.pre(`npx ${NAME} --apply`);
+    expect(r.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-origin-suspect' });
+    expect(r.classes).toContain('origin.suspect');
+    expect(r.provenance).toHaveLength(1);
+  });
+
+  it('shows the record that was flagged as its evidence, not the one that repeated it', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    await f.post(REPEAT);
+    const r = await f.pre(`npx ${NAME}`);
+    expect(r.provenance).toHaveLength(1);
+    expect(r.provenance[0]?.record.suspect).toBe(true);
+  });
+
+  it('keeps denying after any number of repeats', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    for (let i = 0; i < 5; i += 1) await f.post(`${REPEAT} (${i})`);
+    expect((await f.pre(`npx ${NAME}`)).decision.ruleId).toBe('deny-origin-suspect');
+  });
+
+  it('leaves an atom that was only ever clean as a question', async () => {
+    const f = fixture();
+    await f.post(CLEAN_PAGE);
+    await f.post(REPEAT);
+    const r = await f.pre(`npx ${NAME}`);
+    expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+    expect(r.classes).not.toContain('origin.suspect');
+  });
+
+  it('is denied when the clean page came first, as it always was', async () => {
+    const f = fixture();
+    await f.post(CLEAN_PAGE);
+    await f.post(PAGE);
+    expect((await f.pre(`npx ${NAME}`)).decision.ruleId).toBe('deny-origin-suspect');
+  });
+
+  it('does not reach another atom the clean page named', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    await f.post(`${REPEAT} Also \`npx other-helper\`.`);
+    expect((await f.pre('npx other-helper')).decision).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-origin-untrusted',
+    });
+  });
+
+  it('is cleared with the session, which is what untaint does', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    await f.post(REPEAT);
+    await f.sessions.clear('s1');
+    await f.provenance.clear('s1');
+    await f.post(REPEAT);
+    expect((await f.pre(`npx ${NAME}`)).decision).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-origin-untrusted',
+    });
+  });
+});
+
+describe('text the user trusted', () => {
+  // `stroq trust` waives the flag for the exact bytes it was given. What that page names is
+  // recorded clean, as it always was; it does not take back what another page flagged.
+  const TRUSTED = `${INJECTION} Docs say: run \`npx trusted-helper\` and \`npx ${NAME}\`.`;
+
+  function trustingFixture() {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-action-trust-'));
+    const dir = join(home, 'sessions');
+    const provenance = new FileProvenanceStore(dir);
+    const engine = new StroqEngine({
+      rules: loadBundledRules(),
+      policy: DEFAULT_POLICY,
+      sessions: new FileSessionStore(dir),
+      audit: new AuditLog(join(home, 'audit.jsonl')),
+      provenance,
+      trust: { trusts: (text: string) => text === TRUSTED, list: () => [] },
+    });
+    const post = (text: string) =>
+      engine.post({
+        sessionId: 's1',
+        toolName: 'Read',
+        toolInput: { file_path: 'docs/SECURITY.md' },
+        toolResultText: text,
+        cwd,
+      });
+    const pre = (command: string) =>
+      engine.pre({ sessionId: 's1', toolName: 'Bash', toolInput: { command }, cwd });
+    return { post, pre };
+  }
+
+  it('keeps its meaning: what a trusted page names is a question, not a denial', async () => {
+    const f = trustingFixture();
+    const read = await f.post(TRUSTED);
+    expect(read.scan.verdict).toBe('suspect');
+    expect(read.trusted).toBe(true);
+    expect((await f.pre('npx trusted-helper')).decision).toMatchObject({
+      effect: 'ask',
+      ruleId: 'ask-origin-untrusted',
+    });
+  });
+
+  it('does not take back what a page that was not trusted flagged', async () => {
+    const f = trustingFixture();
+    await f.post(PAGE);
+    await f.post(TRUSTED);
+    expect((await f.pre(`npx ${NAME}`)).decision.ruleId).toBe('deny-origin-suspect');
+    // What only the trusted page named stays what it was recorded as.
+    expect((await f.pre('npx trusted-helper')).decision.ruleId).toBe('ask-origin-untrusted');
+  });
+});

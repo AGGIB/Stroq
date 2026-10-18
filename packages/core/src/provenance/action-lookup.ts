@@ -1,4 +1,4 @@
-import type { Atom, PreToolEvent, ProvenanceHit } from '../types.js';
+import type { Atom, PreToolEvent, ProvenanceHit, ProvenanceRecord } from '../types.js';
 import { readActionAtoms } from './action-atoms.js';
 import { atomHash } from './atoms.js';
 import type { ProvenanceStore } from './store.js';
@@ -20,9 +20,33 @@ export interface ProvenanceLookup {
 export const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [], unread: false };
 
 /**
- * One hit per distinct atom of the proposed action, most recent record wins. And, when the
- * session's records are known to be incomplete, the atoms that no record holds: those are
- * not "never read", they are "cannot say". And whether the unread part of a command counts.
+ * One hit per distinct atom of the action. The most recent record of an atom is its hit, unless
+ * an older one flagged it: a record that was flagged wins over every later record of the same atom
+ * until the session is cleared (`stroq untaint`). A page that repeats the name of a package that
+ * a flagged page named does not make it any less what the flagged page said it was. `records` are
+ * the most recent first, as `ProvenanceStore.lookup` returns them.
+ */
+function hitsOf(
+  byHash: ReadonlyMap<string, Atom>,
+  records: readonly ProvenanceRecord[],
+): ProvenanceHit[] {
+  const chosen = new Map<string, ProvenanceRecord>();
+  for (const record of records) {
+    const current = chosen.get(record.hash);
+    if (current === undefined || (!current.suspect && record.suspect))
+      chosen.set(record.hash, record);
+  }
+  return [...chosen].flatMap(([hash, record]): ProvenanceHit[] => {
+    const atom = byHash.get(hash);
+    return atom === undefined ? [] : [{ atom, record }];
+  });
+}
+
+/**
+ * What the store knew about the atoms of the proposed action: one hit per distinct atom (see
+ * `hitsOf` for which record) and, when the session's records are known to be incomplete, the atoms
+ * that no record holds: those are not "never read", they are "cannot say". And whether the unread
+ * part of a command counts.
  */
 export async function findActionProvenance(
   store: ProvenanceStore | undefined,
@@ -34,14 +58,8 @@ export async function findActionProvenance(
   if (atoms.length === 0 && !unread) return NO_LOOKUP;
   const byHash = new Map(atoms.map((atom) => [atomHash(atom), atom] as const));
   const records = byHash.size === 0 ? [] : await store.lookup(event.sessionId, [...byHash.keys()]);
-  const seen = new Set<string>();
-  const hits: ProvenanceHit[] = [];
-  for (const record of records) {
-    const atom = byHash.get(record.hash);
-    if (!atom || seen.has(record.hash)) continue;
-    seen.add(record.hash);
-    hits.push({ atom, record });
-  }
+  const hits = hitsOf(byHash, records);
+  const seen = new Set(hits.map((hit) => atomHash(hit.atom)));
   // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
   const incomplete = await store.isIncomplete(event.sessionId);
   const unrecorded = incomplete

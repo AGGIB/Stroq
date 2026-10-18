@@ -69,3 +69,19 @@ describe('a flagged page that named a package', () => {
     expect(await decide('fresh', `npm install ${'left-pad '.repeat(10)}`)).toBe('allow');
   });
 });
+
+describe('a clean page that repeats the name afterwards', () => {
+  const CLEAN = 'Community tip: some people run `npx evil-helper-fix --apply` to fix this.';
+
+  it('does not turn the denial into a question', async () => {
+    await post('shadow', FLAGGED);
+    expect(await decide('shadow', `npx ${NAME} --apply`)).toBe('deny');
+    await post('shadow', CLEAN);
+    expect(await decide('shadow', `npx ${NAME} --apply`)).toBe('deny');
+  });
+
+  it('leaves a name that was only ever clean as a question', async () => {
+    await post('only-clean', CLEAN);
+    expect(await decide('only-clean', `npx ${NAME} --apply`)).toBe('ask');
+  });
+});
