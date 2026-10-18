@@ -1,0 +1,78 @@
+name: Repository maintainer
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report decisions without changing issues or merging PRs
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [CI, CodeQL]
+    types: [completed]
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  issue_comment:
+    types: [created]
+
+# Explicit, job-scoped permissions. No model credentials or PR code are used.
+permissions: {}
+
+concurrency:
+  group: repository-maintainer
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    if: >-
+      github.repository == 'AGGIB/Stroq' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      issues: write
+      pull-requests: write
+    steps:
+      # Always use trusted main, including when the triggering CI ran a fork PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node .github/scripts/maintainer.mjs scan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MAINTAINER_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+
+  merge:
+    needs: scan
+    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+      checks: read
+      statuses: read
+      issues: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node .github/scripts/maintainer.mjs merge
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MAINTAINER_DRY_RUN: 'false'
