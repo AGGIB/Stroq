@@ -64,7 +64,8 @@ export function killChildTree(
   // A child that has already exited has nothing left to stop, and on Windows its pid may belong to
   // another process by now: `taskkill /pid` would end that one. (`close` can lag `exit` when a
   // grandchild holds the pipes, so the caller's own flag is not enough.)
-  if (child.exitCode != null || child.signalCode != null) return;
+  const exited = child.exitCode != null || child.signalCode != null;
+  if (plat === 'win32' && exited) return;
   const pid = child.pid;
   if (plat === 'win32' && pid !== undefined) {
     try {
@@ -87,6 +88,9 @@ export function killChildTree(
       // The process group is already gone, or the child was not spawned detached.
     }
   }
+  // A detached group's descendants may outlive its leader and keep the pipes open.
+  // Signal that group during escalation, but never the exited leader's reusable pid.
+  if (exited) return;
   try {
     child.kill(signal);
   } catch {
