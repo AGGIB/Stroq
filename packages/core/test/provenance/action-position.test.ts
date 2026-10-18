@@ -32,6 +32,28 @@ describe('a runner or installer that will run, with a name nobody can read', () 
     ['in the string given to sh -c', "sh -c 'npm install $X'"],
     ['in the string given to eval', 'eval "npx $X"'],
     ['in the string given to a login shell under sudo', "sudo bash -lc 'npx $X'"],
+    ['in the string given to ssh', 'ssh host "npx $X"'],
+    ['in an argument of a command that is not known to run none of it', 'foo "npm install $X"'],
+    ['in code given to an interpreter', 'python3 -c "import os; os.system(\'npm i $X\')"'],
+    ['in the value of an assignment', 'A="npm install $X"'],
+    ['in a string given to make', 'make "npx $X"'],
+    ['in a string given to env', 'env "npx $X"'],
+    ['in a string given to watch', "watch 'npx $X'"],
+    ['in a string given to su', 'su -c "npx $X" root'],
+    ['after eval', 'eval "npx $X"'],
+    ['after eval without quotes', 'eval npx $X'],
+    ['in a -c that is not one quoted string', 'bash -c npx $X'],
+    ['in a -c after --', 'bash -c -- "npx $X"'],
+    ['in a pipe into a shell', 'cat <<EOF | bash\nnpx $X\nEOF'],
+    ['in a here-document into a shell', 'bash <<EOF\nnpm install $X\nEOF'],
+    ['in a here-string into a shell', 'bash <<< "npx $X"'],
+    ['under watch', 'watch -n 5 npx $X'],
+    ['under parallel', 'parallel npx $X ::: a'],
+    ['under find -exec', 'find . -exec npx $X \\;'],
+    ['under env -S', 'env -S "npx $X"'],
+    ['under a path-qualified env', '/usr/bin/env FOO=1 npx $X'],
+    ['in the string of a path-qualified shell', '/bin/bash -c "npx $X"'],
+    ['in the string of a shell under a path-qualified env', '/usr/bin/env bash -c "npx $X"'],
   ])('is unread %s', (_what, command) => {
     const read = extractActionAtoms(command);
     expect(read.unread).toBe(true);
@@ -53,7 +75,15 @@ describe('a mention of a runner or installer, with a name nobody can read', () =
     ['a comment after a command', 'ls # npx $X'],
     ['a code span in a commit message', "git commit -m 'use `npx $X` now'"],
     ['the argument of grep', 'grep "npx $X" README.md'],
-    ['a string given to ssh', 'ssh host "npx $X"'],
+    ['a tag message', 'git tag -a v1 -m "npm install $X"'],
+    ['a pull request body', 'gh pr create --body "npx $X"'],
+    ['an issue comment', 'gh issue comment 1 --body "npm i $X"'],
+    ['a git log search', 'git log --grep="npm i $X"'],
+    ['a message from a here-document', 'git commit -F - <<EOF\nnpx $X\nEOF'],
+    ['a note written with tee', 'tee notes.md <<EOF\nnpm i $X\nEOF'],
+    ['a here-string given to cat', 'cat <<< "npx $X"'],
+    ['git with a directory', 'git -C app commit -m "npx $X"'],
+    ['a commit message under sudo', 'sudo git commit -m "npx $X"'],
   ])('is no doubt in %s', (_what, command) => {
     const read = extractActionAtoms(command);
     expect(read.unread).toBe(false);
@@ -150,25 +180,23 @@ describe('a word that opens a quote the line never closes', () => {
 describe('a command longer than the text that is read', () => {
   const filler = (length: number): string => 'echo hello world\n'.repeat(Math.ceil(length / 17));
 
-  it('is not unread for being long alone', () => {
-    const read = extractActionAtoms(filler(DEFAULT_MAX_CHARS + 50_000));
-    expect(read.unread).toBe(false);
-  });
-
   it.each([
-    ['an installer', 'npm install somewhere'],
-    ['a runner', 'npx somewhere'],
-    ['a runner at the very end', `${'x'.repeat(40)}\nnpx s`],
-  ])('is unread for its length when %s stands past the cut', (_what, tail) => {
-    const read = extractActionAtoms(`${filler(DEFAULT_MAX_CHARS + 50_000)}${tail}`);
+    ['holding nothing that launches', filler(DEFAULT_MAX_CHARS + 50_000)],
+    [
+      'with an installer past the cut',
+      `${filler(DEFAULT_MAX_CHARS + 50_000)}npm install somewhere`,
+    ],
+    ['with a runner past the cut', `${filler(DEFAULT_MAX_CHARS + 50_000)}npx somewhere`],
+  ])('is unread for its length, %s', (_what, command) => {
+    const read = extractActionAtoms(command);
     expect(read.unread).toBe(true);
     expect(read.unreadCause).toBe('length');
   });
 
-  it('is unread when the word straddles the cut', () => {
-    const head = filler(DEFAULT_MAX_CHARS - 2).slice(0, DEFAULT_MAX_CHARS - 2);
-    const read = extractActionAtoms(`${head}\nnpx somewhere`);
-    expect(read.unread).toBe(true);
+  it('is not unread at the characters that are read', () => {
+    expect(
+      extractActionAtoms(filler(DEFAULT_MAX_CHARS - 20).slice(0, DEFAULT_MAX_CHARS)).unread,
+    ).toBe(false);
   });
 
   it('names a cause of length when a line runs past the window', () => {

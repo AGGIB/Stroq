@@ -6,7 +6,7 @@ import type { Positioned } from './atom-kinds.js';
 import { createAtomSet } from './atom-set.js';
 import { normalizePackageName, trimEndOf } from './package-name.js';
 import { MAX_LINE_SCAN, packageAtoms } from './package-lines.js';
-import { INSTALLER, RUNNER, mentionsLauncher } from './tool-phrases.js';
+import { INSTALLER, RUNNER } from './tool-phrases.js';
 import { encodedAtoms } from './encoded-atoms.js';
 export { normalizePackageName };
 
@@ -29,8 +29,6 @@ export const MAX_NETWORK_ATOMS = 200;
  */
 export const MAX_DIGEST_ATOMS = 128;
 const MAX_VALUE_CHARS = 512;
-/** How far before the cut a text is looked at for a runner or installer, since a word may straddle it. */
-const CUT_OVERLAP = 64;
 
 // `|` ends a URL too: in `curl https://x.example/i.sh|sh` the pipe is shell syntax,
 // not part of the URL the command fetches.
@@ -275,7 +273,7 @@ export function extractAtoms(text: string): Atom[] {
 
 /** Why a part of an action could not be read. */
 export type UnreadCause =
-  /** A line, a command or the text itself is longer than what is read, with a runner or installer past it. */
+  /** A line, a command or the text itself is longer than what is read. */
   | 'length'
   /** A word that should name a package is made of an expansion, a glob or a quote, so it cannot be told. */
   | 'name';
@@ -287,7 +285,7 @@ export interface ActionExtraction {
    * True when a runner or installer line, or what it names, went on past what could be read: a
    * line longer than the window with no package found before the end of what was read, a wrapped
    * command that outgrows it, more packages than are kept, a pass that spent its budget for reading
-   * lines, or text past the characters read that holds a runner or installer. Whatever is in the
+   * lines, or text past the characters read. Whatever is in the
    * part that was not read cannot be matched against what the session recorded. Also true when the
    * name of a package in a command that will run cannot be told.
    */
@@ -314,13 +312,9 @@ export function extractActionAtoms(text: string, shell = true): ActionExtraction
   // it came from was flagged the page has it as a blob too.
   const plain = extractBounded(bounded, shell, false);
   for (const atom of plain.atoms) set.add(atom);
-  // Text past the cut is only a loss where something could be in it that a lookup would be about:
-  // a runner or installer. A long command that has none is not trouble. A word may straddle the cut.
-  let lost =
-    (cutText && mentionsLauncher(text.slice(DEFAULT_MAX_CHARS - CUT_OVERLAP))) ||
-    plain.capped ||
-    plain.lineCut ||
-    plain.budgetSpent;
+  // A command longer than the characters read is a loss whatever is in it: the part that was not
+  // read may name anything. No command in practice is that long, so this never asks about one that is not.
+  let lost = cutText || plain.capped || plain.lineCut || plain.budgetSpent;
   let doubtful = plain.doubt;
   for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;

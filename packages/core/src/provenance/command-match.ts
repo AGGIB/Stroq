@@ -98,10 +98,8 @@ const OPTIONS_WITH_VALUE: Readonly<Record<string, ReadonlySet<string>>> = {
   brew: options(),
 };
 
-/** The flags of a Python interpreter that stand alone: `python -u -B -m pip`, and clusters of them (`-uB`). */
-const PYTHON_FLAGS = /^-[uBEsSIOqvbRxdi]+$/;
-/** The flags that take a value, alone or glued to it: `-W ignore`, `-Wignore`, `-X dev`. */
-const PYTHON_VALUED = new Set(['-W', '-X']);
+/** The letters of the flags of a Python interpreter that stand alone: `python -u -B -m pip`, and clusters of them (`-uBm`). */
+const PYTHON_ALONE = 'uBEsSIOqvbRxdih';
 /** What the `py` launcher takes to choose a version: `-3`, `-3.11`, `-3-64`. */
 const PYTHON_LAUNCHER_VERSION = /^-\d(?:\.\d+)?(?:-\d+)?$/;
 
@@ -186,25 +184,69 @@ function findVerb(
   return null;
 }
 
-/** Where `-m` stands in the words of a Python command, past the flags of the interpreter. */
+/** What the letters of one short-option word of a Python interpreter say, read as CPython reads them. */
+type Cluster =
+  /** `m`: the rest of the word, or the next word when nothing is left, is the module to run. */
+  | { readonly kind: 'module'; readonly glued: string; readonly doubt: boolean }
+  /** `c`: the rest of the word, or the next word, is code. That is not a module run. */
+  | { readonly kind: 'code' }
+  /** Flags only; `W` and `X` take the rest of the word or the next word as a value. */
+  | { readonly kind: 'flags'; readonly takesNext: boolean; readonly doubt: boolean };
+
+function readCluster(word: string): Cluster {
+  let doubt = false;
+  for (let k = 1; k < word.length; k += 1) {
+    const letter = word.charAt(k);
+    if (letter === 'm') return { kind: 'module', glued: word.slice(k + 1), doubt };
+    if (letter === 'c') return { kind: 'code' };
+    if (letter === 'W' || letter === 'X')
+      return { kind: 'flags', takesNext: k === word.length - 1, doubt };
+    if (!PYTHON_ALONE.includes(letter)) doubt = true;
+  }
+  return { kind: 'flags', takesNext: false, doubt };
+}
+
+const isShortWord = (word: string): boolean => /^-[^-]/.test(word);
+
+/** Where a short-option word that runs a module stands in `words` after `from`, or -1. */
+const indexOfModule = (words: readonly string[], from: number): number =>
+  words.findIndex(
+    (word, k) =>
+      k >= from && isShortWord(written(word)) && readCluster(written(word)).kind === 'module',
+  );
+
+/**
+ * Where the flag that runs a module (`-m`) stands in the words of a Python command, past the
+ * flags of the interpreter: a cluster is read letter by letter (`-um pip`, `-Bm pip`, `-mpip`),
+ * `W` and `X` take a value, and `c` is code, which is no module run. An unknown flag is a doubt, and
+ * so is a word that is none of them with a module flag further on.
+ */
 function findModule(words: readonly string[], from: number): Found | null {
   let at = from;
   let doubt = false;
   for (let steps = 0; at < words.length; steps += 1) {
     if (steps >= MAX_SKIPPED) return { at, doubt: true, word: '', exhausted: true };
     const flag = written(words[at]);
-    if (flag === '-m') return { at, doubt, word: '-m' };
-    if (flag.startsWith('-m') && flag.length > 2)
-      return { at, doubt, word: '-m', attached: flag.slice(2).toLowerCase() };
-    if (PYTHON_FLAGS.test(flag) || PYTHON_LAUNCHER_VERSION.test(flag)) at += 1;
-    else if (PYTHON_VALUED.has(flag)) at += 2;
-    else if (/^-[WX]./.test(flag)) at += 1;
-    else if (flag.startsWith('-')) {
+    if (!isShortWord(flag) && !flag.startsWith('--')) {
+      const later = indexOfModule(words, at + 1);
+      return later === -1 ? null : { at: later, doubt: true, word: '-m' };
+    }
+    if (flag.startsWith('--')) {
       doubt = true;
       at += 1;
-    } else {
-      const later = words.findIndex((word, k) => k > at && written(word) === '-m');
-      return later === -1 ? null : { at: later, doubt: true, word: '-m' };
+    } else if (PYTHON_LAUNCHER_VERSION.test(flag)) at += 1;
+    else {
+      const cluster = readCluster(flag);
+      if (cluster.kind === 'code') return null;
+      if (cluster.kind === 'module')
+        return {
+          at,
+          doubt: doubt || cluster.doubt,
+          word: '-m',
+          ...(cluster.glued === '' ? {} : { attached: cluster.glued.toLowerCase() }),
+        };
+      doubt = doubt || cluster.doubt;
+      at += cluster.takesNext ? 2 : 1;
     }
   }
   return null;

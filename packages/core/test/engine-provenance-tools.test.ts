@@ -40,7 +40,9 @@ function fixture() {
     });
   const pre = (command: string) =>
     engine.pre({ sessionId: 's1', toolName: 'Bash', toolInput: { command }, cwd });
-  return { post, pre };
+  const call = (toolName: string, toolInput: Record<string, unknown>) =>
+    engine.pre({ sessionId: 's1', toolName, toolInput, cwd });
+  return { post, pre, call };
 }
 
 const PAGE_COMMANDS: readonly string[] = [
@@ -134,6 +136,38 @@ describe('a package a flagged page named, behind options and flags the table doe
       effect: 'deny',
       ruleId: 'deny-origin-suspect',
     });
+  });
+});
+
+const CLUSTERS: readonly string[] = [
+  `python -um pip install ${NAME}`,
+  `python -Bm pip install ${NAME}`,
+  `python3 -mpip install ${NAME}`,
+  `python -Wignore -m pip install ${NAME}`,
+  `python -c 'import x' pip install ${NAME}`,
+];
+
+describe('a package a flagged page named, behind the flags of a Python interpreter', () => {
+  it.each(CLUSTERS)('is denied: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+});
+
+describe('a call to an MCP tool', () => {
+  it.each([
+    ['mcp__shell__run', { command: `npx ${NAME}` }],
+    ['mcp__desktop-commander__execute_command', { line: `pip install ${NAME}` }],
+    ['mcp__github__create_pull_request', { body: 'x', script: `npm i ${NAME}` }],
+  ])('%s carries a command line that names a flagged package', async (tool, input) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    const r = await f.call(tool, input);
+    expect(r.classes).toContain('origin.suspect');
   });
 });
 

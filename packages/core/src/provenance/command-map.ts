@@ -14,19 +14,29 @@ import {
   type LexState,
 } from '../actions/shell-skip.js';
 import { LOCAL_WRAPPERS, PREFIX_WORDS, optionTakesValue } from '../actions/shell-wrappers.js';
+import {
+  FIND_RUNS,
+  RUNS_A_COMMAND_STRING,
+  RUNS_ITS_ARGUMENTS,
+  isInertCommand,
+} from './command-kinds.js';
+import { shellWord } from './shell-word.js';
 import { canonicalCommand } from './tool-phrases.js';
 
 /**
  * Where the commands of a command line are, as a shell reads them: the first word of each simple
  * command (after the words that only prefix it), the words that follow, and where it ends. A
- * runner or installer that stands there is a command that will run. One that stands inside quotes,
- * a here-document, a comment, or among the arguments of another command is a mention of one, and
- * what its words are is no doubt about what will run.
+ * runner or installer that stands there is a command that will run. One that stands among the
+ * arguments of another command is a mention of one, and is no doubt about what will run only when
+ * the line PROVES it inert: the arguments of a command known to run none of them (`echo`, `git
+ * commit -m`), the text of a here-document or a here-string given to one, a comment.
  *
  * It is not a shell. It knows quotes, `$'…'`, substitutions, backticks, comments, here-documents,
- * separators, subshells and the string a shell is given with `-c` or `eval`, and says so when it
- * is not sure it read the text right (`uncertain`), so that the caller can treat every mention as a
- * command, as it did before. One pass over each stretch, each nested stretch once more.
+ * separators, subshells and the string a shell is given with `-c`. Whatever it does not model, and
+ * whatever hands a string to a shell it cannot read (`eval`, a `-c` that is not one quoted string,
+ * a pipe or a here-document into a shell, `su -c`, `watch`, `find -exec`), makes the reading
+ * `uncertain`, so that the caller treats every mention as a command, as it did before. One pass
+ * over each stretch, each nested stretch once more.
  */
 
 /** One command in command position. */
@@ -47,24 +57,33 @@ export interface CommandMap {
   readonly commands: ReadonlyMap<number, LexedCommand>;
   /** Something was left open or hard to read: nothing here is known to be a mention. */
   readonly uncertain: boolean;
+  /** Of the mentions asked about, the ones the line proves inert. Meaningful only when it is not `uncertain`. */
+  readonly inert: ReadonlySet<number>;
 }
 
 interface Context {
   readonly text: string;
   readonly wanted: (name: string) => boolean;
   readonly window: number;
+  /** Where mentions of a launcher are, sorted: the ones to say are inert or not. */
+  readonly mentions: readonly number[];
   readonly commands: Map<number, LexedCommand>;
+  readonly inert: Set<number>;
   uncertain: boolean;
 }
 
-interface OpenCommand {
-  readonly start: number;
-  readonly words: number[];
-  truncated: boolean;
+/** The command being read: its name, its first words, and the mentions inside its arguments. */
+interface Current {
+  readonly name: string;
+  readonly args: string[];
+  readonly hits: number[];
+  readonly wanted: { readonly start: number; readonly words: number[]; truncated: boolean } | null;
 }
 
 /** Nested constructs deeper than this are not read: the answer is that the reading is not sure. */
 const MAX_NESTING = 24;
+/** How many of the first arguments of a command are kept to tell what it is (`git commit`). */
+const MAX_KEPT_ARGS = 8;
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 /** Words after which a command begins, which are not commands themselves. */
 const OPENERS: ReadonlySet<string> = new Set([
@@ -81,11 +100,31 @@ const OPENERS: ReadonlySet<string> = new Set([
 const STOPS_A_WORD = ' \t\r\n;&|<>()';
 const REDIRECTION = /&>>?|[<>]{1,2}[&|]?/y;
 /** A flag that makes a shell run the next word as a command (`-c`, `-lc`). */
-const COMMAND_STRING_FLAG = /^-[a-z]*c[a-z]*$/i;
+const COMMAND_STRING_FLAG = /^-[A-Za-z]*c[A-Za-z]*$/;
 const DURATION = /^\d[\d.]*[smhd]?$/;
+
+/** An option that hands a command line to the command (`-c`, `-lc`, `--command=…`). */
+const runsAString = (raw: string): boolean =>
+  COMMAND_STRING_FLAG.test(raw) || raw.startsWith('--command');
 
 const isPrefixWord = (name: string): boolean =>
   PREFIX_WORDS.has(name) || Object.hasOwn(LOCAL_WRAPPERS, name);
+
+/** The mentions in `[from, to)`, by binary search of the sorted list. */
+function mentionsIn(ctx: Context, from: number, to: number): number[] {
+  const { mentions } = ctx;
+  let low = 0;
+  let high = mentions.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if ((mentions[middle] ?? 0) < from) low = middle + 1;
+    else high = middle;
+  }
+  const found: number[] = [];
+  for (let k = low; k < mentions.length && (mentions[k] ?? to) < to; k += 1)
+    found.push(mentions[k] ?? 0);
+  return found;
+}
 
 /** A lexer for one stretch of the text: it ends at `to`, and finds the stretches nested in it as it goes. */
 class RangeLexer {
@@ -95,10 +134,13 @@ class RangeLexer {
   private plainWords = 0;
   private skipValue = false;
   private target = false;
-  private open: OpenCommand | null = null;
-  private runs: 'shell' | 'eval' | null = null;
+  private targetInert = false;
+  private piped = false;
+  private cur: Current | null = null;
   private codeNext = false;
+  private sawOperand = false;
   private readonly pending: HeredocOpen[] = [];
+  private readonly pendingInert: boolean[] = [];
   private readonly state: LexState = newLexState();
   private readonly strings: Array<readonly [number, number]> = [];
 
@@ -126,8 +168,7 @@ class RangeLexer {
     else if (char === '#' && startsComment(text, this.i, this.from)) this.comment();
     else if (char === ';') this.endAfter(text.charAt(this.i + 1) === ';' ? 2 : 1);
     else if (char === '(' || char === ')') this.endAfter(1);
-    else if (char === '|')
-      this.endAfter(text.charAt(this.i + 1) === '|' || text.charAt(this.i + 1) === '&' ? 2 : 1);
+    else if (char === '|') this.pipe();
     else if (char === '&' && text.charAt(this.i + 1) === '&') this.endAfter(2);
     else if (char === '&' && text.charAt(this.i + 1) !== '>') this.endAfter(1);
     else if (char === '<' || char === '>' || char === '&') this.redirect();
@@ -146,8 +187,18 @@ class RangeLexer {
     this.i += length;
   }
 
+  /** A pipe ends a command, and the next one reads its output: a shell there reads a program it cannot see. */
+  private pipe(): void {
+    const next = this.ctx.text.charAt(this.i + 1);
+    this.endAfter(next === '|' || next === '&' ? 2 : 1);
+    this.piped = next !== '|';
+  }
+
   private newline(): void {
+    // A line break after a pipe continues the pipeline.
+    const piped = this.piped;
     this.close(this.i);
+    this.piped = piped;
     if (this.pending.length === 0) {
       this.i += 1;
       return;
@@ -157,17 +208,36 @@ class RangeLexer {
     if (!read.closed) this.ctx.uncertain = true;
     this.pending.forEach((open, k) => {
       const range = read.ranges[k];
+      if (range === undefined) return;
+      if (this.pendingInert[k] === true) this.markInert(range[0], range[1]);
       // The body of a here-document that expands runs the commands in it.
-      if (!open.quoted && range !== undefined) scanExpansions(text, range[0], range[1], this.state);
+      if (!open.quoted) scanExpansions(text, range[0], range[1], this.state);
     });
     this.pending.length = 0;
+    this.pendingInert.length = 0;
     this.i = read.end;
   }
 
   private comment(): void {
     this.close(this.i);
     const eol = this.ctx.text.indexOf('\n', this.i);
-    this.i = eol === -1 || eol > this.to ? this.to : eol;
+    const end = eol === -1 || eol > this.to ? this.to : eol;
+    this.markInert(this.i, end);
+    this.i = end;
+  }
+
+  private markInert(from: number, to: number): void {
+    for (const mention of mentionsIn(this.ctx, from, to)) this.ctx.inert.add(mention);
+  }
+
+  /** Whether the command being read is known to run nothing of what it is given. */
+  private currentIsInert(): boolean {
+    return this.cur !== null && isInertCommand(this.cur.name, this.cur.args);
+  }
+
+  /** A here-document or here-string given to a shell is a program the line does not show. */
+  private feedsAShell(): void {
+    if (this.cur !== null && SHELL_WORDS.has(this.cur.name)) this.ctx.uncertain = true;
   }
 
   /** A redirection: a here-document is read for its body; any other puts the word after it aside. */
@@ -175,15 +245,19 @@ class RangeLexer {
     const { text } = this.ctx;
     const at = this.i;
     if (text.startsWith('<<<', at)) {
+      this.feedsAShell();
       this.i += 3;
       this.target = true;
+      this.targetInert = this.currentIsInert();
     } else if (text.startsWith('<<', at)) {
+      this.feedsAShell();
       const open = readOpener(text, at);
       if (open === null) {
         this.ctx.uncertain = true;
         this.i += 2;
       } else {
         this.pending.push(open);
+        this.pendingInert.push(this.currentIsInert());
         this.i = open.end;
       }
     } else if (
@@ -196,6 +270,7 @@ class RangeLexer {
       const operator = REDIRECTION.exec(text);
       this.i += operator === null ? 1 : operator[0].length;
       this.target = true;
+      this.targetInert = false;
     }
   }
 
@@ -205,6 +280,7 @@ class RangeLexer {
     this.i = end;
     if (this.target) {
       this.target = false;
+      if (this.targetInert) this.markInert(start, end);
       return;
     }
     if (this.isDescriptor(start, end)) return;
@@ -254,6 +330,7 @@ class RangeLexer {
     if (isPrefixWord(name)) {
       this.prefix = name;
       this.plainWords = LOCAL_WRAPPERS[name] ?? 0;
+      if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
       return;
     }
     this.begin(start, end, name);
@@ -262,6 +339,11 @@ class RangeLexer {
   /** What stands between a wrapper and its command: its options, the values they take, a duration. */
   private passesOver(raw: string): boolean {
     if (raw.startsWith('-')) {
+      // `env -S` splits a string into a command line, and `runuser -c` runs one.
+      if (this.prefix === 'env' && (raw.startsWith('-S') || raw === '--split-string'))
+        this.ctx.uncertain = true;
+      if (RUNS_A_COMMAND_STRING.has(this.prefix ?? '') && runsAString(raw))
+        this.ctx.uncertain = true;
       this.skipValue = optionTakesValue(this.prefix ?? '', raw);
       return true;
     }
@@ -275,49 +357,88 @@ class RangeLexer {
   private begin(start: number, end: number, name: string): void {
     this.expect = false;
     this.prefix = null;
-    this.open = this.ctx.wanted(name) ? { start, words: [start, end], truncated: false } : null;
-    this.runs = SHELL_WORDS.has(name) ? 'shell' : name === 'eval' ? 'eval' : null;
+    if (this.piped && SHELL_WORDS.has(name)) this.ctx.uncertain = true;
+    this.piped = false;
+    if (RUNS_ITS_ARGUMENTS.has(name)) this.ctx.uncertain = true;
+    const wanted = this.ctx.wanted(name) ? { start, words: [start, end], truncated: false } : null;
+    this.cur = { name, args: [], hits: [], wanted };
   }
 
   private argument(start: number, end: number): void {
-    if (this.open !== null) {
-      if (start - this.open.start >= this.ctx.window) this.open.truncated = true;
-      else this.open.words.push(start, end);
+    const { cur } = this;
+    if (cur === null) return;
+    if (cur.wanted !== null) {
+      if (start - cur.wanted.start >= this.ctx.window) cur.wanted.truncated = true;
+      else cur.wanted.words.push(start, end);
     }
-    if (this.runs === null) return;
+    if (this.ctx.mentions.length > 0) cur.hits.push(...mentionsIn(this.ctx, start, end));
     const raw = this.ctx.text.slice(start, end);
-    if (this.runs === 'shell' && COMMAND_STRING_FLAG.test(raw)) this.codeNext = true;
-    else if (this.runs === 'eval' || this.codeNext) {
-      this.holdsCommands(start, end);
-      this.codeNext = false;
-      this.runs = this.runs === 'eval' ? null : this.runs;
-    }
+    if (cur.args.length < MAX_KEPT_ARGS) cur.args.push(shellWord(raw).word);
+    this.watch(cur.name, raw, start, end);
   }
 
-  /** A word that is one quoted string handed to a shell: what is inside is a command line of its own. */
-  private holdsCommands(start: number, end: number): void {
+  /** What an argument of a command that runs a string does to the reading. */
+  private watch(name: string, raw: string, start: number, end: number): void {
+    if (name === 'eval') this.ctx.uncertain = true;
+    else if (SHELL_WORDS.has(name)) this.shellArgument(raw, start, end);
+    else if (RUNS_A_COMMAND_STRING.has(name)) {
+      if (runsAString(raw)) this.ctx.uncertain = true;
+    } else if (name === 'find' && FIND_RUNS.has(raw)) this.ctx.uncertain = true;
+  }
+
+  /**
+   * An argument of a shell: the string after `-c` is a command line of its own when it is one
+   * quoted string. Anything else there (a variable, several words, a `--`, another flag) is a
+   * program the line does not show.
+   */
+  private shellArgument(raw: string, start: number, end: number): void {
+    if (this.codeNext) {
+      this.codeNext = false;
+      if (this.isWholeQuotedString(start, end)) this.strings.push([start + 1, end - 1]);
+      else this.ctx.uncertain = true;
+    } else if (!this.sawOperand && COMMAND_STRING_FLAG.test(raw)) this.codeNext = true;
+    else if (!raw.startsWith('-')) this.sawOperand = true;
+  }
+
+  /** Whether the word is exactly one string in single or double quotes. */
+  private isWholeQuotedString(start: number, end: number): boolean {
     const { text } = this.ctx;
     const quote = text.charAt(start);
-    if ((quote === "'" || quote === '"') && end - start >= 2 && text.charAt(end - 1) === quote)
-      this.strings.push([start + 1, end - 1]);
+    if (end - start < 2) return false;
+    if (quote === "'") return skipSingle(text, start, newLexState()) === end;
+    return quote === '"' && skipDouble(text, start, newLexState()) === end;
   }
 
   private close(at: number): void {
-    if (this.open !== null) {
-      this.ctx.commands.set(this.open.start, {
-        end: at,
-        words: this.open.words,
-        truncated: this.open.truncated,
-      });
+    const { cur } = this;
+    if (cur !== null) {
+      if (cur.wanted !== null)
+        this.ctx.commands.set(cur.wanted.start, {
+          end: at,
+          words: cur.wanted.words,
+          truncated: cur.wanted.truncated,
+        });
+      this.settle(cur);
     }
-    this.open = null;
+    this.cur = null;
     this.expect = true;
     this.prefix = null;
     this.plainWords = 0;
     this.skipValue = false;
     this.target = false;
-    this.runs = null;
+    this.piped = false;
     this.codeNext = false;
+    this.sawOperand = false;
+  }
+
+  /** Says, of the mentions among a command's arguments, whether the command is known to run none of them. */
+  private settle(cur: Current): void {
+    if (cur.hits.length === 0) return;
+    const inert = isInertCommand(cur.name, cur.args);
+    for (const hit of cur.hits) {
+      if (inert) this.ctx.inert.add(hit);
+      else this.ctx.inert.delete(hit);
+    }
   }
 
   /** The commands that run inside this stretch, read as stretches of their own. */
@@ -338,15 +459,25 @@ class RangeLexer {
 }
 
 /**
- * The commands of `text` whose command word is one `wanted` asks for, and whether the reading is
- * sure. `window` is how far into a command its words are kept.
+ * The commands of `text` whose command word is one `wanted` asks for, whether the reading is sure,
+ * and which of the `mentions` (where a launcher is named, sorted) are proven inert. `window` is
+ * how far into a command its words are kept.
  */
 export function commandMap(
   text: string,
   wanted: (name: string) => boolean,
   window: number,
+  mentions: readonly number[] = [],
 ): CommandMap {
-  const ctx: Context = { text, wanted, window, commands: new Map(), uncertain: false };
+  const ctx: Context = {
+    text,
+    wanted,
+    window,
+    mentions,
+    commands: new Map(),
+    inert: new Set(),
+    uncertain: false,
+  };
   new RangeLexer(ctx, 0, text.length, 0).run();
-  return { commands: ctx.commands, uncertain: ctx.uncertain };
+  return { commands: ctx.commands, uncertain: ctx.uncertain, inert: ctx.inert };
 }

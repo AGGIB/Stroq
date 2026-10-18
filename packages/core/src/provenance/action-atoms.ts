@@ -8,6 +8,7 @@ import { collectStringsDeep } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { FLOOR_KINDS } from './atom-kinds.js';
 import { extractActionAtoms, normalizePackageName, type UnreadCause } from './atoms.js';
+import { commandTexts, isExecStyleTool } from './mcp-commands.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
 // into curl/ssh/git push (or a pipe-to-shell) is evidence; a URL copied into
@@ -182,10 +183,33 @@ export function readActionAtoms(
       unreadCause: read.unreadCause,
     };
   }
-  // The arguments of an MCP call are text, not a command line: a runner in them is a mention.
-  if (toolName.startsWith('mcp__'))
-    return extractActionAtoms(normalizeText(textOfInput(toolInput)), false);
+  if (toolName.startsWith('mcp__')) return readMcpCall(toolName, toolInput);
   return NOTHING_READ;
+}
+
+const atomKeyOf = (atom: Atom): string => `${atom.kind}\n${atom.value}`;
+
+/** What two readings of the same action find together: every atom, and a loss if either lost something. */
+function mergeReads(first: ReadAction, second: ReadAction): ReadAction {
+  const seen = new Set(first.atoms.map(atomKeyOf));
+  const atoms = [...first.atoms, ...second.atoms.filter((atom) => !seen.has(atomKeyOf(atom)))];
+  const causes = [first.unreadCause, second.unreadCause];
+  return {
+    atoms,
+    unread: first.unread || second.unread,
+    unreadCause: causes.includes('length') ? 'length' : causes.includes('name') ? 'name' : null,
+  };
+}
+
+/**
+ * An MCP call: its arguments are text, in which a runner is a mention, and the ones that are a
+ * command line (see `commandTexts`) are also read as a shell reads one.
+ */
+function readMcpCall(toolName: string, toolInput: Readonly<Record<string, unknown>>): ReadAction {
+  const asText = extractActionAtoms(normalizeText(textOfInput(toolInput)), false);
+  return commandTexts(toolInput, isExecStyleTool(toolName), 2 * DEFAULT_MAX_CHARS)
+    .map((text) => extractActionAtoms(normalizeText(text), true))
+    .reduce(mergeReads, asText);
 }
 
 /** The atoms alone: see `readActionAtoms`. */

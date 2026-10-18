@@ -3,7 +3,7 @@ import { commandMap, type CommandMap, type LexedCommand } from './command-map.js
 import { normalizePackageName } from './package-name.js';
 import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
 import { matchCommand } from './command-match.js';
-import { INSTALLER, PHRASE_STARTS, RUNNER } from './tool-phrases.js';
+import { INSTALLER, PHRASE_STARTS, RUNNER, canonicalCommand } from './tool-phrases.js';
 
 // `restOfLine` scans at most this many characters past a runner/installer match.
 // A command line longer than this is truncated (trailing packages are missed), which
@@ -105,6 +105,12 @@ function readTokens(scan: LineScan): string[] {
   return scan.cut ? tokens.slice(0, -1) : tokens;
 }
 
+/** The tool a matched phrase is of, by its first word: `python -m pip install` is pip's. */
+const toolOf = (phrase: string): string => {
+  const first = canonicalCommand(phrase.trim().split(/\s+/)[0] ?? '');
+  return first === 'python' ? 'pip' : first;
+};
+
 /** The last word of a matched phrase, lower-cased. */
 const lastWord = (phrase: string): string => phrase.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
 
@@ -117,14 +123,15 @@ const atomsAt = (index: number, packages: readonly string[]): Positioned[] =>
 
 /**
  * What the matches of a pattern name when they are read as mentions: the words after a runner or
- * installer in running text, a quoted string or a comment. `doubts` is whether a word that cannot
- * be read counts, which it does not for a mention that is known to be one.
+ * installer in running text, a quoted string or a comment. A word that cannot be read counts as
+ * a doubt unless the line PROVES the mention inert (see `command-map.ts`).
  */
 interface Mentions {
   readonly text: string;
   readonly reader: LineReader;
   readonly isMention: (index: number) => boolean;
-  readonly doubts: boolean;
+  /** Whether a word that cannot be read counts, for the mention that begins at an index. */
+  readonly doubtsAt: (index: number) => boolean;
 }
 
 /**
@@ -133,11 +140,26 @@ interface Mentions {
  * goes on past the window after that word was reached has lost nothing. A line cut before it is
  * cut.
  */
-function runnerMentions({ text, reader, isMention, doubts }: Mentions): Found {
+function runnerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found {
   const lines = [...text.matchAll(RUNNER)]
     .filter((m) => isMention(m.index ?? 0))
-    .map((m) => ({ ...reader.after(m), family: runnerFamily(m[0]), verb: lastWord(m[0]) }))
-    .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan), line.family, doubts) }));
+    .map((m) => ({
+      ...reader.after(m),
+      family: runnerFamily(m[0]),
+      verb: lastWord(m[0]),
+      tool: toolOf(m[0]),
+    }))
+    .map((line) => ({
+      ...line,
+      reading: readRunner(
+        readTokens(line.scan),
+        line.family,
+        doubtsAt(line.index),
+        false,
+        true,
+        line.tool,
+      ),
+    }));
   return {
     positioned: lines.flatMap(({ index, reading, verb }) =>
       atomsAt(index, withCreated(reading.packages, verb)),
@@ -149,11 +171,14 @@ function runnerMentions({ text, reader, isMention, doubts }: Mentions): Found {
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installerMentions({ text, reader, isMention, doubts }: Mentions): Found {
+function installerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found {
   const lines = [...text.matchAll(INSTALLER)]
     .filter((m) => isMention(m.index ?? 0))
-    .map(reader.after)
-    .map((line) => ({ ...line, reading: readInstaller(readTokens(line.scan), doubts) }));
+    .map((m) => ({ ...reader.after(m), tool: toolOf(m[0]) }))
+    .map((line) => ({
+      ...line,
+      reading: readInstaller(readTokens(line.scan), doubtsAt(line.index), false, line.tool),
+    }));
   return {
     positioned: lines.flatMap(({ index, reading }) => atomsAt(index, reading.packages)),
     cut: lines.some(({ scan }) => scan.cut),
@@ -195,18 +220,19 @@ function readCommand(text: string, start: number, command: LexedCommand): Found 
     doubt: doubt || match.doubt,
   });
   const family = runnerFamily(words[0] ?? '');
+  const tool = toolOf(words[0] ?? '');
   // The verb was not reached (more options than are looked at): the rest is read as the words of
   // either kind of launcher, and the packages of both are kept.
   if (match.unreached === true) {
-    const installer = readInstaller(rest, true, true);
-    const runner = readRunner(rest, family, true, true);
+    const installer = readInstaller(rest, true, true, tool);
+    const runner = readRunner(rest, family, true, true, true, tool);
     return found([...installer.packages, ...runner.packages], true, command.truncated);
   }
   if (match.phrase.kind === 'installer') {
-    const reading = readInstaller(rest, true, true);
+    const reading = readInstaller(rest, true, true, tool);
     return found(reading.packages, reading.doubt, command.truncated);
   }
-  const reading = readRunner(rest, family, true, true, match.phrase.kind === 'runner');
+  const reading = readRunner(rest, family, true, true, match.phrase.kind === 'runner', tool);
   return found(reading.packages, reading.doubt, command.truncated && !reading.sure);
 }
 
@@ -236,14 +262,18 @@ const COMMAND_WINDOW = MAX_LINE_SCAN + 32;
  * command, as it did before.
  */
 export function packageAtoms(text: string, command: boolean): Found {
-  const map = command ? commandMap(text, (name) => PHRASE_STARTS.has(name), COMMAND_WINDOW) : null;
+  const map = command
+    ? commandMap(text, (name) => PHRASE_STARTS.has(name), COMMAND_WINDOW, launcherIndexes(text))
+    : null;
   const sure = map !== null && !map.uncertain;
   const reader = lineReader(text, command);
   const mentions: Mentions = {
     text,
     reader,
     isMention: (index) => !sure || !map.commands.has(index),
-    doubts: command && !sure,
+    // Only what the line proves inert is no doubt; a mention that is not proven inert, and every
+    // match where the reading is not sure, counts as a command would.
+    doubtsAt: (index) => command && (!sure || !map.inert.has(index)),
   };
   const runners = runnerMentions(mentions);
   const installers = installerMentions(mentions);
@@ -254,4 +284,11 @@ export function packageAtoms(text: string, command: boolean): Found {
     budgetSpent: reader.skipped(),
     doubt: runners.doubt || installers.doubt || (commands?.doubt ?? false),
   };
+}
+
+/** Where a runner or installer is named in a text, in order. */
+function launcherIndexes(text: string): number[] {
+  return [...text.matchAll(RUNNER), ...text.matchAll(INSTALLER)]
+    .map((m) => m.index ?? 0)
+    .sort((a, b) => a - b);
 }

@@ -10,7 +10,109 @@ import { readPackageWord, type PackageWord } from './word-name.js';
  * command as unread. It is never a package that was quietly not there.
  */
 
-const FLAGS_WITH_VALUE = new Set([
+const values = (...flags: string[]): ReadonlySet<string> => new Set(flags);
+
+/** The options that take the word after them as a value, in the tools whose arguments are packages, by tool. */
+const VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  npm: values(
+    '--registry',
+    '--prefix',
+    '--tag',
+    '-w',
+    '--workspace',
+    '--cache',
+    '--otp',
+    '--userconfig',
+  ),
+  npx: values('-c', '--call', '--registry', '--prefix', '--cache', '--userconfig', '--shell'),
+  pnpm: values('--registry', '--filter', '-F', '--dir', '-C', '--reporter', '--store-dir'),
+  yarn: values('--registry', '--cwd', '--cache-folder', '--modules-folder'),
+  bun: values('--registry', '--cwd', '-c', '--config', '--cache-dir', '--tag'),
+  bunx: values('--registry', '--cwd', '-c', '--config', '--cache-dir'),
+  pip: values(
+    '-r',
+    '--requirement',
+    '-c',
+    '--constraint',
+    '-i',
+    '--index-url',
+    '--extra-index-url',
+    '-t',
+    '--target',
+    '-e',
+    '--editable',
+    '--prefix',
+    '--root',
+    '-f',
+    '--find-links',
+    '--src',
+    '--python',
+    '--no-binary',
+    '--only-binary',
+    '--platform',
+    '--python-version',
+  ),
+  uv: values(
+    '-r',
+    '--requirement',
+    '-c',
+    '--constraint',
+    '-i',
+    '--index-url',
+    '--extra-index-url',
+    '--index',
+    '-e',
+    '--editable',
+    '-f',
+    '--find-links',
+    '-p',
+    '--python',
+    '--git',
+    '--branch',
+    '--rev',
+    '--tag',
+    '--path',
+    '--with',
+    '--with-requirements',
+    '--with-editable',
+    '--group',
+    '--extra',
+    '--package',
+  ),
+  cargo: values(
+    '--path',
+    '--root',
+    '--git',
+    '--branch',
+    '--rev',
+    '--tag',
+    '--bin',
+    '--features',
+    '-F',
+    '--version',
+    '--registry',
+    '--index',
+    '--target',
+    '--profile',
+    '--target-dir',
+    '--example',
+    '--manifest-path',
+    '-j',
+    '--jobs',
+  ),
+  poetry: values('--group', '-G', '--source', '-e', '--python', '--extras', '-E', '--platform'),
+  pdm: values('-G', '--group', '-p', '--project', '-r', '--requirement'),
+  conda: values('-n', '--name', '-p', '--prefix', '-c', '--channel', '--file', '-f'),
+  pipx: values('--python', '--pip-args', '--suffix', '-i', '--index-url'),
+  gem: values('-v', '--version', '-s', '--source', '-i', '--install-dir', '-n', '--bindir'),
+  bundle: values('--version', '--source', '--git', '--branch', '--path', '--group', '--require'),
+  deno: values('--config', '-c', '--import-map', '--lock'),
+  go: values('-C', '-o'),
+  brew: values(),
+};
+
+/** What an unlisted tool takes: the options the first version of this reading skipped. */
+const DEFAULT_VALUE_FLAGS = values(
   '-r',
   '--requirement',
   '-c',
@@ -22,15 +124,11 @@ const FLAGS_WITH_VALUE = new Set([
   '--target',
   '--registry',
   '--prefix',
-  // `cargo install`: where from, and what to build.
-  '--path',
-  '--root',
-  '--git',
-  '--branch',
-  '--rev',
-  '--bin',
-  '--features',
-]);
+);
+
+/** The options of `tool` (its name in the table) that take a value; each tool has its own. */
+const valueFlagsOf = (tool: string): ReadonlySet<string> =>
+  VALUE_FLAGS[tool] ?? DEFAULT_VALUE_FLAGS;
 
 /** The flags that name a package, by the kind of runner. A flag may carry its value as `--flag=value`. */
 const PACKAGE_FLAGS: Readonly<Record<RunnerFamily, ReadonlySet<string>>> = {
@@ -163,9 +261,11 @@ export function readRunner(
   doubts: boolean,
   lexed = false,
   takesPositional = true,
+  tool = '',
 ): RunnerReading {
   const fromFlags: string[] = [];
   const packageFlags = PACKAGE_FLAGS[family];
+  const valueFlags = valueFlagsOf(tool);
   const line = new LineState(lexed);
   let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
@@ -186,10 +286,7 @@ export function readRunner(
       if (flag.skip) i += 1;
       continue;
     }
-    if (
-      FLAGS_WITH_VALUE.has(read.word) ||
-      (family === 'python' && PYTHON_VALUE_FLAGS.has(read.word))
-    ) {
+    if (valueFlags.has(read.word) || (family === 'python' && PYTHON_VALUE_FLAGS.has(read.word))) {
       i += 1;
       continue;
     }
@@ -215,8 +312,10 @@ export function readInstaller(
   tokens: readonly string[],
   doubts: boolean,
   lexed = false,
+  tool = '',
 ): { packages: string[]; doubt: boolean } {
   const packages: string[] = [];
+  const valueFlags = valueFlagsOf(tool);
   const line = new LineState(lexed);
   let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
@@ -229,7 +328,7 @@ export function readInstaller(
     }
     const read = shellWord(token);
     if (isContinuationMark(read.word)) continue;
-    if (FLAGS_WITH_VALUE.has(read.word)) {
+    if (valueFlags.has(read.word)) {
       i += 1;
       continue;
     }

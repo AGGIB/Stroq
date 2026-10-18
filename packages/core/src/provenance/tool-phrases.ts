@@ -104,11 +104,6 @@ export const RUNNER = patternFor('runner');
 // Package installers: every positional token after them is a package.
 export const INSTALLER = patternFor('installer');
 
-const LAUNCHER = new RegExp(`${RUNNER.source}|${INSTALLER.source}`, 'i');
-
-/** Whether a text holds a runner or an installer anywhere: the question of a part of a command that was not read. */
-export const mentionsLauncher = (text: string): boolean => LAUNCHER.test(text);
-
 /** The first words of the phrases: a command that starts with another is neither. */
 export const PHRASE_STARTS: ReadonlySet<string> = new Set(
   PHRASES.flatMap((phrase) => phrase.words[0] ?? []),
