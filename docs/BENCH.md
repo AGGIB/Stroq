@@ -32,24 +32,24 @@ flagged:   18 / 121   (14.9%)
   ATR-2026-00163     Hidden Override Instructions in Skill Content    1 file
 
 Flagged files:
-  vendor/bench-corpus/files/ClickHouse-ClickHouse/README.md
-  vendor/bench-corpus/files/Graphify-Labs-graphify/README.md
-  vendor/bench-corpus/files/HKUDS-CLI-Anything/README.md
-  vendor/bench-corpus/files/ReactiveX-RxJava/README.md
-  vendor/bench-corpus/files/TauricResearch-TradingAgents/README.md
-  vendor/bench-corpus/files/Yuan1z0825-nature-skills/README.md
-  vendor/bench-corpus/files/apache-apisix/README.md
-  vendor/bench-corpus/files/astral-sh-uv/README.md
-  vendor/bench-corpus/files/headroomlabs-ai-headroom/README.md
-  vendor/bench-corpus/files/jingyaogong-minimind/README.md
-  vendor/bench-corpus/files/mlabonne-llm-course/README.md
-  vendor/bench-corpus/files/nexu-io-open-design/README.md
-  vendor/bench-corpus/files/prometheus-prometheus/configuration.md
-  vendor/bench-corpus/files/pulumi-pulumi/README.md
-  vendor/bench-corpus/files/sharkdp-bat/README.md
-  vendor/bench-corpus/files/sharkdp-fd/README.md
-  vendor/bench-corpus/files/skylot-jadx/README.md
-  vendor/bench-corpus/files/zylon-ai-private-gpt/README.md
+  vendor\bench-corpus\files\ClickHouse-ClickHouse\README.md
+  vendor\bench-corpus\files\Graphify-Labs-graphify\README.md
+  vendor\bench-corpus\files\HKUDS-CLI-Anything\README.md
+  vendor\bench-corpus\files\ReactiveX-RxJava\README.md
+  vendor\bench-corpus\files\TauricResearch-TradingAgents\README.md
+  vendor\bench-corpus\files\Yuan1z0825-nature-skills\README.md
+  vendor\bench-corpus\files\apache-apisix\README.md
+  vendor\bench-corpus\files\astral-sh-uv\README.md
+  vendor\bench-corpus\files\headroomlabs-ai-headroom\README.md
+  vendor\bench-corpus\files\jingyaogong-minimind\README.md
+  vendor\bench-corpus\files\mlabonne-llm-course\README.md
+  vendor\bench-corpus\files\nexu-io-open-design\README.md
+  vendor\bench-corpus\files\prometheus-prometheus\configuration.md
+  vendor\bench-corpus\files\pulumi-pulumi\README.md
+  vendor\bench-corpus\files\sharkdp-bat\README.md
+  vendor\bench-corpus\files\sharkdp-fd\README.md
+  vendor\bench-corpus\files\skylot-jadx\README.md
+  vendor\bench-corpus\files\zylon-ai-private-gpt\README.md
 
 corpus: vendor/bench-corpus/files
 ```

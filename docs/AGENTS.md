@@ -1,6 +1,29 @@
 # Per-agent integration details
 
-The [Coverage by agent](GUIDE.md#coverage-by-agent) table in the guide is the summary. This file is the full detail behind it: every hook event Stroq installs on, the wire format it reads, and every documented limit — the honest edges, not just the happy path. Each install command below also appears in the README; this is where the "why" for each adapter lives.
+The [Coverage by agent](GUIDE.md#coverage-by-agent) table in the guide is the summary, and [HOSTS.md](./HOSTS.md) is the generated channel-by-channel matrix for `stroq attack --host <id>`. This file is the full detail behind both: every hook event Stroq installs on, the wire format it reads, and every documented limit — the honest edges, not just the happy path. Each install command below also appears in the README; this is where the "why" for each adapter lives.
+
+| Host | `--agent` / `--host` | Config written by `stroq init` | Detail section |
+| :--- | :--- | :--- | :--- |
+| Claude Code | `claude-code` | `.claude/settings.local.json` (`--user`: `~/.claude/settings.json`) | [Claude Code](#claude-code) |
+| Cursor | `cursor` | `.cursor/hooks.json` (`--user`: `~/.cursor/hooks.json`) | [Cursor](#cursor) |
+| Codex | `codex` | `.codex/hooks.json` + `.codex/config.toml` (`--user`: `~/.codex/...`) | [Codex](#codex) |
+| Copilot CLI | `copilot` | `.github/hooks/stroq.json` (`--user`: `~/.copilot/hooks/stroq.json`) | [Copilot CLI](#copilot-cli) |
+| OpenClaw | `openclaw` | `~/.openclaw/extensions/stroq-guard/` | [OpenClaw](#openclaw) |
+| Windsurf | `windsurf` | `.windsurf/hooks.json` (`--user`: `~/.codeium/windsurf/hooks.json`) | [Windsurf](#windsurf) |
+| Google Antigravity | `antigravity` | `.agents/hooks.json` (`--user`: `~/.gemini/antigravity-cli/hooks.json`) | [Google Antigravity](#google-antigravity) |
+| MCP proxy (any MCP client) | `mcp` | wraps `mcpServers` entries in client config | [MCP proxy (any MCP client)](#mcp-proxy-any-mcp-client) |
+
+### Claude Code
+
+```bash
+npx @stroq/cli init                  # in your project: writes .claude/settings.local.json
+```
+
+`--user` writes `~/.claude/settings.json` instead, `--dry-run` prints the merged file without writing it. Stroq installs `PreToolUse`, `PostToolUse` and `PostToolUseFailure` handlers matching `Bash|PowerShell|Monitor|Read|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|mcp__.*`.
+
+- **`PreToolUse`** classifies shell commands (`Bash`, `PowerShell`, `Monitor`), file writes (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`), file reads (`Read`), web fetches (`WebFetch`, `WebSearch`) and MCP calls (`mcp__<server>__<tool>`) and returns `allow`, `ask` or `deny` via `hookSpecificOutput.permissionDecision`.
+- **`PostToolUse` and `PostToolUseFailure`** scan the returned tool output (`Bash`, `PowerShell`, `Read`, `WebFetch`, `WebSearch`, `mcp__.*`), taint the session on a suspect match, record provenance atoms, and surface a warning via `hookSpecificOutput.additionalContext`.
+- **Limits.** Hook enforcement covers tool calls that pass through Claude Code's hook pipeline; OS-level process sandboxing requires `stroq run --sandbox`. Live enforcement was verified on Claude Code 2.1.271 (`packages/cli/test/fixtures/hosts/claude-code/2.1.271/deny.real.acceptEdits.jsonl`).
 
 ### Cursor
 

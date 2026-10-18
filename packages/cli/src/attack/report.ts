@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { stableStringify, type Policy } from '@stroq/core';
 import type { ClaudeHookEvent } from '../adapters/claude-code.js';
+import { stepChannel, type AttackHost } from '../hosts/channels.js';
 import { stroqVersion } from '../version.js';
 import type { AttackReport, ScenarioResult } from './run.js';
 
@@ -20,10 +21,10 @@ export interface ReportMeta {
   };
   /**
    * What the events were sent to. These reports replay the events a Claude Code hook would send
-   * into the engine in this process, so there is no host and no version of one: `mode` says so.
+   * into the engine in this process, filtered by `id`'s channel table when `--host` is given.
    */
   readonly host: {
-    readonly id: 'claude-code';
+    readonly id: AttackHost;
     readonly version: null;
     readonly mode: 'in-process';
   };
@@ -45,6 +46,7 @@ export interface MetaInput {
   readonly corpusId: string;
   /** The scenarios that were replayed: only their steps' events and their own data are read. */
   readonly scenarios: readonly { readonly steps: readonly { readonly event: ClaudeHookEvent }[] }[];
+  readonly host?: AttackHost;
 }
 
 /** The id the attack suite and its fuzzer give the corpus they replay (they share the scenarios). */
@@ -70,7 +72,7 @@ export function buildMeta(input: MetaInput): ReportMeta {
   return {
     stroq: stroqVersion(),
     policy: { source: input.policySource, sha256: sha256Of(input.policy) },
-    host: { id: 'claude-code', version: null, mode: 'in-process' },
+    host: { id: input.host ?? 'claude-code', version: null, mode: 'in-process' },
     tools: [...tools].sort(),
     sandbox: null,
     corpus: {
@@ -94,15 +96,34 @@ function mismatch(result: ScenarioResult): string {
   return ` (step ${index + 1} ${step.phase} ${step.tool}: expected ${step.expect}, got ${step.actual})`;
 }
 
-/** What follows a scenario's line: why it could not be judged, or where it went wrong. */
+function unsupportedDetail(result: ScenarioResult): string {
+  const items = result.steps
+    .map((step, index) =>
+      step.unsupported === true
+        ? `step ${index + 1} ${step.phase} ${step.tool} [${step.channel ?? stepChannel(step.phase, step.tool)}: ${step.hostStatus ?? 'not seen'}]`
+        : null,
+    )
+    .filter((item): item is string => item !== null);
+  return items.length === 0 ? ' (unsupported)' : ` (unsupported: ${items.join(', ')})`;
+}
+
+/** What follows a scenario's line: why it could not be judged, which step is unsupported, or where it went wrong. */
 function detail(result: ScenarioResult): string {
   if (result.inconclusive) return ` (inconclusive: ${result.reason ?? 'no reason recorded'})`;
+  if (result.outcome === 'unsupported') return unsupportedDetail(result);
   return result.ok ? '' : mismatch(result);
 }
 
 function scenarioLine(result: ScenarioResult): string {
   // `?` is neither a pass nor a fail: a timeout or an error says nothing about the policy.
-  const mark = result.inconclusive ? '?' : result.ok ? '✔' : '✘';
+  // `-` is a scenario with a step the target host never sends.
+  const mark = result.inconclusive
+    ? '?'
+    : result.outcome === 'unsupported'
+      ? '-'
+      : result.ok
+        ? '✔'
+        : '✘';
   const rule = (result.ruleId ?? '-').padEnd(RULE_WIDTH);
   const incident =
     result.incident === null
@@ -112,25 +133,47 @@ function scenarioLine(result: ScenarioResult): string {
 }
 
 function summaryLine(report: AttackReport): string {
-  const { blocked, asked, askedByLimit, passed, timeout, error, inconclusive } = report.totals;
+  const {
+    blocked,
+    asked,
+    askedByLimit,
+    passed,
+    timeout,
+    error,
+    inconclusive,
+    unsupported = 0,
+    unsupportedSteps = 0,
+  } = report.totals;
+  const showUnsupported = report.host !== undefined || unsupported > 0 || unsupportedSteps > 0;
   // Counts that are zero in an ordinary run stay out of the sentence, so that it reads as it did.
   const head =
     `${plural(report.scenarios.length, 'scenario')}: ${blocked} blocked, ${asked} asked, ` +
     (askedByLimit > 0 ? `${askedByLimit} asked at a limit, ` : '') +
     `${passed} passed through` +
     (timeout > 0 ? `, ${timeout} timed out` : '') +
-    (error > 0 ? `, ${error} errored` : '');
-  if (report.ok && passed === 0 && inconclusive === 0) {
+    (error > 0 ? `, ${error} errored` : '') +
+    (showUnsupported ? `, ${unsupported} unsupported (${plural(unsupportedSteps, 'step')})` : '');
+  if (report.ok && passed === 0 && inconclusive === 0 && unsupported === 0) {
     return `${head} — each was blocked or put to you as a question.`;
   }
   const notes: string[] = [];
+  if (unsupported > 0 || unsupportedSteps > 0) {
+    const list = (report.unsupportedSteps ?? [])
+      .map((u) => `${u.scenarioId} step ${u.step} (${u.phase} ${u.tool}, ${u.channel})`)
+      .join(', ');
+    notes.push(
+      `${plural(unsupportedSteps, 'step')} across ${plural(unsupported, 'scenario')} not sent by ${report.host ?? 'this host'} and not counted as protection${list ? `: ${list}` : ''}`,
+    );
+  }
   if (inconclusive > 0) {
     notes.push(
       `${plural(inconclusive, 'scenario')} could not be judged (a timeout or an error is neither a block nor a question, so this run proves nothing about ${inconclusive === 1 ? 'it' : 'them'})`,
     );
   }
-  const wrong = report.scenarios.filter((r) => !r.ok && !r.inconclusive).length;
-  if (wrong > 0 || inconclusive === 0) {
+  const wrong = report.scenarios.filter(
+    (r) => !r.ok && !r.inconclusive && r.outcome !== 'unsupported',
+  ).length;
+  if (wrong > 0 || (inconclusive === 0 && unsupported === 0)) {
     notes.push(
       `${plural(wrong, 'scenario')} did not behave as expected; your policy is weaker than the default (compare it with policies/default.yaml)`,
     );
@@ -144,6 +187,7 @@ export function formatReport(report: AttackReport): string {
   // claimed more than the suite has.
   const documented = report.scenarios.filter((r) => r.incident !== null).length;
   const synthetic = report.scenarios.length - documented;
-  const header = `stroq attack: ${plural(report.scenarios.length, 'scenario')} against policy ${report.policy} (${documented} from public reports, ${synthetic} synthetic)`;
+  const hostSuffix = report.host === undefined ? '' : ` on host ${report.host}`;
+  const header = `stroq attack: ${plural(report.scenarios.length, 'scenario')} against policy ${report.policy}${hostSuffix} (${documented} from public reports, ${synthetic} synthetic)`;
   return `${[header, ...report.scenarios.map(scenarioLine), summaryLine(report)].join('\n')}\n`;
 }
