@@ -2,10 +2,11 @@ import type { Atom } from '../types.js';
 import { isFloorKind } from './atom-kinds.js';
 
 /**
- * The atoms kept from one reading, deduped, with the two budgets that bound them: one for the
- * atoms that can raise the floor (a package, a pipe-to-shell, an encoded blob), one for the URLs
- * and hosts, which cannot. A floor atom that did not fit is a loss and is remembered as one; a
- * URL or host that did not fit is left out and nothing else is said.
+ * The atoms kept from one reading, deduped, with the budgets that bound them: one for the atoms
+ * that can raise the floor (a package, a pipe-to-shell, an encoded blob), one for the URLs and
+ * hosts, and one for the hashes (a labelled token that is not text), none of which can. A floor
+ * atom that did not fit is a loss and is remembered as one; any other that did not fit is left
+ * out and nothing else is said.
  */
 export interface AtomSet {
   readonly atoms: Atom[];
@@ -17,11 +18,12 @@ export interface AtomSet {
   readonly floorLeftOut: boolean;
 }
 
-export function createAtomSet(maxFloor: number, maxNetwork: number): AtomSet {
+export function createAtomSet(maxFloor: number, maxNetwork: number, maxDigest: number): AtomSet {
   const seen = new Set<string>();
   const atoms: Atom[] = [];
   let floor = 0;
   let network = 0;
+  let digest = 0;
   let floorLeftOut = false;
   return {
     atoms,
@@ -34,6 +36,9 @@ export function createAtomSet(maxFloor: number, maxNetwork: number): AtomSet {
           return;
         }
         floor += 1;
+      } else if (atom.kind === 'digest') {
+        if (digest >= maxDigest) return;
+        digest += 1;
       } else {
         if (network >= maxNetwork) return;
         network += 1;

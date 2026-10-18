@@ -298,14 +298,17 @@ export function createPostReadings(): PostReadings {
  * Each reading gets its own extraction cap and its own source for secret redaction. Loss
  * is accumulated before deduplication: even a reading whose atoms all repeat may be cut.
  */
-function atomsOfReadings(texts: readonly string[]): {
+function atomsOfReadings(
+  texts: readonly string[],
+  suspect: boolean,
+): {
   readings: ProvenanceReading[];
   lost: boolean;
 } {
   const seen = new Set<string>();
   let lost = false;
   const readings = texts.map((text) => {
-    const extracted = extractAtomsDeepWithLoss(normalizeText(text));
+    const extracted = extractAtomsDeepWithLoss(normalizeText(text), { cheapDigests: !suspect });
     // Hosts clip at this length; an exact-length reading may have lost a suffix too.
     lost ||= extracted.truncated || text.length >= DEFAULT_MAX_CHARS;
     return {
@@ -695,18 +698,23 @@ export class StroqEngine {
     // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
     // them the same way the scanner already does via expandVariants.
     const actualExtras = readingsState?.extraReadings ?? [];
-    const extracted = atomsOfReadings([
-      ...new Set([
-        event.toolResultText,
-        ...actualExtras.map((reading) => reading.text),
-        ...(event.otherReadings ?? []),
-      ]),
-    ]);
+    const suspect =
+      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true;
+    const extracted = atomsOfReadings(
+      [
+        ...new Set([
+          event.toolResultText,
+          ...actualExtras.map((reading) => reading.text),
+          ...(event.otherReadings ?? []),
+        ]),
+      ],
+      suspect,
+    );
     const recorded = await this.recorder.record(
       event,
       summary,
       extracted.readings,
-      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true,
+      suspect,
       extracted.lost ||
         event.resultUnread === true ||
         actualExtras.some((reading) => reading.unread),

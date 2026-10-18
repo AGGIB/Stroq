@@ -30,16 +30,28 @@ function hitsOf(
   byHash: ReadonlyMap<string, Atom>,
   records: readonly ProvenanceRecord[],
 ): ProvenanceHit[] {
-  const chosen = new Map<string, ProvenanceRecord>();
+  const chosen = new Map<string, ProvenanceHit>();
   for (const record of records) {
-    const current = chosen.get(record.hash);
-    if (current === undefined || (!current.suspect && record.suspect))
-      chosen.set(record.hash, record);
+    const atom = byHash.get(record.hash);
+    if (atom === undefined) continue;
+    const key = atomKey(atom);
+    const current = chosen.get(key);
+    if (current === undefined || (!current.record.suspect && record.suspect))
+      chosen.set(key, { atom, record });
   }
-  return [...chosen].flatMap(([hash, record]): ProvenanceHit[] => {
-    const atom = byHash.get(hash);
-    return atom === undefined ? [] : [{ atom, record }];
-  });
+  return [...chosen.values()];
+}
+
+const atomKey = (atom: Atom): string => `${atom.kind}\n${atom.value}`;
+
+/**
+ * The hashes under which the records of an atom may be kept. A blob in a command is looked up as
+ * the cheap hash of the same value too: a page that labelled a token as a hash recorded it as one
+ * (see `encodedAtoms`), and the command that carries the bare token is a copy of it.
+ */
+function hashesOf(atom: Atom): string[] {
+  const own = atomHash(atom);
+  return atom.kind === 'encoded' ? [own, atomHash({ kind: 'digest', value: atom.value })] : [own];
 }
 
 /**
@@ -56,15 +68,15 @@ export async function findActionProvenance(
   if (!store) return NO_LOOKUP;
   const { atoms, unread } = readActionAtoms(event.toolName, event.toolInput, event.cwd);
   if (atoms.length === 0 && !unread) return NO_LOOKUP;
-  const byHash = new Map(atoms.map((atom) => [atomHash(atom), atom] as const));
+  const byHash = new Map(
+    atoms.flatMap((atom) => hashesOf(atom).map((hash) => [hash, atom] as const)),
+  );
   const records = byHash.size === 0 ? [] : await store.lookup(event.sessionId, [...byHash.keys()]);
   const hits = hitsOf(byHash, records);
-  const seen = new Set(hits.map((hit) => atomHash(hit.atom)));
+  const seen = new Set(hits.map((hit) => atomKey(hit.atom)));
   // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
   const incomplete = await store.isIncomplete(event.sessionId);
-  const unrecorded = incomplete
-    ? [...byHash].filter(([hash]) => !seen.has(hash)).map(([, atom]) => atom)
-    : [];
+  const unrecorded = incomplete ? atoms.filter((atom) => !seen.has(atomKey(atom))) : [];
   const unreadCounts =
     unread && (tainted || incomplete || (await store.hasRecords(event.sessionId)));
   return { hits, unrecorded, unread: unreadCounts };

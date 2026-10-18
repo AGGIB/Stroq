@@ -84,6 +84,7 @@ const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'pkg',
   'pipe_shell',
   'encoded',
+  'digest',
 ]);
 
 /**

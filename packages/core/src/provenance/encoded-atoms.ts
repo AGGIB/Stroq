@@ -51,8 +51,9 @@ const INTEGRITY: ReadonlyMap<
     },
   ],
   ['sha512-', { length: 88, pad: 2, last: 'AQgw' }],
+  // The hash of a Go module in go.sum: SHA-256, as `h1:` and 44 characters.
+  ['h1:', { length: 44, pad: 1, last: 'AEIMQUYcgkosw048' }],
 ]);
-const LABEL_LENGTH = 7;
 
 /** The share of printable ASCII (with the whitespace of text) from which bytes are read as text. */
 const TEXT_SHARE = 0.9;
@@ -107,23 +108,34 @@ function decodesToText(bytes: Uint8Array): boolean {
 
 /**
  * Whether the token that starts at `index` of `text` is exactly an integrity string: one of the
- * three labels (`sha256-`, `sha384-`, `sha512-`, lowercase) straight before a standard base64
+ * labels (`sha256-`, `sha384-`, `sha512-`, lowercase, and Go's `h1:`) straight before a standard base64
  * hash of that label's length, padded as its length is padded, ending as a digest ends, and
  * decoding to bytes that are not text. Nothing near it is exempt: another label, another length,
  * other padding, or a body that decodes to a command is a blob like any. The label alone is
  * not enough, because it is the one thing in the token that anyone can write.
  */
 function isIntegrity(text: string, index: number, token: string): boolean {
-  const shape = INTEGRITY.get(text.slice(Math.max(0, index - LABEL_LENGTH), index));
-  if (shape === undefined || token.length !== shape.length) return false;
+  const shape = [...INTEGRITY].find(([label]) => text.startsWith(label, index - label.length))?.[1];
+  if (shape === undefined || index < 0 || token.length !== shape.length) return false;
   const body = token.replace(/=+$/, '');
   if (token.length - body.length !== shape.pad) return false;
   if (!shape.last.includes(body.charAt(body.length - 1))) return false;
   return !decodesToText(Buffer.from(token, 'base64'));
 }
 
-export function encodedAtoms(text: string): Positioned[] {
+/**
+ * The blobs in `text`. A token that is a hash by its label, its shape and its bytes is a `digest`,
+ * the cheapest atom there is, and not a blob (`cheapDigests`): the exact token still finds its record
+ * when a later action carries it, but it never marks a session and goes first when records are
+ * dropped. Where the page that holds it was flagged (`cheapDigests` off) it is a blob like any, so
+ * that a payload labelled as a hash among a great many real ones cannot hide.
+ */
+export function encodedAtoms(text: string, cheapDigests = true): Positioned[] {
   return [...text.matchAll(BASE64)]
-    .filter((m) => looksBase64(m[0]) && !isIntegrity(text, m.index ?? 0, m[0]))
-    .map((m): Positioned => ({ index: m.index ?? 0, atom: { kind: 'encoded', value: m[0] } }));
+    .filter((m) => looksBase64(m[0]))
+    .map((m): Positioned => {
+      const index = m.index ?? 0;
+      const digest = cheapDigests && isIntegrity(text, index, m[0]);
+      return { index, atom: { kind: digest ? 'digest' : 'encoded', value: m[0] } };
+    });
 }

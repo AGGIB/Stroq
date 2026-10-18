@@ -14,9 +14,11 @@ export interface Retained {
  * are still there: a flagged record dropped while a clean record of the same atom stays would turn
  * the denial of its command into a question. Within each, the record of a URL or a host goes before
  * the record of a package, a pipe-to-shell or an encoded blob: no record of the first kind can
- * raise the floor of an incomplete session.
+ * raise the floor of an incomplete session. The records of hashes go before all of these.
  */
 function dropOrder(record: ProvenanceRecord): number {
+  // A hash is the cheapest record there is: it goes before every other, flagged or not.
+  if (record.kind === 'digest') return -1;
   return (record.suspect ? 2 : 0) + (isFloorKind(record.kind) ? 1 : 0);
 }
 

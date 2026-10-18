@@ -22,6 +22,11 @@ export const MAX_ATOMS = 200;
  * the room a package needs.
  */
 export const MAX_NETWORK_ATOMS = 200;
+/**
+ * And for the hashes, which are cheaper still: a lockfile or a go.sum holds one per package, and a
+ * few dozen are enough to find a token that is copied. The rest are left out without a word.
+ */
+export const MAX_DIGEST_ATOMS = 128;
 const MAX_VALUE_CHARS = 512;
 // `restOfLine` scans at most this many characters past a runner/installer match.
 // A command line longer than this is truncated (trailing packages are missed), which
@@ -385,16 +390,16 @@ interface Extraction {
   readonly doubt: boolean;
 }
 
-function extractBounded(text: string, command = false): Extraction {
+function extractBounded(text: string, command = false, cheapDigests = true): Extraction {
   const packages = packageAtoms(text, command);
   const positioned = [
     ...urlAtoms(text),
     ...packages.positioned,
     ...pipeShellAtoms(text),
-    ...encodedAtoms(text),
+    ...encodedAtoms(text, cheapDigests),
   ];
   positioned.sort((a, b) => a.index - b.index);
-  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
   for (const { atom } of positioned) {
     set.add({ kind: atom.kind, value: atom.value.slice(0, MAX_VALUE_CHARS) });
   }
@@ -446,13 +451,15 @@ export interface ActionExtraction {
 export function extractActionAtoms(text: string): ActionExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
-  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
-  const plain = extractBounded(bounded, true);
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
+  // An action keeps a labelled hash as a blob: it is a copy of something, and where the page that
+  // it came from was flagged the page has it as a blob too.
+  const plain = extractBounded(bounded, true, false);
   for (const atom of plain.atoms) set.add(atom);
   let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent || plain.doubt;
   for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;
-    const extraction = extractBounded(reading.text, true);
+    const extraction = extractBounded(reading.text, true, false);
     for (const atom of extraction.atoms) set.add(atom);
     unread =
       unread ||
@@ -542,6 +549,16 @@ export function extractAtomsDeep(text: string): Atom[] {
   return extractAtomsDeepWithLoss(text).atoms;
 }
 
+/** How `extractAtomsDeepWithLoss` reads a result. */
+export interface DeepOptions {
+  /**
+   * Whether a hash by its label, shape and bytes is a `digest` atom (the default) or a blob. The
+   * result that was flagged reads them as blobs: a payload that says it is a hash is a hash only
+   * when nothing else about the page is wrong.
+   */
+  readonly cheapDigests?: boolean;
+}
+
 /**
  * `extractAtomsDeep`, and whether any bound it applies left an atom out. The recording side
  * needs the second half: this function is the only place that knows the text it was given
@@ -559,10 +576,11 @@ export function extractAtomsDeep(text: string): Atom[] {
  * (see `wrappedCommandCut`): joining every indented line makes a long line of any indented
  * block, and read as a cut that flagged ordinary workflows, Makefiles and README blocks.
  */
-export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
+export function extractAtomsDeepWithLoss(text: string, options: DeepOptions = {}): AtomExtraction {
+  const cheapDigests = options.cheapDigests ?? true;
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
-  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS);
+  const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
   let truncated = cutText;
   const merge = (extraction: Extraction, byLine = true): void => {
     // A spent budget is a loss in every pass, the joined one included; a line longer than the
@@ -574,13 +592,13 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
 
   for (const variant of expandVariants(bounded)) {
     if (set.floorFull) break;
-    merge(extractBounded(variant.text));
+    merge(extractBounded(variant.text, false, cheapDigests));
   }
 
   const joinedTexts = joinedReadings(bounded);
   for (const joined of joinedTexts) {
     if (set.floorFull) break;
-    merge(extractBounded(joined.text), joined.byLine);
+    merge(extractBounded(joined.text, false, cheapDigests), joined.byLine);
   }
   if (joinedTexts.length > 0 && !set.floorFull) truncated = truncated || wrappedCommandCut(bounded);
 
