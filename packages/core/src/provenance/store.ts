@@ -8,7 +8,6 @@ import {
   readdir,
   rename,
   rm,
-  rmdir,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -88,11 +87,6 @@ const PRIVATE_DIR_MODE = 0o700;
  */
 const INCOMPLETE_SUFFIX = '.prov.incomplete';
 const PENDING_SUFFIX = '.prov.pending';
-/** How many times a note is written again when its directory was removed under it. */
-const NOTE_ATTEMPTS = 5;
-const DIRECTORY_GONE: ReadonlySet<unknown> = new Set(['ENOENT', 'EINVAL', 'ENOTDIR']);
-const isDirectoryGone = (err: unknown): boolean =>
-  DIRECTORY_GONE.has((err as NodeJS.ErrnoException).code);
 const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'url',
   'host',
@@ -283,24 +277,17 @@ export class FileProvenanceStore implements ProvenanceStore {
   private async writeNote(target: string, body: string): Promise<void> {
     // Idempotent, so it needs no lock: whoever writes it writes the same thing.
     if (await exists(target)) return;
-    for (let attempt = 0; ; attempt += 1) {
-      const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-      try {
-        await mkdir(dirname(target), { recursive: true, mode: PRIVATE_DIR_MODE });
-        await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
-        await this.renameFile(tmp, target);
-        return;
-      } catch (err) {
-        await rm(tmp, { force: true }).catch(() => undefined);
-        // Another process may have written the note first, and on Windows renaming onto it then
-        // fails (EPERM, EBUSY). The note being there is all that was asked for.
-        if (await exists(target).catch(() => false)) return;
-        // The directory of the markers is removed once the last is off, and can go between the
-        // moment it was made and the moment the file is written into it (a missing directory, or,
-        // on some systems, a directory that is being removed): make it again.
-        if (isDirectoryGone(err) && attempt < NOTE_ATTEMPTS) continue;
-        throw err;
-      }
+    await mkdir(dirname(target), { recursive: true, mode: PRIVATE_DIR_MODE });
+    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await writeFile(tmp, body, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
+      await this.renameFile(tmp, target);
+    } catch (err) {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      // Another process may have written the note first, and on Windows renaming onto it then
+      // fails (EPERM, EBUSY). The note being there is all that was asked for.
+      if (await exists(target).catch(() => false)) return;
+      throw err;
     }
   }
 
@@ -311,11 +298,10 @@ export class FileProvenanceStore implements ProvenanceStore {
 
   async setPending(sessionId: string, pending: boolean, owner?: string): Promise<void> {
     if (!pending) {
+      // The directory stays, empty, until `clear`: removing it would race another operation that
+      // has made it and is about to write its marker in it, and a marker lost that way is a result
+      // that was read and never accounted for.
       await rm(this.pendingFile(sessionId, owner), { force: true });
-      // The directory of a session's markers goes with the last one. Removing it fails, and
-      // changes nothing, while any marker or a file being written is in it, and a marker being put
-      // down tries again if the directory went between its making and its file (see `writeNote`).
-      if (owner !== undefined) await rmdir(this.pendingDir(sessionId)).catch(() => undefined);
       return;
     }
     await this.writeNote(this.pendingFile(sessionId, owner), pendingMarkerBody(this.now()));
