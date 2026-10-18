@@ -1,12 +1,13 @@
-import { TRAILING, normalizePackageName, trimEndOf } from './package-name.js';
+import { shellWord, type ShellWord } from './shell-word.js';
+import { readPackageWord } from './word-name.js';
 
 /**
  * Reading the words after a runner or an installer as the shell reads them, under one rule. A word
- * in the place of a package is READ when, once the shell has unquoted it, it is made of the
- * characters of a package name and none of the characters in it was one the shell would expand
- * (a variable, a command, a brace, a glob, a redirection). Any other word is a DOUBT: what it
- * stands for cannot be read from the command, and the caller counts the command as unread. It is
- * never a package that was quietly not there.
+ * in the place of a package is READ when, once the shell has unquoted it, the NAME in it can be
+ * told from what follows (see `word-name.ts`); the name is then an atom, whatever the word wraps
+ * around it. A word whose name cannot be told (a variable, a command, a brace, a glob inside it)
+ * is a DOUBT: what it stands for cannot be read from the command, and the caller counts the
+ * command as unread. It is never a package that was quietly not there.
  */
 
 const FLAGS_WITH_VALUE = new Set([
@@ -45,122 +46,14 @@ export type RunnerFamily = 'node' | 'python';
 export const runnerFamily = (match: string): RunnerFamily =>
   /^(?:uvx|pipx|uv)\b/i.test(match) ? 'python' : 'node';
 
-/** The characters a package name is made of, once its version and extras are cut off. */
-const NAME_CHARS = /^[A-Za-z0-9@/._:+~=,-]*$/;
-/** Characters the shell expands or acts on where they are not quoted. */
-const EXPANDING = '(){}*?[]!<>|;&';
 /** A short flag with something stuck to it (`-xvalue`), which names a value no one has read. */
 const SHORT_FLAG_WITH_VALUE = /^-[A-Za-z][^-]/;
-const QUOTE_CHAR = /["']/;
 /** A redirection (`>`, `2>&1`, `&>`), which is neither a flag nor a package. */
 const REDIRECTION = /^(?:[0-9]*[<>]|&>)/;
 const ONLY_AN_OPERATOR = /^(?:[0-9]*[<>]{1,2}|&>>?)$/;
 
-/** A word with its quotes and backslashes taken out, and what in it was not plain text. */
-export interface ShellWord {
-  readonly word: string;
-  /** A quote in it was never closed. */
-  readonly open: boolean;
-  /** A character the shell would expand stood in it, unquoted (see `EXPANDING`), anywhere in the token. */
-  readonly meta: boolean;
-}
-
-/** What the quote that opens at `at` holds, where it closes (-1 if it never does), and the indexes of what it expands. */
-function quoted(token: string, at: number): { piece: string; end: number; expansions: number[] } {
-  const quote = token.charAt(at);
-  let piece = '';
-  const expansions: number[] = [];
-  for (let i = at + 1; i < token.length; i += 1) {
-    const char = token.charAt(i);
-    if (char === quote) return { piece, end: i, expansions };
-    if (
-      quote === '"' &&
-      char === '\\' &&
-      i + 1 < token.length &&
-      '$`"\\'.includes(token.charAt(i + 1))
-    ) {
-      piece += token.charAt(i + 1);
-      i += 1;
-      continue;
-    }
-    if (quote === '"' && (char === '$' || char === '`')) expansions.push(i);
-    piece += char;
-  }
-  return { piece, end: -1, expansions };
-}
-
-/**
- * `token` as the shell reads a word. Outside quotes a backslash takes itself out in front of the
- * character after it (`e\vil` is `evil`) and stays at the end of a word, where it is the mark of
- * a continuation. Single quotes keep what they hold; double quotes keep it too, except that a
- * backslash in them escapes only `$`, a backtick, `"` and itself, and that `$` and a backtick in
- * them still expand. A quote that is never closed is left in the word, with the rest of the token
- * after it, and the word is `open`.
- *
- * `meta` is whether a character that expands stood anywhere in the token, version and trailing
- * punctuation included, outside quotes. Only what a single quote holds, and what a double quote
- * holds other than `$` and a backtick, is left alone.
- */
-export function shellWord(token: string): ShellWord {
-  let word = '';
-  const expanding: number[] = [];
-  let open = false;
-  for (let i = 0; i < token.length; i += 1) {
-    const char = token.charAt(i);
-    if (char === '\\') {
-      word += i + 1 < token.length ? token.charAt(i + 1) : char;
-      i += 1;
-    } else if (char === "'" || char === '"') {
-      const { piece, end, expansions } = quoted(token, i);
-      expanding.push(...expansions);
-      if (end === -1) {
-        word += token.slice(i);
-        open = true;
-        break;
-      }
-      word += piece;
-      i = end;
-    } else {
-      if (char === '$' || char === '`' || EXPANDING.includes(char) || (char === '~' && i === 0))
-        expanding.push(i);
-      word += char;
-    }
-  }
-  return { word, open, meta: expanding.length > 0 };
-}
-
 /** A word that is only the mark of a continuation, and is neither a flag nor a package. */
 const isContinuationMark = (word: string): boolean => word === '\\';
-
-/**
- * A word that cannot be read as one name: it expands (`meta`), a quote in it was never closed
- * (a quote left at the end of a word is not that: it closes the string a command is written in),
- * or what is left of its name once its version is cut off holds a character no package name has.
- */
-function isDoubtful(read: ShellWord): boolean {
-  if (read.meta) return true;
-  if (read.open && QUOTE_CHAR.test(trimEndOf(read.word, TRAILING))) return true;
-  return !NAME_CHARS.test(normalizePackageName(read.word));
-}
-
-/**
- * A word that is a package: not a flag, a path, a URL, and, in a command, not one that is
- * doubtful. In a page the words are read for the name in them and nothing else: a page that says
- * `pip install requests>=2` names `requests`, though a shell would not run it that way.
- */
-function isPackageWord(read: ShellWord, command: boolean): boolean {
-  const { word } = read;
-  return (
-    word !== '' &&
-    !word.startsWith('-') &&
-    !word.startsWith('\\') &&
-    !word.startsWith('.') &&
-    !word.startsWith('/') &&
-    !word.startsWith('$') &&
-    !word.includes('://') &&
-    (!command || !isDoubtful(read))
-  );
-}
 
 /** The value a package flag carries: the word after it, or what follows `=` or the short flag. */
 function packageFlagValue(
@@ -185,12 +78,12 @@ function packageFlagValue(
  */
 function flagPackages(value: ShellWord, command: boolean): { packages: string[]; doubt: boolean } {
   const packages: string[] = [];
-  let doubt = command && (value.word === '' || value.meta);
+  let doubt = command && value.word === '';
   for (const piece of value.word.split(',')) {
     if (piece === '') continue;
-    const read: ShellWord = { ...value, word: piece };
-    if (isPackageWord(read, command)) packages.push(piece);
-    else doubt = doubt || (command && isDoubtful(read));
+    const word = readPackageWord({ ...value, word: piece });
+    if (word.name !== undefined) packages.push(word.name);
+    doubt = doubt || (command && word.doubt);
   }
   return { packages, doubt };
 }
@@ -204,7 +97,7 @@ export interface RunnerReading {
    * can add one. False when the words ran out first, and a later package flag may still name one.
    */
   readonly sure: boolean;
-  /** A word that should have named a package is a doubt (see `isDoubtful`). */
+  /** A word that should have named a package is a doubt (see `readPackageWord`). */
   readonly doubt: boolean;
 }
 
@@ -261,9 +154,12 @@ export function readRunner(
       doubt = doubt || (command && SHORT_FLAG_WITH_VALUE.test(read.word) && !isInterpreter);
       continue;
     }
-    if (isPackageWord(read, command))
-      return { packages: [...fromFlags, read.word], sure: true, doubt };
-    return { packages: fromFlags, sure: true, doubt: doubt || (command && isDoubtful(read)) };
+    const word = readPackageWord(read);
+    return {
+      packages: word.name === undefined ? fromFlags : [...fromFlags, word.name],
+      sure: true,
+      doubt: doubt || (command && word.doubt),
+    };
   }
   return { packages: fromFlags, sure: false, doubt };
 }
@@ -289,8 +185,11 @@ export function readInstaller(
       i += 1;
       continue;
     }
-    if (isPackageWord(read, command)) packages.push(read.word);
-    else if (command && !read.word.startsWith('-') && isDoubtful(read)) doubt = true;
+    const word = readPackageWord(read);
+    if (word.name !== undefined) packages.push(word.name);
+    doubt = doubt || (command && word.doubt);
+    if (word.ends) break;
+    if (word.skipsNext) i += 1;
   }
   return { packages, doubt };
 }

@@ -238,25 +238,34 @@ describe('extractActionAtoms and a name that is built by the shell', () => {
     expect(extractActionAtoms(command).unread).toBe(true);
   });
 
-  // Nothing the shell would expand is let through because of where it stands in the word: not in
-  // a version, not at the end of a word, not in a sentence that quotes a command in backticks.
+  // A sentence that quotes a command in backticks is not let through, and nor is a word that goes
+  // on past the brackets of what could be extras: the shell would expand them.
   it.each([
-    'npm install lodash@$VERSION',
-    'npm install @scope/pkg@$V',
     'git commit -m "Run `npx prettier` to format."',
     'echo `npx prettier`',
-    '(npm install foo)',
-    '$(npm install foo)',
     'npm install foo?',
-    'pip install requests[socks]',
+    'npm install foo?bar',
+    'pip install requests[socks]x',
+    'pip install requests[socks',
+    'npx ev[i]l-helper-fix',
   ])('is in doubt about %s, wherever the expansion stands in the word', (command) => {
     expect(extractActionAtoms(command).unread).toBe(true);
   });
 
-  it('is in doubt about a variable in double quotes, which still expands, and not in single quotes', () => {
-    expect(extractActionAtoms('npm install "lodash@$VERSION"').unread).toBe(true);
-    expect(extractActionAtoms("npm install 'lodash@$VERSION'").unread).toBe(false);
-    expect(extractActionAtoms('pip install "requests[socks]"').unread).toBe(false);
+  // What stands after the name says nothing about which package it is: a version, extras, a bound
+  // or a fragment, and what the shell takes for the end of the word, never make a command unread.
+  it.each([
+    'npm install lodash@$VERSION',
+    'npm install @scope/pkg@$V',
+    '(npm install foo)',
+    '$(npm install foo)',
+    'pip install requests[socks]',
+    'pip install requests[socks]>=2',
+    'npm install "lodash@$VERSION"',
+    "npm install 'lodash@$VERSION'",
+    'pip install "requests[socks]"',
+  ])('is not in doubt about %s, since the suffix is not the name', (command) => {
+    expect(extractActionAtoms(command).unread).toBe(false);
   });
 
   it('does not read half of a name that a backtick cuts as the name', () => {
@@ -315,11 +324,10 @@ describe('extractActionAtoms and a word that is made of characters the shell exp
     ['a brace', 'npx ev{il,x}-helper-fix'],
     ['a glob', 'npx ev*l-helper-fix'],
     ['a question mark', 'npx evi?-helper-fix'],
-    ['a bracket', 'npx ev[i]l-helper-fix'],
+    ['a bracket in the middle of a name', 'npx ev[i]l-helper-fix'],
     ['a command in backticks cut into the name', 'npx e`x`vil-helper-fix'],
     ['a variable', 'npx ev$X-helper-fix'],
     ['a command substitution', 'npx ev$(echo il)-helper-fix'],
-    ['a tilde at the start', 'npm install ~evil'],
     ['an exclamation mark', 'npx ev!l-helper-fix'],
     ['a name that is a variable, in an installer', 'pip install ev$X'],
     ['a name with a character no package has', 'npx evil%helper-fix'],
@@ -336,6 +344,8 @@ describe('extractActionAtoms and a word that is made of characters the shell exp
 
   it.each([
     'npx eslint .',
+    'npm install ~evil',
+    'pip install -e ~/dev/lib',
     'npx tsx ./script.ts --flag',
     'npm install lodash@4.17.21 left-pad',
     'npm install "lodash@^4" "@scope/pkg@>=1"',
