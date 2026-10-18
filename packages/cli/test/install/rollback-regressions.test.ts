@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readPassports, writePassports } from '../../src/install/lock.js';
@@ -10,6 +10,30 @@ import { mcpFixture } from '../helpers/mcp-install.js';
 import { setup } from '../helpers/skill-install.js';
 
 describe('rollback confirmation and retained store integrity', () => {
+  it('names the orphan that could not be collected, never the retained rollback revision', async () => {
+    const f = await setup();
+    const first = await addSkill(f.source, f.options);
+    const orphan = 'f'.repeat(64);
+    const elsewhere = join(f.root, 'elsewhere');
+    await mkdir(elsewhere);
+    await writeFile(join(elsewhere, 'keep.txt'), 'keep');
+    await symlink(elsewhere, storePath(f.options.stroqHome, orphan), 'junction');
+    await writeFile(join(f.source, 'README.md'), 'Updated documentation.\n');
+    const updated = await addSkill('demo', f.options);
+    expect(updated.previous?.digest).toBe(first.digest);
+    const warnings = f
+      .output()
+      .split('\n')
+      .filter((line) => line.startsWith('warning:'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(orphan.slice(0, 12));
+    expect(warnings[0]).not.toContain(first.digest.slice(0, 12));
+    expect(await readFile(join(elsewhere, 'keep.txt'), 'utf8')).toBe('keep');
+    expect(await checkRetainedRevisions(f.options.stroqHome)).toEqual([
+      expect.objectContaining({ ok: true }),
+    ]);
+  });
+
   it('requires a typed digest even when only ordinary documentation changed', async () => {
     const f = await setup();
     await writeFile(join(f.source, 'README.md'), 'Ordinary project documentation.\n');

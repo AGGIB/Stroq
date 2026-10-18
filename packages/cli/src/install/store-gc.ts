@@ -8,6 +8,25 @@ import { assertPlainDirectory, storePath } from './store.js';
 
 const STORE_ENTRY = /^sha256-([0-9a-f]{32})$/;
 
+/** Carry the failed candidate, which may be an unrelated orphan, to the warning. */
+class StoreCollectionError extends Error {
+  constructor(
+    readonly digest: string,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : 'it could not be cleared', { cause });
+  }
+}
+
+async function clearStoredCopy(home: string, stored: string, digest: string): Promise<void> {
+  try {
+    assertWriteAllowed(stored, { root: home, initRule: false });
+    if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
+  } catch (error) {
+    throw new StoreCollectionError(digest, error);
+  }
+}
+
 function liveReplacer(key: string, value: unknown): unknown {
   if (key === 'history') return undefined;
   if (
@@ -33,8 +52,7 @@ async function unreferencedStoreDigests(
     if (checked.has(prefix) || skillsText.includes(prefix) || mcpText.includes(prefix)) continue;
     checked.add(prefix);
     const stored = storePath(home, digest);
-    assertWriteAllowed(stored, { root: home, initRule: false });
-    if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
+    await clearStoredCopy(home, stored, digest);
   }
   const entries = await readdir(storeDirIn(home)).catch(() => [] as string[]);
   for (const entry of entries) {
@@ -44,8 +62,7 @@ async function unreferencedStoreDigests(
     if (checked.has(prefix) || skillsText.includes(prefix) || mcpText.includes(prefix)) continue;
     checked.add(prefix);
     const stored = join(storeDirIn(home), entry);
-    assertWriteAllowed(stored, { root: home, initRule: false });
-    if (await assertPlainDirectory(stored)) await rm(stored, { recursive: true });
+    await clearStoredCopy(home, stored, prefix);
   }
 }
 
@@ -98,8 +115,9 @@ export async function tidyStore(
     await clear();
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'it could not be cleared';
+    const failedDigest = error instanceof StoreCollectionError ? error.digest : digest;
     terminal.write(
-      `warning: the old stored copy sha256:${digest.slice(0, 12)} was not removed (${outsideLine(reason)}); it is not used any more and can be deleted by hand\n`,
+      `warning: the old stored copy sha256:${failedDigest.slice(0, 12)} was not removed (${outsideLine(reason)}); it is not used any more and can be deleted by hand\n`,
     );
   }
 }
