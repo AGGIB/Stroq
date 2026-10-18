@@ -753,3 +753,55 @@ test('effective strict rules do not substitute for an exact-head human approval'
   snapshot.reviews = [];
   assert.ok(readiness(snapshot).includes('current-head-human-approval-required'));
 });
+
+test('read-only repository metadata uses GraphQL when the REST squash setting is omitted', async () => {
+  const snapshot = fixture();
+  delete snapshot.repo.allow_squash_merge;
+  const client = fakeClient(snapshot);
+  const original = client.request.bind(client);
+  client.request = async (path, method, body) => {
+    if (path === '/graphql') {
+      assert.equal(method, 'POST');
+      assert.match(body.query, /^query\s/);
+      assert.match(body.query, /squashMergeAllowed/);
+      return { data: { repository: { squashMergeAllowed: true } } };
+    }
+    return original(path, method, body);
+  };
+  assert.deepEqual((await inspectPull(client, 42)).reasons, []);
+});
+
+test('an explicit REST squash refusal never falls back to GraphQL', async () => {
+  const snapshot = fixture();
+  snapshot.repo.allow_squash_merge = false;
+  const client = fakeClient(snapshot);
+  assert.ok((await inspectPull(client, 42)).reasons.includes('squash-unavailable'));
+  assert.ok(!client.calls.some((call) => call.path === '/graphql'));
+});
+
+for (const allowed of [false, null, 'true', undefined]) {
+  test(`missing REST squash setting remains blocked with GraphQL ${JSON.stringify(allowed)}`, async () => {
+    const snapshot = fixture();
+    delete snapshot.repo.allow_squash_merge;
+    const client = fakeClient(snapshot);
+    const original = client.request.bind(client);
+    client.request = async (path, ...args) =>
+      path === '/graphql'
+        ? { data: { repository: { squashMergeAllowed: allowed } } }
+        : original(path, ...args);
+    assert.ok((await inspectPull(client, 42)).reasons.includes('squash-unavailable'));
+  });
+}
+
+test('an unavailable GraphQL squash setting stops merge without mutations', async () => {
+  const snapshot = fixture();
+  delete snapshot.repo.allow_squash_merge;
+  const client = fakeClient(snapshot);
+  const original = client.request.bind(client);
+  client.request = async (path, ...args) => {
+    if (path === '/graphql') throw new Error('GitHub API 403');
+    return original(path, ...args);
+  };
+  await assert.rejects(maintain(client, { mode: 'merge' }), /stopped/);
+  assert.ok(client.calls.every((call) => ['GET', 'QUERY'].includes(call.method)));
+});

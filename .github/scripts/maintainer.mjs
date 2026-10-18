@@ -329,6 +329,20 @@ export function readiness(snapshot) {
   return [...reasons].sort();
 }
 
+async function repositoryMetadata(client) {
+  const repo = await client.request(ROOT);
+  if (typeof repo.allow_squash_merge === 'boolean') return repo;
+  // Contents-read tokens omit REST merge settings. GraphQL exposes this setting
+  // without granting the scan job contents-write permission.
+  const result = await client.request('/graphql', 'POST', {
+    query: 'query { repository(owner:"AGGIB",name:"Stroq") { squashMergeAllowed } }',
+  });
+  return {
+    ...repo,
+    allow_squash_merge: result.data?.repository?.squashMergeAllowed === true,
+  };
+}
+
 export async function inspectPull(client, number) {
   const pr = await client.request(`${ROOT}/pulls/${number}`);
   if (!pr.head?.sha || !pr.base?.sha || !pr.merge_commit_sha)
@@ -350,7 +364,7 @@ export async function inspectPull(client, number) {
     protection,
     workflowSources,
   ] = await Promise.all([
-    client.request(ROOT),
+    repositoryMetadata(client),
     client.request(`${ROOT}/branches/main`),
     client.list(`${ROOT}/rules/branches/main`),
     client.list(`${ROOT}/pulls/${number}/files`),
