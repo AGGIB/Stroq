@@ -128,7 +128,6 @@ describe('after a page that was flagged and named a package, as the shell reads 
     for (const command of [
       'npx ./script.js',
       'npx eslint .',
-      'npm install lodash@$VERSION',
       'npm install left-pad \\\n  lodash',
       'npx -p ok-pkg tool --flag',
     ]) {
@@ -192,12 +191,7 @@ describe('after a page that was flagged and named a package, as the shell builds
   it('leaves commands that quote or substitute elsewhere alone', async () => {
     const f = fixture();
     await f.post(PAGE);
-    for (const command of [
-      'git commit -m "docs: use npx prettier"',
-      'echo "run npx prettier"',
-      'npm install lodash@$VERSION',
-      'git commit -m "Run `npx prettier` to format."',
-    ]) {
+    for (const command of ['git commit -m "docs: use npx prettier"', 'echo "run npx prettier"']) {
       expect((await f.pre(command)).decision.effect, command).toBe('allow');
     }
   });

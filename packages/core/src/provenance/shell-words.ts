@@ -26,7 +26,7 @@ const FLAGS_WITH_VALUE = new Set([
 /** The flags that name a package, by the kind of runner. A flag may carry its value as `--flag=value`. */
 const PACKAGE_FLAGS: Readonly<Record<RunnerFamily, ReadonlySet<string>>> = {
   node: new Set(['-p', '--package']),
-  python: new Set(['--from', '--with', '--spec']),
+  python: new Set(['--from', '--with', '--spec', '-w']),
 };
 /** Flags of a Python runner that take a value that is not a package. */
 const PYTHON_VALUE_FLAGS = new Set([
@@ -49,8 +49,8 @@ export const runnerFamily = (match: string): RunnerFamily =>
 const NAME_CHARS = /^[A-Za-z0-9@/._:+~=,-]*$/;
 /** Characters the shell expands or acts on where they are not quoted. */
 const EXPANDING = '(){}*?[]!<>|;&';
-/** A PEP 508 extras suffix (`requests[socks]`), which is part of a name and not a glob. */
-const EXTRAS = /\[[A-Za-z0-9._,-]*\](?=$|[<>=!~;@"'])/g;
+/** A short flag with something stuck to it (`-xvalue`), which names a value no one has read. */
+const SHORT_FLAG_WITH_VALUE = /^-[A-Za-z][^-]/;
 const QUOTE_CHAR = /["']/;
 /** A redirection (`>`, `2>&1`, `&>`), which is neither a flag nor a package. */
 const REDIRECTION = /^(?:[0-9]*[<>]|&>)/;
@@ -61,24 +61,11 @@ export interface ShellWord {
   readonly word: string;
   /** A quote in it was never closed. */
   readonly open: boolean;
-  /** A character the shell would expand stood in it, unquoted (see `EXPANDING`), in the part that is the name. */
+  /** A character the shell would expand stood in it, unquoted (see `EXPANDING`), anywhere in the token. */
   readonly meta: boolean;
 }
 
-/** Where in `token` the version of a name starts: its first `@` that is not the one of a scope. */
-const versionStart = (token: string): number => {
-  const at = token.indexOf('@', 1);
-  return at === -1 ? token.length : at;
-};
-
-/** The index ranges of `token` that are an extras suffix. */
-const extrasSpans = (token: string): [number, number][] =>
-  [...token.matchAll(EXTRAS)].map((m): [number, number] => [
-    m.index ?? 0,
-    (m.index ?? 0) + m[0].length,
-  ]);
-
-/** The index of the first character after the quote that opens at `at`, with what it holds and the indexes of what it expands. */
+/** What the quote that opens at `at` holds, where it closes (-1 if it never does), and the indexes of what it expands. */
 function quoted(token: string, at: number): { piece: string; end: number; expansions: number[] } {
   const quote = token.charAt(at);
   let piece = '';
@@ -110,8 +97,9 @@ function quoted(token: string, at: number): { piece: string; end: number; expans
  * them still expand. A quote that is never closed is left in the word, with the rest of the token
  * after it, and the word is `open`.
  *
- * `meta` is whether a character that expands stood in the name: before its version, outside an
- * extras suffix, and not in the run of prose punctuation that ends a word.
+ * `meta` is whether a character that expands stood anywhere in the token, version and trailing
+ * punctuation included, outside quotes. Only what a single quote holds, and what a double quote
+ * holds other than `$` and a backtick, is left alone.
  */
 export function shellWord(token: string): ShellWord {
   let word = '';
@@ -138,12 +126,7 @@ export function shellWord(token: string): ShellWord {
       word += char;
     }
   }
-  const nameEnd = Math.min(versionStart(token), trimEndOf(token, TRAILING).length);
-  const spans = extrasSpans(token);
-  const meta = expanding.some(
-    (index) => index < nameEnd && !spans.some(([from, to]) => index >= from && index < to),
-  );
-  return { word, open, meta };
+  return { word, open, meta: expanding.length > 0 };
 }
 
 /** A word that is only the mark of a continuation, and is neither a flag nor a package. */
@@ -189,11 +172,27 @@ function packageFlagValue(
   const equals = flag.indexOf('=');
   if (equals > 0 && flags.has(flag.slice(0, equals)))
     return { raw: flag.slice(equals + 1), skip: false };
-  if (/^-[a-z][^-]/.test(flag) && flags.has(flag.slice(0, 2))) {
+  if (SHORT_FLAG_WITH_VALUE.test(flag) && flags.has(flag.slice(0, 2))) {
     const value = flag.slice(2);
     return { raw: value.startsWith('=') ? value.slice(1) : value, skip: false };
   }
   return null;
+}
+
+/**
+ * The packages in the value of a package flag, which may name several, separated by commas
+ * (`--with a,b`), and whether the value is a doubt: it is empty, or one of them cannot be read.
+ */
+function flagPackages(value: ShellWord, command: boolean): { packages: string[]; doubt: boolean } {
+  const packages: string[] = [];
+  let doubt = command && (value.word === '' || value.meta);
+  for (const piece of value.word.split(',')) {
+    if (piece === '') continue;
+    const read: ShellWord = { ...value, word: piece };
+    if (isPackageWord(read, command)) packages.push(piece);
+    else doubt = doubt || (command && isDoubtful(read));
+  }
+  return { packages, doubt };
 }
 
 /** What a runner's words say about its packages. */
@@ -218,9 +217,9 @@ function stepOver(token: string): number {
 
 /**
  * The packages a runner resolves: the value of every package flag of its kind (see
- * `PACKAGE_FLAGS`; `-p`, `--package`, `--package=x`, `-p=x`, `-px` for `npx`; `--from`, `--with`
- * for `uvx`), and the first word that is not a flag, whether or not a flag named one. A package
- * flag with no value, or with a value that cannot be read, is a doubt.
+ * `PACKAGE_FLAGS`; `-p`, `--package`, `--package=x`, `-p=x`, `-px` for `npx`; `--from`, `--with`,
+ * `-w` for `uvx`), split at commas, and the first word that is not a flag, whether or not a flag
+ * named one. A package flag with no value, or with a value that cannot be read, is a doubt.
  */
 export function readRunner(
   tokens: readonly string[],
@@ -242,10 +241,9 @@ export function readRunner(
     if (isContinuationMark(read.word)) continue;
     const flag = packageFlagValue(read.word, tokens[i + 1], packageFlags);
     if (flag !== null) {
-      const value = flag.raw === undefined ? undefined : shellWord(flag.raw);
-      if (value !== undefined && isPackageWord(value, command)) fromFlags.push(value.word);
-      else if (value !== undefined)
-        doubt = doubt || (command && (value.word === '' || isDoubtful(value)));
+      const value = flagPackages(shellWord(flag.raw ?? ''), command);
+      fromFlags.push(...value.packages);
+      doubt = doubt || (flag.raw !== undefined && value.doubt);
       if (flag.skip) i += 1;
       continue;
     }
@@ -256,7 +254,13 @@ export function readRunner(
       i += 1;
       continue;
     }
-    if (read.word.startsWith('-')) continue;
+    if (read.word.startsWith('-')) {
+      // A short flag with a value stuck to it that is not one of the runner's own names a value
+      // nobody has read (a Python runner's `-p3.12` is its interpreter).
+      const isInterpreter = family === 'python' && read.word.startsWith('-p');
+      doubt = doubt || (command && SHORT_FLAG_WITH_VALUE.test(read.word) && !isInterpreter);
+      continue;
+    }
     if (isPackageWord(read, command))
       return { packages: [...fromFlags, read.word], sure: true, doubt };
     return { packages: fromFlags, sure: true, doubt: doubt || (command && isDoubtful(read)) };

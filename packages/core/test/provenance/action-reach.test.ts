@@ -169,14 +169,8 @@ describe('extractActionAtoms and a runner whose package may be in the part that 
     expect(extractActionAtoms('pip install $PKG').unread).toBe(true);
   });
 
-  it('does not report a path, a flag or a name that holds a variable only for its version', () => {
-    for (const command of [
-      'npx ./script.js',
-      'npx .',
-      'npx eslint .',
-      'npm install lodash@$VERSION',
-      'npx tsx ./a.ts',
-    ]) {
+  it('does not report a path or a flag', () => {
+    for (const command of ['npx ./script.js', 'npx .', 'npx eslint .', 'npx tsx ./a.ts']) {
       expect(extractActionAtoms(command).unread, command).toBe(false);
     }
   });
@@ -244,14 +238,25 @@ describe('extractActionAtoms and a name that is built by the shell', () => {
     expect(extractActionAtoms(command).unread).toBe(true);
   });
 
-  it('is not in doubt about a variable that only holds a version', () => {
-    expect(extractActionAtoms('npm install lodash@$VERSION').unread).toBe(false);
-    expect(extractActionAtoms('npm install @scope/pkg@$V').unread).toBe(false);
+  // Nothing the shell would expand is let through because of where it stands in the word: not in
+  // a version, not at the end of a word, not in a sentence that quotes a command in backticks.
+  it.each([
+    'npm install lodash@$VERSION',
+    'npm install @scope/pkg@$V',
+    'git commit -m "Run `npx prettier` to format."',
+    'echo `npx prettier`',
+    '(npm install foo)',
+    '$(npm install foo)',
+    'npm install foo?',
+    'pip install requests[socks]',
+  ])('is in doubt about %s, wherever the expansion stands in the word', (command) => {
+    expect(extractActionAtoms(command).unread).toBe(true);
   });
 
-  it('is not in doubt about a command that sits in backticks in a string', () => {
-    expect(extractActionAtoms('git commit -m "Run `npx prettier` to format."').unread).toBe(false);
-    expect(extractActionAtoms('echo `npx prettier`').unread).toBe(false);
+  it('is in doubt about a variable in double quotes, which still expands, and not in single quotes', () => {
+    expect(extractActionAtoms('npm install "lodash@$VERSION"').unread).toBe(true);
+    expect(extractActionAtoms("npm install 'lodash@$VERSION'").unread).toBe(false);
+    expect(extractActionAtoms('pip install "requests[socks]"').unread).toBe(false);
   });
 
   it('does not read half of a name that a backtick cuts as the name', () => {
@@ -341,11 +346,8 @@ describe('extractActionAtoms and a word that is made of characters the shell exp
     'pip install foo &> /dev/null',
     'npm install foo & npm run build &',
     'npm install foo; npm run build',
-    '(npm install foo)',
-    '$(npm install foo)',
     'npx --yes --package=left-pad left-pad',
     'echo "run npx prettier"',
-    'git commit -m "Run `npx prettier` to format."',
     "git commit -m 'use pip install requests, then npx tsc'",
   ])('is not in doubt about %s', (command) => {
     expect(extractActionAtoms(command).unread).toBe(false);
@@ -380,5 +382,36 @@ describe('extractActionAtoms and the flags of each kind of runner', () => {
   it('does not take -p of uvx for a package, since it names a Python', () => {
     const { atoms } = extractActionAtoms(`uvx -p 3.12 ${NAME}`);
     expect(atoms.map((a) => a.value)).toEqual([NAME]);
+  });
+});
+
+describe('extractActionAtoms and the last flags of a runner', () => {
+  it('names the packages in a value that lists several', () => {
+    const { atoms } = extractActionAtoms(`uvx --with ok-pkg,${NAME} tool`);
+    expect(atoms).toContainEqual(pkg);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'ok-pkg' });
+    expect(extractActionAtoms(`npx --package=a,${NAME} run`).atoms).toContainEqual(pkg);
+  });
+
+  it('names the package of -w, the short form of --with', () => {
+    expect(extractActionAtoms(`uvx -w ${NAME} tool`).atoms).toContainEqual(pkg);
+    expect(extractActionAtoms(`uvx -w=${NAME} tool`).atoms).toContainEqual(pkg);
+    expect(extractActionAtoms(`uvx -w${NAME} tool`).atoms).toContainEqual(pkg);
+  });
+
+  it('is in doubt about a short flag with a value stuck to it that is not one of the runner', () => {
+    expect(extractActionAtoms('npx -xevil-helper-fix tool').unread).toBe(true);
+    expect(extractActionAtoms('uvx -qevil tool').unread).toBe(true);
+  });
+
+  it('is not in doubt about the flags a runner has on their own, or its Python', () => {
+    for (const command of [
+      'npx -y tool',
+      'npx --yes tool',
+      'uvx -p3.12 ruff',
+      'uvx -p 3.12 ruff',
+    ]) {
+      expect(extractActionAtoms(command).unread, command).toBe(false);
+    }
   });
 });

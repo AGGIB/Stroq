@@ -57,11 +57,10 @@ const INSTALLER =
   /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/gi;
 const LINE_END = /[\n|;`]|&&|\|\|/;
 // Where a command ends, as a shell reads it: a backtick does not end it, it opens a substitution
-// in the middle of a word. A page is not a command, and there a backtick closes the code span that
-// a package is named in (`npx foo`), so `LINE_END` stays for the text of a result.
+// in the middle of a word, and what a command says about its own backticks is not to be trusted to
+// say where it ends. A page is not a command, and there a backtick closes the code span that a
+// package is named in (`npx foo`), so `LINE_END` stays for the text of a result.
 const COMMAND_END = /[\n|;]|&&|\|\|/;
-// How far back on its line a runner or installer is looked at to see if a code span is open.
-const SPAN_LOOKBACK = 256;
 // A newline immediately followed by indentation (a space or tab) is a wrapped
 // continuation of the same command, not a new one — the `split-across-lines`
 // mutation (and ordinary word-wrapping) produces exactly this shape by turning
@@ -89,24 +88,13 @@ interface LineScan {
   readonly read: number;
 }
 
-/** Whether `from` is inside a code span of its line: an odd number of backticks stand before it. */
-function insideCodeSpan(text: string, from: number): boolean {
-  let backticks = 0;
-  for (let i = from - 1; i >= Math.max(0, from - SPAN_LOOKBACK); i -= 1) {
-    const char = text.charAt(i);
-    if (char === '\n') break;
-    if (char === '`') backticks += 1;
-  }
-  return backticks % 2 === 1;
-}
-
 /**
- * The rest of the line after `from`. For a command a backtick is part of a word (`ev`x`il`), unless
- * the line is inside a code span (a sentence that quotes the command), which the next backtick closes.
+ * The rest of the line after `from`. For a command a backtick is part of a word (`ev`x`il`) and
+ * the word is a doubt (see `shell-words.ts`); for a page it ends the line.
  */
 function restOfLine(text: string, from: number, command: boolean): LineScan {
   const rest = text.slice(from, from + MAX_LINE_SCAN);
-  const end = command && !insideCodeSpan(text, from) ? COMMAND_END : LINE_END;
+  const end = command ? COMMAND_END : LINE_END;
   const stop = rest.search(end);
   return {
     line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),

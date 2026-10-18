@@ -103,8 +103,6 @@ describe('a flagged page that named a package', () => {
     await post('flagged-quotes', FLAGGED);
     for (const command of [
       'git commit -m "docs: use npx prettier"',
-      'git commit -m "Run `npx prettier` to format."',
-      'npm install lodash@$VERSION',
       'npm install left-pad 2>&1 | tail -5',
       'pip install "requests[security]>=2.0" -r requirements.txt',
     ]) {
