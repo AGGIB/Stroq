@@ -117,7 +117,6 @@ const VERBS: ReadonlyArray<readonly [string, string]> = [
   ['pnpm', 'add'],
   ['pnpm', 'install'],
   ['pnpm', 'dlx'],
-  ['pnpm', 'exec'],
   ['pnpm', 'up'],
   ['yarn', 'add'],
   ['yarn', 'global add'],
@@ -216,6 +215,8 @@ describe('a command that is not a launcher names nothing', () => {
   it.each([
     'npm run build',
     'npm test',
+    'pnpm exec vitest run',
+    'pnpm -C app exec tsc --noEmit',
     'pnpm run lint',
     'yarn build',
     'bun run dev',

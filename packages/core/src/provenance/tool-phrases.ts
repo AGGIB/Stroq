@@ -22,7 +22,8 @@ const RUNNER_PHRASES = [
   'npx',
   'bunx',
   'uvx',
-  'pnpm dlx|exec|create',
+  // `pnpm exec` runs a binary that is already installed and fetches nothing: it is no launch.
+  'pnpm dlx|create',
   'yarn dlx|create',
   'npm exec|x',
   'bun x|create',
