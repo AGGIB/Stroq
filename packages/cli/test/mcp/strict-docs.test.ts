@@ -28,6 +28,19 @@ const start = agents.indexOf('#### `--strict`');
 const section = agents.slice(start, agents.indexOf('**Limits.**', start));
 
 describe('the --strict section of docs/AGENTS.md', () => {
+  it('keeps SECURITY.md aligned with the completed follow-ups', () => {
+    const security = readFileSync(
+      fileURLToPath(new URL('../../../../SECURITY.md', import.meta.url)),
+      'utf8',
+    );
+    expect(security).not.toContain('ending the server signals only the direct child on POSIX');
+    expect(security).not.toContain(
+      "the request it belonged to is left to the client's own timeout",
+    );
+    expect(security).toContain('a per-string view for each distinct decoded string');
+    expect(security).toContain('including unrelated concurrent requests');
+  });
+
   it('is there to be read', () => {
     expect(start).toBeGreaterThan(0);
     expect(section.length).toBeGreaterThan(2000);
