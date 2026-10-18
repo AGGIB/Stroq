@@ -75,6 +75,43 @@ export function nameOf(name: string): string {
   return name;
 }
 
+import { wrapperIndex } from '../commands/mcp-config.js';
+
+export function isWrappedEntry(entry: unknown): boolean {
+  if (!isPlainObject(entry)) return false;
+  const args = entry['args'];
+  return Array.isArray(args) && wrapperIndex(args) !== null;
+}
+
+export interface McpPendingRecord {
+  readonly kind: 'mcp';
+  readonly status: 'pending';
+  readonly digest: string;
+  readonly grant: { readonly pin: string };
+  readonly source: string;
+  readonly config: string;
+  readonly configRoot?: string | null;
+  readonly client: string;
+  readonly cwd?: string;
+  readonly entrypoint: string;
+  readonly passEnv: readonly string[];
+  readonly passport: Passport;
+  readonly written: Record<string, unknown>;
+  readonly original: Record<string, unknown> | null;
+  readonly replaced: unknown | null;
+  readonly history: readonly Receipt[];
+}
+
+export function pendingRecordOf(lock: Passports, name: string): McpPendingRecord | undefined {
+  const raw = Object.hasOwn(lock.mcp ?? {}, name) ? lock.mcp![name] : undefined;
+  return isPlainObject(raw) &&
+    raw['kind'] === 'mcp' &&
+    raw['status'] === 'pending' &&
+    typeof raw['config'] === 'string'
+    ? (raw as unknown as McpPendingRecord)
+    : undefined;
+}
+
 export function recordOf(lock: Passports, name: string): McpRecord | undefined {
   const raw = Object.hasOwn(lock.mcp ?? {}, name) ? lock.mcp![name] : undefined;
   return isPlainObject(raw) &&

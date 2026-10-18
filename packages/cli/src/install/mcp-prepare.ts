@@ -15,7 +15,9 @@ import { currentEntry, entryFor, jsonEqual, loadConfig, serversOf } from './mcp-
 import { assertSelfContained } from './mcp-outside-imports.js';
 import {
   ENV_NAME,
+  isWrappedEntry,
   nameOf,
+  pendingRecordOf,
   recordOf,
   subjectOf,
   type McpInstallOptions,
@@ -118,6 +120,7 @@ function configFor(
   name: string,
   previous: McpRecord | undefined,
   options: McpInstallOptions,
+  initial?: Passports,
 ): { selected: McpTarget; current: unknown } {
   const selected =
     previous !== undefined && options.client === undefined && options.config === undefined
@@ -131,8 +134,15 @@ function configFor(
   const current = currentEntry(config, name);
   if (previous !== undefined && !jsonEqual(current, previous.written) && options.force !== true)
     throw new Error('the client config entry changed outside Stroq; use remove --force first');
-  if (previous === undefined && Object.hasOwn(serversOf(config), name))
-    throw new Error('the client config already has a server by this name; refusing to replace it');
+  if (previous === undefined && Object.hasOwn(serversOf(config), name)) {
+    const isPending = initial !== undefined && pendingRecordOf(initial, name) !== undefined;
+    const isOrphan = isWrappedEntry(current);
+    if (!((isPending || isOrphan) && options.force === true)) {
+      throw new Error(
+        'the client config already has a server by this name; refusing to replace it',
+      );
+    }
+  }
   return { selected, current };
 }
 
@@ -153,9 +163,10 @@ export async function prepareMcp(
   const { previous, history, oldTree } = await installedUnder(name, source, initial, options);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
   const passEnv = passEnvOf(options, previous);
-  const { selected, current } = configFor(name, previous, options);
+  const { selected, current } = configFor(name, previous, options, initial);
   const digest = made.passport.artifact.digest;
-  const original = previous === undefined ? null : previous.original;
+  const pending = pendingRecordOf(initial, name);
+  const original = previous === undefined ? (pending?.original ?? null) : previous.original;
   const cwd = resolve(
     options.cwd ?? (previous === undefined ? options.project : recordedCwd(previous)),
   );

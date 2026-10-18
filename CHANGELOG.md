@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recover from an interrupted MCP installation and clean up orphan wrappers.** When `stroq add --kind mcp` is interrupted between writing the client configuration and updating the confirmation lock, a pending lock record preserves the replaced configuration entry so `stroq remove <name> --kind mcp --force` safely removes the unconfirmed wrapper, restores the replaced configuration entry, and frees stored server files. Unconfirmed wrappers can also be re-installed using `stroq add <name> --kind mcp --force`. Thanks @kok-o (#247).
+
 ## [0.26.0] - 2026-10-18
 
 ### Added

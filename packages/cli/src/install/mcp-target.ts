@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, posix, resolve } from 'node:path';
 import { isMcpClient, mcpConfigPath, wrapperIndex } from '../commands/mcp-config.js';
 import type { McpClient } from '../commands/mcp-config.js';
-import type { McpInstallOptions, McpRecord } from './mcp-record.js';
+import type { McpInstallOptions, McpPendingRecord, McpRecord } from './mcp-record.js';
 
 export interface McpTarget {
   readonly file: string;
@@ -42,7 +42,7 @@ export function target(options: McpInstallOptions): McpTarget {
   };
 }
 
-export function recordedTarget(record: McpRecord): McpTarget {
+export function recordedTarget(record: McpRecord | McpPendingRecord): McpTarget {
   const file = resolve(record.config);
   let root = record.configRoot;
   // Older records have only the selected client and its conventional config path.
