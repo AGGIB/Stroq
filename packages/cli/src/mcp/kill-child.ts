@@ -61,9 +61,9 @@ export function killChildTree(
   spawnFn: KillSpawn = spawn as unknown as KillSpawn,
   killGroupFn: KillSignal = (pid, sig) => process.kill(pid, sig),
 ): void {
-  // A child that has already exited has nothing left to stop, and on Windows its pid may belong to
-  // another process by now: `taskkill /pid` would end that one. (`close` can lag `exit` when a
-  // grandchild holds the pipes, so the caller's own flag is not enough.)
+  // On Windows an exited child's pid may belong to another process by now: taskkill
+  // must not reach that one. On POSIX its detached group may still contain live
+  // descendants, even after the leader exited or closed its pipes.
   const exited = child.exitCode != null || child.signalCode != null;
   if (plat === 'win32' && exited) return;
   const pid = child.pid;

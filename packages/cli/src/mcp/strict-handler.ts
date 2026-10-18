@@ -80,7 +80,7 @@ export interface StrictHandlerDeps {
 
 export interface StrictServerHandler {
   readonly onServerLine: (line: SplitLine) => Promise<void>;
-  /** True once the server was ended for exceeding a withheld-message cap. */
+  /** True once the server was ended for exceeding a strict message cap. */
   readonly wasTerminated: () => boolean;
   /** The cap that ended it (0 until it is ended), for what is said to the client afterwards. */
   readonly terminatedLimit: () => number;
@@ -539,7 +539,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
           {
             reason: 'unsolicited',
             toolName,
-            summary: `ended after more than ${limit} server-initiated messages`,
+            summary: 'withheld a server-initiated message because the benign-kind cap was exceeded',
           },
           'benign',
         );

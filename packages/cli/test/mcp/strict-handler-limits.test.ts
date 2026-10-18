@@ -166,10 +166,17 @@ describe('the cap for the kinds a benign server also produces', () => {
 
 describe('ending a server', () => {
   it('reports forwarded and mixed benign traffic without claiming it was all withheld', async () => {
-    const rig = handlerRig({ maxBenign: 2 });
+    const rig = handlerRig({ maxBenign: 2, scan: () => 'timeout' });
     track(rig, 3);
     await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'ping', id: 'server-ping' }));
-    await rig.feed(logLine(1));
+    track(rig, 4);
+    await rig.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        result: { content: [{ type: 'text', text: 'ok' }] },
+      }),
+    );
     await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
     expect(rig.terminated()).toBe(1);
     const response = rig.sent.find((value) => (value as { id?: unknown }).id === 3);
@@ -182,6 +189,7 @@ describe('ending a server', () => {
         (entry) => (entry['decision'] as { ruleId?: string })?.ruleId === 'mcp-strict-terminated',
       );
     expect(JSON.stringify(ended)).toContain('benign');
+    expect(JSON.stringify(rig.audit())).toContain('benign-kind cap');
   });
 
   it('asks for the process to be stopped before it writes anything to the client', async () => {
