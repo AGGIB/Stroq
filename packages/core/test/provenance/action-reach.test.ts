@@ -100,8 +100,9 @@ describe('readActionAtoms', () => {
     expect(
       readActionAtoms('Bash', { command: `npx ${'-y '.repeat(1200)}${NAME}` }, cwd).unread,
     ).toBe(true);
-    expect(readActionAtoms('Read', { file_path: 'x' }, cwd)).toEqual({ atoms: [], unread: false });
-    expect(readActionAtoms('Bash', { command: '' }, cwd)).toEqual({ atoms: [], unread: false });
+    const nothing = { atoms: [], unread: false, unreadCause: null };
+    expect(readActionAtoms('Read', { file_path: 'x' }, cwd)).toEqual(nothing);
+    expect(readActionAtoms('Bash', { command: '' }, cwd)).toEqual(nothing);
   });
 });
 
@@ -241,8 +242,8 @@ describe('extractActionAtoms and a name that is built by the shell', () => {
   // A sentence that quotes a command in backticks is not let through, and nor is a word that goes
   // on past the brackets of what could be extras: the shell would expand them.
   it.each([
-    'git commit -m "Run `npx prettier` to format."',
-    'echo `npx prettier`',
+    'git commit -m "Run `npx $TOOL` to format."',
+    'echo `npx $TOOL`',
     'npm install foo?',
     'npm install foo?bar',
     'pip install requests[socks]x',
@@ -251,6 +252,16 @@ describe('extractActionAtoms and a name that is built by the shell', () => {
   ])('is in doubt about %s, wherever the expansion stands in the word', (command) => {
     expect(extractActionAtoms(command).unread).toBe(true);
   });
+
+  // A backtick pair is a command that runs, in a string as anywhere: it is read as its own command.
+  it.each(['git commit -m "Run `npx prettier` to format."', 'echo `npx prettier`'])(
+    'is not in doubt about %s, since the command in the backticks is read as a command',
+    (command) => {
+      const read = extractActionAtoms(command);
+      expect(read.unread).toBe(false);
+      expect(read.atoms).toContainEqual({ kind: 'pkg', value: 'prettier' });
+    },
+  );
 
   // What stands after the name says nothing about which package it is: a version, extras, a bound
   // or a fragment, and what the shell takes for the end of the word, never make a command unread.

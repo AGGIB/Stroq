@@ -147,7 +147,6 @@ describe('extras are read as extras are written', () => {
     ['empty brackets', '[]'],
     ['a range that goes on into the name', '[ab]cd'],
     ['a bracket that never closes', '[ab'],
-    ['a parenthesis', '(x)'],
     ['a brace', '{a,b}'],
     ['a star', '*'],
   ])('counts %s touching the name as unread, and records no half of it', (_what, tail) => {

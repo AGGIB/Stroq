@@ -488,7 +488,9 @@ export class StroqEngine {
             ? 'lost-records'
             : unscanned
               ? 'unscanned-result'
-              : 'unread-command',
+              : lookup.unreadCause === 'name'
+                ? 'doubtful-name'
+                : 'unread-command',
         )
       : evaluated;
     const gated = await evaluateScope(this.opts.scope, {

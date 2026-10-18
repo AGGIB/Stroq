@@ -5,7 +5,8 @@ import type { Atom } from '../types.js';
 import type { Positioned } from './atom-kinds.js';
 import { createAtomSet } from './atom-set.js';
 import { normalizePackageName, trimEndOf } from './package-name.js';
-import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
+import { MAX_LINE_SCAN, packageAtoms } from './package-lines.js';
+import { INSTALLER, RUNNER, mentionsLauncher } from './tool-phrases.js';
 import { encodedAtoms } from './encoded-atoms.js';
 export { normalizePackageName };
 
@@ -28,20 +29,8 @@ export const MAX_NETWORK_ATOMS = 200;
  */
 export const MAX_DIGEST_ATOMS = 128;
 const MAX_VALUE_CHARS = 512;
-// `restOfLine` scans at most this many characters past a runner/installer match.
-// A command line longer than this is truncated (trailing packages are missed), which
-// bounds the per-match scan cost and keeps package extraction linear instead of
-// quadratic on adversarial input that never hits a LINE_END character. A wrapped list of sixty
-// packages is about 1,300 characters once its lines are joined, so the window holds that; it is
-// the smallest power of two that does, because every doubling is another stretch of an indented
-// block that an installer's line runs through (see `wrappedCommandCut`).
-const MAX_LINE_SCAN = 2048;
-// The most characters read after runners and installers in one pass over a text, all matches
-// together. Each match reads its own line, and the lines of matches that sit on one long line
-// overlap, so `npm i a npm i a …` over 200,000 characters would read the window 25,000 times: four
-// seconds, inside a hook with nine. An honest text spends at most its own length (a line is read
-// once); past this, the matches that are left are not read and count as a line that was cut.
-const MAX_LINE_WORK = 262_144;
+/** How far before the cut a text is looked at for a runner or installer, since a word may straddle it. */
+const CUT_OVERLAP = 64;
 
 // `|` ends a URL too: in `curl https://x.example/i.sh|sh` the pipe is shell syntax,
 // not part of the URL the command fetches.
@@ -54,18 +43,6 @@ const TRAILING_PUNCT = '.,;:!?\'"';
 const URL_HOST = /^https?:\/\/(?:[^@/\s]+@)?([^/:?#\s]+)/;
 // `user@host.tld` — ssh/scp targets and git ssh remotes.
 const SSH_TARGET = /(?<![\w.-])[\w.-]+@((?:[\w-]+\.)+[a-z]{2,})(?![\w.-])/gi;
-// Package runners: the first positional token after them is the package.
-const RUNNER =
-  /(?<![\w./-])(?:npx|bunx|uvx|pnpm\s+dlx|yarn\s+dlx|pipx\s+run|npm\s+exec|uv\s+tool\s+run)(?=\s)/gi;
-// Package installers: every positional token after them is a package.
-const INSTALLER =
-  /(?<![\w./-])(?:npm\s+(?:i|install|add)|pnpm\s+(?:add|install)|yarn\s+add|pip3?\s+install|uv\s+add|uv\s+pip\s+install|pipx\s+install|cargo\s+install|gem\s+install|go\s+install|brew\s+install)(?=\s)/gi;
-const LINE_END = /[\n|;`]|&&|\|\|/;
-// Where a command ends, as a shell reads it: a backtick does not end it, it opens a substitution
-// in the middle of a word, and what a command says about its own backticks is not to be trusted to
-// say where it ends. A page is not a command, and there a backtick closes the code span that a
-// package is named in (`npx foo`), so `LINE_END` stays for the text of a result.
-const COMMAND_END = /[\n|;]|&&|\|\|/;
 // A newline immediately followed by indentation (a space or tab) is a wrapped
 // continuation of the same command, not a new one — the `split-across-lines`
 // mutation (and ordinary word-wrapping) produces exactly this shape by turning
@@ -84,29 +61,6 @@ const SHELL_BREAK = /\\\r?\n/g;
 const PIPE_SHELL =
   /\b(?:curl|wget)\b[^\n|;&`]{0,400}\|\s*(?:sudo\s+(?:-E\s+)?)?(?:ba|z|da|k)?sh\b(?:\s+-[a-z]+)?/gi;
 const PROC_SUB_SHELL = /\b(?:ba|z|da|k)?sh\s+<\(\s*(?:curl|wget)\b[^)\n]{0,400}\)/gi;
-
-/** The part of a line an extractor read, and whether the line went on past what it read. */
-interface LineScan {
-  readonly line: string;
-  readonly cut: boolean;
-  /** How many characters of the text were looked at to find it. */
-  readonly read: number;
-}
-
-/**
- * The rest of the line after `from`. For a command a backtick is part of a word (`ev`x`il`) and
- * the word is a doubt (see `shell-words.ts`); for a page it ends the line.
- */
-function restOfLine(text: string, from: number, command: boolean): LineScan {
-  const rest = text.slice(from, from + MAX_LINE_SCAN);
-  const end = command ? COMMAND_END : LINE_END;
-  const stop = rest.search(end);
-  return {
-    line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),
-    cut: stop === -1 && text.length > from + MAX_LINE_SCAN,
-    read: stop === -1 ? rest.length : stop,
-  };
-}
 
 /**
  * Collapses wrapped line continuations to a single space so `restOfLine` can
@@ -128,103 +82,6 @@ function collapseContinuations(text: string): string {
  */
 function shellJoin(text: string): string {
   return text.replace(SHELL_BREAK, '');
-}
-
-/** Atoms one extractor found, and whether it stopped reading a line before the line ended. */
-interface Found {
-  readonly positioned: Positioned[];
-  /** A line went on past the window, with no package found before it ended. */
-  readonly cut: boolean;
-  /** The pass spent its reading budget, so some matches were not read at all. */
-  readonly budgetSpent: boolean;
-  /** A word that should have named a package is a variable or a command (see `shell-words.ts`). */
-  readonly doubt: boolean;
-}
-
-/** A runner or installer match with the rest of its line, positioned at the match's start. */
-type LineAfter = (m: RegExpMatchArray) => { index: number; scan: LineScan };
-
-/** Reads the line after each match, and says whether the budget ran out so some were skipped. */
-interface LineReader {
-  readonly after: LineAfter;
-  readonly skipped: () => boolean;
-}
-
-/**
- * Reads the line after each match in turn, out of one budget for the pass (`MAX_LINE_WORK`). A
- * match that finds the budget spent is given an empty line that was cut: it was not read, and the
- * reader says so through `skipped`, apart from a line that is merely longer than the window. Every
- * pass over a text (the text as written, a decoded variant, the text with its continuation lines
- * joined) makes its own reader and so has its own budget, and the caller counts a spent budget as
- * a loss in every one of them: the joined pass is the one that reads a block of indented lines as
- * a single long line, which is where the budget goes first.
- */
-function lineReader(text: string, command: boolean): LineReader {
-  let budget = MAX_LINE_WORK;
-  let skipped = false;
-  return {
-    after: (m) => {
-      const index = m.index ?? 0;
-      if (budget <= 0) {
-        skipped = true;
-        return { index, scan: { line: '', cut: true, read: 0 } };
-      }
-      const scan = restOfLine(text, index + m[0].length, command);
-      budget -= scan.read + 1;
-      return { index, scan };
-    },
-    skipped: () => skipped,
-  };
-}
-
-/**
- * The words of the line that was read, without the last one when the line went on past the
- * window: that one may have been cut in the middle, and a name that is half of one is not a name.
- */
-function readTokens(scan: LineScan): string[] {
-  const tokens = scan.line === '' ? [] : scan.line.split(/\s+/);
-  return scan.cut ? tokens.slice(0, -1) : tokens;
-}
-
-/**
- * Every package named after a runner match, positioned at that match's start index. A runner's
- * packages are the values of every `-p`, or else the first word that is not a flag, so a line that
- * goes on past the window after that word was reached has lost nothing. A line cut before it is
- * cut.
- */
-function runnerPackages(text: string, reader: LineReader, command: boolean): Found {
-  const lines = [...text.matchAll(RUNNER)]
-    .map((m) => ({ ...reader.after(m), family: runnerFamily(m[0]) }))
-    .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan), line.family, command) }));
-  return {
-    positioned: lines.flatMap(({ index, reading }): Positioned[] =>
-      reading.packages.flatMap((pkg): Positioned[] => {
-        const value = normalizePackageName(pkg);
-        return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
-      }),
-    ),
-    cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
-    budgetSpent: reader.skipped(),
-    doubt: lines.some(({ reading }) => reading.doubt),
-  };
-}
-
-/** Every package named after an installer match, positioned at that match's start index. */
-function installedPackages(text: string, reader: LineReader, command: boolean): Found {
-  const lines = [...text.matchAll(INSTALLER)]
-    .map(reader.after)
-    .map((line) => ({ ...line, reading: readInstaller(readTokens(line.scan), command) }));
-  return {
-    positioned: lines.flatMap(({ index, reading }): Positioned[] =>
-      reading.packages.flatMap((pkg): Positioned[] => {
-        const value = normalizePackageName(pkg);
-        return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
-      }),
-    ),
-    cut: lines.some(({ scan }) => scan.cut),
-    budgetSpent: reader.skipped(),
-    doubt: lines.some(({ reading }) => reading.doubt),
-  };
 }
 
 function urlAtoms(text: string): Positioned[] {
@@ -338,18 +195,6 @@ function wrappedCommandCut(text: string): boolean {
   return false;
 }
 
-function packageAtoms(text: string, command: boolean): Found {
-  const reader = lineReader(text, command);
-  const runners = runnerPackages(text, reader, command);
-  const installers = installedPackages(text, reader, command);
-  return {
-    positioned: [...runners.positioned, ...installers.positioned],
-    cut: runners.cut || installers.cut,
-    budgetSpent: reader.skipped(),
-    doubt: runners.doubt || installers.doubt,
-  };
-}
-
 const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
 function pipeShellAtoms(text: string): Positioned[] {
@@ -428,6 +273,13 @@ export function extractAtoms(text: string): Atom[] {
   return extractBounded(text).atoms;
 }
 
+/** Why a part of an action could not be read. */
+export type UnreadCause =
+  /** A line, a command or the text itself is longer than what is read, with a runner or installer past it. */
+  | 'length'
+  /** A word that should name a package is made of an expansion, a glob or a quote, so it cannot be told. */
+  | 'name';
+
 /** The atoms of a proposed action, and whether some part of it could not be read. */
 export interface ActionExtraction {
   readonly atoms: Atom[];
@@ -435,10 +287,13 @@ export interface ActionExtraction {
    * True when a runner or installer line, or what it names, went on past what could be read: a
    * line longer than the window with no package found before the end of what was read, a wrapped
    * command that outgrows it, more packages than are kept, a pass that spent its budget for reading
-   * lines, or text past the characters read. Whatever is in the part that was not read cannot be
-   * matched against what the session recorded.
+   * lines, or text past the characters read that holds a runner or installer. Whatever is in the
+   * part that was not read cannot be matched against what the session recorded. Also true when the
+   * name of a package in a command that will run cannot be told.
    */
   readonly unread: boolean;
+  /** Why, when it is: a loss of length is named before a name nobody can tell. */
+  readonly unreadCause: UnreadCause | null;
 }
 
 /**
@@ -447,29 +302,40 @@ export interface ActionExtraction {
  * spelled across lines names the same package as the plain one. It is not decoded: an action is
  * what is about to run, not content to decode. The two passes share the budgets of a result's, and
  * an indented block read as one long line is not a command that was cut (see `wrappedCommandCut`).
+ *
+ * `shell` is whether the text is a command line. Anything else (the arguments of an MCP call) is
+ * text, in which a runner is a mention and no word is a doubt.
  */
-export function extractActionAtoms(text: string): ActionExtraction {
+export function extractActionAtoms(text: string, shell = true): ActionExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
   // An action keeps a labelled hash as a blob: it is a copy of something, and where the page that
   // it came from was flagged the page has it as a blob too.
-  const plain = extractBounded(bounded, true, false);
+  const plain = extractBounded(bounded, shell, false);
   for (const atom of plain.atoms) set.add(atom);
-  let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent || plain.doubt;
+  // Text past the cut is only a loss where something could be in it that a lookup would be about:
+  // a runner or installer. A long command that has none is not trouble. A word may straddle the cut.
+  let lost =
+    (cutText && mentionsLauncher(text.slice(DEFAULT_MAX_CHARS - CUT_OVERLAP))) ||
+    plain.capped ||
+    plain.lineCut ||
+    plain.budgetSpent;
+  let doubtful = plain.doubt;
   for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;
-    const extraction = extractBounded(reading.text, true, false);
+    const extraction = extractBounded(reading.text, shell, false);
     for (const atom of extraction.atoms) set.add(atom);
-    unread =
-      unread ||
-      extraction.capped ||
-      extraction.budgetSpent ||
-      extraction.doubt ||
-      (reading.byLine && extraction.lineCut);
+    lost =
+      lost || extraction.capped || extraction.budgetSpent || (reading.byLine && extraction.lineCut);
+    doubtful = doubtful || extraction.doubt;
   }
-  unread = unread || wrappedCommandCut(bounded);
-  return { atoms: set.atoms, unread: unread || set.floorFull || set.floorLeftOut };
+  lost = lost || wrappedCommandCut(bounded) || set.floorFull || set.floorLeftOut;
+  return {
+    atoms: set.atoms,
+    unread: lost || doubtful,
+    unreadCause: lost ? 'length' : doubtful ? 'name' : null,
+  };
 }
 
 /** The text with its continuation lines joined one way, and whether a line cut in it is a loss (see `joinedReadings`). */

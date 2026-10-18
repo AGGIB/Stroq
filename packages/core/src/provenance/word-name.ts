@@ -18,9 +18,9 @@ import type { ShellWord } from './shell-word.js';
 /** The characters of a package's name. A leading `@` is a scope; one after the name starts a version. */
 const NAME_CHAR = /[\w./+:@-]/;
 /** The first character of a suffix, where it stands right after a name (`[` is read apart). */
-const SUFFIX_START = '<>=!,#~)&|;';
+const SUFFIX_START = '<>=!,#~)&|; \t';
 /** What may follow the brackets of extras and still leave them extras. */
-const AFTER_EXTRAS = '<>=!,#~)&|;@';
+const AFTER_EXTRAS = '<>=!,#~)&|;@ \t';
 /** Extras as they are written: the brackets with names between them, right after the package. */
 const EXTRAS = /\[[\w.,-]+\]/y;
 /** Characters that close the command the word was read in, where they follow the name. */
@@ -43,9 +43,21 @@ export interface PackageWord {
   readonly ends: boolean;
   /** The word ends in a redirection operator whose target is the next word, which is not a package. */
   readonly skipsNext: boolean;
+  /**
+   * A quote in the word was never closed inside it, and is not the one that closes the string a
+   * command is written in. Where the quote closes is unknown, so nothing after it in the line is
+   * known to be shell syntax. It is a doubt.
+   */
+  readonly opensQuote: boolean;
 }
 
-const NONE: PackageWord = { name: undefined, doubt: false, ends: false, skipsNext: false };
+const NONE: PackageWord = {
+  name: undefined,
+  doubt: false,
+  ends: false,
+  skipsNext: false,
+  opensQuote: false,
+};
 
 /** Where the name stops: at the first character a name is not made of, or at the `@` of a version. */
 function nameEnd(word: string): number {
@@ -104,10 +116,12 @@ export function readPackageWord(read: ShellWord): PackageWord {
   const end = nameEnd(word);
   const readable = standsAlone(word, end);
   const name = readable ? normalizePackageName(word.slice(0, end)) : '';
+  const opensQuote = read.open && (lead > 0 || /["']/.test(word));
   return {
     name: name === '' ? undefined : name,
-    doubt: lead > 0 || !readable || trailer.includes('?') || (name === '' && end > 0),
+    doubt: opensQuote || !readable || trailer.includes('?') || (name === '' && end > 0),
     ends: (isCloser(word, end) && plain(end)) || closesAfterWord,
     skipsNext: BARE_OPERATOR.test(word.slice(end)) && plain(end),
+    opensQuote,
   };
 }

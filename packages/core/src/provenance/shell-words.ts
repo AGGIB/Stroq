@@ -1,5 +1,5 @@
 import { shellWord, type ShellWord } from './shell-word.js';
-import { readPackageWord } from './word-name.js';
+import { readPackageWord, type PackageWord } from './word-name.js';
 
 /**
  * Reading the words after a runner or an installer as the shell reads them, under one rule. A word
@@ -22,6 +22,14 @@ const FLAGS_WITH_VALUE = new Set([
   '--target',
   '--registry',
   '--prefix',
+  // `cargo install`: where from, and what to build.
+  '--path',
+  '--root',
+  '--git',
+  '--branch',
+  '--rev',
+  '--bin',
+  '--features',
 ]);
 
 /** The flags that name a package, by the kind of runner. A flag may carry its value as `--flag=value`. */
@@ -104,11 +112,39 @@ export interface RunnerReading {
   readonly doubt: boolean;
 }
 
-/** Whether the word is the end of the command (`&`) or a redirection to step over, and how many words it takes. */
-function stepOver(token: string): number {
-  if (token === '&') return -1;
-  if (!REDIRECTION.test(token)) return 0;
-  return ONLY_AN_OPERATOR.test(token) ? 2 : 1;
+/**
+ * What is known about the line the words of a command were taken from. A command read by its
+ * words (`lexed`) has had its quotes, separators and redirections taken out already. A line that
+ * was only split at blanks has not, and once a word in it opens a quote that never closes in that
+ * word, the quote state of every word after it is unknown: a closer or a redirection in a later word
+ * ends and skips nothing, and the words are read on as one quoted run would be.
+ */
+class LineState {
+  quoteOpen = false;
+
+  constructor(private readonly lexed: boolean) {}
+
+  /** Whether the closers and redirections of the words can be taken for what they look like. */
+  get syntaxIsKnown(): boolean {
+    return !this.lexed && !this.quoteOpen;
+  }
+
+  /** Whether the word is the end of the command (`&`) or a redirection to step over, and how many words it takes. */
+  stepOver(token: string): number {
+    if (this.lexed) return 0;
+    if (token.startsWith('#') && !this.quoteOpen) return -1;
+    if (!this.syntaxIsKnown) return 0;
+    if (token === '&') return -1;
+    if (!REDIRECTION.test(token)) return 0;
+    return ONLY_AN_OPERATOR.test(token) ? 2 : 1;
+  }
+
+  /** Takes in what a package word showed about the line, and says whether it ended the command. */
+  after(word: PackageWord): boolean {
+    const ended = word.ends && this.syntaxIsKnown;
+    if (word.opensQuote) this.quoteOpen = true;
+    return ended;
+  }
 }
 
 /**
@@ -120,14 +156,16 @@ function stepOver(token: string): number {
 export function readRunner(
   tokens: readonly string[],
   family: RunnerFamily,
-  command: boolean,
+  doubts: boolean,
+  lexed = false,
 ): RunnerReading {
   const fromFlags: string[] = [];
   const packageFlags = PACKAGE_FLAGS[family];
+  const line = new LineState(lexed);
   let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
-    const step = stepOver(token);
+    const step = line.stepOver(token);
     if (step === -1) break;
     if (step > 0) {
       i += step - 1;
@@ -137,7 +175,7 @@ export function readRunner(
     if (isContinuationMark(read.word)) continue;
     const flag = packageFlagValue(read.word, tokens[i + 1], packageFlags);
     if (flag !== null) {
-      const value = flagPackages(shellWord(flag.raw ?? ''), command);
+      const value = flagPackages(shellWord(flag.raw ?? ''), doubts);
       fromFlags.push(...value.packages);
       doubt = doubt || (flag.raw !== undefined && value.doubt);
       if (flag.skip) i += 1;
@@ -154,14 +192,14 @@ export function readRunner(
       // A short flag with a value stuck to it that is not one of the runner's own names a value
       // nobody has read (a Python runner's `-p3.12` is its interpreter).
       const isInterpreter = family === 'python' && read.word.startsWith('-p');
-      doubt = doubt || (command && SHORT_FLAG_WITH_VALUE.test(read.word) && !isInterpreter);
+      doubt = doubt || (doubts && SHORT_FLAG_WITH_VALUE.test(read.word) && !isInterpreter);
       continue;
     }
     const word = readPackageWord(read);
     return {
       packages: word.name === undefined ? fromFlags : [...fromFlags, word.name],
       sure: true,
-      doubt: doubt || (command && word.doubt),
+      doubt: doubt || (doubts && word.doubt),
     };
   }
   return { packages: fromFlags, sure: false, doubt };
@@ -170,13 +208,15 @@ export function readRunner(
 /** Every package an installer's words name, and whether a word that should have named one is a doubt. */
 export function readInstaller(
   tokens: readonly string[],
-  command: boolean,
+  doubts: boolean,
+  lexed = false,
 ): { packages: string[]; doubt: boolean } {
   const packages: string[] = [];
+  const line = new LineState(lexed);
   let doubt = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
-    const step = stepOver(token);
+    const step = line.stepOver(token);
     if (step === -1) break;
     if (step > 0) {
       i += step - 1;
@@ -190,9 +230,9 @@ export function readInstaller(
     }
     const word = readPackageWord(read);
     if (word.name !== undefined) packages.push(word.name);
-    doubt = doubt || (command && word.doubt);
-    if (word.ends) break;
-    if (word.skipsNext) i += 1;
+    doubt = doubt || (doubts && word.doubt);
+    if (line.after(word)) break;
+    if (word.skipsNext && line.syntaxIsKnown) i += 1;
   }
   return { packages, doubt };
 }

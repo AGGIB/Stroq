@@ -180,7 +180,11 @@ describe('after a page that was flagged and named a package, as the shell builds
     await f.post(PAGE);
     const r = await f.pre(command);
     expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
-    expect(r.decision.reason).toMatch(/longer than .*reads/i);
+    // The reason is about the name, not the length, and the way out is approving this call.
+    expect(r.decision.reason).toMatch(/cannot tell which package it is/i);
+    expect(r.decision.reason).not.toMatch(/longer than/i);
+    expect(r.decision.reason).not.toContain('untaint');
+    expect(r.decision.reason).toMatch(/approve/i);
   });
 
   it.each(DOUBTS)('leaves %s alone in a session that has read nothing', async (_name, command) => {

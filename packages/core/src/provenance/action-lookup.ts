@@ -1,6 +1,6 @@
 import type { Atom, PreToolEvent, ProvenanceHit, ProvenanceRecord } from '../types.js';
 import { readActionAtoms } from './action-atoms.js';
-import { atomHash } from './atoms.js';
+import { atomHash, type UnreadCause } from './atoms.js';
 import type { ProvenanceStore } from './store.js';
 
 /** What the provenance store knew about the atoms of one proposed action. */
@@ -15,9 +15,16 @@ export interface ProvenanceLookup {
    * checked against and which an ordinary long command must not trouble.
    */
   readonly unread: boolean;
+  /** Why it could not be read, when `unread`: the length of the command, or a name nobody can tell. */
+  readonly unreadCause: UnreadCause | null;
 }
 
-export const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [], unread: false };
+export const NO_LOOKUP: ProvenanceLookup = {
+  hits: [],
+  unrecorded: [],
+  unread: false,
+  unreadCause: null,
+};
 
 /**
  * One hit per distinct atom of the action. The most recent record of an atom is its hit, unless
@@ -66,7 +73,11 @@ export async function findActionProvenance(
   tainted: boolean,
 ): Promise<ProvenanceLookup> {
   if (!store) return NO_LOOKUP;
-  const { atoms, unread } = readActionAtoms(event.toolName, event.toolInput, event.cwd);
+  const { atoms, unread, unreadCause } = readActionAtoms(
+    event.toolName,
+    event.toolInput,
+    event.cwd,
+  );
   if (atoms.length === 0 && !unread) return NO_LOOKUP;
   const byHash = new Map(
     atoms.flatMap((atom) => hashesOf(atom).map((hash) => [hash, atom] as const)),
@@ -79,5 +90,5 @@ export async function findActionProvenance(
   const unrecorded = incomplete ? atoms.filter((atom) => !seen.has(atomKey(atom))) : [];
   const unreadCounts =
     unread && (tainted || incomplete || (await store.hasEvidence(event.sessionId)));
-  return { hits, unrecorded, unread: unreadCounts };
+  return { hits, unrecorded, unread: unreadCounts, unreadCause: unreadCounts ? unreadCause : null };
 }

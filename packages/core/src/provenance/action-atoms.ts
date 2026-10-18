@@ -7,7 +7,7 @@ import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
 import { collectStringsDeep } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { FLOOR_KINDS } from './atom-kinds.js';
-import { extractActionAtoms, normalizePackageName } from './atoms.js';
+import { extractActionAtoms, normalizePackageName, type UnreadCause } from './atoms.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
 // into curl/ssh/git push (or a pipe-to-shell) is evidence; a URL copied into
@@ -155,9 +155,10 @@ function textOfInput(toolInput: Readonly<Record<string, unknown>>): string {
 export interface ReadAction {
   readonly atoms: Atom[];
   readonly unread: boolean;
+  readonly unreadCause: UnreadCause | null;
 }
 
-const NOTHING_READ: ReadAction = { atoms: [], unread: false };
+const NOTHING_READ: ReadAction = { atoms: [], unread: false, unreadCause: null };
 
 /**
  * Atoms of a proposed action that could have been copied from earlier tool output, and whether
@@ -178,10 +179,12 @@ export function readActionAtoms(
     return {
       atoms: read.atoms.filter((atom) => atom.kind !== 'pkg' || !known.has(atom.value)),
       unread: read.unread,
+      unreadCause: read.unreadCause,
     };
   }
+  // The arguments of an MCP call are text, not a command line: a runner in them is a mention.
   if (toolName.startsWith('mcp__'))
-    return extractActionAtoms(normalizeText(textOfInput(toolInput)));
+    return extractActionAtoms(normalizeText(textOfInput(toolInput)), false);
   return NOTHING_READ;
 }
 

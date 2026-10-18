@@ -97,6 +97,35 @@ describe('a quoted closer does not hide a package a flagged page named', () => {
   });
 });
 
+describe('a quote that never closes does not hide a package a flagged page named', () => {
+  it.each([
+    [`npm install 'a ${NAME}`, 'deny'],
+    [`npm install "a) ${NAME}`, 'deny'],
+    [`npm install "a & ${NAME}`, 'deny'],
+    [`npx "a ; ${NAME}`, 'ask'],
+  ])('in %s the call is %s', async (command, effect) => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(command)).decision.effect).toBe(effect);
+  });
+
+  it.each([`npm install 'a b' ${NAME}`, `npm install "a b" ${NAME}`, `npm install 'a)' ${NAME}`])(
+    'is denied once the quote is closed: %s',
+    async (command) => {
+      const f = fixture();
+      await f.post(PAGE);
+      expect((await f.pre(command)).decision.effect).toBe('deny');
+    },
+  );
+
+  it('still ends the command at a closer that follows a closed quote', async () => {
+    const f = fixture();
+    await f.post(PAGE);
+    const r = await f.pre(`npm install 'a b'; echo ${NAME}`);
+    expect(r.decision.effect).not.toBe('deny');
+  });
+});
+
 describe('a package nobody flagged', () => {
   it('is not denied for what stands around it', async () => {
     const f = fixture();
