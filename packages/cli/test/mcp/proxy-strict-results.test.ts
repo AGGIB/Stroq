@@ -98,9 +98,10 @@ describe('a response nobody asked for', () => {
     await rig.finish();
   });
 
-  it('is withheld and counted under --strict, while the real answer is delivered', async () => {
+  it('is withheld and counted under --strict, failing the pending request with a fixed error', async () => {
     const { rig, answer } = await strictRun('unknownid');
-    expect(JSON.stringify(answer)).toContain('"ok"');
+    expect(JSON.stringify(answer)).toContain('(unknown-id)');
+    expect(JSON.stringify(answer)).not.toContain('"ok"');
     expect(rig.messages().some((m) => m['id'] === 987654)).toBe(false);
     expect(rig.ruleIds()).toContain('mcp-strict-unknown-id');
     expect(JSON.stringify(rig.audit())).not.toContain('987654');

@@ -29,6 +29,8 @@ import {
   refusedServerRequest,
   terminatedDecision,
   terminatedResponse,
+  terminationCount,
+  type TerminationKind,
   withheldDecision,
   withheldResponse,
   type WithholdReason,
@@ -82,6 +84,7 @@ export interface StrictServerHandler {
   readonly wasTerminated: () => boolean;
   /** The cap that ended it (0 until it is ended), for what is said to the client afterwards. */
   readonly terminatedLimit: () => number;
+  readonly terminationKind: () => TerminationKind;
 }
 
 /** What an id looks like in an audit line without saying it: a server chose it. */
@@ -100,6 +103,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   const { ctx, ledger, cloak, maxWithheld } = deps;
   const maxBenign = deps.maxBenign ?? STRICT_MAX_BENIGN_WITHHELD;
   let endedAtLimit = 0;
+  let endedBy: TerminationKind = 'withheld';
   let hostileCount = 0;
   let benignCount = 0;
   let terminated = false;
@@ -158,6 +162,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       readonly toolName: string;
       readonly summary: string;
     },
+    kind: TerminationKind = 'withheld',
   ): Promise<void> {
     // The flag and the ledger are changed in ONE synchronous step, before the first await.
     // The pump records a request and writes it to the server in one step too, after testing
@@ -166,6 +171,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     // not tracked, not written. Nothing can fall between the two.
     terminated = true;
     endedAtLimit = limit;
+    endedBy = kind;
     const alsoList = also === null ? [] : Array.isArray(also) ? also : [also];
     const waiting = [...alsoList, ...ledger.drain()];
     deps.terminate();
@@ -178,17 +184,17 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
           toolInput: {},
           cwd: ctx.cwd,
         },
-        terminatedDecision(limit),
-        `mcp strict: the server had more than ${limit} messages withheld and was ended`,
+        terminatedDecision(limit, kind),
+        `mcp strict: the server produced ${terminationCount(limit, kind)} and was ended`,
         () => ({ stdout: '', exitCode: 0 }),
       );
     } catch (err) {
       logError('mcp strict audit', err);
     }
     deps.note(
-      `stroq mcp: strict mode ended the server "${ctx.server}": more than ${limit} of its messages were withheld (see stroq log)\n`,
+      `stroq mcp: strict mode ended the server "${ctx.server}": ${terminationCount(limit, kind)} (see stroq log)\n`,
     );
-    for (const request of waiting) await deps.toClient(terminatedResponse(request.id, limit));
+    for (const request of waiting) await deps.toClient(terminatedResponse(request.id, limit, kind));
   }
 
   /**
@@ -202,9 +208,9 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   ): Promise<void> => {
     if (request === null) return Promise.resolve();
     const list = Array.isArray(request) ? request : [request];
-    return Promise.all(list.map((r) => deps.toClient(terminatedResponse(r.id, endedAtLimit)))).then(
-      () => {},
-    );
+    return Promise.all(
+      list.map((r) => deps.toClient(terminatedResponse(r.id, endedAtLimit, endedBy))),
+    ).then(() => {});
   };
 
   /**
@@ -231,11 +237,16 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     const limit = hostile ? maxWithheld : maxBenign;
     const answers = options.answers ?? null;
     if (count > limit)
-      return endServer(answers, limit, {
-        reason,
-        toolName: options.toolName,
-        summary: options.summary,
-      });
+      return endServer(
+        answers,
+        limit,
+        {
+          reason,
+          toolName: options.toolName,
+          summary: options.summary,
+        },
+        hostile ? 'withheld' : 'benign',
+      );
     await audit(reason, options.toolName, options.summary);
     // The audit was an await: the server may have been ended during it, and a server that
     // was ended is refused nothing and delivered nothing more.
@@ -251,10 +262,16 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
   function withholdUnaddressed(reason: WithholdReason, what: string, head: string): Promise<void> {
     const sniffed = sniffId(head);
     const request = sniffed === null ? null : (ledger.take(sniffed) ?? null);
+    const answers =
+      request !== null
+        ? [request]
+        : sniffed !== null && ledger.wasAnswered(sniffed)
+          ? []
+          : ledger.failPending();
     return withhold(reason, {
       toolName: request?.toolName ?? toolOf('unreadable_server_message'),
-      summary: `withheld ${what}${request === null ? ' (no request to answer)' : ' (its request was answered)'}`,
-      answers: request,
+      summary: `withheld ${what} (${answers.length} pending request${answers.length === 1 ? '' : 's'} failed)`,
+      answers,
     });
   }
 
@@ -379,6 +396,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       return withhold('invalid-shape', {
         toolName: toolOf('unreadable_server_message'),
         summary: 'withheld a response whose id is not a safe integer or a string',
+        answers: ledger.failPending(),
       });
     const entry = ledger.take(id);
     if (entry === undefined) {
@@ -388,7 +406,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       return withhold(meant === undefined ? 'unknown-id' : 'id-mismatch', {
         toolName: meant?.toolName ?? toolOf('unknown_response_id'),
         summary: `withheld a response with ${meant === undefined ? 'an unknown or already answered' : 'a differently typed'} id (${describeId(id)})`,
-        answers: meant ?? null,
+        answers: meant ?? (ledger.wasAnswered(id) ? [] : ledger.failPending()),
       });
     }
     // From here the request is taken and has to be answered, whatever goes wrong.
@@ -515,11 +533,16 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       const toolName = toolOf('forwarded_server_message');
       const summary = `forwarded a server ${message.kind} (${describeMethod(message.method)})`;
       if (count > limit)
-        return endServer(null, limit, {
-          reason: 'unsolicited',
-          toolName,
-          summary: `ended after more than ${limit} server-initiated messages`,
-        });
+        return endServer(
+          null,
+          limit,
+          {
+            reason: 'unsolicited',
+            toolName,
+            summary: `ended after more than ${limit} server-initiated messages`,
+          },
+          'benign',
+        );
       await auditForwarded(message.method, toolName, summary);
       if (terminated) return;
       return deps.toClient(forward);
@@ -550,19 +573,22 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     // shape with an id Stroq can read may still name a request that is waiting.
     if (Array.isArray(value)) {
       const answered: TrackedRequest[] = [];
+      let unaddressable = value.length === 0;
       for (const item of value) {
         if (isRecord(item)) {
           const id = asJsonRpcId(item['id']);
           if (id !== null) {
             const req = ledger.take(id);
             if (req !== undefined) answered.push(req);
-          }
-        }
+            else if (!ledger.wasAnswered(id)) unaddressable = true;
+          } else unaddressable = true;
+        } else unaddressable = true;
       }
+      const answers = [...answered, ...(unaddressable ? ledger.failPending() : [])];
       return withhold('invalid-shape', {
         toolName: answered[0]?.toolName ?? toolOf('unreadable_server_message'),
         summary: `withheld a server batch${answered.length > 0 ? ' (its requests were answered)' : ''}`,
-        answers: answered.length > 0 ? answered : null,
+        answers,
       });
     }
     const named = isRecord(value) ? asJsonRpcId(value['id']) : null;
@@ -570,13 +596,14 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     return withhold('invalid-shape', {
       toolName: request?.toolName ?? toolOf('unreadable_server_message'),
       summary: 'withheld a server message of an unknown kind',
-      answers: request,
+      answers: request ?? (named !== null && ledger.wasAnswered(named) ? [] : ledger.failPending()),
     });
   }
 
   return {
     wasTerminated: () => terminated,
     terminatedLimit: () => endedAtLimit,
+    terminationKind: () => endedBy,
     onServerLine: async (line) => {
       if (terminated) return;
       await handle(line);

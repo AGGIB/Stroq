@@ -135,7 +135,7 @@ describe('a server that withholds too much', () => {
     await rig.handshake();
     rig.call(3, 'flood', { count: 100 });
     const answer = await rig.answerFor(3);
-    expect(errorText(answer)).toContain('more than 30 withheld');
+    expect(errorText(answer)).toContain('more than 30 benign-kind');
     expect(await rig.done).toBe(1);
     expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(31);
   }, 60_000);

@@ -80,6 +80,10 @@ describe('the --strict section of docs/AGENTS.md', () => {
   });
 
   it('says what is audited and remembered of a result once, and what the extra views add', () => {
+    expect(section).toContain('up to three aggregate texts plus one `per-string` view');
+    expect(section).toContain('not capped at three scans');
+    expect(section).toContain('without a shared deadline for that second pass');
+    expect(section).toContain('historical measurements');
     expect(section).toContain('audited with one line and remembered once');
     expect(section).toContain('extra readings');
     expect(section).toContain('remembers the atoms of EVERY view');
@@ -122,8 +126,10 @@ describe('the --strict section of docs/AGENTS.md', () => {
     });
 
     it('says a batch from the server is withheld whole while answering its requests', () => {
-      expect(section).toContain('a batch from the server is withheld whole as `invalid-shape`');
+      expect(section).toContain('batch from the server is withheld whole as `invalid-shape`');
       expect(section).toContain('any waiting requests whose ids it carries are answered');
+      expect(section).toContain('all requests still pending on this wrapper receive fixed errors');
+      expect(section).toContain('fail unrelated concurrent requests too');
     });
 
     it('is the same as SECURITY.md in its scope: the deadline is about the scan', () => {

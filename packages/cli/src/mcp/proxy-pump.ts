@@ -7,7 +7,7 @@ import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloa
 import { OrderedQueue, writeBackpressured } from './pump-stream.js';
 import { createStrictHandler, type StrictHandlerDeps } from './strict-handler.js';
 import { strictLine } from './strict-line.js';
-import { terminatedResponse } from './strict-reasons.js';
+import { terminatedResponse, type TerminationKind } from './strict-reasons.js';
 import {
   MAX_LINE_CHARS,
   asJsonRpcId,
@@ -266,18 +266,23 @@ export function createPump(deps: PumpDeps): Pump {
    * mode just refused to keep. A request is answered with the same error the ones that
    * were waiting got; anything else has nobody to tell and is dropped.
    */
-  async function refuseAfterEnd(line: SplitLine, limit: number): Promise<void> {
+  async function refuseAfterEnd(
+    line: SplitLine,
+    limit: number,
+    kind: TerminationKind,
+  ): Promise<void> {
     const unmarked = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
     const value = parseLine(unmarked);
     if (value === undefined) return;
     const message = classifyMessage(value);
-    if (message.kind === 'request') await replyToClient(terminatedResponse(message.id, limit));
+    if (message.kind === 'request')
+      await replyToClient(terminatedResponse(message.id, limit, kind));
   }
 
   /** `--strict` only: the refusal for `line` if the server has been ended, else null (always null without it). */
   function refuseIfEnded(line: SplitLine): Promise<void> | null {
     return strictHandler?.wasTerminated() === true
-      ? refuseAfterEnd(line, strictHandler.terminatedLimit())
+      ? refuseAfterEnd(line, strictHandler.terminatedLimit(), strictHandler.terminationKind())
       : null;
   }
 

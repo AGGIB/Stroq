@@ -9,6 +9,29 @@ const request = (id: string | number, method = 'tools/call'): TrackedRequest => 
 });
 
 describe('StrictLedger', () => {
+  it('remembers failed pending ids so duplicates cannot affect new requests', () => {
+    const ledger = new StrictLedger();
+    ledger.track(request(1));
+    ledger.track(request('1'));
+    expect(ledger.failPending().map((item) => item.id)).toEqual([1, '1']);
+    expect(ledger.wasAnswered(1)).toBe(true);
+    expect(ledger.wasAnswered('1')).toBe(true);
+    expect(ledger.failPending()).toEqual([]);
+    ledger.track(request(1));
+    expect(ledger.wasAnswered(1)).toBe(false);
+    expect(ledger.wasAnswered('1')).toBe(true);
+  });
+
+  it('bounds the memory of completed ids', () => {
+    const ledger = new StrictLedger();
+    for (let id = 0; id < STRICT_CANCELLED_MEMORY + 1; id += 1) {
+      ledger.track(request(id));
+      ledger.take(id);
+    }
+    expect(ledger.wasAnswered(0)).toBe(false);
+    expect(ledger.wasAnswered(STRICT_CANCELLED_MEMORY)).toBe(true);
+  });
+
   it('answers each request once: the second take of an id finds nothing', () => {
     const ledger = new StrictLedger();
     ledger.track(request(1));

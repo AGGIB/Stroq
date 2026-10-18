@@ -24,10 +24,10 @@ const sampling = (id: unknown): string =>
 describe('the cap for malformed and hostile messages', () => {
   it('ends the server on the message after the limit, and answers every waiting request', async () => {
     const rig = handlerRig({ maxWithheld: 2 });
-    track(rig, 3);
-    track(rig, 4);
     await rig.feed(unknownId(1));
     await rig.feed(unknownId(2));
+    track(rig, 3);
+    track(rig, 4);
     expect(rig.terminated()).toBe(0);
     await rig.feed(unknownId(3));
     expect(rig.terminated()).toBe(1);
@@ -132,7 +132,7 @@ describe('the cap for the kinds a benign server also produces', () => {
     expect(rig.terminated()).toBe(0);
     await rig.feed(logLine(5));
     expect(rig.terminated()).toBe(1);
-    expect(JSON.stringify(rig.sent)).toContain('more than 5 withheld');
+    expect(JSON.stringify(rig.sent)).toContain('more than 5 benign-kind');
   });
 
   it('keeps the two counts apart', async () => {
@@ -165,6 +165,25 @@ describe('the cap for the kinds a benign server also produces', () => {
 });
 
 describe('ending a server', () => {
+  it('reports forwarded and mixed benign traffic without claiming it was all withheld', async () => {
+    const rig = handlerRig({ maxBenign: 2 });
+    track(rig, 3);
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'ping', id: 'server-ping' }));
+    await rig.feed(logLine(1));
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+    expect(rig.terminated()).toBe(1);
+    const response = rig.sent.find((value) => (value as { id?: unknown }).id === 3);
+    expect(JSON.stringify(response)).toContain('benign');
+    expect(JSON.stringify(response)).not.toContain('2 withheld messages');
+    expect(rig.notes.join('')).toContain('benign');
+    const ended = rig
+      .audit()
+      .find(
+        (entry) => (entry['decision'] as { ruleId?: string })?.ruleId === 'mcp-strict-terminated',
+      );
+    expect(JSON.stringify(ended)).toContain('benign');
+  });
+
   it('asks for the process to be stopped before it writes anything to the client', async () => {
     // A client that has stopped reading never lets a write finish. The kill must not wait
     // behind it, or a hostile server stays alive for as long as the client is stuck.

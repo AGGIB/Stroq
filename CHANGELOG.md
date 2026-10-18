@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unaddressable strict replies no longer leave clients waiting for their own timeout.** Malformed replies beyond the bounded id reader and responses with unknown ids fail the outstanding requests with fixed errors. This can also fail unrelated concurrent requests on that wrapper; duplicate completed replies do not fail newer requests.
+- **POSIX shutdown escalation reaches descendants after the launcher exits.** The process group still receives SIGKILL while inherited pipes remain open. Benign-message cap errors now identify the shared forwarded/withheld counter consistently in client responses, stderr and audit records.
+- **Strict scan cost documentation includes per-string views.** Each distinct decoded string adds a scan view; the 0.26.0 measurements below describe the original three aggregate views, not the current scan count or latency.
 - **Answer waiting client requests on batch server messages in strict mode.** A server message carrying an array is withheld whole as `invalid-shape`, and all waiting client requests whose IDs it contains are promptly answered with fixed errors rather than left waiting.
 
 ## [0.26.0] - 2026-10-18
