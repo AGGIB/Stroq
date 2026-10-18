@@ -4,7 +4,10 @@ import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { Atom } from '../types.js';
 import type { Positioned } from './atom-kinds.js';
 import { createAtomSet } from './atom-set.js';
+import { normalizePackageName, trimEndOf } from './package-name.js';
+import { readInstaller, readRunner } from './shell-words.js';
 import { encodedAtoms } from './encoded-atoms.js';
+export { normalizePackageName };
 
 /**
  * Upper bound on the atoms that can raise the floor (a package, a pipe-to-shell, an encoded blob)
@@ -43,14 +46,6 @@ const URL_RE = /https?:\/\/[^\s"'<>()[\]`|]+/gi;
 // `/[.,;:!?'"]+$/` restarted at every one of them when one more character followed:
 // 199,000 `!` in tool output took 48 s, and a Bash command has no length cap at all.
 const TRAILING_PUNCT = '.,;:!?\'"';
-const QUOTES = '"\'';
-// What prose puts after a name: "run npx helper-fix." must yield `helper-fix`, or the
-// command that copies it never matches. `;` and `!` need no entry: `VERSION_MARKER`
-// cuts at both.
-const TRAILING = `${QUOTES}.,:?)`;
-const LEADING_QUOTES = /^["']+/;
-const VERSION_MARKER = /[[<>=!~;]/;
-const LINE_BREAKS = '\n\r\u2028\u2029';
 const URL_HOST = /^https?:\/\/(?:[^@/\s]+@)?([^/:?#\s]+)/;
 // `user@host.tld` — ssh/scp targets and git ssh remotes.
 const SSH_TARGET = /(?<![\w.-])[\w.-]+@((?:[\w-]+\.)+[a-z]{2,})(?![\w.-])/gi;
@@ -70,24 +65,8 @@ const LINE_END = /[\n|;`]|&&|\|\|/;
 // A backslash before a line break continues the line whatever follows it, indented or not, and the
 // shell joins it to the next; an indented line is read as a continuation of the one before it.
 const CONTINUATION_NEWLINE = /\\\r?\n[ \t]*|\r?\n[ \t]+/g;
-// What the shell takes out whole (a backslash and the line break after it), and the line that is
-// indented without one.
+// What the shell takes out whole: a backslash and the line break after it.
 const SHELL_BREAK = /\\\r?\n/g;
-const INDENTED_BREAK = /\r?\n[ \t]+/g;
-const FLAGS_WITH_VALUE = new Set([
-  '-r',
-  '--requirement',
-  '-c',
-  '--constraint',
-  '-i',
-  '--index-url',
-  '--extra-index-url',
-  '-t',
-  '--target',
-  '--registry',
-  '--prefix',
-]);
-const PACKAGE_FLAGS = new Set(['-p', '--package']);
 // curl/wget piped into a shell, and `sh <(curl ...)` process substitution. The `{0,400}`
 // bounds cap the backtracking span per curl/wget/sh occurrence so a long run of them with
 // no matching pipe/paren stays linear instead of quadratic.
@@ -95,59 +74,37 @@ const PIPE_SHELL =
   /\b(?:curl|wget)\b[^\n|;&`]{0,400}\|\s*(?:sudo\s+(?:-E\s+)?)?(?:ba|z|da|k)?sh\b(?:\s+-[a-z]+)?/gi;
 const PROC_SUB_SHELL = /\b(?:ba|z|da|k)?sh\s+<\(\s*(?:curl|wget)\b[^)\n]{0,400}\)/gi;
 
-/**
- * `text` without the run of `chars` at its end. A loop, not a `[…]+$` pattern: that
- * restarts at every character of a run it cannot finish, so a long run followed by
- * one character outside it costs time quadratic in the run.
- */
-function trimEndOf(text: string, chars: string): string {
-  let end = text.length;
-  while (end > 0 && chars.includes(text.charAt(end - 1))) end -= 1;
-  return text.slice(0, end);
-}
-
-/**
- * `name` cut at its first version, extra or marker character (`>=2.0`, `[socks]`,
- * `; python_version…`), on its last line only: it used to be `/[[<>=!~;].*$/`, whose
- * `.` stops at a line break, so a marker before one was never cut. The same pattern
- * restarted at every marker character of a run it could not finish.
- */
-function withoutVersion(name: string): string {
-  let lastLine = name.length;
-  while (lastLine > 0 && !LINE_BREAKS.includes(name.charAt(lastLine - 1))) lastLine -= 1;
-  const cut = name.slice(lastLine).search(VERSION_MARKER);
-  return cut === -1 ? name : name.slice(0, lastLine + cut);
-}
-
-/**
- * A package name as a lookup key. `knownPackages` runs every dependency name in the
- * project's `package.json` through here on every Bash call — up to 256 KiB of it,
- * written by whoever wrote the repository — so nothing here may be super-linear: with
- * the edges stripped by `/^["']+|["']+$/g` and `/[[<>=!~;].*$/`, one planted name of
- * 262,000 quotes, or of `[`s and a line break, took 30 s.
- */
-export function normalizePackageName(raw: string): string {
-  const name = trimEndOf(raw.replace(LEADING_QUOTES, ''), TRAILING);
-  const at = name.startsWith('@') ? name.indexOf('@', 1) : name.indexOf('@');
-  const base = at > 0 ? name.slice(0, at) : name;
-  return withoutVersion(base).toLowerCase();
-}
-
 /** The part of a line an extractor read, and whether the line went on past what it read. */
 interface LineScan {
   readonly line: string;
   readonly cut: boolean;
   /** How many characters of the text were looked at to find it. */
   readonly read: number;
+  /**
+   * The line stopped at a backtick that opens a command substitution: one that follows a blank (a
+   * word is about to be made by a command) or sits against a word that goes on after it. A backtick
+   * that closes the one a command is written in (`npx prettier` in a sentence) is not.
+   */
+  readonly substitution: boolean;
+  /** The substitution is against the last word of the line, which goes on after it: that word is half of one. */
+  readonly abutting: boolean;
 }
+
+/** Whether a word goes on in the character after a backtick. */
+const WORD_CONTINUES = /[\w$'"\\-]/;
 
 function restOfLine(text: string, from: number): LineScan {
   const rest = text.slice(from, from + MAX_LINE_SCAN);
   const stop = rest.search(LINE_END);
+  const atBacktick = stop !== -1 && rest.charAt(stop) === '`';
+  const against = atBacktick && stop > 0 && !/\s/.test(rest.charAt(stop - 1));
+  const goesOn = against && WORD_CONTINUES.test(text.charAt(from + stop + 1));
   return {
     line: (stop === -1 ? rest : rest.slice(0, stop)).trim(),
     cut: stop === -1 && text.length > from + MAX_LINE_SCAN,
     read: stop === -1 ? rest.length : stop,
+    substitution: atBacktick && (!against || goesOn),
+    abutting: goesOn,
   };
 }
 
@@ -166,100 +123,11 @@ function collapseContinuations(text: string): string {
 /**
  * The text as the shell joins it: a backslash and the line break after it are removed, with
  * nothing in their place (`ev\<newline>il` is `evil`), where `collapseContinuations` puts the
- * space a word-wrapped page has. An indented line that does not follow a backslash is still
- * joined by a space, as there. A command is read both ways, so that neither can hide a package.
+ * space a word-wrapped page has and joins the lines that are only indented. A command is read both
+ * ways, so that neither can hide a package.
  */
 function shellJoin(text: string): string {
-  return text.replace(SHELL_BREAK, '').replace(INDENTED_BREAK, ' ');
-}
-
-/**
- * A word as the shell reads it outside quotes: a backslash takes itself out in front of the
- * character after it (`e\vil` is `evil`, `\pkg` is `pkg`, `\\` is `\`). A backslash that ends
- * the word has nothing after it and stays: at the end of a line it is the mark of a continuation.
- */
-const shellWord = (token: string): string => token.replace(/\\(.)/g, '$1');
-
-/** A word that is only the mark of a continuation, and is neither a flag nor a package. */
-const isContinuationMark = (word: string): boolean => word === '\\';
-
-/**
- * A word that is the value of a variable or a command, whose package cannot be read from the
- * command: `$PKG`, `"$PKG"`, `$(cat name)`. A doubt about an action, since what it expands to
- * may be a name the session read; not about a page, which names nothing by saying `npx $PKG`.
- */
-const isExpansion = (word: string): boolean => word.replace(LEADING_QUOTES, '').startsWith('$');
-
-function isPackageToken(token: string): boolean {
-  return (
-    token !== '' &&
-    !token.startsWith('-') &&
-    !token.startsWith('\\') &&
-    !token.startsWith('.') &&
-    !token.startsWith('/') &&
-    !token.startsWith('$') &&
-    !token.includes('://')
-  );
-}
-
-/** What a runner's words say about its package. */
-interface RunnerReading {
-  readonly pkg: string | null;
-  /**
-   * The first word that is not a flag was reached, which settles the package: nothing after it
-   * can change it. False when the words ran out first, and a later `-p` may still name another.
-   */
-  readonly sure: boolean;
-  /** A word that should have named the package is a variable or a command, whose value is unknown. */
-  readonly doubt: boolean;
-}
-
-/**
- * The single package a runner (`npx`, `pnpm dlx`, …) resolves: `-p <pkg>` wins, else the first
- * positional. The words are read as the shell reads them (see `shellWord`).
- */
-function runnerPackage(tokens: readonly string[]): RunnerReading {
-  let fromFlag: string | null = null;
-  let doubt = false;
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = shellWord(tokens[i] ?? '');
-    if (isContinuationMark(token)) continue;
-    if (PACKAGE_FLAGS.has(token)) {
-      const value = shellWord(tokens[i + 1] ?? '');
-      if (isPackageToken(value)) fromFlag = value;
-      else if (isExpansion(value)) doubt = true;
-      i += 1;
-      continue;
-    }
-    if (FLAGS_WITH_VALUE.has(token)) {
-      i += 1;
-      continue;
-    }
-    if (token.startsWith('-')) continue;
-    const positional = fromFlag ?? (isPackageToken(token) ? token : null);
-    return {
-      pkg: positional,
-      sure: true,
-      doubt: doubt || (fromFlag === null && isExpansion(token)),
-    };
-  }
-  return { pkg: fromFlag, sure: false, doubt };
-}
-
-function installerPackages(tokens: readonly string[]): { packages: string[]; doubt: boolean } {
-  const packages: string[] = [];
-  let doubt = false;
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = shellWord(tokens[i] ?? '');
-    if (isContinuationMark(token)) continue;
-    if (FLAGS_WITH_VALUE.has(token)) {
-      i += 1;
-      continue;
-    }
-    if (isPackageToken(token)) packages.push(token);
-    else if (isExpansion(token)) doubt = true;
-  }
-  return { packages, doubt };
+  return text.replace(SHELL_BREAK, '');
 }
 
 /** Atoms one extractor found, and whether it stopped reading a line before the line ended. */
@@ -269,7 +137,7 @@ interface Found {
   readonly cut: boolean;
   /** The pass spent its reading budget, so some matches were not read at all. */
   readonly budgetSpent: boolean;
-  /** A word that should have named a package is a variable or a command (see `isExpansion`). */
+  /** A word that should have named a package is a variable or a command (see `shell-words.ts`). */
   readonly doubt: boolean;
 }
 
@@ -299,7 +167,10 @@ function lineReader(text: string): LineReader {
       const index = m.index ?? 0;
       if (budget <= 0) {
         skipped = true;
-        return { index, scan: { line: '', cut: true, read: 0 } };
+        return {
+          index,
+          scan: { line: '', cut: true, read: 0, substitution: false, abutting: false },
+        };
       }
       const scan = restOfLine(text, index + m[0].length);
       budget -= scan.read + 1;
@@ -311,32 +182,34 @@ function lineReader(text: string): LineReader {
 
 /**
  * The words of the line that was read, without the last one when the line went on past the
- * window: that one may have been cut in the middle, and a name that is half of one is not a name.
+ * window or into a command substitution: that one may have been cut in the middle, and a name that
+ * is half of one is not a name.
  */
 function readTokens(scan: LineScan): string[] {
-  const tokens = scan.line.split(/\s+/);
-  return scan.cut ? tokens.slice(0, -1) : tokens;
+  const tokens = scan.line === '' ? [] : scan.line.split(/\s+/);
+  return scan.cut || scan.abutting ? tokens.slice(0, -1) : tokens;
 }
 
 /**
  * Every package named after a runner match, positioned at that match's start index. A runner's
- * package is the first word that is not a flag (or the value of `-p`), so a line that goes on past
- * the window after that word was reached has lost nothing. A line cut before it, or a package
- * that came from `-p` while later words (a second `-p`) were not read, is cut.
+ * packages are the values of every `-p`, or else the first word that is not a flag, so a line that
+ * goes on past the window after that word was reached has lost nothing. A line cut before it is
+ * cut, and so is one that stopped at a command substitution before it (see `LineScan`).
  */
 function runnerPackages(text: string, reader: LineReader): Found {
   const lines = [...text.matchAll(RUNNER)]
     .map(reader.after)
-    .map((line) => ({ ...line, reading: runnerPackage(readTokens(line.scan)) }));
+    .map((line) => ({ ...line, reading: readRunner(readTokens(line.scan)) }));
   return {
-    positioned: lines.flatMap(({ index, reading }): Positioned[] => {
-      if (reading.pkg === null) return [];
-      const value = normalizePackageName(reading.pkg);
-      return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
-    }),
+    positioned: lines.flatMap(({ index, reading }): Positioned[] =>
+      reading.packages.flatMap((pkg): Positioned[] => {
+        const value = normalizePackageName(pkg);
+        return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
+      }),
+    ),
     cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
-    doubt: lines.some(({ reading }) => reading.doubt),
+    doubt: lines.some(({ scan, reading }) => reading.doubt || (scan.substitution && !reading.sure)),
   };
 }
 
@@ -344,7 +217,7 @@ function runnerPackages(text: string, reader: LineReader): Found {
 function installedPackages(text: string, reader: LineReader): Found {
   const lines = [...text.matchAll(INSTALLER)]
     .map(reader.after)
-    .map((line) => ({ ...line, reading: installerPackages(readTokens(line.scan)) }));
+    .map((line) => ({ ...line, reading: readInstaller(readTokens(line.scan)) }));
   return {
     positioned: lines.flatMap(({ index, reading }): Positioned[] =>
       reading.packages.flatMap((pkg): Positioned[] => {
@@ -354,7 +227,7 @@ function installedPackages(text: string, reader: LineReader): Found {
     ),
     cut: lines.some(({ scan }) => scan.cut),
     budgetSpent: reader.skipped(),
-    doubt: lines.some(({ reading }) => reading.doubt),
+    doubt: lines.some(({ scan, reading }) => reading.doubt || scan.substitution),
   };
 }
 
@@ -387,20 +260,21 @@ const skipBlanks = (text: string, from: number): number => {
 };
 
 /**
- * Whether what follows a runner or installer is a wrapped command: the rest of its line is
- * empty, or only a backslash, and the next line either follows that backslash or is indented and
+ * Whether what follows a runner or installer is a wrapped command: the first line ends in a
+ * backslash (after the words it has, if any), or it is empty and the next line is indented and
  * starts with a flag (`-x`, `--long`). A dash and a space is a list item, not a flag.
  * Written without a pattern so that a long run of blanks costs a pass, not a square.
  */
 function startsWrapped(tail: string): boolean {
-  let at = skipBlanks(tail, 0);
-  const backslash = tail.charAt(at) === '\\';
-  if (backslash) at = skipBlanks(tail, at + 1);
-  if (tail.charAt(at) === '\r') at += 1;
-  if (tail.charAt(at) !== '\n') return false;
-  const next = skipBlanks(tail, at + 1);
-  if (next === at + 1 && !backslash) return false;
-  return backslash || (tail.charAt(next) === '-' && /[-A-Za-z]/.test(tail.charAt(next + 1)));
+  const lineEnd = tail.indexOf('\n');
+  const first = (lineEnd === -1 ? tail : tail.slice(0, lineEnd)).replace(/[ \t\r]+$/, '');
+  if (lineEnd === -1) return false;
+  // A backslash that ends the first line continues it, whatever stands before it on that line.
+  if (first.endsWith('\\')) return true;
+  if (first.trim() !== '') return false;
+  const next = skipBlanks(tail, lineEnd + 1);
+  if (next === lineEnd + 1) return false;
+  return tail.charAt(next) === '-' && /[-A-Za-z]/.test(tail.charAt(next + 1));
 }
 
 /**
@@ -516,7 +390,7 @@ interface Extraction {
   readonly lineCut: boolean;
   /** The pass ran out of the budget for reading lines, so the matches that were left were not read. */
   readonly budgetSpent: boolean;
-  /** A word that should have named a package is a variable or a command (see `isExpansion`). */
+  /** A word that should have named a package is a variable or a command (see `shell-words.ts`). */
   readonly doubt: boolean;
 }
 
@@ -585,24 +459,43 @@ export function extractActionAtoms(text: string): ActionExtraction {
   const plain = extractBounded(bounded);
   for (const atom of plain.atoms) set.add(atom);
   let unread = cutText || plain.capped || plain.lineCut || plain.budgetSpent || plain.doubt;
-  for (const joined of joinedReadings(bounded)) {
+  for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;
-    const extraction = extractBounded(joined);
+    const extraction = extractBounded(reading.text);
     for (const atom of extraction.atoms) set.add(atom);
-    unread = unread || extraction.capped || extraction.budgetSpent || extraction.doubt;
+    unread =
+      unread ||
+      extraction.capped ||
+      extraction.budgetSpent ||
+      extraction.doubt ||
+      (reading.byLine && extraction.lineCut);
   }
   unread = unread || wrappedCommandCut(bounded);
   return { atoms: set.atoms, unread: unread || set.floorFull || set.floorLeftOut };
 }
 
+/** The text with its continuation lines joined one way, and whether a line cut in it is a loss (see `joinedReadings`). */
+interface JoinedReading {
+  readonly text: string;
+  readonly byLine: boolean;
+}
+
 /**
  * The text with its continuation lines joined, in each way that is read: with a space where a line
- * was wrapped (`collapseContinuations`), and as the shell joins them (`shellJoin`). The ones that
- * are not different from the text itself are left out.
+ * was wrapped or only indented (`collapseContinuations`), and as the shell joins a backslash and
+ * its line break (`shellJoin`). The ones that are not different from the text itself are left out.
+ * A runner or installer line that is cut in the second is a command that was wrapped on purpose
+ * and outgrew the window; in the first it is as likely to be an indented block read as one line.
  */
-function joinedReadings(text: string): string[] {
-  const readings = [collapseContinuations(text), shellJoin(text)];
-  return readings.filter((reading, i) => reading !== text && readings.indexOf(reading) === i);
+function joinedReadings(text: string): JoinedReading[] {
+  const readings: JoinedReading[] = [
+    { text: collapseContinuations(text), byLine: false },
+    { text: shellJoin(text), byLine: true },
+  ];
+  return readings.filter(
+    (reading, i) =>
+      reading.text !== text && readings.findIndex((other) => other.text === reading.text) === i,
+  );
 }
 
 /**
@@ -696,7 +589,7 @@ export function extractAtomsDeepWithLoss(text: string): AtomExtraction {
   const joinedTexts = joinedReadings(bounded);
   for (const joined of joinedTexts) {
     if (set.floorFull) break;
-    merge(extractBounded(joined), false);
+    merge(extractBounded(joined.text), joined.byLine);
   }
   if (joinedTexts.length > 0 && !set.floorFull) truncated = truncated || wrappedCommandCut(bounded);
 

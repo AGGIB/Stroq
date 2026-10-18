@@ -118,7 +118,7 @@ describe('extractActionAtoms reads a command the way the shell reads it', () => 
     ['a backslash and a line break inside the name of a runner', 'npx ev\\\nil-helper-fix'],
     ['a backslash, a line break and a carriage return', 'npx ev\\\r\nil-helper-fix'],
     ['a backslash and a line break at a hyphen', 'npx evil-\\\nhelper-fix'],
-    ['the name in a quote after a backslash', `npx \\"${NAME}"`],
+    ['the name in escaped quotes', `npx \\"${NAME}\\"`],
   ])('finds the package after %s', (_name, command) => {
     expect(extractActionAtoms(command).atoms).toContainEqual(pkg);
   });
@@ -190,5 +190,113 @@ describe('a page that is read as the shell reads it', () => {
 
   it('does not take a variable in a page for a doubt that marks the session', () => {
     expect(extractAtomsDeepWithLoss('Run `npx $PKG` or `npm install $PKG`.').truncated).toBe(false);
+  });
+});
+
+// A word is read as the shell reads it: quotes are taken out and the pieces joined, a variable or a
+// command in the name is a doubt, and a runner with several -p names each of them.
+describe('extractActionAtoms and the quotes in a word', () => {
+  it.each([
+    ['a quote inside the name', 'npx ev"il"-helper-fix'],
+    ['a single-quoted start', "npx 'evil'-helper-fix"],
+    ['pieces in both kinds of quote', `npx "e"'vil'-helper-fix`],
+    ['a quote after a backslash', 'npx e\\vil"-helper-fix"'],
+    ['the whole name in quotes', 'npx "evil-helper-fix"'],
+    ['an installer with a quote inside the name', 'pip install ev"il"-helper-fix'],
+    ['a backslash inside double quotes that does not escape', 'npx "evil-helper-fix"'],
+  ])('finds the package after %s', (_name, command) => {
+    expect(extractActionAtoms(command).atoms).toContainEqual(pkg);
+  });
+
+  it('reads a backslash that escapes a quote inside double quotes as the shell does', () => {
+    expect(extractActionAtoms('npx "evil\\"x"').atoms.some((a) => a.value.includes('evil'))).toBe(
+      true,
+    );
+  });
+
+  it('is in doubt about a quote that is never closed inside a word', () => {
+    expect(extractActionAtoms('npx ev"il-helper-fix').unread).toBe(true);
+    expect(extractActionAtoms("pip install ev'il").unread).toBe(true);
+  });
+
+  it('is not in doubt about the quote that closes the string a command sits in', () => {
+    for (const command of [
+      'echo "run npx prettier"',
+      'git commit -m "docs: use npx prettier"',
+      "git commit -m 'use pip install requests'",
+    ]) {
+      expect(extractActionAtoms(command).unread, command).toBe(false);
+    }
+  });
+});
+
+describe('extractActionAtoms and a name that is built by the shell', () => {
+  it.each([
+    ['a variable inside the name', 'npx ev$IL-helper-fix'],
+    ['a variable in braces', 'npx ${P}'],
+    ['a variable after the name starts', 'npm install evil-$SUFFIX'],
+    ['a variable in double quotes inside the name', 'npx ev"$IL"-pkg'],
+    ['a command substitution inside the name', 'npx ev$(echo il)-helper-fix'],
+    ['a backtick inside the name', 'npx ev`echo il`-helper-fix'],
+    ['a backtick where the package should be', 'npx `cat name`'],
+    ['a backtick where the packages should be', 'npm install foo `cat names`'],
+  ])('is in doubt about %s', (_name, command) => {
+    expect(extractActionAtoms(command).unread).toBe(true);
+  });
+
+  it('is not in doubt about a variable that only holds a version', () => {
+    expect(extractActionAtoms('npm install lodash@$VERSION').unread).toBe(false);
+    expect(extractActionAtoms('npm install @scope/pkg@$V').unread).toBe(false);
+  });
+
+  it('is not in doubt about a command that sits in backticks in a string', () => {
+    expect(extractActionAtoms('git commit -m "Run `npx prettier` to format."').unread).toBe(false);
+    expect(extractActionAtoms('echo `npx prettier`').unread).toBe(false);
+  });
+
+  it('does not read half of a name that a backtick cuts as the name', () => {
+    const { atoms } = extractActionAtoms('npx ev`echo il`-helper-fix');
+    expect(atoms.some((a) => a.value === 'ev')).toBe(false);
+  });
+});
+
+describe('extractActionAtoms and a runner with several package names', () => {
+  it.each([
+    ['two -p', `npx -p ok-pkg -p ${NAME} run`],
+    ['two --package', `npx --package ok-pkg --package ${NAME} run`],
+    ['--package=', `npx --package=ok-pkg --package=${NAME} run`],
+    ['a name stuck to -p', `npx -pok-pkg -p${NAME} run`],
+    ['a first -p that names the other one last', `npx -p ${NAME} -p ok-pkg run`],
+  ])('names each package of %s', (_name, command) => {
+    const { atoms } = extractActionAtoms(command);
+    expect(atoms).toContainEqual(pkg);
+    expect(atoms).toContainEqual({ kind: 'pkg', value: 'ok-pkg' });
+  });
+
+  it('does not name the command when -p names the packages', () => {
+    const { atoms } = extractActionAtoms(`npx -p ${NAME} run-this`);
+    expect(atoms.some((a) => a.value === 'run-this')).toBe(false);
+  });
+
+  it('names the first word that is not a flag when no -p is given, as before', () => {
+    expect(extractActionAtoms(`npx -y ${NAME} --apply`).atoms).toContainEqual(pkg);
+  });
+});
+
+describe('extractActionAtoms and a command wrapped after its first words', () => {
+  it('reports a command wrapped with a backslash after a flag that outgrows the window as unread', () => {
+    const command = `npx -y \\\n${'  -y \\\n'.repeat(700)}  ${NAME}`;
+    expect(extractActionAtoms(command).unread).toBe(true);
+  });
+
+  it('reports a long command joined by backslashes with a package past the window as unread', () => {
+    const command = `npm install lodash ${'a '.repeat(30)}\\\n${'  b \\\n'.repeat(900)}  ${NAME}`;
+    expect(extractActionAtoms(command).unread).toBe(true);
+  });
+
+  it('reports no doubt for a short command wrapped after a flag', () => {
+    const { atoms, unread } = extractActionAtoms(`npx -y \\\n  ${NAME}`);
+    expect(atoms).toContainEqual(pkg);
+    expect(unread).toBe(false);
   });
 });

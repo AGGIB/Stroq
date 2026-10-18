@@ -166,11 +166,10 @@ describe('extractAtomsDeepWithLoss when a pass spends its budget for reading lin
   const indentedBlock = (lines: number): string => '  npm i a\n'.repeat(lines);
   const wrappedTail = 'npm install \\\n  evil-helper-fix\n';
 
-  it('reports the loss when only the joined pass ran out, and the package it left unread', () => {
+  it('reports the loss when only the joined pass ran out, though another pass read the package', () => {
     const text = `Notes:\n${indentedBlock(15_000)}${wrappedTail}`;
     expect(text.length).toBeLessThan(DEFAULT_MAX_CHARS);
-    const { atoms, truncated } = extractAtomsDeepWithLoss(text);
-    expect(atoms.some((a) => a.value === 'evil-helper-fix')).toBe(false);
+    const { truncated } = extractAtomsDeepWithLoss(text);
     expect(truncated).toBe(true);
   });
 
