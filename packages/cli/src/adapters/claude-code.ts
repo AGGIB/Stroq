@@ -210,7 +210,7 @@ interface KnownReading {
   readonly serialised: boolean;
 }
 
-function knownReading(obj: Record<string, unknown>): KnownReading {
+function knownReading(obj: Record<string, unknown>, requestPath: string | undefined): KnownReading {
   const pieces: string[] = [];
   const consumed = new Set<string>();
   let fileRest: Record<string, unknown> | null = null;
@@ -233,7 +233,7 @@ function knownReading(obj: Record<string, unknown>): KnownReading {
       if (typeof obj[stream] === 'string') consumed.add(stream);
   }
   if (Array.isArray(obj['content'])) {
-    const items = toolResultReading(obj['content']);
+    const items = toolResultReading(obj['content'], requestPath);
     pieces.push(items.text);
     consumed.add('content');
     serialised = items.serialised;
@@ -254,11 +254,25 @@ const TYPE_LABELS: ReadonlySet<string> = new Set([
   'tool_result',
 ]);
 
-/**
- * The keys of a file object that only say which file it is: they echo the request, and a result
- * that carried them into the text would put a path at the end of every file a person reads.
- */
+/** The keys of a file object that can only echo the path of the file that was asked for. */
 const FILE_ECHO_KEYS: ReadonlySet<string> = new Set(['filePath', 'path']);
+/** The longest a string can be and still be a path to leave out of the text. */
+const MAX_ECHOED_PATH = 4096;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Whether the value of a file object's `filePath` or `path` only echoes the path that was asked
+ * for, and so says nothing a person did not already write: it is that very path, or, when the
+ * request's path is not known, it is a single string of a plausible length with no blank and no
+ * control character in it. Anything else (a sentence, a string with line breaks, a value that is
+ * not a string at all) is text like the rest, and is read: a file result is where a hostile page
+ * can put what it wants said, and the path is a field it controls.
+ */
+function echoesPath(value: unknown, requestPath: string | undefined): boolean {
+  if (typeof value !== 'string') return false;
+  if (requestPath !== undefined && value === requestPath) return true;
+  return value.length <= MAX_ECHOED_PATH && !/\s/.test(value) && !CONTROL_CHARS.test(value);
+}
 
 /** A `type` whose value is one of the labels, which says what an item is and is not text anyone wrote. */
 const isTypeLabel = (key: string, value: unknown): boolean =>
@@ -269,11 +283,17 @@ const isTypeLabel = (key: string, value: unknown): boolean =>
  * what a file object holds beside its content (a note, another key). A `type` that is one of the
  * labels is left out; any other `type` is text like the rest. The bytes of media are left out.
  */
-function otherStrings(obj: Record<string, unknown>, known: KnownReading): string[] {
+function otherStrings(
+  obj: Record<string, unknown>,
+  known: KnownReading,
+  requestPath: string | undefined,
+): string[] {
   const siblings = Object.entries(obj).filter(
     ([key, value]) => !known.consumed.has(key) && key !== 'file' && !isTypeLabel(key, value),
   );
-  const inFile = Object.entries(known.fileRest ?? {}).filter(([key]) => !FILE_ECHO_KEYS.has(key));
+  const inFile = Object.entries(known.fileRest ?? {}).filter(
+    ([key, value]) => !(FILE_ECHO_KEYS.has(key) && echoesPath(value, requestPath)),
+  );
   const unread =
     known.fileRest === null ? Object.entries(obj).filter(([key]) => key === 'file') : [];
   return [...siblings, ...inFile, ...unread]
@@ -299,8 +319,11 @@ function stringsAndJson(strings: readonly string[], readable: unknown): ResultRe
  * serialised turned every line break in the page into the two characters backslash and `n`. An
  * object with no string at all is serialised alone, and said to be.
  */
-function objectReading(obj: Record<string, unknown>): ResultReading {
-  const known = knownReading(obj);
+function objectReading(
+  obj: Record<string, unknown>,
+  requestPath: string | undefined,
+): ResultReading {
+  const known = knownReading(obj, requestPath);
   if (known.pieces.length === 0) {
     const readable = withoutMedia(obj);
     const strings = collectStrings(readable).filter((value) => value !== '');
@@ -308,29 +331,29 @@ function objectReading(obj: Record<string, unknown>): ResultReading {
     return stringsAndJson(strings, readable);
   }
   const primary = known.pieces.filter((piece) => piece !== '');
-  const others = otherStrings(obj, known);
+  const others = otherStrings(obj, known, requestPath);
   if (others.length === 0) return { text: primary.join('\n'), serialised: known.serialised };
   return stringsAndJson([...primary, ...others], withoutMedia(obj));
 }
 
-export function toolResultReading(result: unknown): ResultReading {
+export function toolResultReading(result: unknown, requestPath?: string): ResultReading {
   if (typeof result === 'string') return plain(clip(result));
   if (Array.isArray(result)) {
-    const parts = result.map(toolResultReading);
+    const parts = result.map((item) => toolResultReading(item, requestPath));
     return {
       text: clip(parts.map((part) => part.text).join('\n')),
       serialised: parts.some((part) => part.serialised),
     };
   }
   if (result && typeof result === 'object') {
-    const reading = objectReading(result as Record<string, unknown>);
+    const reading = objectReading(result as Record<string, unknown>, requestPath);
     return { ...reading, text: clip(reading.text) };
   }
   return plain(result === undefined || result === null ? '' : String(result));
 }
 
-export function toolResultToText(result: unknown): string {
-  return toolResultReading(result).text;
+export function toolResultToText(result: unknown, requestPath?: string): string {
+  return toolResultReading(result, requestPath).text;
 }
 
 /** Tools whose output is prose: a result of one that held no text is not a result Stroq has read. */
@@ -351,6 +374,15 @@ function preOutput(decision: 'deny' | 'ask', reason: string): HookOutput {
 
 export const denyOutput = (reason: string): HookOutput => preOutput('deny', reason);
 export const askOutput = (reason: string): HookOutput => preOutput('ask', reason);
+
+/** The path a tool call asked for, which a result may echo back. */
+function requestedPath(toolInput: Readonly<Record<string, unknown>>): string | undefined {
+  for (const key of ['file_path', 'notebook_path', 'path']) {
+    const value = toolInput[key];
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
 
 export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = ClaudeHookInputSchema.parse(raw);
@@ -386,7 +418,7 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const failed = input.hook_event_name === 'PostToolUseFailure';
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
-  const reading = toolResultReading(response);
+  const reading = toolResultReading(response, requestedPath(input.tool_input));
   const result = await engine.post({
     ...base,
     ...(failed ? { resultFailed: true as const } : {}),
