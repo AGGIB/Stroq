@@ -154,23 +154,29 @@ const MEDIA_KINDS: ReadonlySet<unknown> = new Set(['image', 'audio', 'video']);
 /** How deep a result is looked into for media; a result nested deeper keeps what it holds. */
 const MEDIA_SCAN_DEPTH = 32;
 
+/** The keys that hold the bytes of media, in the media object and in the objects inside it. */
+const PAYLOAD_KEYS: ReadonlySet<string> = new Set(['base64', 'data', 'bytes']);
+
 /**
- * `value` without its media: an object whose `type` is an image, audio or video is reduced to
- * that kind, and a `base64` field is dropped. What a screenshot returns is its bytes in
- * base64 (hundreds of thousands of characters for a large one). It is not text anything is
- * copied from, and it would otherwise be read as text, scanned, and, past the clip, make the
- * session look as if a result had been cut short.
+ * `value` without the bytes of its media: in an object whose `type` is an image, audio or video,
+ * and in the objects inside it, the keys that hold the payload (`base64`, `data`, `bytes`) are
+ * dropped, and a `base64` field is dropped wherever it is. What a screenshot returns is its bytes
+ * in base64 (hundreds of thousands of characters for a large one). It is not text anything is copied
+ * from, and it would otherwise be read as text, scanned, and, past the clip, make the session look
+ * as if a result had been cut short. Every other string beside them stays: a caption, a
+ * description, a title or a transcript is text the model reads, and is where a page can put what it
+ * wants said.
  */
-function withoutMedia(value: unknown, depth = 0): unknown {
+function withoutMedia(value: unknown, depth = 0, inMedia = false): unknown {
   if (depth > MEDIA_SCAN_DEPTH || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1));
+  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1, inMedia));
   const record = value as Record<string, unknown>;
   const kind = record['type'];
-  if (typeof kind === 'string' && MEDIA_KINDS.has(kind)) return { type: kind };
+  const media = inMedia || (typeof kind === 'string' && MEDIA_KINDS.has(kind));
   return Object.fromEntries(
     Object.entries(record)
-      .filter(([key]) => key !== 'base64')
-      .map(([key, item]) => [key, withoutMedia(item, depth + 1)]),
+      .filter(([key]) => key !== 'base64' && !(media && PAYLOAD_KEYS.has(key)))
+      .map(([key, item]) => [key, withoutMedia(item, depth + 1, media)]),
   );
 }
 
