@@ -87,6 +87,9 @@ pin_missing=0
 work=""
 scratch_failed=0
 cleanup() {
+  # A watchdog stopped before its subshell starts can inherit EXIT. Only the wrapper owns
+  # the scratch directory: removing it in that child races the npm-to-npx fallback.
+  if [ "$BASH_SUBSHELL" -ne 0 ]; then return; fi
   if [ -n "$work" ]; then rm -rf "$work"; fi
 }
 trap cleanup EXIT

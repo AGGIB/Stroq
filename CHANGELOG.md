@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
+
 - Host-filtered attack replay checks partial visibility by phase and tool; absent shell output, page bodies and Claude WebSearch pre-hooks are unsupported. Generated host evidence escapes Markdown table separators and HTML placeholders. Benchmark report paths use forward slashes on every OS so `check:reports` is reproducible across Windows and POSIX.
 
 ### Added
