@@ -2,8 +2,9 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isShellTool } from '../actions/shell-tools.js';
 import { normalizeText } from '../normalize/normalizer.js';
+import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
-import { collectStrings } from '../cloak/json-strings.js';
+import { collectStringsDeep } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { FLOOR_KINDS } from './atom-kinds.js';
 import { extractActionAtoms, normalizePackageName } from './atoms.js';
@@ -141,8 +142,13 @@ export function knownPackages(cwd: string): ReadonlySet<string> {
  * in it is all there is to read, so it is serialised.
  */
 function textOfInput(toolInput: Readonly<Record<string, unknown>>): string {
-  const strings = collectStrings(toolInput);
-  return strings.length > 0 ? strings.join('\n') : JSON.stringify(toolInput);
+  const strings = collectStringsDeep(toolInput, 2 * DEFAULT_MAX_CHARS);
+  if (strings.length > 0) return strings.join('\n');
+  try {
+    return JSON.stringify(toolInput);
+  } catch {
+    return '';
+  }
 }
 
 /** The atoms of a proposed action, and whether some part of it could not be read (see `ActionExtraction`). */

@@ -1,6 +1,6 @@
 import {
   DEFAULT_MAX_CHARS,
-  collectStrings,
+  collectStringsDeep,
   describeEvidence,
   describeSecretHit,
   toEvidence,
@@ -153,6 +153,10 @@ const plain = (value: string): ResultReading => ({ text: value, serialised: fals
 const MEDIA_KINDS: ReadonlySet<unknown> = new Set(['image', 'audio', 'video']);
 /** How deep a result is looked into for media; a result nested deeper keeps what it holds. */
 const MEDIA_SCAN_DEPTH = 32;
+/** How many levels of items and lists are looked into for the shapes of a result, before the rest is read flat. */
+const MAX_READ_DEPTH = 64;
+/** How many characters of strings are collected from a value: twice what is kept, so that the clip is the reader's. */
+const STRING_ROOM = MAX_RESULT_CHARS * 2;
 
 /** The keys that hold the bytes of media, in the media object and in the objects inside it. */
 const PAYLOAD_KEYS: ReadonlySet<string> = new Set(['base64', 'data', 'bytes']);
@@ -185,14 +189,20 @@ const JSON_FORM_CHARS = 32_768;
 const JSON_FORM_STRING_CHARS = 2_000;
 
 /** `value` serialised, its long strings cut (their text is read in full beside it), and the whole kept short. */
-const jsonForm = (value: unknown): string =>
-  (
-    JSON.stringify(value, (_key, item: unknown) =>
-      typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
-        ? item.slice(0, JSON_FORM_STRING_CHARS)
-        : item,
-    ) ?? ''
-  ).slice(0, JSON_FORM_CHARS);
+const jsonForm = (value: unknown): string => {
+  try {
+    return (
+      JSON.stringify(value, (_key, item: unknown) =>
+        typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
+          ? item.slice(0, JSON_FORM_STRING_CHARS)
+          : item,
+      ) ?? ''
+    ).slice(0, JSON_FORM_CHARS);
+  } catch {
+    // Too deep to serialise: the strings in it have been read, which is what this is a copy of.
+    return '';
+  }
+};
 
 /**
  * What the shapes of a result that are known read, each in its own way: the `text` of a text item,
@@ -210,7 +220,11 @@ interface KnownReading {
   readonly serialised: boolean;
 }
 
-function knownReading(obj: Record<string, unknown>, requestPath: string | undefined): KnownReading {
+function knownReading(
+  obj: Record<string, unknown>,
+  requestPath: string | undefined,
+  depth: number,
+): KnownReading {
   const pieces: string[] = [];
   const consumed = new Set<string>();
   let fileRest: Record<string, unknown> | null = null;
@@ -233,7 +247,7 @@ function knownReading(obj: Record<string, unknown>, requestPath: string | undefi
       if (typeof obj[stream] === 'string') consumed.add(stream);
   }
   if (Array.isArray(obj['content'])) {
-    const items = toolResultReading(obj['content'], requestPath);
+    const items = toolResultReading(obj['content'], requestPath, depth + 1);
     pieces.push(items.text);
     consumed.add('content');
     serialised = items.serialised;
@@ -297,7 +311,7 @@ function otherStrings(
   const unread =
     known.fileRest === null ? Object.entries(obj).filter(([key]) => key === 'file') : [];
   return [...siblings, ...inFile, ...unread]
-    .flatMap(([, value]) => collectStrings(withoutMedia(value)))
+    .flatMap(([, value]) => collectStringsDeep(withoutMedia(value), STRING_ROOM))
     .filter((value) => value !== '');
 }
 
@@ -322,11 +336,12 @@ function stringsAndJson(strings: readonly string[], readable: unknown): ResultRe
 function objectReading(
   obj: Record<string, unknown>,
   requestPath: string | undefined,
+  depth: number,
 ): ResultReading {
-  const known = knownReading(obj, requestPath);
+  const known = knownReading(obj, requestPath, depth);
   if (known.pieces.length === 0) {
     const readable = withoutMedia(obj);
-    const strings = collectStrings(readable).filter((value) => value !== '');
+    const strings = collectStringsDeep(readable, STRING_ROOM).filter((value) => value !== '');
     if (strings.length === 0) return { text: jsonForm(readable), serialised: true };
     return stringsAndJson(strings, readable);
   }
@@ -336,17 +351,20 @@ function objectReading(
   return stringsAndJson([...primary, ...others], withoutMedia(obj));
 }
 
-export function toolResultReading(result: unknown, requestPath?: string): ResultReading {
+export function toolResultReading(result: unknown, requestPath?: string, depth = 0): ResultReading {
   if (typeof result === 'string') return plain(clip(result));
+  // Past this the shapes are not looked for: whatever strings are down there are read, flat.
+  if (depth > MAX_READ_DEPTH && result !== null && typeof result === 'object')
+    return plain(clip(collectStringsDeep(result, STRING_ROOM).join('\n')));
   if (Array.isArray(result)) {
-    const parts = result.map((item) => toolResultReading(item, requestPath));
+    const parts = result.map((item) => toolResultReading(item, requestPath, depth + 1));
     return {
       text: clip(parts.map((part) => part.text).join('\n')),
       serialised: parts.some((part) => part.serialised),
     };
   }
   if (result && typeof result === 'object') {
-    const reading = objectReading(result as Record<string, unknown>, requestPath);
+    const reading = objectReading(result as Record<string, unknown>, requestPath, depth);
     return { ...reading, text: clip(reading.text) };
   }
   return plain(result === undefined || result === null ? '' : String(result));
@@ -374,6 +392,24 @@ function preOutput(decision: 'deny' | 'ask', reason: string): HookOutput {
 
 export const denyOutput = (reason: string): HookOutput => preOutput('deny', reason);
 export const askOutput = (reason: string): HookOutput => preOutput('ask', reason);
+
+/**
+ * The reading of a result, which does not throw. A result that cannot be read (it is not what the
+ * reader looks at, or reading it fails) is posted with nothing to scan and as unread, so that the
+ * session is marked incomplete and a package no record accounts for is asked about: the engine is
+ * given every result, whatever the reading of it came to.
+ */
+function safeReading(
+  response: unknown,
+  requestPath: string | undefined,
+): ResultReading & { readonly failed?: true } {
+  try {
+    return toolResultReading(response, requestPath);
+  } catch (err) {
+    logError('result', err);
+    return { text: '', serialised: false, failed: true };
+  }
+}
 
 /** The path a tool call asked for, which a result may echo back. */
 function requestedPath(toolInput: Readonly<Record<string, unknown>>): string | undefined {
@@ -418,12 +454,12 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const failed = input.hook_event_name === 'PostToolUseFailure';
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
-  const reading = toolResultReading(response, requestedPath(input.tool_input));
+  const reading = safeReading(response, requestedPath(input.tool_input));
   const result = await engine.post({
     ...base,
     ...(failed ? { resultFailed: true as const } : {}),
     toolResultText: reading.text,
-    ...(reading.serialised && PROSE_TOOL.test(input.tool_name)
+    ...((reading.serialised && PROSE_TOOL.test(input.tool_name)) || reading.failed
       ? { resultUnread: true as const }
       : {}),
     // No result field at all is not an empty result: it is a payload shape this

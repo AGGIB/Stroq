@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_CHARS, collectStrings } from '@stroq/core';
+import { DEFAULT_MAX_CHARS, collectStringsDeep } from '@stroq/core';
 import { isRecord } from '../adapters/tool-input.js';
 import type { ScannedMethod } from './framing.js';
 
@@ -22,7 +22,15 @@ const stringAt = (record: Record<string, unknown>, key: string): string => {
   return typeof value === 'string' ? value : '';
 };
 
-const asJson = (value: unknown): string => JSON.stringify(value) ?? '';
+const asJson = (value: unknown): string => {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    // Too deep to serialise (a value nested thousands of levels deep): the strings in it are
+    // read apart from this, which is all the JSON form is a copy of.
+    return '';
+  }
+};
 
 /**
  * A NON-STRING `text` field read as text: its JSON. A hostile server that writes an
@@ -100,7 +108,7 @@ const joined = (parts: readonly string[]): string =>
  * nothing could read it. The keys are structure, and the JSON form below has them.
  */
 const structuredStrings = (structured: unknown): string =>
-  collectStrings(structured)
+  collectStringsDeep(structured, MCP_MAX_RESULT_CHARS * 2)
     .filter((text) => text !== '')
     .join('\n');
 
