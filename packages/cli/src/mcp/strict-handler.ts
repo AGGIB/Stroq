@@ -133,7 +133,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * audited like the ones before it, so the log shows which one was the last.
    */
   async function endServer(
-    also: TrackedRequest | null,
+    also: TrackedRequest | readonly TrackedRequest[] | null,
     limit: number,
     crossing: {
       readonly reason: WithholdReason;
@@ -148,7 +148,8 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     // not tracked, not written. Nothing can fall between the two.
     terminated = true;
     endedAtLimit = limit;
-    const waiting = [...(also === null ? [] : [also]), ...ledger.drain()];
+    const alsoList = also === null ? [] : Array.isArray(also) ? also : [also];
+    const waiting = [...alsoList, ...ledger.drain()];
     deps.terminate();
     await audit(crossing.reason, crossing.toolName, crossing.summary);
     try {
@@ -178,10 +179,15 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * taken before it is this handler's to answer, and it is answered with what the ones
    * the end answered got. Nothing else answers it, so it is answered exactly once.
    */
-  const answerEnded = (request: TrackedRequest | null): Promise<void> =>
-    request === null
-      ? Promise.resolve()
-      : deps.toClient(terminatedResponse(request.id, endedAtLimit));
+  const answerEnded = (
+    request: TrackedRequest | readonly TrackedRequest[] | null,
+  ): Promise<void> => {
+    if (request === null) return Promise.resolve();
+    const list = Array.isArray(request) ? request : [request];
+    return Promise.all(list.map((r) => deps.toClient(terminatedResponse(r.id, endedAtLimit)))).then(
+      () => {},
+    );
+  };
 
   /**
    * One withheld message: counted toward the cap for its kind, audited and, if it belongs
@@ -194,7 +200,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     options: {
       readonly toolName: string;
       readonly summary: string;
-      readonly answers?: TrackedRequest | null;
+      readonly answers?: TrackedRequest | readonly TrackedRequest[] | null;
       readonly toServer?: Record<string, unknown>;
       readonly method?: string;
       /** Whether the server-initiated message had an `id` member, usable or not. */
@@ -217,7 +223,10 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     // was ended is refused nothing and delivered nothing more.
     if (terminated) return answerEnded(answers);
     if (options.toServer !== undefined) deps.toServer(options.toServer);
-    if (answers !== null) await deps.toClient(withheldResponse(answers.id, reason));
+    if (answers !== null) {
+      const list = Array.isArray(answers) ? answers : [answers];
+      for (const req of list) await deps.toClient(withheldResponse(req.id, reason));
+    }
   }
 
   /** A message with no request to answer, or whose head may name one that is still waiting. */
@@ -506,11 +515,28 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       return onServerInitiated(message);
     // A batch, or an object that is no kind of message: nothing to forward. A response
     // shape with an id Stroq can read may still name a request that is waiting.
+    if (Array.isArray(value)) {
+      const answered: TrackedRequest[] = [];
+      for (const item of value) {
+        if (isRecord(item)) {
+          const id = asJsonRpcId(item['id']);
+          if (id !== null) {
+            const req = ledger.take(id);
+            if (req !== undefined) answered.push(req);
+          }
+        }
+      }
+      return withhold('invalid-shape', {
+        toolName: answered[0]?.toolName ?? toolOf('unreadable_server_message'),
+        summary: `withheld a server batch${answered.length > 0 ? ' (its requests were answered)' : ''}`,
+        answers: answered.length > 0 ? answered : null,
+      });
+    }
     const named = isRecord(value) ? asJsonRpcId(value['id']) : null;
     const request = named === null ? null : (ledger.take(named) ?? null);
     return withhold('invalid-shape', {
       toolName: request?.toolName ?? toolOf('unreadable_server_message'),
-      summary: `withheld a server ${message.kind === 'batch' ? 'batch' : 'message of an unknown kind'}`,
+      summary: 'withheld a server message of an unknown kind',
       answers: request,
     });
   }

@@ -118,6 +118,11 @@ describe('the --strict section of docs/AGENTS.md', () => {
       expect(section).toContain('silently');
     });
 
+    it('says a batch from the server is withheld whole while answering its requests', () => {
+      expect(section).toContain('a batch from the server is withheld whole as `invalid-shape`');
+      expect(section).toContain('any waiting requests whose ids it carries are answered');
+    });
+
     it('is the same as SECURITY.md in its scope: the deadline is about the scan', () => {
       const security = readFileSync(
         fileURLToPath(new URL('../../../../SECURITY.md', import.meta.url)),

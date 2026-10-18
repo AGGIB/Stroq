@@ -99,6 +99,43 @@ describe('a line that could not be parsed', () => {
     expect(rig.sent).toEqual([]);
     expect(JSON.stringify(rig.audit())).toContain('no request to answer');
   });
+
+  it('answers the waiting request when an unparsable line is a batch', async () => {
+    const rig = handlerRig();
+    track(rig, 5);
+    await rig.feed('[{"jsonrpc":"2.0","id":5,"result":{"content":[');
+    expect(JSON.stringify(rig.sent)).toContain('"id":5');
+    expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
+  });
+});
+
+describe('a batch sent by the server', () => {
+  it('is withheld as invalid-shape and answers all waiting requests in the batch', async () => {
+    const rig = handlerRig();
+    track(rig, 3);
+    track(rig, 4);
+    await rig.feed(
+      JSON.stringify([
+        { jsonrpc: '2.0', id: 3, result: { content: [] } },
+        { jsonrpc: '2.0', id: 4, result: { content: [] } },
+      ]),
+    );
+    expect(rig.lines).toEqual([]);
+    expect(rig.sent).toHaveLength(2);
+    expect(JSON.stringify(rig.sent)).toContain('"id":3');
+    expect(JSON.stringify(rig.sent)).toContain('"id":4');
+    expect(JSON.stringify(rig.sent)).toContain('(invalid-shape)');
+    expect(rig.ruleIds()).toEqual(['mcp-strict-invalid-shape']);
+  });
+
+  it('answers nobody when the batch names no waiting requests', async () => {
+    const rig = handlerRig();
+    track(rig, 3);
+    await rig.feed(JSON.stringify([{ jsonrpc: '2.0', id: 99, result: { content: [] } }]));
+    expect(rig.lines).toEqual([]);
+    expect(rig.sent).toEqual([]);
+    expect(rig.ruleIds()).toEqual(['mcp-strict-invalid-shape']);
+  });
 });
 
 describe('a message that will not serialise', () => {

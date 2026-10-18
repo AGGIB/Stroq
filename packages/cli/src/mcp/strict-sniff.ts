@@ -56,6 +56,7 @@ function idAt(text: string, at: number): JsonRpcId | null {
 export function sniffId(head: string): JsonRpcId | null {
   const window = head.slice(0, STRICT_ID_SNIFF_CHARS);
   let i = skipBlanks(window, 0);
+  if (window[i] === '[') i = skipBlanks(window, i + 1);
   if (window[i] !== '{') return null;
   let depth = 0;
   while (i < window.length) {
