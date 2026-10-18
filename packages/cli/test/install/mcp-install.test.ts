@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -95,24 +96,32 @@ describe('confirmed MCP install', () => {
     await expect(addMcp(f.dir, f.mcpOptions)).rejects.toThrow(/already has/);
   });
 
-  it('updates a changed server with a typed digest and drops the old revision', async () => {
+  it('updates a changed server with a typed digest and retains the previous revision', async () => {
     const f = await fixture();
     const first = await addMcp(f.dir, f.mcpOptions);
     await writeFile(join(f.dir, 'server.js'), 'console.log("two");\n');
     const second = await addMcp('demo', f.mcpOptions);
     expect(second.digest).not.toBe(first.digest);
     expect(second.history.map((h) => h.action)).toEqual(['add', 'update']);
-    await expect(
-      readFile(join(storePath(f.options.stroqHome, first.digest), 'manifest.json')),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    // The previous revision is retained for rollback until the next update or removal
+    expect(existsSync(join(storePath(f.options.stroqHome, first.digest), 'manifest.json'))).toBe(
+      true,
+    );
     expect(
       await readFile(
         join(storePath(f.options.stroqHome, second.digest), 'tree', 'server.js'),
         'utf8',
       ),
     ).toBe('console.log("two");\n');
+    // A second update drops the oldest revision
+    await writeFile(join(f.dir, 'server.js'), 'console.log("three");\n');
+    const third = await addMcp('demo', f.mcpOptions);
+    expect(third.digest).not.toBe(second.digest);
+    await expect(
+      readFile(join(storePath(f.options.stroqHome, first.digest), 'manifest.json')),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 
   it('refuses to update over an outside edit of the config entry unless forced', async () => {

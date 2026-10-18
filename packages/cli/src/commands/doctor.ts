@@ -885,6 +885,8 @@ export async function doctorReport(
     stroqHome: home,
     ...(opts.userHome !== undefined ? { userHome: opts.userHome } : {}),
   });
+  const { checkRetainedRevisions } = await import('../install/previous-revisions.js');
+  const retainedChecks = await checkRetainedRevisions(home);
   const checks: readonly DoctorCheck[] = [
     { name: 'stroq', ok: true, detail: stroqVersion() },
     { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
@@ -902,6 +904,7 @@ export async function doctorReport(
     ...pinChecks,
     ...pinSandbox,
     ...skillChecks,
+    ...retainedChecks,
     {
       name: 'home',
       ok: true,

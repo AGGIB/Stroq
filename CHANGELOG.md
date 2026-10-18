@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stroq add <name> --rollback` restores the previous revision of an updated skill or MCP server.** Store garbage collection now retains exactly one previous revision per installed skill and MCP server until the next update or removal. `stroq doctor` reports retained previous revisions and the disk space they use. An update can be rolled back with `stroq add <name> --rollback`, requiring the typed digest and recording an audit receipt.
+
 ## [0.26.0] - 2026-10-18
 
 ### Added
