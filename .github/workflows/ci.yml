@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -10,6 +11,17 @@ permissions:
   contents: read
 
 jobs:
+  maintainer-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: node --test .github/scripts/maintainer.test.mjs
   python-oracle:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -243,7 +255,9 @@ jobs:
     name: stroq inspect (SARIF)
     runs-on: ubuntu-latest
     # A fork's and Dependabot's pull requests get a read-only token, which cannot upload.
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     permissions:
       contents: read
       security-events: write
