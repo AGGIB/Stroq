@@ -141,11 +141,6 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
   'git.push_external',
   'shell.exec_encoded',
 ];
-/**
- * How old a marker that a result is being recorded has to be to be one that nothing will take off.
- * A hook answers in seconds, and the host gives it fifteen at most.
- */
-const STALE_MARKER_MS = 20_000;
 const CANARY_RULE_ID = 'STROQ-CANARY';
 const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
 
@@ -423,7 +418,8 @@ export class StroqEngine {
 
   /**
    * Whether a result was read in this session that the hook did not finish scanning, for a call
-   * that sends something out: its marker is still there long after any hook would have answered.
+   * that sends something out: its marker is still there, though the process that put it down is
+   * gone or past its deadline.
    * Such a result may hold what the agent is now about to act on, and tainted is what a session
    * would be if the scan had finished with a verdict.
    */
@@ -433,7 +429,7 @@ export class StroqEngine {
   ): Promise<boolean> {
     const store = this.opts.provenance;
     if (!store || !isNetworkShaped(classes)) return false;
-    return store.hasStaleMarker(event.sessionId, STALE_MARKER_MS);
+    return store.hasStaleMarker(event.sessionId);
   }
 
   async pre(event: PreToolEvent): Promise<PreResult> {

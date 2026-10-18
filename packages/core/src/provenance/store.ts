@@ -18,6 +18,7 @@ import { neutralizeControls } from '../util/controls.js';
 import { withLock } from '../util/lock.js';
 import { shellQuote } from '../util/shell-quote.js';
 import { isFloorKind } from './atom-kinds.js';
+import { markerIsStale, pendingMarkerBody } from './pending-marker.js';
 import { retain } from './retain.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
@@ -52,11 +53,12 @@ export interface ProvenanceStore {
    */
   hasEvidence(sessionId: string): Promise<boolean>;
   /**
-   * Whether a marker that a result is being recorded (see `setPending`) is older than `olderThanMs`
-   * at `nowMs`, or has no readable time: a result the agent read and the hook did not finish
-   * scanning, since a hook that is running answers in seconds.
+   * Whether a marker that a result is being recorded (see `setPending`) is stale at `nowMs`: its
+   * deadline has passed, the process that owns it is gone, or it cannot be read or names no owner.
+   * That is a result the agent read and the hook did not finish scanning, since a hook that is
+   * running answers within its deadline.
    */
-  hasStaleMarker(sessionId: string, olderThanMs: number, nowMs?: number): Promise<boolean>;
+  hasStaleMarker(sessionId: string, nowMs?: number): Promise<boolean>;
   /**
    * Notes that evidence for this session was lost or never recorded. Permanent until
    * `clear`: a later short result does not make an earlier loss any less of one.
@@ -300,10 +302,7 @@ export class FileProvenanceStore implements ProvenanceStore {
       await rm(this.pendingFile(sessionId, owner), { force: true });
       return;
     }
-    await this.writeNote(
-      this.pendingFile(sessionId, owner),
-      JSON.stringify({ pending: true, since: this.now().toISOString() }),
-    );
+    await this.writeNote(this.pendingFile(sessionId, owner), pendingMarkerBody(this.now()));
   }
 
   async isIncomplete(sessionId: string): Promise<boolean> {
@@ -328,11 +327,7 @@ export class FileProvenanceStore implements ProvenanceStore {
     return (await this.read(sessionId)).some((r) => r.suspect || isFloorKind(r.kind));
   }
 
-  async hasStaleMarker(
-    sessionId: string,
-    olderThanMs: number,
-    nowMs: number = Date.now(),
-  ): Promise<boolean> {
+  async hasStaleMarker(sessionId: string, nowMs: number = Date.now()): Promise<boolean> {
     const files = [this.pendingFile(sessionId)];
     try {
       const owners = await readdir(this.pendingDir(sessionId));
@@ -341,15 +336,15 @@ export class FileProvenanceStore implements ProvenanceStore {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return true;
     }
     for (const file of files) {
-      let since = Number.NaN;
+      let text: string;
       try {
-        since = Date.parse(
-          (JSON.parse(await readFile(file, 'utf8')) as { since?: string }).since ?? '',
-        );
+        text = await readFile(file, 'utf8');
       } catch (err) {
+        // Settled between the listing and the read: nothing is in flight there any more.
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        return true;
       }
-      if (Number.isNaN(since) || nowMs - since > olderThanMs) return true;
+      if (markerIsStale(text, nowMs)) return true;
     }
     return false;
   }
