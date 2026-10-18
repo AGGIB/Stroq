@@ -74,8 +74,9 @@ describe('the --strict section of docs/AGENTS.md', () => {
     for (const escape of ['\\u2028', '\\u2029', '\\u0085']) expect(section).toContain(escape);
   });
 
-  it('says that the messages it forwards on the server\u2019s initiative are neither counted nor audited', () => {
-    expect(section).toContain('are not counted, audited or rate-limited');
+  it('says that the messages it forwards on the server\u2019s initiative are counted, audited and capped', () => {
+    expect(section).toContain('are counted, audited and capped');
+    expect(section).toContain('mcp-strict-forwarded');
   });
 
   it('says what is audited and remembered of a result once, and what the extra views add', () => {

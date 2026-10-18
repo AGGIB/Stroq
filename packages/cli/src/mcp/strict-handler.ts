@@ -25,6 +25,7 @@ import { strictLine } from './strict-line.js';
 import { describeMethod, forwardableServerMessage } from './strict-messages.js';
 import {
   countClass,
+  forwardedDecision,
   refusedServerRequest,
   terminatedDecision,
   terminatedResponse,
@@ -121,6 +122,23 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     } catch (err) {
       // A request that cannot be audited must still be answered: the audit failing
       // is a thing to log, never a reason for the client to wait forever.
+      logError('mcp strict audit', err);
+    }
+  };
+
+  const auditForwarded = async (
+    method: string,
+    toolName: string,
+    summary: string,
+  ): Promise<void> => {
+    try {
+      await denyDirectly(
+        { sessionId: ctx.sessionId, toolName, toolInput: {}, cwd: ctx.cwd },
+        forwardedDecision(method),
+        `mcp strict: ${summary}`,
+        () => ({ stdout: '', exitCode: 0 }),
+      );
+    } catch (err) {
       logError('mcp strict audit', err);
     }
   };
@@ -490,7 +508,22 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
 
   async function onServerInitiated(message: ServerInitiated): Promise<void> {
     const forward = forwardableServerMessage(message);
-    if (forward !== null) return deps.toClient(forward);
+    if (forward !== null) {
+      if (terminated) return;
+      const count = (benignCount += 1);
+      const limit = maxBenign;
+      const toolName = toolOf('forwarded_server_message');
+      const summary = `forwarded a server ${message.kind} (${describeMethod(message.method)})`;
+      if (count > limit)
+        return endServer(null, limit, {
+          reason: 'unsolicited',
+          toolName,
+          summary: `ended after more than ${limit} server-initiated messages`,
+        });
+      await auditForwarded(message.method, toolName, summary);
+      if (terminated) return;
+      return deps.toClient(forward);
+    }
     return withhold('unsolicited', {
       method: message.method,
       hasId: Object.hasOwn(message.value, 'id'),

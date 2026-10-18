@@ -148,3 +148,10 @@ export const terminatedDecision = (limit: number): Decision => ({
   ruleId: 'mcp-strict-terminated',
   reason: `The server had more than ${limit} messages withheld in one run, so strict mode ended it.`,
 });
+
+/** The audit decision for a forwarded server-initiated message. */
+export const forwardedDecision = (method: string): Decision => ({
+  effect: 'allow',
+  ruleId: 'mcp-strict-forwarded',
+  reason: `Strict mode verified and forwarded a server-initiated message (${method}).`,
+});

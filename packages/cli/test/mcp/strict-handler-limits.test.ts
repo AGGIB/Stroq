@@ -225,4 +225,27 @@ describe('what is forwarded when a server starts the exchange', () => {
     expect(JSON.stringify(rig.sent)).not.toContain('Ignore');
     expect(rig.ruleIds()).toEqual(['mcp-strict-unsolicited']);
   });
+
+  it('is audited as mcp-strict-forwarded and counts toward the benign cap', async () => {
+    const rig = handlerRig();
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 'srv-ping', method: 'ping' }));
+    expect(rig.ruleIds()).toEqual(['mcp-strict-forwarded']);
+    expect(JSON.stringify(rig.audit())).toContain('forwarded a server request (ping)');
+  });
+
+  it('ends the server when forwarded server messages exceed the benign cap', async () => {
+    const rig = handlerRig({ maxBenign: 2 });
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' }));
+    expect(rig.terminated()).toBe(0);
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'ping' }));
+    expect(rig.terminated()).toBe(1);
+    expect(rig.notes.join('')).toContain('strict mode ended the server');
+    expect(rig.ruleIds()).toEqual([
+      'mcp-strict-forwarded',
+      'mcp-strict-forwarded',
+      'mcp-strict-unsolicited',
+      'mcp-strict-terminated',
+    ]);
+  });
 });
