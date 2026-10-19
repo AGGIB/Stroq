@@ -1,36 +1,17 @@
 name: False positive
-description: Stroq flagged, warned on, or blocked something benign
+description: Stroq blocked or asked about something safe
 title: '[False positive]: '
 labels: ['false-positive']
 body:
   - type: markdown
     attributes:
       value: |
-        A false positive is treated as a bug in this project. The more
-        precisely you can reproduce it, the faster it gets fixed.
-  - type: textarea
-    id: content
-    attributes:
-      label: The benign command or content
-      description: >
-        The command that was denied or asked, or the part of the file or tool
-        output that was flagged — the smallest piece that still triggers it.
-        Remove anything private first: secrets, internal hostnames, customer
-        data. The words that matched matter more than the rest, so a trimmed
-        excerpt is fine; if you cannot share any of it, describe it instead.
-      render: text
-    validations:
-      required: false
-  - type: textarea
-    id: decision
-    attributes:
-      label: Rule id(s) and decision line
-      description: >
-        The rule id(s) involved — `stroq why` prints them — and the relevant
-        line(s) from `stroq log`, or the reason the agent showed you.
-      render: shell
-    validations:
-      required: true
+        Stroq blocked or asked about something safe. We treat that as a bug.
+
+        **Remove secrets before you paste anything below:** keys, tokens, passwords,
+        private hostnames and customer data. A trimmed excerpt is fine.
+
+        If Stroq let something risky through, use the **False negative** form instead.
   - type: input
     id: agent
     attributes:
@@ -38,10 +19,52 @@ body:
       placeholder: 'e.g. Claude Code 2.1.226'
     validations:
       required: true
+  - type: input
+    id: stroq-version
+    attributes:
+      label: Stroq version
+      description: Run `stroq --version` (or `npx @stroq/cli --version`).
+      placeholder: 'e.g. 0.27.0'
+    validations:
+      required: true
+  - type: textarea
+    id: content
+    attributes:
+      label: The tool call or command
+      description: >
+        The command or tool call that Stroq stopped, or the part of a file it
+        flagged. Keep the smallest piece that still triggers it. Remove secrets
+        first. If you cannot share any of it, describe it instead.
+      render: text
+    validations:
+      required: false
+  - type: dropdown
+    id: what-stroq-did
+    attributes:
+      label: What Stroq did
+      options:
+        - Blocked it
+        - Asked me first
+        - Flagged the session, so later actions were stricter
+        - Something else (say what below)
+    validations:
+      required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
-      description: What should have happened instead, and why you believe this content or command is benign.
+      label: What you expected
+      description: What should have happened instead, and why it is safe.
+    validations:
+      required: true
+  - type: textarea
+    id: why-output
+    attributes:
+      label: Output of `stroq why`
+      description: >
+        Run `stroq why` in a terminal, outside the agent, and paste what it prints.
+        It names the rule. If it was not the last action Stroq stopped, find its
+        number (#) with `stroq log` and run `stroq why --seq <number>`. Check the
+        output for secrets first.
+      render: shell
     validations:
       required: true

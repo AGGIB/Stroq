@@ -591,6 +591,18 @@ test('form classification requires prefix and headings and never overwrites a ca
   assert.equal(issueLabel({ ...issue, pull_request: {} }, new Set(['bug'])), null);
 });
 
+test('form classification knows the false-positive and false-negative forms by their headings', () => {
+  const issue = (title, body) => ({ state: 'open', title, body, labels: [] });
+  const labels = new Set(['false-positive', 'false-negative']);
+  const positive = '### What you expected\ntext\n### Output of `stroq why`\ntext';
+  const older = '### Rule id(s) and decision line\ntext\n### Expected behavior\ntext';
+  const negative = '### The tool call or command\ntext\n### What you expected\ntext';
+  assert.equal(issueLabel(issue('[False positive]: x', positive), labels), 'false-positive');
+  assert.equal(issueLabel(issue('[False positive]: x', older), labels), 'false-positive');
+  assert.equal(issueLabel(issue('[False negative]: x', negative), labels), 'false-negative');
+  assert.equal(issueLabel(issue('[False negative]: x', positive), labels), null);
+});
+
 test('pagination retrieves a second page instead of silently dropping issues', async () => {
   const urls = [];
   const client = new GitHub('test-token', async (url) => {

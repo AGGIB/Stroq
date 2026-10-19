@@ -1,0 +1,73 @@
+name: False negative
+description: Stroq let something risky through
+title: '[False negative]: '
+labels: ['false-negative']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stroq let a risky action through.
+
+        **Does it get around a protection the docs promise?** Then do not file it here.
+        Report it privately as [SECURITY.md](../../SECURITY.md) says, so it can be fixed
+        before the trick is public. If you are not sure, report it privately.
+
+        This public form is for a risky action that Stroq does not claim to stop.
+
+        **Remove secrets before you paste anything below:** keys, tokens, passwords,
+        private hostnames and customer data.
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      placeholder: 'e.g. Claude Code 2.1.226'
+    validations:
+      required: true
+  - type: input
+    id: stroq-version
+    attributes:
+      label: Stroq version
+      description: Run `stroq --version` (or `npx @stroq/cli --version`).
+      placeholder: 'e.g. 0.27.0'
+    validations:
+      required: true
+  - type: textarea
+    id: content
+    attributes:
+      label: The tool call or command
+      description: >
+        What the agent ran, or tried to run. Remove secrets first. If you cannot
+        share it, describe its shape instead.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: what-stroq-did
+    attributes:
+      label: What Stroq did
+      options:
+        - Let it run without a word
+        - Asked me, but it should have blocked it
+        - Flagged the session, but did not stop this action
+        - Something else (say what below)
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What Stroq should have done, and why the action is risky.
+    validations:
+      required: true
+  - type: textarea
+    id: why-output
+    attributes:
+      label: Output of `stroq why`
+      description: >
+        Find the action's number (#) with `stroq log`, then run
+        `stroq why --seq <number>` in a terminal, outside the agent, and paste what
+        it prints. If `stroq log` has no entry for it, say so. Check the output for
+        secrets first.
+      render: shell
+    validations:
+      required: false
