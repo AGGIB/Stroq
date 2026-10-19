@@ -15,9 +15,20 @@ import { describe, expect, it } from 'vitest';
 import { FileProvenanceStore, MAX_RECORDS } from '../../src/provenance/store.js';
 import { FileSessionStore, sessionKey } from '../../src/taint/session-store.js';
 
+/**
+ * A clock five minutes back. A marker the store writes with it is already stale: its deadline has
+ * passed, which is what a post that never finished leaves. A marker of a post that is running is no
+ * loss, and is tested in engine-live-marker.test.ts.
+ */
+const STALE_CLOCK = (): Date => new Date(Date.now() - 5 * 60_000);
+
 const fresh = () => {
   const dir = join(mkdtempSync(join(tmpdir(), 'stroq-prov-inc-')), 'sessions');
-  return { dir, store: new FileProvenanceStore(dir), sessions: new FileSessionStore(dir) };
+  return {
+    dir,
+    store: new FileProvenanceStore(dir, STALE_CLOCK),
+    sessions: new FileSessionStore(dir),
+  };
 };
 const input = (hash: string, suspect = false) => ({
   tool: 'Read',
@@ -29,6 +40,8 @@ const input = (hash: string, suspect = false) => ({
 });
 const batch = (prefix: string, count: number) =>
   Array.from({ length: count }, (_, i) => input(`${prefix}${i}`));
+const links = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => ({ ...input(`${prefix}${i}`), kind: 'url' as const }));
 const provFile = (dir: string, id: string) => join(dir, `${sessionKey(id)}.prov.json`);
 const taint = { tool: 'Read', ruleIds: ['STROQ-2026-00001'], at: '2026-09-04T00:00:00.000Z' };
 
@@ -249,7 +262,7 @@ describe('FileProvenanceStore.markIncomplete when the rename fails', () => {
       before?.();
       throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
     };
-    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+    return { dir, store: new FileProvenanceStore(dir, STALE_CLOCK, rename) };
   };
 
   it('leaves no temporary file behind, and says it failed', async () => {
@@ -310,10 +323,136 @@ describe('FileProvenanceStore under concurrent callers', () => {
   });
 });
 
+describe('FileProvenanceStore when the records outgrow the cap', () => {
+  // A URL or a host cannot raise the floor, so losing the record of one is not a loss that needs
+  // a note, and a lot of them must not push out the records that can.
+  it('drops the oldest URL records before any other, and says nothing', async () => {
+    const { store } = fresh();
+    await store.record('s1', [...batch('p', 10), ...links('u', MAX_RECORDS - 10)]);
+    await store.record('s1', links('v', 50));
+
+    expect(await store.lookup('s1', ['u0', 'u49'])).toEqual([]);
+    expect(await store.lookup('s1', ['u50', 'v49'])).toHaveLength(2);
+    expect(await store.lookup('s1', ['p0', 'p9'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('stays complete however many URL records a session reads', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('p', 5));
+    for (let round = 0; round < 6; round += 1) {
+      await store.record('s1', links(`r${round}-`, MAX_RECORDS / 2));
+    }
+    expect(await store.lookup('s1', ['p0', 'p4'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('keeps the cap on the file, URL records included', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', links('u', MAX_RECORDS + 300));
+    const onDisk: unknown = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8'));
+    expect(onDisk).toHaveLength(MAX_RECORDS);
+  });
+
+  it('notes the loss when it is a record that can raise the floor that goes', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('p', MAX_RECORDS));
+    await store.record('s1', links('u', 3));
+    expect(await store.isIncomplete('s1')).toBe(false);
+    expect(await store.lookup('s1', ['u0'])).toEqual([]);
+
+    await store.record('s1', [input('q0')]);
+
+    expect(await store.lookup('s1', ['p0'])).toEqual([]);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('keeps the records in the order they were read', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', [input('p0'), ...links('u', 3), input('p1')]);
+    await store.record('s1', links('v', MAX_RECORDS));
+    const onDisk = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8')) as { seq: number }[];
+    const seqs = onDisk.map((record) => record.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+});
+
+describe('FileProvenanceStore when flagged records meet the cap', () => {
+  // A flagged record wins over every later record of the same atom (see `action-lookup.ts`), but
+  // only among the records still kept. So the cap drops clean records before it drops a flagged one.
+  const flagged = (hash: string) => input(hash, true);
+
+  it('keeps a flagged record while clean records are dropped around it', async () => {
+    const { store } = fresh();
+    await store.record('s1', [flagged('x')]);
+    await store.record('s1', [...batch('c', MAX_RECORDS + 100), input('x')]);
+
+    const found = await store.lookup('s1', ['x']);
+    expect(found.map((record) => record.suspect).sort()).toEqual([false, true]);
+    expect(await store.lookup('s1', ['c0', 'c99'])).toEqual([]);
+    expect(await store.lookup('s1', ['c2099'])).toHaveLength(1);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('drops the oldest clean records first, as it always dropped the oldest', async () => {
+    const { store } = fresh();
+    await store.record('s1', [...batch('a', 10), flagged('x'), ...batch('b', MAX_RECORDS - 11)]);
+    await store.record('s1', batch('n', 5));
+    expect(await store.lookup('s1', ['a0', 'a4'])).toHaveLength(0);
+    expect(await store.lookup('s1', ['a5', 'x', 'n4'])).toHaveLength(3);
+  });
+
+  it('keeps the newest records of a session without a flagged one, as before', async () => {
+    const { store } = fresh();
+    await store.record('s1', batch('a', MAX_RECORDS));
+    await store.record('s1', batch('b', 50));
+    expect(await store.lookup('s1', ['a0', 'a49'])).toEqual([]);
+    expect(await store.lookup('s1', ['a50', 'b49'])).toHaveLength(2);
+  });
+
+  it('drops the oldest flagged records only when flagged records alone outgrow the cap, and says so', async () => {
+    const { store } = fresh();
+    await store.record(
+      's1',
+      Array.from({ length: MAX_RECORDS }, (_, i) => flagged(`f${i}`)),
+    );
+    expect(await store.isIncomplete('s1')).toBe(false);
+
+    await store.record('s1', [flagged('f-new')]);
+
+    expect(await store.lookup('s1', ['f0'])).toEqual([]);
+    expect(await store.lookup('s1', ['f1', 'f-new'])).toHaveLength(2);
+    expect(await store.isIncomplete('s1')).toBe(true);
+  });
+
+  it('drops a flagged record of a URL before a flagged package', async () => {
+    const { store } = fresh();
+    const link = { ...flagged('u0'), kind: 'url' as const };
+    await store.record('s1', [
+      link,
+      ...Array.from({ length: MAX_RECORDS - 1 }, (_, i) => flagged(`f${i}`)),
+    ]);
+    await store.record('s1', [flagged('f-new')]);
+    expect(await store.lookup('s1', ['u0'])).toEqual([]);
+    expect(await store.lookup('s1', ['f0'])).toHaveLength(1);
+    expect(await store.isIncomplete('s1')).toBe(false);
+  });
+
+  it('keeps the file a bare array in the order records were read', async () => {
+    const { dir, store } = fresh();
+    await store.record('s1', [flagged('x'), ...batch('c', MAX_RECORDS + 20)]);
+    const onDisk = JSON.parse(readFileSync(provFile(dir, 's1'), 'utf8')) as { seq: number }[];
+    expect(Array.isArray(onDisk)).toBe(true);
+    expect(onDisk).toHaveLength(MAX_RECORDS);
+    const seqs = onDisk.map((record) => record.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+});
+
 describe('FileProvenanceStore pending marker', () => {
   it('settles only its own operation, including across store instances', async () => {
     const { dir, store } = fresh();
-    const other = new FileProvenanceStore(dir);
+    const other = new FileProvenanceStore(dir, STALE_CLOCK);
     await Promise.all([
       store.setPending('s1', true, 'operation-a'),
       other.setPending('s1', true, 'operation-b'),
@@ -395,7 +534,7 @@ describe('FileProvenanceStore when the note of an eviction cannot be written', (
       if (String(to).endsWith(suffix)) throw noSpace();
       await renameFile(from, to);
     };
-    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+    return { dir, store: new FileProvenanceStore(dir, STALE_CLOCK, rename) };
   };
 
   it('still writes the records, and then fails closed on them, where the note would have been', async () => {

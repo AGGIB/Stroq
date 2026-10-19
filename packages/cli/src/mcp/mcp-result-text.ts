@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_CHARS } from '@stroq/core';
+import { DEFAULT_MAX_CHARS, collectStringsDeep } from '@stroq/core';
 import { isRecord } from '../adapters/tool-input.js';
 import type { ScannedMethod } from './framing.js';
 
@@ -22,7 +22,15 @@ const stringAt = (record: Record<string, unknown>, key: string): string => {
   return typeof value === 'string' ? value : '';
 };
 
-const asJson = (value: unknown): string => JSON.stringify(value) ?? '';
+const asJson = (value: unknown): string => {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    // Too deep to serialise (a value nested thousands of levels deep): the strings in it are
+    // read apart from this, which is all the JSON form is a copy of.
+    return '';
+  }
+};
 
 /**
  * A NON-STRING `text` field read as text: its JSON. A hostile server that writes an
@@ -94,10 +102,22 @@ const joined = (parts: readonly string[]): string =>
   clip(parts.filter((part) => part !== '').join('\n'));
 
 /**
- * A `tools/call` result: every content item, `structuredContent` as JSON, and an
- * `input_required` reply's `inputRequests` — the modern shape by which a server asks
- * the model for more input, which is exactly where an injection would sit. `isError`
- * results are scanned too: a poisoned error text is still content the model reads.
+ * The strings in `structuredContent`, decoded, one to a line. Serialised, a line break in a value
+ * is the two characters backslash and `n`, and a pattern that needs the start of a line (`npx`,
+ * `npm install`) no longer finds its start: a page in a structured value named its command where
+ * nothing could read it. The keys are structure, and the JSON form below has them.
+ */
+const structuredStrings = (structured: unknown): string =>
+  collectStringsDeep(structured, MCP_MAX_RESULT_CHARS * 2)
+    .filter((text) => text !== '')
+    .join('\n');
+
+/**
+ * A `tools/call` result: every content item, `structuredContent` as the strings in it and then as
+ * JSON (the strings first, so that it is the JSON form the clip cuts), and an `input_required`
+ * reply's `inputRequests` — the modern shape by which a server asks the model for more input,
+ * which is exactly where an injection would sit. `isError` results are scanned too: a poisoned
+ * error text is still content the model reads.
  */
 export function mcpResultText(result: unknown): string {
   if (!isRecord(result)) return '';
@@ -105,6 +125,7 @@ export function mcpResultText(result: unknown): string {
   const inputRequests = result['inputRequests'];
   return joined([
     itemsText(result['content']),
+    structured === undefined ? '' : structuredStrings(structured),
     structured === undefined ? '' : asJson(structured),
     inputRequests === undefined ? '' : asJson(inputRequests),
   ]);

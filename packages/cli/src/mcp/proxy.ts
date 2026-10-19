@@ -136,6 +136,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
     ...(serverCwd === undefined ? {} : { cwd: serverCwd }),
     ...(options.passEnv === null ? {} : { env: childEnv(options.passEnv) }),
     stdio: ['pipe', 'pipe', 'inherit'],
+    detached: process.platform !== 'win32',
   });
   const serverIn = child.stdin;
   const serverOut = child.stdout;
@@ -279,6 +280,10 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   });
 
   shuttingDown = true;
+  // Descendants can ignore SIGTERM and close their inherited pipes. The leader's
+  // close does not prove its detached group is gone; finish that group before
+  // clearing escalation timers. Windows must not reuse an exited leader's pid.
+  if (process.platform !== 'win32') killChildTree(child, 'SIGKILL');
   if (termTimer !== null) clearTimeout(termTimer);
   if (killTimer !== null) clearTimeout(killTimer);
   if (signalKillTimer !== null) clearTimeout(signalKillTimer);

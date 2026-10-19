@@ -93,6 +93,24 @@ describe.skipIf(!posix)('a pinned server whose folder cannot be written', () => 
     await second.cleanup();
     expect((await stat(join(f.home, 'run'))).mode & 0o777).toBe(0o750);
   });
+
+  it.each(['home', 'run'])(
+    'refuses an existing %s writable by other users without changing its mode',
+    async (parent) => {
+      const f = await fixture();
+      const folder = parent === 'home' ? f.home : join(f.home, 'run');
+      await mkdir(folder, { recursive: true });
+      await chmod(folder, 0o777);
+      try {
+        await expect(preparePin(f.options)).rejects.toThrow(
+          'cannot use a runtime folder writable by other users',
+        );
+        expect((await stat(folder)).mode & 0o777).toBe(0o777);
+      } finally {
+        await chmod(folder, 0o700);
+      }
+    },
+  );
 });
 
 describe('a linked Stroq home or store folder', () => {

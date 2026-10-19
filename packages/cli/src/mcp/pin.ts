@@ -149,6 +149,8 @@ async function privateRunDir(home: string): Promise<string> {
     const info = await lstat(folder);
     if (process.getuid !== undefined && info.uid !== process.getuid())
       throw new Error('cannot use a runtime folder owned by another user');
+    if (process.platform !== 'win32' && (info.mode & 0o022) !== 0)
+      throw new Error('cannot use a runtime folder writable by other users');
     if (created) await chmod(folder, 0o700);
   }
   return run;

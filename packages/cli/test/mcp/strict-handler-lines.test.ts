@@ -50,9 +50,9 @@ describe('a byte-order mark before the JSON of a server line', () => {
     const rig = handlerRig();
     track(rig, 3);
     await rig.feed('﻿not json');
-    // Nothing in it names a request, so there is nobody to answer; it is audited and dropped.
+    // No reliable association: fail pending requests without forwarding the malformed text.
     expect(rig.ruleIds()).toEqual(['mcp-strict-unparsable']);
-    expect(rig.sent).toEqual([]);
+    expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
     expect(rig.lines).toEqual([]);
   });
 

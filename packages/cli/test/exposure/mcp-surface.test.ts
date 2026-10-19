@@ -16,13 +16,24 @@ const writeProjectMcp = (cwd: string, servers: Record<string, unknown>): void =>
  * `countWrapped` rejects anything looser, so a hand-shortened fixture would count as
  * unwrapped and the assertion below would pass for the wrong reason.
  */
-const wrappedEntry = (cwd: string): Record<string, unknown> => {
+const wrappedEntry = (cwd: string, strict = false): Record<string, unknown> => {
   mkdirSync(join(cwd, 'dist'), { recursive: true });
   const entry = join(cwd, 'dist', 'index.js');
   writeFileSync(entry, '');
   return {
     command: 'node',
-    args: [entry, 'mcp', '--server', 'x', '--client', 'claude-code', '--', 'node', 's.js'],
+    args: [
+      entry,
+      'mcp',
+      '--server',
+      'x',
+      '--client',
+      'claude-code',
+      ...(strict ? ['--strict'] : []),
+      '--',
+      'node',
+      's.js',
+    ],
   };
 };
 
@@ -40,6 +51,19 @@ describe('mcpSurface', () => {
     const found = mcpSurface(cwd).find((s) => s.client === 'claude-code');
     expect(found?.stdio).toBe(2);
     expect(found?.wrapped).toBe(1);
+  });
+
+  it('counts strict wrappers separately', () => {
+    const cwd = fixture();
+    writeProjectMcp(cwd, {
+      plain: { command: 'node', args: ['server.js'] },
+      strictWrapped: wrappedEntry(cwd, true),
+      defaultWrapped: wrappedEntry(cwd, false),
+    });
+    const found = mcpSurface(cwd).find((s) => s.client === 'claude-code');
+    expect(found?.stdio).toBe(3);
+    expect(found?.wrapped).toBe(2);
+    expect(found?.strict).toBe(1);
   });
 
   it('counts http entries separately from stdio', () => {
@@ -70,6 +94,7 @@ describe('mcpFindings', () => {
         file: '/p/.mcp.json',
         stdio: 3,
         wrapped: 1,
+        strict: 0,
         http: 0,
       },
     ]);
@@ -87,6 +112,7 @@ describe('mcpFindings', () => {
         file: '/h/.cursor/mcp.json',
         stdio: 0,
         wrapped: 0,
+        strict: 0,
         http: 2,
       },
     ]);
@@ -104,6 +130,7 @@ describe('mcpFindings', () => {
           file: '/h/.cursor/mcp.json',
           stdio: 2,
           wrapped: 2,
+          strict: 0,
           http: 0,
         },
       ]),

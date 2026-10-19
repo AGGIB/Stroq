@@ -1,6 +1,6 @@
 import { isScannedMethod } from './framing.js';
 import { resultTextFor } from './mcp-result-text.js';
-import type { MediaPayloads } from './strict-leaves.js';
+import { collectLeaves, type MediaPayloads } from './strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 
 /**
@@ -12,25 +12,21 @@ import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
  * spread over four content blocks stays a sentence; a list of every decoded string puts
  * a key on a line of its own between two values, which breaks that sentence and is also
  * the only text that holds EVERY string, which is what the post-condition proves; and a
- * rule written for JSON syntax wants JSON. So there are three views, scanned one after
- * the other, and a result is as suspect as its worst view:
+ * rule written for JSON syntax wants JSON. Each decoded string is also scanned alone in
+ * a per-string view so that end-anchored rules match even when another field or block follows.
  *
  * - `default`: exactly what the default proxy hands its scanner (`resultTextFor`, the
- *   reader the default proxy uses, unchanged), for the four methods it scans. Strict mode
- *   therefore scans at least what the default scans, by construction and not by a
- *   resemblance that has to be kept up;
+ *   reader the default proxy uses, unchanged), for the four methods it scans;
  * - `strings`: every decoded string of the result, keys included, one per line
  *   (`strict-leaves.ts`); the text `isCovered` proves complete;
  * - `json`: the result as JSON, as far as the same 200,000-character window the default
- *   proxy clips its own text to. A string is not cut to a shorter length of its own, so a
- *   long value cannot push what follows it out of the text.
- *
- * They are separate texts rather than one joined text so that a rule anchored to the end
- * of a text (about thirty are, "a secret key:" with nothing after it) sees a text that
- * ends where the sentence does.
+ *   proxy clips its own text to;
+ * - `per-string`: each decoded string of the result, scanned on its own, so that a rule
+ *   anchored to the end of a text (about thirty are, "a secret key:" with nothing after it)
+ *   matches even when another block or field follows in the message.
  */
 
-export type ScanViewName = 'default' | 'strings' | 'json';
+export type ScanViewName = 'default' | 'strings' | 'json' | 'per-string';
 
 export interface ScanView {
   readonly name: ScanViewName;
@@ -86,13 +82,16 @@ export function scanViews(
   body: unknown,
   strings: string,
   media: MediaPayloads,
+  leaves?: readonly string[],
 ): readonly ScanView[] {
   const scanned = method !== null && isScannedMethod(method) ? method : null;
   const defaultText = scanned === null ? '' : resultTextFor(scanned, body);
+  const allLeaves = leaves ?? collectLeaves(body, media) ?? [];
   const views = distinctViews([
     { name: 'default', text: defaultText },
     { name: 'strings', text: strings },
     { name: 'json', text: isEmptyContainer(body) ? '' : jsonView(body, media) },
+    ...allLeaves.map((text) => ({ name: 'per-string' as const, text })),
   ]);
   if (views.length > 0 || scanned === null) return views;
   return [{ name: 'default', text: defaultText }];

@@ -14,7 +14,12 @@ import {
 import { dirname, join } from 'node:path';
 import { sessionKey } from '../taint/session-store.js';
 import type { AtomKind, ProvenanceRecord } from '../types.js';
+import { neutralizeControls } from '../util/controls.js';
 import { withLock } from '../util/lock.js';
+import { shellQuote } from '../util/shell-quote.js';
+import { isFloorKind } from './atom-kinds.js';
+import { markerIsStale, pendingMarkerBody } from './pending-marker.js';
+import { retain } from './retain.js';
 
 export type ProvenanceInput = Omit<ProvenanceRecord, 'seq' | 'at'>;
 
@@ -29,8 +34,9 @@ export interface ProvenanceStore {
    */
   clear(sessionId: string): Promise<void>;
   /**
-   * Whether this session may have read something that is no longer on record: a record
-   * was dropped to stay within the cap, or a result was only partly recorded; or the
+   * Whether this session may have read something that is no longer on record: a record that
+   * can raise the floor (a package, a pipe-to-shell, an encoded blob; not a URL or a host) was
+   * dropped to stay within the cap, or a result was only partly recorded; or the
    * directory the note would go in cannot be written, so a loss could not be noted. A
    * lookup that finds nothing means "not read" only when this is false.
    *
@@ -40,6 +46,28 @@ export interface ProvenanceStore {
    * clean.
    */
   isIncomplete(sessionId: string): Promise<boolean>;
+  /**
+   * Whether this session has recorded something a command could be matched against: an atom that
+   * can raise the floor (a package, a pipe-to-shell, an encoded blob), or any flagged record.
+   * The records of URLs and hosts, and of hashes, do not count: nearly every session has them.
+   */
+  hasEvidence(sessionId: string): Promise<boolean>;
+  /**
+   * Whether a marker that a result is being recorded (see `setPending`) is stale at `nowMs`: its
+   * deadline has passed, the process that owns it is gone, or it cannot be read or names no owner.
+   * That is a result the agent read and the hook did not finish scanning, since a hook that is
+   * running answers within its deadline.
+   */
+  hasStaleMarker(sessionId: string, nowMs?: number): Promise<boolean>;
+  /**
+   * Whether hashes (the labelled tokens that are not text; see `encodedAtoms`) were left out for
+   * want of room, or their file cannot be read. A NARROW loss: it makes a blob that no record
+   * accounts for a question, and does not touch packages or pipe-to-shell commands, so that a big
+   * lockfile does not make every later install ask. Cleared by `clear`.
+   */
+  digestsLost(sessionId: string): Promise<boolean>;
+  /** Notes that hashes were left out (see `digestsLost`). */
+  noteDigestsLost(sessionId: string): Promise<void>;
   /**
    * Notes that evidence for this session was lost or never recorded. Permanent until
    * `clear`: a later short result does not make an earlier loss any less of one.
@@ -56,7 +84,7 @@ export interface ProvenanceStore {
   setPending(sessionId: string, pending: boolean, owner?: string): Promise<void>;
 }
 
-/** Oldest records are dropped beyond this many per session. */
+/** Records beyond this many per session are dropped, the oldest of the least valuable first (see `retain`). */
 export const MAX_RECORDS = 2000;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
@@ -68,6 +96,17 @@ const PRIVATE_DIR_MODE = 0o700;
  */
 const INCOMPLETE_SUFFIX = '.prov.incomplete';
 const PENDING_SUFFIX = '.prov.pending';
+/**
+ * Records of hashes live in a file of their own, a bare array like the records file. A reader that
+ * does not know the kind never opens it, so an older Stroq sharing the directory is not made to
+ * deny every command by a record it cannot parse. Its presence beside a lost-hashes note is read
+ * only by this code.
+ */
+const DIGESTS_SUFFIX = '.prov.digests.json';
+const DIGESTS_LOST_SUFFIX = '.prov.digests-lost';
+/** The hashes a session keeps; the oldest go first, and that is noted. */
+export const MAX_DIGEST_RECORDS = 2000;
+/** The kinds of the records file: the ones a 0.26.0 reader knows. A hash is not among them. */
 const ATOM_KINDS: ReadonlySet<unknown> = new Set<AtomKind>([
   'url',
   'host',
@@ -106,7 +145,10 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-function isProvenanceRecord(value: unknown): value is ProvenanceRecord {
+function isProvenanceRecord(
+  value: unknown,
+  kinds: ReadonlySet<unknown> = ATOM_KINDS,
+): value is ProvenanceRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
@@ -114,11 +156,25 @@ function isProvenanceRecord(value: unknown): value is ProvenanceRecord {
     typeof record['at'] === 'string' &&
     typeof record['tool'] === 'string' &&
     typeof record['source'] === 'string' &&
-    ATOM_KINDS.has(record['kind']) &&
+    kinds.has(record['kind']) &&
     typeof record['hash'] === 'string' &&
     typeof record['excerpt'] === 'string' &&
     typeof record['suspect'] === 'boolean'
   );
+}
+
+/**
+ * The error for a records file that does not parse. Nothing can be said of what the session read
+ * and every command with an atom is denied, so it names the session and the command that starts it
+ * over, which the person runs outside the agent: the id is what `stroq log` and the hook's own
+ * messages show, and the path holds only a hash of it.
+ */
+function corruptState(file: string, sessionId: string, cause?: unknown): Error {
+  const shown = neutralizeControls(sessionId);
+  const message =
+    `corrupt provenance state: ${file} (session ${shown}). Stroq cannot say what this session read; ` +
+    `to start it over, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(shown)}`;
+  return cause === undefined ? new Error(message) : new Error(message, { cause });
 }
 
 export class FileProvenanceStore implements ProvenanceStore {
@@ -131,6 +187,14 @@ export class FileProvenanceStore implements ProvenanceStore {
 
   private file(sessionId: string): string {
     return join(this.dir, `${sessionKey(sessionId)}.prov.json`);
+  }
+
+  private digestsFile(sessionId: string): string {
+    return join(this.dir, `${sessionKey(sessionId)}${DIGESTS_SUFFIX}`);
+  }
+
+  private digestsLostFile(sessionId: string): string {
+    return join(this.dir, `${sessionKey(sessionId)}${DIGESTS_LOST_SUFFIX}`);
   }
 
   private incompleteFile(sessionId: string): string {
@@ -161,19 +225,38 @@ export class FileProvenanceStore implements ProvenanceStore {
     } catch (err) {
       // Fail closed, like the session store: the CLI turns this into `deny`
       // on high-impact tools rather than silently forgetting what was read.
-      throw new Error(`corrupt provenance state: ${this.file(sessionId)}`, { cause: err });
+      throw corruptState(this.file(sessionId), sessionId, err);
     }
-    if (!Array.isArray(parsed) || !parsed.every(isProvenanceRecord)) {
+    if (!Array.isArray(parsed) || !parsed.every((r) => isProvenanceRecord(r))) {
       // Valid JSON but the wrong shape is corruption too: silently treating it
       // as an empty list would let `record` fold it away on the next write, and a
       // record whose `suspect` is not a boolean would read as a clean origin.
-      throw new Error(`corrupt provenance state: ${this.file(sessionId)}`);
+      throw corruptState(this.file(sessionId), sessionId);
     }
     return parsed;
   }
 
-  private async write(sessionId: string, records: readonly ProvenanceRecord[]): Promise<void> {
-    const target = this.file(sessionId);
+  /** The records of hashes, or an error when the file does not parse: a loss of hashes, not of the session. */
+  private async readDigests(sessionId: string): Promise<ProvenanceRecord[]> {
+    let raw: string;
+    try {
+      raw = await readFile(this.digestsFile(sessionId), 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw err;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    const digestKind: ReadonlySet<unknown> = new Set(['digest']);
+    if (!Array.isArray(parsed) || !parsed.every((r) => isProvenanceRecord(r, digestKind)))
+      throw new Error('hash records of the wrong shape');
+    return parsed;
+  }
+
+  private async write(
+    sessionId: string,
+    records: readonly ProvenanceRecord[],
+    target: string = this.file(sessionId),
+  ): Promise<void> {
     const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
       await writeFile(tmp, JSON.stringify(records), { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
@@ -215,28 +298,77 @@ export class FileProvenanceStore implements ProvenanceStore {
 
   async record(sessionId: string, inputs: readonly ProvenanceInput[]): Promise<void> {
     if (inputs.length === 0) return;
+    const hashes = inputs.filter((input) => input.kind === 'digest');
+    const rest = inputs.filter((input) => input.kind !== 'digest');
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     await withLock(`${this.file(sessionId)}.lock`, async () => {
-      const existing = await this.read(sessionId);
-      const at = this.now().toISOString();
-      const start = existing[existing.length - 1]?.seq ?? 0;
-      const added = inputs.map((input, i) => ({ ...input, seq: start + i + 1, at }));
-      const all = [...existing, ...added];
-      const kept = all.slice(-MAX_RECORDS);
-      // The note first, the records second: a crash between the two leaves a session
-      // that says it is incomplete and is not, never one that is and does not say so.
-      // A note that cannot be written (the disk is full) does not stop the records going in,
-      // and leaves the file failing closed, since nothing else would say a record was dropped.
-      const noteError = kept.length < all.length ? await this.tryNote(sessionId) : null;
-      let writeError: unknown = null;
-      try {
-        await this.write(sessionId, kept);
-      } catch (err) {
-        writeError = err;
-      }
-      if (noteError !== null) await this.poison(sessionId);
-      if (noteError !== null || writeError !== null) throw noteError ?? writeError;
+      if (rest.length > 0) await this.recordRest(sessionId, rest);
+      if (hashes.length > 0) await this.recordDigests(sessionId, hashes);
     });
+  }
+
+  /**
+   * Adds hashes to their file, the newest `MAX_DIGEST_RECORDS` kept. The oldest going is a loss,
+   * noted before the file is written, like any other.
+   */
+  private async recordDigests(
+    sessionId: string,
+    inputs: readonly ProvenanceInput[],
+  ): Promise<void> {
+    let existing: ProvenanceRecord[] = [];
+    try {
+      existing = await this.readDigests(sessionId);
+    } catch {
+      // A file that does not parse is hashes that were lost; it starts over, and says so.
+      await this.writeNote(this.digestsLostFile(sessionId), this.digestsLostBody());
+    }
+    const at = this.now().toISOString();
+    const start = existing[existing.length - 1]?.seq ?? 0;
+    const added = inputs.map((input, i) => ({ ...input, seq: start + i + 1, at }));
+    const all = [...existing, ...added];
+    if (all.length > MAX_DIGEST_RECORDS)
+      await this.writeNote(this.digestsLostFile(sessionId), this.digestsLostBody());
+    await this.write(sessionId, all.slice(-MAX_DIGEST_RECORDS), this.digestsFile(sessionId));
+  }
+
+  private digestsLostBody(): string {
+    return JSON.stringify({ digestsLost: true, since: this.now().toISOString() });
+  }
+
+  async noteDigestsLost(sessionId: string): Promise<void> {
+    await this.writeNote(this.digestsLostFile(sessionId), this.digestsLostBody());
+  }
+
+  async digestsLost(sessionId: string): Promise<boolean> {
+    try {
+      if (await exists(this.digestsLostFile(sessionId))) return true;
+      await this.readDigests(sessionId);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  private async recordRest(sessionId: string, inputs: readonly ProvenanceInput[]): Promise<void> {
+    const existing = await this.read(sessionId);
+    const at = this.now().toISOString();
+    const start = existing[existing.length - 1]?.seq ?? 0;
+    const added = inputs.map((input, i) => ({ ...input, seq: start + i + 1, at }));
+    const { kept, floorLost } = retain([...existing, ...added], MAX_RECORDS);
+    // The note first, the records second: a crash between the two leaves a session
+    // that says it is incomplete and is not, never one that is and does not say so.
+    // A note that cannot be written (the disk is full) does not stop the records going in,
+    // and leaves the file failing closed, since nothing else would say a record was dropped.
+    // Only the loss of a record that can raise the floor is one to note (see `retain`).
+    const noteError = floorLost ? await this.tryNote(sessionId) : null;
+    let writeError: unknown = null;
+    try {
+      await this.write(sessionId, kept);
+    } catch (err) {
+      writeError = err;
+    }
+    if (noteError !== null) await this.poison(sessionId);
+    if (noteError !== null || writeError !== null) throw noteError ?? writeError;
   }
 
   /** Writes a small file whose presence is the point, once, atomically and privately. */
@@ -264,25 +396,23 @@ export class FileProvenanceStore implements ProvenanceStore {
 
   async setPending(sessionId: string, pending: boolean, owner?: string): Promise<void> {
     if (!pending) {
-      // Keep the empty directory: removing it could race another operation beginning in it.
+      // The directory stays, empty, until `clear`: removing it would race another operation that
+      // has made it and is about to write its marker in it, and a marker lost that way is a result
+      // that was read and never accounted for.
       await rm(this.pendingFile(sessionId, owner), { force: true });
       return;
     }
-    await this.writeNote(
-      this.pendingFile(sessionId, owner),
-      JSON.stringify({ pending: true, since: this.now().toISOString() }),
-    );
+    await this.writeNote(this.pendingFile(sessionId, owner), pendingMarkerBody(this.now()));
   }
 
   async isIncomplete(sessionId: string): Promise<boolean> {
     try {
       if (await exists(this.incompleteFile(sessionId))) return true;
-      if (await exists(this.pendingFile(sessionId))) return true;
-      try {
-        if ((await readdir(this.pendingDir(sessionId))).length > 0) return true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      }
+      // A marker that a result is being recorded is a loss only once it is stale: a post that is
+      // running (its process alive, its deadline not passed) has lost nothing yet, and a call that
+      // runs beside it must not be asked about a package for that. A hook that was killed leaves
+      // a marker whose process is gone, and the marker an older version wrote names no owner.
+      if (await this.hasStaleMarker(sessionId)) return true;
       // A loss is noted by writing a file here. Where that cannot be done the note cannot
       // exist, and its absence says nothing.
       return !(await canWriteIn(this.dir));
@@ -292,15 +422,46 @@ export class FileProvenanceStore implements ProvenanceStore {
     }
   }
 
+  async hasEvidence(sessionId: string): Promise<boolean> {
+    return (await this.read(sessionId)).some((r) => r.suspect || isFloorKind(r.kind));
+  }
+
+  async hasStaleMarker(sessionId: string, nowMs: number = Date.now()): Promise<boolean> {
+    const files = [this.pendingFile(sessionId)];
+    try {
+      const owners = await readdir(this.pendingDir(sessionId));
+      files.push(...owners.map((owner) => join(this.pendingDir(sessionId), owner)));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return true;
+    }
+    for (const file of files) {
+      let text: string;
+      try {
+        text = await readFile(file, 'utf8');
+      } catch (err) {
+        // Settled between the listing and the read: nothing is in flight there any more.
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        return true;
+      }
+      if (markerIsStale(text, nowMs)) return true;
+    }
+    return false;
+  }
+
   async lookup(sessionId: string, hashes: readonly string[]): Promise<ProvenanceRecord[]> {
     const wanted = new Set(hashes);
-    return (await this.read(sessionId)).filter((r) => wanted.has(r.hash)).reverse();
+    const found = (await this.read(sessionId)).filter((r) => wanted.has(r.hash)).reverse();
+    // Hashes are looked up too, and an unreadable file of them finds none (and is a loss, see `digestsLost`).
+    const hashed = await this.readDigests(sessionId).catch((): ProvenanceRecord[] => []);
+    return [...found, ...hashed.filter((r) => wanted.has(r.hash)).reverse()];
   }
 
   async clear(sessionId: string): Promise<void> {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     await withLock(`${this.file(sessionId)}.lock`, async () => {
       await rm(this.file(sessionId), { force: true });
+      await rm(this.digestsFile(sessionId), { force: true });
+      await rm(this.digestsLostFile(sessionId), { force: true });
       await rm(this.incompleteFile(sessionId), { force: true });
       await rm(this.pendingFile(sessionId), { force: true });
       await rm(this.pendingDir(sessionId), { recursive: true, force: true });

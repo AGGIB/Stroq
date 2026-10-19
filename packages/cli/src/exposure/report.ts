@@ -92,6 +92,7 @@ export function formatExposure(
   const unprotected = detected.filter((a) => !a.protected);
   const stdio = sum(report.mcp, (m) => m.stdio);
   const wrapped = sum(report.mcp, (m) => m.wrapped);
+  const strict = sum(report.mcp, (m) => m.strict);
   const http = sum(report.mcp, (m) => m.http);
   const ctx = report.context;
 
@@ -103,7 +104,7 @@ export function formatExposure(
     row('unprotected', unprotected.length, unprotected.map((a) => a.agent).join(', ')),
     '',
     row('MCP servers', stdio + http),
-    row('wrapped by Stroq', wrapped),
+    row('wrapped by Stroq', wrapped, strict > 0 ? `(${strict} strict)` : ''),
     row('stdio, unwrapped', stdio - wrapped),
     row('http (out of reach)', http),
     '',

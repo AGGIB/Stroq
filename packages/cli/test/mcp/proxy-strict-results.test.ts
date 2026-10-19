@@ -98,9 +98,10 @@ describe('a response nobody asked for', () => {
     await rig.finish();
   });
 
-  it('is withheld and counted under --strict, while the real answer is delivered', async () => {
+  it('is withheld and counted under --strict, failing the pending request with a fixed error', async () => {
     const { rig, answer } = await strictRun('unknownid');
-    expect(JSON.stringify(answer)).toContain('"ok"');
+    expect(JSON.stringify(answer)).toContain('(unknown-id)');
+    expect(JSON.stringify(answer)).not.toContain('"ok"');
     expect(rig.messages().some((m) => m['id'] === 987654)).toBe(false);
     expect(rig.ruleIds()).toContain('mcp-strict-unknown-id');
     expect(JSON.stringify(rig.audit())).not.toContain('987654');
@@ -152,14 +153,20 @@ describe('a JSON-RPC error that carries text', () => {
 });
 
 describe('a result Stroq cannot finish reading (nesting that overflows serialisation)', () => {
-  it.skipIf(!deepJsonOverflowsSerialisation())('is forwarded unscanned by default', async () => {
-    const rig = await defaultRun('deepjson');
-    await rig.answerFor(3);
-    // The raw line: the parsed value is too deep for the test to serialise either.
-    expect(rig.lines().some((line) => line.includes(POISON_OPENING))).toBe(true);
-    expect(rig.tainted()).toBe(false);
-    await rig.finish();
-  });
+  // The strings in it are read without serialising it, so the session is tainted by what the text
+  // item says; the warning cannot be written into a value that deep, and the answer is delivered as
+  // the server sent it rather than lost.
+  it.skipIf(!deepJsonOverflowsSerialisation())(
+    'is read and delivered as it came by default',
+    async () => {
+      const rig = await defaultRun('deepjson');
+      await rig.answerFor(3);
+      // The raw line: the parsed value is too deep for the test to serialise either.
+      expect(rig.lines().some((line) => line.includes(POISON_OPENING))).toBe(true);
+      expect(rig.tainted()).toBe(true);
+      await rig.finish();
+    },
+  );
 
   it('is withheld under --strict and the request is answered', async () => {
     const { rig, answer } = await strictRun('deepjson');
@@ -229,16 +236,18 @@ describe('text beyond the 200,000 characters the scan reads', () => {
   });
 });
 
-describe('a result the scanner is slow on', () => {
-  it('is withheld at the deadline, not after the 12 to 18 seconds the scan takes', async () => {
-    // 100 KB of ordinary prose takes the real scanner several seconds; a 400 ms deadline
-    // has to stop it. With the deadline taken out this answer is a delivered result (or
-    // arrives much later), and the reason check below fails.
+describe('a result the scanner cannot read within the deadline', () => {
+  it('is withheld at the deadline, whatever the scanner is doing when it passes', async () => {
+    // 100 KB of ordinary prose used to hold the real scanner for seconds, which was a pattern
+    // that was quadratic in the length of the text and no longer is. The deadline is the same
+    // guard against any pattern that is, so it is tried with one that not even a linear scan of
+    // this text fits in. With the deadline taken out this answer is a delivered result, and the
+    // reason check below fails.
     const started = Date.now();
-    const { rig, answer } = await strictRun('heavy', { strictScanMs: 400 });
+    const { rig, answer } = await strictRun('heavy', { strictScanMs: 2 });
     const took = Date.now() - started;
     expectWithheld(rig, answer, 'scan-timeout');
-    // Generous on purpose: this machine may be loaded; the scan alone takes several times this.
+    // Generous on purpose: this machine may be loaded.
     expect(took).toBeLessThan(12_000);
     await rig.finish();
   }, 60_000);

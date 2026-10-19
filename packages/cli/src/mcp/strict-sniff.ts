@@ -8,13 +8,15 @@ import { STRICT_ID_CHARS, STRICT_ID_DIGITS, STRICT_ID_SNIFF_CHARS } from './stri
  * request by parsing, and a request left unanswered is a client left waiting. So the head
  * of the line is read, token by token, for the TOP-LEVEL `id` member, and the result is
  * used only to look up a request that is waiting: a wrong answer costs one waiting request
- * an early error from Stroq, never a message to anyone.
+ * an early error from Stroq, never a message to anyone. A batch has no single top-level
+ * id: recovering only its first member would leave the other requests unanswered.
  *
  * The scan is linear in the window and tracks nesting and strings, so an `"id"` inside a
  * nested value or inside a string is not taken for the top-level one. What it cannot do is
  * look past the window: an id member that comes after the first `STRICT_ID_SNIFF_CHARS`
- * characters is not found, and the message is then dropped and audited with nobody to
- * answer. An id is accepted only if it could be one a client chose: an integer of at most
+ * characters is not found. The strict handler then fails pending requests with fixed
+ * errors rather than guessing an association or leaving the client waiting. An id is
+ * accepted only if it could be one a client chose: an integer of at most
  * fifteen digits with nothing after it that makes it a fraction or an exponent, or a plain
  * string of up to `STRICT_ID_CHARS` characters with no escape in it.
  */

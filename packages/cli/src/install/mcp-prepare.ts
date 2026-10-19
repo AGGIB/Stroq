@@ -52,17 +52,18 @@ async function inspectSource(source: string): Promise<{ tree: Tree; passport: Pa
   return { tree, passport };
 }
 
-/** The tree and passport to install: read from the source, or taken from the stored copy for a restore. */
+/** The tree and passport to install: read from the source, or taken from the stored copy for a restore or rollback. */
 async function madeOf(
   sourceOrName: string,
   source: string,
   named: McpRecord | undefined,
   options: McpInstallOptions,
 ): Promise<{ tree: Tree; passport: Passport }> {
-  if (!options.restore) return inspectSource(source);
+  const target = options.restore ? named : options.rollback ? named?.previous : undefined;
+  if (target === undefined) return inspectSource(source);
   return {
-    tree: await readStoredTreeOf(options.stroqHome, named!.digest, subjectOf(sourceOrName, named!)),
-    passport: named!.passport,
+    tree: await readStoredTreeOf(options.stroqHome, target.digest, subjectOf(sourceOrName, named!)),
+    passport: target.passport,
   };
 }
 
@@ -111,7 +112,10 @@ async function installedUnder(
 }
 
 /** The variables the server may see: those given, else those recorded, each a plain name. */
-function passEnvOf(options: McpInstallOptions, previous: McpRecord | undefined): string[] {
+function passEnvOf(
+  options: McpInstallOptions,
+  previous: Pick<McpRecord, 'passEnv'> | undefined,
+): string[] {
   const passEnv = [...new Set(options.passEnv ?? previous?.passEnv ?? [])];
   if (passEnv.some((variable) => !ENV_NAME.test(variable)))
     throw new Error('--pass-env takes variable names: letters, digits and underscores');
@@ -147,9 +151,17 @@ export async function prepareMcp(
   initial: Passports,
 ): Promise<PreparedMcp> {
   await assertPlainStoreHome(options.stroqHome);
+  if (options.restore && options.rollback)
+    throw new Error('cannot use --restore and --rollback together');
   const named = recordOf(initial, sourceOrName);
   if (options.restore && named === undefined)
     throw new Error('--restore needs the name of an installed MCP server');
+  if (options.rollback) {
+    if (named === undefined)
+      throw new Error('--rollback needs the name of an installed MCP server');
+    if (named.previous === undefined)
+      throw new Error(`MCP server ${sourceOrName} has no previous revision to roll back to`);
+  }
   const source = named?.source ?? resolve(sourceOrName);
   const made = await madeOf(sourceOrName, source, named, options);
   assertSelfContained(made.tree);
@@ -157,14 +169,13 @@ export async function prepareMcp(
     options.name ?? (named === undefined ? made.passport.artifact.name : sourceOrName),
   );
   const { previous, history, oldTree } = await installedUnder(name, source, initial, options);
-  const entrypoint = entrypointOf(made.tree, options.entrypoint ?? previous?.entrypoint);
-  const passEnv = passEnvOf(options, previous);
+  const base = options.rollback && previous?.previous !== undefined ? previous.previous : previous;
+  const entrypoint = entrypointOf(made.tree, options.entrypoint ?? base?.entrypoint);
+  const passEnv = passEnvOf(options, base);
   const { selected, current } = configFor(name, previous, options);
   const digest = made.passport.artifact.digest;
   const original = previous === undefined ? null : previous.original;
-  const cwd = resolve(
-    options.cwd ?? (previous === undefined ? options.project : recordedCwd(previous)),
-  );
+  const cwd = resolve(options.cwd ?? (base === undefined ? options.project : recordedCwd(base)));
   const written = entryFor(
     name,
     { digest, entrypoint, passEnv },
@@ -172,7 +183,7 @@ export async function prepareMcp(
     selected.label,
     cwd,
     original,
-    strictArgsOf(previous, options.strict),
+    strictArgsOf(base, options.strict),
   );
   const material =
     options.restore === true ||
@@ -202,7 +213,7 @@ export async function prepareMcp(
 
 /** Only the confirmed wrapper supplies inherited checks; --force never promotes flags from a drifted config. */
 function strictArgsOf(
-  previous: McpRecord | undefined,
+  previous: Pick<McpRecord, 'written'> | undefined,
   requested: boolean | undefined,
 ): readonly string[] {
   const recorded = previous?.written['args'];

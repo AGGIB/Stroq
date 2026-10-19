@@ -21,7 +21,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'add',
     synopsis:
-      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
+      'add <local-source|installed-name> [--user] [--restore] [--rollback] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
     about: [
       'read a local skill directory or tar archive, show its passport and require a person',
       'to type the first 12 hex digits of its digest before installing the inspected bytes.',
@@ -34,6 +34,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
       ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
+      ['--rollback', 'roll back an updated skill or MCP server to its previous stored revision'],
       ['--kind <kind>', 'skill (default) or mcp'],
       ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
       ['--config <path>', 'with --kind mcp: the client config file to edit'],
@@ -323,7 +324,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'attack',
-    synopsis: 'attack [--json] [--only <id>] [--fuzz]',
+    synopsis: 'attack [--json] [--only <id>] [--fuzz] [--host <id>]',
     about: [
       'replay recorded attacks against your policy; exit 1 if any gets through or could not be judged',
     ],
@@ -331,6 +332,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--json', 'machine-readable output'],
       ['--only <id>', 'one scenario, e.g. 05'],
       ['--fuzz', 'cross every scenario with every mutation and print the ones that escape'],
+      [
+        '--host <id>',
+        'claude-code, cursor, codex, copilot, openclaw, windsurf, antigravity or mcp: filter by what the host can actually see',
+      ],
     ],
   },
   {

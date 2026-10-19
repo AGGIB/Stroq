@@ -289,7 +289,7 @@ describe('the text a result contributes to the scanner', () => {
         structuredContent: { note: 'third' },
         resultType: 'complete',
       }),
-    ).toBe('first\nsecond\n{"note":"third"}');
+    ).toBe('first\nsecond\nthird\n{"note":"third"}');
     expect(
       mcpResultText({
         resultType: 'input_required',

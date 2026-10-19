@@ -76,6 +76,49 @@ describe('stroq attack', () => {
     });
   }, 60_000);
 
+  it('filters by host with --host and reports unsupported steps', async () => {
+    const out = capture();
+    const code = await runAttackCommand(['--host', 'windsurf', '--json', '--only', '05']);
+    out.restore();
+    expect(code).toBe(1);
+    const report = JSON.parse(out.lines.join('')) as {
+      version: number;
+      ok: boolean;
+      host: string;
+      totals: { unsupported?: number; unsupportedSteps?: number };
+      unsupportedSteps?: unknown[];
+    };
+    expect(report.ok).toBe(false);
+    expect(report.host).toBe('windsurf');
+    expect(report.totals.unsupportedSteps).toBeGreaterThan(0);
+    expect(report.unsupportedSteps).toBeDefined();
+    expect(report.unsupportedSteps!.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('rejects an unknown --host with exit 2', async () => {
+    const err: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      err.push(String(chunk));
+      return true;
+    });
+    const code = await runAttackCommand(['--host', 'nonexistent-host']);
+    spy.mockRestore();
+    expect(code).toBe(2);
+    expect(err.join('')).toContain('unknown --host "nonexistent-host"');
+  });
+
+  it('refuses --host combined with --fuzz with exit 2', async () => {
+    const err: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      err.push(String(chunk));
+      return true;
+    });
+    const code = await runAttackCommand(['--host', 'cursor', '--fuzz']);
+    spy.mockRestore();
+    expect(code).toBe(2);
+    expect(err.join('')).toContain('--host cannot be combined with --fuzz');
+  });
+
   // The exit code is what CI reads. A run that could not judge a scenario is not a run that
   // passed, and an attack that got through is not either: both are 1, whatever else came out right.
   describe('exit code', () => {

@@ -2,40 +2,30 @@ import { mkdir, mkdtemp, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { commandLine } from '../shell-quote.js';
-import { labelOf } from '../commands/vet-flow.js';
 import { confirm } from '../ui/prompt.js';
 import { styleFor } from '../ui/style.js';
 import { outsideLine } from '../ui/layout.js';
 import type { Terminal } from '../ui/terminal.js';
 import { stroqVersion } from '../version.js';
-import { readArchiveFile } from './archive-file.js';
-import {
-  inspectTree,
-  INSPECT_RULES_ID,
-  InspectError,
-  passportIsIncomplete,
-} from './inspect/index.js';
 import {
   readPassports,
   SKILL_NAME,
   withPassports,
   writePassports,
   type Passports,
+  type PreviousSkill,
   type Receipt,
   type SkillRecord,
 } from './lock.js';
 import { materialChange } from './material.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS, ReadDirError } from './read-dir.js';
-import { confirmSkill } from './skill-confirm.js';
-import { sourceTypeOf } from './read-source.js';
+import { confirmSkill, inspectSkillSource } from './skill-confirm.js';
 import { checkEntryPath } from './safe-path.js';
 import { auditReceipt } from './receipt.js';
 import { collectSkillStore, tidyStore } from './store-gc.js';
 import {
   assertPlainDirectory,
   assertPlainStoreHome,
-  assertInstallablePlatform,
-  assertWritableTree,
   putStore,
   readStoredTreeOf,
   writeTree,
@@ -43,7 +33,7 @@ import {
 } from './store.js';
 import { skillRemedy } from './remedy.js';
 import { treeDigest } from './tree.js';
-import type { Passport, Tree } from './types.js';
+import type { Tree } from './types.js';
 
 export interface SkillOptions {
   readonly project: string;
@@ -52,6 +42,7 @@ export interface SkillOptions {
   readonly terminal: Terminal;
   readonly user?: boolean;
   readonly restore?: boolean;
+  readonly rollback?: boolean;
   readonly force?: boolean;
   /** `--kind skill`: the person says what the folder is, for files that look like more than one kind of artifact. */
   readonly kind?: 'skill';
@@ -96,57 +87,6 @@ function targetOf(
     throw new Error('the installed path in the lock is not a skill path');
   assertWriteAllowed(path, { root, initRule: false });
   return { root, path };
-}
-
-/** The passport of a tree as a skill's: the kind the person gave, or the one the files say. */
-function passportOfSkill(
-  tree: Tree,
-  source: string,
-  type: 'dir' | 'tarball',
-  blindSpots: readonly string[],
-  kind: 'skill' | undefined,
-): Passport {
-  try {
-    return inspectTree(tree, {
-      kind: kind ?? 'auto',
-      source: { type, label: labelOf(source, type) },
-      extraBlindSpots: blindSpots,
-      stroqVersion: stroqVersion(),
-      rulesId: INSPECT_RULES_ID,
-    });
-  } catch (error) {
-    // The message of the inspector says to "say which kind it is"; for add, this is how.
-    if (error instanceof InspectError && error.code === 'cannot-tell-kind')
-      throw new Error(
-        `${error.message}; give --kind skill (or --kind mcp for a server) to stroq add`,
-      );
-    throw error;
-  }
-}
-
-async function inspectSource(
-  source: string,
-  kind: 'skill' | undefined,
-): Promise<{ tree: Tree; passport: Passport }> {
-  const type = await sourceTypeOf(source);
-  const { tree, blindSpots } =
-    type === 'dir'
-      ? await readDirTree(source, { rejectNestedRepositories: true })
-      : await readArchiveFile(source);
-  const passport = passportOfSkill(tree, source, type, blindSpots, kind);
-  if (passport.artifact.kind === 'mcp')
-    throw new Error(
-      'this folder is an MCP server, not a skill: add it with --kind mcp and the client it is for (--client <name> or --config <path>)',
-    );
-  if (passport.artifact.kind !== 'skill')
-    throw new Error(
-      `this folder is a ${passport.artifact.kind}, which add does not install: read it with stroq vet --from <folder>`,
-    );
-  if (passportIsIncomplete(passport))
-    throw new Error('the passport is incomplete; refusing to install');
-  assertWritableTree(tree, passport.artifact.digest);
-  assertInstallablePlatform(tree, process.platform);
-  return { tree, passport };
 }
 
 async function isDrifted(record: SkillRecord): Promise<boolean> {
@@ -234,24 +174,35 @@ async function replaceSkill(
 
 async function prepareSkill(sourceOrName: string, options: SkillOptions) {
   await assertPlainStoreHome(options.stroqHome);
+  if (options.restore === true && options.rollback === true)
+    throw new Error('cannot use --restore and --rollback together');
   const initial = await readPassports(options.stroqHome);
   const installed = Object.hasOwn(initial.skills, sourceOrName)
     ? initial.skills[sourceOrName]
     : undefined;
   if (options.restore === true && (installed === undefined || installed.status === 'revoked'))
     throw new Error('--restore needs the name of an installed skill');
+  if (options.rollback === true) {
+    if (installed === undefined || installed.status === 'revoked')
+      throw new Error('--rollback needs the name of an installed skill');
+    if (installed.previous === undefined)
+      throw new Error(`skill ${sourceOrName} has no previous revision to roll back to`);
+  }
   const restoring = options.restore === true;
+  const rollingBack = options.rollback === true;
   const source = installed?.source ?? resolve(sourceOrName);
-  const made = restoring
-    ? {
-        tree: await readStoredTreeOf(
-          options.stroqHome,
-          installed!.digest,
-          subjectOf(sourceOrName, installed!, options),
-        ),
-        passport: installed!.passport,
-      }
-    : await inspectSource(source, options.kind);
+  const storedTarget = restoring ? installed : rollingBack ? installed!.previous : undefined;
+  const made =
+    storedTarget !== undefined
+      ? {
+          tree: await readStoredTreeOf(
+            options.stroqHome,
+            storedTarget.digest,
+            subjectOf(sourceOrName, installed!, options),
+          ),
+          passport: storedTarget.passport,
+        }
+      : await inspectSkillSource(source, options.kind);
   const name = nameOf(installed === undefined ? made.passport.artifact.name : sourceOrName);
   const prior = Object.hasOwn(initial.skills, name) ? initial.skills[name] : undefined;
   const previous = prior?.status === 'revoked' ? undefined : prior;
@@ -272,9 +223,20 @@ async function prepareSkill(sourceOrName: string, options: SkillOptions) {
         );
   const material =
     previous === undefined ||
-    previous.source !== source ||
+    (!rollingBack && previous.source !== source) ||
     materialChange(previous.passport, made.passport, { before: oldTree!, after: made.tree });
-  return { name, prior, previous, target, material, restoring, source, made, oldTree };
+  return {
+    name,
+    prior,
+    previous,
+    target,
+    material,
+    restoring,
+    rollingBack,
+    source,
+    made,
+    oldTree,
+  };
 }
 
 const DRIFT_RESTORE_ERROR =
@@ -283,7 +245,8 @@ const DRIFT_RESTORE_ERROR =
 export async function addSkill(sourceOrName: string, options: SkillOptions): Promise<SkillRecord> {
   requirePerson(options);
   const prepared = await prepareSkill(sourceOrName, options);
-  const { name, prior, previous, target, material, restoring, source, made } = prepared;
+  const { name, prior, previous, target, material, restoring, rollingBack, source, made } =
+    prepared;
   if (previous !== undefined && !restoring && (await isDrifted(previous))) {
     await withPassports(options.stroqHome, async (lock) => {
       if (JSON.stringify(lock.skills[name]) !== JSON.stringify(prior))
@@ -305,8 +268,21 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
       throw new Error('the skill directory now exists; refusing to replace it');
     const digest = made.passport.artifact.digest;
     await putStore(options.stroqHome, made.tree, digest);
-    const action = restoring ? 'restore' : previous === undefined ? 'add' : 'update';
+    const action = rollingBack
+      ? 'rollback'
+      : restoring
+        ? 'restore'
+        : previous === undefined
+          ? 'add'
+          : 'update';
     const record = receipt(name, action, previous?.digest ?? null, digest, material);
+    const retained: PreviousSkill | undefined = rollingBack
+      ? undefined
+      : previous === undefined
+        ? undefined
+        : previous.digest !== digest
+          ? { digest: previous.digest, passport: previous.passport }
+          : previous.previous;
     const next: SkillRecord = {
       kind: 'skill',
       status: 'confirmed',
@@ -316,16 +292,26 @@ export async function addSkill(sourceOrName: string, options: SkillOptions): Pro
       installedTo: target.path,
       root: target.root,
       history: [...(prior?.history ?? []), record],
+      ...(retained === undefined ? {} : { previous: retained }),
     };
     const nextLock = { ...lock, skills: { ...lock.skills, [name]: next } };
     await replaceSkill(made.tree, digest, target.path, () =>
       writePassports(options.stroqHome, nextLock),
     );
     await auditReceipt(options.stroqHome, record);
-    if (previous !== undefined)
-      await tidyStore(options.terminal, previous.digest, () =>
-        collectSkillStore(options.stroqHome, nextLock, '', previous),
+    if (previous !== undefined) {
+      const evicted = rollingBack
+        ? previous.digest
+        : (previous.previous?.digest ?? previous.digest);
+      await tidyStore(options.terminal, evicted, () =>
+        collectSkillStore(
+          options.stroqHome,
+          { ...lock, skills: { ...lock.skills, [name]: next } },
+          '',
+          previous,
+        ),
       );
+    }
     return next;
   });
 }
@@ -373,8 +359,9 @@ export async function removeSkill(name: string, options: SkillOptions): Promise<
       await rename(target.path, stage);
     }
     const record = receipt(name, 'remove', previous.digest, null, false);
+    const { previous: _retained, ...rest } = previous;
     const next = {
-      ...previous,
+      ...rest,
       status: 'revoked' as const,
       history: [...previous.history, record],
     };

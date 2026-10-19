@@ -101,13 +101,25 @@ export const withheldResponse = (
   error: { code: STRICT_ERROR_CODE, message: withheldMessage(reason) },
 });
 
+export type TerminationKind = 'withheld' | 'benign';
+
+/** Fixed counter description shared by the client error, stderr and audit. */
+export const terminationCount = (limit: number, kind: TerminationKind): string =>
+  kind === 'benign'
+    ? `more than ${limit} benign-kind messages (forwarded or withheld)`
+    : `more than ${limit} withheld messages`;
+
 /** The JSON-RPC error answering a request still waiting when strict mode ended the server. */
-export const terminatedResponse = (id: JsonRpcId, limit: number): Record<string, unknown> => ({
+export const terminatedResponse = (
+  id: JsonRpcId,
+  limit: number,
+  kind: TerminationKind = 'withheld',
+): Record<string, unknown> => ({
   jsonrpc: '2.0',
   id,
   error: {
     code: STRICT_ERROR_CODE,
-    message: `Stroq strict mode ended this server after more than ${limit} withheld messages. No further answer will come.`,
+    message: `Stroq strict mode ended this server after ${terminationCount(limit, kind)}. No further answer will come.`,
   },
 });
 
@@ -143,8 +155,18 @@ export const withheldDecision = (reason: WithholdReason): Decision => ({
 });
 
 /** The audit decision for ending the server after too many withheld messages. */
-export const terminatedDecision = (limit: number): Decision => ({
+export const terminatedDecision = (
+  limit: number,
+  kind: TerminationKind = 'withheld',
+): Decision => ({
   effect: 'deny',
   ruleId: 'mcp-strict-terminated',
-  reason: `The server had more than ${limit} messages withheld in one run, so strict mode ended it.`,
+  reason: `The server produced ${terminationCount(limit, kind)} in one run, so strict mode ended it.`,
+});
+
+/** The audit decision for a forwarded server-initiated message. */
+export const forwardedDecision = (method: string): Decision => ({
+  effect: 'allow',
+  ruleId: 'mcp-strict-forwarded',
+  reason: `Strict mode verified and forwarded a server-initiated message (${method}).`,
 });

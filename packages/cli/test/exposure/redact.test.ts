@@ -17,6 +17,7 @@ const report: ExposureReport = {
       file: '/Users/secretname/.cursor/mcp.json',
       stdio: 3,
       wrapped: 1,
+      strict: 0,
       http: 1,
     },
   ],

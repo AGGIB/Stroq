@@ -87,6 +87,29 @@ describe('FileProvenanceStore', () => {
     await expect(store.record('s1', [input('h')])).rejects.toThrow(/corrupt provenance/);
   });
 
+  it('names the session and the way out in the error for a corrupt file', async () => {
+    const { dir, store } = fresh();
+    await mkdir(dir, { recursive: true });
+    writeFileSync(join(dir, `${sessionKey('s1')}.prov.json`), '{not json');
+    const error = await store.lookup('s1', ['h']).catch((err: Error) => err);
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain(`${sessionKey('s1')}.prov.json`);
+    expect(message).toContain('session s1');
+    expect(message).toContain('stroq untaint --session s1');
+    expect(message).toMatch(/outside the agent/);
+  });
+
+  it('quotes a session id that needs it, and keeps control characters out of the error', async () => {
+    const { dir, store } = fresh();
+    await mkdir(dir, { recursive: true });
+    const id = "it's \u001b[31mred";
+    writeFileSync(join(dir, `${sessionKey(id)}.prov.json`), '!');
+    const message = ((await store.lookup(id, ['h']).catch((err: Error) => err)) as Error).message;
+    expect(message).not.toContain('\u001b');
+    expect(message).toContain("stroq untaint --session 'it'\\''s \\u001b[31mred'");
+  });
+
   it('fails closed on a parseable file with the wrong shape', async () => {
     const { dir, store } = fresh();
     await mkdir(dir, { recursive: true });

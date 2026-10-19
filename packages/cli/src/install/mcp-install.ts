@@ -15,6 +15,7 @@ import {
   requirePerson,
   subjectOf,
   type McpInstallOptions,
+  type McpPrevious,
   type McpRecord,
 } from './mcp-record.js';
 import { showMcpScreen } from './mcp-screen.js';
@@ -23,7 +24,7 @@ import { collectMcpStore, tidyStore } from './store-gc.js';
 import { assertPlainStoreHome, putStore, readStoredTreeOf } from './store.js';
 
 export { entrypointOf } from '../mcp/entrypoint.js';
-export type { McpInstallOptions, McpRecord } from './mcp-record.js';
+export type { McpInstallOptions, McpPrevious, McpRecord } from './mcp-record.js';
 
 /** The question: the digest to type when anything but the confirmed state would be written, else a y/N. */
 async function confirmed(options: McpInstallOptions, prepared: PreparedMcp): Promise<boolean> {
@@ -46,6 +47,12 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       throw new Error('the lock changed while confirming; read and confirm again');
     if (previous !== undefined)
       await readStoredTreeOf(options.stroqHome, previous.digest, subjectOf(name, previous));
+    if (options.rollback && previous?.previous !== undefined)
+      await readStoredTreeOf(
+        options.stroqHome,
+        previous.previous.digest,
+        subjectOf(name, previous),
+      );
     await putStore(options.stroqHome, made.tree, digest);
     assertWriteAllowed(file, targetRules(selected));
     const fresh = loadConfig(file);
@@ -55,13 +62,33 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       v: 1,
       at: new Date().toISOString(),
       name,
-      action: options.restore ? 'restore' : previous === undefined ? 'add' : 'update',
+      action: options.rollback
+        ? 'rollback'
+        : options.restore
+          ? 'restore'
+          : previous === undefined
+            ? 'add'
+            : 'update',
       from: previous?.digest ?? null,
       to: digest,
       material,
       confirmed: true,
       stroq: stroqVersion(),
     };
+    const retained: McpPrevious | undefined = options.rollback
+      ? undefined
+      : previous === undefined
+        ? undefined
+        : previous.digest !== digest
+          ? {
+              digest: previous.digest,
+              entrypoint: previous.entrypoint,
+              passEnv: previous.passEnv,
+              ...(previous.cwd === undefined ? {} : { cwd: previous.cwd }),
+              passport: previous.passport,
+              written: previous.written,
+            }
+          : previous.previous;
     const record: McpRecord = {
       kind: 'mcp',
       status: 'confirmed',
@@ -78,6 +105,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       written,
       original: prepared.original,
       history: [...prepared.history, receipt],
+      ...(retained === undefined ? {} : { previous: retained }),
     };
     const next = { ...lock, mcp: { ...(lock.mcp ?? {}), [name]: record } };
     await commitMcpConfig(
@@ -87,10 +115,20 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       { ...targetRules(selected), before: fresh.text },
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
-    if (previous !== undefined)
-      await tidyStore(options.terminal, previous.digest, () =>
-        collectMcpStore(options.stroqHome, next, previous.digest),
+    if (previous !== undefined) {
+      const evicted = options.rollback
+        ? previous.digest
+        : (previous.previous?.digest ?? previous.digest);
+      await tidyStore(options.terminal, evicted, () =>
+        collectMcpStore(
+          options.stroqHome,
+          next,
+          previous.digest,
+          previous.previous?.digest,
+          ...previous.history.flatMap((item) => [item.from ?? undefined, item.to ?? undefined]),
+        ),
       );
+    }
     return record;
   });
 }
@@ -153,7 +191,13 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
     await tidyStore(options.terminal, previous.digest, () =>
-      collectMcpStore(options.stroqHome, next, previous.digest),
+      collectMcpStore(
+        options.stroqHome,
+        next,
+        previous.digest,
+        previous.previous?.digest,
+        ...previous.history.flatMap((item) => [item.from ?? undefined, item.to ?? undefined]),
+      ),
     );
   });
 }

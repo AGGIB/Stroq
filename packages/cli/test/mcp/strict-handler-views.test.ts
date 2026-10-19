@@ -96,7 +96,7 @@ describe('the views of a result in the handler', () => {
     track(rig, 3);
     await rig.feed(line());
     expect(asked).toEqual([viewTexts()]);
-    expect(asked[0]).toHaveLength(3);
+    expect(asked[0]).toHaveLength(viewTexts().length);
   });
 
   it('are scanned by the engine one after the other, each text as it is: the extra views first, the first view last', async () => {
@@ -112,9 +112,12 @@ describe('the views of a result in the handler', () => {
     const { rig, posted } = rigWith(() => 'clean');
     track(rig, 3);
     await rig.feed(line());
+    const [, ...extras] = viewTexts();
+    const read = readStrictResult('tools/call', RESULT);
+    if (!read.ok) throw new Error('unreadable');
+    const extraViews = read.views.slice(1);
     expect(posted.map((entry) => entry.toolInput)).toEqual([
-      { method: 'tools/call', view: 'strings' },
-      { method: 'tools/call', view: 'json' },
+      ...extraViews.map((v) => ({ method: 'tools/call', view: v.name })),
       { method: 'tools/call' },
     ]);
   });
@@ -123,8 +126,11 @@ describe('the views of a result in the handler', () => {
     const { rig, posted } = rigWith(() => 'clean');
     track(rig, 3);
     await rig.feed(line());
-    expect(posted.map((entry) => entry.extraReading)).toEqual([true, true, false]);
-    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, false]);
+    const [, ...extras] = viewTexts();
+    expect(posted.map((entry) => entry.extraReading)).toEqual([...extras.map(() => true), false]);
+    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual(
+      viewTexts().map(() => false),
+    );
   });
 });
 
@@ -137,14 +143,17 @@ describe('the call that records the result, and what only another view held', ()
     const recording = posted.at(-1);
     expect(recording?.text).toBe(first);
     expect(recording?.otherReadings).toEqual(extras);
-    expect(extras.length).toBe(2);
+    expect(extras.length).toBe(viewTexts().length - 1);
   });
 
   it('is the only call that is handed them: an extra reading remembers nothing', async () => {
     const { rig, posted } = rigWith(() => 'clean');
     track(rig, 3);
     await rig.feed(line());
-    expect(posted.slice(0, -1).map((entry) => entry.otherReadings)).toEqual([undefined, undefined]);
+    const [, ...extras] = viewTexts();
+    expect(posted.slice(0, -1).map((entry) => entry.otherReadings)).toEqual(
+      extras.map(() => undefined),
+    );
   });
 
   it('is handed nothing when the result has only one view', async () => {
@@ -164,15 +173,24 @@ describe('the call that records the result', () => {
       const { rig, posted } = rigWith((_posted, index) => (index === which ? 'suspect' : 'clean'));
       track(rig, 3);
       await rig.feed(line());
-      expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, true]);
+      const [, ...extras] = viewTexts();
+      expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([
+        ...extras.map(() => false),
+        true,
+      ]);
     },
   );
 
   it('is not told when only it was suspect: its own verdict is what flags', async () => {
-    const { rig, posted } = rigWith((_posted, index) => (index === 2 ? 'suspect' : 'clean'));
+    const [, ...extras] = viewTexts();
+    const { rig, posted } = rigWith((_posted, index) =>
+      index === extras.length ? 'suspect' : 'clean',
+    );
     track(rig, 3);
     await rig.feed(line());
-    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual([false, false, false]);
+    expect(posted.map((entry) => entry.suspectInAnotherReading)).toEqual(
+      viewTexts().map(() => false),
+    );
     expect(warningsIn(rig.lines)).toBe(1);
   });
 
@@ -203,7 +221,7 @@ describe('the verdict over the views', () => {
     const { rig, posted } = rigWith(() => 'suspect');
     track(rig, 3);
     await rig.feed(line());
-    expect(posted).toHaveLength(3);
+    expect(posted).toHaveLength(viewTexts().length);
     expect(warningsIn(rig.lines)).toBe(1);
   });
 
