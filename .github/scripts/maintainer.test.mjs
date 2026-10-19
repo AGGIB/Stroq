@@ -627,6 +627,26 @@ test('every label an issue form sets is listed in CONTRIBUTING.md and in the tri
   }
 });
 
+test('the forms for a missed risky action send a way around a protection to SECURITY.md', () => {
+  const root = new URL('../../', import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), 'utf8');
+  for (const name of ['false_negative.yml', 'bypass_report.yml']) {
+    const form = read(`.github/ISSUE_TEMPLATE/${name}`);
+    const intro = form.split('\n  - type: ')[1] ?? '';
+    assert.ok(intro.startsWith('markdown'), `${name} does not open with a note`);
+    assert.ok(
+      intro.includes('[SECURITY.md](../../SECURITY.md)'),
+      `${name} does not link SECURITY.md`,
+    );
+    assert.match(
+      intro,
+      /do not file it here|do NOT file it here/,
+      `${name} does not say "not here"`,
+    );
+    assert.match(intro, /privately|private security advisory/, `${name} does not say "privately"`);
+  }
+});
+
 test('pagination retrieves a second page instead of silently dropping issues', async () => {
   const urls = [];
   const client = new GitHub('test-token', async (url) => {
