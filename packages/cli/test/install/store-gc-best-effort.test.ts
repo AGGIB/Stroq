@@ -57,12 +57,14 @@ describe('removing a skill whose old stored copy cannot be cleared', () => {
   });
 });
 
-describe.skipIf(!canRestrict)('updating when the old stored copy cannot be cleared', () => {
+describe.skipIf(!canRestrict)('updating when the evicted stored copy cannot be cleared', () => {
   it('commits the update of a server, warns, and keeps the old copy', async () => {
     const f = await mcpFixture();
     const first = await addMcp(f.dir, f.mcpOptions);
-    const tree = join(storePath(f.options.stroqHome, first.digest), 'tree');
     await writeFile(join(f.dir, 'server.js'), 'console.log("two");\n');
+    const retained = await addMcp('demo', f.mcpOptions);
+    const tree = join(storePath(f.options.stroqHome, first.digest), 'tree');
+    await writeFile(join(f.dir, 'server.js'), 'console.log("three");\n');
     await chmod(tree, 0o500);
     try {
       const second = await addMcp('demo', f.mcpOptions);
@@ -71,6 +73,7 @@ describe.skipIf(!canRestrict)('updating when the old stored copy cannot be clear
       expect((await readPassports(f.options.stroqHome)).mcp?.['demo']).toMatchObject({
         digest: second.digest,
         status: 'confirmed',
+        previous: { digest: retained.digest },
       });
       expect(f.output()).toMatch(/warning: .*stored copy.*not removed/);
     } finally {
@@ -81,6 +84,8 @@ describe.skipIf(!canRestrict)('updating when the old stored copy cannot be clear
   it('commits the update of a skill, warns, and keeps the old copy', async () => {
     const f = await setup();
     const first = await addSkill(f.source, f.options);
+    await writeFile(join(f.source, 'README.md'), 'The second revision.\n');
+    const retained = await addSkill('demo', f.options);
     const tree = join(storePath(f.options.stroqHome, first.digest), 'tree');
     await writeFile(
       join(f.source, 'SKILL.md'),
@@ -91,6 +96,7 @@ describe.skipIf(!canRestrict)('updating when the old stored copy cannot be clear
       const second = await addSkill('demo', f.options);
 
       expect(second.digest).not.toBe(first.digest);
+      expect(second.previous?.digest).toBe(retained.digest);
       expect(f.output()).toMatch(/warning: .*stored copy.*not removed/);
     } finally {
       await chmod(tree, 0o700);
