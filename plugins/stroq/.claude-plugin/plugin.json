@@ -1,6 +1,6 @@
 {
   "name": "stroq",
-  "description": "Guards Claude Code's tool calls: scans what the agent reads, names the file or result that dictated a command, and blocks secret egress and risky follow-ups. Local, no telemetry. Pair with `npx @stroq/cli sent --last` to find known secrets in past sessions.",
+  "description": "Checks each Claude Code tool call before it runs. Blocks a command that would send one of your keys out, and asks before the agent runs a package or script it copied from something it just read. Runs on your machine. No telemetry.",
   "version": "0.27.0",
   "author": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
   "homepage": "https://stroq.dev",
@@ -15,6 +15,5 @@
     "provenance",
     "audit",
     "mcp"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }

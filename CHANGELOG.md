@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Claude Code plugin no longer falls back to `@stroq/cli@latest` while npm does not have the pinned version yet. It runs the previous release instead (`STROQ_FALLBACK_PIN`), so the code that guards your agent is always an exact version. The plugin also has its own README, saying what it runs, downloads and writes.
+
 ## [0.27.0] - 2026-10-19
 
 ### Fixed

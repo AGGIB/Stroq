@@ -17,6 +17,9 @@ export const wrapper = join(repoRoot, 'plugins/stroq/hooks/stroq-hook.sh');
 const entry = CLI_ENTRY;
 export const PIN =
   /^STROQ_PIN="@stroq\/cli@([^"]+)"$/m.exec(readFileSync(wrapper, 'utf8'))?.[1] ?? '0';
+/** The release the wrapper runs while npm does not have PIN yet. */
+export const FALLBACK_PIN =
+  /^STROQ_FALLBACK_PIN="@stroq\/cli@([^"]+)"$/m.exec(readFileSync(wrapper, 'utf8'))?.[1] ?? '0';
 
 /** A `stroq` executable on PATH that runs the TypeScript CLI in-process, like a global install. */
 export function stroqShim(): string {

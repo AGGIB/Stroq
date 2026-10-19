@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PIN,
+  FALLBACK_PIN,
   cliDir,
   runWrapper,
   preBash,
@@ -397,13 +398,13 @@ done
     expect(r.stderr).toContain('delete');
   }, 60_000);
 
-  it('goes straight to the newest release when npm says the pin is not there yet', async () => {
+  it('goes straight to the previous release when npm says the pin is not there yet', async () => {
     const npm = fakeNpm({
       before:
         "echo 'npm error code ETARGET' >&2; echo 'npm error notarget No matching version found' >&2; exit 1",
     });
     const npx = fakeNpx(`case "$*" in
-  *'@stroq/cli@latest'*) printf '%s' '{}'; exit 0 ;;
+  *'@stroq/cli@${FALLBACK_PIN} '*) printf '%s' '{}'; exit 0 ;;
   *) ${ETARGET_STDERR} ;;
 esac`);
     const r = await runWithCopy(preBash('ls'), npm, npx, newHome(), {
@@ -412,7 +413,7 @@ esac`);
     expect(r.code).toBe(0);
     const seen = calls(npx.log);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toContain('@stroq/cli@latest');
+    expect(seen[0]).toContain(`@stroq/cli@${FALLBACK_PIN} `);
   }, 60_000);
 
   it('takes a deadline that is not a plain number for the default one', async () => {
