@@ -179,9 +179,9 @@ describe('a result that is an image', () => {
     },
   });
 
-  it('is read as no text beyond its kind, however large', () => {
+  it('is read as no text beyond its kind and its metadata, however large', () => {
     const text = toolResultToText(image(300_000));
-    expect(text.length).toBeLessThan(100);
+    expect(text.length).toBeLessThan(400);
     expect(text).not.toContain('iVBORw0KGgo');
     expect(toolResultReading(image(300_000)).serialised).toBe(false);
   });

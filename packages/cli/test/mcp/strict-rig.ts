@@ -229,8 +229,10 @@ export function startRig(options: RigOptions = {}): Rig {
     tainted: () => {
       const dir = join(home, 'sessions');
       if (!existsSync(dir)) return false;
-      return readdirSync(dir).some((name) =>
-        readFileSync(join(dir, name), 'utf8').includes('"suspect"'),
+      // The marker that a result is being recorded is a directory beside the files of the session.
+      return readdirSync(dir, { withFileTypes: true }).some(
+        (entry) =>
+          entry.isFile() && readFileSync(join(dir, entry.name), 'utf8').includes('"suspect"'),
       );
     },
     finish: () => {

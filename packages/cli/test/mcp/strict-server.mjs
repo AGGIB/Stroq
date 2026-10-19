@@ -204,7 +204,7 @@ function call(name, id, args) {
       return reply(id, text(`${'.'.repeat(210_000)} ${INJ}`));
     case 'dotfront':
       return reply(id, text(`${INJ} ${'.'.repeat(210_000)}`));
-    case 'heavy': // ordinary prose the scanner is slow on
+    case 'heavy': // 100 KB of ordinary prose: more than a very short deadline lets the scanner read
       return reply(
         id,
         text('lorem ipsum dolor sit amet '.repeat(Math.ceil(100_000 / 27)).slice(0, 100_000)),

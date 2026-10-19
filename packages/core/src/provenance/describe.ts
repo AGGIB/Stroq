@@ -34,6 +34,7 @@ const GAP_KIND_LABEL: Readonly<Record<ProvenanceGap['kind'], string>> = {
   pkg: 'package',
   pipe_shell: 'pipe-to-shell command',
   encoded: 'encoded blob',
+  digest: 'hash',
 };
 
 /** One English sentence for `stroq why`, saying what provenance could not rule out and why. */
