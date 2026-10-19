@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
+import { agentSurface } from '../../src/exposure/agent-tree.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runsFetchedOrHiddenCode } from '../../src/exposure/fetch-shapes.js';
 import { commitFiles, git, scratchRepo, stageLink } from '../helpers/scratch-repo.js';
@@ -114,9 +115,41 @@ describe('a link out of the repository', () => {
     const head = git(dir, 'rev-parse', 'HEAD').trim();
     const [h] = agentChanges(dir, head).hits;
     expect(h).toMatchObject({ kind: 'config-link-outside', status: 'present', severity: 'error' });
-    for (const target of ['/var/tmp/m.json', '/dev/shm/m.json', '/private/tmp/m.json'])
+    for (const target of [
+      '/var/tmp/m.json',
+      '/dev/shm/m.json',
+      '/private/tmp/m.json',
+      '//tmp/m.json',
+      '/a/../tmp/m.json',
+      '/./var/tmp/m.json',
+      '/private//tmp/m.json',
+      '/TMP/m.json',
+    ])
       expect(
         tagChanges([hit('config-link-outside', '.mcp.json', 1, 'link', target)], null)[0]?.severity,
       ).toBe('error');
   });
+
+  // A change can only be checked against what is in the repository: a link that leads out of it,
+  // however its target is spelled, reads a file nobody reviewed.
+  posixOnly('makes one that was already there an error in a change', () => {
+    const dir = scratchRepo(dirs);
+    stageLink(dir, '.claude/settings.json', 'a/../../../etc/stroq-test.json');
+    git(dir, 'commit', '-q', '-m', 'c');
+    const head = git(dir, 'rev-parse', 'HEAD').trim();
+    const [h] = agentChanges(dir, head).hits;
+    expect(h).toMatchObject({ kind: 'config-link-outside', status: 'present', severity: 'error' });
+    expect(isFailing(h as TaggedHit, 'any')).toBe(true);
+  });
+
+  posixOnly(
+    'makes a link on disk into a shared temporary folder an error, however it is spelled',
+    () => {
+      const dir = scratchRepo(dirs);
+      const up = '../'.repeat(dir.split('/').length + 2);
+      symlinkSync(`${up}tmp/stroq-attacker-servers.json`, join(dir, '.mcp.json'));
+      const hits = tagChanges(agentSurface(dir).hits, null);
+      expect(hits.map((h) => `${h.kind} ${h.severity}`)).toEqual(['config-link-outside error']);
+    },
+  );
 });

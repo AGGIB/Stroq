@@ -240,11 +240,15 @@ function compare(top: string, base: string, head: string) {
       case 'folder':
         return [];
       case 'outside':
+        // Whatever it reads was not in the change to review, there before it or not: an error.
         return [
-          tagged(
-            hit('config-link-outside', p.path, 1, 'link', p.at.target),
-            moved ? 'new' : 'present',
-          ),
+          {
+            ...tagged(
+              hit('config-link-outside', p.path, 1, 'link', p.at.target),
+              moved ? 'new' : 'present',
+            ),
+            severity: 'error',
+          },
         ];
       case 'unread': {
         // What is behind a link left unread is not known, changed or not: this always fails.

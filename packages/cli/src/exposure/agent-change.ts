@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit, AgentKind } from './agent-kinds.js';
 import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
@@ -63,8 +64,15 @@ const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set([
   'agent-broad-allow',
   'config-link-outside',
 ]);
-/** A folder anyone on the machine can write, where an attacker can put the file a link reads. */
-const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/;
+/**
+ * A folder anyone on the machine can write, where an attacker can put the file a link reads. In
+ * any letter case: macOS opens `/TMP` as `/tmp`.
+ */
+const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/i;
+
+/** Whether an absolute link target, once `//`, `.` and `..` are resolved, is in a shared folder. */
+export const inSharedFolder = (target: string): boolean =>
+  target.startsWith('/') && SHARED_FOLDER.test(posix.normalize(target));
 
 /**
  * A hit's severity once it is known whether the change brought it. One that was already there
@@ -75,7 +83,7 @@ const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/;
  * it. A link to a shared temporary folder is an error either way.
  */
 export function settle(h: AgentHit, status: ChangeStatus): TaggedHit {
-  if (h.kind === 'config-link-outside' && SHARED_FOLDER.test(h.value))
+  if (h.kind === 'config-link-outside' && inSharedFolder(h.value))
     return { ...h, severity: 'error', status };
   if (status === 'present')
     return h.kind === 'agent-env' && warnsWhenPresent(h.name)

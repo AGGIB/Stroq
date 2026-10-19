@@ -121,6 +121,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['deep JSON arrays', (size) => `${'['.repeat(size / 2)}${']'.repeat(size / 2)}`],
   ['deep JSON objects', (size) => `${'{"a":'.repeat(size / 6)}1${'}'.repeat(size / 6)}`],
   ['controls', repeat('\u0001\u001b\r\n')],
+  // A link target down many folders and back up them, normalized before it is judged.
+  ['down and back up', (size) => `/${'a/'.repeat(size / 5)}${'../'.repeat(size / 5)}tmp/x`],
 ];
 
 const json = (text: string): string => JSON.stringify(text);

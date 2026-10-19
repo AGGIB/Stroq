@@ -1,7 +1,8 @@
 import { readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from 'node:fs';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { dirname, join, posix, resolve as resolvePath, sep } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { within } from '../commands/config-file.js';
+import { inSharedFolder } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import {
@@ -63,7 +64,19 @@ const readlinkOrUndefined = (path: string): string | undefined => {
   }
 };
 
-const linkText = (path: string): string => readlinkOrUndefined(path) ?? 'outside the repository';
+/**
+ * What to report a link out of the folder by: the text it holds, or, when it leads into a folder
+ * anyone can write however it is spelled (`../../../../tmp/x`), where it leads, so that the shared
+ * folder is seen. `real` is where it was found to lead, when it does lead somewhere.
+ */
+function outsideText(abs: string, real?: string): string {
+  const text = readlinkOrUndefined(abs);
+  if (text === undefined) return 'outside the repository';
+  const where = posix.normalize(resolvePath(dirname(abs), text).split(sep).join('/'));
+  for (const target of [where, real])
+    if (target !== undefined && inSharedFolder(target)) return target;
+  return text;
+}
 
 const isDirectory = (path: string): boolean => {
   try {
@@ -146,7 +159,7 @@ function walk(root: string): Walked {
       }
       if (isLink && !within(real, realRoot)) {
         if (isSurfacePath(rel) || isAgentDir(rel))
-          found.push({ rel, real: linkText(abs), kind: 'outside' });
+          found.push({ rel, real: outsideText(abs, real), kind: 'outside' });
         continue;
       }
       if (isLink ? isDirectory(real) : entry.isDirectory())
@@ -167,7 +180,9 @@ function brokenLink(abs: string, rel: string, roots: readonly string[]): Candida
   const where = resolvePath(dirname(abs), text);
   if (roots.some((root) => within(where, root)))
     return linkMatters(rel) ? { rel, real: text, kind: 'dangling' } : undefined;
-  return isSurfacePath(rel) || isAgentDir(rel) ? { rel, real: text, kind: 'outside' } : undefined;
+  return isSurfacePath(rel) || isAgentDir(rel)
+    ? { rel, real: outsideText(abs), kind: 'outside' }
+    : undefined;
 }
 
 /** Reads one file, charging its size to what is `left` of the budget. */
