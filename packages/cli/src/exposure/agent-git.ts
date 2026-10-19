@@ -37,6 +37,7 @@ import {
   type TreeView,
 } from './git-tree.js';
 
+import { FILE_NAMES, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 import { stripJsonc } from './jsonc.js';
 
 export { GitError } from './git-read.js';
@@ -397,21 +398,45 @@ function limitHits(
   return hits;
 }
 
-/** Folders that hold `HEAD`, `objects/` and `refs/`: a bare repository committed as files. */
+/**
+ * Folders that git takes for a bare repository (see `git-dir-names.ts`): one committed as files.
+ * Every part of a path is a name in the folder before it, whether a file, a link or a folder. A
+ * folder is known by a running digest of its path rather than by the path itself, so a path of
+ * a thousand parts named `HEAD` costs its length and not its length times its depth.
+ */
 export function bareRepositories(paths: Iterable<string>): string[] {
-  const heads = new Set<string>();
-  const objects = new Set<string>();
-  const refs = new Set<string>();
+  const names = new Map<string, Set<string>>();
+  const folders = new Map<string, string>();
   for (const path of paths) {
-    const parts = path.split('/');
-    for (let i = 1; i < parts.length; i += 1) {
-      const dir = parts.slice(0, i).join('/');
-      if (i === parts.length - 1 && parts[i] === 'HEAD') heads.add(dir);
-      if (parts[i] === 'objects' && i < parts.length - 1) objects.add(dir);
-      if (parts[i] === 'refs' && i < parts.length - 1) refs.add(dir);
+    let a = 0;
+    let b = 0;
+    let start = 0;
+    for (let index = 0; ; index += 1) {
+      const end = path.indexOf('/', start);
+      const name =
+        index === 0 ? undefined : gitDirName(path.slice(start, end === -1 ? undefined : end));
+      // `HEAD` and `commondir` are files: one that has paths under it is a folder.
+      if (name !== undefined && !(end !== -1 && FILE_NAMES.has(name))) {
+        const key = `${a}:${b}:${start}`;
+        const found = names.get(key);
+        if (found === undefined) {
+          names.set(key, new Set([name]));
+          folders.set(key, path.slice(0, start - 1));
+        } else found.add(name);
+      }
+      if (end === -1) break;
+      for (let at = start; at <= end; at += 1) {
+        const c = path.charCodeAt(at);
+        a = (Math.imul(a, 31) + c) >>> 0;
+        b = (Math.imul(b, 131) + c + 7) >>> 0;
+      }
+      start = end + 1;
     }
   }
-  return [...heads].filter((dir) => objects.has(dir) && refs.has(dir)).sort();
+  return [...names]
+    .filter(([, found]) => looksLikeGitDir(found))
+    .map(([key]) => folders.get(key) as string)
+    .sort();
 }
 
 function bareChanges(

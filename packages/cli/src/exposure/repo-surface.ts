@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
 import type { Finding } from './findings.js';
+import { FILE_NAMES, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 
 /**
  * What a repository can make run on the machine that opens it.
@@ -277,8 +278,14 @@ function nestedBareRepos(root: string, withRoot = false): { hits: RepoExecHit[];
     } catch {
       continue;
     }
-    const names = new Set(entries.map((e) => e.name));
-    const isBare = names.has('HEAD') && names.has('objects') && names.has('refs');
+    // Links and other letter cases too: git opens `Objects` as `objects` on a disk that ignores case.
+    const names = new Set(
+      entries.flatMap((e) => {
+        const name = gitDirName(e.name);
+        return name === undefined || (e.isDirectory() && FILE_NAMES.has(name)) ? [] : [name];
+      }),
+    );
+    const isBare = looksLikeGitDir(names);
     if (isBare && (dir !== root || withRoot)) {
       hits.push({
         kind: 'nested-bare-repo',
