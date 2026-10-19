@@ -9,6 +9,8 @@ export const REMOVE_OPTIONS = {
   force: { type: 'boolean' },
   kind: { type: 'string' },
   user: { type: 'boolean' },
+  client: { type: 'string' },
+  config: { type: 'string' },
 } as const;
 
 export async function runRemove(args: readonly string[]): Promise<number> {
@@ -43,9 +45,15 @@ export async function runRemove(args: readonly string[]): Promise<number> {
       node: process.execPath,
       entryArgv: [],
       force: parsed.values.force === true,
+      ...(parsed.values.client === undefined ? {} : { client: parsed.values.client }),
+      ...(parsed.values.config === undefined ? {} : { config: parsed.values.config }),
     });
     process.stdout.write('MCP server removed; client config restored\n');
     return 0;
+  }
+  if (parsed.values.client !== undefined || parsed.values.config !== undefined) {
+    process.stderr.write(usageError('remove', '--client and --config require --kind mcp'));
+    return 2;
   }
   const { removeSkill } = await import('../install/skill-install.js');
   await removeSkill(parsed.positionals[0]!, {

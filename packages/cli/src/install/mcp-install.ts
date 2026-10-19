@@ -10,16 +10,19 @@ import { commitMcpConfig } from './mcp-config-transaction.js';
 import { currentEntry, jsonEqual, loadConfig, withServer } from './mcp-client-config.js';
 import { prepareMcp, type PreparedMcp } from './mcp-prepare.js';
 import {
+  isWrappedEntry,
   nameOf,
+  pendingRecordOf,
   recordOf,
   requirePerson,
   subjectOf,
   type McpInstallOptions,
+  type McpPendingRecord,
   type McpPrevious,
   type McpRecord,
 } from './mcp-record.js';
 import { showMcpScreen } from './mcp-screen.js';
-import { recordedTarget, targetRules } from './mcp-target.js';
+import { recordedTarget, target, targetRules, type McpTarget } from './mcp-target.js';
 import { collectMcpStore, tidyStore } from './store-gc.js';
 import { assertPlainStoreHome, putStore, readStoredTreeOf } from './store.js';
 
@@ -58,6 +61,30 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
     const fresh = loadConfig(file);
     if (!jsonEqual(currentEntry(fresh.config, name), current))
       throw new Error('the client config changed while confirming; read and confirm again');
+    const interrupted = pendingRecordOf(lock, name);
+    const pendingRecord: McpPendingRecord = {
+      kind: 'mcp',
+      status: 'pending',
+      digest,
+      grant: { pin: `sha256:${digest}` },
+      source: prepared.source,
+      config: file,
+      configRoot: root,
+      client: label,
+      cwd: prepared.cwd,
+      entrypoint: prepared.entrypoint,
+      passEnv: prepared.passEnv,
+      passport: made.passport,
+      written,
+      original: prepared.original,
+      replaced: interrupted === undefined ? current : interrupted.replaced,
+      ...(previous === undefined ? {} : { previousRecord: previous }),
+      history: [...prepared.history],
+    };
+    await writePassports(options.stroqHome, {
+      ...lock,
+      mcp: { ...(lock.mcp ?? {}), [name]: pendingRecord },
+    });
     const receipt: Receipt = {
       v: 1,
       at: new Date().toISOString(),
@@ -108,12 +135,17 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       ...(retained === undefined ? {} : { previous: retained }),
     };
     const next = { ...lock, mcp: { ...(lock.mcp ?? {}), [name]: record } };
-    await commitMcpConfig(
-      file,
-      withServer(fresh.config, name, written),
-      () => writePassports(options.stroqHome, next),
-      { ...targetRules(selected), before: fresh.text },
-    );
+    try {
+      await commitMcpConfig(
+        file,
+        withServer(fresh.config, name, written),
+        () => writePassports(options.stroqHome, next),
+        { ...targetRules(selected), before: fresh.text },
+      );
+    } catch (error) {
+      await writePassports(options.stroqHome, lock);
+      throw error;
+    }
     await auditReceipt(options.stroqHome, receipt, 'mcp');
     if (previous !== undefined) {
       const evicted = options.rollback
@@ -133,15 +165,105 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   });
 }
 
+/** Validate explicit selection, but keep the recorded target's project/home write boundary. */
+function removalTarget(
+  record: McpRecord | McpPendingRecord,
+  options: McpInstallOptions,
+): McpTarget {
+  const selected = recordedTarget(record);
+  if (options.client !== undefined || options.config !== undefined) {
+    const requested = target(options);
+    if (requested.file !== selected.file)
+      throw new Error(
+        'the MCP server is recorded in another client config; omit --client and --config to use its recorded target',
+      );
+  }
+  return selected;
+}
+
 export async function removeMcp(name: string, options: McpInstallOptions): Promise<void> {
   requirePerson(options);
   nameOf(name);
   const initial = await readPassports(options.stroqHome);
   const previous = recordOf(initial, name);
-  if (previous === undefined) throw new Error('the MCP server is not installed');
+  const pending = pendingRecordOf(initial, name);
+  if (previous === undefined) {
+    if (pending !== undefined) {
+      const restored = pending.previousRecord;
+      const replacement =
+        restored?.written ??
+        (isWrappedEntry(pending.replaced) ? pending.original : pending.replaced);
+      const selected = removalTarget(pending, options);
+      const { file } = selected;
+      assertWriteAllowed(file, targetRules(selected));
+      const current = currentEntry(loadConfig(file).config, name);
+      const drifted = !jsonEqual(current, pending.written);
+      if (drifted && options.force !== true)
+        throw new Error(
+          'the client config entry changed outside Stroq; it was kept (use --force to remove it)',
+        );
+      options.terminal.write(
+        `Remove unconfirmed MCP server ${name} from ${outsideLine(JSON.stringify(file))}\nPending sha256:${pending.digest}\n${replacement === null || replacement === undefined ? 'The entry is deleted.' : 'The replaced entry is restored.'}\n`,
+      );
+      const yes =
+        options.force === true
+          ? true
+          : await confirm(
+              options.terminal,
+              styleFor(options.terminal),
+              `Remove unconfirmed ${name}${drifted ? ' including outside edits' : ''}?`,
+              false,
+            );
+      if (!yes) throw new Error('removal not confirmed');
+      await withPassports(options.stroqHome, async (lock) => {
+        if (!jsonEqual(lock.mcp?.[name], initial.mcp?.[name]))
+          throw new Error('the lock changed while confirming; read and confirm again');
+        assertWriteAllowed(file, targetRules(selected));
+        const fresh = loadConfig(file);
+        if (!jsonEqual(currentEntry(fresh.config, name), current))
+          throw new Error('the client config changed while confirming; read and confirm again');
+        const rest = { ...(lock.mcp ?? {}) };
+        if (restored !== undefined) rest[name] = restored;
+        else delete rest[name];
+        const next = { ...lock, mcp: rest };
+        await commitMcpConfig(
+          file,
+          withServer(
+            fresh.config,
+            name,
+            (replacement as Record<string, unknown> | null) ?? undefined,
+          ),
+          () => writePassports(options.stroqHome, next),
+          { ...targetRules(selected), before: fresh.text },
+        );
+        await tidyStore(options.terminal, pending.digest, () =>
+          collectMcpStore(options.stroqHome, next, pending.digest),
+        );
+      });
+      return;
+    }
+    if (options.force === true) {
+      const selected = target(options);
+      const { file } = selected;
+      assertWriteAllowed(file, targetRules(selected));
+      const fresh = loadConfig(file);
+      const current = currentEntry(fresh.config, name);
+      if (isWrappedEntry(current)) {
+        options.terminal.write(
+          `Remove orphan MCP wrapper ${name} from ${outsideLine(JSON.stringify(file))}\nThe entry is deleted.\n`,
+        );
+        await commitMcpConfig(file, withServer(fresh.config, name, undefined), async () => {}, {
+          ...targetRules(selected),
+          before: fresh.text,
+        });
+        return;
+      }
+    }
+    throw new Error('the MCP server is not installed');
+  }
   // Removing needs the digest from the lock and the entry in the client config, never the stored bytes: a
   // damaged store must not make a server impossible to take out.
-  const selected = recordedTarget(previous);
+  const selected = removalTarget(previous, options);
   const { file } = selected;
   assertWriteAllowed(file, targetRules(selected));
   const current = currentEntry(loadConfig(file).config, name);

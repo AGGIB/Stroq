@@ -15,7 +15,9 @@ import { currentEntry, entryFor, jsonEqual, loadConfig, serversOf } from './mcp-
 import { assertSelfContained } from './mcp-outside-imports.js';
 import {
   ENV_NAME,
+  isWrappedEntry,
   nameOf,
+  pendingRecordOf,
   recordOf,
   subjectOf,
   type McpInstallOptions,
@@ -98,7 +100,8 @@ async function installedUnder(
   initial: Passports,
   options: McpInstallOptions,
 ) {
-  const previous = recordOf(initial, name);
+  const pending = pendingRecordOf(initial, name);
+  const previous = recordOf(initial, name) ?? pending?.previousRecord;
   const prior = initial.mcp?.[name];
   const history =
     isPlainObject(prior) && Array.isArray(prior['history']) ? (prior['history'] as Receipt[]) : [];
@@ -107,6 +110,8 @@ async function installedUnder(
       ? undefined
       : await readStoredTreeOf(options.stroqHome, previous.digest, subjectOf(name, previous));
   if (previous !== undefined && resolve(previous.source) !== source)
+    throw new Error(`this path is not ${name}'s recorded source; remove it first`);
+  if (pending !== undefined && resolve(pending.source) !== source)
     throw new Error(`this path is not ${name}'s recorded source; remove it first`);
   return { previous, history, oldTree };
 }
@@ -127,21 +132,31 @@ function configFor(
   name: string,
   previous: McpRecord | undefined,
   options: McpInstallOptions,
+  initial?: Passports,
 ): { selected: McpTarget; current: unknown } {
+  const pending = initial === undefined ? undefined : pendingRecordOf(initial, name);
+  const recorded = pending ?? previous;
   const selected =
-    previous !== undefined && options.client === undefined && options.config === undefined
-      ? recordedTarget(previous)
+    recorded !== undefined && options.client === undefined && options.config === undefined
+      ? recordedTarget(recorded)
       : target(options);
   const { file } = selected;
-  if (previous !== undefined && resolve(previous.config) !== file)
+  if (recorded !== undefined && resolve(recorded.config) !== file)
     throw new Error('the server is installed in another client config; remove it first');
   assertWriteAllowed(file, targetRules(selected));
   const { config } = loadConfig(file);
   const current = currentEntry(config, name);
   if (previous !== undefined && !jsonEqual(current, previous.written) && options.force !== true)
     throw new Error('the client config entry changed outside Stroq; use remove --force first');
-  if (previous === undefined && Object.hasOwn(serversOf(config), name))
-    throw new Error('the client config already has a server by this name; refusing to replace it');
+  if (previous === undefined && Object.hasOwn(serversOf(config), name)) {
+    const isPending = pending !== undefined;
+    const isOrphan = isWrappedEntry(current);
+    if (!((isPending || isOrphan) && options.force === true)) {
+      throw new Error(
+        'the client config already has a server by this name; refusing to replace it',
+      );
+    }
+  }
   return { selected, current };
 }
 
@@ -154,6 +169,7 @@ export async function prepareMcp(
   if (options.restore && options.rollback)
     throw new Error('cannot use --restore and --rollback together');
   const named = recordOf(initial, sourceOrName);
+  const pendingName = pendingRecordOf(initial, sourceOrName);
   if (options.restore && named === undefined)
     throw new Error('--restore needs the name of an installed MCP server');
   if (options.rollback) {
@@ -162,19 +178,26 @@ export async function prepareMcp(
     if (named.previous === undefined)
       throw new Error(`MCP server ${sourceOrName} has no previous revision to roll back to`);
   }
-  const source = named?.source ?? resolve(sourceOrName);
+  const source = named?.source ?? pendingName?.source ?? resolve(sourceOrName);
   const made = await madeOf(sourceOrName, source, named, options);
   assertSelfContained(made.tree);
   const name = nameOf(
-    options.name ?? (named === undefined ? made.passport.artifact.name : sourceOrName),
+    options.name ??
+      (named === undefined && pendingName === undefined
+        ? made.passport.artifact.name
+        : sourceOrName),
   );
   const { previous, history, oldTree } = await installedUnder(name, source, initial, options);
-  const base = options.rollback && previous?.previous !== undefined ? previous.previous : previous;
+  const pending = pendingRecordOf(initial, name);
+  const base =
+    options.rollback && previous?.previous !== undefined
+      ? previous.previous
+      : (pending ?? previous);
   const entrypoint = entrypointOf(made.tree, options.entrypoint ?? base?.entrypoint);
   const passEnv = passEnvOf(options, base);
-  const { selected, current } = configFor(name, previous, options);
+  const { selected, current } = configFor(name, previous, options, initial);
   const digest = made.passport.artifact.digest;
-  const original = previous === undefined ? null : previous.original;
+  const original = previous === undefined ? (pending?.original ?? null) : previous.original;
   const cwd = resolve(options.cwd ?? (base === undefined ? options.project : recordedCwd(base)));
   const written = entryFor(
     name,

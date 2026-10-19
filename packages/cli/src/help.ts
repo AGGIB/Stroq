@@ -48,10 +48,12 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'remove',
-    synopsis: 'remove <name> [--user] [--force] [--kind skill|mcp]',
+    synopsis:
+      'remove <name> [--user] [--force] [--kind skill|mcp] [--client <name>|--config <path>]',
     about: [
       'remove a confirmed skill after a terminal y/N question, and record a receipt;',
       'with --kind mcp, delete the config entry or restore the one it replaced',
+      'For a wrapper with no lock record, give --force and --client or --config.',
     ],
     flags: [
       ['--user', "remove from ~/.claude/skills instead of this project's .claude/skills"],
@@ -60,6 +62,8 @@ export const COMMANDS: readonly CommandHelp[] = [
         'also remove a skill or entry changed outside Stroq; still requires a person at a terminal',
       ],
       ['--kind <kind>', 'skill (default) or mcp'],
+      ['--client <name>', 'with --kind mcp: the client config containing an orphan wrapper'],
+      ['--config <path>', 'with --kind mcp: the explicit config containing an orphan wrapper'],
     ],
   },
   {
