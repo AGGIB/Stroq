@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { stroqHome } from '../paths.js';
+import { stroqHome, storeDirIn, runDirIn } from '../paths.js';
 import { parseArgsProblem, usageError } from '../help.js';
 import { currentTerminal } from '../ui/terminal.js';
 
@@ -64,6 +64,9 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     const { hookArgv, stableEntry, runsFromNpxCache } = await import('./init.js');
     const { stroqVersion } = await import('../version.js');
     const home = stroqHome();
+    const { assertPlainDirectory } = await import('../install/store.js');
+    for (const folder of [home, storeDirIn(home), runDirIn(home)])
+      await assertPlainDirectory(folder);
     const launched = resolve(process.argv[1] ?? '');
     const entry = stableEntry(launched, home, stroqVersion());
     if (runsFromNpxCache(entry))

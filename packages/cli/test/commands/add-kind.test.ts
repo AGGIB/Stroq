@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAdd } from '../../src/commands/add.js';
@@ -93,6 +94,27 @@ describe('add --kind mcp --strict', () => {
 });
 
 describe('add --kind mcp from an npx cache entry', () => {
+  it('refuses a linked home before copying the npx entry into it', async () => {
+    const { mcpFixture } = await import('../helpers/mcp-install.js');
+    const f = await mcpFixture();
+    const entry = join(f.root, '_npx', 'linked', 'node_modules', 'cli', 'index.js');
+    await mkdir(join(entry, '..'), { recursive: true });
+    await writeFile(entry, '// temporary entry\n');
+    const linked = join(f.root, 'linked-home');
+    await symlink(f.root, linked, process.platform === 'win32' ? 'junction' : 'dir');
+    vi.stubEnv('STROQ_HOME', linked);
+    const old = process.argv[1];
+    process.argv[1] = entry;
+    try {
+      await expect(runAdd([f.dir, '--kind', 'mcp', '--config', f.config])).rejects.toThrow(
+        /linked/,
+      );
+      expect(existsSync(join(f.root, 'cli'))).toBe(false);
+    } finally {
+      process.argv[1] = old!;
+    }
+  });
+
   it('refuses before confirmation when the stable copy cannot be created', async () => {
     const { mcpFixture } = await import('../helpers/mcp-install.js');
     const terminal = await import('../../src/ui/terminal.js');
