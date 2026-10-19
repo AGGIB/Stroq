@@ -182,3 +182,33 @@ describe('a page names the same package as a command does', () => {
     expect(extractAtoms(page).filter((a) => a.kind === 'pkg')).toContainEqual(pkg);
   });
 });
+
+describe('an expansion stuck to the end of a clean name', () => {
+  it.each([
+    ['a command in backticks', `npx ${NAME}\`true\``],
+    ['a command substitution', `npx ${NAME}$(echo x)`],
+    ['a variable', `npx ${NAME}$SUFFIX`],
+    ['a braced variable', `npx ${NAME}\${SUFFIX}`],
+    ['a command in backticks for an installer', `npm install ${NAME}\`true\``],
+    ['a command substitution for an installer', `pip install ${NAME}$(date)`],
+    ['a scoped name', `npm install @scope/${NAME}\`true\``],
+  ])('records the name before it, and is still a doubt: %s', (_what, command) => {
+    const read = extractActionAtoms(command);
+    const names = read.atoms.filter((a) => a.kind === 'pkg').map((a) => a.value);
+    expect(names).toContain(command.includes('@scope') ? `@scope/${NAME}` : NAME);
+    expect(read.unread).toBe(true);
+    expect(read.unreadCause).toBe('name');
+  });
+
+  it.each([
+    ['an expansion in the middle of the name', `npx evil-$X-fix`],
+    ['an expansion followed by more of a name', `npx ev$X-helper-fix`],
+    ['two expansions', `npx ${NAME}$A$B`],
+    ['an expansion and then text', `npx ${NAME}$(echo x)-more`],
+    ['a backtick pair and then text', `npx ${NAME}\`true\`more`],
+  ])('still records no half of it: %s', (_what, command) => {
+    const read = extractActionAtoms(command);
+    expect(read.atoms.filter((a) => a.kind === 'pkg')).toEqual([]);
+    expect(read.unread).toBe(true);
+  });
+});

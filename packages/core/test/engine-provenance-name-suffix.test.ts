@@ -134,3 +134,19 @@ describe('a package nobody flagged', () => {
     expect((await f.pre('pip install requests[socks]==2.*')).decision.effect).not.toBe('deny');
   });
 });
+
+describe('an expansion stuck to the end of a flagged name', () => {
+  it.each([
+    `npx ${NAME}\`true\``,
+    `npx ${NAME}$(echo x)`,
+    `npx ${NAME}$SUFFIX`,
+    `npm install ${NAME}\${SUFFIX}`,
+  ])('is denied like the plain command: %s', async (command) => {
+    const f = fixture();
+    await f.post(PAGE);
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+});

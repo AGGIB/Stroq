@@ -31,6 +31,13 @@ const BARE_OPERATOR = /^(?:[0-9]*[<>]{1,2}|&>>?)$/;
 const REGISTRY_SPEC = /^(?:npm|jsr):/i;
 /** Where an alias names the package it stands for: `alias@npm:real@1.2`. */
 const ALIAS_OF = /^@(?:npm|jsr):/i;
+/**
+ * What stands after a clean name when it is exactly one expansion and nothing more: a pair of
+ * backticks, `$(…)`, `${…}` or `$NAME`. The shell attaches its output to the name, so the package
+ * is not certainly the one named; but the name before it is a complete one, and is recorded, as a
+ * flagged package must not become a question for having something stuck to it.
+ */
+const ATTACHED_EXPANSION = /^(?:`[^`]*`|\$\([^()]*\)|\$\{[^{}]*\}|\$[A-Za-z_]\w*|\$\d)$/;
 /** A word that is a flag, a place or an address, not the name of a package in a registry. */
 const NOT_A_NAME_START = '.-/~\\';
 
@@ -122,7 +129,12 @@ export function readPackageWord(read: ShellWord): PackageWord {
   const spec = REGISTRY_SPEC.exec(word)?.[0].length ?? 0;
   const end = spec + nameEnd(word.slice(spec));
   const readable = standsAlone(word, end);
-  const name = readable ? normalizePackageName(word.slice(spec, end)) : '';
+  // The closing parenthesis of `$(…)` is among the characters trimmed from the end of a word.
+  const attached =
+    !readable &&
+    end > spec &&
+    (ATTACHED_EXPANSION.test(word.slice(end)) || ATTACHED_EXPANSION.test(unquoted.slice(end)));
+  const name = readable || attached ? normalizePackageName(word.slice(spec, end)) : '';
   const target = readable ? aliasTarget(read, lead + end, word, end) : undefined;
   const opensQuote = read.open && (lead > 0 || /["']/.test(word));
   return {
