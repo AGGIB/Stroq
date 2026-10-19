@@ -86,6 +86,8 @@ export interface HookEntry {
   /** The path of keys to the handler, without the array indices. */
   readonly path: readonly string[];
   readonly event: string;
+  /** The key the command was found under: `command`, `bash`, `powershell`... */
+  readonly key: string;
   readonly command: string;
 }
 
@@ -109,7 +111,10 @@ interface Pending {
   readonly path: readonly string[];
 }
 
-export function hookEntries(value: unknown): { entries: HookEntry[]; cut: boolean } {
+export function hookEntries(
+  value: unknown,
+  commandKeys: ReadonlySet<string> = COMMAND_KEYS,
+): { entries: HookEntry[]; cut: boolean } {
   const entries: HookEntry[] = [];
   const stack: Pending[] = [{ node: value, path: [] }];
   let visited = 0;
@@ -120,11 +125,11 @@ export function hookEntries(value: unknown): { entries: HookEntry[]; cut: boolea
     if (typeof node !== 'object' || node === null) continue;
     const children: Pending[] = [];
     for (const [key, child] of Object.entries(node)) {
-      const command = COMMAND_KEYS.has(key) ? commandText(child) : undefined;
+      const command = commandKeys.has(key) ? commandText(child) : undefined;
       if (command !== undefined) {
         const keys = path.filter((k) => !isIndex(k));
         const event = keys.filter((k) => k.toLowerCase() !== 'hooks').join('.');
-        entries.push({ path: keys, event: event === '' ? 'hooks' : event, command });
+        entries.push({ path: keys, event: event === '' ? 'hooks' : event, key, command });
       } else if (typeof child === 'object' && child !== null) {
         children.push({ node: child, path: [...path, key] });
       }
@@ -157,51 +162,100 @@ export function hookHits(
 // ---------------------------------------------------------------------------------------------
 // Claude Code's settings (and Copilot's, which take the same keys).
 
+/** Top-level keys whose string Claude Code runs as a command. */
 const HELPER_KEYS = [
   'apiKeyHelper',
   'otelHeadersHelper',
   'awsAuthRefresh',
   'awsCredentialExport',
+  'gcpAuthRefresh',
 ] as const;
+/** A top-level key named as those are, so a helper a later version adds is read as one too. */
+const HELPER_NAME = /^[A-Za-z]{0,64}(?:Helper|AuthRefresh|CredentialExport|Command)$/;
+/** The keys under which a settings value holds a command; `url` is an address, not one. */
+const SETTINGS_COMMAND_KEYS: ReadonlySet<string> = new Set([
+  'command',
+  'bash',
+  'powershell',
+  'commandWindows',
+]);
+/** Top-level keys read on their own below, and so left out of the walk for commands. */
+const READ_APART: ReadonlySet<string> = new Set([
+  'hooks',
+  'env',
+  'permissions',
+  'enabledPlugins',
+  'extraKnownMarketplaces',
+  'enabledMcpjsonServers',
+  'disabledMcpjsonServers',
+]);
 const API_BASE_URL = /^ANTHROPIC(?:_[A-Z]+)?_BASE_URL$/;
 /**
- * Variables of `env` that make the programs a session starts load code, or connect through
+ * Variables of `env` known to make the programs a session starts load code, or connect through
  * someone else, or trust their certificate: `env` is set for every session and every hook, so
  * `NODE_OPTIONS=--require ./x.js` runs x.js the next time anything starts node. Claude Code's
  * own `CLAUDE_CODE_SHELL_PREFIX` wraps every shell command, and `CLAUDE_ENV_FILE` is sourced
- * before each one.
+ * before each one. Git takes any setting from `GIT_CONFIG_PARAMETERS`, `core.fsmonitor`
+ * included, and runs it on the next `git status`. This list only words the report: every name
+ * that is not in `HARMLESS_ENV` is reported, since a list of the dangerous ones always misses one.
  */
 const ENV_LOADS_CODE =
-  /^(?:NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|BASH_ENV|ENV|ZDOTDIR|PROMPT_COMMAND|PATH|SHELL|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_[A-Z_]{1,40}|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_SSH|GIT_SSH_COMMAND|GIT_EXEC_PATH|GIT_ASKPASS|SSH_ASKPASS|GIT_EDITOR|GIT_PAGER|EDITOR|VISUAL|PAGER|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_COUNT|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|CLAUDE_CODE_SHELL_PREFIX|CLAUDE_ENV_FILE)$/;
+  /^(?:NODE_[A-Z_]{1,40}|BASH_ENV|BASH_FUNC_[^=]{1,256}|ENV|ZDOTDIR|PROMPT_COMMAND|PATH|SHELL|HOME|XDG_[A-Z_]{1,40}|LD_[A-Z_]{1,40}|DYLD_[A-Z_]{1,40}|PYTHON[A-Z_]{1,40}|PERL5[A-Z_]{1,40}|RUBY[A-Z_]{1,40}|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_[A-Z_]{1,40}|SSH_[A-Z_]{1,40}|EDITOR|VISUAL|PAGER|(?:NPM|npm|YARN|yarn|PNPM|pnpm|BUN|bun)_[A-Za-z_]{1,64}|GO[A-Z_]{1,40}|CARGO[A-Z_]{0,40}|RUSTC[A-Z_]{0,40}|RUSTFLAGS|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NO_PROXY|no_proxy|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|OTEL_[A-Z_]{1,64}|AWS_[A-Z_]{1,64}|CLAUDE_[A-Z_]{1,64})$/;
+/**
+ * The variables `env` may set without a report: they change no program a session starts, what
+ * it loads, or where it sends anything. Locale, colour, debug output, timeouts and the model
+ * Claude Code uses. Matched as they are spelled: `Path` is another variable to POSIX and the
+ * same one to Windows, so only these spellings pass.
+ */
+const HARMLESS_ENV =
+  /^(?:LANG|LANGUAGE|LC_[A-Z]{1,20}|TZ|TERM|COLORTERM|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|DEBUG|CI|NODE_ENV|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE|PYTHONIOENCODING|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH|CLAUDE_CODE_MAX_OUTPUT_TOKENS|CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|CLAUDE_CODE_DISABLE_TERMINAL_TITLE|CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY|DISABLE_TELEMETRY|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_BUG_COMMAND|DISABLE_COST_WARNINGS|DISABLE_NON_ESSENTIAL_MODEL_CALLS|DISABLE_PROMPT_CACHING|DISABLE_INTERLEAVED_THINKING|USE_BUILTIN_RIPGREP|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_(?:OPUS|SONNET|HAIKU)_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)$/;
+/** Whether a variable is one of those known to load code or send traffic elsewhere. */
+export const envLoadsCode = (name: string): boolean => ENV_LOADS_CODE.test(name);
 /** An allow rule for the whole shell: `Bash`, or `Bash(...)` whose pattern is only a wildcard. */
 const WHOLE_SHELL = /^Bash(?:\((?:\*|:\*|\*\*| \*)\))?$/;
 
-function helperCommands(f: JsonFile): AgentHit[] {
-  const hits: AgentHit[] = [];
-  const status = ownObject(f.value, 'statusLine');
-  const statusCommand = status === undefined ? undefined : ownString(status, 'command');
-  if (statusCommand !== undefined)
-    hits.push(
-      hit(
-        'agent-helper-command',
-        f.path,
-        lineOf(f.text, ['"statusLine"', '"command"']),
-        'statusLine.command',
-        statusCommand,
-      ),
-    );
-  for (const key of HELPER_KEYS) {
-    const command = ownString(f.value, key);
-    if (command !== undefined)
-      hits.push(hit('agent-helper-command', f.path, lineOf(f.text, [quoted(key)]), key, command));
-  }
-  return hits;
+/** The top-level keys named as helpers are, whose string Claude Code runs. */
+function helperKeys(f: JsonFile): AgentHit[] {
+  const named = Object.entries(f.value).filter(
+    (pair): pair is [string, string] =>
+      typeof pair[1] === 'string' &&
+      ((HELPER_KEYS as readonly string[]).includes(pair[0]) || HELPER_NAME.test(pair[0])),
+  );
+  const list = firstEntries(f.path, 'helper commands', named);
+  return [
+    ...list.cut,
+    ...list.items.map(([key, command]) =>
+      hit('agent-helper-command', f.path, lineOf(f.text, [quoted(key)]), key, command),
+    ),
+  ];
 }
 
+/**
+ * Every command anywhere else in the settings: `statusLine`, `fileSuggestion`, and whatever key a
+ * later version gives a `{ "type": "command", "command": ... }`. Named by their path of keys.
+ */
+function helperCommands(f: JsonFile): AgentHit[] {
+  const rest = Object.fromEntries(Object.entries(f.value).filter(([key]) => !READ_APART.has(key)));
+  const { entries, cut } = hookEntries(rest, SETTINGS_COMMAND_KEYS);
+  const walked = entries.slice(0, MAX_HOOKS).map((e) => {
+    const needles = [...e.path.map(quoted), quoted(e.key)];
+    const name = [...e.path, e.key].join('.');
+    return hit('agent-helper-command', f.path, lineOf(f.text, needles), name, e.command);
+  });
+  // In the order of the file's keys, for hits that share a line.
+  const order = new Map(Object.keys(f.value).map((key, i) => [key, i]));
+  const at = (h: AgentHit): number => order.get(h.name.split('.')[0] as string) ?? 0;
+  const hits = [...helperKeys(f), ...walked]
+    .map((h, i) => [h, i] as const)
+    .sort(([a, i], [b, j]) => at(a) - at(b) || i - j)
+    .map(([h]) => h);
+  return cut ? [...hits, tooMany(f.path, 'helper commands', MAX_HOOKS, rest)] : hits;
+}
+
+/** Every variable of `env` but the few known to be harmless, whatever its value's type. */
 function envHits(f: JsonFile): AgentHit[] {
   const named = Object.entries(ownObject(f.value, 'env') ?? {}).filter(
-    (pair): pair is [string, string] =>
-      typeof pair[1] === 'string' && (API_BASE_URL.test(pair[0]) || ENV_LOADS_CODE.test(pair[0])),
+    ([key]) => !HARMLESS_ENV.test(key),
   );
   const list = firstEntries(f.path, 'env variables', named);
   return [
@@ -212,7 +266,28 @@ function envHits(f: JsonFile): AgentHit[] {
         f.path,
         lineOf(f.text, ['"env"', quoted(key)]),
         key,
-        value,
+        typeof value === 'string' ? value : boundedJson(value),
+      ),
+    ),
+  ];
+}
+
+/** Each server of `.mcp.json` that `enabledMcpjsonServers` starts without asking. */
+function approvedServers(f: JsonFile): AgentHit[] {
+  const list = firstEntries(
+    f.path,
+    'approved servers',
+    strings(own(f.value, 'enabledMcpjsonServers')),
+  );
+  return [
+    ...list.cut,
+    ...list.items.map((name) =>
+      hit(
+        'mcp-auto-approve',
+        f.path,
+        lineOf(f.text, ['"enabledMcpjsonServers"', quoted(name)]),
+        'enabledMcpjsonServers',
+        name,
       ),
     ),
   ];
@@ -257,7 +332,32 @@ function settingsSwitches(f: JsonFile): AgentHit[] {
         'true',
       ),
     );
-  return hits;
+  return [...hits, ...approvedServers(f)];
+}
+
+/** A server list Claude Code reads as the project's: `.mcp.json`, wherever a session starts. */
+const isProjectServerList = (file: string): boolean => {
+  const lower = file.toLowerCase();
+  return lower === '.mcp.json' || lower.endsWith('/.mcp.json');
+};
+
+/**
+ * Servers of `.mcp.json` that settings start without asking, all of them or by name, made an
+ * error: an approved server runs as soon as a session starts, with nobody asked. The approval
+ * may be in the change or already at its base, so it is read from the head as it is.
+ */
+export function escalateApproved<T extends AgentHit>(hits: readonly T[]): T[] {
+  const approvals = hits.filter((h) => h.kind === 'mcp-auto-approve');
+  if (approvals.length === 0) return [...hits];
+  const all = approvals.some((h) => h.name === 'enableAllProjectMcpServers');
+  const names = new Set(
+    approvals.filter((h) => h.name === 'enabledMcpjsonServers').map((h) => h.value),
+  );
+  return hits.map((h) =>
+    h.kind === 'mcp-server' && isProjectServerList(h.file) && (all || names.has(h.name))
+      ? { ...h, severity: 'error' }
+      : h,
+  );
 }
 
 function pluginHits(f: JsonFile): AgentHit[] {
@@ -312,11 +412,16 @@ export const claudeSettings = (f: JsonFile): AgentHit[] => [
 export const CLAUDE_SETTINGS_KEYS = [
   'hooks',
   'statusLine',
+  '"command"',
+  'Helper',
+  'AuthRefresh',
+  'CredentialExport',
   ...HELPER_KEYS,
   '_BASE_URL',
   '"env"',
   'bypassPermissions',
   'enableAllProjectMcpServers',
+  'enabledMcpjsonServers',
   'enabledPlugins',
   'extraKnownMarketplaces',
 ] as const;

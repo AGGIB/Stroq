@@ -1,5 +1,6 @@
 import { showable } from '../install/inspect/safe-text.js';
 import { isFailing, type FailOn, type TaggedHit } from './agent-change.js';
+import { envLoadsCode } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 
 /**
@@ -30,7 +31,9 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'agent-api-redirect':
       return `${name} sends the agent's API traffic, and its key, to: ${value}`;
     case 'agent-env':
-      return `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`;
+      return envLoadsCode(h.name)
+        ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
+        : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow':
       return `permissions.allow lets the agent run any shell command without asking: ${value}`;
     case 'agent-permission-bypass':
@@ -42,13 +45,18 @@ function sentence(h: AgentHit, q: Quote): string {
         ? `turns on the plugin: ${value}`
         : `adds a plugin source: ${value}`;
     case 'mcp-auto-approve':
-      return 'starts every MCP server in the repository without asking (enableAllProjectMcpServers)';
+      return h.name === 'enabledMcpjsonServers'
+        ? `starts the MCP server ${value} of .mcp.json without asking (enabledMcpjsonServers)`
+        : 'starts every MCP server in the repository without asking (enableAllProjectMcpServers)';
     case 'mcp-server-runs-code':
       return unparsed
         ? 'an MCP server starts a shell or inline code (the file could not be fully read)'
         : `MCP server ${name} starts a shell or inline code: ${value}`;
     case 'mcp-server':
-      return `MCP server ${name} starts: ${value}`;
+      // Only an approval makes an ordinary server an error: see `escalateApproved`.
+      return h.severity === 'error'
+        ? `MCP server ${name} starts without asking, since the settings approve it: ${value}`
+        : `MCP server ${name} starts: ${value}`;
     case 'editor-autorun-task':
       if (unparsed) return 'a task runs when the folder opens (the file could not be fully read)';
       return h.name === 'task.allowAutomaticTasks'

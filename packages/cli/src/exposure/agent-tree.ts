@@ -2,6 +2,7 @@ import { readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from '
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { within } from '../commands/config-file.js';
+import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import {
   AGENT_DIRS,
@@ -205,9 +206,11 @@ const byRel = (a: Candidate, b: Candidate): number => (a.rel < b.rel ? -1 : a.re
 export function agentSurface(root: string): AgentSurface {
   const { found, stoppedAt } = walk(root);
   const left = { bytes: MAX_TOTAL_BYTES };
-  const hits = [...found]
-    .sort(byRel)
-    .flatMap((candidate) => hitsForRead(candidate.rel, readCandidate(candidate, left)));
+  const hits = escalateApproved(
+    [...found]
+      .sort(byRel)
+      .flatMap((candidate) => hitsForRead(candidate.rel, readCandidate(candidate, left))),
+  );
   if (stoppedAt === undefined) return { hits, capped: false };
   const why = `the walk stopped here, after ${WALK_CAPS.dirs} folders or ${WALK_CAPS.files} agent files`;
   return { hits: [...hits, hit('unreadable-config', stoppedAt, 1, 'walk', why)], capped: true };

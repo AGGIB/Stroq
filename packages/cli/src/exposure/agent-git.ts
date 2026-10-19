@@ -1,4 +1,5 @@
 import { tagChanges, type ChangeStatus, type TaggedHit } from './agent-change.js';
+import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { runFileChanges } from './agent-run-files.js';
 import {
@@ -262,7 +263,7 @@ function compare(top: string, base: string, head: string) {
     }
   };
 
-  const found = kept.flatMap(hitsOf);
+  const found = escalateApproved(kept.flatMap(hitsOf));
   const touched = (path: string): 'new' | 'changed' | undefined => {
     const at = resolve(path, links.view);
     if (at.kind !== 'blob') return undefined;

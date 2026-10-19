@@ -63,6 +63,9 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     'CLAUDE.md ',
     'ANTHROPIC_',
     'DYLD_',
+    'BASH_FUNC_',
+    'GIT_',
+    'aHelper',
     'Bash(',
     '$CLAUDE_PROJECT_DIR/',
     './a ',
@@ -133,6 +136,14 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       scanFile(
         '.claude/settings.json',
         `{"env":{${json(text)}:"x"},"permissions":{"allow":[${json(text)}]}}`,
+      ),
+  ],
+  [
+    'a settings key, and a command under it',
+    (text) =>
+      scanFile(
+        '.claude/settings.json',
+        `{${json(text)}:"x","k":{${json(text)}:{"command":${json(text)}}},"enabledMcpjsonServers":[${json(text)}]}`,
       ),
   ],
   ['the file words of a command line', (text) => pathWords(text)],
@@ -207,6 +218,26 @@ const MANY: readonly (readonly [name: string, path: string, build: (size: number
     'env variables that load code',
     '.claude/settings.json',
     many((i) => `"DYLD_${letters(i)}":"x"`, ',', '{"env":{', '}}'),
+  ],
+  [
+    'helper keys',
+    '.claude/settings.json',
+    many((i) => `"k${letters(i)}Helper":"x"`, ',', '{', '}'),
+  ],
+  [
+    'commands under settings keys',
+    '.claude/settings.json',
+    many((i) => `"k${i}":{"command":"x"}`, ',', '{', '}'),
+  ],
+  [
+    'approved servers',
+    '.claude/settings.json',
+    many((i) => `"s${i}"`, ',', '{"enabledMcpjsonServers":[', ']}'),
+  ],
+  [
+    'env variables nobody knows',
+    '.claude/settings.json',
+    many((i) => `"V${i}":"x"`, ',', '{"env":{', '}}'),
   ],
   [
     'plugin sources',
