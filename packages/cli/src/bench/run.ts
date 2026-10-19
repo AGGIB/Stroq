@@ -262,8 +262,12 @@ export function formatBench(
     }
   }
   if (opts.verbose && report.flaggedFiles.length > 0) {
-    lines.push('', 'Flagged files:', ...report.flaggedFiles.map((f) => `  ${f}`));
+    lines.push(
+      '',
+      'Flagged files:',
+      ...report.flaggedFiles.map((f) => `  ${f.replaceAll('\\', '/')}`),
+    );
   }
-  lines.push('', `corpus: ${report.corpus}`);
+  lines.push('', `corpus: ${report.corpus.replaceAll('\\', '/')}`);
   return `${lines.join('\n')}\n`;
 }

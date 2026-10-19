@@ -17,7 +17,7 @@ const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const ReceiptSchema = z.strictObject({
   v: z.literal(1),
   at: z.iso.datetime(),
-  action: z.enum(['add', 'update', 'restore', 'remove']),
+  action: z.enum(['add', 'update', 'restore', 'rollback', 'remove']),
   name: z.string().regex(SKILL_NAME),
   from: digest.nullable(),
   to: digest.nullable(),
@@ -26,6 +26,16 @@ const ReceiptSchema = z.strictObject({
   stroq: z.string().min(1),
 });
 export type Receipt = z.infer<typeof ReceiptSchema>;
+const PreviousSkillSchema = z
+  .strictObject({
+    digest,
+    passport: PassportSchema,
+  })
+  .refine(
+    (entry) =>
+      entry.passport.artifact.digest === entry.digest && entry.passport.artifact.kind === 'skill',
+  );
+export type PreviousSkill = z.infer<typeof PreviousSkillSchema>;
 const SkillSchema = z
   .strictObject({
     kind: z.literal('skill'),
@@ -36,6 +46,7 @@ const SkillSchema = z
     installedTo: z.string().min(1),
     root: z.string().min(1),
     history: z.array(ReceiptSchema),
+    previous: z.exactOptional(PreviousSkillSchema),
   })
   .refine(
     (entry) =>
