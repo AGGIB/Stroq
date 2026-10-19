@@ -34,6 +34,33 @@ export function collectStrings(value: unknown, depth = 0): string[] {
 }
 
 /**
+ * Every string leaf of `value`, in the order `collectStrings` has them, however deep: a stack of
+ * its own and no recursion, so that a value nested thousands of levels deep (a result from a
+ * server, written by whoever wrote the server) is read to its leaves and does not overflow the
+ * stack of the hook that reads it. For what is only read, never rewritten: the cloak rewrites
+ * by `MAX_JSON_DEPTH` and does not use this. Stops once `maxChars` characters of strings are
+ * collected.
+ */
+export function collectStringsDeep(value: unknown, maxChars = Number.POSITIVE_INFINITY): string[] {
+  const out: string[] = [];
+  let chars = 0;
+  const pending: unknown[] = [value];
+  while (pending.length > 0 && chars < maxChars) {
+    const next = pending.pop();
+    if (typeof next === 'string') {
+      out.push(next);
+      chars += next.length;
+    } else if (Array.isArray(next)) {
+      for (let i = next.length - 1; i >= 0; i -= 1) pending.push(next[i]);
+    } else if (next !== null && typeof next === 'object') {
+      const values = Object.values(next as Record<string, unknown>);
+      for (let i = values.length - 1; i >= 0; i -= 1) pending.push(values[i]);
+    }
+  }
+  return out;
+}
+
+/**
  * The same walk, but keeping the key each leaf sat under.
  *
  * An array element inherits the array's own key, because `{"attendees":["Peter"]}`

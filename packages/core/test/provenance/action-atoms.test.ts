@@ -12,6 +12,8 @@ import {
 import type { AtomKind, ProvenanceHit } from '../../src/types.js';
 
 const project = (): string => mkdtempSync(join(tmpdir(), 'stroq-proj-'));
+const sizeOf = (known: ReturnType<typeof knownPackages>): number =>
+  known.npm.size + known.python.size;
 const hit = (kind: AtomKind, suspect = false): ProvenanceHit => ({
   atom: { kind, value: 'v' },
   record: {
@@ -45,33 +47,31 @@ describe('knownPackages', () => {
     );
     writeFileSync(join(cwd, 'pyproject.toml'), 'dependencies = ["httpx>=0.27", "typer"]\n');
     const known = knownPackages(cwd);
-    for (const name of [
-      'my-app',
-      'express',
-      'typescript',
-      'tsc',
-      'requests',
-      'rich',
-      'httpx',
-      'typer',
-    ])
-      expect(known.has(name)).toBe(true);
-    expect(known.has('r')).toBe(false);
-    expect(known.has('other.txt')).toBe(false);
+    for (const name of ['my-app', 'express', 'typescript', 'tsc'])
+      expect(known.npm.has(name)).toBe(true);
+    for (const name of ['requests', 'rich', 'httpx', 'typer'])
+      expect(known.python.has(name)).toBe(true);
+    // Each name is known to its own ecosystem only.
+    for (const name of ['express', 'tsc']) expect(known.python.has(name)).toBe(false);
+    for (const name of ['requests', 'httpx']) expect(known.npm.has(name)).toBe(false);
+    for (const set of [known.npm, known.python]) {
+      expect(set.has('r')).toBe(false);
+      expect(set.has('other.txt')).toBe(false);
+    }
   });
 
   it('is empty for a directory without manifests and tolerates a broken package.json', () => {
-    expect(knownPackages(project()).size).toBe(0);
+    expect(sizeOf(knownPackages(project()))).toBe(0);
     const cwd = project();
     writeFileSync(join(cwd, 'package.json'), '{broken');
-    expect(knownPackages(cwd).size).toBe(0);
+    expect(sizeOf(knownPackages(cwd))).toBe(0);
   });
 
   it('tolerates package.json that parses to a non-object', () => {
     for (const content of ['null', '[]', '42']) {
       const cwd = project();
       writeFileSync(join(cwd, 'package.json'), content);
-      expect(knownPackages(cwd).size).toBe(0);
+      expect(sizeOf(knownPackages(cwd))).toBe(0);
     }
   });
 
@@ -94,8 +94,10 @@ describe('knownPackages', () => {
       ].join('\n'),
     );
     const known = knownPackages(cwd);
-    for (const name of ['httpx', 'typer', 'pytest', 'ruff']) expect(known.has(name)).toBe(true);
-    for (const name of ['myapp', '1.0.0', 'readme.md', 'mit']) expect(known.has(name)).toBe(false);
+    for (const name of ['httpx', 'typer', 'pytest', 'ruff'])
+      expect(known.python.has(name)).toBe(true);
+    for (const name of ['myapp', '1.0.0', 'readme.md', 'mit'])
+      expect(known.python.has(name)).toBe(false);
   });
 
   it('stays fast on adversarial manifests', () => {
@@ -105,14 +107,14 @@ describe('knownPackages', () => {
     const start = performance.now();
     const known = knownPackages(cwd);
     expect(performance.now() - start).toBeLessThan(1000);
-    expect(known.has('left')).toBe(true);
+    expect(known.npm.has('left')).toBe(true);
 
     const oversizedCwd = project();
     writeFileSync(join(oversizedCwd, 'pyproject.toml'), 'dependencies=['.repeat(40000));
     const start2 = performance.now();
     const oversized = knownPackages(oversizedCwd);
     expect(performance.now() - start2).toBeLessThan(1000);
-    expect(oversized.has('dependencies')).toBe(false);
+    expect(oversized.python.has('dependencies')).toBe(false);
   });
 
   // `mkfifo package.json` is one ordinary-looking command, and this runs on every Bash
@@ -130,7 +132,7 @@ describe('knownPackages', () => {
       stdio: 'ignore',
     });
     try {
-      expect(knownPackages(cwd).has('from-the-pipe')).toBe(false);
+      expect(knownPackages(cwd).npm.has('from-the-pipe')).toBe(false);
     } finally {
       writer.kill('SIGKILL');
     }

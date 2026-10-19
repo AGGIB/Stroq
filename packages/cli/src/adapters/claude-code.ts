@@ -1,6 +1,6 @@
 import {
   DEFAULT_MAX_CHARS,
-  collectStrings,
+  collectStringsDeep,
   describeEvidence,
   describeSecretHit,
   toEvidence,
@@ -153,24 +153,34 @@ const plain = (value: string): ResultReading => ({ text: value, serialised: fals
 const MEDIA_KINDS: ReadonlySet<unknown> = new Set(['image', 'audio', 'video']);
 /** How deep a result is looked into for media; a result nested deeper keeps what it holds. */
 const MEDIA_SCAN_DEPTH = 32;
+/** How many levels of items and lists are looked into for the shapes of a result, before the rest is read flat. */
+const MAX_READ_DEPTH = 64;
+/** How many characters of strings are collected from a value: twice what is kept, so that the clip is the reader's. */
+const STRING_ROOM = MAX_RESULT_CHARS * 2;
+
+/** The keys that hold the bytes of media, in the media object and in the objects inside it. */
+const PAYLOAD_KEYS: ReadonlySet<string> = new Set(['base64', 'data', 'bytes']);
 
 /**
- * `value` without its media: an object whose `type` is an image, audio or video is reduced to
- * that kind, and a `base64` field is dropped. What a screenshot returns is its bytes in
- * base64 (hundreds of thousands of characters for a large one). It is not text anything is
- * copied from, and it would otherwise be read as text, scanned, and, past the clip, make the
- * session look as if a result had been cut short.
+ * `value` without the bytes of its media: in an object whose `type` is an image, audio or video,
+ * and in the objects inside it, the keys that hold the payload (`base64`, `data`, `bytes`) are
+ * dropped, and a `base64` field is dropped wherever it is. What a screenshot returns is its bytes
+ * in base64 (hundreds of thousands of characters for a large one). It is not text anything is copied
+ * from, and it would otherwise be read as text, scanned, and, past the clip, make the session look
+ * as if a result had been cut short. Every other string beside them stays: a caption, a
+ * description, a title or a transcript is text the model reads, and is where a page can put what it
+ * wants said.
  */
-function withoutMedia(value: unknown, depth = 0): unknown {
+function withoutMedia(value: unknown, depth = 0, inMedia = false): unknown {
   if (depth > MEDIA_SCAN_DEPTH || value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1));
+  if (Array.isArray(value)) return value.map((item) => withoutMedia(item, depth + 1, inMedia));
   const record = value as Record<string, unknown>;
   const kind = record['type'];
-  if (typeof kind === 'string' && MEDIA_KINDS.has(kind)) return { type: kind };
+  const media = inMedia || (typeof kind === 'string' && MEDIA_KINDS.has(kind));
   return Object.fromEntries(
     Object.entries(record)
-      .filter(([key]) => key !== 'base64')
-      .map(([key, item]) => [key, withoutMedia(item, depth + 1)]),
+      .filter(([key]) => key !== 'base64' && !(media && PAYLOAD_KEYS.has(key)))
+      .map(([key, item]) => [key, withoutMedia(item, depth + 1, media)]),
   );
 }
 
@@ -179,59 +189,189 @@ const JSON_FORM_CHARS = 32_768;
 const JSON_FORM_STRING_CHARS = 2_000;
 
 /** `value` serialised, its long strings cut (their text is read in full beside it), and the whole kept short. */
-const jsonForm = (value: unknown): string =>
-  (
-    JSON.stringify(value, (_key, item: unknown) =>
-      typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
-        ? item.slice(0, JSON_FORM_STRING_CHARS)
-        : item,
-    ) ?? ''
-  ).slice(0, JSON_FORM_CHARS);
+const jsonForm = (value: unknown): string => {
+  try {
+    return (
+      JSON.stringify(value, (_key, item: unknown) =>
+        typeof item === 'string' && item.length > JSON_FORM_STRING_CHARS
+          ? item.slice(0, JSON_FORM_STRING_CHARS)
+          : item,
+      ) ?? ''
+    ).slice(0, JSON_FORM_CHARS);
+  } catch {
+    // Too deep to serialise: the strings in it have been read, which is what this is a copy of.
+    return '';
+  }
+};
 
 /**
- * An object that is none of the shapes above, read as the string values in it, one to a line,
- * and then as the object serialised. A web fetch's result is such an object (`{bytes, code,
- * codeText, result, durationMs, url}`), and only serialised it turned every line break in the
- * page into the two characters backslash and `n`: the patterns that need the start of a line
- * then missed what the page said. Only the values, though, left out the keys, and about a
- * hundred rules are written for JSON syntax (a key, a colon, a value); so both are there, the
- * text first, and the serialised form only as far as the clip leaves room. An object with no
- * string at all is serialised alone, and said to be.
+ * What the shapes of a result that are known read, each in its own way: the `text` of a text item,
+ * the `content` of a file, the streams of a command, the items of a `content` list. Every one that
+ * is there is read, and not only the first, in that order. `consumed` is the keys they read, which
+ * the rest of the object is read without.
  */
-function objectReading(obj: Record<string, unknown>): ResultReading {
-  if (typeof obj['text'] === 'string') return plain(obj['text']);
-  const file = fileContentOf(obj);
-  if (file !== null) return plain(file);
-  const streams = streamsOf(obj);
-  if (streams !== null) return plain(streams);
-  if (Array.isArray(obj['content'])) return toolResultReading(obj['content']);
-  const readable = withoutMedia(obj);
-  const strings = collectStrings(readable).filter((value) => value !== '');
-  const serialised = jsonForm(readable);
-  if (strings.length === 0) return { text: serialised, serialised: true };
-  const joined = strings.join('\n');
-  const room = MAX_RESULT_CHARS - 1 - joined.length - 1;
-  return plain(room > 0 ? `${joined}\n${serialised.slice(0, room)}` : joined);
+interface KnownReading {
+  readonly pieces: string[];
+  /** The keys of the object a known shape read whole. */
+  readonly consumed: ReadonlySet<string>;
+  /** The rest of a file object after its content, which is read like any other sibling. */
+  readonly fileRest: Readonly<Record<string, unknown>> | null;
+  /** The text of the pieces is no text: a list of items that held none, and had to be serialised. */
+  readonly serialised: boolean;
 }
 
-export function toolResultReading(result: unknown): ResultReading {
+function knownReading(
+  obj: Record<string, unknown>,
+  requestPath: string | undefined,
+  depth: number,
+): KnownReading {
+  const pieces: string[] = [];
+  const consumed = new Set<string>();
+  let fileRest: Record<string, unknown> | null = null;
+  let serialised = false;
+  if (typeof obj['text'] === 'string') {
+    pieces.push(obj['text']);
+    consumed.add('text');
+  }
+  const file = fileContentOf(obj);
+  if (file !== null) {
+    pieces.push(file);
+    const { content: _content, ...rest } = obj['file'] as Record<string, unknown>;
+    fileRest = rest;
+  }
+  const streams = streamsOf(obj);
+  if (streams !== null) {
+    pieces.push(streams);
+    // Only a stream that was a string was read; any other is a sibling to read like the rest.
+    for (const stream of ['stdout', 'stderr'])
+      if (typeof obj[stream] === 'string') consumed.add(stream);
+  }
+  if (Array.isArray(obj['content'])) {
+    const items = toolResultReading(obj['content'], requestPath, depth + 1);
+    pieces.push(items.text);
+    consumed.add('content');
+    serialised = items.serialised;
+  }
+  return { pieces, consumed, fileRest, serialised };
+}
+
+/** What `type` is when it only labels the kind of item an object is. */
+const TYPE_LABELS: ReadonlySet<string> = new Set([
+  'text',
+  'image',
+  'audio',
+  'video',
+  'resource',
+  'resource_link',
+  'file',
+  'tool_use',
+  'tool_result',
+]);
+
+/** The keys of a file object that can only echo the path of the file that was asked for. */
+const FILE_ECHO_KEYS: ReadonlySet<string> = new Set(['filePath', 'path']);
+/** The longest a string can be and still be a path to leave out of the text. */
+const MAX_ECHOED_PATH = 4096;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Whether the value of a file object's `filePath` or `path` only echoes the path that was asked
+ * for, and so says nothing a person did not already write: it is that very path, or, when the
+ * request's path is not known, it is a single string of a plausible length with no blank and no
+ * control character in it. Anything else (a sentence, a string with line breaks, a value that is
+ * not a string at all) is text like the rest, and is read: a file result is where a hostile page
+ * can put what it wants said, and the path is a field it controls.
+ */
+function echoesPath(value: unknown, requestPath: string | undefined): boolean {
+  if (typeof value !== 'string') return false;
+  if (requestPath !== undefined && value === requestPath) return true;
+  return value.length <= MAX_ECHOED_PATH && !/\s/.test(value) && !CONTROL_CHARS.test(value);
+}
+
+/** A `type` whose value is one of the labels, which says what an item is and is not text anyone wrote. */
+const isTypeLabel = (key: string, value: unknown): boolean =>
+  key === 'type' && typeof value === 'string' && TYPE_LABELS.has(value);
+
+/**
+ * The string values of the object that no known shape read: the keys it did not read whole, and
+ * what a file object holds beside its content (a note, another key). A `type` that is one of the
+ * labels is left out; any other `type` is text like the rest. The bytes of media are left out.
+ */
+function otherStrings(
+  obj: Record<string, unknown>,
+  known: KnownReading,
+  requestPath: string | undefined,
+): string[] {
+  const siblings = Object.entries(obj).filter(
+    ([key, value]) => !known.consumed.has(key) && key !== 'file' && !isTypeLabel(key, value),
+  );
+  const inFile = Object.entries(known.fileRest ?? {}).filter(
+    ([key, value]) => !(FILE_ECHO_KEYS.has(key) && echoesPath(value, requestPath)),
+  );
+  const unread =
+    known.fileRest === null ? Object.entries(obj).filter(([key]) => key === 'file') : [];
+  return [...siblings, ...inFile, ...unread]
+    .flatMap(([, value]) => collectStringsDeep(withoutMedia(value), STRING_ROOM))
+    .filter((value) => value !== '');
+}
+
+/** The strings, one to a line, and then the serialised object as far as the clip leaves room. */
+function stringsAndJson(strings: readonly string[], readable: unknown): ResultReading {
+  const joined = strings.join('\n');
+  const room = MAX_RESULT_CHARS - 1 - joined.length - 1;
+  return plain(room > 0 ? `${joined}\n${jsonForm(readable).slice(0, room)}` : joined);
+}
+
+/**
+ * An object, read as every string in it. The shapes that are known read what they hold in their
+ * own way (see `knownReading`); the rest of the object, whatever a sibling of them holds
+ * (`structuredContent` beside `content`, a note beside a file), is read as its string values. When
+ * the object is none of the known shapes, all of its strings are its text. Whenever strings were
+ * read that a known shape did not own, the serialised object follows them: about a hundred rules
+ * are written for JSON syntax (a key, a colon, a value), and a web fetch's result
+ * (`{bytes, code, codeText, result, durationMs, url}`) has no shape of its own and read only
+ * serialised turned every line break in the page into the two characters backslash and `n`. An
+ * object with no string at all is serialised alone, and said to be.
+ */
+function objectReading(
+  obj: Record<string, unknown>,
+  requestPath: string | undefined,
+  depth: number,
+): ResultReading {
+  const known = knownReading(obj, requestPath, depth);
+  if (known.pieces.length === 0) {
+    const readable = withoutMedia(obj);
+    const strings = collectStringsDeep(readable, STRING_ROOM).filter((value) => value !== '');
+    if (strings.length === 0) return { text: jsonForm(readable), serialised: true };
+    return stringsAndJson(strings, readable);
+  }
+  const primary = known.pieces.filter((piece) => piece !== '');
+  const others = otherStrings(obj, known, requestPath);
+  if (others.length === 0) return { text: primary.join('\n'), serialised: known.serialised };
+  return stringsAndJson([...primary, ...others], withoutMedia(obj));
+}
+
+export function toolResultReading(result: unknown, requestPath?: string, depth = 0): ResultReading {
   if (typeof result === 'string') return plain(clip(result));
+  // Past this the shapes are not looked for: whatever strings are down there are read, flat.
+  if (depth > MAX_READ_DEPTH && result !== null && typeof result === 'object')
+    return plain(clip(collectStringsDeep(result, STRING_ROOM).join('\n')));
   if (Array.isArray(result)) {
-    const parts = result.map(toolResultReading);
+    const parts = result.map((item) => toolResultReading(item, requestPath, depth + 1));
     return {
       text: clip(parts.map((part) => part.text).join('\n')),
       serialised: parts.some((part) => part.serialised),
     };
   }
   if (result && typeof result === 'object') {
-    const reading = objectReading(result as Record<string, unknown>);
+    const reading = objectReading(result as Record<string, unknown>, requestPath, depth);
     return { ...reading, text: clip(reading.text) };
   }
   return plain(result === undefined || result === null ? '' : String(result));
 }
 
-export function toolResultToText(result: unknown): string {
-  return toolResultReading(result).text;
+export function toolResultToText(result: unknown, requestPath?: string): string {
+  return toolResultReading(result, requestPath).text;
 }
 
 /** Tools whose output is prose: a result of one that held no text is not a result Stroq has read. */
@@ -252,6 +392,33 @@ function preOutput(decision: 'deny' | 'ask', reason: string): HookOutput {
 
 export const denyOutput = (reason: string): HookOutput => preOutput('deny', reason);
 export const askOutput = (reason: string): HookOutput => preOutput('ask', reason);
+
+/**
+ * The reading of a result, which does not throw. A result that cannot be read (it is not what the
+ * reader looks at, or reading it fails) is posted with nothing to scan and as unread, so that the
+ * session is marked incomplete and a package no record accounts for is asked about: the engine is
+ * given every result, whatever the reading of it came to.
+ */
+function safeReading(
+  response: unknown,
+  requestPath: string | undefined,
+): ResultReading & { readonly failed?: true } {
+  try {
+    return toolResultReading(response, requestPath);
+  } catch (err) {
+    logError('result', err);
+    return { text: '', serialised: false, failed: true };
+  }
+}
+
+/** The path a tool call asked for, which a result may echo back. */
+function requestedPath(toolInput: Readonly<Record<string, unknown>>): string | undefined {
+  for (const key of ['file_path', 'notebook_path', 'path']) {
+    const value = toolInput[key];
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
 
 export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = ClaudeHookInputSchema.parse(raw);
@@ -287,12 +454,12 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
   }
   const failed = input.hook_event_name === 'PostToolUseFailure';
   const response = failed ? input.error : (input.tool_response ?? input.tool_result);
-  const reading = toolResultReading(response);
+  const reading = safeReading(response, requestedPath(input.tool_input));
   const result = await engine.post({
     ...base,
     ...(failed ? { resultFailed: true as const } : {}),
     toolResultText: reading.text,
-    ...(reading.serialised && PROSE_TOOL.test(input.tool_name)
+    ...((reading.serialised && PROSE_TOOL.test(input.tool_name)) || reading.failed
       ? { resultUnread: true as const }
       : {}),
     // No result field at all is not an empty result: it is a payload shape this

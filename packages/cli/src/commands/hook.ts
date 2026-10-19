@@ -180,6 +180,15 @@ const ADAPTERS: Readonly<Record<string, HookAdapter>> = {
   },
 };
 
+/**
+ * The longest deadline any agent's hook gives itself. The provenance store dates a marker that a
+ * result is being recorded by it (`HOOK_DEADLINE_CEILING_MS` in the core, which cannot read this
+ * table); a test fails when the two differ.
+ */
+export const LONGEST_HOOK_DEADLINE_MS: number = Math.max(
+  ...Object.values(ADAPTERS).map((adapter) => adapter.deadlineMs),
+);
+
 /** Agent names `stroq hook <agent>` accepts, in the order the error message lists them. */
 export const SUPPORTED_AGENTS: readonly string[] = Object.keys(ADAPTERS);
 

@@ -134,7 +134,7 @@ export function excerptRedactor(
   );
 
   return (atom) => {
-    if (atom.kind === 'encoded') {
+    if (atom.kind === 'encoded' || atom.kind === 'digest') {
       const lower = atom.value.toLowerCase();
       if (
         knownNameIn(atom.value, known) !== undefined ||
