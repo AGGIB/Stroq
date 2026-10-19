@@ -128,8 +128,8 @@ Releases are cut from `main` once CI is green. Merging a pull request does not b
 3. Commit the release changes, merge them into `main`, and wait for green CI before tagging that commit. Push only the intended tag, for example:
 
    ```bash
-   git tag v0.26.0
-   git push origin v0.26.0
+   git tag v0.26.1
+   git push origin v0.26.1
    ```
 
 4. Pushing a `v*` tag triggers `.github/workflows/release.yml`. It verifies that the tag matches `packages/cli/package.json`, runs the release checks, builds the package, and stages it with `npm stage publish --access public` (with `--provenance` for token publishing). It does not make the staged version publicly installable. A manual workflow run is accepted only on `main`, for example to retry after configuring npm publishing; it does not create a GitHub release page.
