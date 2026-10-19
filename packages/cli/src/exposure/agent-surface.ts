@@ -214,15 +214,37 @@ function fixedReader(parts: readonly string[]): Reader | undefined {
 }
 
 /**
- * Whether a path is in a folder of other people's code, as the walk on disk skips them: a skipped
- * folder that is not itself inside an agent folder.
+ * The folder of other people's code a path is in, as the walk on disk skips them: a skipped folder
+ * that is not itself inside an agent folder. Matched by its exact name, as the walk matches it:
+ * `Vendor` is read, in doubt. `path` is as it is in the tree, in its own letter case.
  */
-function inOthersCode(parts: readonly string[]): boolean {
-  for (const part of parts.slice(0, -1)) {
-    if (AGENT_DIR_NAMES.has(part)) return false;
-    if (SKIP_DIRS.has(part)) return true;
+function othersCodeFolder(path: string): string | undefined {
+  const parts = path.split('/');
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const part = parts[i] as string;
+    if (AGENT_DIR_NAMES.has(part.toLowerCase())) return undefined;
+    if (SKIP_DIRS.has(part)) return part;
   }
-  return false;
+  return undefined;
+}
+
+const inOthersCode = (path: string): boolean => othersCodeFolder(path) !== undefined;
+
+/**
+ * The folder of other people's code (`vendor`, `build`...) that a config a host would read is in,
+ * when the readers skip it; undefined for any other path, and for `node_modules`, which a change
+ * fills with nothing a host starts in. A host started in that folder reads the config all the same.
+ */
+export function skippedConfigFolder(path: string): string | undefined {
+  const folder = othersCodeFolder(path);
+  if (folder === undefined || folder === 'node_modules') return undefined;
+  const lower = path.toLowerCase();
+  const parts = lower.split('/');
+  const read =
+    fixedReader(parts) !== undefined ||
+    folderReaders(parts).length > 0 ||
+    lower.endsWith('.code-workspace');
+  return read ? folder : undefined;
 }
 
 /** Whether the last parts of `parts` are `folder` and then a name `name` accepts. */
@@ -278,7 +300,7 @@ export function readersFor(path: string): Reader[] {
   const lower = path.toLowerCase();
   const parts = lower.split('/');
   const readers: Reader[] = [];
-  if (!inOthersCode(parts)) {
+  if (!inOthersCode(path)) {
     const fixed = fixedReader(parts);
     if (fixed !== undefined) readers.push(fixed);
     readers.push(...folderReaders(parts).filter((r) => r !== fixed));
@@ -429,16 +451,15 @@ const AGENT_DIR_NAMES: ReadonlySet<string> = new Set([
  * host may be started in: `.claude`, `packages/app/.claude/skills`.
  */
 export function isAgentDir(path: string): boolean {
+  if (inOthersCode(path)) return false;
   const parts = path.toLowerCase().split('/');
-  if (inOthersCode(parts)) return false;
   return [1, 2].some((n) => parts.length >= n && AGENT_DIRS.has(parts.slice(-n).join('/')));
 }
 
 /** Inside an agent folder, at any depth: not `.github` as a whole, whose workflows are not one. */
 export function inAgentDir(path: string): boolean {
-  const lower = path.toLowerCase();
-  if (inOthersCode(lower.split('/'))) return false;
-  const slashed = `/${lower}`;
+  if (inOthersCode(path)) return false;
+  const slashed = `/${path.toLowerCase()}`;
   for (const dir of AGENT_DIRS) {
     if (slashed.endsWith(`/${dir}`)) return true;
     if (dir !== '.github' && slashed.includes(`/${dir}/`)) return true;

@@ -10,6 +10,7 @@ import {
   readTier,
   readersFor,
   scanFile,
+  skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
@@ -252,6 +253,8 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       isAgentDir(text),
       inAgentDir(text),
       readersFor(`${text}/.claude/settings.json`),
+      skippedConfigFolder(text),
+      skippedConfigFolder(`vendor/${text}/.mcp.json`),
     ],
   ],
   ['the file words of a command line', (text) => pathWords(text)],
