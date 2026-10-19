@@ -218,6 +218,12 @@ export interface AtomExtraction {
    * `MAX_NETWORK_ATOMS` are not a loss: no lookup of one can raise the floor.
    */
   readonly truncated: boolean;
+  /**
+   * True when a hash (a labelled token that is not text) was left out because the result held
+   * more than `MAX_DIGEST_ATOMS`. A narrow loss: a later blob that no record accounts for is asked
+   * about, a package is not.
+   */
+  readonly digestsLost: boolean;
 }
 
 /** One extraction pass, with the two ways a bound can cut it told apart. */
@@ -231,6 +237,8 @@ interface Extraction {
   readonly budgetSpent: boolean;
   /** A word that should have named a package is a variable or a command (see `shell-words.ts`). */
   readonly doubt: boolean;
+  /** More distinct hashes were found than `MAX_DIGEST_ATOMS` keeps. */
+  readonly digestsLeftOut: boolean;
 }
 
 function extractBounded(text: string, command = false, cheapDigests = true): Extraction {
@@ -252,6 +260,7 @@ function extractBounded(text: string, command = false, cheapDigests = true): Ext
     lineCut: packages.cut,
     budgetSpent: packages.budgetSpent,
     doubt: packages.doubt,
+    digestsLeftOut: set.digestLeftOut,
   };
 }
 
@@ -442,7 +451,9 @@ export function extractAtomsDeepWithLoss(text: string, options: DeepOptions = {}
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
   let truncated = cutText;
+  let digestsLost = false;
   const merge = (extraction: Extraction, byLine = true): void => {
+    digestsLost = digestsLost || extraction.digestsLeftOut;
     // A spent budget is a loss in every pass, the joined one included; a line longer than the
     // window is one only where it is not just a block of indented lines read as a single line.
     truncated =
@@ -462,5 +473,9 @@ export function extractAtomsDeepWithLoss(text: string, options: DeepOptions = {}
   }
   if (joinedTexts.length > 0 && !set.floorFull) truncated = truncated || wrappedCommandCut(bounded);
 
-  return { atoms: set.atoms, truncated: truncated || set.floorFull || set.floorLeftOut };
+  return {
+    atoms: set.atoms,
+    truncated: truncated || set.floorFull || set.floorLeftOut,
+    digestsLost: digestsLost || set.digestLeftOut,
+  };
 }

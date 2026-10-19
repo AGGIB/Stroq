@@ -87,6 +87,17 @@ export class ProvenanceRecorder {
     }
   }
 
+  /** Notes the loss of hashes, never throwing; the error message, or null. Falls back to the wider note. */
+  private async noteDigests(store: ProvenanceStore, sessionId: string): Promise<string | null> {
+    try {
+      await store.noteDigestsLost(sessionId);
+      return null;
+    } catch (err) {
+      const wider = await this.note(store, sessionId);
+      return wider === null ? null : messageOf(err);
+    }
+  }
+
   /**
    * Marks that a scanned result is about to be recorded, before it is scanned. The scan, the taint
    * and the records come one after the other, with a secret-index lookup and a lock between; a
@@ -133,16 +144,21 @@ export class ProvenanceRecorder {
     suspect: boolean,
     lost: boolean,
     pendingOwner?: string,
+    digestsLost = false,
   ): Promise<ProvenanceOutcome> {
     const store = this.store;
     if (!store) return { error: null, incomplete: false };
+    // Hashes left out are a narrow loss, noted apart: it makes an unrecorded blob a question and
+    // leaves the floor of packages and pipe-to-shell commands alone. A note that cannot be written
+    // is the wider loss, since nothing else would say that hashes went.
+    const digestNote = digestsLost ? await this.noteDigests(store, event.sessionId) : null;
     const noted = lost ? await this.note(store, event.sessionId) : null;
     // Report whether the permanent loss note was written. If it failed, an operation marker
     // can still keep the session reading as incomplete, and the failure is logged.
     const marked = lost && noted === null;
     if (readings.every((reading) => reading.atoms.length === 0)) {
       if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
-      return { error: noted, incomplete: marked };
+      return { error: noted ?? digestNote, incomplete: marked };
     }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
     // The secret index must read the text each atom came from, including extra readings:
@@ -164,7 +180,7 @@ export class ProvenanceRecorder {
     try {
       await store.record(event.sessionId, inputs);
       if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
-      return { error: noted, incomplete: marked };
+      return { error: noted ?? digestNote, incomplete: marked };
     } catch (err) {
       const failed = await this.note(store, event.sessionId);
       // If the permanent note failed too, the operation's marker is the evidence that remains.

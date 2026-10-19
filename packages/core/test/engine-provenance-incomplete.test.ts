@@ -258,6 +258,8 @@ describe('a result whose atoms could not be written', () => {
       isIncomplete: (session) => real.isIncomplete(session),
       hasEvidence: (session) => real.hasEvidence(session),
       hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+      digestsLost: (session) => real.digestsLost(session),
+      noteDigestsLost: (session) => real.noteDigestsLost(session),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -316,6 +318,8 @@ describe('a flagged result whose recording was cut short', () => {
       isIncomplete: (session) => real.isIncomplete(session),
       hasEvidence: (session) => real.hasEvidence(session),
       hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+      digestsLost: (session) => real.digestsLost(session),
+      noteDigestsLost: (session) => real.noteDigestsLost(session),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -354,6 +358,8 @@ describe('a flagged result whose recording was cut short', () => {
       isIncomplete: (session) => real.isIncomplete(session),
       hasEvidence: (session) => real.hasEvidence(session),
       hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+      digestsLost: (session) => real.digestsLost(session),
+      noteDigestsLost: (session) => real.noteDigestsLost(session),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -388,6 +394,8 @@ describe('a flagged result whose recording was cut short', () => {
       isIncomplete: (session) => real.isIncomplete(session),
       hasEvidence: (session) => real.hasEvidence(session),
       hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+      digestsLost: (session) => real.digestsLost(session),
+      noteDigestsLost: (session) => real.noteDigestsLost(session),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));
@@ -434,6 +442,8 @@ describe('a flagged result whose recording was cut short', () => {
         isIncomplete: (session) => real.isIncomplete(session),
         hasEvidence: (session) => real.hasEvidence(session),
         hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+        digestsLost: (session) => real.digestsLost(session),
+        noteDigestsLost: (session) => real.noteDigestsLost(session),
         markIncomplete: async () => {
           throw new Error('disk full');
         },
@@ -473,6 +483,8 @@ describe('a flagged result whose recording was cut short', () => {
       isIncomplete: (session) => real.isIncomplete(session),
       hasEvidence: (session) => real.hasEvidence(session),
       hasStaleMarker: (session, now) => real.hasStaleMarker(session, now),
+      digestsLost: (session) => real.digestsLost(session),
+      noteDigestsLost: (session) => real.noteDigestsLost(session),
       markIncomplete: (session) => real.markIncomplete(session),
       setPending: (session, pending, owner) => real.setPending(session, pending, owner),
     }));

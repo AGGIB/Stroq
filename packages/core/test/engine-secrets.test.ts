@@ -350,6 +350,8 @@ describe('StroqEngine provenance excerpts and known secrets', () => {
         isIncomplete: async () => false,
         hasEvidence: async () => false,
         hasStaleMarker: async () => false,
+        digestsLost: async () => false,
+        noteDigestsLost: async () => undefined,
         markIncomplete: async () => {},
         setPending: async () => {},
       },

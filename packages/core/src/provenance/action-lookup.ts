@@ -87,7 +87,11 @@ export async function findActionProvenance(
   const seen = new Set(hits.map((hit) => atomKey(hit.atom)));
   // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
   const incomplete = await store.isIncomplete(event.sessionId);
-  const unrecorded = incomplete ? atoms.filter((atom) => !seen.has(atomKey(atom))) : [];
+  const missing = atoms.filter((atom) => !seen.has(atomKey(atom)));
+  // Lost hashes are a narrow loss: a blob that nothing accounts for is a question, a package is not.
+  const blobs = missing.filter((atom) => atom.kind === 'encoded');
+  const hashesLost = !incomplete && blobs.length > 0 && (await store.digestsLost(event.sessionId));
+  const unrecorded = incomplete ? missing : hashesLost ? blobs : [];
   const unreadCounts =
     unread && (tainted || incomplete || (await store.hasEvidence(event.sessionId)));
   return { hits, unrecorded, unread: unreadCounts, unreadCause: unreadCounts ? unreadCause : null };

@@ -306,13 +306,16 @@ function atomsOfReadings(
 ): {
   readings: ProvenanceReading[];
   lost: boolean;
+  digestsLost: boolean;
 } {
   const seen = new Set<string>();
   let lost = false;
+  let digestsLost = false;
   const readings = texts.map((text) => {
     const extracted = extractAtomsDeepWithLoss(normalizeText(text), { cheapDigests: !suspect });
     // Hosts clip at this length; an exact-length reading may have lost a suffix too.
     lost ||= extracted.truncated || text.length >= DEFAULT_MAX_CHARS;
+    digestsLost ||= extracted.digestsLost;
     return {
       text,
       atoms: extracted.atoms.filter((atom) => {
@@ -323,7 +326,7 @@ function atomsOfReadings(
       }),
     };
   });
-  return { readings, lost };
+  return { readings, lost, digestsLost };
 }
 
 export class StroqEngine {
@@ -774,6 +777,7 @@ export class StroqEngine {
         event.resultUnread === true ||
         actualExtras.some((reading) => reading.unread),
       pendingOwner,
+      extracted.digestsLost,
     );
     return {
       scan,

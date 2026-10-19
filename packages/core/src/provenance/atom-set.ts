@@ -5,8 +5,8 @@ import { isFloorKind } from './atom-kinds.js';
  * The atoms kept from one reading, deduped, with the budgets that bound them: one for the atoms
  * that can raise the floor (a package, a pipe-to-shell, an encoded blob), one for the URLs and
  * hosts, and one for the hashes (a labelled token that is not text), none of which can. A floor
- * atom that did not fit is a loss and is remembered as one; any other that did not fit is left
- * out and nothing else is said.
+ * atom that did not fit is a loss and is remembered as one; a hash that did not fit is a narrow
+ * loss, remembered as that; a URL or host that did not fit is left out and nothing is said.
  */
 export interface AtomSet {
   readonly atoms: Atom[];
@@ -16,6 +16,8 @@ export interface AtomSet {
   readonly floorFull: boolean;
   /** A distinct floor atom was left out because the budget was spent. */
   readonly floorLeftOut: boolean;
+  /** A distinct hash was left out because its budget was spent: a narrow loss (see `ProvenanceStore.digestsLost`). */
+  readonly digestLeftOut: boolean;
 }
 
 export function createAtomSet(maxFloor: number, maxNetwork: number, maxDigest: number): AtomSet {
@@ -25,6 +27,7 @@ export function createAtomSet(maxFloor: number, maxNetwork: number, maxDigest: n
   let network = 0;
   let digest = 0;
   let floorLeftOut = false;
+  let digestLeftOut = false;
   return {
     atoms,
     add(atom: Atom): void {
@@ -37,7 +40,10 @@ export function createAtomSet(maxFloor: number, maxNetwork: number, maxDigest: n
         }
         floor += 1;
       } else if (atom.kind === 'digest') {
-        if (digest >= maxDigest) return;
+        if (digest >= maxDigest) {
+          digestLeftOut = true;
+          return;
+        }
         digest += 1;
       } else {
         if (network >= maxNetwork) return;
@@ -51,6 +57,9 @@ export function createAtomSet(maxFloor: number, maxNetwork: number, maxDigest: n
     },
     get floorLeftOut(): boolean {
       return floorLeftOut;
+    },
+    get digestLeftOut(): boolean {
+      return digestLeftOut;
     },
   };
 }

@@ -23,7 +23,11 @@ describe('extractAtomsDeepWithLoss', () => {
   });
 
   it('reports no loss for empty text and for text without atoms', () => {
-    expect(extractAtomsDeepWithLoss('')).toEqual({ atoms: [], truncated: false });
+    expect(extractAtomsDeepWithLoss('')).toEqual({
+      atoms: [],
+      truncated: false,
+      digestsLost: false,
+    });
     expect(extractAtomsDeepWithLoss('plain prose about widgets').truncated).toBe(false);
   });
 

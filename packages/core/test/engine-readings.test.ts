@@ -182,6 +182,8 @@ describe('the call that records a result, given the texts of its other readings'
         isIncomplete: async () => incomplete || pending.size > 0,
         hasEvidence: async () => false,
         hasStaleMarker: async () => false,
+        digestsLost: async () => false,
+        noteDigestsLost: async () => undefined,
         markIncomplete: async () => {
           incomplete = true;
         },
