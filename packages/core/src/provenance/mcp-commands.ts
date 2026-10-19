@@ -8,10 +8,43 @@
 
 /** Keys that name a command line, compared without regard to case. */
 const COMMAND_KEYS = /^(?:command|cmd|script|shell|run|exec|args|argv|commandline)$/i;
-/** Tools that run what they are given, by the words in their names. */
-const EXEC_TOOL = /shell|exec|run_command|terminal|bash|cmd/i;
+/**
+ * The words of a tool's name that say it runs what it is given. They are compared as whole words,
+ * not as pieces of a word: `search_shellfish` is no shell, `get_command_help` is no executor.
+ */
+const EXEC_WORDS = new Set([
+  'shell',
+  'bash',
+  'zsh',
+  'sh',
+  'cmd',
+  'exec',
+  'execute',
+  'executor',
+  'terminal',
+  'powershell',
+  'pwsh',
+  'runcommand',
+  'execcommand',
+  'executecommand',
+]);
 
-export const isExecStyleTool = (toolName: string): boolean => EXEC_TOOL.test(toolName);
+/** The lower-case words of a name, split at anything that is not a letter or a digit and at a camelCase step. */
+function nameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word !== '');
+}
+
+/** Whether the name has an executor's word, or `run` right before `command` (`run_command`). */
+export function isExecStyleTool(toolName: string): boolean {
+  const words = nameWords(toolName);
+  return words.some(
+    (word, i) => EXEC_WORDS.has(word) || (word === 'run' && words[i + 1] === 'command'),
+  );
+}
 
 /** The key of the program of a spawned process, and the keys of the list of its arguments. */
 const PROGRAM_KEYS = /^(?:command|cmd)$/i;

@@ -69,18 +69,27 @@ describe('a tool that executes what it is given', () => {
     'mcp__x__cmd_run',
     'mcp__x__run_command',
     'mcp__x__Exec',
+    'mcp__x__runCommand',
+    'mcp__x__execCommand',
+    'mcp__PowerShell__invoke',
   ])('%s reads every string argument as a command', (tool) => {
     expect(isExecStyleTool(tool)).toBe(true);
     expect(read(tool, { input: 'npm install ev$X' }).unread).toBe(true);
     expect(read(tool, { lines: ['ls', 'npx $X'] }).unread).toBe(true);
   });
 
-  it.each(['mcp__github__create_pull_request', 'mcp__notion__create_page', 'mcp__slack__post'])(
-    '%s is no executor',
-    (tool) => {
-      expect(isExecStyleTool(tool)).toBe(false);
-    },
-  );
+  it.each([
+    'mcp__github__create_pull_request',
+    'mcp__notion__create_page',
+    'mcp__slack__post',
+    'mcp__docs__search_shellfish',
+    'mcp__x__get_command_help',
+    'mcp__x__executive_summary',
+    'mcp__x__bashful',
+    'mcp__x__cmdline_docs',
+  ])('%s is no executor', (tool) => {
+    expect(isExecStyleTool(tool)).toBe(false);
+  });
 });
 
 describe('the command lines of an input', () => {
