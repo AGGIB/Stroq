@@ -1,7 +1,7 @@
 import { isPlainObject } from '../commands/config-file.js';
 import { settle, tagChanges, type TaggedHit } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
-import { hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
 import { runFileChanges, type PackageScripts, type RunView } from './agent-run-files.js';
 import {
   MAX_FILE_BYTES,
@@ -278,24 +278,35 @@ function compare(top: string, base: string, head: string) {
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
-  const touched = (path: string): 'new' | 'changed' | undefined => {
+  const statusOf = (c: Changed | undefined): 'new' | 'changed' | undefined =>
+    c?.status === 'A' ? 'new' : c?.status === 'M' || c?.status === 'T' ? 'changed' : undefined;
+  // How a path a command names changed: itself (a file, a link, a submodule), a link on the way,
+  // or the file behind; `unknown` when a link on the way was not read.
+  const touched = (path: string): 'new' | 'changed' | 'unknown' | undefined => {
+    const direct = statusOf(changed.get(path));
+    if (direct !== undefined) return direct;
     const at = resolve(path, links.view);
-    if (at.kind !== 'blob') return undefined;
+    if (at.kind === 'unread') return 'unknown';
+    if (at.kind === 'none') return undefined;
     if (linkChanged(at, changed)) return 'changed';
-    const status = changed.get(at.path)?.status;
-    return status === 'A' ? 'new' : status === 'M' || status === 'T' ? 'changed' : undefined;
+    return at.kind === 'blob' ? statusOf(changed.get(at.path)) : undefined;
   };
+  const real = (path: string): string | 'unknown' | undefined => {
+    const at = resolve(path, links.view);
+    if (at.kind === 'unread') return 'unknown';
+    return at.kind === 'folder' || at.kind === 'blob' ? at.path : undefined;
+  };
+  // Links and submodules too: one a change puts in a folder a hook runs is run.
   const touchedFiles = [...changed].flatMap(([path, c]): RunView['touchedFiles'] => {
     const entry = tree.get(path);
-    if (entry === undefined || !isBlob(entry)) return [];
-    if (c.status === 'A') return [[path, 'new']];
-    return c.status === 'M' || c.status === 'T' ? [[path, 'changed']] : [];
+    const status = statusOf(c);
+    return entry === undefined || status === undefined ? [] : [[path, status, entry.mode]];
   });
   const scripts = packageScripts(top, tree, changed, links.view);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
-    ...runFileChanges(found, { touched, touchedFiles, scripts }),
+    ...runFileChanges(found, { touched, touchedFiles, scripts, real }),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...skippedConfigs(changed),
@@ -366,14 +377,26 @@ const TWO_PATHS = 'two paths of the tree read as this one name, so the check saw
 /** The most package.json files one check reads for the npm scripts that entries already there run. */
 const MAX_PACKAGE_FILES = 64;
 
-/** The `scripts` of a package.json's text; null when the text is not JSON. */
-function scriptsIn(text: string | undefined): Readonly<Record<string, unknown>> | null {
+/** The fields of a package.json that set up the runner, compared as one value. */
+const RUNNER_FIELDS = ['workspaces', 'packageManager', 'pnpm', 'config', 'bin'] as const;
+
+/** The `scripts` of a package.json's text, and its runner settings; null when it is not JSON. */
+function packageIn(
+  text: string | undefined,
+): { readonly scripts: Readonly<Record<string, unknown>>; readonly setup: string } | null {
   if (text === undefined) return null;
   try {
     const value: unknown = JSON.parse(stripJsonc(text));
     if (!isPlainObject(value)) return null;
     const scripts = Object.hasOwn(value, 'scripts') ? value['scripts'] : undefined;
-    return isPlainObject(scripts) ? scripts : {};
+    const setup = boundedJson(
+      Object.fromEntries(
+        RUNNER_FIELDS.map((key) => [key, Object.hasOwn(value, key) ? value[key] : null]),
+      ),
+      1024,
+      true,
+    );
+    return { scripts: isPlainObject(scripts) ? scripts : {}, setup };
   } catch {
     return null;
   }
@@ -391,10 +414,14 @@ function packageScripts(
   view: TreeView,
 ): RunView['scripts'] {
   const cache = new Map<string, PackageScripts | 'unread' | undefined>();
+  let reads = 0;
   const read = (path: string): PackageScripts | 'unread' | undefined => {
     const at = resolve(path, view);
     if (at.kind === 'none' || at.kind === 'folder') return undefined;
     if (at.kind !== 'blob') return 'unread';
+    // Only a file that is there counts toward the limit: asking about a folder with none is free.
+    reads += 1;
+    if (reads > MAX_PACKAGE_FILES) return 'unread';
     const entry = entryAt(tree, at.path);
     const c = changed.get(at.path);
     const old = linkChanged(at, changed)
@@ -412,14 +439,18 @@ function packageScripts(
       top,
       oids.map((oid) => ({ oid, size: sizes.get(oid) ?? 0 })),
     );
-    const head = scriptsIn(blobs.get(entry.oid));
+    const head = packageIn(blobs.get(entry.oid));
     if (head === null) return 'unread';
-    const base = old === undefined ? null : scriptsIn(blobs.get(old));
-    return { head, base: base ?? undefined };
+    const base = old === undefined ? null : packageIn(blobs.get(old));
+    return {
+      head: head.scripts,
+      base: base?.scripts,
+      setup: { head: head.setup, base: base?.setup },
+    };
   };
   return (path) => {
     if (cache.has(path)) return cache.get(path);
-    const scripts = cache.size >= MAX_PACKAGE_FILES ? 'unread' : read(path);
+    const scripts = read(path);
     cache.set(path, scripts);
     return scripts;
   };

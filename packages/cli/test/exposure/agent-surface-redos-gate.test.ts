@@ -5,6 +5,12 @@ import { hit } from '../../src/exposure/agent-kinds.js';
 import { runFileChanges } from '../../src/exposure/agent-run-files.js';
 import { pathWords } from '../../src/exposure/run-words.js';
 import {
+  computesWhatRuns,
+  npmPlan,
+  programOf,
+  shellTokens,
+} from '../../src/exposure/run-programs.js';
+import {
   inAgentDir,
   isAgentDir,
   readTier,
@@ -109,6 +115,20 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     'base64 ',
     'node -e ',
     '$( ',
+    '$(',
+    '${',
+    '$a"',
+    '`',
+    'a()',
+    'a ( ) ',
+    'eval ',
+    'bash -c "',
+    'sudo env A=1 ',
+    'timeout 1 ',
+    'pnpm --x ',
+    'python -m ',
+    'x.mk/',
+    '.yarn/',
     'a/',
     './a ',
     '"runOn": /**/',
@@ -279,6 +299,30 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
             ['package.json', 'changed'],
           ],
           scripts: () => ({ head: { a: text, lint: text }, base: {} }),
+        },
+      ),
+  ],
+  [
+    'which program a command starts',
+    (text) => [
+      computesWhatRuns(text),
+      programOf(shellTokens(text)),
+      npmPlan('pnpm', shellTokens(text)),
+    ],
+  ],
+  [
+    'what a command it cannot follow could run',
+    (text) =>
+      runFileChanges(
+        [{ ...hit('agent-hook', '.claude/settings.json', 1, 'S', 'mytool'), status: 'present' }],
+        {
+          touched: () => undefined,
+          touchedFiles: [
+            [text, 'new'],
+            [`${text}/x.sh`, 'changed', '100755'],
+            [`.claude/${text}`, 'new'],
+          ],
+          scripts: () => ({ head: { a: text }, base: { a: 'x' }, setup: { head: text, base: '' } }),
         },
       ),
   ],

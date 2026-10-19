@@ -96,8 +96,33 @@ describe('an entry already there whose other fields change', () => {
         }),
       ),
     ).toEqual(['changed editor-autorun-task .vscode/tasks.json warm FAILS']);
+    // A task that runs make, whose recipes are not read, fails on any change in an agent folder,
+    // this file included; one that runs a file it names is compared by its value alone.
     expect(
       brief(change(before, { '.vscode/tasks.json': tasks({ presentation: { reveal: 'never' } }) })),
+    ).toEqual([
+      'present editor-autorun-task .vscode/tasks.json warm passes',
+      'changed agent-run-file-changed .vscode/tasks.json warm task in .vscode/tasks.json FAILS',
+    ]);
+    const node = (extra: object) =>
+      json({
+        version: '2.0.0',
+        tasks: [
+          {
+            label: 'warm',
+            command: 'node warm.js',
+            runOptions: { runOn: 'folderOpen' },
+            ...extra,
+          },
+        ],
+      });
+    expect(
+      brief(
+        change(
+          { '.vscode/tasks.json': node({}) },
+          { '.vscode/tasks.json': node({ presentation: { reveal: 'never' } }) },
+        ),
+      ),
     ).toEqual(['present editor-autorun-task .vscode/tasks.json warm passes']);
   });
 
