@@ -1,6 +1,6 @@
 import { agentDefinitionHasHooks } from '@stroq/core';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
-import { hookEntries, MAX_HOOKS } from './agent-json.js';
+import { hookEntries, MAX_HOOKS, tooMany } from './agent-json.js';
 import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineAt } from './jsonc.js';
 
@@ -112,7 +112,5 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
   const hits = entries
     .slice(0, MAX_HOOKS)
     .map((e) => hit('agent-definition-hook', path, line, e.event, e.command));
-  if (cut)
-    hits.push(hit('unreadable-config', path, line, 'too many hooks', `more than ${MAX_HOOKS}`));
-  return hits;
+  return cut ? [...hits, { ...tooMany(path, 'hooks', MAX_HOOKS, hooks), line }] : hits;
 }

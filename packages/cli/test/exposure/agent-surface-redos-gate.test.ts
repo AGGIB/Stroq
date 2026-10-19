@@ -34,7 +34,13 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '[[',
     '[a.',
     '"""',
+    "'''",
     "'",
+    // One single-quoted string after another on one line: each looked for the next newline.
+    "'a'",
+    "a='b' ",
+    '"""a"""',
+    'a = """\\\n',
     'command = "',
     'a = [',
     '{ a = ',
@@ -124,5 +130,64 @@ describe('the readers of stroq inspect stay linear on text built to be slow', ()
         run,
       );
     });
+  });
+});
+
+/** `count` entries made by `entry`, as many as fit in `size` characters. */
+const many =
+  (entry: (i: number) => string, join: string, open: string, close: string) =>
+  (size: number): string => {
+    const parts: string[] = [];
+    for (let i = 0, used = open.length; used < size; i += 1) {
+      const part = entry(i);
+      parts.push(part);
+      used += part.length + join.length;
+    }
+    return `${open}${parts.join(join)}${close}`;
+  };
+
+/**
+ * One file with many entries: each entry's line was looked for from the top of the file, so
+ * 40,000 servers in a megabyte took seconds. Every reader that reports one entry each is here.
+ */
+const MANY: readonly (readonly [name: string, path: string, build: (size: number) => string])[] = [
+  [
+    'MCP servers',
+    '.mcp.json',
+    many((i) => `"s${i}":{"command":"x"}`, ',', '{"mcpServers":{', '}}'),
+  ],
+  [
+    'Codex servers',
+    '.codex/config.toml',
+    many((i) => `[mcp_servers.s${i}]\ncommand = "x"`, '\n', '', '\n'),
+  ],
+  [
+    'folder-open tasks',
+    '.vscode/tasks.json',
+    many(
+      (i) => `{"label":"t${i}","command":"x","runOptions":{"runOn":"folderOpen"}}`,
+      ',',
+      '{"tasks":[',
+      ']}',
+    ),
+  ],
+  [
+    'enabled plugins',
+    '.claude/settings.json',
+    many((i) => `"p${i}@m":true`, ',', '{"enabledPlugins":{', '}}'),
+  ],
+  [
+    'plugin sources',
+    '.claude/settings.json',
+    many((i) => `"m${i}":{"source":"x"}`, ',', '{"extraKnownMarketplaces":{', '}}'),
+  ],
+];
+
+describe('a file with many entries is read in linear time', () => {
+  it.each(MANY)('%s', (_name, path, build) => {
+    expectLinear(
+      SIZES.map((size) => build(size)),
+      (text) => scanFile(path, text),
+    );
   });
 });

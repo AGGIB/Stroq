@@ -181,6 +181,21 @@ describe('MCP servers', () => {
     expect(values(hits, 'agent-hook')).toEqual(['node g.js']);
   });
 
+  it('reports the first 200 servers of a file and fails the rest, which still count as a change', () => {
+    const list = (last: string): string =>
+      JSON.stringify({
+        mcpServers: Object.fromEntries(
+          Array.from({ length: 201 }, (_, i) => [`s${i}`, { command: i === 200 ? last : 'npx' }]),
+        ),
+      });
+    const hits = scanFile('.mcp.json', list('npx'));
+    expect(of(hits, 'mcp-server')).toHaveLength(200);
+    const [cut] = of(hits, 'unreadable-config');
+    expect(cut).toMatchObject({ name: 'too many servers', severity: 'error' });
+    const [other] = of(scanFile('.mcp.json', list('bash')), 'unreadable-config');
+    expect(other?.value).not.toBe(cut?.value);
+  });
+
   it('reports an unreadable server list whose text registers a shell', () => {
     const hits = scanFile('.mcp.json', '{"mcpServers": {"x": {"command": "bash", "args": [}}');
     expect(hits).toMatchObject([{ kind: 'mcp-server-runs-code', severity: 'error' }]);

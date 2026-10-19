@@ -2,6 +2,7 @@ import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import {
   commandText,
+  firstEntries,
   mcpServerHits,
   own,
   ownObject,
@@ -85,21 +86,28 @@ export function folderOpenTasks(f: JsonFile, list: unknown, prefix: readonly str
     const label = labelOf(task);
     if (label !== undefined && !byLabel.has(label)) byLabel.set(label, task);
   }
-  return tasks.flatMap((task, i) => {
-    if (!runsOnFolderOpen(task)) return [];
-    const label = labelOf(task);
-    const seen = new Set(label === undefined ? [] : [label]);
-    const line = lineOf(f.text, [...prefix, label === undefined ? '' : quoted(label), '"runOn"']);
-    return [
-      hit(
-        'editor-autorun-task',
-        f.path,
-        line,
-        label ?? `task ${i + 1}`,
-        taskRuns(task, byLabel, seen),
-      ),
-    ];
-  });
+  const opening = firstEntries(
+    f.path,
+    'folder-open tasks',
+    tasks.flatMap((task, i) => (runsOnFolderOpen(task) ? [[task, i] as const] : [])),
+  );
+  return [
+    ...opening.cut,
+    ...opening.items.flatMap(([task, i]) => {
+      const label = labelOf(task);
+      const seen = new Set(label === undefined ? [] : [label]);
+      const line = lineOf(f.text, [...prefix, label === undefined ? '' : quoted(label), '"runOn"']);
+      return [
+        hit(
+          'editor-autorun-task',
+          f.path,
+          line,
+          label ?? `task ${i + 1}`,
+          taskRuns(task, byLabel, seen),
+        ),
+      ];
+    }),
+  ];
 }
 
 const AUTO_APPROVE_KEYS = ['chat.tools.autoApprove', 'chat.tools.global.autoApprove'] as const;

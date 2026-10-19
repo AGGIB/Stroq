@@ -1,6 +1,6 @@
 import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
-import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -49,6 +49,38 @@ const COMMAND_KEYS: ReadonlySet<string> = new Set([
 /** The most nodes of one hooks value that are walked, and the most hooks that are reported. */
 const MAX_HOOK_NODES = 20_000;
 export const MAX_HOOKS = 200;
+/**
+ * The most entries of one list in one file that are reported: servers, tasks, plugins. Each one
+ * looks for its line in the file, so 40,000 of them in a megabyte took seconds. Real files have
+ * a handful.
+ */
+export const MAX_ENTRIES = 200;
+
+/**
+ * A failing entry for a list cut at its cap. Its value ends with a digest of everything in the
+ * list, so an entry added past the cap is still a change.
+ */
+export const tooMany = (path: string, what: string, max: number, all: unknown): AgentHit =>
+  hit(
+    'unreadable-config',
+    path,
+    1,
+    `too many ${what}`,
+    `more than ${max}, ${digestOf(boundedJson(all))}`,
+  );
+
+/** The first `MAX_ENTRIES` of `items`, and the failing entry for the cut when there were more. */
+export function firstEntries<T>(
+  path: string,
+  what: string,
+  items: readonly T[],
+): { readonly items: readonly T[]; readonly cut: readonly AgentHit[] } {
+  if (items.length <= MAX_ENTRIES) return { items, cut: [] };
+  return {
+    items: items.slice(0, MAX_ENTRIES),
+    cut: [tooMany(path, what, MAX_ENTRIES, items)],
+  };
+}
 
 export interface HookEntry {
   /** The path of keys to the handler, without the array indices. */
@@ -119,9 +151,7 @@ export function hookHits(
     const needles = [...prefix, ...e.path.map(quoted), quoted(e.command)];
     return hit(kind, f.path, lineOf(f.text, needles), e.event, e.command);
   });
-  if (cut)
-    hits.push(hit('unreadable-config', f.path, 1, 'too many hooks', `more than ${MAX_HOOKS}`));
-  return hits;
+  return cut ? [...hits, tooMany(f.path, 'hooks', MAX_HOOKS, value)] : hits;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -191,14 +221,23 @@ function settingsSwitches(f: JsonFile): AgentHit[] {
 }
 
 function pluginHits(f: JsonFile): AgentHit[] {
-  const hits: AgentHit[] = [];
   const enabled = own(f.value, 'enabledPlugins');
-  const ids = isPlainObject(enabled)
-    ? Object.entries(enabled)
-        .filter(([, on]) => on !== false && on !== null)
-        .map(([id]) => id)
-    : strings(enabled);
-  for (const id of ids)
+  const on = firstEntries(
+    f.path,
+    'plugins',
+    isPlainObject(enabled)
+      ? Object.entries(enabled)
+          .filter(([, value]) => value !== false && value !== null)
+          .map(([id]) => id)
+      : strings(enabled),
+  );
+  const sources = firstEntries(
+    f.path,
+    'plugin sources',
+    Object.entries(ownObject(f.value, 'extraKnownMarketplaces') ?? {}),
+  );
+  const hits: AgentHit[] = [...on.cut, ...sources.cut];
+  for (const id of on.items)
     hits.push(
       hit(
         'agent-plugin',
@@ -208,7 +247,7 @@ function pluginHits(f: JsonFile): AgentHit[] {
         id,
       ),
     );
-  for (const [name, entry] of Object.entries(ownObject(f.value, 'extraKnownMarketplaces') ?? {})) {
+  for (const [name, entry] of sources.items) {
     const source = isPlainObject(entry) && Object.hasOwn(entry, 'source') ? entry['source'] : entry;
     hits.push(
       hit(
@@ -255,8 +294,9 @@ export function mcpServerHits(
   prefix: readonly string[] = [],
 ): AgentHit[] {
   const servers = container === undefined ? undefined : ownObject(container, key);
-  const hits: AgentHit[] = [];
-  for (const [name, entry] of Object.entries(servers ?? {})) {
+  const list = firstEntries(f.path, 'servers', Object.entries(servers ?? {}));
+  const hits: AgentHit[] = [...list.cut];
+  for (const [name, entry] of list.items) {
     if (!isPlainObject(entry)) continue;
     const line = lineOf(f.text, [...prefix, quoted(key), quoted(name)]);
     const command = ownString(entry, 'command');
