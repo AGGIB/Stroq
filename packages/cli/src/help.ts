@@ -390,7 +390,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       'inspect [<dir>] [--changed-from <rev>] [--format text|json|sarif|github] [--fail-on new|any|none] [--env]',
     about: [
       'read what a repository runs before you open it with an agent or editor. Exit 1 when',
-      'something fails the check, 2 for a usage error, 3 when git cannot read the base',
+      'something fails the check, 2 for a usage error, 3 when the check cannot run',
     ],
     flags: [
       ['--changed-from <rev>', 'compare with <rev> and mark each entry new, changed or present'],
@@ -398,7 +398,7 @@ export const COMMANDS: readonly CommandHelp[] = [
         '--format <text|json|sarif|github>',
         'github: a job summary on stdout, annotations on stderr',
       ],
-      ['--fail-on <new|any|none>', 'what fails: new with --changed-from, any without it'],
+      ['--fail-on <new|any|none>', 'what fails: new (needs --changed-from, its default) or any'],
       ['--json', 'the same as --format json'],
       ['--sarif', 'the same as --format sarif (SARIF 2.1.0, for code scanning)'],
       ['--env', 'print the git settings that neutralise it'],

@@ -377,15 +377,25 @@ What it reads:
 - Hooks in `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` and `.codex/config.toml`, `.github/hooks/*.json`, `.github/copilot/`, `.gemini/`, `.agents/hooks.json`, `.windsurf/hooks.json` and `.devin/hooks.json`, and in the front matter of skills, subagents and commands.
 - MCP servers in `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json` and `.codex/config.toml`. A server that starts a shell or inline code fails. Any other new server is listed to review.
 - Claude Code settings that run a command or let the agent do more: `statusLine`, `apiKeyHelper` and the other helpers, `ANTHROPIC_BASE_URL`, `bypassPermissions`, `enableAllProjectMcpServers`, plugins and plugin sources.
-- VS Code tasks that run when the folder opens, in `tasks.json` and `.code-workspace` files, and the settings that let tasks or tool calls run without asking. Comments in these files are read past.
+- `env` variables in those settings that load code or send traffic elsewhere, such as `NODE_OPTIONS`, `BASH_ENV`, `LD_PRELOAD`, `PATH` and `HTTPS_PROXY`. An allow rule for the whole shell, such as `Bash(*)`, is listed to review.
+- VS Code tasks that run when the folder opens, in `tasks.json` and `.code-workspace` files, and the settings that let tasks, tool calls or terminal commands run without asking. Comments in these files are read past.
 - Dev container commands anywhere under `.devcontainer/`, and the install scripts in `package.json`.
-- Instruction files such as `CLAUDE.md`, `AGENTS.md` and `.cursorrules`. Invisible characters in one fail the check. A new or changed one is only listed.
+- Instruction files such as `CLAUDE.md`, `AGENTS.md` and `.cursorrules`. Invisible characters in one fail the check, and so does a NUL byte. A new or changed one is only listed.
+- A submodule where an agent folder or config would be. What it holds comes from another repository, so it fails.
 
-It compares values, not files. A hook that was already there does not fail, however the file around it changed. A file it cannot read fails when it names a key that runs something.
+It compares values, not files. A hook that was already there does not fail, however the file around it changed. A second hook under the same event is new, not changed.
 
-It reads only git's objects for the two commits, never the working tree, and runs nothing from the repository. It skips `.git`: a pull request cannot change it, and `actions/checkout` writes its own entries there.
+It also follows the files those entries run. When a change edits a script that a hook already there runs, such as `node .vscode/setup.mjs`, the script fails the check. An edit to the code of an ordinary MCP server or install script is listed to review.
 
-Exit 0 means nothing fails, 1 means something fails, 2 is a usage error, and 3 means git cannot read the base. `--fail-on any` also fails on what was already there, and `--fail-on none` never fails. Without `--changed-from` the default is `any`, so plain `stroq inspect` fails on a repository that already has a hook or a folder-open task.
+A JSON config it cannot read fails when it names a key that runs something. A `.codex/config.toml` it cannot read always fails. A config or an instruction file over 1 MiB fails.
+
+It reads only git's objects for the two commits, never the working tree, and runs nothing from the repository. It skips `.git`: a pull request cannot change it, and `actions/checkout` writes its own entries there. It checks the whole repository that holds the folder you give it, from its top, and says so when that folder is not the top.
+
+It reads the configs at a fixed place first, then the files the change touched, then the rest: up to 5,000 files, 2,000 links and 64 MiB. A limit that keeps it from reading a file the change touched fails the check.
+
+Exit 0 means nothing fails, 1 means something fails, 2 is a usage error, and 3 means the check could not run: git cannot read the base, or the check stopped on an error. `--fail-on any` also fails on what was already there, and `--fail-on none` never fails. `--fail-on new` needs `--changed-from`. Without `--changed-from` the default is `any`, so plain `stroq inspect` fails on a repository that already has a hook or a folder-open task.
+
+Plain `stroq inspect` reads the same entries from the folder on disk, with or without `.git`, so it works on a zip download too. It reads the agent and editor folders first. It stops after 20,000 folders or 5,000 agent files, and then fails, since it has not read everything.
 
 `--format github` writes a job summary in Markdown to standard output, and at most ten `::error` and `::warning` lines to standard error. Every value from the repository is escaped first.
 
