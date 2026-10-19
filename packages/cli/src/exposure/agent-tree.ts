@@ -5,11 +5,12 @@ import { within } from '../commands/config-file.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import {
-  AGENT_DIRS,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
+  SKIP_DIRS,
   hitsForRead,
   inAgentFolder,
+  isAgentDir,
   isSurfacePath,
   type SourceRead,
 } from './agent-surface.js';
@@ -24,17 +25,6 @@ import { linkMatters } from './git-tree.js';
 
 /** A repository is a working tree, not a corpus; these are generous for one. */
 export const WALK_CAPS = { dirs: 20_000, files: 5_000 } as const;
-
-/** Folders of other people's code, skipped unless they are inside an agent or editor folder. */
-const SKIP_DIRS: ReadonlySet<string> = new Set([
-  'node_modules',
-  '.venv',
-  'venv',
-  'vendor',
-  'target',
-  'dist',
-  'build',
-]);
 
 export interface AgentSurface {
   readonly hits: readonly AgentHit[];
@@ -155,7 +145,7 @@ function walk(root: string): Walked {
         continue;
       }
       if (isLink && !within(real, realRoot)) {
-        if (isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase()))
+        if (isSurfacePath(rel) || isAgentDir(rel))
           found.push({ rel, real: linkText(abs), kind: 'outside' });
         continue;
       }
@@ -177,9 +167,7 @@ function brokenLink(abs: string, rel: string, roots: readonly string[]): Candida
   const where = resolvePath(dirname(abs), text);
   if (roots.some((root) => within(where, root)))
     return linkMatters(rel) ? { rel, real: text, kind: 'dangling' } : undefined;
-  return isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase())
-    ? { rel, real: text, kind: 'outside' }
-    : undefined;
+  return isSurfacePath(rel) || isAgentDir(rel) ? { rel, real: text, kind: 'outside' } : undefined;
 }
 
 /** Reads one file, charging its size to what is `left` of the budget. */

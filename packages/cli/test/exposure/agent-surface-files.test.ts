@@ -391,7 +391,11 @@ describe('agentSurface, on a working tree', () => {
     symlinkSync('.', join(root, '.claude', 'here'));
     const { hits, capped } = agentSurface(root);
     expect(capped).toBe(false);
-    expect(of(hits, 'agent-hook').map((h) => h.file)).toEqual(['.claude/settings.json']);
+    // Read once more through the link, as the settings of the folder `.claude/up`, and no further.
+    expect(of(hits, 'agent-hook').map((h) => h.file)).toEqual([
+      '.claude/settings.json',
+      '.claude/up/.claude/settings.json',
+    ]);
   });
 
   it('reports a config that is too large to read instead of reading it', () => {

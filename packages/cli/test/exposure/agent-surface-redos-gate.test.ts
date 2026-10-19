@@ -3,7 +3,13 @@ import { tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runFileChanges } from '../../src/exposure/agent-run-files.js';
 import { pathWords } from '../../src/exposure/run-words.js';
-import { scanFile } from '../../src/exposure/agent-surface.js';
+import {
+  inAgentDir,
+  isAgentDir,
+  readTier,
+  readersFor,
+  scanFile,
+} from '../../src/exposure/agent-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -84,6 +90,11 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     'a\\ ',
     '"a b/',
     '/a',
+    '.claude/',
+    'node_modules/',
+    '.github/hooks/',
+    '.devcontainer/',
+    '.opencode/plugin/',
     './a ',
     '"runOn": /**/',
     '---\n',
@@ -155,6 +166,27 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       scanFile('.mcp.json', `{"mcpServers":{"s":{"command":"bash","args":["-c",${json(text)}]}}}`),
   ],
   ['a Codex config.toml', (text) => scanFile('.codex/config.toml', text)],
+  ['an opencode config, raw', (text) => scanFile('opencode.json', text)],
+  [
+    'an opencode config, as servers and plugins',
+    (text) =>
+      scanFile(
+        'opencode.json',
+        `{"mcp":{"s":{"command":[${json(text)}],"environment":{${json(text)}:1}}},"plugin":[${json(text)}]}`,
+      ),
+  ],
+  ['Zed settings, raw', (text) => scanFile('.zed/settings.json', text)],
+  [
+    'Zed settings, as servers and a language server',
+    (text) =>
+      scanFile(
+        '.zed/settings.json',
+        `{"context_servers":{"a":{"command":{"path":${json(text)},"args":[${json(text)}]}}},"lsp":{"r":{"binary":{"path":${json(text)}}}}}`,
+      ),
+  ],
+  ['a Kiro hook', (text) => scanFile('.kiro/hooks/a.kiro.hook', text)],
+  ['plugin code', (text) => scanFile('.opencode/plugin/a.js', text)],
+  ['settings in a subfolder', (text) => scanFile('a/b/.claude/settings.json', text)],
   [
     'a Codex config.toml, as a server',
     (text) => scanFile('.codex/config.toml', `[mcp_servers.s]\ncommand = ${json(text)}\n`),
@@ -179,6 +211,16 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
         '.claude/settings.json',
         `{${json(text)}:"x","k":{${json(text)}:{"command":${json(text)}}},"enabledMcpjsonServers":[${json(text)}]}`,
       ),
+  ],
+  [
+    'a path to choose readers by',
+    (text) => [
+      readersFor(text),
+      readTier(text),
+      isAgentDir(text),
+      inAgentDir(text),
+      readersFor(`${text}/.claude/settings.json`),
+    ],
   ],
   ['the file words of a command line', (text) => pathWords(text)],
   [
@@ -288,6 +330,16 @@ const MANY: readonly (readonly [name: string, path: string, build: (size: number
     'env variables nobody knows',
     '.claude/settings.json',
     many((i) => `"V${i}":"x"`, ',', '{"env":{', '}}'),
+  ],
+  [
+    'opencode servers',
+    'opencode.json',
+    many((i) => `"s${i}":{"command":["x"]}`, ',', '{"mcp":{', '}}'),
+  ],
+  [
+    'Zed servers and language servers',
+    '.zed/settings.json',
+    many((i) => `"s${i}":{"command":"x","binary":{"path":"x"}}`, ',', '{"context_servers":{', '}}'),
   ],
   [
     'plugin sources',

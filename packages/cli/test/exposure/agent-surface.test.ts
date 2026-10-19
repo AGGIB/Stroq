@@ -474,8 +474,11 @@ describe('package.json install scripts', () => {
     ]);
   });
 
-  it('reads only the package.json at the root', () => {
+  // npm runs the install scripts of every workspace member; a dependency's own are not this
+  // repository's to read.
+  it('reads the package.json of a workspace member, and not one in node_modules', () => {
     const text = JSON.stringify({ scripts: { postinstall: 'node x.js' } });
-    expect(scanFile('packages/a/package.json', text)).toEqual([]);
+    expect(of(scanFile('packages/a/package.json', text), 'package-script')).toHaveLength(1);
+    expect(scanFile('node_modules/a/package.json', text)).toEqual([]);
   });
 });

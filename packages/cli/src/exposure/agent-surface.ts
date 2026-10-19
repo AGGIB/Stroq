@@ -24,6 +24,7 @@ import {
   type JsonFile,
 } from './agent-json.js';
 import { byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { opencodeConfig, pluginCode, zedSettings } from './agent-others.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
 import { codexConfig } from './agent-toml.js';
 import { lineOf, stripJsonc } from './jsonc.js';
@@ -135,19 +136,33 @@ const READERS = {
   workspace: json(codeWorkspace, either(editorText, mentions(['autoApprove', ...RUN_KEYS]))),
   devcontainer: json(devcontainer, devcontainerText),
   package: json(packageScripts, () => []),
+  opencode: json(opencodeConfig, mentions(['"mcp"', '"plugin"'])),
+  zed: json(zedSettings, mentions(['context_servers', '"binary"'])),
+  plugin: pluginCode,
   codex: codexConfig,
   definition: agentDefinition,
   instruction: instructionFile,
 } satisfies Record<string, Reader>;
 
-/** Files at a fixed place from the root, by their path in lower case. */
+/**
+ * Files at a fixed place, by their path in lower case: at the root, and in any folder, since a
+ * host started in a subfolder of a monorepo, or an editor opened on one, reads that folder's own.
+ */
 const AT_ROOT: ReadonlyMap<string, Reader> = new Map([
   ['.claude/settings.json', READERS.claude],
   ['.claude/settings.local.json', READERS.claude],
   ['.mcp.json', READERS.mcp],
   ['.cursor/mcp.json', READERS.mcp],
   ['.vscode/mcp.json', READERS.mcp],
+  ['.kiro/settings/mcp.json', READERS.mcp],
+  ['.roo/mcp.json', READERS.mcp],
   ['.gemini/settings.json', READERS.gemini],
+  ['.qwen/settings.json', READERS.gemini],
+  ['opencode.json', READERS.opencode],
+  ['opencode.jsonc', READERS.opencode],
+  ['.opencode/opencode.json', READERS.opencode],
+  ['.opencode/opencode.jsonc', READERS.opencode],
+  ['.zed/settings.json', READERS.zed],
   ['.cursor/hooks.json', READERS.hooks],
   ['.codex/hooks.json', READERS.hooks],
   ['.codex/config.toml', READERS.codex],
@@ -162,33 +177,98 @@ const AT_ROOT: ReadonlyMap<string, Reader> = new Map([
 ]);
 
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
-/** `dir/x` with nothing more under it. */
-const directlyIn = (path: string, dir: string): boolean =>
-  path.startsWith(dir) && !path.slice(dir.length).includes('/');
+
+/** Folders of other people's code: a config under one is not one a host of this repository reads. */
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.venv',
+  'venv',
+  'vendor',
+  'target',
+  'dist',
+  'build',
+]);
+
+/** The reader of a file at a fixed place, at the root or in a folder; `parts` are in lower case. */
+function fixedReader(parts: readonly string[]): Reader | undefined {
+  for (let n = Math.min(3, parts.length); n >= 1; n -= 1) {
+    const reader = AT_ROOT.get(parts.slice(-n).join('/'));
+    if (reader !== undefined) return reader;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a path is in a folder of other people's code, as the walk on disk skips them: a skipped
+ * folder that is not itself inside an agent folder.
+ */
+function inOthersCode(parts: readonly string[]): boolean {
+  for (const part of parts.slice(0, -1)) {
+    if (AGENT_DIR_NAMES.has(part)) return false;
+    if (SKIP_DIRS.has(part)) return true;
+  }
+  return false;
+}
+
+/** Whether the last parts of `parts` are `folder` and then a name `name` accepts. */
+const endsIn = (
+  parts: readonly string[],
+  folder: readonly string[],
+  name: (base: string) => boolean,
+) =>
+  parts.length > folder.length &&
+  folder.every((f, i) => parts[parts.length - 1 - folder.length + i] === f) &&
+  name(parts[parts.length - 1] as string);
+
+/** Readers chosen by the folder a file is in, at any depth; `lower` is split at `/`. */
+function folderReaders(parts: readonly string[]): Reader[] {
+  const readers: Reader[] = [];
+  const base = parts[parts.length - 1] as string;
+  // A server list straight inside an agent's own folder: `.amazonq/mcp.json`, `.trae/mcp.json`.
+  const parent = parts[parts.length - 2] ?? '';
+  if (base === 'mcp.json' && parent.length > 1 && parent.startsWith('.')) readers.push(READERS.mcp);
+  if (
+    endsIn(parts, ['.github', 'hooks'], (b) => b.endsWith('.json')) ||
+    endsIn(parts, ['.kiro', 'hooks'], (b) => b.endsWith('.kiro.hook'))
+  )
+    readers.push(READERS.hooks);
+  if (endsIn(parts, ['.github', 'copilot'], (b) => b.startsWith('settings') && b.endsWith('.json')))
+    readers.push(READERS.claude);
+  if (
+    parts.slice(0, -1).includes('.devcontainer') &&
+    (base === 'devcontainer.json' || base === '.devcontainer.json')
+  )
+    readers.push(READERS.devcontainer);
+  const plugin = (b: string): boolean => /\.[cm]?[jt]s$/.test(b);
+  if (
+    endsIn(parts, ['.opencode', 'plugin'], plugin) ||
+    endsIn(parts, ['.opencode', 'plugins'], plugin)
+  )
+    readers.push(READERS.plugin);
+  return readers;
+}
 
 /** Names an instruction reader reads as text; a picture in a skill folder is not one. */
 function isTextName(path: string): boolean {
   const base = baseName(path);
   const dot = base.lastIndexOf('.');
   if (dot <= 0) return true;
-  return ['.md', '.mdc', '.markdown', '.txt', '.json'].includes(base.slice(dot).toLowerCase());
+  return ['.md', '.mdc', '.markdown', '.txt', '.json', '.hook'].includes(
+    base.slice(dot).toLowerCase(),
+  );
 }
 
 /** Every reader for a repository-relative path with `/` separators; none for most files. */
 export function readersFor(path: string): Reader[] {
   const lower = path.toLowerCase();
+  const parts = lower.split('/');
   const readers: Reader[] = [];
-  const fixed = AT_ROOT.get(lower);
-  if (fixed !== undefined) readers.push(fixed);
-  if (directlyIn(lower, '.github/hooks/') && lower.endsWith('.json')) readers.push(READERS.hooks);
-  if (directlyIn(lower, '.github/copilot/settings') && lower.endsWith('.json'))
-    readers.push(READERS.claude);
-  if (lower.endsWith('.code-workspace')) readers.push(READERS.workspace);
-  if (
-    lower.startsWith('.devcontainer/') &&
-    ['devcontainer.json', '.devcontainer.json'].includes(baseName(lower))
-  )
-    readers.push(READERS.devcontainer);
+  if (!inOthersCode(parts)) {
+    const fixed = fixedReader(parts);
+    if (fixed !== undefined) readers.push(fixed);
+    readers.push(...folderReaders(parts).filter((r) => r !== fixed));
+    if (lower.endsWith('.code-workspace')) readers.push(READERS.workspace);
+  }
   if (isAgentDefinitionPath(path) && lower.endsWith('.md')) readers.push(READERS.definition);
   if (INSTRUCTION_FILE.test(path) && !isMcpConfigPath(path) && isTextName(path))
     readers.push(READERS.instruction);
@@ -288,6 +368,18 @@ export const AGENT_DIRS: ReadonlySet<string> = new Set([
   '.github/hooks',
   '.github/copilot',
   '.github/agents',
+  '.kiro',
+  '.kiro/hooks',
+  '.kiro/settings',
+  '.roo',
+  '.amazonq',
+  '.kilocode',
+  '.trae',
+  '.qwen',
+  '.zed',
+  '.opencode',
+  '.opencode/plugin',
+  '.opencode/plugins',
 ]);
 
 /**
@@ -309,7 +401,35 @@ const AGENT_DIR_NAMES: ReadonlySet<string> = new Set([
   '.github',
   '.kiro',
   '.roo',
+  '.amazonq',
+  '.kilocode',
+  '.trae',
+  '.qwen',
+  '.zed',
+  '.opencode',
 ]);
+
+/**
+ * Whether a path is a folder whose contents an agent loads, at the root or in a subfolder that a
+ * host may be started in: `.claude`, `packages/app/.claude/skills`.
+ */
+export function isAgentDir(path: string): boolean {
+  const parts = path.toLowerCase().split('/');
+  if (inOthersCode(parts)) return false;
+  return [1, 2].some((n) => parts.length >= n && AGENT_DIRS.has(parts.slice(-n).join('/')));
+}
+
+/** Inside an agent folder, at any depth: not `.github` as a whole, whose workflows are not one. */
+export function inAgentDir(path: string): boolean {
+  const lower = path.toLowerCase();
+  if (inOthersCode(lower.split('/'))) return false;
+  const slashed = `/${lower}`;
+  for (const dir of AGENT_DIRS) {
+    if (slashed.endsWith(`/${dir}`)) return true;
+    if (dir !== '.github' && slashed.includes(`/${dir}/`)) return true;
+  }
+  return false;
+}
 
 /** Whether a repository-relative path goes through a folder an agent or editor loads from. */
 export const inAgentFolder = (path: string): boolean =>

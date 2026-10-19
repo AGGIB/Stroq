@@ -41,7 +41,8 @@ function sentence(h: AgentHit, q: Quote): string {
         ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'
         : `${name} approves tool calls without asking: ${value}`;
     case 'agent-plugin':
-      return h.name.startsWith('enabledPlugins.')
+      if (h.name === 'plugin code') return 'is plugin code the agent loads and runs when it starts';
+      return h.name.startsWith('enabledPlugins.') || h.name === 'plugin'
         ? `turns on the plugin: ${value}`
         : `adds a plugin source: ${value}`;
     case 'mcp-auto-approve':

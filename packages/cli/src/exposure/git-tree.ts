@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import { AGENT_DIRS, inAgentFolder, isSurfacePath } from './agent-surface.js';
+import { inAgentDir, inAgentFolder, isAgentDir, isSurfacePath } from './agent-surface.js';
 import type { TreeEntry } from './git-read.js';
 
 /**
@@ -138,14 +138,6 @@ export function resolve(path: string, view: TreeView): Resolved {
 /** A link whose target decides what an agent or editor loads. */
 export const linkMatters = (path: string): boolean => isSurfacePath(path) || inAgentFolder(path);
 
-/** Inside an agent folder: not `.github` as a whole, whose workflows and actions are not one. */
-export const inAgentDir = (path: string): boolean => {
-  const lower = path.toLowerCase();
-  if (AGENT_DIRS.has(lower)) return true;
-  for (const dir of AGENT_DIRS) if (dir !== '.github' && lower.startsWith(`${dir}/`)) return true;
-  return false;
-};
-
 /**
  * The links to read after the ones already read: the links on the way to each target read so
  * far, and the links inside a folder that one points at, since a host opens those through it.
@@ -180,9 +172,7 @@ function loops(expanded: ReadonlyMap<string, string>, virtual: string, real: str
 
 /** A path a host opens that the readers want, a submodule where one would be, or a link to one. */
 const wanted = (path: string, entry: TreeEntry | undefined): boolean =>
-  isSurfacePath(path) ||
-  AGENT_DIRS.has(path.toLowerCase()) ||
-  (entry?.mode === GITLINK && inAgentDir(path));
+  isSurfacePath(path) || isAgentDir(path) || (entry?.mode === GITLINK && inAgentDir(path));
 
 export interface Paths {
   readonly paths: readonly string[];
