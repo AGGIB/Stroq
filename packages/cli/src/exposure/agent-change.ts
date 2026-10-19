@@ -32,6 +32,19 @@ const takeOne = (counts: Map<string, number>, key: string): boolean => {
 };
 
 /**
+ * Env variables that honest settings often set: PATH, a shell, an editor or pager, a proxy, a
+ * certificate. One that was already there is a warning. One a change adds or changes stays an
+ * error, since it decides what every session runs, or where its traffic goes.
+ */
+const COMMON_ENV =
+  /^(?:PATH|SHELL|EDITOR|VISUAL|PAGER|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/;
+
+const withStatus = (h: AgentHit, status: ChangeStatus): TaggedHit =>
+  status === 'present' && h.kind === 'agent-env' && COMMON_ENV.test(h.name)
+    ? { ...h, severity: 'warning', status }
+    : { ...h, status };
+
+/**
  * `head` tagged against `base`; with no base at all, everything is `present`. Each base entry
  * accounts for one head entry at most: first the ones with the same value (`present`), then,
  * in order, one with a new value in the same slot (`changed`). What is left over is `new`.
@@ -40,7 +53,7 @@ export function tagChanges(
   head: readonly AgentHit[],
   base: readonly AgentHit[] | null,
 ): TaggedHit[] {
-  if (base === null) return head.map((h) => ({ ...h, status: 'present' }));
+  if (base === null) return head.map((h) => withStatus(h, 'present'));
   const sameValue = new Map<string, number>();
   const sameSlot = new Map<string, number>();
   for (const h of base) {
@@ -48,10 +61,9 @@ export function tagChanges(
     countUp(sameSlot, slot(h));
   }
   const kept = head.map((h) => takeOne(sameValue, entry(h)) && takeOne(sameSlot, slot(h)));
-  return head.map((h, i) => ({
-    ...h,
-    status: kept[i] ? 'present' : takeOne(sameSlot, slot(h)) ? 'changed' : 'new',
-  }));
+  return head.map((h, i) =>
+    withStatus(h, kept[i] ? 'present' : takeOne(sameSlot, slot(h)) ? 'changed' : 'new'),
+  );
 }
 
 /** Only an error fails, and only when `failOn` counts its status. */

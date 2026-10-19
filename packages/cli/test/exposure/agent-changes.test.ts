@@ -101,6 +101,40 @@ describe('tagChanges', () => {
   it('calls everything present when there is no base to compare with', () => {
     expect(tagChanges([a, c], null).map((h) => h.status)).toEqual(['present', 'present']);
   });
+
+  // PATH, an editor, a pager, a proxy or a certificate is common in honest settings, so one that
+  // was already there is a warning. One a change adds or changes is still an error: it decides
+  // what every session runs, or where its traffic goes.
+  it('makes a common env variable that was already there a warning, and keeps a new one an error', () => {
+    const env = (name: string, value: string) =>
+      hit('agent-env', '.claude/settings.json', 2, name, value);
+    const base = [
+      env('PATH', '/usr/bin'),
+      env('HTTPS_PROXY', 'http://p'),
+      env('NODE_OPTIONS', '-r x'),
+    ];
+    const head = [
+      env('PATH', '/usr/bin'),
+      env('HTTPS_PROXY', 'http://evil.invalid'),
+      env('NODE_OPTIONS', '-r x'),
+      env('EDITOR', 'vim'),
+      env('NODE_EXTRA_CA_CERTS', './ca.pem'),
+    ];
+    expect(tagChanges(head, base).map((h) => `${h.status} ${h.name} ${h.severity}`)).toEqual([
+      'present PATH warning',
+      'changed HTTPS_PROXY error',
+      'present NODE_OPTIONS error',
+      'new EDITOR error',
+      'new NODE_EXTRA_CA_CERTS error',
+    ]);
+    expect(tagChanges(head, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
+      'PATH warning',
+      'HTTPS_PROXY warning',
+      'NODE_OPTIONS error',
+      'EDITOR warning',
+      'NODE_EXTRA_CA_CERTS warning',
+    ]);
+  });
 });
 
 describe('isFailing', () => {
