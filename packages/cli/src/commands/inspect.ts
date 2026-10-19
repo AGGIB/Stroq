@@ -9,7 +9,7 @@ import {
   type TaggedHit,
 } from '../exposure/agent-change.js';
 import { GitError, agentChanges, type AgentChanges } from '../exposure/agent-git.js';
-import { groupHits, textGroup } from '../exposure/agent-report.js';
+import { groupHits, textGroup, textNotices } from '../exposure/agent-report.js';
 import { agentSurface, type AgentHit } from '../exposure/agent-surface.js';
 import { hardeningExports } from '../exposure/git-hardening.js';
 import { annotations, githubSummary, type PreTrustItem } from '../exposure/github-format.js';
@@ -123,6 +123,10 @@ export function formatChange(changedFrom: string, changes: AgentChanges, failOn:
     '',
     ...textGroup(`FAILS (${n})`, groups.failing),
     ...textGroup(`TO REVIEW (${groups.review.length}, not failing)`, groups.review),
+    ...textNotices(
+      `INSTRUCTION FILES NEW OR CHANGED (${groups.notices.length}, not failing)`,
+      groups.notices,
+    ),
     ...textGroup(
       `ALREADY THERE BEFORE THIS CHANGE (${groups.present.length}, not failing)`,
       groups.present,

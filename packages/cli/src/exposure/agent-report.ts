@@ -84,21 +84,31 @@ export const placeOf = (h: AgentHit, q: Quote): string => q(`${h.file}:${h.line}
 
 export interface Groups {
   readonly failing: readonly TaggedHit[];
-  /** New or changed, and not failing. */
+  /** New or changed, not failing, and more than a notice. */
   readonly review: readonly TaggedHit[];
   /** There before the change, not failing. Instruction files that did not change are left out. */
   readonly present: readonly TaggedHit[];
+  /**
+   * New or changed instruction files. Listed by name only: an edit to a dozen skills is
+   * ordinary work, and a sentence each would bury the entries that run something.
+   */
+  readonly notices: readonly TaggedHit[];
 }
 
 export function groupHits(hits: readonly TaggedHit[], failOn: FailOn): Groups {
   const failing = hits.filter((h) => isFailing(h, failOn));
   const rest = hits.filter((h) => !isFailing(h, failOn));
+  const changed = rest.filter((h) => h.status !== 'present');
   return {
     failing,
-    review: rest.filter((h) => h.status !== 'present'),
+    review: changed.filter((h) => h.severity !== 'notice'),
     present: rest.filter((h) => h.status === 'present' && h.severity !== 'notice'),
+    notices: changed.filter((h) => h.severity === 'notice'),
   };
 }
+
+/** The most notices a terminal lists before it says how many more there are. */
+const MAX_NOTICES = 20;
 
 /** The lines of one group for a terminal: a heading, then `  file:line  sentence` each. */
 export function textGroup(heading: string, hits: readonly TaggedHit[]): string[] {
@@ -106,6 +116,18 @@ export function textGroup(heading: string, hits: readonly TaggedHit[]): string[]
   return [
     heading,
     ...hits.map((h) => `  ${placeOf(h, plainQuote)}  ${describe(h, plainQuote)}`),
+    '',
+  ];
+}
+
+/** Notices for a terminal: a heading, then `  file (new)` each, cut at a count. */
+export function textNotices(heading: string, hits: readonly TaggedHit[]): string[] {
+  if (hits.length === 0) return [];
+  const more = hits.length > MAX_NOTICES ? [`  and ${hits.length - MAX_NOTICES} more`] : [];
+  return [
+    heading,
+    ...hits.slice(0, MAX_NOTICES).map((h) => `  ${plainQuote(h.file)} (${h.status})`),
+    ...more,
     '',
   ];
 }

@@ -89,6 +89,19 @@ function listed(heading: string, hits: readonly TaggedHit[]): string[] {
   return [`#### ${heading}`, '', ...lines, ...more, ''];
 }
 
+/** Instruction files by name only, on one line: an edit to many skills is ordinary work. */
+function noticeList(hits: readonly TaggedHit[]): string[] {
+  if (hits.length === 0) return [];
+  const names = hits.slice(0, MAX_LISTED).map((h) => `${codeSpan(h.file)} (${h.status})`);
+  const more = hits.length > MAX_LISTED ? [`and ${hits.length - MAX_LISTED} more`] : [];
+  return [
+    `#### Instruction files new or changed (${hits.length}, not failing)`,
+    '',
+    [...names, ...more].join(', '),
+    '',
+  ];
+}
+
 export interface SummaryContext {
   readonly failOn: FailOn;
   /** The revision the change was compared with, as given, and the commit it named. */
@@ -136,6 +149,7 @@ export function githubSummary(hits: readonly TaggedHit[], context: SummaryContex
     ...preTrustList(context.preTrust ?? []),
     ...listed('Fails', groups.failing),
     ...listed('To review', groups.review),
+    ...noticeList(groups.notices),
     ...listed(context.changedFrom === undefined ? 'Not failing' : presentHeading, groups.present),
   ].join('\n');
 }

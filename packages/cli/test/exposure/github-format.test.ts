@@ -102,6 +102,29 @@ describe('githubSummary', () => {
     expect(text).not.toContain('CLAUDE.md');
   });
 
+  // 437 instruction-file notices in 96 of 600 routine commits of 30 public repositories: an
+  // edit to a dozen skills must not bury the one entry that runs something.
+  it('lists changed instruction files by name only, apart from what runs', () => {
+    const skills = Array.from({ length: 12 }, (_, i) =>
+      tagged(
+        'instruction-file',
+        'content',
+        `sha256:${i}`,
+        'changed',
+        `.claude/skills/s${i}/SKILL.md`,
+      ),
+    );
+    const text = githubSummary(skills, {
+      failOn: 'new',
+      changedFrom: 'main',
+      base: 'd'.repeat(40),
+    });
+    expect(text).toContain('**Passes.** Nothing in this change runs by itself');
+    expect(text).not.toContain('#### To review');
+    expect(text).toContain('#### Instruction files new or changed (12, not failing)');
+    expect(text.split('\n').filter((l) => l.includes('SKILL.md'))).toHaveLength(1);
+  });
+
   it('passes plainly when nothing came with the change', () => {
     const text = githubSummary([], { failOn: 'new', changedFrom: 'main', base: 'b'.repeat(40) });
     expect(text).toContain('**Passes.**');
