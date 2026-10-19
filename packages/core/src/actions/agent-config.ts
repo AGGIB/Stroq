@@ -237,6 +237,15 @@ function startsCode(raw: ServerEntry): boolean {
 }
 
 /**
+ * Whether one MCP server entry starts a shell or runs code given on its command line: the
+ * question `mcpConfigRunsCode` asks of every entry in a file, for a caller that reads the
+ * entries itself and reports each one apart (`stroq inspect`).
+ */
+export function mcpServerRunsCode(command: string, args: readonly string[]): boolean {
+  return startsCode({ command, args });
+}
+
+/**
  * Whether the text registers an MCP server that starts a shell or runs code given on
  * its command line. Read as JSON when it is, and with the same question put to the
  * fragment when it is not (an `Edit` writes part of a file). A text past the size these
