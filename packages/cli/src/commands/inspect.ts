@@ -14,7 +14,13 @@ import type { AgentHit } from '../exposure/agent-surface.js';
 import { agentSurface } from '../exposure/agent-tree.js';
 import { hardeningExports } from '../exposure/git-hardening.js';
 import { annotations, githubSummary, type PreTrustItem } from '../exposure/github-format.js';
-import { WHY, repoFindings, repoSurface, type RepoSurface } from '../exposure/repo-surface.js';
+import {
+  WHY,
+  folderSurface,
+  repoFindings,
+  repoSurface,
+  type RepoSurface,
+} from '../exposure/repo-surface.js';
 import { inspectSarif } from '../exposure/sarif.js';
 import { neutralizeControls } from '../terminal-safe.js';
 import { stroqVersion } from '../version.js';
@@ -63,12 +69,17 @@ export function formatInspect(
   const lines = [`stroq inspect — what ${dir} runs when you open it`, ''];
 
   if (!surface.isRepo) {
+    // Git still reads a bare repository here, and direnv and husky do not need .git to be named.
+    const quiet = findings.length === 0 && surface.onOpen.length === 0;
     lines.push(
-      'This folder is not a git repository, so git runs nothing from it. Its agent and editor files are read below.',
+      quiet
+        ? 'This folder is not a git repository, so git runs nothing from it. Its agent and editor files are read below.'
+        : 'This folder is not a git repository, but some of what it holds can still run: read the entries below. Its agent and editor files are read after them.',
       '',
     );
-  } else if (findings.length === 0) {
-    lines.push('Nothing here runs before you approve it.', '');
+  }
+  if (findings.length === 0) {
+    if (surface.isRepo) lines.push('Nothing here runs before you approve it.', '');
   } else {
     lines.push(`BEFORE YOU APPROVE ANYTHING (${findings.length})`);
     for (const f of findings) {
@@ -195,7 +206,8 @@ function write(o: Output): void {
 }
 
 function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): number {
-  const surface = repoSurface(dir);
+  const inRepo = repoSurface(dir);
+  const surface = inRepo.isRepo ? inRepo : folderSurface(dir);
   const findings = repoFindings(surface);
   // Agent files take effect with or without git: a zip download has them too. Only the reading
   // of `.git` itself, in `repoSurface`, needs a repository.

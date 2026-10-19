@@ -117,6 +117,36 @@ describe('stroq inspect on a checkout, without a base', () => {
     expect(json).toMatchObject({ isRepo: false, failing: 2 });
   });
 
+  // The folder can itself be a bare repository, whose config git reads at the first `git status`.
+  it('says git runs nothing from a folder with no .git only when nothing in it can run', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'stroq-inspect-bare-'));
+    dirs.push(bare);
+    write(bare, {
+      HEAD: 'ref: refs/heads/main\n',
+      'objects/info/packs': '',
+      'refs/heads/main': '',
+      config: '[core]\n\tfsmonitor = ./x.sh\n',
+    });
+    const run = inspect(bare);
+    expect(run.code).toBe(1);
+    expect(run.out).toContain('not a git repository');
+    expect(run.out).not.toContain('git runs nothing');
+    expect(run.out).toContain('config — core.fsmonitor');
+
+    const envrc = mkdtempSync(join(tmpdir(), 'stroq-inspect-envrc-'));
+    dirs.push(envrc);
+    write(envrc, { '.envrc': 'use nix\n' });
+    const listed = inspect(envrc);
+    expect(listed.code).toBe(0);
+    expect(listed.out).not.toContain('git runs nothing');
+    expect(listed.out).toContain('.envrc');
+
+    const plain = mkdtempSync(join(tmpdir(), 'stroq-inspect-plain-'));
+    dirs.push(plain);
+    write(plain, { 'README.md': 'x\n' });
+    expect(inspect(plain).out).toContain('git runs nothing');
+  });
+
   it('fails on nothing with --fail-on none', () => {
     const dir = repo();
     write(dir, { '.claude/settings.json': KEYV_SETTINGS });

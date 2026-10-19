@@ -108,8 +108,8 @@ export function gitConfigEntries(text: string): readonly { key: string; value: s
  */
 const isBoolean = (value: string): boolean => /^(true|false|yes|no|on|off|1|0)$/i.test(value);
 
-function gitConfigHits(root: string): RepoExecHit[] {
-  const file = join(root, '.git', 'config');
+/** The keys of a git config that run something, `label` being how the report names the file. */
+function gitConfigHits(file: string, label: string): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   for (const { key, value } of gitConfigEntries(readTextOr(file))) {
     if (!isGitExecKey(key)) continue;
@@ -117,7 +117,7 @@ function gitConfigHits(root: string): RepoExecHit[] {
     const include = /^include(if)?\./i.test(key);
     hits.push({
       kind: include ? 'git-config-include' : 'git-config-exec',
-      file: '.git/config',
+      file: label,
       what: key,
     });
   }
@@ -263,7 +263,7 @@ function envrcHits(root: string): RepoExecHit[] {
  * and `refs/`, so it survives a clone — the vector behind CVE-2026-45033, and the one
  * that makes this class of attack deliverable by pull request rather than by zip.
  */
-function nestedBareRepos(root: string): { hits: RepoExecHit[]; capped: boolean } {
+function nestedBareRepos(root: string, withRoot = false): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
   const queue: string[] = [root];
   let visited = 0;
@@ -278,13 +278,15 @@ function nestedBareRepos(root: string): { hits: RepoExecHit[]; capped: boolean }
       continue;
     }
     const names = new Set(entries.map((e) => e.name));
-    if (dir !== root && names.has('HEAD') && names.has('objects') && names.has('refs')) {
+    const isBare = names.has('HEAD') && names.has('objects') && names.has('refs');
+    if (isBare && (dir !== root || withRoot)) {
       hits.push({
         kind: 'nested-bare-repo',
-        file: relative(root, dir),
+        file: relative(root, dir) || '.',
         what: 'HEAD, objects, refs',
       });
-      continue;
+      // The root is walked on: what is under it is all this check reads.
+      if (dir !== root) continue;
     }
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
@@ -294,6 +296,13 @@ function nestedBareRepos(root: string): { hits: RepoExecHit[]; capped: boolean }
   }
   return { hits, capped: false };
 }
+
+const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): RepoSurface => ({
+  isRepo,
+  preTrust: all.filter((h) => PRE_TRUST.has(h.kind)),
+  onOpen: all.filter((h) => !PRE_TRUST.has(h.kind)),
+  capped,
+});
 
 /**
  * `plat` defaults to the real platform, so every caller keeps working unchanged; a
@@ -305,7 +314,7 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
   }
   const bare = nestedBareRepos(cwd);
   const all = [
-    ...gitConfigHits(cwd),
+    ...gitConfigHits(join(cwd, '.git', 'config'), '.git/config'),
     ...gitAttributesHits(cwd),
     ...bare.hits,
     ...gitHookHits(cwd, plat),
@@ -314,12 +323,29 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
     ...envrcHits(cwd),
     ...packageScriptHits(cwd),
   ];
-  return {
-    isRepo: true,
-    preTrust: all.filter((h) => PRE_TRUST.has(h.kind)),
-    onOpen: all.filter((h) => !PRE_TRUST.has(h.kind)),
-    capped: bare.capped,
-  };
+  return split(all, bare.capped, true);
+}
+
+/**
+ * A folder with no `.git`: a zip download, an unpacked tarball. Git still runs in it. When the
+ * folder itself holds `HEAD`, `objects` and `refs`, git takes it for a bare repository and
+ * reads its `config`, so the first `git status` there runs what that config names; a bare
+ * repository deeper in does the same for a git command run inside it. A `.envrc` and husky
+ * hooks are listed as they are in a repository.
+ */
+export function folderSurface(cwd: string): RepoSurface {
+  const bare = nestedBareRepos(cwd, true);
+  const rootIsBare = bare.hits.some((h) => h.file === '.');
+  return split(
+    [
+      ...bare.hits,
+      ...(rootIsBare ? gitConfigHits(join(cwd, 'config'), 'config') : []),
+      ...huskyHits(cwd),
+      ...envrcHits(cwd),
+    ],
+    bare.capped,
+    false,
+  );
 }
 
 /** Why each kind of pre-trust execution is a finding; also the SARIF rule text. */
@@ -342,8 +368,10 @@ export function repoFindings(surface: RepoSurface): readonly Finding[] {
     severity: 'critical' as const,
     detail: `${hit.file} — ${hit.what}: ${WHY[hit.kind] ?? 'repository-supplied execution'}`,
     fix:
-      hit.kind === 'nested-bare-repo'
-        ? `inspect and remove ${hit.file} before opening this repository with an agent`
-        : `git config --get ${hit.what} — and remove it if you did not set it`,
+      hit.kind !== 'nested-bare-repo'
+        ? `git config --get ${hit.what} — and remove it if you did not set it`
+        : hit.file === '.'
+          ? 'this folder is itself a bare repository: clone it into a new folder and open the clone, which leaves its config behind'
+          : `inspect and remove ${hit.file} before opening this repository with an agent`,
   }));
 }

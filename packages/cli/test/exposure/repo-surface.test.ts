@@ -2,7 +2,12 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { gitConfigEntries, repoFindings, repoSurface } from '../../src/exposure/repo-surface.js';
+import {
+  folderSurface,
+  gitConfigEntries,
+  repoFindings,
+  repoSurface,
+} from '../../src/exposure/repo-surface.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -38,6 +43,53 @@ describe('gitConfigEntries', () => {
 
   it('survives a config it cannot fully parse rather than throwing', () => {
     expect(gitConfigEntries('nonsense\n[unclosed\n= 3\n')).toEqual([]);
+  });
+});
+
+describe('folderSurface — a folder with no .git', () => {
+  function folder(files: Record<string, string>): string {
+    const root = mkdtempSync(join(tmpdir(), 'stroq-folder-surface-'));
+    dirs.push(root);
+    for (const [name, content] of Object.entries(files)) {
+      mkdirSync(join(root, name, '..'), { recursive: true });
+      writeFileSync(join(root, name), content);
+    }
+    return root;
+  }
+  const lines = (hits: readonly { kind: string; file: string; what: string }[]) =>
+    hits.map((h) => `${h.kind} ${h.file} ${h.what}`);
+  const BARE = { HEAD: 'ref: refs/heads/main\n', 'objects/info/packs': '', 'refs/heads/main': '' };
+
+  // Git takes a folder that holds HEAD, objects and refs for a bare repository, and reads its
+  // config, so a `git status` there runs what that config names.
+  it('reports a folder that is itself a bare repository, and the commands its config runs', () => {
+    const root = folder({ ...BARE, config: '[core]\n\tfsmonitor = ./pwn.sh\n' });
+    const surface = folderSurface(root);
+    expect(surface.isRepo).toBe(false);
+    expect(lines(surface.preTrust)).toEqual([
+      'nested-bare-repo . HEAD, objects, refs',
+      'git-config-exec config core.fsmonitor',
+    ]);
+    expect(repoFindings(surface)[0]?.fix).toContain('clone');
+  });
+
+  it('reports a bare repository inside it, and lists .envrc and husky hooks as in a repository', () => {
+    const root = folder({
+      ...Object.fromEntries(Object.entries(BARE).map(([k, v]) => [`lib/x/${k}`, v])),
+      '.envrc': 'use nix\n',
+      '.husky/pre-commit': 'pnpm test\n',
+    });
+    const surface = folderSurface(root);
+    expect(lines(surface.preTrust)).toEqual(['nested-bare-repo lib/x HEAD, objects, refs']);
+    expect(lines(surface.onOpen)).toEqual([
+      'husky-hook .husky/pre-commit pre-commit',
+      'envrc .envrc .envrc',
+    ]);
+  });
+
+  it('reports nothing for a folder of plain files', () => {
+    const root = folder({ 'README.md': 'x\n', config: '[core]\n\tfsmonitor = ./pwn.sh\n' });
+    expect(folderSurface(root)).toMatchObject({ isRepo: false, preTrust: [], onOpen: [] });
   });
 });
 
