@@ -339,6 +339,37 @@ describe('the verbs that update, link or initialise with a package', () => {
   });
 });
 
+describe('the package an initialiser of a scope alone runs', () => {
+  const SCOPE = '@evil-scope';
+
+  it.each(['npm init', 'npm create', 'pnpm create', 'yarn create', 'bun create'])(
+    'is denied in both directions: %s',
+    async (create) => {
+      const page = fixture();
+      await page.post(pageWith(`${create} ${SCOPE}`));
+      expect((await page.pre(`npx ${SCOPE}/create`)).decision).toMatchObject({
+        effect: 'deny',
+        ruleId: 'deny-origin-suspect',
+      });
+      const other = fixture();
+      await other.post(pageWith(`npx ${SCOPE}/create`));
+      expect((await other.pre(`${create} ${SCOPE}`)).decision).toMatchObject({
+        effect: 'deny',
+        ruleId: 'deny-origin-suspect',
+      });
+    },
+  );
+
+  it('is denied through the package a scoped initialiser with a name runs', async () => {
+    const page = fixture();
+    await page.post(pageWith(`npm init ${SCOPE}/${NAME}`));
+    expect((await page.pre(`npx ${SCOPE}/create-${NAME}`)).decision.effect).toBe('deny');
+    const other = fixture();
+    await other.post(pageWith(`npx ${SCOPE}/create-${NAME}`));
+    expect((await other.pre(`pnpm create ${SCOPE}/${NAME}`)).decision.effect).toBe('deny');
+  });
+});
+
 describe('an MCP call that spawns a command with its arguments', () => {
   it.each([
     ['mcp__fs__spawn', { command: 'npx', args: ['-y', NAME] }],

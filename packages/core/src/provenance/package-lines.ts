@@ -214,16 +214,20 @@ function wordsOf(text: string, command: LexedCommand): string[] {
   return words;
 }
 
-/** The name of the package a `create` runs: `create-<name>`, and `@scope/create-<name>` for a scoped one. */
+/**
+ * The name of the package a `create` runs: `create-<name>`, `@scope/create-<name>` for a scoped
+ * name and `@scope/create` for a scope alone (`npm init @scope`).
+ */
 const createdBy = (name: string): string => {
-  const slash = name.startsWith('@') ? name.indexOf('/') : -1;
+  if (!name.startsWith('@')) return `create-${name}`;
+  const slash = name.indexOf('/');
   return slash === -1
-    ? `create-${name}`
+    ? `${name}/create`
     : `${name.slice(0, slash + 1)}create-${name.slice(slash + 1)}`;
 };
 
 /** The verbs that run the package named `create-<name>` for `<name>`: `pnpm create`, `npm init`. */
-const CREATES: ReadonlySet<string> = new Set(['create', 'init', 'innit']);
+const CREATES: ReadonlySet<string> = new Set(['create', 'c', 'init', 'innit']);
 
 /** A `create` runs the package named `create-<name>`: both names are read. */
 const withCreated = (packages: readonly string[], verb: string): string[] =>

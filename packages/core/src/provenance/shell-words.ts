@@ -1,4 +1,5 @@
 import { shellWord, type ShellWord } from './shell-word.js';
+import { PNPM_VALUE_FLAGS } from './pnpm-options.js';
 import { readPackageWord, type PackageWord } from './word-name.js';
 
 /**
@@ -25,7 +26,9 @@ const VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
     '--userconfig',
   ),
   npx: values('-c', '--call', '--registry', '--prefix', '--cache', '--userconfig', '--shell'),
-  pnpm: values('--registry', '--filter', '-F', '--dir', '-C', '--reporter', '--store-dir'),
+  pnpm: PNPM_VALUE_FLAGS,
+  // `pnpx` is `pnpm dlx`: the options of pnpm stand before the package, and `dlx` has its own.
+  pnpx: PNPM_VALUE_FLAGS,
   yarn: values('--registry', '--cwd', '--cache-folder', '--modules-folder'),
   bun: values('--registry', '--cwd', '-c', '--config', '--cache-dir', '--tag'),
   bunx: values('--registry', '--cwd', '-c', '--config', '--cache-dir'),

@@ -221,6 +221,40 @@ describe('the specs that name a package another way', () => {
     expect(packages(`pnpm create @scope/${NAME}`)).toContain(`@scope/create-${NAME}`);
   });
 
+  it.each(['pnpm create', 'yarn create', 'bun create', 'npm create', 'npm init', 'npm innit'])(
+    'names @scope/create for a create of a scope alone: %s',
+    (create) => {
+      expect(packages(`${create} @scope`)).toEqual(
+        expect.arrayContaining(['@scope', '@scope/create']),
+      );
+      expect(packages(`${create} @scope@latest my-app`)).toContain('@scope/create');
+      expect(extractAtoms(`Run ${create} @scope now`).map((a) => a.value)).toContain(
+        '@scope/create',
+      );
+    },
+  );
+
+  it('does not make a name without a scope a scope', () => {
+    expect(packages(`npm init ${NAME}`)).not.toContain(`${NAME}/create`);
+    expect(packages('npm init @scope/app')).toContain('@scope/create-app');
+    expect(packages('npm init @scope/app')).not.toContain('@scope/create');
+  });
+
+  it.each([
+    ['pnpx -C app', 'pnpx -C app'],
+    ['pnpx --dir app', 'pnpx --dir app'],
+    ['pnpx --filter web', 'pnpx --filter web'],
+    ['pnpx -F web', 'pnpx -F web'],
+    ['pnpx --reporter silent', 'pnpx --reporter silent'],
+    ['pnpx --allow-build x', 'pnpx --allow-build x'],
+    ['pnpx --loglevel error', 'pnpx --loglevel error'],
+    ['pnpm dlx -C app', 'pnpm dlx -C app'],
+    ['pnpm --dir app dlx', 'pnpm --dir app dlx'],
+  ])('skips the value of an option of pnpm before the package: %s', (_what, head) => {
+    expect(packages(`${head} ${NAME}`)).toContain(NAME);
+    expect(extractActionAtoms(`${head} ${NAME}`).unread).toBe(false);
+  });
+
   it('reads the packages of uv run --with, and not the program it runs', () => {
     const names = packages(`uv run --with ${NAME} python script.py`);
     expect(names).toContain(NAME);

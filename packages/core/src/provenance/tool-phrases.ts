@@ -27,7 +27,7 @@ const RUNNER_PHRASES = [
   'pnpm dlx|create',
   'yarn dlx|create',
   'npm exec|x|create|init|innit',
-  'bun x|create',
+  'bun x|create|c',
   'pipx run',
   'uv tool run',
   'deno run',
@@ -35,11 +35,12 @@ const RUNNER_PHRASES = [
 ];
 
 const INSTALLER_PHRASES = [
-  'npm i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|add|it|install-test|up|update|upgrade|link|ln',
-  'pnpm i|add|install|up|update',
-  'yarn add|upgrade|up',
-  'yarn global add',
-  'bun add|install|i|update',
+  // npm's own alias table: `install` is also `add` and every shortening and mistyping of it.
+  'npm i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|isntall|add|it|install-test|up|update|upgrade|udpate|link|ln',
+  'pnpm i|add|install|it|install-test|up|update|upgrade|link|ln',
+  'yarn add|upgrade|up|link',
+  'yarn global add|upgrade',
+  'bun add|a|install|i|update|link',
   'pip install',
   'python -m pip install',
   'uv run python -m pip install',
@@ -52,7 +53,7 @@ const INSTALLER_PHRASES = [
   'pipx install',
   'cargo add|binstall|install',
   'go get|install',
-  'gem install|i',
+  'gem install|i|update|up',
   'bundle add',
   'brew install',
   'deno install',

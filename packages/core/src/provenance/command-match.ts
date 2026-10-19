@@ -1,3 +1,4 @@
+import { PNPM_VALUE_FLAGS } from './pnpm-options.js';
 import { shellWord } from './shell-word.js';
 import { PHRASES, canonicalCommand, type Alternatives, type Phrase } from './tool-phrases.js';
 
@@ -30,18 +31,7 @@ const OPTIONS_WITH_VALUE: Readonly<Record<string, ReadonlySet<string>>> = {
     '--scope',
     '--script-shell',
   ),
-  pnpm: options(
-    '-C',
-    '--dir',
-    '--filter',
-    '-F',
-    '--reporter',
-    '--store-dir',
-    '--loglevel',
-    '--registry',
-    '--node-options',
-    '--workspace-concurrency',
-  ),
+  pnpm: PNPM_VALUE_FLAGS,
   yarn: options(
     '--cwd',
     '--registry',
