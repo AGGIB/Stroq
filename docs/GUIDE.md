@@ -352,6 +352,57 @@ steps:
 
 Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the step from failing on them and still fails on anything else. `stroq exposure` has no SARIF form: its findings are about this machine, not a file in the repository, and code scanning needs one.
 
+### What a pull request adds
+
+`stroq inspect --changed-from <rev>` compares a change with its base. It fails when the change adds something an AI agent or an editor runs by itself once the folder is open.
+
+```text
+stroq inspect: what changed since HEAD^1 (33fbf26e6d5e) that an agent or editor runs by itself
+
+FAILS (2)
+  .claude/settings.json:4  new: SessionStart hook runs: node .vscode/setup.mjs
+  .vscode/tasks.json:8  new: task warm runs when the folder opens: node .claude/setup.mjs
+
+TO REVIEW (1, not failing)
+  .mcp.json:1  new: MCP server docs starts: npx -y docs-mcp
+
+ALREADY THERE BEFORE THIS CHANGE (1, not failing)
+  .claude/settings.json:3  PreToolUse hook runs: npx stroq hook claude-code
+
+2 findings fail this check (--fail-on new).
+```
+
+What it reads:
+
+- Hooks in `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` and `.codex/config.toml`, `.github/hooks/*.json`, `.github/copilot/`, `.gemini/`, `.agents/hooks.json`, `.windsurf/hooks.json` and `.devin/hooks.json`, and in the front matter of skills, subagents and commands.
+- MCP servers in `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json` and `.codex/config.toml`. A server that starts a shell or inline code fails. Any other new server is listed to review.
+- Claude Code settings that run a command or let the agent do more: `statusLine`, `apiKeyHelper` and the other helpers, `ANTHROPIC_BASE_URL`, `bypassPermissions`, `enableAllProjectMcpServers`, plugins and plugin sources.
+- VS Code tasks that run when the folder opens, in `tasks.json` and `.code-workspace` files, and the settings that let tasks or tool calls run without asking. Comments in these files are read past.
+- Dev container commands anywhere under `.devcontainer/`, and the install scripts in `package.json`.
+- Instruction files such as `CLAUDE.md`, `AGENTS.md` and `.cursorrules`. Invisible characters in one fail the check. A new or changed one is only listed.
+
+It compares values, not files. A hook that was already there does not fail, however the file around it changed. A file it cannot read fails when it names a key that runs something.
+
+It reads only git's objects for the two commits, never the working tree, and runs nothing from the repository. It skips `.git`: a pull request cannot change it, and `actions/checkout` writes its own entries there.
+
+Exit 0 means nothing fails, 1 means something fails, 2 is a usage error, and 3 means git cannot read the base. `--fail-on any` also fails on what was already there, and `--fail-on none` never fails. Without `--changed-from` the default is `any`, so plain `stroq inspect` fails on a repository that already has a hook or a folder-open task.
+
+`--format github` writes a job summary in Markdown to standard output, and at most ten `::error` and `::warning` lines to standard error. Every value from the repository is escaped first.
+
+```yaml
+permissions:
+  contents: read
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 2
+      persist-credentials: false
+  - name: What this pull request adds for agents and editors
+    run: npx -y @stroq/cli inspect --changed-from HEAD^1 --format github . >> "$GITHUB_STEP_SUMMARY"
+```
+
+On a `pull_request` event the checkout is the merge commit, so `HEAD^1` is the base.
+
 `--probe` is the only flag that starts a process: it launches each configured stdio MCP server, runs the MCP handshake, asks once for `tools/list`, scans the tool descriptions that come back and kills the server. No tool is ever called. The server is started with the variables it needs to run (`PATH`, `HOME`, the proxy and locale settings) and the `env` its own config declares, not with your shell's environment, so the cloud keys and tokens your shell exports do not reach it. It is still a program that runs as you, with your `HOME`: it can read `~/.aws` or `~/.ssh` and it sees a proxy password. `--probe` starts whatever the config names, and a `.mcp.json` can arrive with a repository, so use it on servers you would run anyway, not on a repository you have not read. Without `--probe` no server is started, and a run that found no poisoned tool description is not evidence that there is none — the report says so in its last line either way.
 
 ## Read a skill before you add it
