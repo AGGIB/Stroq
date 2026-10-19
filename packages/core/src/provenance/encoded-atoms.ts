@@ -23,8 +23,15 @@ function looksLikePath(body: string): boolean {
   return parts.length >= 3 && parts.every((part) => part.length <= PATH_SEGMENT_MAX);
 }
 
+/** `token` without its trailing `=` padding, in one pass (a `=+$` regex is quadratic on a long run of `=`). */
+function withoutPadding(token: string): string {
+  let end = token.length;
+  while (end > 0 && token.charCodeAt(end - 1) === 61) end -= 1;
+  return token.slice(0, end);
+}
+
 function looksBase64(token: string): boolean {
-  const body = token.replace(/=+$/, '');
+  const body = withoutPadding(token);
   if (looksLikePath(body)) return false;
   return !HEX.test(body) && /[a-z]/.test(body) && /[A-Z]/.test(body) && /[0-9+/]/.test(body);
 }
@@ -117,7 +124,7 @@ function decodesToText(bytes: Uint8Array): boolean {
 function isIntegrity(text: string, index: number, token: string): boolean {
   const shape = [...INTEGRITY].find(([label]) => text.startsWith(label, index - label.length))?.[1];
   if (shape === undefined || index < 0 || token.length !== shape.length) return false;
-  const body = token.replace(/=+$/, '');
+  const body = withoutPadding(token);
   if (token.length - body.length !== shape.pad) return false;
   if (!shape.last.includes(body.charAt(body.length - 1))) return false;
   return !decodesToText(Buffer.from(token, 'base64'));

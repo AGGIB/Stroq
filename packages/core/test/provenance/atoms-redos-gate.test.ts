@@ -24,6 +24,11 @@ const repeat = (unit: string, head = ''): string =>
 
 const SHAPES: ReadonlyArray<readonly [string, string]> = [
   ['npx a, repeated', repeat('npx a ')],
+  [
+    'a long run of padding characters',
+    `sha512-${'A'.repeat(86)}${'='.repeat(SIZE)}`.slice(0, SIZE),
+  ],
+  ['padding runs between hash-shaped tokens', repeat(`${'A'.repeat(30)}${'='.repeat(40)} `)],
   ['npm i a, repeated', repeat('npm i a ')],
   ['pip install a, repeated', repeat('pip install a ')],
   ['npx -y, repeated', repeat('npx -y ')],
