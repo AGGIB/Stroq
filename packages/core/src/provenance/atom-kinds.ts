@@ -1,4 +1,5 @@
 import type { Atom, AtomKind } from '../types.js';
+import type { Ecosystem } from './package-name.js';
 
 /**
  * The kinds of atom that can raise the floor of a session whose records are incomplete: a
@@ -14,4 +15,6 @@ export const isFloorKind = (kind: AtomKind): boolean => FLOOR_KINDS.includes(kin
 export interface Positioned {
   readonly index: number;
   readonly atom: Atom;
+  /** For a package: the name as it was written and the registry the tool that named it uses. */
+  readonly named?: { readonly name: string; readonly ecosystem: Ecosystem };
 }

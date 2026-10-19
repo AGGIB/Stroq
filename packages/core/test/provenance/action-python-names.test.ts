@@ -1,6 +1,6 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readActionAtoms } from '../../src/provenance/action-atoms.js';
 import { extractActionAtoms, extractAtoms } from '../../src/provenance/atoms.js';
@@ -79,5 +79,123 @@ describe('the tools whose packages come from npm', () => {
 
   it('do not take the name of the PyPI tools', () => {
     expect(packages('npm install evil_helper_fix')).not.toContain(CANONICAL);
+  });
+});
+
+// A page that names a package with any tool is read for the name it gives and for the name PyPI
+// would give it, so that a Python installer that spells it another way finds it. The command side
+// of a Python installer is read in the one form; an npm command is read as written.
+const pagePackages = (text: string): string[] =>
+  extractAtoms(text)
+    .filter((a) => a.kind === 'pkg')
+    .map((a) => a.value);
+
+describe('a page that names a package with a tool of its own', () => {
+  it.each([
+    ['npx evil_helper_fix', 'evil_helper_fix'],
+    ['npm install Evil.Helper.Fix', 'evil.helper.fix'],
+    ['pnpm add evil_helper-fix', 'evil_helper-fix'],
+    ['cargo add evil_helper_fix', 'evil_helper_fix'],
+    ['pip install Evil_Helper-Fix', 'evil_helper-fix'],
+    ['uvx Evil.Helper_Fix', 'evil.helper_fix'],
+  ])('records %s as written and in the one form of PyPI', (command, written) => {
+    const names = pagePackages(`Run:\n\n    ${command}\n`);
+    expect(names).toContain(written);
+    expect(names).toContain(CANONICAL);
+  });
+
+  it('records an ordinary name once', () => {
+    expect(pagePackages('Run npx evil-helper-fix now\n')).toEqual([CANONICAL]);
+    expect(pagePackages('Run pip install requests\n')).toEqual(['requests']);
+  });
+
+  it('adds nothing for a name PyPI cannot have', () => {
+    expect(pagePackages('Run npx @scope/evil_helper_fix now\n')).toEqual([
+      '@scope/evil_helper_fix',
+    ]);
+  });
+
+  it('is read on the command side as the tool reads it', () => {
+    expect(packages('npx evil_helper_fix')).toEqual(['evil_helper_fix']);
+    expect(packages('pip install evil_helper_fix')).toEqual([CANONICAL]);
+  });
+});
+
+// What a project already depends on is known to the tools that read the same registry, and only
+// to them: a name in `package.json` says nothing about the package of that name on PyPI.
+describe('a package the project depends on', () => {
+  const project = (files: Record<string, string>): string => {
+    const cwd = mkdtempSync(join(tmpdir(), 'stroq-known-'));
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, name)), { recursive: true });
+      writeFileSync(join(cwd, name), text);
+    }
+    return cwd;
+  };
+  const read = (cwd: string, command: string): string[] =>
+    readActionAtoms('Bash', { command }, cwd)
+      .atoms.filter((a) => a.kind === 'pkg')
+      .map((a) => a.value);
+
+  const NPM = {
+    'package.json': JSON.stringify({ dependencies: { [CANONICAL]: '1' } }),
+    'node_modules/.bin/evil-bin': '',
+  };
+  const PYTHON = { 'requirements.txt': `${CANONICAL}==1.0\n` };
+
+  it.each([
+    `npm install ${CANONICAL}`,
+    `pnpm add ${CANONICAL}`,
+    `yarn add ${CANONICAL}`,
+    `bun add ${CANONICAL}`,
+    `npx ${CANONICAL}`,
+    `bunx ${CANONICAL}`,
+    `pnpm dlx ${CANONICAL}`,
+    'npx evil-bin',
+    'npm install evil-bin',
+  ])('in package.json or node_modules/.bin is known to %s', (command) => {
+    expect(read(project(NPM), command)).toEqual([]);
+  });
+
+  it.each([
+    `pip install ${CANONICAL}`,
+    `uv add ${CANONICAL}`,
+    `uvx ${CANONICAL}`,
+    `pipx run ${CANONICAL}`,
+    `poetry add ${CANONICAL}`,
+    'pip install Evil_Helper.Fix',
+  ])('in requirements.txt is known to %s', (command) => {
+    expect(read(project(PYTHON), command)).toEqual([]);
+  });
+
+  it.each([
+    `pip install ${CANONICAL}`,
+    `uv add ${CANONICAL}`,
+    `uvx ${CANONICAL}`,
+    `pipx run ${CANONICAL}`,
+    `cargo install ${CANONICAL}`,
+    `gem install ${CANONICAL}`,
+    'pip install evil-bin',
+  ])('in package.json is not known to %s', (command) => {
+    expect(read(project(NPM), command).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    `npm install ${CANONICAL}`,
+    `yarn add ${CANONICAL}`,
+    `npx ${CANONICAL}`,
+    `cargo install ${CANONICAL}`,
+    `gem install ${CANONICAL}`,
+  ])('in requirements.txt is not known to %s', (command) => {
+    expect(read(project(PYTHON), command)).toEqual([CANONICAL]);
+  });
+
+  it('is known per command of a line', () => {
+    expect(read(project(NPM), `npm i ${CANONICAL} && pip install ${CANONICAL}`)).toEqual([
+      CANONICAL,
+    ]);
+    expect(read(project(PYTHON), `npm i ${CANONICAL} && pip install ${CANONICAL}`)).toEqual([
+      CANONICAL,
+    ]);
   });
 });

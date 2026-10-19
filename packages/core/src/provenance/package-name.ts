@@ -54,7 +54,64 @@ export const pythonPackageName = (name: string): string =>
 
 /** The tools whose packages come from PyPI, and so are named in that form. */
 const PYTHON_TOOLS: ReadonlySet<string> = new Set(['pip', 'uv', 'pipx', 'poetry', 'pdm', 'conda']);
+/** The tools whose packages come from the npm registry (`deno` runs `npm:` specifiers). */
+const NPM_TOOLS: ReadonlySet<string> = new Set([
+  'npm',
+  'pnpm',
+  'yarn',
+  'bun',
+  'bunx',
+  'npx',
+  'pnpx',
+  'deno',
+]);
 
-/** Whether the tool (its name in the table) or the kind of runner takes its packages from PyPI. */
-export const isPythonSource = (tool: string, family?: string): boolean =>
-  family === 'python' || PYTHON_TOOLS.has(tool);
+/** The registry a package is named in: PyPI, npm, or any other (crates, gems, modules, formulae). */
+export type Ecosystem = 'npm' | 'python' | 'other';
+
+/** The registry the tool (its name in the table) or the kind of runner takes its packages from. */
+export const ecosystemOf = (tool: string, family?: string): Ecosystem => {
+  if (family === 'python' || PYTHON_TOOLS.has(tool)) return 'python';
+  return NPM_TOOLS.has(tool) ? 'npm' : 'other';
+};
+
+/** A name PyPI could have: no scope, path or URL in it, so the one form of PEP 503 is a name of it. */
+const PYPI_LIKE = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * The names a package is read as. A Python installer's package is read in the one form PyPI gives
+ * it (PEP 503), whatever its spelling, and so is every other registry's when it is only recorded
+ * (a page that names `evil_helper_fix` with `npx` is also recorded as `evil-helper-fix`, so that a
+ * Python installer that spells the name another way finds it), and a page that names a package
+ * with a Python installer is also recorded as it is written (an npm command that spells it so
+ * finds it). A command of any other registry is read as it is written: `evil_helper_fix` is not
+ * `evil-helper-fix` on npm. A name PyPI cannot have (a scope, a path, a URL) is read as written.
+ */
+export function nameForms(written: string, ecosystem: Ecosystem, recording: boolean): string[] {
+  if (!PYPI_LIKE.test(written)) return [written];
+  const canonical = pythonPackageName(written);
+  if (canonical === written) return [written];
+  if (ecosystem === 'python') return recording ? [canonical, written] : [canonical];
+  return recording ? [written, canonical] : [written];
+}
+
+/**
+ * The names the project already depends on or has installed, by the registry they are from: a
+ * name in `package.json` or `node_modules/.bin` says nothing about the package of that name on
+ * PyPI, nor one in `requirements.txt` about the package of that name on npm. The Python names are
+ * in the one form of PEP 503.
+ */
+export interface KnownPackages {
+  readonly npm: ReadonlySet<string>;
+  readonly python: ReadonlySet<string>;
+}
+
+/** Whether the project already depends on the package of that name in that registry. */
+export function isKnownPackage(
+  written: string,
+  ecosystem: Ecosystem,
+  known: KnownPackages,
+): boolean {
+  if (ecosystem === 'npm') return known.npm.has(written);
+  return ecosystem === 'python' && known.python.has(pythonPackageName(written));
+}

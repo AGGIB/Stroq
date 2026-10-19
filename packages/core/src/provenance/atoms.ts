@@ -4,7 +4,12 @@ import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { Atom } from '../types.js';
 import type { Positioned } from './atom-kinds.js';
 import { createAtomSet } from './atom-set.js';
-import { normalizePackageName, trimEndOf } from './package-name.js';
+import {
+  isKnownPackage,
+  normalizePackageName,
+  trimEndOf,
+  type KnownPackages,
+} from './package-name.js';
 import { MAX_LINE_SCAN, packageAtoms } from './package-lines.js';
 import { INSTALLER, RUNNER } from './tool-phrases.js';
 import { encodedAtoms } from './encoded-atoms.js';
@@ -241,13 +246,38 @@ interface Extraction {
   readonly digestsLeftOut: boolean;
 }
 
-function extractBounded(text: string, command = false, cheapDigests = true): Extraction {
-  const packages = packageAtoms(text, command);
+/** How a text is read: as what, and for what. */
+interface ReadMode {
+  /** The text is a command line, and a word that cannot be read is a doubt. */
+  readonly command: boolean;
+  /** Whether a hash by its label, shape and bytes is a `digest` atom or a blob. */
+  readonly cheapDigests: boolean;
+  /** The text is a result being recorded, which names a package in every form it is looked up in. */
+  readonly recording: boolean;
+  /** Packages the project already depends on, which are no atoms of a command. */
+  readonly known?: KnownPackages | undefined;
+}
+
+/** What a result being recorded is read as, before and after any decoding. */
+const asResult = (cheapDigests: boolean): ReadMode => ({
+  command: false,
+  cheapDigests,
+  recording: true,
+});
+
+function extractBounded(text: string, mode: ReadMode): Extraction {
+  const packages = packageAtoms(text, mode.command, mode.recording);
+  const { known } = mode;
   const positioned = [
     ...urlAtoms(text),
-    ...packages.positioned,
+    ...packages.positioned.filter(
+      ({ named }) =>
+        known === undefined ||
+        named === undefined ||
+        !isKnownPackage(named.name, named.ecosystem, known),
+    ),
     ...pipeShellAtoms(text),
-    ...encodedAtoms(text, cheapDigests),
+    ...encodedAtoms(text, mode.cheapDigests),
   ];
   positioned.sort((a, b) => a.index - b.index);
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
@@ -277,7 +307,7 @@ function extractBounded(text: string, command = false, cheapDigests = true): Ext
  * tell prose from code.
  */
 export function extractAtoms(text: string): Atom[] {
-  return extractBounded(text).atoms;
+  return extractBounded(text, asResult(true)).atoms;
 }
 
 /** Why a part of an action could not be read. */
@@ -313,13 +343,18 @@ export interface ActionExtraction {
  * `shell` is whether the text is a command line. Anything else (the arguments of an MCP call) is
  * text, in which a runner is a mention and no word is a doubt.
  */
-export function extractActionAtoms(text: string, shell = true): ActionExtraction {
+export function extractActionAtoms(
+  text: string,
+  shell = true,
+  known?: KnownPackages,
+): ActionExtraction {
   const cutText = text.length > DEFAULT_MAX_CHARS;
   const bounded = cutText ? text.slice(0, DEFAULT_MAX_CHARS) : text;
   const set = createAtomSet(MAX_ATOMS, MAX_NETWORK_ATOMS, MAX_DIGEST_ATOMS);
   // An action keeps a labelled hash as a blob: it is a copy of something, and where the page that
   // it came from was flagged the page has it as a blob too.
-  const plain = extractBounded(bounded, shell, false);
+  const mode: ReadMode = { command: shell, cheapDigests: false, recording: false, known };
+  const plain = extractBounded(bounded, mode);
   for (const atom of plain.atoms) set.add(atom);
   // A command longer than the characters read is a loss whatever is in it: the part that was not
   // read may name anything. No command in practice is that long, so this never asks about one that is not.
@@ -327,7 +362,7 @@ export function extractActionAtoms(text: string, shell = true): ActionExtraction
   let doubtful = plain.doubt;
   for (const reading of joinedReadings(bounded)) {
     if (set.floorFull) break;
-    const extraction = extractBounded(reading.text, shell, false);
+    const extraction = extractBounded(reading.text, mode);
     for (const atom of extraction.atoms) set.add(atom);
     lost =
       lost || extraction.capped || extraction.budgetSpent || (reading.byLine && extraction.lineCut);
@@ -463,13 +498,13 @@ export function extractAtomsDeepWithLoss(text: string, options: DeepOptions = {}
 
   for (const variant of expandVariants(bounded)) {
     if (set.floorFull) break;
-    merge(extractBounded(variant.text, false, cheapDigests));
+    merge(extractBounded(variant.text, asResult(cheapDigests)));
   }
 
   const joinedTexts = joinedReadings(bounded);
   for (const joined of joinedTexts) {
     if (set.floorFull) break;
-    merge(extractBounded(joined.text, false, cheapDigests), joined.byLine);
+    merge(extractBounded(joined.text, asResult(cheapDigests)), joined.byLine);
   }
   if (joinedTexts.length > 0 && !set.floorFull) truncated = truncated || wrappedCommandCut(bounded);
 

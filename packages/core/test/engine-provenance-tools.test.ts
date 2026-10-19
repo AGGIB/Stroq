@@ -1,6 +1,6 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AuditLog } from '../src/audit/audit-log.js';
 import { StroqEngine } from '../src/engine.js';
@@ -20,7 +20,7 @@ const pageWith = (command: string): string =>
 
 const cwd = mkdtempSync(join(tmpdir(), 'stroq-tools-cwd-'));
 
-function fixture() {
+function fixture(workdir: string = cwd) {
   const home = mkdtempSync(join(tmpdir(), 'stroq-tools-'));
   const dir = join(home, 'sessions');
   const engine = new StroqEngine({
@@ -36,12 +36,12 @@ function fixture() {
       toolName: 'Read',
       toolInput: { file_path: 'README.md' },
       toolResultText: text,
-      cwd,
+      cwd: workdir,
     });
   const pre = (command: string) =>
-    engine.pre({ sessionId: 's1', toolName: 'Bash', toolInput: { command }, cwd });
+    engine.pre({ sessionId: 's1', toolName: 'Bash', toolInput: { command }, cwd: workdir });
   const call = (toolName: string, toolInput: Record<string, unknown>) =>
-    engine.pre({ sessionId: 's1', toolName, toolInput, cwd });
+    engine.pre({ sessionId: 's1', toolName, toolInput, cwd: workdir });
   return { post, pre, call };
 }
 
@@ -218,6 +218,79 @@ describe('a Python name is the same name in any spelling', () => {
     await f.post(pageWith(`npx ${NAME}`));
     expect((await f.pre('npm install evil_helper_fix')).decision.effect).not.toBe('deny');
     expect((await f.pre('yarn add Evil.Helper.Fix')).decision.effect).not.toBe('deny');
+  });
+});
+
+describe('a Python name a page spelled with another tool', () => {
+  it.each([
+    ['npx evil_helper_fix', 'pip install evil-helper-fix'],
+    ['npx evil_helper_fix', 'pip install Evil.Helper_Fix'],
+    ['npm install Evil.Helper.Fix', 'uv add evil-helper-fix'],
+    ['pnpm add evil_helper-fix', 'poetry add Evil_Helper_Fix'],
+    ['cargo add evil_helper_fix', 'pipx install evil-helper-fix'],
+    ['pip install Evil_Helper-Fix', 'npx evil_helper-fix'],
+    ['pip install Evil_Helper-Fix', 'pip install evil-helper-fix'],
+    ['pip install Evil.Helper.Fix', 'npm install evil.helper.fix'],
+    ['uvx Evil_Helper_Fix', 'uvx evil-helper-fix'],
+  ])('is denied: page %s, then %s', async (pageCommand, command) => {
+    const f = fixture();
+    await f.post(pageWith(pageCommand));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+
+  it.each([
+    ['npx evil-helper-fix', 'npm install evil_helper_fix'],
+    ['pip install Evil_Helper-Fix', 'npx evil_helper_fix'],
+    ['npx @scope/evil_helper_fix', 'pip install evil-helper-fix'],
+  ])('keeps an npm name as written: page %s, then %s', async (pageCommand, command) => {
+    const f = fixture();
+    await f.post(pageWith(pageCommand));
+    expect((await f.pre(command)).decision.effect).not.toBe('deny');
+  });
+
+  it('leaves an ordinary name as it was', async () => {
+    const f = fixture();
+    await f.post(pageWith('npx left-pad'));
+    expect((await f.pre('pip install left-pad')).decision.effect).toBe('deny');
+    expect((await f.pre('pip install left-pad2')).decision.effect).not.toBe('deny');
+  });
+});
+
+describe('a name the project already depends on, in the other ecosystem', () => {
+  const projectWith = (files: Record<string, string>): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-eco-'));
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
+      writeFileSync(join(dir, name), text);
+    }
+    return dir;
+  };
+
+  it('is not known to a Python installer because package.json has it', async () => {
+    const f = fixture(
+      projectWith({ 'package.json': JSON.stringify({ dependencies: { [NAME]: '1' } }) }),
+    );
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(`npm install ${NAME}`)).decision.effect).not.toBe('deny');
+    expect((await f.pre(`pip install ${NAME}`)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+    expect((await f.pre(`uvx ${NAME}`)).decision.effect).toBe('deny');
+  });
+
+  it('is not known to an npm installer because requirements.txt has it', async () => {
+    const f = fixture(projectWith({ 'requirements.txt': `${NAME}==1.0\n` }));
+    await f.post(pageWith(`pip install ${NAME}`));
+    expect((await f.pre(`pip install ${NAME}`)).decision.effect).not.toBe('deny');
+    expect((await f.pre(`npm install ${NAME}`)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+    expect((await f.pre(`npx ${NAME}`)).decision.effect).toBe('deny');
   });
 });
 

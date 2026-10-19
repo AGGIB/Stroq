@@ -1,6 +1,6 @@
 import type { Positioned } from './atom-kinds.js';
 import { commandMap, type CommandMap, type LexedCommand } from './command-map.js';
-import { isPythonSource, normalizePackageName, pythonPackageName } from './package-name.js';
+import { ecosystemOf, nameForms, normalizePackageName, type Ecosystem } from './package-name.js';
 import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
 import { matchCommand } from './command-match.js';
 import { INSTALLER, PHRASE_STARTS, RUNNER, canonicalCommand } from './tool-phrases.js';
@@ -114,12 +114,26 @@ const toolOf = (phrase: string): string => {
 /** The last word of a matched phrase, lower-cased. */
 const lastWord = (phrase: string): string => phrase.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
 
-/** Where a package was named, as atoms. */
-const atomsAt = (index: number, packages: readonly string[], python = false): Positioned[] =>
+/**
+ * Where a package was named, as atoms: the name in the form it is read in (see `nameForms`; a page
+ * that is being recorded has the other form too), with what filters it out of a command when the
+ * project already depends on it.
+ */
+const atomsAt = (
+  index: number,
+  packages: readonly string[],
+  ecosystem: Ecosystem,
+  recording: boolean,
+): Positioned[] =>
   packages.flatMap((pkg): Positioned[] => {
-    // A Python name is recorded and looked up in its one form (PEP 503), an npm name as written.
-    const value = python ? pythonPackageName(normalizePackageName(pkg)) : normalizePackageName(pkg);
-    return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
+    const written = normalizePackageName(pkg);
+    if (written.length === 0) return [];
+    const named = { name: written, ecosystem };
+    return nameForms(written, ecosystem, recording).map((value) => ({
+      index,
+      atom: { kind: 'pkg' as const, value },
+      named,
+    }));
   });
 
 /**
@@ -133,6 +147,8 @@ interface Mentions {
   readonly isMention: (index: number) => boolean;
   /** Whether a word that cannot be read counts, for the mention that begins at an index. */
   readonly doubtsAt: (index: number) => boolean;
+  /** Whether the text is being recorded (a result), and not looked up (an action). */
+  readonly recording: boolean;
 }
 
 /**
@@ -141,7 +157,7 @@ interface Mentions {
  * goes on past the window after that word was reached has lost nothing. A line cut before it is
  * cut.
  */
-function runnerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found {
+function runnerMentions({ text, reader, isMention, doubtsAt, recording }: Mentions): Found {
   const lines = [...text.matchAll(RUNNER)]
     .filter((m) => isMention(m.index ?? 0))
     .map((m) => ({
@@ -163,7 +179,7 @@ function runnerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found 
     }));
   return {
     positioned: lines.flatMap(({ index, reading, verb, family, tool }) =>
-      atomsAt(index, withCreated(reading.packages, verb), isPythonSource(tool, family)),
+      atomsAt(index, withCreated(reading.packages, verb), ecosystemOf(tool, family), recording),
     ),
     cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
@@ -172,7 +188,7 @@ function runnerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found 
 }
 
 /** Every package named after an installer match, positioned at that match's start index. */
-function installerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found {
+function installerMentions({ text, reader, isMention, doubtsAt, recording }: Mentions): Found {
   const lines = [...text.matchAll(INSTALLER)]
     .filter((m) => isMention(m.index ?? 0))
     .map((m) => ({ ...reader.after(m), tool: toolOf(m[0]) }))
@@ -182,7 +198,7 @@ function installerMentions({ text, reader, isMention, doubtsAt }: Mentions): Fou
     }));
   return {
     positioned: lines.flatMap(({ index, reading, tool }) =>
-      atomsAt(index, reading.packages, isPythonSource(tool)),
+      atomsAt(index, reading.packages, ecosystemOf(tool), recording),
     ),
     cut: lines.some(({ scan }) => scan.cut),
     budgetSpent: reader.skipped(),
@@ -214,7 +230,12 @@ const withCreated = (packages: readonly string[], verb: string): string[] =>
   CREATES.has(verb) ? [...packages, ...packages.map(createdBy)] : [...packages];
 
 /** What one command that runs a runner or an installer names, read from its words. */
-function readCommand(text: string, start: number, command: LexedCommand): Found | null {
+function readCommand(
+  text: string,
+  start: number,
+  command: LexedCommand,
+  recording: boolean,
+): Found | null {
   const words = wordsOf(text, command);
   const match = matchCommand(words);
   if (match === null) return null;
@@ -222,7 +243,12 @@ function readCommand(text: string, start: number, command: LexedCommand): Found 
   const family = runnerFamily(words[0] ?? '');
   const tool = toolOf(words[0] ?? '');
   const found = (packages: string[], doubt: boolean, cut: boolean): Found => ({
-    positioned: atomsAt(start, withCreated(packages, match.verb), isPythonSource(tool, family)),
+    positioned: atomsAt(
+      start,
+      withCreated(packages, match.verb),
+      ecosystemOf(tool, family),
+      recording,
+    ),
     cut,
     budgetSpent: false,
     doubt: doubt || match.doubt,
@@ -243,9 +269,9 @@ function readCommand(text: string, start: number, command: LexedCommand): Found 
 }
 
 /** The commands of a text that run a runner or an installer, each read from its words. */
-function commandPackages(text: string, map: CommandMap): Found {
+function commandPackages(text: string, map: CommandMap, recording: boolean): Found {
   const found = [...map.commands].flatMap(([start, command]) => {
-    const read = readCommand(text, start, command);
+    const read = readCommand(text, start, command, recording);
     return read === null ? [] : [read];
   });
   return {
@@ -267,7 +293,7 @@ const COMMAND_WINDOW = MAX_LINE_SCAN + 32;
  * is not sure (a quote that never closes, a construct it does not know), every match counts as a
  * command, as it did before.
  */
-export function packageAtoms(text: string, command: boolean): Found {
+export function packageAtoms(text: string, command: boolean, recording: boolean): Found {
   const map = command
     ? commandMap(text, (name) => PHRASE_STARTS.has(name), COMMAND_WINDOW, launcherIndexes(text))
     : null;
@@ -280,10 +306,11 @@ export function packageAtoms(text: string, command: boolean): Found {
     // Only what the line proves inert is no doubt; a mention that is not proven inert, and every
     // match where the reading is not sure, counts as a command would.
     doubtsAt: (index) => command && (!sure || !map.inert.has(index)),
+    recording,
   };
   const runners = runnerMentions(mentions);
   const installers = installerMentions(mentions);
-  const commands = sure ? commandPackages(text, map) : null;
+  const commands = sure ? commandPackages(text, map, recording) : null;
   return {
     positioned: [...runners.positioned, ...installers.positioned, ...(commands?.positioned ?? [])],
     cut: runners.cut || installers.cut || (commands?.cut ?? false),
