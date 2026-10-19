@@ -8,7 +8,8 @@ import { STRICT_ID_CHARS, STRICT_ID_DIGITS, STRICT_ID_SNIFF_CHARS } from './stri
  * request by parsing, and a request left unanswered is a client left waiting. So the head
  * of the line is read, token by token, for the TOP-LEVEL `id` member, and the result is
  * used only to look up a request that is waiting: a wrong answer costs one waiting request
- * an early error from Stroq, never a message to anyone.
+ * an early error from Stroq, never a message to anyone. A batch has no single top-level
+ * id: recovering only its first member would leave the other requests unanswered.
  *
  * The scan is linear in the window and tracks nesting and strings, so an `"id"` inside a
  * nested value or inside a string is not taken for the top-level one. What it cannot do is
@@ -57,7 +58,6 @@ function idAt(text: string, at: number): JsonRpcId | null {
 export function sniffId(head: string): JsonRpcId | null {
   const window = head.slice(0, STRICT_ID_SNIFF_CHARS);
   let i = skipBlanks(window, 0);
-  if (window[i] === '[') i = skipBlanks(window, i + 1);
   if (window[i] !== '{') return null;
   let depth = 0;
   while (i < window.length) {
