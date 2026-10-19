@@ -251,6 +251,7 @@ jobs:
   # it proves GitHub accepts the log the command writes, and a pull request that adds
   # execution this repository would run before anyone approves it shows up as an
   # alert. Exit 1 means findings, which is the upload's job to report, not this step's.
+  # Exit 2 (a usage error) and 3 (git cannot read the base) fail the step.
   inspect:
     name: stroq inspect (SARIF)
     runs-on: ubuntu-latest
@@ -265,6 +266,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A pull request is checked out as its merge commit, whose first parent is the
+          # base. One more commit of history is all `--changed-from HEAD^1` needs.
+          fetch-depth: 2
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -280,7 +284,17 @@ jobs:
         run: pnpm build
 
       - name: Inspect this repository
+        if: github.event_name != 'pull_request'
         run: node packages/cli/dist/index.js inspect --sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
+
+      # What the pull request adds that an agent or editor runs by itself, compared with
+      # the base: SARIF for the upload below, and a job summary with annotations. Like the
+      # step above, it reports and does not block.
+      - name: Inspect what this pull request adds
+        if: github.event_name == 'pull_request'
+        run: |
+          node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
+          node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format github . >> "$GITHUB_STEP_SUMMARY" || [ $? -eq 1 ]
 
       - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
