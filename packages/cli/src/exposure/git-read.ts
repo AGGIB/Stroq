@@ -128,6 +128,11 @@ export interface Tree {
   readonly entries: Map<string, TreeEntry>;
   /** Paths that are not UTF-8, as decoded: each may stand for more than one path of the tree. */
   readonly lossy: readonly string[];
+  /**
+   * Texts that two or more paths of the tree decode to. Git lists each path, as bytes, once, so a
+   * text seen twice stands for two paths: `entries` holds one of them, and the other was hidden.
+   */
+  readonly collisions: readonly string[];
 }
 
 /** `git ls-tree -r -l -z`: every blob, link and submodule of a commit, by path. */
@@ -135,16 +140,18 @@ export function listTree(top: string, commit: string): Tree {
   const out = run(top, ['ls-tree', '-r', '-l', '-z', '--full-tree', commit], MAX_LISTING_BYTES);
   const entries = new Map<string, TreeEntry>();
   const lossy = new Set<string>();
+  const collisions = new Set<string>();
   const listing = records(out);
   listing.text.forEach((record, i) => {
     const tab = record.indexOf('\t');
     if (tab === -1) return;
     const [mode = '', , oid = '', size = '-'] = record.slice(0, tab).split(/ +/);
     const path = record.slice(tab + 1);
+    if (entries.has(path)) collisions.add(path);
     entries.set(path, { mode, oid, size: size === '-' ? -1 : Number(size) });
     if (listing.lossy.has(i)) lossy.add(path);
   });
-  return { entries, lossy: [...lossy] };
+  return { entries, lossy: [...lossy], collisions: [...collisions] };
 }
 
 /**
@@ -172,7 +179,10 @@ export function changedPaths(top: string, base: string, head: string): Map<strin
   const changed = new Map<string, Changed>();
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const [oldMode = '', , oldOid = '', , status = ''] = (parts[i] as string).slice(1).split(' ');
-    changed.set(parts[i + 1] as string, { status: status.charAt(0), oldMode, oldOid });
+    const path = parts[i + 1] as string;
+    // Two paths that decode to one text: the one the head still has decides how it changed.
+    if (changed.get(path)?.status !== undefined && status.charAt(0) === 'D') continue;
+    changed.set(path, { status: status.charAt(0), oldMode, oldOid });
   }
   return changed;
 }

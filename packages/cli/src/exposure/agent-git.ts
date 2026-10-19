@@ -226,7 +226,7 @@ function readPlan(
 }
 
 function compare(top: string, base: string, head: string) {
-  const { entries: tree, lossy } = listTree(top, head);
+  const { entries: tree, lossy, collisions } = listTree(top, head);
   const sorted = [...tree.keys()].sort(byPath);
   const changed = changedPaths(top, base, head);
   const links = readLinks(top, tree, sorted);
@@ -296,7 +296,7 @@ function compare(top: string, base: string, head: string) {
     ...found,
     ...runFileChanges(found, { touched, touchedFiles, scripts }),
     ...limits,
-    ...unnamed(lossy, changed),
+    ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...bareChanges(tree, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
@@ -305,19 +305,40 @@ function compare(top: string, base: string, head: string) {
 }
 
 /**
- * A path of an agent folder, or of a config, whose name is not UTF-8. It decodes to the same text
- * as another path that differs only in those bytes, so one of them hid the other from the check,
- * while a host that reads names as bytes loads both. It is not read, and it fails.
+ * A path of an agent folder, or of a config, whose name is not UTF-8, by its own name or by where
+ * a host ends up through links (`.claude/skills -> ../tools`, and a skill in `tools`). It decodes
+ * to the same text as another path that differs only in those bytes, so one of them could hide
+ * the other from the check, while a host that reads names as bytes loads both. It fails.
  */
-function unnamed(lossy: readonly string[], changed: ReadonlyMap<string, Changed>): TaggedHit[] {
-  const why =
-    'its name is not UTF-8, so the check cannot tell it from another name that reads the same, and did not read it';
-  return lossy
-    .filter((path) => linkMatters(path))
-    .map((path) =>
-      tagged(hit('unreadable-config', path, 1, 'path', why), changed.has(path) ? 'new' : 'present'),
-    );
+function unnamed(
+  lossy: ReadonlySet<string>,
+  collisions: ReadonlySet<string>,
+  changed: ReadonlyMap<string, Changed>,
+  planned: readonly Planned[],
+): TaggedHit[] {
+  const found = new Map<string, TaggedHit>();
+  const add = (path: string, why: string, isNew: boolean): void => {
+    if (!found.has(path))
+      found.set(
+        path,
+        tagged(hit('unreadable-config', path, 1, 'path', why), isNew ? 'new' : 'present'),
+      );
+  };
+  // Wherever they are: what the check read under the name may not be what a host reads.
+  for (const path of collisions) add(path, TWO_PATHS, true);
+  for (const path of lossy) if (linkMatters(path)) add(path, NOT_UTF8, changed.has(path));
+  for (const p of planned) {
+    const file = behind(p.at);
+    const through = [p.path, ...linksOf(p.at), ...(file === undefined ? [] : [file])];
+    if (through.some((path) => lossy.has(path) || collisions.has(path)))
+      add(p.path, NOT_UTF8, p.touched);
+  }
+  return [...found.values()];
 }
+
+const NOT_UTF8 =
+  'its name is not UTF-8, so the check cannot tell it from another name that reads the same';
+const TWO_PATHS = 'two paths of the tree read as this one name, so the check saw only one of them';
 
 /** The most package.json files one check reads for the npm scripts that entries already there run. */
 const MAX_PACKAGE_FILES = 64;
