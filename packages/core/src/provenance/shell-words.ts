@@ -321,7 +321,7 @@ export function readRunner(
       const value = flagPackages(shellWord(flag.raw ?? ''), doubts);
       fromFlags.push(...value.packages);
       doubt = doubt || (flag.raw !== undefined && value.doubt);
-      if (flag.skip) i += 1;
+      i += flag.skip ? 1 : 0;
       continue;
     }
     if (takesValue(read.word)) {
@@ -339,20 +339,9 @@ export function readRunner(
     const word = readPackageWord(read);
     if (!takesPositional)
       return { packages: fromFlags, sure: true, doubt: doubt || (doubts && word.doubt) };
-    const more =
-      flagMayTakeValue && !line.after(word)
-        ? candidateWords(
-            tokens,
-            i + (word.skipsNext && line.syntaxIsKnown ? 2 : 1),
-            takesValue,
-            line,
-          )
-        : [];
-    return {
-      packages: [...fromFlags, ...namesOf(word), ...more],
-      sure: true,
-      doubt: doubt || (doubts && word.doubt),
-    };
+    const more = flagMayTakeValue ? candidatesAfter(word, tokens, i, takesValue, line) : [];
+    const packages = [...fromFlags, ...namesOf(word), ...more];
+    return { packages, sure: true, doubt: doubt || (doubts && word.doubt) };
   }
   return { packages: fromFlags, sure: false, doubt };
 }
@@ -360,6 +349,18 @@ export function readRunner(
 /** Whether a flag the runner does not know may take the word after it as its value. */
 const mayTakeValue = (flag: string): boolean =>
   !flag.includes('=') && !SHORT_FLAG_WITH_VALUE.test(flag) && !NO_VALUE_FLAGS.has(flag);
+
+/** The candidates after the first word, at token `i`: none where that word ends the command. */
+const candidatesAfter = (
+  word: PackageWord,
+  tokens: readonly string[],
+  i: number,
+  takesValue: (flag: string) => boolean,
+  line: LineState,
+): string[] =>
+  line.after(word)
+    ? []
+    : candidateWords(tokens, i + (word.skipsNext && line.syntaxIsKnown ? 2 : 1), takesValue, line);
 
 /**
  * The names in the words that are not flags after the first one, up to the words a runner's package
