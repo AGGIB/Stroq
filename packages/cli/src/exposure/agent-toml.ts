@@ -1,6 +1,12 @@
-import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
-import { firstEntries, hookEntries, MAX_HOOKS, tooMany } from './agent-json.js';
+import {
+  firstEntries,
+  hookEntries,
+  MAX_HOOKS,
+  serverFields,
+  serverKind,
+  tooMany,
+} from './agent-json.js';
 import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { parseToml, type Obj, type Toml } from './toml-lite.js';
@@ -43,13 +49,15 @@ function serverHits(path: string, text: string, toml: Toml): AgentHit[] {
         : [];
       if (typeof command === 'string') {
         const line = serverLine(toml, text, entry, name, 'command');
-        const kind = mcpServerRunsCode(command, args) ? 'mcp-server-runs-code' : 'mcp-server';
-        return [hit(kind, path, line, name, [command, ...args].join(' '))];
+        const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
+        return [hit(serverKind(command, args, entry), path, line, name, value)];
       }
       if (command !== undefined)
         return [hit('unreadable-config', path, 1, `mcp_servers.${name}`, boundedJson(command))];
-      if (typeof url === 'string')
-        return [hit('mcp-server', path, serverLine(toml, text, entry, name, 'url'), name, url)];
+      if (typeof url === 'string') {
+        const line = serverLine(toml, text, entry, name, 'url');
+        return [hit('mcp-server', path, line, name, `${url}${serverFields(entry)}`)];
+      }
       return [];
     }),
   ];
@@ -65,7 +73,7 @@ function hookHitsOf(path: string, text: string, doc: Obj): AgentHit[] {
   const { entries, cut } = hookEntries(hooks);
   for (const e of entries.slice(0, MAX_HOOKS)) {
     const line = lineOf(text, [...e.path, firstWord(e.command)]);
-    hits.push(hit('agent-hook', path, line, e.event, e.command));
+    hits.push(hit('agent-hook', path, line, e.event, e.runs));
   }
   return cut ? [...hits, tooMany(path, 'hooks', MAX_HOOKS, hooks)] : hits;
 }

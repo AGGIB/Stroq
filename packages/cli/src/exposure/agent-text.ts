@@ -160,6 +160,6 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
   }
   const hits = entries
     .slice(0, MAX_HOOKS)
-    .map((e) => hit('agent-definition-hook', path, line, e.event, e.command));
+    .map((e) => hit('agent-definition-hook', path, line, e.event, e.runs));
   return cut ? [...hits, { ...tooMany(path, 'hooks', MAX_HOOKS, hooks), line }] : hits;
 }

@@ -1,6 +1,6 @@
 import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
-import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -89,7 +89,32 @@ export interface HookEntry {
   /** The key the command was found under: `command`, `bash`, `powershell`... */
   readonly key: string;
   readonly command: string;
+  /** The command and the handler's other fields that decide how it runs: the value to compare. */
+  readonly runs: string;
 }
+
+/**
+ * Fields of a handler that change when or how long it runs, or what it is called, and not what
+ * it runs. Any other field (`cwd`, `env`, `shell`, `working_directory`, `enabled`) is part of
+ * what runs.
+ */
+const HANDLER_LABELS: ReadonlySet<string> = new Set([
+  'type',
+  'timeout',
+  'timeoutSec',
+  'timeout_ms',
+  'timeoutMs',
+  'name',
+  'description',
+  'comment',
+  'statusMessage',
+  'show_output',
+  'matcher',
+  'async',
+  'once',
+  'padding',
+]);
+const isHandlerLabel = (key: string): boolean => COMMAND_KEYS.has(key) || HANDLER_LABELS.has(key);
 
 /** A command as a string, or a program and its arguments as an array of strings. */
 export const commandText = (value: unknown): string | undefined =>
@@ -129,7 +154,8 @@ export function hookEntries(
       if (command !== undefined) {
         const keys = path.filter((k) => !isIndex(k));
         const event = keys.filter((k) => k.toLowerCase() !== 'hooks').join('.');
-        entries.push({ path: keys, event: event === '' ? 'hooks' : event, key, command });
+        const runs = `${command}${otherFields(node as Obj, isHandlerLabel)}`;
+        entries.push({ path: keys, event: event === '' ? 'hooks' : event, key, command, runs });
       } else if (typeof child === 'object' && child !== null) {
         children.push({ node: child, path: [...path, key] });
       }
@@ -154,7 +180,7 @@ export function hookHits(
   const { entries, cut } = hookEntries(value);
   const hits = entries.slice(0, MAX_HOOKS).map((e) => {
     const needles = [...prefix, ...e.path.map(quoted), quoted(e.command)];
-    return hit(kind, f.path, lineOf(f.text, needles), e.event, e.command);
+    return hit(kind, f.path, lineOf(f.text, needles), e.event, e.runs);
   });
   return cut ? [...hits, tooMany(f.path, 'hooks', MAX_HOOKS, value)] : hits;
 }
@@ -240,7 +266,7 @@ function helperCommands(f: JsonFile): AgentHit[] {
   const walked = entries.slice(0, MAX_HOOKS).map((e) => {
     const needles = [...e.path.map(quoted), quoted(e.key)];
     const name = [...e.path, e.key].join('.');
-    return hit('agent-helper-command', f.path, lineOf(f.text, needles), name, e.command);
+    return hit('agent-helper-command', f.path, lineOf(f.text, needles), name, e.runs);
   });
   // In the order of the file's keys, for hits that share a line.
   const order = new Map(Object.keys(f.value).map((key, i) => [key, i]));
@@ -432,6 +458,41 @@ export const hookFile = (f: JsonFile): AgentHit[] => hookHits(f, f.value, []);
 // ---------------------------------------------------------------------------------------------
 // MCP servers.
 
+/** Fields of a server entry that name it or say how it talks, and not what it runs. */
+const SERVER_LABELS: ReadonlySet<string> = new Set([
+  'command',
+  'args',
+  'url',
+  'httpUrl',
+  'type',
+  'description',
+  'timeout',
+  'name',
+  'title',
+]);
+/**
+ * Variables of a server's own `env` that make the program it starts load other code: a server
+ * that sets `NODE_OPTIONS=--require ./x.js` runs x.js whatever its command says.
+ */
+const SERVER_ENV_LOADS_CODE =
+  /^(?:NODE_OPTIONS|NODE_PATH|BASH_ENV|BASH_FUNC_[^=]{1,256}|ENV|ZDOTDIR|PROMPT_COMMAND|LD_[A-Z_]{1,40}|DYLD_[A-Z_]{1,40}|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PYTHONUSERBASE|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_CONFIG_[A-Z_]{1,40}|GIT_SSH|GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_PROXY_COMMAND|GIT_ASKPASS|GIT_EXEC_PATH)$/;
+
+/** A server that starts a shell or inline code, or whose own `env` loads other code. */
+export function serverKind(
+  command: string,
+  args: readonly string[],
+  entry: Obj,
+): 'mcp-server-runs-code' | 'mcp-server' {
+  if (mcpServerRunsCode(command, args)) return 'mcp-server-runs-code';
+  const env = ownObject(entry, 'env') ?? ownObject(entry, 'environment');
+  const loads = env !== undefined && Object.keys(env).some((k) => SERVER_ENV_LOADS_CODE.test(k));
+  return loads ? 'mcp-server-runs-code' : 'mcp-server';
+}
+
+/** The server's other fields (`env`, `cwd`, `headers`, `disabled`), to follow what it runs. */
+export const serverFields = (entry: Obj): string =>
+  otherFields(entry, (key) => SERVER_LABELS.has(key));
+
 /** The servers under `key` of `container`, which sits at `prefix` in the file. */
 export function mcpServerHits(
   f: JsonFile,
@@ -449,10 +510,10 @@ export function mcpServerHits(
     const url = ownString(entry, 'url') ?? ownString(entry, 'httpUrl');
     if (command !== undefined) {
       const args = strings(own(entry, 'args'));
-      const kind = mcpServerRunsCode(command, args) ? 'mcp-server-runs-code' : 'mcp-server';
-      hits.push(hit(kind, f.path, line, name, [command, ...args].join(' ')));
+      const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
+      hits.push(hit(serverKind(command, args, entry), f.path, line, name, value));
     } else if (url !== undefined) {
-      hits.push(hit('mcp-server', f.path, line, name, url));
+      hits.push(hit('mcp-server', f.path, line, name, `${url}${serverFields(entry)}`));
     }
   }
   return hits;

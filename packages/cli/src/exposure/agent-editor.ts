@@ -12,7 +12,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { autoApproves } from './privilege-surface.js';
 
@@ -48,14 +48,42 @@ function commandLine(task: Obj): string {
 const labelOf = (task: Obj): string | undefined => argText(own(task, 'label'));
 
 /**
+ * Fields of a task that are shown on their own, or change how its output looks or when it is
+ * reported done, and not what it runs. `options` (its `cwd`, `env` and `shell`), `type` other
+ * than a plain shell or process, an npm task's `script` and anything else are part of what runs.
+ */
+const TASK_LABELS: ReadonlySet<string> = new Set([
+  'label',
+  'command',
+  'args',
+  'dependsOn',
+  'dependsOrder',
+  'runOptions',
+  ...OS_KEYS,
+  'presentation',
+  'problemMatcher',
+  'group',
+  'detail',
+  'icon',
+  'hide',
+  'isBackground',
+  'promptOnClose',
+]);
+const isTaskLabel = (key: string, value: unknown): boolean =>
+  TASK_LABELS.has(key) || (key === 'type' && (value === 'shell' || value === 'process'));
+
+/** A task's command line and its other fields that decide how it runs. */
+const runsOf = (task: Obj): string => `${commandLine(task)}${otherFields(task, isTaskLabel)}`;
+
+/**
  * Everything a folder-open task runs: its command, the per-system commands that replace it,
  * and the tasks it depends on, which run first and need no `runOn` of their own.
  */
 function taskRuns(task: Obj, byLabel: ReadonlyMap<string, Obj>, seen: Set<string>): string {
-  const parts = [commandLine(task)];
+  const parts = [runsOf(task)];
   for (const os of OS_KEYS) {
     const variant = ownObject(task, os);
-    const line = variant === undefined ? '' : commandLine(variant);
+    const line = variant === undefined ? '' : runsOf(variant);
     if (line !== '') parts.push(`${os}: ${line}`);
   }
   const depends = own(task, 'dependsOn');
@@ -78,8 +106,24 @@ const runsOnFolderOpen = (task: Obj): boolean => {
   return runOn !== undefined && runOn.toLowerCase() === 'folderopen';
 };
 
-export function folderOpenTasks(f: JsonFile, list: unknown, prefix: readonly string[]): AgentHit[] {
+/**
+ * What a tasks file sets for all of its tasks: `options`, the per-system blocks, `inputs` (a
+ * prompt can run a command), as text to follow each folder-open task's value.
+ */
+function forAllTasks(container: Obj | undefined): string {
+  if (container === undefined) return '';
+  const rest = otherFields(container, (key) => key === 'version' || key === 'tasks');
+  return rest === '' ? '' : ` | for all tasks${rest}`;
+}
+
+export function folderOpenTasks(
+  f: JsonFile,
+  container: Obj | undefined,
+  prefix: readonly string[],
+): AgentHit[] {
+  const list = container === undefined ? undefined : own(container, 'tasks');
   if (!Array.isArray(list)) return [];
+  const shared = forAllTasks(container);
   const tasks = list.filter(isPlainObject);
   const byLabel = new Map<string, Obj>();
   for (const task of tasks) {
@@ -103,7 +147,7 @@ export function folderOpenTasks(f: JsonFile, list: unknown, prefix: readonly str
           f.path,
           line,
           label ?? `task ${i + 1}`,
-          taskRuns(task, byLabel, seen),
+          `${taskRuns(task, byLabel, seen)}${shared}`,
         ),
       ];
     }),
@@ -165,19 +209,12 @@ export function vscodeSettings(
   ];
 }
 
-export const vscodeTasks = (f: JsonFile): AgentHit[] =>
-  folderOpenTasks(f, own(f.value, 'tasks'), ['"tasks"']);
+export const vscodeTasks = (f: JsonFile): AgentHit[] => folderOpenTasks(f, f.value, ['"tasks"']);
 
-export const codeWorkspace = (f: JsonFile): AgentHit[] => {
-  const tasks = ownObject(f.value, 'tasks');
-  return [
-    ...vscodeSettings(f, ownObject(f.value, 'settings'), ['"settings"']),
-    ...folderOpenTasks(f, tasks === undefined ? undefined : own(tasks, 'tasks'), [
-      '"tasks"',
-      '"tasks"',
-    ]),
-  ];
-};
+export const codeWorkspace = (f: JsonFile): AgentHit[] => [
+  ...vscodeSettings(f, ownObject(f.value, 'settings'), ['"settings"']),
+  ...folderOpenTasks(f, ownObject(f.value, 'tasks'), ['"tasks"', '"tasks"']),
+];
 
 export const vscodeSettingsFile = (f: JsonFile): AgentHit[] => vscodeSettings(f, f.value);
 

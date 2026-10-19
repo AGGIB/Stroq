@@ -86,8 +86,10 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * value nested 100,000 levels deep (which `JSON.parse` reads from under a megabyte) overflows
  * the stack. This walks with a stack of its own and keeps the first `max` characters; when it
  * cuts, a digest of the whole text follows, so two values that differ past the cut still differ.
+ * With `sortKeys`, the keys of every object are written in order, so the same fields written in
+ * another order are the same value.
  */
-export function boundedJson(value: unknown, max = JSON_TEXT_MAX): string {
+export function boundedJson(value: unknown, max = JSON_TEXT_MAX, sortKeys = false): string {
   const hash = createHash('sha256');
   let shown = '';
   const emit = (text: string): void => {
@@ -101,7 +103,9 @@ export function boundedJson(value: unknown, max = JSON_TEXT_MAX): string {
       stack.push({ close: ']', items: v.map((item) => [null, item] as const), next: 0 });
     } else if (isRecord(v)) {
       emit('{');
-      stack.push({ close: '}', items: Object.entries(v), next: 0 });
+      const items = Object.entries(v);
+      if (sortKeys) items.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      stack.push({ close: '}', items, next: 0 });
     } else {
       emit(JSON.stringify(v) ?? 'null');
     }
@@ -120,6 +124,21 @@ export function boundedJson(value: unknown, max = JSON_TEXT_MAX): string {
   }
   if (shown.length <= max) return shown;
   return `${shown.slice(0, max)}... (sha256:${hash.digest('hex').slice(0, 16)})`;
+}
+
+/**
+ * ` with {...}`: the fields of `entry` that are not in `shown` or `skip`, keys in order, to follow
+ * the command an entry runs in its value. Empty when there are none. A field that decides how or
+ * where the command runs (`env`, `cwd`, `options`) is a change to what runs when it changes.
+ */
+export function otherFields(
+  entry: Readonly<Record<string, unknown>>,
+  skip: (key: string, value: unknown) => boolean,
+): string {
+  const rest = Object.entries(entry).filter(([key, value]) => !skip(key, value));
+  return rest.length === 0
+    ? ''
+    : ` with ${boundedJson(Object.fromEntries(rest), JSON_TEXT_MAX, true)}`;
 }
 
 /** The hits of one file in the order of their lines, the reader's order kept within a line. */

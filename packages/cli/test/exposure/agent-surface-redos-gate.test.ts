@@ -118,6 +118,24 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ],
   ['a server list, raw', (text) => scanFile('.mcp.json', text)],
   [
+    'a server with other fields',
+    (text) =>
+      scanFile(
+        '.mcp.json',
+        `{"mcpServers":{"s":{"command":"node","env":{${json(text)}:${json(text)}},"cwd":${json(text)}}}}`,
+      ),
+  ],
+  [
+    'a hook and a task with other fields',
+    (text) => [
+      scanFile('.github/hooks/h.json', `{"hooks":{"s":[{"bash":"x","env":{${json(text)}:1}}]}}`),
+      scanFile(
+        '.vscode/tasks.json',
+        `{"options":{"env":{${json(text)}:1}},"tasks":[{"label":"w","command":"x","options":${json(text)},"runOptions":{"runOn":"folderOpen"}}]}`,
+      ),
+    ],
+  ],
+  [
     'a server list, as a server',
     (text) =>
       scanFile('.mcp.json', `{"mcpServers":{"s":{"command":"bash","args":["-c",${json(text)}]}}}`),
