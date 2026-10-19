@@ -492,23 +492,69 @@ const SERVER_LABELS: ReadonlySet<string> = new Set([
   'name',
   'title',
 ]);
-/**
- * Variables of a server's own `env` that make the program it starts load other code: a server
- * that sets `NODE_OPTIONS=--require ./x.js` runs x.js whatever its command says.
- */
-const SERVER_ENV_LOADS_CODE =
-  /^(?:NODE_OPTIONS|NODE_PATH|BASH_ENV|BASH_FUNC_[^=]{1,256}|ENV|ZDOTDIR|PROMPT_COMMAND|LD_[A-Z_]{1,40}|DYLD_[A-Z_]{1,40}|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PYTHONUSERBASE|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_CONFIG_[A-Z_]{1,40}|GIT_SSH|GIT_SSH_COMMAND|GIT_EXTERNAL_DIFF|GIT_PROXY_COMMAND|GIT_ASKPASS|GIT_EXEC_PATH)$/;
+/** The keys a server sets its own variables under, across the agents. */
+const SERVER_ENV_KEYS = ['env', 'environment'] as const;
+/** Keys that name a file of variables the host reads for the server. */
+const SERVER_ENV_FILE_KEYS = ['envFile', 'env_file', 'envfile'] as const;
+/** Keys that name the folder the server starts in. */
+const SERVER_CWD_KEYS = ['cwd', 'workingDirectory', 'working_directory'] as const;
+/** A folder that is the one the host starts in anyway. */
+const TOP_FOLDER: ReadonlySet<string> = new Set([
+  '',
+  '.',
+  './',
+  '${workspaceFolder}',
+  '${workspaceFolder}/',
+  '${workspaceRoot}',
+  '${workspaceRoot}/',
+]);
 
-/** A server that starts a shell or inline code, or whose own `env` loads other code. */
+const isAbsolutePath = (word: string): boolean =>
+  word.startsWith('/') || word.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(word);
+
+/**
+ * Whether a server's own variables can make the program it starts run other code. Read through
+ * the one list `env` in the settings is read by: any name that is not known to be harmless counts
+ * (`NODE_OPTIONS=--require ./x.js` runs x.js, `PATH=./bin` finds another `npx`). So does a value
+ * that is not a table, which the host may read in a way this does not, and a file of variables.
+ */
+function envRunsOther(entry: Obj): boolean {
+  for (const key of SERVER_ENV_KEYS) {
+    if (!Object.hasOwn(entry, key)) continue;
+    const env = entry[key];
+    if (!isPlainObject(env) || Object.keys(env).some((name) => !isHarmlessEnv(name))) return true;
+  }
+  return SERVER_ENV_FILE_KEYS.some((key) => Object.hasOwn(entry, key));
+}
+
+/**
+ * Whether a server starts in a folder other than the top, with a command or a script named
+ * relative to it: the same entry in another folder runs another file. A bare program name counts
+ * too: Windows looks for it in that folder first, and `npx` or `python -m` load from it.
+ */
+function folderRunsOther(command: string, args: readonly string[], entry: Obj): boolean {
+  const moved = SERVER_CWD_KEYS.some((key) => {
+    if (!Object.hasOwn(entry, key)) return false;
+    const cwd = entry[key];
+    return typeof cwd !== 'string' || !TOP_FOLDER.has(cwd.trim());
+  });
+  if (!moved) return false;
+  return !isAbsolutePath(command) || args.some((a) => !a.startsWith('-') && !isAbsolutePath(a));
+}
+
+/**
+ * A server that starts a shell or inline code, or whose own variables or folder can make it run
+ * other code than its command says.
+ */
 export function serverKind(
   command: string,
   args: readonly string[],
   entry: Obj,
 ): 'mcp-server-runs-code' | 'mcp-server' {
   if (mcpServerRunsCode(command, args)) return 'mcp-server-runs-code';
-  const env = ownObject(entry, 'env') ?? ownObject(entry, 'environment');
-  const loads = env !== undefined && Object.keys(env).some((k) => SERVER_ENV_LOADS_CODE.test(k));
-  return loads ? 'mcp-server-runs-code' : 'mcp-server';
+  return envRunsOther(entry) || folderRunsOther(command, args, entry)
+    ? 'mcp-server-runs-code'
+    : 'mcp-server';
 }
 
 /** The server's other fields (`env`, `cwd`, `headers`, `disabled`), to follow what it runs. */

@@ -134,6 +134,78 @@ describe('the configs of other agents', () => {
   });
 });
 
+/**
+ * A server's own env, read through the one list of harmless names that `env` in the settings is
+ * read by: any other name can make the program it starts run other code. So can an env that is not
+ * a table, a file of variables, and a folder other than the top for a command or a script named
+ * relative to it.
+ */
+describe('what makes an MCP server run other code than its command', () => {
+  const server = (path: string, entry: object): string[] =>
+    brief(
+      path,
+      json({ mcpServers: { s: { command: 'npx', args: ['-y', 'docs-mcp'], ...entry } } }),
+    );
+
+  it.each([
+    { env: { PATH: './bin' } },
+    { env: { node_options: '--require ./x.js' } },
+    { env: { SOMETHING_NEW: 'x' } },
+    { env: { Lang: 'C' } },
+    { environment: { NODE_OPTIONS: '-r ./x.js' } },
+    { env: { LANG: 'C' }, environment: { NODE_OPTIONS: '-r ./x.js' } },
+    { env: 'NODE_OPTIONS=-r ./x.js' },
+    { env: ['NODE_OPTIONS=-r ./x.js'] },
+    { env: null },
+    { envFile: '.env' },
+    { cwd: 'tools' },
+    { cwd: '/' },
+    { cwd: ['tools'] },
+    { working_directory: 'tools' },
+  ])('fails one with %j', (entry) => {
+    expect(server('.mcp.json', entry)).toEqual(['mcp-server-runs-code s error']);
+  });
+
+  it('keeps one with harmless env names, the top folder, or only absolute paths a warning', () => {
+    expect(server('.mcp.json', { env: { LANG: 'C', DEBUG: '1' } })).toEqual([
+      'mcp-server s warning',
+    ]);
+    expect(server('.vscode/mcp.json', { cwd: '${workspaceFolder}' })).toEqual([
+      'mcp-server s warning',
+    ]);
+    expect(server('.mcp.json', { cwd: '.' })).toEqual(['mcp-server s warning']);
+    expect(
+      brief(
+        '.mcp.json',
+        json({ mcpServers: { s: { command: '/usr/bin/node', args: ['/opt/s.js'], cwd: 'x' } } }),
+      ),
+    ).toEqual(['mcp-server s warning']);
+  });
+
+  it('reads the same in the other server lists', () => {
+    expect(
+      brief(
+        '.codex/config.toml',
+        '[mcp_servers.s]\ncommand = "npx"\nargs = ["docs-mcp"]\n[mcp_servers.s.env]\nTOKEN = "x"\n',
+      ),
+    ).toEqual(['mcp-server-runs-code s error']);
+    expect(
+      brief(
+        'opencode.json',
+        json({
+          mcp: { s: { type: 'local', command: ['npx', 'docs-mcp'], environment: { A: 1 } } },
+        }),
+      ),
+    ).toEqual(['mcp-server-runs-code s error']);
+    expect(
+      brief(
+        '.zed/settings.json',
+        json({ context_servers: { s: { command: { path: 'npx', args: [], env: { A: '1' } } } } }),
+      ),
+    ).toEqual(['mcp-server-runs-code s error']);
+  });
+});
+
 describe('agent folders in a subfolder', () => {
   it.skipIf(process.platform === 'win32')(
     'reports a link out of the repository from a subfolder agent folder, on disk and in a change',

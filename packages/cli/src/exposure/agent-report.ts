@@ -60,7 +60,7 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'mcp-server-runs-code':
       return unparsed
         ? 'an MCP server starts a shell or inline code (the file could not be fully read)'
-        : `MCP server ${name} starts a shell or inline code, or its env loads other code: ${value}`;
+        : `MCP server ${name} starts a shell or inline code, or its env or folder can make it run other code: ${value}`;
     case 'mcp-server':
       // Only an approval makes an ordinary server an error: see `escalateApproved`.
       return h.severity === 'error'

@@ -41,7 +41,7 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
   'mcp-auto-approve':
     'This starts every MCP server the repository declares without asking about each one.',
   'mcp-server-runs-code':
-    'This MCP server entry starts a shell or runs code written on its own command line.',
+    'This MCP server entry starts a shell or runs code written on its own command line, or sets variables or a folder that can make it run other code.',
   'mcp-server': 'The agent starts this MCP server program when it opens the repository.',
   'editor-autorun-task': 'The editor runs this task as soon as the folder is opened.',
   'agent-definition-hook':

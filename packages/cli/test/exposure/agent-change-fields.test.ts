@@ -49,9 +49,15 @@ describe('an entry already there whose other fields change', () => {
         ),
       ),
     ).toEqual(['new mcp-server-runs-code .mcp.json docs FAILS']);
+    // A relative script started in another folder is another script.
     expect(
       brief(change({ '.mcp.json': server({}) }, { '.mcp.json': server({ cwd: './evil' }) })),
-    ).toEqual(['changed mcp-server .mcp.json docs passes']);
+    ).toEqual(['new mcp-server-runs-code .mcp.json docs FAILS']);
+    expect(
+      brief(
+        change({ '.mcp.json': server({ cwd: 'tools' }) }, { '.mcp.json': server({ cwd: 'evil' }) }),
+      ),
+    ).toEqual(['changed mcp-server-runs-code .mcp.json docs FAILS']);
   });
 
   it('fails a folder-open task whose options change, and one whose tasks.json gains options for all', () => {
@@ -126,8 +132,18 @@ describe('an entry already there whose other fields change', () => {
     const a = json({ mcpServers: { d: { command: 'n', env: { A: '1', B: '2' }, cwd: 'x' } } });
     const b = json({ mcpServers: { d: { cwd: 'x', env: { B: '2', A: '1' }, command: 'n' } } });
     expect(brief(change({ '.mcp.json': a }, { '.mcp.json': b }))).toEqual([
-      'present mcp-server .mcp.json d passes',
+      'present mcp-server-runs-code .mcp.json d passes',
     ]);
+  });
+
+  it('fails a server that was already there whose env gains a name that is not harmless', () => {
+    const server = (env: object) =>
+      json({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs-mcp'], env } } });
+    expect(
+      brief(
+        change({ '.mcp.json': server({ LANG: 'C' }) }, { '.mcp.json': server({ PATH: './b' }) }),
+      ),
+    ).toEqual(['new mcp-server-runs-code .mcp.json docs FAILS']);
   });
 
   it('shows the other fields after the command', () => {
