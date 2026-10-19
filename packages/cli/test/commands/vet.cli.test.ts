@@ -133,7 +133,7 @@ describe('the built CLI: stroq vet', () => {
     expect(help.stdout).toMatch(/^stroq vet --from <dir or \.tgz>/);
     for (const flag of ['--from', '--online', '--kind', '--json', '--expect', '--card', '--out'])
       expect(help.stdout, flag).toContain(flag);
-    expect(list.stdout).toMatch(/^ {2}vet --from <dir or \.tgz>/m);
+    expect(list.stdout).toMatch(/^ {2}stroq vet --from <path>/m);
   });
 });
 

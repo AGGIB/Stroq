@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { commandHelp, usage } from '../src/help.js';
+import { commandHelp, usage, usageAll } from '../src/help.js';
 import {
   NAMES,
   REAL_COUNT,
@@ -282,6 +282,7 @@ describe.each(DOCS)('$name', ({ name, text }) => {
 describe('the help text', () => {
   const HELP_TEXTS: [string, string][] = [
     ['stroq --help', usage()],
+    ['stroq help --all', usageAll()],
     ...NAMES.map((command): [string, string] => [
       `stroq ${command} --help`,
       commandHelp(command) ?? '',

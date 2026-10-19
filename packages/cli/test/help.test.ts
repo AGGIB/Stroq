@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { commandNames } from '../src/help.js';
 import { CLI_ENTRY } from './helpers/cli-entry.js';
 
 /**
@@ -85,10 +86,10 @@ describe('stroq <command> --help', () => {
     expect(run('log', '-h').stdout).toMatch(/^stroq log\b/);
   });
 
-  it('stroq help lists the commands, and stroq help <command> is <command> --help', () => {
+  it('stroq help is stroq --help, and stroq help <command> is <command> --help', () => {
     const list = run('help');
     expect(list.status).toBe(0);
-    expect(list.stdout).toContain('Commands:');
+    expect(list.stdout).toBe(run('--help').stdout);
     expect(run('help', 'untaint').stdout).toBe(run('untaint', '--help').stdout);
   });
 
@@ -111,6 +112,55 @@ describe('stroq <command> --help', () => {
     for (const sub of ['list', 'show', 'extend', 'revoke']) {
       expect(help).toContain(sub);
     }
+  });
+});
+
+describe('stroq --help and stroq help --all', () => {
+  /** The first screen, in the order it lists them. */
+  const CORE = ['sent', 'inspect', 'vet', 'init', 'doctor', 'why', 'uninstall'];
+  /** What Stroq writes into an agent's config; no person types these. */
+  const HIDDEN = ['hook', 'mcp'];
+  /** The commands a screen lists: one per line that starts with `  stroq <name>`. */
+  const listed = (text: string): string[] =>
+    [...text.matchAll(/^ {2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
+
+  it('prints the same short screen for stroq, stroq --help, stroq -h and stroq help', () => {
+    const screen = run('--help');
+    expect(screen.status).toBe(0);
+    expect(screen.stderr).toBe('');
+    for (const args of [[], ['-h'], ['help']])
+      expect(run(...args).stdout, args.join(' ')).toBe(screen.stdout);
+  });
+
+  it('lists exactly the core commands on that screen, in under 20 lines', () => {
+    const text = run('--help').stdout;
+    expect(listed(text)).toEqual(CORE);
+    expect(text.trimEnd().split('\n').length).toBeLessThan(20);
+    expect(text).toContain('stroq help --all');
+  });
+
+  it('lists every command but the hidden ones under help --all, and --help --all is the same', () => {
+    const all = run('help', '--all');
+    expect(all.status).toBe(0);
+    const names = listed(all.stdout);
+    expect(new Set(names).size).toBe(names.length);
+    expect([...names].sort()).toEqual(
+      commandNames()
+        .filter((n) => !HIDDEN.includes(n))
+        .sort(),
+    );
+    expect(run('--help', '--all').stdout).toBe(all.stdout);
+  });
+
+  it('shows the hidden commands on neither screen', () => {
+    for (const text of [run('--help').stdout, run('help', '--all').stdout])
+      for (const name of HIDDEN) expect(listed(text)).not.toContain(name);
+  });
+
+  it.each(commandNames())('%s still has a --help of its own', (name) => {
+    const out = run(name, '--help');
+    expect(out.status).toBe(0);
+    expect(out.stdout).toMatch(new RegExp(`^stroq ${name}\\b`));
   });
 });
 
