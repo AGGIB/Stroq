@@ -1,0 +1,111 @@
+import { showable } from '../install/inspect/safe-text.js';
+import { isFailing, type FailOn, type TaggedHit } from './agent-change.js';
+import type { AgentHit } from './agent-kinds.js';
+
+/**
+ * One plain sentence per finding, for every output of `stroq inspect`. Every name and value in
+ * a finding was written by whoever wrote the repository, so each goes through `quote` before
+ * it is put in a sentence: cut and made visible for a terminal, put in a code span for
+ * Markdown.
+ */
+export type Quote = (text: string) => string;
+
+/** The most characters of one value that are shown. */
+export const VALUE_MAX = 160;
+
+/** For a terminal and for SARIF: blanks folded, controls written out, cut to a length. */
+export const plainQuote: Quote = (text) => showable(text, VALUE_MAX) || '(empty)';
+
+function sentence(h: AgentHit, q: Quote): string {
+  const name = q(h.name);
+  const value = q(h.value);
+  const unparsed = h.name === 'unparsed';
+  switch (h.kind) {
+    case 'agent-hook':
+      return `${name} hook runs: ${value}`;
+    case 'agent-helper-command':
+      return `${name} runs: ${value}`;
+    case 'agent-api-redirect':
+      return `${name} sends the agent's API traffic, and its key, to: ${value}`;
+    case 'agent-permission-bypass':
+      return h.name === 'permissions.defaultMode'
+        ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'
+        : `${name} approves tool calls without asking: ${value}`;
+    case 'agent-plugin':
+      return h.name.startsWith('enabledPlugins.')
+        ? `turns on the plugin: ${value}`
+        : `adds a plugin source: ${value}`;
+    case 'mcp-auto-approve':
+      return 'starts every MCP server in the repository without asking (enableAllProjectMcpServers)';
+    case 'mcp-server-runs-code':
+      return unparsed
+        ? 'an MCP server starts a shell or inline code (the file could not be fully read)'
+        : `MCP server ${name} starts a shell or inline code: ${value}`;
+    case 'mcp-server':
+      return `MCP server ${name} starts: ${value}`;
+    case 'editor-autorun-task':
+      if (unparsed) return 'a task runs when the folder opens (the file could not be fully read)';
+      return h.name === 'task.allowAutomaticTasks'
+        ? 'tasks run when the folder opens, without asking (task.allowAutomaticTasks is on)'
+        : `task ${name} runs when the folder opens: ${value}`;
+    case 'agent-definition-hook':
+      return `${name} hook in an agent definition runs: ${value}`;
+    case 'instruction-hidden-text':
+      return `instruction file holds invisible characters: ${value}`;
+    case 'instruction-file':
+      return 'instruction file the agent reads in every session';
+    case 'devcontainer-host-command':
+      return `initializeCommand runs on this machine before the container starts: ${value}`;
+    case 'devcontainer-command':
+      return `${name} runs in the dev container: ${value}`;
+    case 'package-script-agent-path':
+      return `npm runs the ${name} script on install, and it names an agent config file: ${value}`;
+    case 'package-script':
+      return `npm runs the ${name} script on install: ${value}`;
+    case 'nested-bare-repo':
+      return 'a bare git repository is committed here as plain files';
+    case 'unreadable-config':
+      return unparsed
+        ? 'could not be read, and it names a key that runs something'
+        : `not read: ${value}`;
+    case 'config-link-outside':
+      return `is a link out of the repository, to: ${value}`;
+  }
+}
+
+/** The finding as a sentence, with `new` or `changed` in front when it came with a change. */
+export function describe(h: TaggedHit, q: Quote): string {
+  const text = sentence(h, q);
+  return h.status === 'present' ? text : `${h.status}: ${text}`;
+}
+
+/** Where a finding is, as `file:line`, quoted. */
+export const placeOf = (h: AgentHit, q: Quote): string => q(`${h.file}:${h.line}`);
+
+export interface Groups {
+  readonly failing: readonly TaggedHit[];
+  /** New or changed, and not failing. */
+  readonly review: readonly TaggedHit[];
+  /** There before the change, not failing. Instruction files that did not change are left out. */
+  readonly present: readonly TaggedHit[];
+}
+
+export function groupHits(hits: readonly TaggedHit[], failOn: FailOn): Groups {
+  const failing = hits.filter((h) => isFailing(h, failOn));
+  const rest = hits.filter((h) => !isFailing(h, failOn));
+  return {
+    failing,
+    review: rest.filter((h) => h.status !== 'present'),
+    present: rest.filter((h) => h.status === 'present' && h.severity !== 'notice'),
+  };
+}
+
+/** The lines of one group for a terminal: a heading, then `  file:line  sentence` each. */
+export function textGroup(heading: string, hits: readonly TaggedHit[]): string[] {
+  if (hits.length === 0) return [];
+  return [
+    heading,
+    ...hits.map((h) => `  ${placeOf(h, plainQuote)}  ${describe(h, plainQuote)}`),
+    '',
+  ];
+}

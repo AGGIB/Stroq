@@ -95,11 +95,13 @@ describe('stroq inspect', () => {
     expect(formatInspect(dir, repoSurface(dir))).toContain('not a git repository');
   });
 
+  // Exit 2 is a usage error since `--changed-from` gave the command its exit codes: 1 is kept
+  // for findings, so a CI job with a wrong path never reads as one that found something.
   it('reports a missing directory rather than pretending it is clean', () => {
     const out = capture();
     const code = runInspect([join(tmpdir(), 'stroq-inspect-does-not-exist')]);
     out.restore();
-    expect(code).toBe(1);
+    expect(code).toBe(2);
     expect(out.lines.join('')).toContain('no such directory');
   });
 

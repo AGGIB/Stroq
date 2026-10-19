@@ -2,6 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { TaggedHit } from '../../src/exposure/agent-change.js';
+import { hit } from '../../src/exposure/agent-kinds.js';
 import { repoSurface } from '../../src/exposure/repo-surface.js';
 import { inspectSarif } from '../../src/exposure/sarif.js';
 
@@ -60,20 +62,24 @@ describe('inspectSarif', () => {
     const driver = log.runs[0]!.tool.driver;
     expect(driver.name).toBe('stroq');
     expect(driver.version).toBe('9.9.9');
-    expect(driver.rules.map((r) => r.id)).toEqual([
+    const preTrust = [
       'stroq/git-config-exec',
       'stroq/git-config-include',
       'stroq/nested-bare-repo',
       'stroq/gitattributes-driver',
       'stroq/devcontainer-host-command',
-    ]);
-    for (const rule of driver.rules) {
-      expect(rule.fullDescription.text.length).toBeGreaterThan(20);
+    ];
+    expect(driver.rules.map((r) => r.id).slice(0, preTrust.length)).toEqual(preTrust);
+    for (const rule of driver.rules.slice(0, preTrust.length)) {
       expect(rule.defaultConfiguration.level).toBe('error');
       // GitHub reads this to rank an alert: 9.0 and up is critical, as the finding is.
       expect(Number(rule.properties['security-severity'])).toBeGreaterThanOrEqual(9);
+    }
+    for (const rule of driver.rules) {
+      expect(rule.fullDescription.text.length).toBeGreaterThan(20);
       expect(rule.properties.tags).toContain('security');
     }
+    expect(new Set(driver.rules.map((r) => r.id)).size).toBe(driver.rules.length);
     expect(log.runs[0]!.results).toEqual([]);
   });
 
@@ -104,5 +110,62 @@ describe('inspectSarif', () => {
     const surface = repoSurface(repo({ '.husky/pre-commit': 'npm test\n' }));
     expect(surface.onOpen.length).toBeGreaterThan(0);
     expect((inspectSarif(surface, '1.0.0') as SarifLog).runs[0]!.results).toEqual([]);
+  });
+});
+
+describe('inspectSarif with what an agent or editor runs by itself', () => {
+  interface AgentResult {
+    ruleId: string;
+    ruleIndex: number;
+    level: string;
+    message: { text: string };
+    locations: Array<{
+      physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number } };
+    }>;
+    partialFingerprints: Record<string, string>;
+    properties: { change: string };
+  }
+  const empty = { isRepo: true, preTrust: [], onOpen: [], capped: false };
+  const tagged = (status: TaggedHit['status'], line = 4, value = './s.sh'): TaggedHit => ({
+    ...hit('agent-hook', '.claude/settings.json', line, 'SessionStart', value),
+    status,
+  });
+  const results = (hits: readonly TaggedHit[]): AgentResult[] =>
+    (inspectSarif(empty, '1.0.0', hits) as { runs: Array<{ results: AgentResult[] }> }).runs[0]!
+      .results;
+
+  it('places each one at its line, with a fingerprint and whether the change brought it', () => {
+    const [result] = results([tagged('new')]);
+    expect(result!.ruleId).toBe('stroq/agent-hook');
+    expect(result!.level).toBe('error');
+    expect(result!.message.text).toBe('new: SessionStart hook runs: ./s.sh');
+    expect(result!.locations[0]!.physicalLocation.region.startLine).toBe(4);
+    expect(result!.locations[0]!.physicalLocation.artifactLocation.uri).toBe(
+      '.claude/settings.json',
+    );
+    expect(result!.properties.change).toBe('new');
+    expect(Object.values(result!.partialFingerprints)[0]).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  // The same hook moved down a line by an edit above it is the same alert, and a new command
+  // under the same event is a new one.
+  it('keeps the fingerprint when only the line moves, and changes it with the value', () => {
+    const [a, b, c] = results([
+      tagged('present', 4),
+      tagged('present', 9),
+      tagged('new', 4, './x'),
+    ]);
+    expect(a!.partialFingerprints).toEqual(b!.partialFingerprints);
+    expect(a!.partialFingerprints).not.toEqual(c!.partialFingerprints);
+  });
+
+  it('gives a warning and a notice their own levels, and leaves out notices nothing changed', () => {
+    const warning = { ...hit('mcp-server', '.mcp.json', 2, 's', 'npx s'), status: 'new' } as const;
+    const notice = {
+      ...hit('instruction-file', 'CLAUDE.md', 1, 'content', 'x'),
+      status: 'changed',
+    } as const;
+    const old = { ...notice, status: 'present' } as const;
+    expect(results([warning, notice, old]).map((r) => r.level)).toEqual(['warning', 'note']);
   });
 });
