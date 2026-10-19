@@ -1,7 +1,8 @@
 import { describe, it } from 'vitest';
 import { tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
-import { pathWords } from '../../src/exposure/agent-run-files.js';
+import { runFileChanges } from '../../src/exposure/agent-run-files.js';
+import { pathWords } from '../../src/exposure/run-words.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
@@ -70,6 +71,19 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     'aHelper',
     'Bash(',
     '$CLAUDE_PROJECT_DIR/',
+    '${A:-.}/',
+    '$(pwd)/',
+    'cd a && ',
+    'a/*/',
+    '*',
+    'npm run ',
+    'pnpm ',
+    'make ',
+    'https://a/',
+    'a:/',
+    'a\\ ',
+    '"a b/',
+    '/a',
     './a ',
     '"runOn": /**/',
     '---\n',
@@ -167,6 +181,22 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       ),
   ],
   ['the file words of a command line', (text) => pathWords(text)],
+  [
+    'following a command already there to the files it runs',
+    (text) =>
+      runFileChanges(
+        [{ ...hit('agent-hook', '.claude/settings.json', 1, 'S', text), status: 'present' }],
+        {
+          touched: (path) => (path.endsWith('x.sh') ? 'changed' : undefined),
+          touchedFiles: [
+            ['.claude/hooks/x.sh', 'changed'],
+            ['a/a/a/Makefile', 'new'],
+            ['package.json', 'changed'],
+          ],
+          scripts: () => ({ head: { a: text, lint: text }, base: {} }),
+        },
+      ),
+  ],
   ['an instruction file', (text) => scanFile('CLAUDE.md', text)],
   ['a file in a skill folder', (text) => scanFile('.claude/skills/s/ref.md', text)],
   ['an env name, tagged', (text) => tagChanges([hit('agent-env', 'f', 1, text, text)], null)],

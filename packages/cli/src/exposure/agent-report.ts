@@ -90,7 +90,7 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'config-submodule':
       return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
     case 'agent-run-file-changed':
-      return `${name} runs this file`;
+      return h.value === h.file ? `${name} runs this file` : `${name} runs ${value} of this file`;
   }
 }
 

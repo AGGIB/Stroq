@@ -1,7 +1,8 @@
+import { isPlainObject } from '../commands/config-file.js';
 import { tagChanges, type ChangeStatus, type TaggedHit } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
-import { runFileChanges } from './agent-run-files.js';
+import { runFileChanges, type PackageScripts, type RunView } from './agent-run-files.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -27,6 +28,7 @@ import {
   MAX_LINK_HOPS,
   SYMLINK,
   byPath,
+  isBlob,
   linkMatters,
   linksOnTheWay,
   openedPaths,
@@ -34,6 +36,8 @@ import {
   type Resolved,
   type TreeView,
 } from './git-tree.js';
+
+import { stripJsonc } from './jsonc.js';
 
 export { GitError } from './git-read.js';
 
@@ -271,16 +275,85 @@ function compare(top: string, base: string, head: string) {
     const status = changed.get(at.path)?.status;
     return status === 'A' ? 'new' : status === 'M' || status === 'T' ? 'changed' : undefined;
   };
+  const touchedFiles = [...changed].flatMap(([path, c]): RunView['touchedFiles'] => {
+    const entry = tree.get(path);
+    if (entry === undefined || !isBlob(entry)) return [];
+    if (c.status === 'A') return [[path, 'new']];
+    return c.status === 'M' || c.status === 'T' ? [[path, 'changed']] : [];
+  });
+  const scripts = packageScripts(top, tree, changed, links.view);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
-    ...runFileChanges(found, touched),
+    ...runFileChanges(found, { touched, touchedFiles, scripts }),
     ...limits,
     ...bareChanges(tree, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
   const byFile = hits.sort((a, b) => byPath(a.file, b.file));
   return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };
+}
+
+/** The most package.json files one check reads for the npm scripts that entries already there run. */
+const MAX_PACKAGE_FILES = 64;
+
+/** The `scripts` of a package.json's text; null when the text is not JSON. */
+function scriptsIn(text: string | undefined): Readonly<Record<string, unknown>> | null {
+  if (text === undefined) return null;
+  try {
+    const value: unknown = JSON.parse(stripJsonc(text));
+    if (!isPlainObject(value)) return null;
+    const scripts = Object.hasOwn(value, 'scripts') ? value['scripts'] : undefined;
+    return isPlainObject(scripts) ? scripts : {};
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The scripts of a package.json at the head and at the base, read when a command already there
+ * runs npm: a few files, each read once, at most `MAX_PACKAGE_FILES` of them. One that cannot be
+ * read, or one past that count, is `unread`, which fails.
+ */
+function packageScripts(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  changed: ReadonlyMap<string, Changed>,
+  view: TreeView,
+): RunView['scripts'] {
+  const cache = new Map<string, PackageScripts | 'unread' | undefined>();
+  const read = (path: string): PackageScripts | 'unread' | undefined => {
+    const at = resolve(path, view);
+    if (at.kind === 'none' || at.kind === 'folder') return undefined;
+    if (at.kind !== 'blob') return 'unread';
+    const entry = entryAt(tree, at.path);
+    const c = changed.get(at.path);
+    const old = linkChanged(at, changed)
+      ? undefined
+      : c === undefined
+        ? entry.oid
+        : c.status !== 'A' && (c.oldMode === '100644' || c.oldMode === '100755')
+          ? c.oldOid
+          : undefined;
+    const oids = unique([entry.oid, ...(old === undefined ? [] : [old])]);
+    const sizes = objectSizes(top, oids);
+    if (oids.some((oid) => (sizes.get(oid) ?? MAX_FILE_BYTES + 1) > MAX_FILE_BYTES))
+      return 'unread';
+    const blobs = readBlobs(
+      top,
+      oids.map((oid) => ({ oid, size: sizes.get(oid) ?? 0 })),
+    );
+    const head = scriptsIn(blobs.get(entry.oid));
+    if (head === null) return 'unread';
+    const base = old === undefined ? null : scriptsIn(blobs.get(old));
+    return { head, base: base ?? undefined };
+  };
+  return (path) => {
+    if (cache.has(path)) return cache.get(path);
+    const scripts = cache.size >= MAX_PACKAGE_FILES ? 'unread' : read(path);
+    cache.set(path, scripts);
+    return scripts;
+  };
 }
 
 function submoduleHits(
