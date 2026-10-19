@@ -377,25 +377,29 @@ What it reads:
 - Hooks in `.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json` and `.codex/config.toml`, `.github/hooks/*.json`, `.github/copilot/`, `.gemini/`, `.agents/hooks.json`, `.windsurf/hooks.json` and `.devin/hooks.json`, and in the front matter of skills, subagents and commands.
 - MCP servers in `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json` and `.codex/config.toml`. A server that starts a shell or inline code fails. Any other new server is listed to review.
 - Claude Code settings that run a command or let the agent do more: `statusLine`, `apiKeyHelper` and the other helpers, `ANTHROPIC_BASE_URL`, `bypassPermissions`, `enableAllProjectMcpServers`, plugins and plugin sources.
-- `env` variables in those settings that load code or send traffic elsewhere, such as `NODE_OPTIONS`, `BASH_ENV`, `LD_PRELOAD`, `PATH` and `HTTPS_PROXY`. An allow rule for the whole shell, such as `Bash(*)`, is listed to review.
+- `env` variables in those settings that load code or send traffic elsewhere, such as `NODE_OPTIONS`, `BASH_ENV`, `LD_PRELOAD`, `PATH` and `HTTPS_PROXY`. `PATH`, `SHELL`, an editor or pager, a proxy or a certificate bundle fails when a change adds or changes it; one that was already there is only a warning, since honest settings often set them. An allow rule for the whole shell, such as `Bash(*)`, is listed to review.
 - VS Code tasks that run when the folder opens, in `tasks.json` and `.code-workspace` files, and the settings that let tasks, tool calls or terminal commands run without asking. Comments in these files are read past.
 - Dev container commands anywhere under `.devcontainer/`, and the install scripts in `package.json`.
-- Instruction files such as `CLAUDE.md`, `AGENTS.md` and `.cursorrules`. Invisible characters in one fail the check, and so does a NUL byte. A new or changed one is only listed.
+- Instruction files such as `CLAUDE.md`, `AGENTS.md` and `.cursorrules`. Invisible characters in one fail the check: every character Unicode lists as default ignorable, such as zero-width spaces, direction marks, variation selectors and tag characters, except what spells an emoji. A NUL byte fails a file a host reads by its name (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `SKILL.md`, `.cursorrules`, `.windsurfrules`, Copilot's instructions, Cursor's rules, Claude Code's commands and subagents). Any other file in an agent folder with a NUL is a binary file, listed as one without failing. A new or changed instruction file is only listed.
 - A submodule where an agent folder or config would be. What it holds comes from another repository, so it fails.
 
 It compares values, not files. A hook that was already there does not fail, however the file around it changed. A second hook under the same event is new, not changed.
 
 It also follows the files those entries run. When a change edits a script that a hook already there runs, such as `node .vscode/setup.mjs`, the script fails the check. An edit to the code of an ordinary MCP server or install script is listed to review.
 
-A JSON config it cannot read fails when it names a key that runs something. A `.codex/config.toml` it cannot read always fails. A config or an instruction file over 1 MiB fails.
+A JSON config it cannot read fails when it names a key that runs something. A `.codex/config.toml` it cannot read always fails. A file over 1 MiB, or past the budget, fails, even when it was not read at the base either. The one exception is an instruction file the change did not touch: it runs nothing, so it is only listed.
+
+It follows links inside the repository as a host on disk would, a link to the top of the repository included. A link it could not read fails. A link that points at nothing in the commit, or goes round in a loop, is an error: a host opens whatever appears there later, and Git for Windows checks a link out as a plain file holding its text.
 
 It reads only git's objects for the two commits, never the working tree, and runs nothing from the repository. It skips `.git`: a pull request cannot change it, and `actions/checkout` writes its own entries there. It checks the whole repository that holds the folder you give it, from its top, and says so when that folder is not the top.
 
-It reads the configs at a fixed place first, then the files the change touched, then the rest: up to 5,000 files, 2,000 links and 64 MiB. A limit that keeps it from reading a file the change touched fails the check.
+It reads the configs at a fixed place first, then the files the change touched, then the rest: up to 5,000 files, 2,000 links and 64 MiB. A limit that keeps it from reading any agent file or link fails the check, since a config left unread could run a file the change edits.
 
 Exit 0 means nothing fails, 1 means something fails, 2 is a usage error, and 3 means the check could not run: git cannot read the base, or the check stopped on an error. `--fail-on any` also fails on what was already there, and `--fail-on none` never fails. `--fail-on new` needs `--changed-from`. Without `--changed-from` the default is `any`, so plain `stroq inspect` fails on a repository that already has a hook or a folder-open task.
 
 Plain `stroq inspect` reads the same entries from the folder on disk, with or without `.git`, so it works on a zip download too. It reads the agent and editor folders first. It stops after 20,000 folders or 5,000 agent files, and then fails, since it has not read everything.
+
+A folder with no `.git` can still be a bare repository: when it holds `HEAD`, `objects` and `refs`, git reads its `config`, and the first `git status` there runs what that config names. Plain `stroq inspect` reports such a folder, and a bare repository deeper in, as a finding, and lists a `.envrc` and husky hooks as it does in a repository. It says git runs nothing from the folder only when it finds none of these.
 
 `--format github` writes a job summary in Markdown to standard output, and at most ten `::error` and `::warning` lines to standard error. Every value from the repository is escaped first.
 
