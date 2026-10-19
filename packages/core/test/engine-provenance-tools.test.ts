@@ -370,6 +370,48 @@ describe('the package an initialiser of a scope alone runs', () => {
   });
 });
 
+const BEHIND_AN_OPTION: readonly string[] = [
+  `npx --loglevel silent ${NAME}`,
+  `npx --otp 123456 ${NAME}`,
+  `npx -w app ${NAME}`,
+  `npx --some-new-flag value ${NAME}`,
+  `npm exec --loglevel silent ${NAME}`,
+  `pnpm dlx --some-new-flag value ${NAME}`,
+  `yarn dlx --some-new-flag value ${NAME}`,
+  `bunx --some-new-flag value ${NAME}`,
+  `uvx --prerelease allow ${NAME}`,
+  `uvx --default-index https://index.example.test/simple ${NAME}`,
+  `uv tool run --prerelease allow ${NAME}`,
+  `pipx run --some-new-flag value ${NAME}`,
+];
+
+describe('a package a flagged page named, behind an option that may take a value', () => {
+  it.each(BEHIND_AN_OPTION)('is denied when a command runs it so: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+
+  it.each(BEHIND_AN_OPTION)('is denied when the page ran it so: %s', async (pageCommand) => {
+    const f = fixture();
+    await f.post(pageWith(pageCommand));
+    const names = [`npx ${NAME}`, `pnpm dlx ${NAME}`, `npm install ${NAME}`];
+    for (const command of names)
+      expect((await f.pre(command)).decision, command).toMatchObject({ effect: 'deny' });
+  });
+
+  it('does not make the arguments of a runner packages when nothing could have taken the first word', async () => {
+    const f = fixture();
+    await f.post(pageWith('npx -y create-vite my-app --template react'));
+    expect((await f.pre('npm install react')).decision.effect).not.toBe('deny');
+    expect((await f.pre('npm install my-app')).decision.effect).not.toBe('deny');
+    expect((await f.pre('npx create-vite')).decision.effect).toBe('deny');
+  });
+});
+
 describe('an MCP call that spawns a command with its arguments', () => {
   it.each([
     ['mcp__fs__spawn', { command: 'npx', args: ['-y', NAME] }],

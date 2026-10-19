@@ -149,6 +149,33 @@ const PYTHON_VALUE_FLAGS = new Set([
   '--extra-index-url',
 ]);
 
+/**
+ * Flags of the runners that are known to take no value, so the word after one is not a value.
+ * A flag that is not in this list, not a package flag and not a value flag of the tool may take
+ * the word after it, and then the package is not the first word (see `readRunner`). The list
+ * keeps the common ones from doing that to every `npx -y x`; a flag missing from it costs a
+ * few more candidates, never a package.
+ */
+const NO_VALUE_FLAGS: ReadonlySet<string> = values(
+  '--',
+  '-y',
+  '--yes',
+  '--no',
+  '--no-install',
+  '--ignore-existing',
+  '-q',
+  '--quiet',
+  '--silent',
+  '--verbose',
+  '--offline',
+  '--bun',
+  '--isolated',
+  '--no-cache',
+);
+
+/** How many words that are not flags are candidates for the package when a flag may have taken the first. */
+const RUNNER_CANDIDATE_WORDS = 3;
+
 export type RunnerFamily = 'node' | 'python';
 
 /** `npx`, `pnpm dlx`, `yarn dlx`, `bunx` and `npm exec` read `-p`; `uvx`, `pipx run` and `uv tool run` read `--from` and `--with`. */
@@ -257,6 +284,11 @@ class LineState {
  * `PACKAGE_FLAGS`; `-p`, `--package`, `--package=x`, `-p=x`, `-px` for `npx`; `--from`, `--with`,
  * `-w` for `uvx`), split at commas, and the first word that is not a flag, whether or not a flag
  * named one. A package flag with no value, or with a value that cannot be read, is a doubt.
+ *
+ * A flag that is not known to take no value and not one of the tool's value flags may take the
+ * word after it (`npx --loglevel silent x`), and then the first word is its value and not the
+ * package. When one stands before the first word, the next words are read as candidates too, up
+ * to `RUNNER_CANDIDATE_WORDS` words in all. They name a package or do not and are never a doubt.
  */
 export function readRunner(
   tokens: readonly string[],
@@ -269,8 +301,11 @@ export function readRunner(
   const fromFlags: string[] = [];
   const packageFlags = PACKAGE_FLAGS[family];
   const valueFlags = valueFlagsOf(tool);
+  const takesValue = (flag: string): boolean =>
+    valueFlags.has(flag) || (family === 'python' && PYTHON_VALUE_FLAGS.has(flag));
   const line = new LineState(lexed);
   let doubt = false;
+  let flagMayTakeValue = false;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] ?? '';
     const step = line.stepOver(token);
@@ -289,7 +324,7 @@ export function readRunner(
       if (flag.skip) i += 1;
       continue;
     }
-    if (valueFlags.has(read.word) || (family === 'python' && PYTHON_VALUE_FLAGS.has(read.word))) {
+    if (takesValue(read.word)) {
       i += 1;
       continue;
     }
@@ -298,16 +333,68 @@ export function readRunner(
       // nobody has read (a Python runner's `-p3.12` is its interpreter).
       const isInterpreter = family === 'python' && read.word.startsWith('-p');
       doubt = doubt || (doubts && SHORT_FLAG_WITH_VALUE.test(read.word) && !isInterpreter);
+      flagMayTakeValue = flagMayTakeValue || mayTakeValue(read.word);
       continue;
     }
     const word = readPackageWord(read);
+    if (!takesPositional)
+      return { packages: fromFlags, sure: true, doubt: doubt || (doubts && word.doubt) };
+    const more =
+      flagMayTakeValue && !line.after(word)
+        ? candidateWords(
+            tokens,
+            i + (word.skipsNext && line.syntaxIsKnown ? 2 : 1),
+            takesValue,
+            line,
+          )
+        : [];
     return {
-      packages: takesPositional ? [...fromFlags, ...namesOf(word)] : fromFlags,
+      packages: [...fromFlags, ...namesOf(word), ...more],
       sure: true,
       doubt: doubt || (doubts && word.doubt),
     };
   }
   return { packages: fromFlags, sure: false, doubt };
+}
+
+/** Whether a flag the runner does not know may take the word after it as its value. */
+const mayTakeValue = (flag: string): boolean =>
+  !flag.includes('=') && !SHORT_FLAG_WITH_VALUE.test(flag) && !NO_VALUE_FLAGS.has(flag);
+
+/**
+ * The names in the words that are not flags after the first one, up to the words a runner's package
+ * can be among (see `RUNNER_CANDIDATE_WORDS`): the package, when a flag took the first word as
+ * its value. The options of the tool that take a value are stepped over; the line ends where the
+ * command does, and a word that is no name, or cannot be read, is passed over without a doubt.
+ */
+function candidateWords(
+  tokens: readonly string[],
+  from: number,
+  takesValue: (flag: string) => boolean,
+  line: LineState,
+): string[] {
+  const names: string[] = [];
+  let words = 1;
+  for (let i = from; i < tokens.length && words < RUNNER_CANDIDATE_WORDS; i += 1) {
+    const token = tokens[i] ?? '';
+    const step = line.stepOver(token);
+    if (step === -1) break;
+    if (step > 0) {
+      i += step - 1;
+      continue;
+    }
+    const read = shellWord(token);
+    if (isContinuationMark(read.word) || read.word.startsWith('-')) {
+      i += takesValue(read.word) ? 1 : 0;
+      continue;
+    }
+    const word = readPackageWord(read);
+    names.push(...namesOf(word));
+    words += 1;
+    if (line.after(word)) break;
+    if (word.skipsNext && line.syntaxIsKnown) i += 1;
+  }
+  return names;
 }
 
 /** Every package an installer's words name, and whether a word that should have named one is a doubt. */
