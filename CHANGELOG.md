@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Recover from an interrupted MCP installation and clean up orphan wrappers.** When `stroq add --kind mcp` is interrupted between writing the client configuration and updating the confirmation lock, a pending lock record preserves the replaced configuration entry so `stroq remove <name> --kind mcp --force` safely removes the unconfirmed wrapper, restores the replaced configuration entry, and frees stored server files. Unconfirmed wrappers can also be re-installed using `stroq add <name> --kind mcp --force`. Cancelling an interrupted update restores the prior confirmation as well as the wrapper. Pending retries resolve the recorded source and target by name and refuse another config. Orphans with no record can be removed with `--force --config <path>` or `--force --client <name>`. Thanks @kok-o (#247).
+- **MCP removal refuses an explicitly selected client config that differs from the recorded installation target.** Confirmed and pending installations keep their recorded write boundary; selecting an orphan in another config cannot remove the recorded installation instead.
+
+- **`stroq add` refuses a symlinked `~/.stroq`, `store` or `run` folder before asking for confirmation, and the runtime pin surfaces its fixed refusal phrase without changing the mode of existing folders.** Previously `stroq add --kind mcp` succeeded when `STROQ_HOME` was a symbolic link while the runtime pin then refused to start (`cannot verify a linked store folder`) behind the generic proxy refusal, and `privateRunDir` changed the mode of `~/.stroq` to `0700` even when it did not create the directory. On POSIX, existing runtime parents writable by other users are refused without changing their modes.
 
 - **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
 
@@ -24,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Strict scan cost documentation includes per-string views.** Each distinct decoded string adds a scan view; the 0.26.0 measurements below describe the original three aggregate views, not the current scan count or latency.
 
 - **Answer waiting client requests on batch server messages in strict mode.** A readable server array is withheld whole as `invalid-shape`, and all waiting client requests whose IDs it contains are promptly answered with fixed errors rather than left waiting. A malformed batch or one above the line limit fails all pending requests: its first id alone cannot identify every response being withheld.
+
+- **Recover from an interrupted MCP installation and clean up orphan wrappers.** When `stroq add --kind mcp` is interrupted between writing the client configuration and updating the confirmation lock, a pending lock record preserves the replaced configuration entry so `stroq remove <name> --kind mcp --force` safely removes the unconfirmed wrapper, restores the replaced configuration entry, and frees stored server files. Unconfirmed wrappers can also be re-installed using `stroq add <name> --kind mcp --force`. Cancelling an interrupted update restores the prior confirmation as well as the wrapper. Pending retries resolve the recorded source and target by name and refuse another config. Orphans with no record can be removed with `--force --config <path>` or `--force --client <name>`. Thanks @kok-o (#247).
 
 ### Added
 
