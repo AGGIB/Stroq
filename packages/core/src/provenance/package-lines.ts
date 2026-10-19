@@ -1,6 +1,6 @@
 import type { Positioned } from './atom-kinds.js';
 import { commandMap, type CommandMap, type LexedCommand } from './command-map.js';
-import { normalizePackageName } from './package-name.js';
+import { isPythonSource, normalizePackageName, pythonPackageName } from './package-name.js';
 import { readInstaller, readRunner, runnerFamily } from './shell-words.js';
 import { matchCommand } from './command-match.js';
 import { INSTALLER, PHRASE_STARTS, RUNNER, canonicalCommand } from './tool-phrases.js';
@@ -115,9 +115,10 @@ const toolOf = (phrase: string): string => {
 const lastWord = (phrase: string): string => phrase.trim().split(/\s+/).pop()?.toLowerCase() ?? '';
 
 /** Where a package was named, as atoms. */
-const atomsAt = (index: number, packages: readonly string[]): Positioned[] =>
+const atomsAt = (index: number, packages: readonly string[], python = false): Positioned[] =>
   packages.flatMap((pkg): Positioned[] => {
-    const value = normalizePackageName(pkg);
+    // A Python name is recorded and looked up in its one form (PEP 503), an npm name as written.
+    const value = python ? pythonPackageName(normalizePackageName(pkg)) : normalizePackageName(pkg);
     return value.length > 0 ? [{ index, atom: { kind: 'pkg', value } }] : [];
   });
 
@@ -161,8 +162,8 @@ function runnerMentions({ text, reader, isMention, doubtsAt }: Mentions): Found 
       ),
     }));
   return {
-    positioned: lines.flatMap(({ index, reading, verb }) =>
-      atomsAt(index, withCreated(reading.packages, verb)),
+    positioned: lines.flatMap(({ index, reading, verb, family, tool }) =>
+      atomsAt(index, withCreated(reading.packages, verb), isPythonSource(tool, family)),
     ),
     cut: lines.some(({ scan, reading }) => scan.cut && !reading.sure),
     budgetSpent: reader.skipped(),
@@ -180,7 +181,9 @@ function installerMentions({ text, reader, isMention, doubtsAt }: Mentions): Fou
       reading: readInstaller(readTokens(line.scan), doubtsAt(line.index), false, line.tool),
     }));
   return {
-    positioned: lines.flatMap(({ index, reading }) => atomsAt(index, reading.packages)),
+    positioned: lines.flatMap(({ index, reading, tool }) =>
+      atomsAt(index, reading.packages, isPythonSource(tool)),
+    ),
     cut: lines.some(({ scan }) => scan.cut),
     budgetSpent: reader.skipped(),
     doubt: lines.some(({ reading }) => reading.doubt),
@@ -213,14 +216,14 @@ function readCommand(text: string, start: number, command: LexedCommand): Found 
   const match = matchCommand(words);
   if (match === null) return null;
   const rest = words.slice(match.consumed);
+  const family = runnerFamily(words[0] ?? '');
+  const tool = toolOf(words[0] ?? '');
   const found = (packages: string[], doubt: boolean, cut: boolean): Found => ({
-    positioned: atomsAt(start, withCreated(packages, match.verb)),
+    positioned: atomsAt(start, withCreated(packages, match.verb), isPythonSource(tool, family)),
     cut,
     budgetSpent: false,
     doubt: doubt || match.doubt,
   });
-  const family = runnerFamily(words[0] ?? '');
-  const tool = toolOf(words[0] ?? '');
   // The verb was not reached (more options than are looked at): the rest is read as the words of
   // either kind of launcher, and the packages of both are kept.
   if (match.unreached === true) {

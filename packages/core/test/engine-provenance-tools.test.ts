@@ -184,3 +184,39 @@ describe('a command that is no launcher', () => {
     expect((await f.pre(command)).decision.effect).not.toBe('deny');
   });
 });
+
+describe('a Python name is the same name in any spelling', () => {
+  it.each([
+    'pip install evil_helper_fix',
+    'pip install Evil.Helper-Fix',
+    'pip3 install EVIL__HELPER..FIX==1.0',
+    'python -m pip install evil_helper_fix',
+    'uv add evil_helper_fix',
+    'uvx Evil_Helper_Fix',
+    'pipx install evil.helper.fix',
+    'poetry add Evil_Helper-Fix',
+    'pdm add evil_helper_fix',
+    'conda install evil_helper_fix',
+  ])('is denied after a flagged page that named it with a dash: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+
+  it('is denied the other way round, after a page that spelled it with underscores', async () => {
+    const f = fixture();
+    await f.post(pageWith('pip install Evil_Helper_Fix'));
+    expect((await f.pre(`pip install ${NAME}`)).decision.effect).toBe('deny');
+    expect((await f.pre(`uv add ${NAME}`)).decision.effect).toBe('deny');
+  });
+
+  it('does not reach an npm name', async () => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre('npm install evil_helper_fix')).decision.effect).not.toBe('deny');
+    expect((await f.pre('yarn add Evil.Helper.Fix')).decision.effect).not.toBe('deny');
+  });
+});

@@ -8,6 +8,7 @@ import { collectStringsDeep } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
 import { FLOOR_KINDS } from './atom-kinds.js';
 import { extractActionAtoms, normalizePackageName, type UnreadCause } from './atoms.js';
+import { pythonPackageName } from './package-name.js';
 import { commandTexts, isExecStyleTool } from './mcp-commands.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
@@ -129,10 +130,14 @@ function pythonNames(cwd: string): string[] {
  * `npx tsc` after reading the project's own README stays silent.
  */
 export function knownPackages(cwd: string): ReadonlySet<string> {
+  const python = pythonNames(cwd).map(normalizePackageName);
   return new Set(
-    [...packageJsonNames(cwd), ...binNames(cwd), ...pythonNames(cwd)]
-      .map(normalizePackageName)
-      .filter((name) => name.length > 0),
+    [
+      ...[...packageJsonNames(cwd), ...binNames(cwd)].map(normalizePackageName),
+      // A Python dependency is known in every spelling of its name (see `pythonPackageName`).
+      ...python,
+      ...python.map(pythonPackageName),
+    ].filter((name) => name.length > 0),
   );
 }
 

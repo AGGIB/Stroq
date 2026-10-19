@@ -44,3 +44,17 @@ export function normalizePackageName(raw: string): string {
   const base = at > 0 ? name.slice(0, at) : name;
   return withoutVersion(base).toLowerCase();
 }
+
+/**
+ * A Python package name in its one form (PEP 503): lower case, and every run of dashes, underscores
+ * and dots one dash. `Evil_Helper..Fix` and `evil-helper-fix` are the same package on PyPI.
+ */
+export const pythonPackageName = (name: string): string =>
+  name.toLowerCase().replace(/[-_.]+/g, '-');
+
+/** The tools whose packages come from PyPI, and so are named in that form. */
+const PYTHON_TOOLS: ReadonlySet<string> = new Set(['pip', 'uv', 'pipx', 'poetry', 'pdm', 'conda']);
+
+/** Whether the tool (its name in the table) or the kind of runner takes its packages from PyPI. */
+export const isPythonSource = (tool: string, family?: string): boolean =>
+  family === 'python' || PYTHON_TOOLS.has(tool);
