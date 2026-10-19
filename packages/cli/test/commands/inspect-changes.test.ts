@@ -221,8 +221,14 @@ describe('stroq inspect usage errors', () => {
     [['--json', '--sarif']],
     [['--no-such-flag']],
     [['a', 'b']],
+    // Without a base every finding is already there, so --fail-on new could never fail.
+    [['--fail-on', 'new']],
   ])('exits 2 for %j', (argv) => {
     expect(inspect(...argv).code).toBe(2);
+  });
+
+  it('says --fail-on new needs --changed-from', () => {
+    expect(inspect('--fail-on', 'new').err).toContain('--fail-on new needs --changed-from');
   });
 
   it('exits 2 for a folder that does not exist', () => {

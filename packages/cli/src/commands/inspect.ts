@@ -289,6 +289,9 @@ export function parseInspectArgs(argv: readonly string[], cwd = process.cwd()): 
     return usage('--changed-from takes a revision, such as main or HEAD^1');
   const failOn = values['fail-on'] ?? (changedFrom === undefined ? 'any' : 'new');
   if (!isOneOf(FAIL_ON, failOn)) return usage(`--fail-on takes ${FAIL_ON.join(', ')}`);
+  // Without a base every entry was already there, so `new` would never fail anything.
+  if (failOn === 'new' && changedFrom === undefined)
+    return usage('--fail-on new needs --changed-from');
   if (positionals.length > 1) return usage('takes one directory');
   return {
     kind: 'run',
