@@ -154,9 +154,10 @@ describe('instruction files', () => {
   it('fails invisible characters: zero-width, tags and direction overrides', () => {
     const hidden = `Use pnpm.​​\nThen ${String.fromCodePoint(0xe0041, 0xe0042)} and ‮.\n`;
     const hits = of(scanFile('AGENTS.md', hidden), 'instruction-hidden-text');
-    expect(hits).toMatchObject([
-      { severity: 'error', line: 1, value: 'U+200B x2, U+202E x1, U+E0041 x1, U+E0042 x1' },
-    ]);
+    expect(hits).toMatchObject([{ severity: 'error', line: 1 }]);
+    expect(hits[0]?.value).toMatch(
+      /^U\+200B x2, U\+202E x1, U\+E0041 x1, U\+E0042 x1 \(sha256:[0-9a-f]{16}\)$/,
+    );
   });
 
   // Hosts read CLAUDE.md and AGENTS.md as UTF-8 text, and a NUL byte does not stop them.

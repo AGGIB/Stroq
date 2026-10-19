@@ -33,13 +33,19 @@ const isPictograph = (code: number | undefined): boolean =>
 const codeName = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
 
 /**
- * The hidden characters of `text`, counted by code point, and the offset of the first. A joiner
+ * The hidden characters of `text`, counted by code point, in the order they come, and the offset
+ * of the first. A joiner
  * between two pictographs is how an emoji like a family is spelled and carries nothing hidden,
  * since the characters on both sides of it show; a byte order mark at the very start is how
  * some editors save a file.
  */
-function hiddenCharacters(text: string): { counts: Map<number, number>; first: number } {
+function hiddenCharacters(text: string): {
+  counts: Map<number, number>;
+  order: string;
+  first: number;
+} {
   const counts = new Map<number, number>();
+  const order: string[] = [];
   let first = -1;
   let previous: number | undefined;
   for (let at = 0; at < text.length;) {
@@ -52,27 +58,31 @@ function hiddenCharacters(text: string): { counts: Map<number, number>; first: n
       isPictograph(text.codePointAt(at + width));
     if (isHidden(code) && !isLeadingMark && !isEmojiJoiner) {
       counts.set(code, (counts.get(code) ?? 0) + 1);
+      order.push(String.fromCodePoint(code));
       if (first === -1) first = at;
     }
     previous = code;
     at += width;
   }
-  return { counts, first };
+  return { counts, order: order.join(''), first };
 }
 
 /**
  * An instruction file: a notice that it is there (which the report shows only when it is new
- * or changed), and an error when it holds characters nobody reading it would see.
+ * or changed), and an error when it holds characters nobody reading it would see. The error's
+ * value counts them and ends with a digest of them in order: a hidden message swapped for
+ * another made of the same characters is a change.
  */
 export function instructionFile(path: string, text: string): AgentHit[] {
-  const { counts, first } = hiddenCharacters(text);
+  const { counts, order, first } = hiddenCharacters(text);
   const notice = hit('instruction-file', path, 1, 'content', digestOf(text));
   if (counts.size === 0) return [notice];
   const value = [...counts.entries()]
     .sort(([a], [b]) => a - b)
     .map(([code, count]) => `${codeName(code)} x${count}`)
     .join(', ');
-  return [hit('instruction-hidden-text', path, lineAt(text, first), 'hidden', value), notice];
+  const hidden = `${value} (${digestOf(order)})`;
+  return [hit('instruction-hidden-text', path, lineAt(text, first), 'hidden', hidden), notice];
 }
 
 /**
