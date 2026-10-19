@@ -1,14 +1,11 @@
-import { readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   INSTRUCTION_FILE,
   editorAutorunText,
   isAgentDefinitionPath,
   isMcpConfigPath,
   mcpConfigRunsCode,
-  readRegularFile,
 } from '@stroq/core';
-import { isPlainObject, within } from '../commands/config-file.js';
+import { isPlainObject } from '../commands/config-file.js';
 import {
   DEVCONTAINER_HOST_KEY,
   DEVCONTAINER_KEYS,
@@ -245,22 +242,8 @@ export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[]
   return [hit('unreadable-config', path, 1, 'size', why)];
 }
 
-// ---------------------------------------------------------------------------------------------
-// The working tree.
-
-/** A repository is a working tree, not a corpus; these are generous for one. */
-const MAX_DIRS = 4_000;
-const MAX_FILES = 2_000;
-const SKIP_DIRS = new Set([
-  '.git',
-  'node_modules',
-  '.venv',
-  'venv',
-  'vendor',
-  'target',
-  'dist',
-  'build',
-]);
+/** The most bytes of agent files one check reads, in all; real ones are kilobytes. */
+export const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 /** Folders whose contents an agent loads, reported when they are a link out of the repository. */
 export const AGENT_DIRS: ReadonlySet<string> = new Set([
@@ -283,104 +266,30 @@ export const AGENT_DIRS: ReadonlySet<string> = new Set([
   '.github/agents',
 ]);
 
-export interface AgentSurface {
-  readonly hits: readonly AgentHit[];
-  /** True when the walk stopped at a cap, so files deeper in were not read. */
-  readonly capped: boolean;
-}
-
-interface Candidate {
-  readonly rel: string;
-  /** The real path when it is inside the repository, or the link's target when it is not. */
-  readonly real: string;
-  readonly outside: boolean;
-}
-
-const tryRealpath = (path: string): string | undefined => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return undefined;
-  }
-};
-
-const linkText = (path: string): string => {
-  try {
-    return readlinkSync(path);
-  } catch {
-    return 'outside the repository';
-  }
-};
-
 /**
- * The files the readers want, found by a walk that stops at its caps, skips the folders that
- * hold other people's code, and follows a link only while it stays inside the repository.
+ * Folder names that make what is under them something an agent or editor loads, wherever they
+ * stand: the readers above choose by them. A path through one is read under its own name even
+ * when the same folder was read under another.
  */
-function walk(root: string): { found: Candidate[]; capped: boolean } {
-  const realRoot = tryRealpath(root) ?? root;
-  const found: Candidate[] = [];
-  const queue: { abs: string; rel: string }[] = [{ abs: root, rel: '' }];
-  const seen = new Set<string>([realRoot]);
-  let dirs = 0;
-  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    dirs += 1;
-    if (dirs > MAX_DIRS || found.length >= MAX_FILES) return { found, capped: true };
-    let entries;
-    try {
-      entries = readdirSync(next.abs, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const abs = join(next.abs, entry.name);
-      const rel = next.rel === '' ? entry.name : `${next.rel}/${entry.name}`;
-      const real = entry.isSymbolicLink() ? tryRealpath(abs) : abs;
-      if (real === undefined) continue;
-      if (entry.isSymbolicLink() && !within(real, realRoot)) {
-        if (isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase()))
-          found.push({ rel, real: linkText(abs), outside: true });
-        continue;
-      }
-      const isDir = entry.isSymbolicLink() ? isDirectory(real) : entry.isDirectory();
-      if (isDir) {
-        if (!seen.has(real)) {
-          seen.add(real);
-          queue.push({ abs, rel });
-        }
-      } else if (isSurfacePath(rel)) {
-        found.push({ rel, real, outside: false });
-      }
-    }
-  }
-  return { found, capped: false };
-}
+const AGENT_DIR_NAMES: ReadonlySet<string> = new Set([
+  '.claude',
+  '.cursor',
+  '.codex',
+  '.gemini',
+  '.agents',
+  '.agent',
+  '.windsurf',
+  '.devin',
+  '.vscode',
+  '.devcontainer',
+  '.github',
+  '.kiro',
+  '.roo',
+]);
 
-const isDirectory = (path: string): boolean => {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-};
-
-function readCandidate(candidate: Candidate): SourceRead {
-  if (candidate.outside) return { kind: 'outside', target: candidate.real };
-  try {
-    const read = readRegularFile(candidate.real, MAX_FILE_BYTES);
-    if (read.kind === 'text') return { kind: 'text', text: read.text };
-    if (read.kind === 'too-large') return { kind: 'too-large', size: read.size };
-    return { kind: 'unreadable' };
-  } catch {
-    return { kind: 'unreadable' };
-  }
-}
-
-/** What the working tree at `root` runs by itself, file by file in the order of their paths. */
-export function agentSurface(root: string): AgentSurface {
-  const { found, capped } = walk(root);
-  const hits = [...found]
-    .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
-    .flatMap((candidate) => hitsForRead(candidate.rel, readCandidate(candidate)));
-  return { hits, capped };
-}
+/** Whether a repository-relative path goes through a folder an agent or editor loads from. */
+export const inAgentFolder = (path: string): boolean =>
+  path
+    .toLowerCase()
+    .split('/')
+    .some((part) => AGENT_DIR_NAMES.has(part));

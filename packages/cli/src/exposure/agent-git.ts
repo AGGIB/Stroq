@@ -5,6 +5,7 @@ import { hit, type AgentHit } from './agent-kinds.js';
 import {
   AGENT_DIRS,
   MAX_FILE_BYTES,
+  MAX_TOTAL_BYTES,
   hitsForRead,
   isSurfacePath,
   type SourceRead,
@@ -36,8 +37,6 @@ const MAX_LISTING_BYTES = 256 * 1024 * 1024;
 const MAX_LINK_HOPS = 16;
 const MAX_LINKS = 500;
 const MAX_CANDIDATES = 2_000;
-/** The most bytes of agent files one check reads from a commit; real ones are kilobytes. */
-const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_LINK_BYTES = 4096;
 const SYMLINK = '120000';
 const isBlob = (e: TreeEntry): boolean => e.mode === '100644' || e.mode === '100755';

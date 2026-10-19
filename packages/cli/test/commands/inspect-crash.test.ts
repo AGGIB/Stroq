@@ -9,8 +9,8 @@ import { runInspect } from '../../src/commands/inspect.js';
  * through to the report, so a check that stops on an error must never exit 1 as well: it would
  * read as a report that was written, when none was.
  */
-vi.mock('../../src/exposure/agent-surface.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/exposure/agent-surface.js')>();
+vi.mock('../../src/exposure/agent-tree.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/exposure/agent-tree.js')>();
   return {
     ...actual,
     agentSurface: () => {

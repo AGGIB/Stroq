@@ -1,0 +1,186 @@
+import { readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from 'node:fs';
+import { join } from 'node:path';
+import { readRegularFile } from '@stroq/core';
+import { within } from '../commands/config-file.js';
+import { hit, type AgentHit } from './agent-kinds.js';
+import {
+  AGENT_DIRS,
+  MAX_FILE_BYTES,
+  MAX_TOTAL_BYTES,
+  hitsForRead,
+  inAgentFolder,
+  isSurfacePath,
+  type SourceRead,
+} from './agent-surface.js';
+
+/**
+ * What a working tree runs by itself, read from the disk: `stroq inspect` without a base, on a
+ * clone, a zip download or any folder. The walk reads the agent and editor folders first, so no
+ * number of other folders can push them past its caps, and a cap that stops it fails the check.
+ * It follows a link only while the link stays inside the folder.
+ */
+
+/** A repository is a working tree, not a corpus; these are generous for one. */
+export const WALK_CAPS = { dirs: 20_000, files: 5_000 } as const;
+
+/** Folders of other people's code, skipped unless they are inside an agent or editor folder. */
+const SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.venv',
+  'venv',
+  'vendor',
+  'target',
+  'dist',
+  'build',
+]);
+
+export interface AgentSurface {
+  readonly hits: readonly AgentHit[];
+  /** True when the walk stopped at a cap, so files further on were not read. */
+  readonly capped: boolean;
+}
+
+interface Candidate {
+  readonly rel: string;
+  /** The real path when it is inside the repository, or the link's target when it is not. */
+  readonly real: string;
+  readonly outside: boolean;
+}
+
+interface Dir {
+  readonly abs: string;
+  readonly rel: string;
+  readonly real: string;
+  /** The folder this one was reached from, to tell a link that loops back up. */
+  readonly parent: Dir | undefined;
+}
+
+const tryRealpath = (path: string): string | undefined => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+};
+
+const linkText = (path: string): string => {
+  try {
+    return readlinkSync(path);
+  } catch {
+    return 'outside the repository';
+  }
+};
+
+const isDirectory = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const entriesOf = (path: string): Dirent[] => {
+  try {
+    return readdirSync(path, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+};
+
+/** Whether `real` is a folder on the way to `dir`: a link to it would walk in circles. */
+function isOnTheWay(dir: Dir | undefined, real: string): boolean {
+  for (let at = dir; at !== undefined; at = at.parent) if (at.real === real) return true;
+  return false;
+}
+
+/** The queues of the walk: folders inside agent and editor folders are taken first. */
+class Queue {
+  private readonly agent: Dir[] = [];
+  private readonly other: Dir[] = [];
+  /**
+   * A folder reached through an agent folder is walked under each name, since its name decides
+   * what reads its files; any other folder only once.
+   */
+  private readonly seen = new Set<string>();
+
+  add(dir: Dir): void {
+    const isAgent = inAgentFolder(dir.rel);
+    const key = isAgent ? `${dir.real}\0${dir.rel.toLowerCase()}` : dir.real;
+    if (this.seen.has(key) || isOnTheWay(dir.parent, dir.real)) return;
+    this.seen.add(key);
+    (isAgent ? this.agent : this.other).push(dir);
+  }
+
+  take(): Dir | undefined {
+    return this.agent.shift() ?? this.other.shift();
+  }
+}
+
+interface Walked {
+  readonly found: readonly Candidate[];
+  /** Where the walk stopped at a cap, or undefined when it read everything. */
+  readonly stoppedAt: string | undefined;
+}
+
+/** The files the readers want, the agent folders first, until a cap stops the walk. */
+function walk(root: string): Walked {
+  const realRoot = tryRealpath(root) ?? root;
+  const found: Candidate[] = [];
+  const queue = new Queue();
+  queue.add({ abs: root, rel: '', real: realRoot, parent: undefined });
+  let dirs = 0;
+  for (let next = queue.take(); next !== undefined; next = queue.take()) {
+    dirs += 1;
+    if (dirs > WALK_CAPS.dirs) return { found, stoppedAt: next.rel || '.' };
+    const skip = inAgentFolder(next.rel) ? new Set<string>() : SKIP_DIRS;
+    for (const entry of entriesOf(next.abs)) {
+      if (entry.name === '.git' || skip.has(entry.name)) continue;
+      const rel = next.rel === '' ? entry.name : `${next.rel}/${entry.name}`;
+      if (found.length >= WALK_CAPS.files) return { found, stoppedAt: rel };
+      const abs = join(next.abs, entry.name);
+      const isLink = entry.isSymbolicLink();
+      const real = isLink ? tryRealpath(abs) : join(next.real, entry.name);
+      if (real === undefined) continue;
+      if (isLink && !within(real, realRoot)) {
+        if (isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase()))
+          found.push({ rel, real: linkText(abs), outside: true });
+        continue;
+      }
+      if (isLink ? isDirectory(real) : entry.isDirectory())
+        queue.add({ abs, rel, real, parent: next });
+      else if (isSurfacePath(rel)) found.push({ rel, real, outside: false });
+    }
+  }
+  return { found, stoppedAt: undefined };
+}
+
+/** Reads one file, charging its size to what is `left` of the budget. */
+function readCandidate(candidate: Candidate, left: { bytes: number }): SourceRead {
+  if (candidate.outside) return { kind: 'outside', target: candidate.real };
+  try {
+    const size = statSync(candidate.real).size;
+    if (size <= MAX_FILE_BYTES && size > left.bytes)
+      return { kind: 'over-budget', budget: MAX_TOTAL_BYTES };
+    const read = readRegularFile(candidate.real, MAX_FILE_BYTES);
+    if (read.kind === 'too-large') return { kind: 'too-large', size: read.size };
+    if (read.kind !== 'text') return { kind: 'unreadable' };
+    left.bytes -= Buffer.byteLength(read.text);
+    return { kind: 'text', text: read.text };
+  } catch {
+    return { kind: 'unreadable' };
+  }
+}
+
+const byRel = (a: Candidate, b: Candidate): number => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+
+/** What the working tree at `root` runs by itself, file by file in the order of their paths. */
+export function agentSurface(root: string): AgentSurface {
+  const { found, stoppedAt } = walk(root);
+  const left = { bytes: MAX_TOTAL_BYTES };
+  const hits = [...found]
+    .sort(byRel)
+    .flatMap((candidate) => hitsForRead(candidate.rel, readCandidate(candidate, left)));
+  if (stoppedAt === undefined) return { hits, capped: false };
+  const why = `the walk stopped here, after ${WALK_CAPS.dirs} folders or ${WALK_CAPS.files} agent files`;
+  return { hits: [...hits, hit('unreadable-config', stoppedAt, 1, 'walk', why)], capped: true };
+}

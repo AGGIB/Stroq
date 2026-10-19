@@ -10,7 +10,8 @@ import {
 } from '../exposure/agent-change.js';
 import { GitError, agentChanges, type AgentChanges } from '../exposure/agent-git.js';
 import { groupHits, textGroup, textNotices } from '../exposure/agent-report.js';
-import { agentSurface, type AgentHit } from '../exposure/agent-surface.js';
+import type { AgentHit } from '../exposure/agent-surface.js';
+import { agentSurface } from '../exposure/agent-tree.js';
 import { hardeningExports } from '../exposure/git-hardening.js';
 import { annotations, githubSummary, type PreTrustItem } from '../exposure/github-format.js';
 import { WHY, repoFindings, repoSurface, type RepoSurface } from '../exposure/repo-surface.js';
