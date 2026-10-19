@@ -93,17 +93,58 @@ export function topLevel(dir: string): string {
   }
 }
 
-/** `git ls-tree -r -l -z`: every blob, link and submodule of a commit, by path. */
-export function listTree(top: string, commit: string): Map<string, TreeEntry> {
-  const out = run(top, ['ls-tree', '-r', '-l', '-z', '--full-tree', commit], MAX_LISTING_BYTES);
-  const tree = new Map<string, TreeEntry>();
-  for (const record of out.toString('utf8').split('\0')) {
-    const tab = record.indexOf('\t');
-    if (tab === -1) continue;
-    const [mode = '', , oid = '', size = '-'] = record.slice(0, tab).split(/ +/);
-    tree.set(record.slice(tab + 1), { mode, oid, size: size === '-' ? -1 : Number(size) });
+/** Decodes UTF-8 and throws on bytes that are not, keeping a byte order mark as a character. */
+const STRICT = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * The NUL-separated records of a listing as text, and which of them are not UTF-8. Git keeps a
+ * path as bytes: two that differ only in bytes that are not UTF-8 decode to the same text, so
+ * such a path is marked, for the caller to report rather than to read.
+ */
+function records(out: Buffer): { readonly text: string[]; readonly lossy: ReadonlySet<number> } {
+  try {
+    return { text: STRICT.decode(out).split('\0'), lossy: new Set() };
+  } catch {
+    // Some record is not UTF-8: each one is decoded on its own to find which.
   }
-  return tree;
+  const text: string[] = [];
+  const lossy = new Set<number>();
+  for (let at = 0; ;) {
+    const end = out.indexOf(0, at);
+    const bytes = out.subarray(at, end === -1 ? out.length : end);
+    try {
+      text.push(STRICT.decode(bytes));
+    } catch {
+      lossy.add(text.length);
+      text.push(bytes.toString('utf8'));
+    }
+    if (end === -1) return { text, lossy };
+    at = end + 1;
+  }
+}
+
+export interface Tree {
+  /** Every blob, link and submodule of a commit, by path. */
+  readonly entries: Map<string, TreeEntry>;
+  /** Paths that are not UTF-8, as decoded: each may stand for more than one path of the tree. */
+  readonly lossy: readonly string[];
+}
+
+/** `git ls-tree -r -l -z`: every blob, link and submodule of a commit, by path. */
+export function listTree(top: string, commit: string): Tree {
+  const out = run(top, ['ls-tree', '-r', '-l', '-z', '--full-tree', commit], MAX_LISTING_BYTES);
+  const entries = new Map<string, TreeEntry>();
+  const lossy = new Set<string>();
+  const listing = records(out);
+  listing.text.forEach((record, i) => {
+    const tab = record.indexOf('\t');
+    if (tab === -1) return;
+    const [mode = '', , oid = '', size = '-'] = record.slice(0, tab).split(/ +/);
+    const path = record.slice(tab + 1);
+    entries.set(path, { mode, oid, size: size === '-' ? -1 : Number(size) });
+    if (listing.lossy.has(i)) lossy.add(path);
+  });
+  return { entries, lossy: [...lossy] };
 }
 
 /**
@@ -126,7 +167,8 @@ export function changedPaths(top: string, base: string, head: string): Map<strin
     ],
     MAX_LISTING_BYTES,
   );
-  const parts = out.toString('utf8').split('\0');
+  // Decoded as the tree is, so a path that is not UTF-8 is found under the same text.
+  const parts = records(out).text;
   const changed = new Map<string, Changed>();
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const [oldMode = '', , oldOid = '', , status = ''] = (parts[i] as string).slice(1).split(' ');

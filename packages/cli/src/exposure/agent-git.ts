@@ -62,6 +62,8 @@ export const GIT_CAPS = {
   /** The most entries one check walks through links to folders. */
   steps: 50_000,
 } as const;
+/** What a byte that is not UTF-8 decodes to. */
+const REPLACEMENT = '\uFFFD';
 /** A link's target is a path; one longer than a path can be is not a link a checkout makes. */
 const MAX_LINK_BYTES = 4096;
 
@@ -110,7 +112,9 @@ function readLinks(top: string, tree: ReadonlyMap<string, TreeEntry>, sorted: re
     const blobs = readBlobs(top, small);
     for (const p of now) {
       const text = blobs.get(entryAt(tree, p).oid);
-      if (text !== undefined) targets.set(p, text);
+      // A target that is not UTF-8 names a file the check cannot tell from another: left unread,
+      // which fails (a stray replacement character errs the same way).
+      if (text !== undefined && !text.includes(REPLACEMENT)) targets.set(p, text);
     }
     next = [...linksOnTheWay(view, now)].filter((p) => !tried.has(p));
   }
@@ -222,7 +226,7 @@ function readPlan(
 }
 
 function compare(top: string, base: string, head: string) {
-  const tree = listTree(top, head);
+  const { entries: tree, lossy } = listTree(top, head);
   const sorted = [...tree.keys()].sort(byPath);
   const changed = changedPaths(top, base, head);
   const links = readLinks(top, tree, sorted);
@@ -288,11 +292,27 @@ function compare(top: string, base: string, head: string) {
     ...found,
     ...runFileChanges(found, { touched, touchedFiles, scripts }),
     ...limits,
+    ...unnamed(lossy, changed),
     ...bareChanges(tree, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
   const byFile = hits.sort((a, b) => byPath(a.file, b.file));
   return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };
+}
+
+/**
+ * A path of an agent folder, or of a config, whose name is not UTF-8. It decodes to the same text
+ * as another path that differs only in those bytes, so one of them hid the other from the check,
+ * while a host that reads names as bytes loads both. It is not read, and it fails.
+ */
+function unnamed(lossy: readonly string[], changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const why =
+    'its name is not UTF-8, so the check cannot tell it from another name that reads the same, and did not read it';
+  return lossy
+    .filter((path) => linkMatters(path))
+    .map((path) =>
+      tagged(hit('unreadable-config', path, 1, 'path', why), changed.has(path) ? 'new' : 'present'),
+    );
 }
 
 /** The most package.json files one check reads for the npm scripts that entries already there run. */
