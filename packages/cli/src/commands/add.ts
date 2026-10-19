@@ -9,6 +9,7 @@ import { currentTerminal } from '../ui/terminal.js';
 export const ADD_OPTIONS = {
   user: { type: 'boolean' },
   restore: { type: 'boolean' },
+  rollback: { type: 'boolean' },
   kind: { type: 'string' },
   client: { type: 'string' },
   config: { type: 'string' },
@@ -71,6 +72,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
       entryArgv,
       user: parsed.values.user === true,
       restore: parsed.values.restore === true,
+      rollback: parsed.values.rollback === true,
       ...(parsed.values.client === undefined ? {} : { client: parsed.values.client }),
       ...(parsed.values.config === undefined ? {} : { config: parsed.values.config }),
       ...(parsed.values.entrypoint === undefined ? {} : { entrypoint: parsed.values.entrypoint }),
@@ -91,6 +93,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     terminal: currentTerminal(),
     user: parsed.values.user === true,
     restore: parsed.values.restore === true,
+    rollback: parsed.values.rollback === true,
     // Only what the person said: without --kind the files tell what the folder is.
     ...(parsed.values.kind === 'skill' ? { kind: 'skill' as const } : {}),
   });

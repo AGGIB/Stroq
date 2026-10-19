@@ -28,6 +28,19 @@ const start = agents.indexOf('#### `--strict`');
 const section = agents.slice(start, agents.indexOf('**Limits.**', start));
 
 describe('the --strict section of docs/AGENTS.md', () => {
+  it('keeps SECURITY.md aligned with the completed follow-ups', () => {
+    const security = readFileSync(
+      fileURLToPath(new URL('../../../../SECURITY.md', import.meta.url)),
+      'utf8',
+    );
+    expect(security).not.toContain('ending the server signals only the direct child on POSIX');
+    expect(security).not.toContain(
+      "the request it belonged to is left to the client's own timeout",
+    );
+    expect(security).toContain('a per-string view for each distinct decoded string');
+    expect(security).toContain('including unrelated concurrent requests');
+  });
+
   it('is there to be read', () => {
     expect(start).toBeGreaterThan(0);
     expect(section.length).toBeGreaterThan(2000);
@@ -74,11 +87,16 @@ describe('the --strict section of docs/AGENTS.md', () => {
     for (const escape of ['\\u2028', '\\u2029', '\\u0085']) expect(section).toContain(escape);
   });
 
-  it('says that the messages it forwards on the server\u2019s initiative are neither counted nor audited', () => {
-    expect(section).toContain('are not counted, audited or rate-limited');
+  it('says that the messages it forwards on the server\u2019s initiative are counted, audited and capped', () => {
+    expect(section).toContain('are counted, audited and capped');
+    expect(section).toContain('mcp-strict-forwarded');
   });
 
   it('says what is audited and remembered of a result once, and what the extra views add', () => {
+    expect(section).toContain('up to three aggregate texts plus one `per-string` view');
+    expect(section).toContain('not capped at three scans');
+    expect(section).toContain('without a shared deadline for that second pass');
+    expect(section).toContain('historical measurements');
     expect(section).toContain('audited with one line and remembered once');
     expect(section).toContain('extra readings');
     expect(section).toContain('remembers the atoms of EVERY view');
@@ -97,15 +115,18 @@ describe('the --strict section of docs/AGENTS.md', () => {
       expect(section).toContain('The dry run uses the bundled rules');
     });
 
-    it('says ending the server signals the direct child on POSIX and the tree on Windows', () => {
-      expect(section).toContain('Ending the server signals the direct child');
+    it('says ending the server signals the process group on POSIX and the tree on Windows', () => {
+      expect(section).toContain(
+        'Ending the server signals the process group on POSIX and the tree on Windows',
+      );
       expect(section).toContain('`sh -c` or `npx`');
       expect(section).toContain('On Windows the whole tree is killed');
     });
 
     it('says what is shared with the default proxy: end-anchored rules and the window', () => {
       expect(section).toContain('ATR-2026-02009');
-      expect(section).toContain('in strict mode and in the default proxy alike');
+      expect(section).toContain('in the default proxy');
+      expect(section).toContain('per-string');
       expect(section).toContain(
         `past the ${STRICT_MAX_TEXT_CHARS.toLocaleString('en-US')}-character window`,
       );
@@ -115,6 +136,13 @@ describe('the --strict section of docs/AGENTS.md', () => {
     it('says older and newer versions do not mix', () => {
       expect(section).toContain('fails on the unknown option');
       expect(section).toContain('silently');
+    });
+
+    it('says a batch from the server is withheld whole while answering its requests', () => {
+      expect(section).toContain('batch from the server is withheld whole as `invalid-shape`');
+      expect(section).toContain('any waiting requests whose ids it carries are answered');
+      expect(section).toContain('all requests still pending on this wrapper receive fixed errors');
+      expect(section).toContain('fail unrelated concurrent requests too');
     });
 
     it('is the same as SECURITY.md in its scope: the deadline is about the scan', () => {

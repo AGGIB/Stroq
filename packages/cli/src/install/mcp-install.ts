@@ -18,6 +18,7 @@ import {
   subjectOf,
   type McpInstallOptions,
   type McpPendingRecord,
+  type McpPrevious,
   type McpRecord,
 } from './mcp-record.js';
 import { showMcpScreen } from './mcp-screen.js';
@@ -26,7 +27,7 @@ import { collectMcpStore, tidyStore } from './store-gc.js';
 import { putStore, readStoredTreeOf } from './store.js';
 
 export { entrypointOf } from '../mcp/entrypoint.js';
-export type { McpInstallOptions, McpRecord } from './mcp-record.js';
+export type { McpInstallOptions, McpPrevious, McpRecord } from './mcp-record.js';
 
 /** The question: the digest to type when anything but the confirmed state would be written, else a y/N. */
 async function confirmed(options: McpInstallOptions, prepared: PreparedMcp): Promise<boolean> {
@@ -48,11 +49,18 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       throw new Error('the lock changed while confirming; read and confirm again');
     if (previous !== undefined)
       await readStoredTreeOf(options.stroqHome, previous.digest, subjectOf(name, previous));
+    if (options.rollback && previous?.previous !== undefined)
+      await readStoredTreeOf(
+        options.stroqHome,
+        previous.previous.digest,
+        subjectOf(name, previous),
+      );
     await putStore(options.stroqHome, made.tree, digest);
     assertWriteAllowed(file, targetRules(selected));
     const fresh = loadConfig(file);
     if (!jsonEqual(currentEntry(fresh.config, name), current))
       throw new Error('the client config changed while confirming; read and confirm again');
+    const interrupted = pendingRecordOf(lock, name);
     const pendingRecord: McpPendingRecord = {
       kind: 'mcp',
       status: 'pending',
@@ -68,7 +76,8 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       passport: made.passport,
       written,
       original: prepared.original,
-      replaced: current,
+      replaced: interrupted === undefined ? current : interrupted.replaced,
+      ...(previous === undefined ? {} : { previousRecord: previous }),
       history: [...prepared.history],
     };
     await writePassports(options.stroqHome, {
@@ -79,13 +88,33 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       v: 1,
       at: new Date().toISOString(),
       name,
-      action: options.restore ? 'restore' : previous === undefined ? 'add' : 'update',
+      action: options.rollback
+        ? 'rollback'
+        : options.restore
+          ? 'restore'
+          : previous === undefined
+            ? 'add'
+            : 'update',
       from: previous?.digest ?? null,
       to: digest,
       material,
       confirmed: true,
       stroq: stroqVersion(),
     };
+    const retained: McpPrevious | undefined = options.rollback
+      ? undefined
+      : previous === undefined
+        ? undefined
+        : previous.digest !== digest
+          ? {
+              digest: previous.digest,
+              entrypoint: previous.entrypoint,
+              passEnv: previous.passEnv,
+              ...(previous.cwd === undefined ? {} : { cwd: previous.cwd }),
+              passport: previous.passport,
+              written: previous.written,
+            }
+          : previous.previous;
     const record: McpRecord = {
       kind: 'mcp',
       status: 'confirmed',
@@ -102,6 +131,7 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       written,
       original: prepared.original,
       history: [...prepared.history, receipt],
+      ...(retained === undefined ? {} : { previous: retained }),
     };
     const next = { ...lock, mcp: { ...(lock.mcp ?? {}), [name]: record } };
     try {
@@ -116,10 +146,20 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
       throw error;
     }
     await auditReceipt(options.stroqHome, receipt, 'mcp');
-    if (previous !== undefined)
-      await tidyStore(options.terminal, previous.digest, () =>
-        collectMcpStore(options.stroqHome, next, previous.digest),
+    if (previous !== undefined) {
+      const evicted = options.rollback
+        ? previous.digest
+        : (previous.previous?.digest ?? previous.digest);
+      await tidyStore(options.terminal, evicted, () =>
+        collectMcpStore(
+          options.stroqHome,
+          next,
+          previous.digest,
+          previous.previous?.digest,
+          ...previous.history.flatMap((item) => [item.from ?? undefined, item.to ?? undefined]),
+        ),
       );
+    }
     return record;
   });
 }
@@ -132,6 +172,10 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   const pending = pendingRecordOf(initial, name);
   if (previous === undefined) {
     if (pending !== undefined) {
+      const restored = pending.previousRecord;
+      const replacement =
+        restored?.written ??
+        (isWrappedEntry(pending.replaced) ? pending.original : pending.replaced);
       const selected = recordedTarget(pending);
       const { file } = selected;
       assertWriteAllowed(file, targetRules(selected));
@@ -142,7 +186,7 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
           'the client config entry changed outside Stroq; it was kept (use --force to remove it)',
         );
       options.terminal.write(
-        `Remove unconfirmed MCP server ${name} from ${outsideLine(JSON.stringify(file))}\nPending sha256:${pending.digest}\n${pending.replaced === null || pending.replaced === undefined ? 'The entry is deleted.' : 'The replaced entry is restored.'}\n`,
+        `Remove unconfirmed MCP server ${name} from ${outsideLine(JSON.stringify(file))}\nPending sha256:${pending.digest}\n${replacement === null || replacement === undefined ? 'The entry is deleted.' : 'The replaced entry is restored.'}\n`,
       );
       const yes =
         options.force === true
@@ -162,14 +206,15 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
         if (!jsonEqual(currentEntry(fresh.config, name), current))
           throw new Error('the client config changed while confirming; read and confirm again');
         const rest = { ...(lock.mcp ?? {}) };
-        delete rest[name];
+        if (restored !== undefined) rest[name] = restored;
+        else delete rest[name];
         const next = { ...lock, mcp: rest };
         await commitMcpConfig(
           file,
           withServer(
             fresh.config,
             name,
-            (pending.replaced as Record<string, unknown> | null) ?? undefined,
+            (replacement as Record<string, unknown> | null) ?? undefined,
           ),
           () => writePassports(options.stroqHome, next),
           { ...targetRules(selected), before: fresh.text },
@@ -251,7 +296,13 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
     );
     await auditReceipt(options.stroqHome, receipt, 'mcp');
     await tidyStore(options.terminal, previous.digest, () =>
-      collectMcpStore(options.stroqHome, next, previous.digest),
+      collectMcpStore(
+        options.stroqHome,
+        next,
+        previous.digest,
+        previous.previous?.digest,
+        ...previous.history.flatMap((item) => [item.from ?? undefined, item.to ?? undefined]),
+      ),
     );
   });
 }

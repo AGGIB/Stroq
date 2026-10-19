@@ -87,17 +87,38 @@ export class ProvenanceRecorder {
     }
   }
 
+  /** Notes the loss of hashes, never throwing; the error message, or null. Falls back to the wider note. */
+  private async noteDigests(store: ProvenanceStore, sessionId: string): Promise<string | null> {
+    try {
+      await store.noteDigestsLost(sessionId);
+      return null;
+    } catch (err) {
+      const wider = await this.note(store, sessionId);
+      return wider === null ? null : messageOf(err);
+    }
+  }
+
   /**
-   * Marks that a result which taints the session is about to be recorded. The taint is written
-   * first and the records after, with a secret-index lookup and a lock between; a process that
-   * goes in that gap would leave a session that is flagged and has no trace. Never throws:
-   * failure to write the marker must not prevent the taint or the attempt to write records.
+   * Marks that a scanned result is about to be recorded, before it is scanned. The scan, the taint
+   * and the records come one after the other, with a secret-index lookup and a lock between; a
+   * process that stops anywhere in that stretch (a scan that does not finish, the hook's deadline,
+   * a crash) would leave a session that read the result and has no trace of it, and a flagged one
+   * that is not tainted. The marker stays and the session reads as incomplete. Never throws:
+   * failure to write the marker must not prevent the scan or the attempt to write records.
    */
   async begin(sessionId: string): Promise<string | undefined> {
     if (!this.store) return undefined;
     const owner = randomUUID();
     await this.store.setPending(sessionId, true, owner).catch(() => undefined);
     return owner;
+  }
+
+  /**
+   * Takes off the marker of an operation that was given up on: its result was never delivered, so
+   * nothing the session did not see is unrecorded. Never throws.
+   */
+  async release(sessionId: string, owner: string): Promise<void> {
+    if (this.store) await this.settle(this.store, sessionId, owner);
   }
 
   /** Takes off only this operation's marker, once its records or loss note are durable. */
@@ -123,16 +144,26 @@ export class ProvenanceRecorder {
     suspect: boolean,
     lost: boolean,
     pendingOwner?: string,
+    digestsLost = false,
   ): Promise<ProvenanceOutcome> {
     const store = this.store;
     if (!store) return { error: null, incomplete: false };
+    // Hashes left out are a narrow loss, noted apart: it makes an unrecorded blob a question and
+    // leaves the floor of packages and pipe-to-shell commands alone. A note that cannot be written
+    // is the wider loss, since nothing else would say that hashes went.
+    const digestNote = digestsLost ? await this.noteDigests(store, event.sessionId) : null;
     const noted = lost ? await this.note(store, event.sessionId) : null;
     // Report whether the permanent loss note was written. If it failed, an operation marker
     // can still keep the session reading as incomplete, and the failure is logged.
     const marked = lost && noted === null;
+    // The operation's marker comes off only when every loss is durably noted, the narrow one too.
+    // A note that could not be written leaves the marker as the evidence: it goes stale, and the
+    // session then asks about what nothing accounts for.
+    const digestsNoted = !digestsLost || digestNote === null;
+    const settles = (!lost || marked) && digestsNoted;
     if (readings.every((reading) => reading.atoms.length === 0)) {
-      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
-      return { error: noted, incomplete: marked };
+      if (settles) await this.settle(store, event.sessionId, pendingOwner);
+      return { error: noted ?? digestNote, incomplete: marked };
     }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
     // The secret index must read the text each atom came from, including extra readings:
@@ -153,12 +184,12 @@ export class ProvenanceRecorder {
     }
     try {
       await store.record(event.sessionId, inputs);
-      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
-      return { error: noted, incomplete: marked };
+      if (settles) await this.settle(store, event.sessionId, pendingOwner);
+      return { error: noted ?? digestNote, incomplete: marked };
     } catch (err) {
       const failed = await this.note(store, event.sessionId);
       // If the permanent note failed too, the operation's marker is the evidence that remains.
-      if (failed === null) await this.settle(store, event.sessionId, pendingOwner);
+      if (failed === null && digestsNoted) await this.settle(store, event.sessionId, pendingOwner);
       return { error: messageOf(err), incomplete: failed === null };
     }
   }

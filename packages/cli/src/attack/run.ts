@@ -12,6 +12,12 @@ import {
   type StepKind,
   type StepResult as SharedStepResult,
 } from '../harness/step.js';
+import {
+  hostStepSupport,
+  type AttackChannel,
+  type AttackHost,
+  type ChannelStatus,
+} from '../hosts/channels.js';
 import { ATTACK_CORPUS_ID, buildMeta, type ReportMeta } from './report.js';
 import {
   CWD_PLACEHOLDER,
@@ -37,8 +43,12 @@ export { substituteCwd };
  *   of a command ran past its deadline). A timeout fails closed, which looks exactly like a rule
  *   catching the attack, so it is never counted as one.
  * - `error`: a step threw; there is no answer.
+ * - `unsupported`: under `--host <id>`, at least one step uses a channel the host never sends
+ *   (`not seen` or `unknown`). Counted apart from `blocked`, `asked` and `passed`, and never as
+ *   a protection.
  */
-export type Outcome = 'blocked' | 'asked' | 'asked-by-limit' | 'passed' | 'timeout' | 'error';
+export type Outcome =
+  'blocked' | 'asked' | 'asked-by-limit' | 'passed' | 'timeout' | 'error' | 'unsupported';
 
 /** A step as `stroq attack` reports it: the shared result, with the expectation the scenario set. */
 export type StepResult = SharedStepResult & { readonly expect: StepExpectation };
@@ -57,15 +67,31 @@ export interface ScenarioResult {
   readonly inconclusive: boolean;
   /** What made the scenario inconclusive, step by step; null when it is not. */
   readonly reason: string | null;
-  /** True when every step produced what the scenario expects, and none timed out or threw. */
+  /** True when every step produced what the scenario expects, and none timed out, threw or was unsupported. */
   readonly ok: boolean;
-  /** The rule that decided the attack step, or null when it was allowed by default. */
+  /** The rule that decided the attack step, or null when it was allowed by default or unsupported. */
   readonly ruleId: string | null;
   readonly steps: readonly StepResult[];
+  /** Count of steps in this scenario that the target `--host` never sends. */
+  readonly unsupportedSteps?: number;
+}
+
+export interface UnsupportedStepRecord {
+  readonly scenarioId: string;
+  readonly step: number;
+  readonly phase: 'pre' | 'post';
+  readonly tool: string;
+  readonly channel: AttackChannel;
+  readonly status: ChannelStatus;
+  readonly evidence: string;
+}
+
+export interface RunAttackOptions {
+  readonly host?: AttackHost;
 }
 
 /**
- * How many scenarios ended in each outcome. The six outcome counts partition the scenarios: each
+ * How many scenarios ended in each outcome. The outcome counts partition the scenarios: each
  * scenario is counted once, in the bucket of its `outcome`, so they add up to the number of
  * scenarios. `inconclusive` counts the scenarios flagged inconclusive, and is not part of that sum:
  * it is the timeouts and the errors, and also a scenario whose attack passed after an earlier step
@@ -80,6 +106,10 @@ export interface AttackTotals {
   readonly timeout: number;
   readonly error: number;
   readonly inconclusive: number;
+  /** Scenarios with at least one step the target `--host` never sends (present when `--host` is set). */
+  readonly unsupported?: number;
+  /** Total steps across all scenarios that the target `--host` never sends (present when `--host` is set). */
+  readonly unsupportedSteps?: number;
 }
 
 export interface AttackReport {
@@ -88,9 +118,11 @@ export interface AttackReport {
   readonly meta: ReportMeta;
   /** `default` or the path of the policy override that was used. */
   readonly policy: string;
+  readonly host?: AttackHost;
+  readonly unsupportedSteps?: readonly UnsupportedStepRecord[];
   readonly scenarios: readonly ScenarioResult[];
   readonly totals: AttackTotals;
-  /** False when an attack passed, a scenario is inconclusive, or any scenario did not behave as expected. */
+  /** False when an attack passed, a scenario is inconclusive, a step is unsupported, or any scenario did not behave as expected. */
   readonly ok: boolean;
 }
 
@@ -147,16 +179,17 @@ function checkShape(scenario: Scenario): void {
 }
 
 /**
- * What the attack came to. An attack that got through is `passed` whatever else happened: an earlier
- * step that timed out makes the scenario inconclusive, and must not hide it. Past that, an error or
- * a timeout anywhere in the scenario decides, because the denial of the attack step may be nothing
- * but the fail-closed answer of the step before it (a scan that ran out of budget taints the session,
- * and the tainted session is denied the attack). Only then does the attack step itself decide.
+ * What the attack came to. Under `--host`, a scenario with any step the host never sends is
+ * `unsupported`, counted apart from `blocked`, `asked` and `passed`, and never as a protection.
+ * Otherwise an attack that got through is `passed` whatever else happened: an earlier step that
+ * timed out makes the scenario inconclusive, and must not hide it. Past that, an error or a
+ * timeout anywhere in the scenario decides, and only then does the attack step itself decide.
  */
 function outcomeOf(steps: readonly StepResult[], kinds: readonly StepKind[]): Outcome {
   const attack = steps[steps.length - 1];
   const attackKind = kinds[kinds.length - 1];
   if (attack === undefined || attackKind === undefined) throw new Error('runAttack: no steps ran');
+  if (kinds.includes('unsupported')) return 'unsupported';
   if (attackKind === 'decided' && attack.actual === 'allow') return 'passed';
   if (kinds.includes('error')) return 'error';
   if (kinds.includes('timeout')) return 'timeout';
@@ -169,10 +202,15 @@ function outcomeOf(steps: readonly StepResult[], kinds: readonly StepKind[]): Ou
 }
 
 /** The result of a scenario from the steps that ran. */
-function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioResult {
+function resultOf(
+  scenario: Scenario,
+  steps: readonly StepResult[],
+  host?: AttackHost,
+): ScenarioResult {
   const kinds = steps.map(stepKind);
   const trouble = steps.flatMap((step, index) => troubleOf(step, index) ?? []);
   const inconclusive = trouble.length > 0;
+  const unsupportedCount = steps.filter((s) => s.unsupported === true).length;
   return {
     id: scenario.id,
     title: scenario.title,
@@ -181,13 +219,15 @@ function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioRes
     outcome: outcomeOf(steps, kinds),
     inconclusive,
     reason: inconclusive ? trouble.join('; ') : null,
-    // A scenario that stopped at a step that threw has not run every step.
+    // A scenario that stopped at a step that threw has not run every step; an unsupported step is never a pass.
     ok:
       !inconclusive &&
+      unsupportedCount === 0 &&
       steps.length === scenario.steps.length &&
       steps.every((s) => s.actual === s.expect),
-    ruleId: steps[steps.length - 1]?.ruleId ?? null,
+    ruleId: unsupportedCount > 0 ? null : (steps[steps.length - 1]?.ruleId ?? null),
     steps,
+    ...(host === undefined ? {} : { unsupportedSteps: unsupportedCount }),
   };
 }
 
@@ -199,7 +239,11 @@ function resultOf(scenario: Scenario, steps: readonly StepResult[]): ScenarioRes
  *
  * A step that throws ends the scenario there and is its result (`error`); it does not end the run.
  */
-export async function runScenario(scenario: Scenario, policy: Policy): Promise<ScenarioResult> {
+export async function runScenario(
+  scenario: Scenario,
+  policy: Policy,
+  host?: AttackHost,
+): Promise<ScenarioResult> {
   checkShape(scenario);
   const root = await mkdtemp(join(tmpdir(), 'stroq-attack-'));
   try {
@@ -212,21 +256,65 @@ export async function runScenario(scenario: Scenario, policy: Policy): Promise<S
     const engine = createEngineAt({ home, userHome, policy, env: {} });
     const steps: StepResult[] = [];
     for (const [index, step] of scenario.steps.entries()) {
+      const phase = step.event.hook_event_name === 'PreToolUse' ? 'pre' : 'post';
+      const toolName = String(step.event.tool_name);
+      if (host !== undefined) {
+        const support = hostStepSupport(host, phase, toolName);
+        if (!support.supported) {
+          steps.push({
+            phase,
+            tool: toolName,
+            expect: step.expect,
+            actual: null,
+            ruleId: null,
+            reason: null,
+            signals: [],
+            timedOut: false,
+            channel: support.channel,
+            unsupported: true,
+            hostStatus: support.cell.status,
+          });
+          continue;
+        }
+      }
       const label = stepLabel('scenario', scenario.id, index, step.event);
-      const result = { ...(await runStep(engine, step, cwd, label)), expect: step.expect };
+      const hostFields =
+        host === undefined
+          ? {}
+          : (() => {
+              const support = hostStepSupport(host, phase, toolName);
+              return {
+                channel: support.channel,
+                unsupported: false,
+                hostStatus: support.cell.status,
+              };
+            })();
+      const result: StepResult = {
+        ...(await runStep(engine, step, cwd, label)),
+        expect: step.expect,
+        ...hostFields,
+      };
       steps.push(result);
       // What follows would run against a session the scenario did not mean to leave behind.
       if (result.error !== undefined) break;
     }
-    return resultOf(scenario, steps);
+    return resultOf(scenario, steps, host);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 /** Counts each scenario once, in the bucket of its outcome (see `AttackTotals`). */
-export function totalsOf(results: readonly ScenarioResult[]): AttackTotals {
+export function totalsOf(
+  results: readonly ScenarioResult[],
+  includeUnsupported = false,
+): AttackTotals {
   const count = (outcome: Outcome): number => results.filter((r) => r.outcome === outcome).length;
+  const unsupported = count('unsupported');
+  const unsupportedSteps = results.reduce(
+    (sum, r) => sum + r.steps.filter((s) => s.unsupported === true).length,
+    0,
+  );
   return {
     blocked: count('blocked'),
     asked: count('asked'),
@@ -235,6 +323,9 @@ export function totalsOf(results: readonly ScenarioResult[]): AttackTotals {
     timeout: count('timeout'),
     error: count('error'),
     inconclusive: results.filter((r) => r.inconclusive).length,
+    ...(includeUnsupported || unsupported > 0 || unsupportedSteps > 0
+      ? { unsupported, unsupportedSteps }
+      : {}),
   };
 }
 
@@ -243,19 +334,50 @@ export async function runAttack(
   scenarios: readonly Scenario[],
   policy: Policy,
   policySource: string,
+  options?: RunAttackOptions,
 ): Promise<AttackReport> {
+  const host = options?.host;
   const results: ScenarioResult[] = [];
-  for (const scenario of scenarios) results.push(await runScenario(scenario, policy));
-  const totals = totalsOf(results);
+  for (const scenario of scenarios) results.push(await runScenario(scenario, policy, host));
+  const totals = totalsOf(results, host !== undefined);
+  const unsupportedList: UnsupportedStepRecord[] = [];
+  if (host !== undefined) {
+    for (const r of results) {
+      r.steps.forEach((step, idx) => {
+        if (step.unsupported === true) {
+          const support = hostStepSupport(host, step.phase, step.tool);
+          unsupportedList.push({
+            scenarioId: r.id,
+            step: idx + 1,
+            phase: step.phase,
+            tool: step.tool,
+            channel: support.channel,
+            status: support.cell.status,
+            evidence: support.cell.evidence,
+          });
+        }
+      });
+    }
+  }
   return {
     version: 2,
-    meta: buildMeta({ policy, policySource, corpusId: ATTACK_CORPUS_ID, scenarios }),
+    meta: buildMeta({
+      policy,
+      policySource,
+      corpusId: ATTACK_CORPUS_ID,
+      scenarios,
+      ...(host === undefined ? {} : { host }),
+    }),
     policy: policySource,
+    ...(host === undefined ? {} : { host, unsupportedSteps: unsupportedList }),
     scenarios: results,
     totals,
-    // Structurally honest: a report can never claim success while an attack passed through, or
-    // while a scenario could not be judged, even if some future path produced a scenario whose
-    // own `ok` flag was true.
-    ok: results.every((r) => r.ok) && totals.passed === 0 && totals.inconclusive === 0,
+    // Structurally honest: a report can never claim success while an attack passed through, while
+    // a scenario could not be judged, or while a step was unsupported on the target host.
+    ok:
+      results.every((r) => r.ok) &&
+      totals.passed === 0 &&
+      totals.inconclusive === 0 &&
+      (totals.unsupported ?? 0) === 0,
   };
 }

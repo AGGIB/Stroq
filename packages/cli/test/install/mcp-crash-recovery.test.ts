@@ -1,6 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as transaction from '../../src/install/mcp-config-transaction.js';
+import { runRemove } from '../../src/commands/remove.js';
+import * as terminal from '../../src/ui/terminal.js';
 import { addMcp, removeMcp } from '../../src/install/mcp-install.js';
 import { readPassports, withPassports, writePassports } from '../../src/install/lock.js';
 import { storePath } from '../../src/install/store.js';
@@ -150,6 +153,7 @@ describe('MCP install crash recovery', () => {
       written: newWrapper,
       original: null,
       replaced: originalWrapper,
+      previousRecord: initial,
       history: initial.history,
     };
 
@@ -236,5 +240,93 @@ describe('MCP install crash recovery', () => {
     const servers = await f.servers();
     expect(servers['demo'].args).toContain(`sha256:${record.digest}`);
     expect(servers['other']).toEqual({ command: 'keep', args: ['1'] });
+  });
+});
+
+async function interrupt(f: Awaited<ReturnType<typeof fixture>>, source = 'demo', force = false) {
+  let pending: Awaited<ReturnType<typeof readPassports>>;
+  vi.spyOn(transaction, 'commitMcpConfig').mockImplementationOnce(async (file, config) => {
+    await writeFile(file, JSON.stringify(config));
+    pending = await readPassports(f.options.stroqHome);
+    throw new Error('simulated interruption');
+  });
+  await expect(addMcp(source, { ...f.mcpOptions, force })).rejects.toThrow(
+    'simulated interruption',
+  );
+  // A process kill cannot run addMcp's catch. Restore the exact pending snapshot from that point.
+  await writePassports(f.options.stroqHome, pending!);
+}
+
+describe('MCP recovery keeps confirmation and target identity', () => {
+  it('can cancel a first install even after an interrupted retry', async () => {
+    const f = await fixture();
+    await interrupt(f, f.dir);
+    await interrupt(f, 'demo', true);
+    await removeMcp('demo', { ...f.mcpOptions, force: true });
+    expect((await f.servers())['demo']).toBeUndefined();
+    expect((await readPassports(f.options.stroqHome)).mcp?.['demo']).toBeUndefined();
+  });
+  it.each([false, true])(
+    'restores a usable confirmation after cancelling an update (same digest: %s)',
+    async (same) => {
+      const f = await fixture();
+      const previous = await addMcp(f.dir, f.mcpOptions);
+      if (!same) await writeFile(join(f.dir, 'server.js'), 'console.log("two");\n');
+      await interrupt(f);
+      await removeMcp('demo', { ...f.mcpOptions, force: true });
+      expect((await f.servers())['demo']).toEqual(previous.written);
+      expect((await readPassports(f.options.stroqHome)).mcp?.['demo']).toEqual(previous);
+      const launch = await preparePin({
+        server: 'demo',
+        pin: previous.grant.pin,
+        home: f.options.stroqHome,
+        command: process.execPath,
+        args: [join(storePath(f.options.stroqHome, previous.digest), 'tree', 'server.js')],
+        passEnv: previous.passEnv,
+        launch: {
+          command: previous.written['command'] as string,
+          argv: previous.written['args'] as string[],
+        },
+      });
+      await launch.cleanup();
+    },
+  );
+
+  it('retries a pending first install by name without source or target flags', async () => {
+    const f = await fixture();
+    await interrupt(f, f.dir);
+    const { config: _config, ...options } = f.mcpOptions;
+    const recovered = await addMcp('demo', { ...options, force: true });
+    expect(recovered.config).toBe(f.config);
+    expect(recovered.source).toBe(f.dir);
+    expect(recovered.status).toBe('confirmed');
+  });
+
+  it('refuses a pending retry into another config and keeps both files and lock intact', async () => {
+    const f = await fixture();
+    await interrupt(f, f.dir);
+    const other = join(f.root, 'other-client.json');
+    const text = JSON.stringify({ mcpServers: { demo: { command: 'unrelated' } } });
+    await writeFile(other, text);
+    const before = await readFile(f.config, 'utf8');
+    const lock = await readPassports(f.options.stroqHome);
+    await expect(addMcp(f.dir, { ...f.mcpOptions, config: other, force: true })).rejects.toThrow(
+      /another client config/,
+    );
+    expect(await readFile(other, 'utf8')).toBe(text);
+    expect(await readFile(f.config, 'utf8')).toBe(before);
+    expect(await readPassports(f.options.stroqHome)).toEqual(lock);
+  });
+
+  it('removes a no-record orphan through the CLI with an explicit config', async () => {
+    const f = await fixture();
+    await addMcp(f.dir, f.mcpOptions);
+    await writePassports(f.options.stroqHome, { v: 1, skills: {}, mcp: {} });
+    vi.stubEnv('STROQ_HOME', f.options.stroqHome);
+    vi.spyOn(terminal, 'currentTerminal').mockReturnValue(f.terminal);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    expect(await runRemove(['demo', '--kind', 'mcp', '--force', '--config', f.config])).toBe(0);
+    expect((await f.servers())['demo']).toBeUndefined();
+    expect((await f.servers())['other']).toEqual({ command: 'keep', args: ['1'] });
   });
 });

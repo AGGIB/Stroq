@@ -24,8 +24,19 @@ export interface McpInstallOptions {
   readonly force?: boolean;
   readonly user?: boolean;
   readonly restore?: boolean;
+  readonly rollback?: boolean;
   /** Enable strict filtering in the confirmed wrapper; when absent, keep the recorded strict arguments. */
   readonly strict?: boolean;
+}
+
+/** The retained previous revision of an updated MCP server, kept until the next update or removal. */
+export interface McpPrevious {
+  readonly digest: string;
+  readonly entrypoint: string;
+  readonly passEnv: readonly string[];
+  readonly cwd?: string;
+  readonly passport: Passport;
+  readonly written: Record<string, unknown>;
 }
 
 /** What `add --kind mcp` records beside the pin; the proxy reads only kind, status, digest and grant. */
@@ -49,6 +60,7 @@ export interface McpRecord {
   /** The entry that stood under this name before Stroq took it, or null when there was none. */
   readonly original: Record<string, unknown> | null;
   readonly history: readonly Receipt[];
+  readonly previous?: McpPrevious;
 }
 
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -99,6 +111,8 @@ export interface McpPendingRecord {
   readonly written: Record<string, unknown>;
   readonly original: Record<string, unknown> | null;
   readonly replaced: unknown | null;
+  /** The confirmation to restore if this interrupted operation is cancelled. */
+  readonly previousRecord?: McpRecord;
   readonly history: readonly Receipt[];
 }
 

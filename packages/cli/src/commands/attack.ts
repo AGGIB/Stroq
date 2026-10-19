@@ -8,6 +8,7 @@ import { runAttack } from '../attack/run.js';
 import type { Scenario } from '../attack/scenario.js';
 import { SCENARIOS } from '../attack/scenarios/index.js';
 import { loadPolicy, policySource } from '../engine-factory.js';
+import { ATTACK_HOSTS, isAttackHost } from '../hosts/channels.js';
 
 /** `--only 05` or `--only 05-roguepilot-schema-url`. */
 function select(only: string | undefined): readonly Scenario[] {
@@ -32,8 +33,19 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
       json: { type: 'boolean', default: false },
       only: { type: 'string' },
       fuzz: { type: 'boolean', default: false },
+      host: { type: 'string' },
     },
   });
+  let host = undefined;
+  if (values.host !== undefined) {
+    if (!isAttackHost(values.host)) {
+      process.stderr.write(
+        `stroq attack: unknown --host "${values.host}". Expected one of: ${ATTACK_HOSTS.join(', ')}.\n`,
+      );
+      return 2;
+    }
+    host = values.host;
+  }
   const selected = select(values.only);
   if (selected.length === 0) {
     const ids = SCENARIOS.map((s) => s.id).join(', ');
@@ -41,6 +53,10 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
     return 1;
   }
   if (values.fuzz) {
+    if (host !== undefined) {
+      process.stderr.write('stroq attack: --host cannot be combined with --fuzz.\n');
+      return 2;
+    }
     // A `\r`-updating progress line only reads as one line on a TTY, where the
     // carriage return overwrites in place. Piped to a file or captured by a
     // test runner, there is no cursor to overwrite, so every write accumulates
@@ -61,7 +77,12 @@ export async function runAttackCommand(args: readonly string[]): Promise<number>
     process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatFuzz(report));
     return report.ok ? 0 : 1;
   }
-  const report = await runAttack(selected, loadPolicy(), displayPath(policySource()));
+  const report = await runAttack(
+    selected,
+    loadPolicy(),
+    displayPath(policySource()),
+    host === undefined ? undefined : { host },
+  );
   process.stdout.write(values.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
   return report.ok ? 0 : 1;
 }

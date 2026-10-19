@@ -221,7 +221,7 @@ export interface ToolResources {
 }
 
 /** Kinds of "actionable atoms" tracked for instruction provenance. */
-export type AtomKind = 'url' | 'host' | 'pkg' | 'pipe_shell' | 'encoded';
+export type AtomKind = 'url' | 'host' | 'pkg' | 'pipe_shell' | 'encoded' | 'digest';
 
 export interface Atom {
   readonly kind: AtomKind;

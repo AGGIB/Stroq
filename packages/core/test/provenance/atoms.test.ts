@@ -2,6 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ATOMS,
+  MAX_NETWORK_ATOMS,
   atomHash,
   extractAtoms,
   normalizePackageName,
@@ -104,7 +105,8 @@ describe('extractAtoms', () => {
     expect(kinds('npx --yes create-thing@2 my-app', 'pkg')).toEqual(['create-thing']);
     expect(kinds('pnpm dlx shadcn init', 'pkg')).toEqual(['shadcn']);
     expect(kinds('uvx ruff check .', 'pkg')).toEqual(['ruff']);
-    expect(kinds('npx -p typescript tsc --init', 'pkg')).toEqual(['typescript']);
+    // The word after the flags is named too: it is a command, and a candidate for a package.
+    expect(kinds('npx -p typescript tsc --init', 'pkg')).toEqual(['typescript', 'tsc']);
   });
 
   it('finds runners and installers regardless of case', () => {
@@ -207,7 +209,9 @@ describe('extractAtoms', () => {
   it('dedupes atoms and caps their number', () => {
     expect(extractAtoms('https://a.example/x https://a.example/x')).toHaveLength(2);
     const many = Array.from({ length: 300 }, (_, i) => `https://h${i}.example/`).join(' ');
-    expect(extractAtoms(many)).toHaveLength(MAX_ATOMS);
+    expect(extractAtoms(many)).toHaveLength(MAX_NETWORK_ATOMS);
+    const packages = Array.from({ length: 300 }, (_, i) => `npx helper-${i}`).join('\n');
+    expect(extractAtoms(packages)).toHaveLength(MAX_ATOMS);
   });
 
   it('returns nothing for plain prose', () => {

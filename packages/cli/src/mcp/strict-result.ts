@@ -1,5 +1,11 @@
 import { isRecord } from '../adapters/tool-input.js';
-import { NO_MEDIA, isCovered, leafText, type MediaPayloads } from './strict-leaves.js';
+import {
+  NO_MEDIA,
+  collectLeaves,
+  isCovered,
+  leafText,
+  type MediaPayloads,
+} from './strict-leaves.js';
 import { STRICT_MAX_TEXT_CHARS } from './strict-limits.js';
 import { isClassifiedMedia } from './strict-media.js';
 import type { WithholdReason } from './strict-reasons.js';
@@ -42,7 +48,13 @@ export type StrictRead =
 
 /** What a reader makes of a body before the views are added: the strings, proved. */
 type StringsRead =
-  { readonly ok: true; readonly text: string; readonly media: MediaPayloads } | Withheld;
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly media: MediaPayloads;
+      readonly leaves?: readonly string[];
+    }
+  | Withheld;
 
 const withheld = (reason: WithholdReason): Withheld => ({ ok: false, reason });
 
@@ -156,10 +168,13 @@ function readItems(items: unknown, media: Media): WithholdReason | null {
  * whose strings do not fit is withheld.
  */
 function finish(value: unknown, media: MediaPayloads): StringsRead {
-  const text = leafText(value, media);
-  if (text === null) return withheld('scan-failed');
+  const leaves = collectLeaves(value, media);
+  if (leaves === null) return withheld('scan-failed');
+  const text = leaves.join('\n');
   if (text.length > STRICT_MAX_TEXT_CHARS) return withheld('oversize-text');
-  return isCovered(value, media, text) ? { ok: true, text, media } : withheld('unread-content');
+  return isCovered(value, media, text)
+    ? { ok: true, text, media, leaves }
+    : withheld('unread-content');
 }
 
 function readToolsCall(result: Record<string, unknown>): StringsRead {
@@ -261,7 +276,7 @@ const READERS: ReadonlyMap<string, (result: Record<string, unknown>) => StringsR
 /** The strings read of `body` with the views to scan added, for a response to `method` (null: an error). */
 function withViews(method: string | null, body: unknown, read: StringsRead): StrictRead {
   if (!read.ok) return read;
-  return { ...read, views: scanViews(method, body, read.text, read.media) };
+  return { ...read, views: scanViews(method, body, read.text, read.media, read.leaves) };
 }
 
 /**

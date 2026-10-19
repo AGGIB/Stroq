@@ -43,7 +43,7 @@ describe('a response whose id has the wrong type', () => {
     const rig = handlerRig();
     track(rig, 3);
     await rig.feed(result('03'));
-    expect(JSON.stringify(rig.sent)).toBe('[]');
+    expect(JSON.stringify(rig.sent)).toContain('(unknown-id)');
     expect(rig.ruleIds()).toEqual(['mcp-strict-unknown-id']);
   });
 });
@@ -81,23 +81,60 @@ describe('a line that could not be parsed', () => {
     expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
   });
 
-  it('answers nobody when the head names a request that is not waiting', async () => {
+  it('fails pending requests when the head names an unknown request, without delivering a guess', async () => {
     const rig = handlerRig();
     track(rig, 3);
     await rig.feed('{"jsonrpc":"2.0","id":99,"result":{"content":[');
-    expect(rig.sent).toEqual([]);
+    expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
     expect(rig.ruleIds()).toEqual(['mcp-strict-unparsable']);
-    // And the request that is waiting is still waiting, not answered on a guess.
+    // A late reply to the failed request is withheld, never delivered after its error.
     await rig.feed(result(3));
-    expect(rig.lines).toHaveLength(1);
+    expect(rig.lines).toHaveLength(0);
   });
 
-  it('answers nobody when the id comes after the window, and says it was not answered', async () => {
+  it('fails pending requests when an id cannot be recovered within the window', async () => {
     const rig = handlerRig();
     track(rig, 3);
     await rig.feed(`{"result":"${'a'.repeat(600)}`);
-    expect(rig.sent).toEqual([]);
-    expect(JSON.stringify(rig.audit())).toContain('no request to answer');
+    expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
+    expect(JSON.stringify(rig.audit())).toContain('1 pending request failed');
+  });
+
+  it('answers the waiting request when an unparsable line is a batch', async () => {
+    const rig = handlerRig();
+    track(rig, 5);
+    await rig.feed('[{"jsonrpc":"2.0","id":5,"result":{"content":[');
+    expect(JSON.stringify(rig.sent)).toContain('"id":5');
+    expect(JSON.stringify(rig.sent)).toContain('(unparsable)');
+  });
+});
+
+describe('a batch sent by the server', () => {
+  it('is withheld as invalid-shape and answers all waiting requests in the batch', async () => {
+    const rig = handlerRig();
+    track(rig, 3);
+    track(rig, 4);
+    await rig.feed(
+      JSON.stringify([
+        { jsonrpc: '2.0', id: 3, result: { content: [] } },
+        { jsonrpc: '2.0', id: 4, result: { content: [] } },
+      ]),
+    );
+    expect(rig.lines).toEqual([]);
+    expect(rig.sent).toHaveLength(2);
+    expect(JSON.stringify(rig.sent)).toContain('"id":3');
+    expect(JSON.stringify(rig.sent)).toContain('"id":4');
+    expect(JSON.stringify(rig.sent)).toContain('(invalid-shape)');
+    expect(rig.ruleIds()).toEqual(['mcp-strict-invalid-shape']);
+  });
+
+  it('fails pending requests when the batch names no waiting requests', async () => {
+    const rig = handlerRig();
+    track(rig, 3);
+    await rig.feed(JSON.stringify([{ jsonrpc: '2.0', id: 99, result: { content: [] } }]));
+    expect(rig.lines).toEqual([]);
+    expect(JSON.stringify(rig.sent)).toContain('(invalid-shape)');
+    expect(rig.ruleIds()).toEqual(['mcp-strict-invalid-shape']);
   });
 });
 

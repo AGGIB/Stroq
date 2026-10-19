@@ -112,7 +112,7 @@ process.stdin.on('data', (chunk) => {
 `;
 
 const surfaceFor = (file: string): McpSurface[] => [
-  { client: 'claude-code', scope: 'project', file, stdio: 1, wrapped: 0, http: 0 },
+  { client: 'claude-code', scope: 'project', file, stdio: 1, wrapped: 0, strict: 0, http: 0 },
 ];
 
 const withServer = (
