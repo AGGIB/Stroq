@@ -105,3 +105,40 @@ describe('the command lines of an input', () => {
     expect(() => commandTexts({ deep }, false, 1000)).not.toThrow();
   });
 });
+
+describe('an object that has a command and its arguments', () => {
+  const NAME = 'evil-helper-fix';
+  const names = (tool: string, input: Record<string, unknown>): string[] =>
+    read(tool, input)
+      .atoms.filter((atom) => atom.kind === 'pkg')
+      .map((atom) => atom.value);
+
+  it.each([
+    [{ command: 'npx', args: ['-y', NAME] }],
+    [{ command: 'npx', args: [NAME] }],
+    [{ cmd: 'npm', argv: ['install', NAME] }],
+    [{ command: 'pip', arguments: ['install', NAME] }],
+    [{ Command: 'yarn', Args: ['add', NAME] }],
+    [{ server: { command: 'uvx', args: [NAME, '--stdio'] } }],
+    [{ servers: [{ other: 1 }, { command: 'pnpm', args: ['dlx', NAME] }] }],
+  ])('is read as one command line, whatever the tool: %j', (input) => {
+    for (const tool of ['mcp__fs__spawn', 'mcp__github__create_pull_request', 'mcp__x__y'])
+      expect(names(tool, input), tool).toContain(NAME);
+  });
+
+  it('reads a name nobody can tell in the arguments as a doubt', () => {
+    const result = read('mcp__fs__spawn', { command: 'npx', args: ['-y', 'ev$X'] });
+    expect(result.unread).toBe(true);
+    expect(result.unreadCause).toBe('name');
+  });
+
+  it('leaves an object that is not a command alone', () => {
+    expect(names('mcp__notion__create_page', { title: 'npx', tags: ['a', NAME] })).toEqual([]);
+    expect(names('mcp__x__y', { command: 'ls', args: ['-la', NAME] })).toEqual([]);
+  });
+
+  it('ignores an argument that is not a string, and still reads the others', () => {
+    expect(names('mcp__x__y', { command: 'npx', args: [1, null, NAME] })).toContain(NAME);
+    expect(names('mcp__x__y', { command: 'npx', args: [NAME, { nested: true }] })).toContain(NAME);
+  });
+});

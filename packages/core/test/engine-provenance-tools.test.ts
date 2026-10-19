@@ -265,3 +265,16 @@ describe('the verbs that update, link or initialise with a package', () => {
     expect((await other.pre(`npm init ${NAME}`)).decision.effect).toBe('deny');
   });
 });
+
+describe('an MCP call that spawns a command with its arguments', () => {
+  it.each([
+    ['mcp__fs__spawn', { command: 'npx', args: ['-y', NAME] }],
+    ['mcp__notion__create_page', { command: 'npx', args: [NAME] }],
+    ['mcp__x__run', { cmd: 'pip', argv: ['install', NAME] }],
+    ['mcp__x__start', { server: { command: 'uvx', args: [NAME] } }],
+  ])('%s carries a flagged package', async (tool, input) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.call(tool, input)).classes).toContain('origin.suspect');
+  });
+});
