@@ -371,7 +371,7 @@ export interface McpProxyCount {
 }
 
 /** The Stroq entry path a wrapped entry's `args` records — the token right before `mcp`. */
-function wrappedEntryPath(args: readonly unknown[]): string | null {
+export function wrappedEntryPath(args: readonly unknown[]): string | null {
   const at = wrapperIndex(args);
   if (at === null) return null;
   const entry = args[at - 1];

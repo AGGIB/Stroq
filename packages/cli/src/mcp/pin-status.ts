@@ -1,6 +1,12 @@
+import { existsSync } from 'node:fs';
 import { isRecord } from '../adapters/tool-input.js';
 import { parseMcpArgv } from '../commands/mcp.js';
-import { readMcpConfig, wrapperIndex } from '../commands/mcp-config.js';
+import {
+  entryRunsStrict,
+  readMcpConfig,
+  wrappedEntryPath,
+  wrapperIndex,
+} from '../commands/mcp-config.js';
 import { reconfirmCommand } from './pin-argument.js';
 
 export interface PinStatus {
@@ -71,7 +77,15 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
             ...(launch === undefined ? {} : { launch }),
           })
         : { ok: false, detail: 'invalid pinned wrapper; start refused' };
-    statuses.push({ name: label, ...result });
+    const entryPath = wrappedEntryPath(entry.args);
+    const finalResult =
+      result.ok && entryPath !== null && !existsSync(entryPath)
+        ? {
+            ok: false,
+            detail: `the recorded Stroq entry ${quotePath(entryPath)} no longer exists; start will fail (to confirm it again run: ${reconfirmCommand(name, { strict: entryRunsStrict(entry) })})`,
+          }
+        : result;
+    statuses.push({ name: label, ...finalResult });
   }
   return statuses;
 }
