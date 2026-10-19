@@ -379,6 +379,11 @@ const MANY: readonly (readonly [name: string, path: string, build: (size: number
     ),
   ],
   [
+    'Codex otel exporters',
+    '.codex/config.toml',
+    many((i) => `exporter${i} = "x"`, '\n', '[otel]\n', '\n'),
+  ],
+  [
     'Gemini trusted servers',
     '.gemini/settings.json',
     many((i) => `"s${i}":{"command":"x","trust":true}`, ',', '{"mcpServers":{', '}}'),

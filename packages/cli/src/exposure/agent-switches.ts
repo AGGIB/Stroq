@@ -61,12 +61,18 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
     const where = ['model_providers', name, 'base_url'];
     hits.push(hit('agent-api-redirect', path, line(where), where.join('.'), value));
   }
-  const otel = ownObject(doc, 'otel') ?? {};
-  for (const [key, exporter] of Object.entries(otel))
-    if (key.includes('exporter') && exporter !== 'none')
-      hits.push(
-        hit('agent-api-redirect', path, line(['otel', key]), `otel.${key}`, boundedJson(exporter)),
-      );
+  const exporters = firstEntries(
+    path,
+    'otel exporters',
+    Object.entries(ownObject(doc, 'otel') ?? {}).filter(
+      ([key, exporter]) => key.includes('exporter') && exporter !== 'none',
+    ),
+  );
+  hits.push(...exporters.cut);
+  for (const [key, exporter] of exporters.items)
+    hits.push(
+      hit('agent-api-redirect', path, line(['otel', key]), `otel.${key}`, boundedJson(exporter)),
+    );
   const policy = ownObject(doc, 'shell_environment_policy');
   const set = policy === undefined ? undefined : ownObject(policy, 'set');
   const env = firstEntries(

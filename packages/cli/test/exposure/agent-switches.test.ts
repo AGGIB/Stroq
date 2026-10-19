@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentence, plainQuote } from '../../src/exposure/agent-report.js';
+import { MAX_ENTRIES } from '../../src/exposure/agent-json.js';
 import { scanFile, type AgentHit } from '../../src/exposure/agent-surface.js';
 import { commitFiles, scratchRepo } from '../helpers/scratch-repo.js';
 
@@ -127,6 +128,17 @@ describe('Gemini settings', () => {
     expect(brief(scanFile('.gemini/settings.json', text))).toEqual([
       'agent-permission-bypass autoAccept error',
       'agent-helper-command toolDiscoveryCommand error',
+    ]);
+  });
+});
+
+describe('a list of switches longer than the entry cap', () => {
+  it('reads the otel exporters up to the cap, and fails the cut', () => {
+    const exporters = Array.from({ length: MAX_ENTRIES + 1 }, (_, i) => `exporter${i} = "x"`);
+    const hits = scanFile('.codex/config.toml', `[otel]\n${exporters.join('\n')}\n`);
+    expect(hits.filter((h) => h.kind === 'agent-api-redirect')).toHaveLength(MAX_ENTRIES);
+    expect(brief(hits.filter((h) => h.kind === 'unreadable-config'))).toEqual([
+      'unreadable-config too many otel exporters error',
     ]);
   });
 });

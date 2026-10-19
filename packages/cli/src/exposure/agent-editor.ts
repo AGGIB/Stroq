@@ -3,6 +3,7 @@ import { isPlainObject } from '../commands/config-file.js';
 import {
   commandText,
   firstEntries,
+  tooMany,
   mcpServerHits,
   own,
   ownObject,
@@ -76,28 +77,73 @@ const isTaskLabel = (key: string, value: unknown): boolean =>
 const runsOf = (task: Obj): string => `${commandLine(task)}${otherFields(task, isTaskLabel)}`;
 
 /**
- * Everything a folder-open task runs: its command, the per-system commands that replace it,
- * and the tasks it depends on, which run first and need no `runOn` of their own.
+ * The most characters the tasks that folder-open tasks depend on add to the values of one file.
+ * A task many depend on is written into each of their values, so without a bound 200 tasks on one
+ * long one made 180 MB from 400 KB. Real files add a few lines.
  */
-function taskRuns(task: Obj, byLabel: ReadonlyMap<string, Obj>, seen: Set<string>): string {
-  const parts = [runsOf(task)];
+const MAX_DEPENDS_TEXT = 1024 * 1024;
+
+/** What one file's folder-open tasks may still add for their dependencies, and whether it ran out. */
+interface Spend {
+  left: number;
+  cut: boolean;
+}
+
+/** A task's own lines: its command and the per-system commands that replace it, read once. */
+function ownLines(task: Obj, memo: Map<Obj, readonly string[]>): readonly string[] {
+  const known = memo.get(task);
+  if (known !== undefined) return known;
+  const lines = [runsOf(task)];
   for (const os of OS_KEYS) {
     const variant = ownObject(task, os);
     const line = variant === undefined ? '' : runsOf(variant);
-    if (line !== '') parts.push(`${os}: ${line}`);
+    if (line !== '') lines.push(`${os}: ${line}`);
   }
+  memo.set(task, lines);
+  return lines;
+}
+
+interface TaskContext {
+  readonly byLabel: ReadonlyMap<string, Obj>;
+  readonly memo: Map<Obj, readonly string[]>;
+  readonly spend: Spend;
+}
+
+/**
+ * Everything a folder-open task runs: its command, the per-system commands that replace it,
+ * and the tasks it depends on, which run first and need no `runOn` of their own. What a
+ * dependency adds is charged to the file's `spend`; past it the rest is left out and `cut` set.
+ */
+function taskRuns(task: Obj, ctx: TaskContext, seen: Set<string>, charged: boolean): string {
+  const parts: string[] = [];
+  const add = (part: string): boolean => {
+    if (charged) {
+      if (part.length > ctx.spend.left) {
+        ctx.spend.cut = true;
+        return false;
+      }
+      ctx.spend.left -= part.length;
+    }
+    parts.push(part);
+    return true;
+  };
+  const join = (): string => parts.filter((part) => part !== '').join(' | ');
+  for (const line of ownLines(task, ctx.memo)) if (!add(line)) return join();
   const depends = own(task, 'dependsOn');
   const labels = typeof depends === 'string' ? [depends] : strings(depends);
   for (const label of labels) {
-    const dependency = byLabel.get(label);
+    if (ctx.spend.cut) break;
+    const dependency = ctx.byLabel.get(label);
     if (dependency === undefined || seen.has(label) || seen.size >= MAX_DEPENDS) {
-      parts.push(`then ${label}`);
+      if (!add(`then ${label}`)) break;
       continue;
     }
     seen.add(label);
-    parts.push(`then ${label}: ${taskRuns(dependency, byLabel, seen)}`);
+    if (!add(`then ${label}:`)) break;
+    const inner = taskRuns(dependency, ctx, seen, true);
+    parts[parts.length - 1] = `then ${label}: ${inner}`;
   }
-  return parts.filter((part) => part !== '').join(' | ');
+  return join();
 }
 
 const runsOnFolderOpen = (task: Obj): boolean => {
@@ -135,23 +181,28 @@ export function folderOpenTasks(
     'folder-open tasks',
     tasks.flatMap((task, i) => (runsOnFolderOpen(task) ? [[task, i] as const] : [])),
   );
-  return [
-    ...opening.cut,
-    ...opening.items.flatMap(([task, i]) => {
-      const label = labelOf(task);
-      const seen = new Set(label === undefined ? [] : [label]);
-      const line = lineOf(f.text, [...prefix, label === undefined ? '' : quoted(label), '"runOn"']);
-      return [
-        hit(
-          'editor-autorun-task',
-          f.path,
-          line,
-          label ?? `task ${i + 1}`,
-          `${taskRuns(task, byLabel, seen)}${shared}`,
-        ),
-      ];
-    }),
-  ];
+  const ctx: TaskContext = {
+    byLabel,
+    memo: new Map(),
+    spend: { left: MAX_DEPENDS_TEXT, cut: false },
+  };
+  const found = opening.items.map(([task, i]) => {
+    const label = labelOf(task);
+    const seen = new Set(label === undefined ? [] : [label]);
+    const line = lineOf(f.text, [...prefix, label === undefined ? '' : quoted(label), '"runOn"']);
+    return hit(
+      'editor-autorun-task',
+      f.path,
+      line,
+      label ?? `task ${i + 1}`,
+      `${taskRuns(task, ctx, seen, false)}${shared}`,
+    );
+  });
+  // What was left out of the values could run: the cut fails, with a digest of every task.
+  const cut = ctx.spend.cut
+    ? [tooMany(f.path, 'steps of folder-open tasks', MAX_DEPENDS_TEXT, list)]
+    : [];
+  return [...opening.cut, ...cut, ...found];
 }
 
 const AUTO_APPROVE_KEYS = ['chat.tools.autoApprove', 'chat.tools.global.autoApprove'] as const;

@@ -327,6 +327,32 @@ describe('VS Code tasks, workspaces and settings', () => {
     );
   });
 
+  // A task that many folder-open tasks depend on is written into the value of each of them: 200
+  // of them on one long task made 180 MB of values from 400 KB, and a few such files a crash.
+  it.each([
+    [
+      'a long list of what it depends on',
+      { dependsOn: Array.from({ length: 100_000 }, () => 'x') },
+    ],
+    ['a long command', { command: 'x'.repeat(400_000) }],
+  ])('bounds what a task many depend on adds to their values: %s, and fails the cut', (_n, b) => {
+    const tasks = [
+      { label: 'B', command: 'true', ...b },
+      ...Array.from({ length: 200 }, (_, i) => ({
+        label: `t${i}`,
+        command: 'true',
+        dependsOn: 'B',
+        runOptions: { runOn: 'folderOpen' },
+      })),
+    ];
+    const hits = scanFile('.vscode/tasks.json', JSON.stringify({ tasks }));
+    expect(hits.reduce((n, h) => n + h.value.length, 0)).toBeLessThan(4 * 1024 * 1024);
+    expect(of(hits, 'unreadable-config').map((h) => h.name)).toEqual([
+      'too many steps of folder-open tasks',
+    ]);
+    expect(of(hits, 'editor-autorun-task')).toHaveLength(200);
+  });
+
   it('falls back to reading the text when the file is not JSON even with comments', () => {
     const text =
       '{ "tasks": [ { "command": "x", "runOptions": { "runOn": /* c */ "folderOpen" } ] ';
