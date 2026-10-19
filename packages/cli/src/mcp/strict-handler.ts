@@ -312,6 +312,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     entry: TrackedRequest,
     views: readonly ScanView[],
   ): Promise<PostOutcome | WithholdReason> {
+    let readings: PostReadings | undefined;
     try {
       const verdict = deps.scan(
         views.map((view) => view.text),
@@ -319,28 +320,50 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       );
       if (verdict !== 'ok') return verdict === 'timeout' ? 'scan-timeout' : 'scan-failed';
       const [recorded, ...extras] = views as readonly [ScanView, ...ScanView[]];
-      const readings = createPostReadings();
-      const extraOutcomes: PostOutcome[] = [];
-      for (const view of extras) {
-        const outcome = await scanView(entry, view, { extraReading: true }, readings);
-        if (typeof outcome === 'string') return outcome;
-        extraOutcomes.push(outcome);
-      }
-      const matched = extraOutcomes.some((outcome) => outcome.warning !== null);
-      const first = await scanView(
-        entry,
-        recorded,
-        {
-          ...(extras.length === 0 ? {} : { otherReadings: extras.map((view) => view.text) }),
-          ...(matched ? { suspectInAnotherReading: true } : {}),
-        },
-        readings,
-      );
-      if (typeof first === 'string') return first;
-      return [first, ...extraOutcomes].find((outcome) => outcome.warning !== null) ?? first;
+      readings = createPostReadings();
+      const outcome = await scanReadings(entry, recorded, extras, readings);
+      // A result that is withheld was not delivered, so the marker its readings put down comes off.
+      if (typeof outcome === 'string') await giveUp(readings);
+      return outcome;
     } catch (err) {
       logError('mcp strict scan', err);
+      if (readings !== undefined) await giveUp(readings);
       return 'scan-failed';
+    }
+  }
+
+  /** Scans the extra views, then the one that is recorded, in one reading scope. */
+  async function scanReadings(
+    entry: TrackedRequest,
+    recorded: ScanView,
+    extras: readonly ScanView[],
+    readings: PostReadings,
+  ): Promise<PostOutcome | WithholdReason> {
+    const extraOutcomes: PostOutcome[] = [];
+    for (const view of extras) {
+      const outcome = await scanView(entry, view, { extraReading: true }, readings);
+      if (typeof outcome === 'string') return outcome;
+      extraOutcomes.push(outcome);
+    }
+    const matched = extraOutcomes.some((outcome) => outcome.warning !== null);
+    const first = await scanView(
+      entry,
+      recorded,
+      {
+        ...(extras.length === 0 ? {} : { otherReadings: extras.map((view) => view.text) }),
+        ...(matched ? { suspectInAnotherReading: true } : {}),
+      },
+      readings,
+    );
+    if (typeof first === 'string') return first;
+    return [first, ...extraOutcomes].find((outcome) => outcome.warning !== null) ?? first;
+  }
+
+  async function giveUp(readings: PostReadings): Promise<void> {
+    try {
+      await ctx.engine.abandon(readings);
+    } catch (err) {
+      logError('mcp strict scan', err);
     }
   }
 

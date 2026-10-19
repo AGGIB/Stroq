@@ -1,12 +1,8 @@
 import { ageLabel } from '../provenance/describe.js';
 import type { ActionClass, Decision, Taint } from '../types.js';
 import { neutralizeControls } from '../util/controls.js';
+import { shellQuote } from '../util/shell-quote.js';
 import type { Policy } from './policy-types.js';
-
-/** Characters a POSIX shell reads as text; anything else makes the word need quoting. */
-const SAFE_WORD = /^[\w@%+=:,./-]+$/;
-const shellQuote = (word: string): string =>
-  SAFE_WORD.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
 
 /**
  * A deny or ask that the session's taint caused, with the way out of a false positive
@@ -62,20 +58,44 @@ export function withWayOut(
  * A tainted session is not sent to `stroq untaint`: it clears the taint and every flagged
  * record along with the note, which is far more than one unrecorded package is worth. There
  * the user is left with approving the call.
+ *
+ * `why` says what the doubt is: records that were lost (the default), or a command that is
+ * longer than Stroq reads, whose unread part it cannot match against what the session read.
  */
+/** What Stroq cannot rule out about a call, and so asks about. */
+export type DoubtCause = 'lost-records' | 'unscanned-result' | 'unread-command' | 'doubtful-name';
+
+const DOUBT_SENTENCE: Readonly<Record<DoubtCause, string>> = {
+  'lost-records':
+    "Stroq's provenance for this session is incomplete (some of what it read is no longer on record), so it cannot rule out that this came from content the agent read.",
+  'unscanned-result':
+    'A tool result in this session could not be scanned (the hook that reads it did not finish), so Stroq cannot rule out that it holds instructions for this call.',
+  'unread-command':
+    'This command is longer than Stroq reads, so it cannot rule out that the part it did not read names something the agent read.',
+  'doubtful-name':
+    'The package name in this command uses a shell expansion, a glob or a quote, so Stroq cannot tell which package it is.',
+};
+
+/** The causes that are about the session, which clearing it ends. */
+const CLEARED_BY_UNTAINT: ReadonlySet<DoubtCause> = new Set(['lost-records', 'unscanned-result']);
+
 export function withIncompleteNote(
   decision: Decision,
   policy: Policy,
   sessionId: string,
   tainted: boolean,
+  why: DoubtCause = 'lost-records',
 ): Decision {
   if (decision.effect === 'allow' || decision.ruleId === null) return decision;
   const rule = policy.rules.find((r) => r.id === decision.ruleId);
   if (rule === undefined || !rule.when.classes.includes('origin.untrusted' satisfies ActionClass))
     return decision;
-  const incomplete = `${decision.reason.replace(/\.$/, '')}. Stroq's provenance for this session is incomplete (some of what it read is no longer on record), so it cannot rule out that this came from content the agent read.`;
-  const wayOut = tainted
-    ? 'If this is the call you wanted, approve it.'
-    : `If that is a false alarm, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(sessionId)}`;
+  const incomplete = `${decision.reason.replace(/\.$/, '')}. ${DOUBT_SENTENCE[why]}`;
+  // `stroq untaint` wipes the whole trace of the session: it is the way out of a doubt about the
+  // session, and not of one about this one call, for which approving it is the right size.
+  const wayOut =
+    tainted || !CLEARED_BY_UNTAINT.has(why)
+      ? 'If this is the call you wanted, approve it.'
+      : `If that is a false alarm, clear it yourself, outside the agent: stroq untaint --session ${shellQuote(sessionId)}`;
   return { ...decision, reason: `${incomplete} ${wayOut}` };
 }

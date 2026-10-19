@@ -7,7 +7,8 @@ import { normalizeText } from './normalize/normalizer.js';
 import { evaluatePolicy } from './policy/evaluate.js';
 import type { Policy } from './policy/policy-types.js';
 import { withIncompleteNote, withWayOut } from './policy/way-out.js';
-import { atomsForAction, floorAtoms, originClasses } from './provenance/action-atoms.js';
+import { floorAtoms, isNetworkShaped, originClasses } from './provenance/action-atoms.js';
+import { findActionProvenance } from './provenance/action-lookup.js';
 import { atomHash, extractAtomsDeepWithLoss } from './provenance/atoms.js';
 import {
   MAX_STORED_CHARS,
@@ -17,9 +18,9 @@ import {
 import { percentDecodedLeniently } from './provenance/excerpt.js';
 import { toEvidence } from './provenance/describe.js';
 import type { ProvenanceStore } from './provenance/store.js';
-import type { ScanTarget } from './rules/atr-types.js';
 import type { CompiledRule } from './rules/compile.js';
 import { DEFAULT_MAX_CHARS, scanContent } from './scan/scanner.js';
+import { SCANNED_TOOLS, scanFieldsForTool, scanTargetForTool } from './scan/scan-target.js';
 import { evaluateScope } from './scope/engine-gate.js';
 import type { ScopeGate } from './scope/types.js';
 import {
@@ -118,88 +119,8 @@ export interface PostResult {
   readonly trusted?: boolean;
 }
 
-export const SCANNED_TOOLS = /^(Read|WebFetch|WebSearch|Bash|PowerShell|Grep|mcp__)/;
+export { SCANNED_TOOLS, scanFieldsForTool, scanTargetForTool };
 
-/**
- * Names of files whose *content* is instructions to the agent rather than repository
- * material, so a `Read` of one is an `instruction_file` and not `repo_content`. The
- * distinction matters because a rule scoped to instruction files would otherwise go
- * dark exactly where those files are read at run time — the tool name alone cannot
- * tell `CLAUDE.md` from `README.md`, but the path can.
- *
- * Kept deliberately narrow (the well-known agent instruction files, plus anything under
- * a `.claude`/`.cursor`/`.codex`/`.windsurf` directory, plus `SKILL.md`): a file this
- * does not recognise is read as `repo_content`, which is the wider surface for the
- * rules that matter there and therefore the safe way to be wrong.
- */
-const INSTRUCTION_READ_PATH =
-  /(?:^|[/\\])(?:CLAUDE(?:\.local)?|AGENTS(?:\.override)?|GEMINI|SKILL|copilot-instructions)\.md$|(?:^|[/\\])\.(?:cursorrules|windsurfrules)$|(?:^|[/\\])\.(?:claude|cursor|codex|windsurf)[/\\]|(?:^|[/\\])\.github[/\\]instructions[/\\]/i;
-
-/**
- * The surface a tool's output arrives on, or `'any'` when the tool name says nothing
- * about it — under which every rule fires, exactly as before surfaces existed.
- * A wrong narrow answer here is a hole, so each case below is one the tool name
- * settles, with one named exception:
- *
- * - `tools/list` through the MCP proxy returns the servers' tool *descriptions*, which
- *   is where tool poisoning lives; every other `mcp__` call returns `tool_result` —
- *   including `resources/read` and `prompts/get`, minted as
- *   `mcp__<srv>__resources_read` and `mcp__<srv>__prompts_get` by `MCP_METHOD_TOOL` in
- *   `packages/cli/src/mcp/judge.ts`. Those two are not actually settled by the tool
- *   name: a prompt template is text the agent is meant to obey, which by this
- *   codebase's own definition is `instruction_file`, and a resource read is closer to
- *   `repo_content` than to a tool call's own result. They share `tool_result` today as
- *   a placeholder, which costs nothing measurable because nothing is scoped to
- *   `instruction_file` or `repo_content` in a way that a stray `mcp__` result could
- *   wrongly feed — but the day a rule category such as `skill-compromise` is scoped
- *   away from `any`, these two need their own branch here rather than continuing to
- *   share `tool_result` with `tools/call`.
- * - `Bash` and Claude Code's `PowerShell` return a command's output.
- * - `Read` returns a file, classified by path (see `INSTRUCTION_READ_PATH`); `Grep` returns
- *   repository lines.
- * - `WebFetch`/`WebSearch` return fetched documents — prose, like repository docs, and
- *   the surface the published false-positive rate is measured on.
- */
-export function scanTargetForTool(
-  toolName: string,
-  toolInput: Readonly<Record<string, unknown>> = {},
-): ScanTarget {
-  if (toolName.startsWith('mcp__')) {
-    return toolName.endsWith('__tools_list') ? 'tool_description' : 'tool_result';
-  }
-  if (toolName === 'Bash' || toolName === 'PowerShell') return 'command_output';
-  if (toolName === 'Read') {
-    const path = toolInput.file_path ?? toolInput.notebook_path;
-    return typeof path === 'string' && INSTRUCTION_READ_PATH.test(path)
-      ? 'instruction_file'
-      : 'repo_content';
-  }
-  if (toolName === 'Grep' || toolName === 'WebFetch' || toolName === 'WebSearch') {
-    return 'repo_content';
-  }
-  return 'any';
-}
-
-/**
- * The fields of the rule format that the result of a tool fills in, beside `content`. The text of
- * what an MCP server returns, or a web fetch or search, is a tool's response, and the text of
- * `tools/list` is what a server says its tools are: about three hundred rules read those fields and
- * matched nothing while nobody supplied them (see `supplied-fields.ts`). A local result (a file, a
- * listing, a command's output) fills neither: those rules were written for what another party
- * answers, and on one's own work they fire as often as the rules on `content` do.
- *
- * A field that is the scanned text is read in each form the scanner makes of it.
- */
-export function scanFieldsForTool(
-  toolName: string,
-  text: string,
-): Readonly<Record<string, string>> {
-  if (toolName.startsWith('mcp__')) {
-    return toolName.endsWith('__tools_list') ? { tool_description: text } : { tool_response: text };
-  }
-  if (toolName === 'WebFetch' || toolName === 'WebSearch') return { tool_response: text };
-  return {};
-}
 /**
  * The score at which text written into an instruction file counts as a payload: a
  * medium match, below the 0.6 that taints a session on a read. `curl … | sh` is medium
@@ -222,14 +143,6 @@ const EGRESS_CLASSES: readonly ActionClass[] = [
 ];
 const CANARY_RULE_ID = 'STROQ-CANARY';
 const CANARY_FILE_RULE_ID = 'STROQ-CANARY-FILE';
-
-/** What the provenance store knew about the atoms of one proposed action. */
-interface ProvenanceLookup {
-  readonly hits: readonly ProvenanceHit[];
-  /** Atoms with no record, while the session's records are incomplete; empty otherwise. */
-  readonly unrecorded: readonly Atom[];
-}
-const NO_LOOKUP: ProvenanceLookup = { hits: [], unrecorded: [] };
 
 /**
  * The secret guard's verdict on one action: the known values found in its arguments,
@@ -365,8 +278,10 @@ interface PostReadingsState {
 const readingStates = new WeakMap<PostReadings, PostReadingsState>();
 
 /**
- * Creates one result's reading scope. Its primary (non-extra) post consumes it; abandoning
- * the scope after a suspect extra leaves that result's pending marker in place.
+ * Creates one result's reading scope. Its primary (non-extra) post consumes it. An extra reading
+ * that is clean puts no marker down; one that is suspect does, and abandoning the scope after it
+ * leaves that result's pending marker in place, as a result that was delivered and not recorded
+ * is. A caller that WITHHOLDS the result instead says so with `StroqEngine.abandon`.
  */
 export function createPostReadings(): PostReadings {
   const readings = Object.freeze({}) as PostReadings;
@@ -385,16 +300,22 @@ export function createPostReadings(): PostReadings {
  * Each reading gets its own extraction cap and its own source for secret redaction. Loss
  * is accumulated before deduplication: even a reading whose atoms all repeat may be cut.
  */
-function atomsOfReadings(texts: readonly string[]): {
+function atomsOfReadings(
+  texts: readonly string[],
+  suspect: boolean,
+): {
   readings: ProvenanceReading[];
   lost: boolean;
+  digestsLost: boolean;
 } {
   const seen = new Set<string>();
   let lost = false;
+  let digestsLost = false;
   const readings = texts.map((text) => {
-    const extracted = extractAtomsDeepWithLoss(normalizeText(text));
+    const extracted = extractAtomsDeepWithLoss(normalizeText(text), { cheapDigests: !suspect });
     // Hosts clip at this length; an exact-length reading may have lost a suffix too.
     lost ||= extracted.truncated || text.length >= DEFAULT_MAX_CHARS;
+    digestsLost ||= extracted.digestsLost;
     return {
       text,
       atoms: extracted.atoms.filter((atom) => {
@@ -405,7 +326,7 @@ function atomsOfReadings(texts: readonly string[]): {
       }),
     };
   });
-  return { readings, lost };
+  return { readings, lost, digestsLost };
 }
 
 export class StroqEngine {
@@ -417,33 +338,6 @@ export class StroqEngine {
 
   private now(): string {
     return (this.opts.now ?? (() => new Date()))().toISOString();
-  }
-
-  /**
-   * One hit per distinct atom of the proposed action, most recent record wins. And, when the
-   * session's records are known to be incomplete, the atoms that no record holds: those are
-   * not "never read", they are "cannot say".
-   */
-  private async findProvenance(event: PreToolEvent): Promise<ProvenanceLookup> {
-    const store = this.opts.provenance;
-    if (!store) return NO_LOOKUP;
-    const atoms = atomsForAction(event.toolName, event.toolInput, event.cwd);
-    if (atoms.length === 0) return NO_LOOKUP;
-    const byHash = new Map(atoms.map((atom) => [atomHash(atom), atom] as const));
-    const records = await store.lookup(event.sessionId, [...byHash.keys()]);
-    const seen = new Set<string>();
-    const hits: ProvenanceHit[] = [];
-    for (const record of records) {
-      const atom = byHash.get(record.hash);
-      if (!atom || seen.has(record.hash)) continue;
-      seen.add(record.hash);
-      hits.push({ atom, record });
-    }
-    // After the lookup, not before: see `ProvenanceStore.isIncomplete`.
-    const unrecorded = (await store.isIncomplete(event.sessionId))
-      ? [...byHash].filter(([hash]) => !seen.has(hash)).map(([, atom]) => atom)
-      : [];
-    return { hits, unrecorded };
   }
 
   /**
@@ -527,12 +421,34 @@ export class StroqEngine {
     return { suspect: scan.verdict === 'suspect', timedOut: scan.timedOut === true };
   }
 
+  /**
+   * Whether a result was read in this session that the hook did not finish scanning, for a call
+   * that sends something out: its marker is still there, though the process that put it down is
+   * gone or past its deadline.
+   * Such a result may hold what the agent is now about to act on, and tainted is what a session
+   * would be if the scan had finished with a verdict.
+   */
+  private async hasUnscannedResult(
+    event: PreToolEvent,
+    classes: readonly ActionClass[],
+  ): Promise<boolean> {
+    const store = this.opts.provenance;
+    if (!store || !isNetworkShaped(classes)) return false;
+    return store.hasStaleMarker(event.sessionId);
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classification = classifyTool(event.toolName, event.toolInput, event.cwd);
     const state = await this.opts.sessions.get(event.sessionId);
-    const lookup = await this.findProvenance(event);
+    const lookup = await findActionProvenance(this.opts.provenance, event, state.taint !== null);
     const unverified = floorAtoms(lookup.unrecorded);
-    const origin = originClasses(lookup.hits, classification.classes, unverified);
+    const unscanned = await this.hasUnscannedResult(event, classification.classes);
+    const origin = originClasses(
+      lookup.hits,
+      classification.classes,
+      unverified,
+      lookup.unread || unscanned,
+    );
     const { matches, unscannable } = await this.checkSecrets(event, classification);
     const secrets = dedupeHits(matches.map(toHit));
     const injection = classification.classes.includes('config.instructions')
@@ -565,10 +481,23 @@ export class StroqEngine {
     );
     // With a record in hand the evidence says why. Without one the only reason there is
     // is that the session lost some, and the decision should not claim more than that.
-    const policyDecision =
-      origin.counted.length === 0 && unverified.length > 0
-        ? withIncompleteNote(evaluated, this.opts.policy, event.sessionId, state.taint !== null)
-        : evaluated;
+    const onlyDoubt =
+      origin.counted.length === 0 && (unverified.length > 0 || lookup.unread || unscanned);
+    const policyDecision = onlyDoubt
+      ? withIncompleteNote(
+          evaluated,
+          this.opts.policy,
+          event.sessionId,
+          state.taint !== null,
+          unverified.length > 0
+            ? 'lost-records'
+            : unscanned
+              ? 'unscanned-result'
+              : lookup.unreadCause === 'name'
+                ? 'doubtful-name'
+                : 'unread-command',
+        )
+      : evaluated;
     const gated = await evaluateScope(this.opts.scope, {
       event,
       classification,
@@ -641,6 +570,24 @@ export class StroqEngine {
     };
   }
 
+  /**
+   * Gives up on a result whose readings will not be completed because the result is not going to be
+   * delivered (a proxy withheld it). Nothing of it reached the model, so the marker its readings put
+   * down comes off; what a suspect reading already tainted stays. The scope cannot be used again.
+   */
+  async abandon(readings: PostReadings): Promise<void> {
+    const state = readingStates.get(readings);
+    if (state === undefined) throw new Error('abandon: invalid result reading scope');
+    if (state.busy) throw new Error('abandon: result reading scope is in use');
+    const owner = state.pendingOwner;
+    const sessionId = state.identity?.sessionId;
+    state.closed = true;
+    state.pendingOwner = undefined;
+    state.extraReadings.length = 0;
+    if (owner !== undefined && sessionId !== undefined)
+      await this.recorder.release(sessionId, owner);
+  }
+
   async post(event: PostToolEvent, readings?: PostReadings): Promise<PostResult> {
     if (readings === undefined) return this.postReading(event);
     const state = readingStates.get(readings);
@@ -676,6 +623,22 @@ export class StroqEngine {
       // Closed scopes cannot be retried; keep no result payload alive through the capability.
       if (state.closed) state.extraReadings.length = 0;
     }
+  }
+
+  /**
+   * The owner of the marker for this result, putting it down if it is not down yet. The readings
+   * of one logical result share one, and an extra alone never takes it off. An extra reading with
+   * no scope has nothing to settle it, so it is given none.
+   */
+  private async markInFlight(
+    event: PostToolEvent,
+    readingsState: PostReadingsState | undefined,
+  ): Promise<string | undefined> {
+    if (readingsState?.pendingOwner !== undefined) return readingsState.pendingOwner;
+    if (event.extraReading === true && readingsState === undefined) return undefined;
+    const owner = await this.recorder.begin(event.sessionId);
+    if (readingsState !== undefined) readingsState.pendingOwner = owner;
+    return owner;
   }
 
   private async postReading(
@@ -719,6 +682,13 @@ export class StroqEngine {
       const state = await this.opts.sessions.get(event.sessionId);
       return { scan: CLEAN, taint: state.taint, scanned: false, atoms: [], provenanceError: null };
     }
+    // The marker goes down before anything that can take long or fail: a scan that does not
+    // finish (a pattern that does not come back, the hook's own deadline, a crash) must leave a
+    // session that reads as incomplete, not one with nothing recorded and nothing said. It comes
+    // off when this result's records are written. The readings of one result share it, and an
+    // extra with no scope to be settled in is not given one.
+    const isExtra = event.extraReading === true && readingsState !== undefined;
+    let pendingOwner = isExtra ? undefined : await this.markInFlight(event, readingsState);
     const scan = scanContent(
       this.opts.rules,
       event.toolResultText,
@@ -742,6 +712,11 @@ export class StroqEngine {
     // about the text actually scanned, not about where it came from.
     const trusted =
       scan.verdict === 'suspect' && this.opts.trust?.trusts(event.toolResultText) === true;
+    // A clean extra reading puts no marker down: it is not recorded on its own, and a scope
+    // abandoned after it would leave the session reading as incomplete for nothing. One that
+    // taints does, before the taint is written, and the primary settles it.
+    if (isExtra && scan.verdict === 'suspect' && !trusted)
+      pendingOwner = await this.markInFlight(event, readingsState);
     // The audit entry is the forensic record and must be durable before we
     // derive and persist taint from it: if markSuspect ran first and the
     // audit append then failed, the session would be tainted with no
@@ -762,16 +737,7 @@ export class StroqEngine {
         },
       });
     const taints = scan.verdict === 'suspect' && !trusted;
-    let pendingOwner = readingsState?.pendingOwner;
-    if (taints) {
-      // The first suspect reading puts the marker down before tainting. All readings of
-      // this logical result share it; an extra alone never takes it off.
-      pendingOwner ??= await this.recorder.begin(event.sessionId);
-      if (readingsState !== undefined) {
-        readingsState.pendingOwner = pendingOwner;
-        readingsState.suspect = true;
-      }
-    }
+    if (taints && readingsState !== undefined) readingsState.suspect = true;
     const state = taints
       ? await this.opts.sessions.markSuspect(event.sessionId, {
           tool: event.toolName,
@@ -783,29 +749,35 @@ export class StroqEngine {
     if (event.extraReading === true)
       return { scan, taint: state.taint, scanned: true, atoms: [], provenanceError: null, trusted };
     // Atoms come from the *normalized* text, exactly like the scan above and
-    // like `atomsForAction` on the PreToolUse side: a package name split by a
+    // like `readActionAtoms` on the PreToolUse side: a package name split by a
     // zero-width space or spelled with a Cyrillic homoglyph must produce the
     // same atom as the plain command the agent then runs, in both directions.
     // Deep, not raw: a tool result the agent is told to "decode and run" hides
     // its atoms behind base64/hex/url-encoding, and extractAtomsDeep recovers
     // them the same way the scanner already does via expandVariants.
     const actualExtras = readingsState?.extraReadings ?? [];
-    const extracted = atomsOfReadings([
-      ...new Set([
-        event.toolResultText,
-        ...actualExtras.map((reading) => reading.text),
-        ...(event.otherReadings ?? []),
-      ]),
-    ]);
+    const suspect =
+      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true;
+    const extracted = atomsOfReadings(
+      [
+        ...new Set([
+          event.toolResultText,
+          ...actualExtras.map((reading) => reading.text),
+          ...(event.otherReadings ?? []),
+        ]),
+      ],
+      suspect,
+    );
     const recorded = await this.recorder.record(
       event,
       summary,
       extracted.readings,
-      taints || readingsState?.suspect === true || event.suspectInAnotherReading === true,
+      suspect,
       extracted.lost ||
         event.resultUnread === true ||
         actualExtras.some((reading) => reading.unread),
       pendingOwner,
+      extracted.digestsLost,
     );
     return {
       scan,

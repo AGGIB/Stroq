@@ -551,7 +551,22 @@ export function createPump(deps: PumpDeps): Pump {
       warns ? warning : null,
       notice,
     ]);
-    return replyFromResult({ ...message.value, result: out });
+    try {
+      return await replyFromResult({ ...message.value, result: out });
+    } catch (err) {
+      // A result nested too deep to write again: its strings were read and the session is tainted
+      // by what they said, but the warning has nowhere to go. Without a cloak the line goes on as
+      // the server sent it, not lost; with one it was meant to be rewritten, so it is dropped.
+      logError('mcp proxy result', err);
+      if (cloak === null) return forwardToClient(line);
+      await auditDrop(
+        entry.toolName,
+        { method: entry.method },
+        CLOAK_UNSCANNABLE_RESULT,
+        'mcp cloak: a tools/call result that could not be written again was dropped unsent',
+      );
+      return;
+    }
   }
 
   /**
