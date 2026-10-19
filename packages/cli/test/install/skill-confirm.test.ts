@@ -57,6 +57,7 @@ describe('skill confirmation output', () => {
       target: { path: '/project/\u202edemo' },
       previous,
       restoring: false,
+      rollingBack: false,
       made: { tree, passport: after },
       material: true,
       oldTree: tree,

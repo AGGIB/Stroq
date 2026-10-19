@@ -11,9 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
 
+- Garbage-collection warnings name the unreferenced copy that could not be removed, including orphaned copies, rather than a revision intentionally retained for rollback.
+
 - Host-filtered attack replay checks partial visibility by phase and tool; absent shell output, page bodies and Claude WebSearch pre-hooks are unsupported. Generated host evidence escapes Markdown table separators and HTML placeholders. Benchmark report paths use forward slashes on every OS so `check:reports` is reproducible across Windows and POSIX.
 
 ### Added
+
+- **`stroq add <name> --rollback` restores the previous revision of an updated skill or MCP server.** Store garbage collection now retains exactly one previous revision per installed skill and MCP server until the next update or removal. `stroq doctor` reports retained previous revisions and the disk space they use. An update can be rolled back with `stroq add <name> --rollback`, requiring the typed digest and recording an audit receipt.
 
 - **Per-host channel reporting for `stroq attack` and generated `docs/HOSTS.md`.** `stroq attack --host <id>` filters scenario steps by the channels each host can actually see (shell commands, file writes, file reads, MCP calls, tool results, web fetches), counting steps a host never sends as `unsupported` rather than a defence. `docs/HOSTS.md` is generated from the machine-readable channel matrix and verified in CI alongside coverage and bench reports. Thanks @kok-o (#231).
 

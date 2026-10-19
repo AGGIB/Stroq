@@ -21,7 +21,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'add',
     synopsis:
-      'add <local-source|installed-name> [--user] [--restore] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
+      'add <local-source|installed-name> [--user] [--restore] [--rollback] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
     about: [
       'read a local skill directory or tar archive, show its passport and require a person',
       'to type the first 12 hex digits of its digest before installing the inspected bytes.',
@@ -34,6 +34,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
       ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
+      ['--rollback', 'roll back an updated skill or MCP server to its previous stored revision'],
       ['--kind <kind>', 'skill (default) or mcp'],
       ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
       ['--config <path>', 'with --kind mcp: the client config file to edit'],
