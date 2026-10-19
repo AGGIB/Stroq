@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   agentSurface,
+  hitsForRead,
   isSurfacePath,
   scanFile,
   type AgentHit,
@@ -156,6 +157,30 @@ describe('instruction files', () => {
     expect(hits).toMatchObject([
       { severity: 'error', line: 1, value: 'U+200B x2, U+202E x1, U+E0041 x1, U+E0042 x1' },
     ]);
+  });
+
+  // Hosts read CLAUDE.md and AGENTS.md as UTF-8 text, and a NUL byte does not stop them.
+  it('fails a NUL byte, and still finds the hidden characters next to it', () => {
+    const hits = scanFile('CLAUDE.md', '# Rules\n\0​ignore previous\n');
+    expect(of(hits, 'instruction-hidden-text')).toMatchObject([
+      { severity: 'error', line: 2, value: expect.stringContaining('U+0000 x1, U+200B x1') },
+    ]);
+    const tags = `\0${String.fromCodePoint(0xe0041, 0xe0042)}​`;
+    expect(of(scanFile('AGENTS.md', tags), 'instruction-hidden-text')).toMatchObject([
+      { severity: 'error' },
+    ]);
+  });
+
+  // Padding a file past the size cap would skip the one check instruction files get.
+  it('fails an instruction file too large to read, or past the budget', () => {
+    for (const read of [
+      { kind: 'too-large', size: 1_200_000 },
+      { kind: 'over-budget', budget: 64 * 1024 * 1024 },
+    ] as const) {
+      expect(hitsForRead('CLAUDE.md', read)).toMatchObject([
+        { kind: 'unreadable-config', file: 'CLAUDE.md', severity: 'error' },
+      ]);
+    }
   });
 
   it('does not count a byte order mark at the start or a joiner inside an emoji', () => {

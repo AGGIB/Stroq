@@ -140,8 +140,7 @@ const READERS = {
   package: json(packageScripts, () => []),
   codex: codexConfig,
   definition: agentDefinition,
-  instruction: (path: string, text: string): AgentHit[] =>
-    text.includes('\0') ? [] : instructionFile(path, text),
+  instruction: instructionFile,
 } satisfies Record<string, Reader>;
 
 /** Files at a fixed place from the root, by their path in lower case. */
@@ -241,12 +240,9 @@ export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[]
     read.kind === 'too-large'
       ? `too large to read (${read.size} bytes)`
       : `past the ${read.budget} bytes one check reads`;
-  const onlyInstructions = readersFor(path).every((r) => r === READERS.instruction);
-  return [
-    onlyInstructions
-      ? hit('instruction-file', path, 1, 'content', why)
-      : hit('unreadable-config', path, 1, 'size', why),
-  ];
+  // An instruction file too, though its only check is for hidden characters: padding it past
+  // the cap would otherwise switch that check off.
+  return [hit('unreadable-config', path, 1, 'size', why)];
 }
 
 // ---------------------------------------------------------------------------------------------

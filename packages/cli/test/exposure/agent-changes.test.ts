@@ -192,6 +192,16 @@ describe('agentChanges against a base commit', () => {
     expect(summary(agentChanges(dir, base).hits)).toEqual(['new unreadable-config .mcp.json size']);
   });
 
+  it('fails an instruction file padded past the size cap, which hides what is at its end', () => {
+    const dir = repo();
+    const base = commit(dir, { 'README.md': 'x\n' });
+    const hidden = String.fromCodePoint(0xe0041, 0xe0042);
+    commit(dir, { 'AGENTS.md': `# Rules\n${'pad '.repeat(300_000)}${hidden}\n` });
+    const hits = agentChanges(dir, base).hits;
+    expect(summary(hits)).toEqual(['new unreadable-config AGENTS.md size']);
+    expect(hits.every((h) => isFailing(h, 'new'))).toBe(true);
+  });
+
   it.skipIf(process.platform === 'win32')(
     'follows a link inside the tree, so changing what it points at is a change',
     () => {

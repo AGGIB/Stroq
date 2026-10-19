@@ -13,9 +13,11 @@ import { lineAt } from './jsonc.js';
  * Characters that show nothing and can carry text a reviewer does not see (TrapDoor, 2026-05):
  * zero-width spaces and joiners, the word joiner, a byte order mark that is not at the start,
  * the direction overrides and isolates, and the tag characters U+E0000 to U+E007F, which spell
- * out a whole hidden message in what looks like an empty line.
+ * out a whole hidden message in what looks like an empty line. A NUL byte is one too: hosts
+ * read the file as text past it, while many viewers stop at it or call the file binary.
  */
 const isHidden = (code: number): boolean =>
+  code === 0 ||
   (code >= 0x200b && code <= 0x200d) ||
   code === 0x2060 ||
   code === 0xfeff ||
