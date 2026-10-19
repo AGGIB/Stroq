@@ -172,7 +172,7 @@ function unknownCommand(typed: string): number {
   const suggestion = suggestCommand(typed);
   process.stderr.write(
     `stroq: unknown command "${typed}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}\n` +
-      'Run "stroq --help" for the list of commands.\n',
+      'Run "stroq help --all" for the list of commands.\n',
   );
   return 1;
 }

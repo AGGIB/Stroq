@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`stroq --help` is short: 16 lines and the 7 commands most people need, in two groups (Check and Guard).** `stroq help --all` lists the other commands, one line each, grouped by job. `hook` and `mcp` are no longer listed, since Stroq writes them into your agent's config for you. No command was removed or renamed, and `stroq <command> --help` still prints every option. The help for `init`, `add` and `prove` is rewritten in plain words. The false-positive issue form asks for the agent, the Stroq version, the command and the output of `stroq why`, and a new false-negative form is for something risky Stroq let through.
+- **`stroq --help` is short: 16 lines and the 7 commands most people need, in two groups (Check and Guard).** `stroq help --all` lists the other commands, one line each, grouped by job. `hook` and `mcp` are no longer listed, since Stroq writes them into your agent's config for you. No command was removed or renamed, and `stroq <command> --help` still prints every option. An unknown command now points at `stroq help --all`. The help for `init`, `add` and `prove` is rewritten in plain words. The false-positive issue form asks for the agent, the Stroq version, the command and the output of `stroq why`, and a new false-negative form is for something risky Stroq let through.
 - The Claude Code plugin no longer falls back to `@stroq/cli@latest` while npm does not have the pinned version yet. It runs the previous release instead (`STROQ_FALLBACK_PIN`), so the code that guards your agent is always an exact version. The plugin also has its own README, saying what it runs, downloads and writes.
 
 ## [0.27.0] - 2026-10-19

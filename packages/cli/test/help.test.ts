@@ -174,6 +174,13 @@ describe('a command line stroq cannot use', () => {
     expect(text.trim().split('\n').length).toBeLessThanOrEqual(3);
   });
 
+  it('points an unknown command at the full list, not the short screen', () => {
+    const out = run('foo');
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('Run "stroq help --all" for the list of commands.');
+    expect(out.stderr).not.toContain('"stroq --help"');
+  });
+
   it('names an unknown option and where to look, without a stack', () => {
     const out = run('log', '--bogus');
     expect(out.status).toBe(2);
