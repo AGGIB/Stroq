@@ -110,7 +110,11 @@ describe('stroq inspect on a checkout, without a base', () => {
     const run = inspect(dir);
     expect(run.code).toBe(1);
     expect(run.out).toContain('SessionStart hook runs: node .vscode/setup.mjs');
-    expect(run.out).toContain('initializeCommand runs on this machine before the container starts');
+    // As a finding before anything is approved, as in a repository, and not twice.
+    expect(run.out).toContain('initializeCommand runs on this machine before the container exists');
+    expect(run.out).not.toContain(
+      'initializeCommand runs on this machine before the container starts',
+    );
     expect(run.out).toContain('not a git repository');
     expect(run.out).not.toContain('nothing for stroq inspect to read');
     const json = JSON.parse(inspect(dir, '--json').out) as { isRepo: boolean; failing: number };

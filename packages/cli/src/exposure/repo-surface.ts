@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
 import type { Finding } from './findings.js';
-import { FILE_NAMES, gitDirName, looksLikeGitDir } from './git-dir-names.js';
+import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 
 /**
  * What a repository can make run on the machine that opens it.
@@ -125,21 +125,32 @@ function gitConfigHits(file: string, label: string): RepoExecHit[] {
   return hits;
 }
 
-/** A driver named here is only executable because `.git/config` defines its command. */
-function gitAttributesHits(root: string): RepoExecHit[] {
-  const text = readTextOr(join(root, '.gitattributes'));
-  const drivers = new Set<string>();
-  for (const m of text.matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
-    drivers.add(`${m[1]}.${m[2]}`);
-  }
+/**
+ * A driver named in an attributes file is only executable because a git config defines its
+ * command: `.git/config` in a repository, the folder's own `config` when it is a bare one.
+ */
+function gitAttributesHits(
+  root: string,
+  configs: readonly string[],
+  attributes: readonly string[],
+): RepoExecHit[] {
   const defined = new Set(
-    gitConfigEntries(readTextOr(join(root, '.git', 'config')))
+    configs
+      .flatMap((file) => gitConfigEntries(readTextOr(file)))
       .map((e) => e.key.replace(/\.(clean|smudge|process|textconv|command|driver)$/i, ''))
       .filter((k) => /^(filter|diff|merge)\./i.test(k)),
   );
-  return [...drivers]
-    .filter((d) => defined.has(d))
-    .map((what) => ({ kind: 'gitattributes-driver' as const, file: '.gitattributes', what }));
+  const hits: RepoExecHit[] = [];
+  for (const file of attributes) {
+    const drivers = new Set<string>();
+    for (const m of readTextOr(file).matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
+      drivers.add(`${m[1]}.${m[2]}`);
+    }
+    const label = relative(root, file).split(sep).join('/');
+    for (const what of drivers)
+      if (defined.has(what)) hits.push({ kind: 'gitattributes-driver', file: label, what });
+  }
+  return hits;
 }
 
 /**
@@ -258,46 +269,148 @@ function envrcHits(root: string): RepoExecHit[] {
     : [];
 }
 
+/** Why a file that only points git elsewhere is reported. */
+const POINTS_ELSEWHERE = 'which points git at the folder of another repository';
+
+/** A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. */
+const labelOf = (root: string, abs: string): string =>
+  relative(root, abs).split(sep).join('/') || '.';
+
 /**
- * A bare repository committed into an ordinary one as plain files. Git refuses to
- * check out a path named `.git`, but a bare repository needs only `HEAD`, `objects/`
- * and `refs/`, so it survives a clone — the vector behind CVE-2026-45033, and the one
- * that makes this class of attack deliverable by pull request rather than by zip.
+ * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
+ * when a `commondir` file names another folder, that folder's two as well. Git reads the config of
+ * the folder `commondir` names; one that points out of `root` is reported, not read.
  */
-function nestedBareRepos(root: string, withRoot = false): { hits: RepoExecHit[]; capped: boolean } {
+function gitDirConfigHits(
+  root: string,
+  dir: string,
+  names: ReadonlyMap<string, string>,
+): RepoExecHit[] {
+  const hits: RepoExecHit[] = [];
+  const read = (
+    folder: string,
+    configName: string | undefined,
+    worktreeName: string | undefined,
+  ) => {
+    for (const name of [configName, worktreeName])
+      if (name !== undefined) {
+        const file = join(folder, name);
+        hits.push(...gitConfigHits(file, labelOf(root, file)));
+      }
+  };
+  read(dir, names.get('config'), names.get('config.worktree'));
+  const commondir = names.get('commondir');
+  if (commondir === undefined) return hits;
+  const target = readTextOr(join(dir, commondir)).trim();
+  if (target === '') return hits;
+  const common = resolve(dir, target);
+  if (!isWithin(common, root)) {
+    hits.push({
+      kind: 'nested-bare-repo',
+      file: labelOf(root, dir),
+      what: 'its commondir file points out of this folder, at a config that was not read',
+    });
+    return hits;
+  }
+  const inCommon = namesIn(common);
+  read(common, inCommon.get('config'), inCommon.get('config.worktree'));
+  return hits;
+}
+
+const isWithin = (path: string, root: string): boolean => {
+  const rel = relative(root, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+};
+
+/**
+ * The names git looks for in a folder, folded as a disk that ignores case opens them, each with
+ * the name it has on disk. A folder named `HEAD` or `commondir` is not what git looks for.
+ */
+function namesOf(entries: readonly Dirent[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const e of entries) {
+    const name =
+      gitDirName(e.name) ??
+      (foldName(e.name) === 'config.worktree' ? 'config.worktree' : undefined);
+    if (name === undefined || (e.isDirectory() && FILE_NAMES.has(name)) || names.has(name))
+      continue;
+    names.set(name, e.name);
+  }
+  return names;
+}
+
+function namesIn(dir: string): Map<string, string> {
+  try {
+    return namesOf(readdirSync(dir, { withFileTypes: true }));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * A bare repository committed into an ordinary one as plain files. Git refuses to check out a path
+ * named `.git`, but a bare repository needs only `HEAD`, `objects/` and `refs/`, or `HEAD` and a
+ * `commondir` file, so it survives a clone — the vector behind CVE-2026-45033, and the one that
+ * makes this class of attack deliverable by pull request rather than by zip. Each one is reported
+ * with the commands its config runs, and so is a lone `commondir` or `gitdir` file, which only
+ * points git elsewhere. In a folder with no `.git` (`folder`), a `.git` folder or file deeper in
+ * came with the folder too, and is read and reported the same way.
+ */
+function nestedBareRepos(
+  root: string,
+  withRoot = false,
+  folder = false,
+): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
   const queue: string[] = [root];
   let visited = 0;
-  while (queue.length > 0) {
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
     if (visited >= MAX_DIRS) return { hits, capped: true };
-    const dir = queue.shift() as string;
+    const dir = next;
     visited += 1;
-    let entries;
+    let entries: Dirent[];
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+      );
     } catch {
       continue;
     }
     // Links and other letter cases too: git opens `Objects` as `objects` on a disk that ignores case.
-    const names = new Set(
-      entries.flatMap((e) => {
-        const name = gitDirName(e.name);
-        return name === undefined || (e.isDirectory() && FILE_NAMES.has(name)) ? [] : [name];
-      }),
-    );
-    const isBare = looksLikeGitDir(names);
+    const names = namesOf(entries);
+    const isBare = looksLikeGitDir(new Set(names.keys()));
     if (isBare && (dir !== root || withRoot)) {
       hits.push({
         kind: 'nested-bare-repo',
-        file: relative(root, dir) || '.',
+        file: labelOf(root, dir),
         what: 'HEAD, objects, refs',
       });
+      hits.push(...gitDirConfigHits(root, dir, names));
       // The root is walked on: what is under it is all this check reads.
       if (dir !== root) continue;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      if (entry.name === '.git' || SKIP_DIRS.has(entry.name)) continue;
+      const folded = foldName(entry.name);
+      const isDir = entry.isDirectory() && !entry.isSymbolicLink();
+      if (!isBare && !isDir && (folded === 'commondir' || folded === 'gitdir'))
+        hits.push({
+          kind: 'nested-bare-repo',
+          file: labelOf(root, join(dir, entry.name)),
+          what: `a ${folded} file, ${POINTS_ELSEWHERE}`,
+        });
+      // The repository's own is not read here; in a folder with no `.git`, one deeper in came with it.
+      if (entry.name === '.git' && !folder) continue;
+      if (folder && folded === '.git') {
+        if (!isDir)
+          hits.push({
+            kind: 'nested-bare-repo',
+            file: labelOf(root, join(dir, entry.name)),
+            what: `a .git file, ${POINTS_ELSEWHERE}`,
+          });
+        else queue.push(join(dir, entry.name));
+        continue;
+      }
+      if (!isDir || SKIP_DIRS.has(entry.name)) continue;
       queue.push(join(dir, entry.name));
     }
   }
@@ -312,6 +425,17 @@ const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): R
 });
 
 /**
+ * What the files of a folder make run whether or not it is a repository: husky hooks, dev
+ * container commands, a `.envrc`, install scripts. Both a repository and a plain folder read these.
+ */
+const workingTreeHits = (root: string): RepoExecHit[] => [
+  ...huskyHits(root),
+  ...devcontainerHits(root),
+  ...envrcHits(root),
+  ...packageScriptHits(root),
+];
+
+/**
  * `plat` defaults to the real platform, so every caller keeps working unchanged; a
  * test overrides it to exercise the Windows rules on a machine that cannot run them.
  */
@@ -320,39 +444,40 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
   }
   const bare = nestedBareRepos(cwd);
+  const config = join(cwd, '.git', 'config');
   const all = [
-    ...gitConfigHits(join(cwd, '.git', 'config'), '.git/config'),
-    ...gitAttributesHits(cwd),
+    ...gitConfigHits(config, '.git/config'),
+    ...gitAttributesHits(
+      cwd,
+      [config],
+      [join(cwd, '.gitattributes'), join(cwd, '.git', 'info', 'attributes')],
+    ),
     ...bare.hits,
     ...gitHookHits(cwd, plat),
-    ...huskyHits(cwd),
-    ...devcontainerHits(cwd),
-    ...envrcHits(cwd),
-    ...packageScriptHits(cwd),
+    ...workingTreeHits(cwd),
   ];
   return split(all, bare.capped, true);
 }
 
 /**
  * A folder with no `.git`: a zip download, an unpacked tarball. Git still runs in it. When the
- * folder itself holds `HEAD`, `objects` and `refs`, git takes it for a bare repository and
- * reads its `config`, so the first `git status` there runs what that config names; a bare
- * repository deeper in does the same for a git command run inside it. A `.envrc` and husky
- * hooks are listed as they are in a repository.
+ * folder itself holds `HEAD` with `objects` and `refs`, or with a `commondir` file, git takes it
+ * for a bare repository and reads its config, so the first `git status` there runs what that
+ * config names, and routes paths through the drivers its attributes name; a bare repository or a
+ * `.git` deeper in does the same for a git command run inside it. The rest is read as it is in a
+ * repository.
  */
 export function folderSurface(cwd: string): RepoSurface {
-  const bare = nestedBareRepos(cwd, true);
-  const rootIsBare = bare.hits.some((h) => h.file === '.');
-  return split(
-    [
-      ...bare.hits,
-      ...(rootIsBare ? gitConfigHits(join(cwd, 'config'), 'config') : []),
-      ...huskyHits(cwd),
-      ...envrcHits(cwd),
-    ],
-    bare.capped,
-    false,
-  );
+  const bare = nestedBareRepos(cwd, true, true);
+  const rootIsBare = bare.hits.some((h) => h.file === '.' && h.what === 'HEAD, objects, refs');
+  const attributes = rootIsBare
+    ? gitAttributesHits(
+        cwd,
+        [join(cwd, 'config'), join(cwd, 'config.worktree')],
+        [join(cwd, '.gitattributes'), join(cwd, 'info', 'attributes')],
+      )
+    : [];
+  return split([...bare.hits, ...attributes, ...workingTreeHits(cwd)], bare.capped, false);
 }
 
 /** Why each kind of pre-trust execution is a finding; also the SARIF rule text. */

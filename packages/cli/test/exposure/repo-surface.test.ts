@@ -91,6 +91,78 @@ describe('folderSurface — a folder with no .git', () => {
     const root = folder({ 'README.md': 'x\n', config: '[core]\n\tfsmonitor = ./pwn.sh\n' });
     expect(folderSurface(root)).toMatchObject({ isRepo: false, preTrust: [], onOpen: [] });
   });
+
+  // Git takes a folder with HEAD and a commondir file for a repository whose objects, refs and
+  // config are in the folder commondir names; config.worktree is read next to config.
+  it('reads the config that a commondir file points at, and config.worktree', () => {
+    const fsmonitor = '[core]\n\tfsmonitor = ./pwn.sh\n';
+    const root = folder({
+      HEAD: BARE.HEAD,
+      commondir: 'common\n',
+      'common/objects/x': '',
+      'common/refs/x': '',
+      'common/config': fsmonitor,
+      'config.worktree': '[core]\n\tsshCommand = ./ssh.sh\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toEqual([
+      'nested-bare-repo . HEAD, objects, refs',
+      'git-config-exec config.worktree core.sshCommand',
+      'git-config-exec common/config core.fsmonitor',
+    ]);
+  });
+
+  it('reports a commondir that points out of the folder, and a lone commondir or gitdir file', () => {
+    const root = folder({
+      'a/HEAD': BARE.HEAD,
+      'a/commondir': '/stroq-test-elsewhere\n',
+      'b/commondir': '../a\n',
+      'c/gitdir': '/stroq-test-elsewhere/.git\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toEqual([
+      'nested-bare-repo a HEAD, objects, refs',
+      'nested-bare-repo a its commondir file points out of this folder, at a config that was not read',
+      'nested-bare-repo b/commondir a commondir file, which points git at the folder of another repository',
+      'nested-bare-repo c/gitdir a gitdir file, which points git at the folder of another repository',
+    ]);
+  });
+
+  it('reports a .git folder or file deeper in, and the commands its config runs', () => {
+    const root = folder({
+      ...Object.fromEntries(Object.entries(BARE).map(([k, v]) => [`sub/.git/${k}`, v])),
+      'sub/.git/config': '[core]\n\tfsmonitor = ./pwn.sh\n',
+      'other/.git': 'gitdir: ../sub/.git\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toEqual([
+      'nested-bare-repo other/.git a .git file, which points git at the folder of another repository',
+      'nested-bare-repo sub/.git HEAD, objects, refs',
+      'git-config-exec sub/.git/config core.fsmonitor',
+    ]);
+  });
+
+  it('reads dev container commands and install scripts as in a repository', () => {
+    const root = folder({
+      '.devcontainer/devcontainer.json': '{ "initializeCommand": "./host.sh" }',
+      'package.json': JSON.stringify({ scripts: { postinstall: 'node x.js' } }),
+    });
+    const surface = folderSurface(root);
+    expect(lines(surface.preTrust)).toEqual([
+      'devcontainer-host-command .devcontainer/devcontainer.json initializeCommand',
+    ]);
+    expect(lines(surface.onOpen)).toEqual(['package-install-script package.json postinstall']);
+  });
+
+  it('reports a driver that the attributes of a bare folder route through its config', () => {
+    const root = folder({
+      ...BARE,
+      config: '[filter "x"]\n\tsmudge = ./pwn.sh\n',
+      'info/attributes': '* filter=x\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toEqual([
+      'nested-bare-repo . HEAD, objects, refs',
+      'git-config-exec config filter.x.smudge',
+      'gitattributes-driver info/attributes filter.x',
+    ]);
+  });
 });
 
 describe('repoSurface — what a repository can run', () => {

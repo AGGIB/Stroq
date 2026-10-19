@@ -116,6 +116,30 @@ describe('stroq inspect', () => {
     expect(record.findings).toHaveLength(1);
   });
 
+  it('reports a dev container host command of a folder with no .git once, as a finding', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-inspect-folder-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.devcontainer'));
+    writeFileSync(
+      join(dir, '.devcontainer', 'devcontainer.json'),
+      '{ "initializeCommand": "./host.sh" }',
+    );
+    const out = capture();
+    const code = runInspect([dir, '--json']);
+    out.restore();
+    expect(code).toBe(1);
+    const record = JSON.parse(out.lines.join('')) as {
+      isRepo: boolean;
+      findings: { detail: string }[];
+      agent: { kind: string }[];
+    };
+    expect(record.isRepo).toBe(false);
+    expect(record.findings.map((f) => f.detail.split(' — ')[0])).toEqual([
+      '.devcontainer/devcontainer.json',
+    ]);
+    expect(record.agent.map((h) => h.kind)).toEqual([]);
+  });
+
   it('emits SARIF with --sarif, keeping the exit code, for code scanning', () => {
     const dir = repo();
     git(dir, 'config', 'core.fsmonitor', '/tmp/pwn.sh');

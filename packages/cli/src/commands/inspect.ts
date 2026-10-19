@@ -48,7 +48,7 @@ export { GIT_HARDENING, hardeningEnv, hardeningExports } from '../exposure/git-h
 /** Exit codes: nothing fails, something fails, the arguments were wrong, the check could not run. */
 const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 } as const;
 
-/** The root dev container files and the root install scripts are already in `repoSurface`. */
+/** The root dev container files and the root install scripts are already in `repoSurface` and `folderSurface`. */
 const COVERED_FILES: ReadonlySet<string> = new Set([
   '.devcontainer/devcontainer.json',
   '.devcontainer.json',
@@ -212,8 +212,9 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
   // Agent files take effect with or without git: a zip download has them too. Only the reading
   // of `.git` itself, in `repoSurface`, needs a repository.
   const agent = agentSurface(dir);
+  // A folder with no .git reads the root dev container and install scripts the same way.
   const hits = tagChanges(
-    agent.hits.filter((h) => !(surface.isRepo && coveredByRepoSurface(h))),
+    agent.hits.filter((h) => !coveredByRepoSurface(h)),
     null,
   );
   const failing =
