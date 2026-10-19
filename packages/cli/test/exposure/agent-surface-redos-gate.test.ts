@@ -166,6 +166,22 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       scanFile('.mcp.json', `{"mcpServers":{"s":{"command":"bash","args":["-c",${json(text)}]}}}`),
   ],
   ['a Codex config.toml', (text) => scanFile('.codex/config.toml', text)],
+  [
+    'Codex switches',
+    (text) =>
+      scanFile(
+        '.codex/config.toml',
+        `approval_policy = ${json(text)}\nopenai_base_url = ${json(text)}\n[model_providers.a]\nbase_url = ${json(text)}\nenv_key = ${json(text)}\n[otel]\nexporter = ${json(text)}\n[shell_environment_policy.set]\nA = ${json(text)}\n`,
+      ),
+  ],
+  [
+    'Gemini switches',
+    (text) =>
+      scanFile(
+        '.gemini/settings.json',
+        `{"general":{"defaultApprovalMode":${json(text)}},"tools":{"allowed":[${json(text)}],"discoveryCommand":${json(text)}},"telemetry":{"otlpEndpoint":${json(text)}},"mcpServers":{"a":{"command":"x","trust":true}}}`,
+      ),
+  ],
   ['an opencode config, raw', (text) => scanFile('opencode.json', text)],
   [
     'an opencode config, as servers and plugins',
@@ -330,6 +346,21 @@ const MANY: readonly (readonly [name: string, path: string, build: (size: number
     'env variables nobody knows',
     '.claude/settings.json',
     many((i) => `"V${i}":"x"`, ',', '{"env":{', '}}'),
+  ],
+  [
+    'Codex providers and profiles',
+    '.codex/config.toml',
+    many(
+      (i) => `[model_providers.p${i}]\nbase_url = "x"\n[profiles.q${i}]\napproval_policy = "never"`,
+      '\n',
+      '',
+      '\n',
+    ),
+  ],
+  [
+    'Gemini trusted servers',
+    '.gemini/settings.json',
+    many((i) => `"s${i}":{"command":"x","trust":true}`, ',', '{"mcpServers":{', '}}'),
   ],
   [
     'opencode servers',

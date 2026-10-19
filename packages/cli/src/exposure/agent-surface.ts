@@ -18,13 +18,13 @@ import {
 import {
   CLAUDE_SETTINGS_KEYS,
   claudeSettings,
-  geminiSettings,
   hookFile,
   mcpFile,
   type JsonFile,
 } from './agent-json.js';
 import { byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { opencodeConfig, pluginCode, zedSettings } from './agent-others.js';
+import { geminiSettings } from './agent-switches.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
 import { codexConfig } from './agent-toml.js';
 import { lineOf, stripJsonc } from './jsonc.js';
@@ -129,7 +129,22 @@ const devcontainerText: Fallback = (path, raw, stripped) =>
 const READERS = {
   claude: json(claudeSettings, mentions(CLAUDE_SETTINGS_KEYS)),
   mcp: json(mcpFile, either(mcpText, mentions(RUN_KEYS))),
-  gemini: json(geminiSettings, either(mcpText, mentions([...RUN_KEYS, '"hooks"']))),
+  gemini: json(
+    geminiSettings,
+    either(
+      mcpText,
+      mentions([
+        ...RUN_KEYS,
+        '"hooks"',
+        'defaultApprovalMode',
+        'autoAccept',
+        'Command"',
+        'otlpEndpoint',
+        'folderTrust',
+        '"trust"',
+      ]),
+    ),
+  ),
   hooks: json(hookFile, mentions(RUN_KEYS)),
   tasks: json(vscodeTasks, either(editorText, mentions(RUN_KEYS))),
   settings: json(vscodeSettingsFile, either(editorText, mentions(['autoApprove', '"servers"']))),

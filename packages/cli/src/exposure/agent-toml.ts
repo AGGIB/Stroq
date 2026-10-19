@@ -8,6 +8,7 @@ import {
   tooMany,
 } from './agent-json.js';
 import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { codexSwitches } from './agent-switches.js';
 import { lineOf } from './jsonc.js';
 import { parseToml, type Obj, type Toml } from './toml-lite.js';
 
@@ -78,6 +79,17 @@ function hookHitsOf(path: string, text: string, doc: Obj): AgentHit[] {
   return cut ? [...hits, tooMany(path, 'hooks', MAX_HOOKS, hooks)] : hits;
 }
 
+/** The line a key was set on, by its path of keys; else where its words first stand. */
+const lineIn =
+  (toml: Toml, text: string) =>
+  (keys: readonly string[]): number => {
+    let table: unknown = toml.doc;
+    for (const key of keys.slice(0, -1))
+      table = isPlainObject(table) && Object.hasOwn(table, key) ? table[key] : undefined;
+    const last = keys[keys.length - 1] as string;
+    return (isPlainObject(table) ? toml.keyLine(table, last) : undefined) ?? lineOf(text, keys);
+  };
+
 /** Words that point at the line to show for a file this reader could not follow. */
 const RUN_WORDS = /\b(?:command|notify|mcp_servers|hooks)\b/;
 
@@ -93,5 +105,9 @@ export function codexConfig(path: string, text: string): AgentHit[] {
         : hit('unreadable-config', path, lineOf(clean, [mention[0]]), 'unparsed', digestOf(text)),
     ];
   }
-  return [...serverHits(path, clean, toml), ...hookHitsOf(path, clean, toml.doc)];
+  return [
+    ...serverHits(path, clean, toml),
+    ...hookHitsOf(path, clean, toml.doc),
+    ...codexSwitches(path, toml.doc, lineIn(toml, clean)),
+  ];
 }

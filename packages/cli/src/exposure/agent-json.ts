@@ -131,33 +131,43 @@ export const commandText = (value: unknown): string | undefined =>
  * event is the path of keys to the handler with the indices and the word `hooks` left out.
  * Walked with a stack of its own, so a deep file is only slow; `cut` says the caps were hit.
  */
+/** A key on the way to a node, and the one before it: the path is spelled out only for a hook. */
+interface PathNode {
+  readonly key: string;
+  readonly up: PathNode | undefined;
+}
 interface Pending {
   readonly node: unknown;
-  readonly path: readonly string[];
+  readonly at: PathNode | undefined;
 }
+const keysOf = (at: PathNode | undefined): string[] => {
+  const keys: string[] = [];
+  for (let n = at; n !== undefined; n = n.up) keys.push(n.key);
+  return keys.reverse();
+};
 
 export function hookEntries(
   value: unknown,
   commandKeys: ReadonlySet<string> = COMMAND_KEYS,
 ): { entries: HookEntry[]; cut: boolean } {
   const entries: HookEntry[] = [];
-  const stack: Pending[] = [{ node: value, path: [] }];
+  const stack: Pending[] = [{ node: value, at: undefined }];
   let visited = 0;
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
     visited += 1;
     if (visited > MAX_HOOK_NODES || entries.length > MAX_HOOKS) return { entries, cut: true };
-    const { node, path } = next;
+    const { node, at } = next;
     if (typeof node !== 'object' || node === null) continue;
     const children: Pending[] = [];
     for (const [key, child] of Object.entries(node)) {
       const command = commandKeys.has(key) ? commandText(child) : undefined;
       if (command !== undefined) {
-        const keys = path.filter((k) => !isIndex(k));
+        const keys = keysOf(at).filter((k) => !isIndex(k));
         const event = keys.filter((k) => k.toLowerCase() !== 'hooks').join('.');
         const runs = `${command}${otherFields(node as Obj, isHandlerLabel)}`;
         entries.push({ path: keys, event: event === '' ? 'hooks' : event, key, command, runs });
       } else if (typeof child === 'object' && child !== null) {
-        children.push({ node: child, path: [...path, key] });
+        children.push({ node: child, at: { key, up: at } });
       }
     }
     // Pushed last to first, so the file's first entry is the next one taken.
@@ -235,6 +245,8 @@ const ENV_LOADS_CODE =
  */
 const HARMLESS_ENV =
   /^(?:LANG|LANGUAGE|LC_[A-Z]{1,20}|TZ|TERM|COLORTERM|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|DEBUG|CI|NODE_ENV|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE|PYTHONIOENCODING|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH|CLAUDE_CODE_MAX_OUTPUT_TOKENS|CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|CLAUDE_CODE_DISABLE_TERMINAL_TITLE|CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY|DISABLE_TELEMETRY|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_BUG_COMMAND|DISABLE_COST_WARNINGS|DISABLE_NON_ESSENTIAL_MODEL_CALLS|DISABLE_PROMPT_CACHING|DISABLE_INTERLEAVED_THINKING|USE_BUILTIN_RIPGREP|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_(?:OPUS|SONNET|HAIKU)_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)$/;
+/** Whether a variable is one of the few that `env` may set without a report. */
+export const isHarmlessEnv = (name: string): boolean => HARMLESS_ENV.test(name);
 /** Whether a variable is one of those known to load code or send traffic elsewhere. */
 export const envLoadsCode = (name: string): boolean => ENV_LOADS_CODE.test(name);
 /** An allow rule for the whole shell: `Bash`, or `Bash(...)` whose pattern is only a wildcard. */
@@ -281,7 +293,7 @@ function helperCommands(f: JsonFile): AgentHit[] {
 /** Every variable of `env` but the few known to be harmless, whatever its value's type. */
 function envHits(f: JsonFile): AgentHit[] {
   const named = Object.entries(ownObject(f.value, 'env') ?? {}).filter(
-    ([key]) => !HARMLESS_ENV.test(key),
+    ([key]) => !isHarmlessEnv(key),
   );
   const list = firstEntries(f.path, 'env variables', named);
   return [
@@ -522,9 +534,4 @@ export function mcpServerHits(
 export const mcpFile = (f: JsonFile): AgentHit[] => [
   ...mcpServerHits(f, f.value, 'mcpServers'),
   ...mcpServerHits(f, f.value, 'servers'),
-];
-
-export const geminiSettings = (f: JsonFile): AgentHit[] => [
-  ...mcpServerHits(f, f.value, 'mcpServers'),
-  ...hookHits(f, own(f.value, 'hooks'), ['"hooks"']),
 ];

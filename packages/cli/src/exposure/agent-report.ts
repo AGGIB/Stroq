@@ -29,23 +29,31 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'agent-helper-command':
       return `${name} runs: ${value}`;
     case 'agent-api-redirect':
-      return `${name} sends the agent's API traffic, and its key, to: ${value}`;
+      return /otel|telemetry/i.test(h.name)
+        ? `${name} sends the agent's telemetry, which can hold your prompts, to: ${value}`
+        : `${name} sends the agent's API traffic, and its key, to: ${value}`;
     case 'agent-env':
       return envLoadsCode(h.name)
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow':
-      return `permissions.allow lets the agent run any shell command without asking: ${value}`;
+      return `${name} lets the agent run any shell command without asking: ${value}`;
     case 'agent-permission-bypass':
-      return h.name === 'permissions.defaultMode'
-        ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'
-        : `${name} approves tool calls without asking: ${value}`;
+      if (h.name === 'permissions.defaultMode')
+        return 'the agent runs every tool without asking (defaultMode is bypassPermissions)';
+      if (h.name.endsWith('sandbox_mode'))
+        return `${name} runs every command outside the sandbox: ${value}`;
+      if (h.name.endsWith('folderTrust.enabled'))
+        return `${name} switches off the question whether this folder is trusted: ${value}`;
+      return `${name} approves tool calls without asking: ${value}`;
     case 'agent-plugin':
       if (h.name === 'plugin code') return 'is plugin code the agent loads and runs when it starts';
       return h.name.startsWith('enabledPlugins.') || h.name === 'plugin'
         ? `turns on the plugin: ${value}`
         : `adds a plugin source: ${value}`;
     case 'mcp-auto-approve':
+      if (h.name.endsWith('.trust'))
+        return `runs the tools of MCP server ${value} without asking (trust)`;
       return h.name === 'enabledMcpjsonServers'
         ? `starts the MCP server ${value} of .mcp.json without asking (enabledMcpjsonServers)`
         : 'starts every MCP server in the repository without asking (enableAllProjectMcpServers)';
