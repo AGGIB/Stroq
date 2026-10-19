@@ -1,6 +1,7 @@
 import { describe, it } from 'vitest';
 import type { TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
+import { pathWords } from '../../src/exposure/agent-run-files.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -57,6 +58,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     'ANTHROPIC_',
     'DYLD_',
     'Bash(',
+    '$CLAUDE_PROJECT_DIR/',
+    './a ',
     '"runOn": /**/',
     '---\n',
     'hooks:\n',
@@ -126,6 +129,7 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
         `{"env":{${json(text)}:"x"},"permissions":{"allow":[${json(text)}]}}`,
       ),
   ],
+  ['the file words of a command line', (text) => pathWords(text)],
   ['an instruction file', (text) => scanFile('CLAUDE.md', text)],
   ['an agent definition', (text) => scanFile('.claude/agents/a.md', `---\n${text}\n---\n`)],
   ['GitHub annotations', (text) => annotations([hostile(text)], 'new')],

@@ -32,6 +32,7 @@ export const KIND_SEVERITY = {
   'unreadable-config': 'error',
   'config-link-outside': 'warning',
   'config-submodule': 'error',
+  'agent-run-file-changed': 'error',
 } as const;
 
 export type AgentKind = keyof typeof KIND_SEVERITY;

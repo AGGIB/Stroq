@@ -1,5 +1,6 @@
 import { tagChanges, type ChangeStatus, type TaggedHit } from './agent-change.js';
 import { hit, type AgentHit } from './agent-kinds.js';
+import { runFileChanges } from './agent-run-files.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -247,8 +248,20 @@ function compare(top: string, base: string, head: string) {
   };
 
   const found = kept.flatMap(hitsOf);
+  const touched = (path: string): 'new' | 'changed' | undefined => {
+    const at = resolve(path, links.view);
+    if (at.kind !== 'blob') return undefined;
+    if (linkChanged(at, changed)) return 'changed';
+    const status = changed.get(at.path)?.status;
+    return status === 'A' ? 'new' : status === 'M' || status === 'T' ? 'changed' : undefined;
+  };
   const limits = limitHits(dropped, links.cut, stoppedAt);
-  const hits = [...found, ...limits, ...bareChanges(tree, changed)];
+  const hits = [
+    ...found,
+    ...runFileChanges(found, touched),
+    ...limits,
+    ...bareChanges(tree, changed),
+  ];
   // A stable sort: each file's hits keep the order of their lines.
   return { base, hits: hits.sort((a, b) => byPath(a.file, b.file)), capped: limits.length > 0 };
 }
