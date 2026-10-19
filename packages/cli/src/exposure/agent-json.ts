@@ -164,6 +164,17 @@ const HELPER_KEYS = [
   'awsCredentialExport',
 ] as const;
 const API_BASE_URL = /^ANTHROPIC(?:_[A-Z]+)?_BASE_URL$/;
+/**
+ * Variables of `env` that make the programs a session starts load code, or connect through
+ * someone else, or trust their certificate: `env` is set for every session and every hook, so
+ * `NODE_OPTIONS=--require ./x.js` runs x.js the next time anything starts node. Claude Code's
+ * own `CLAUDE_CODE_SHELL_PREFIX` wraps every shell command, and `CLAUDE_ENV_FILE` is sourced
+ * before each one.
+ */
+const ENV_LOADS_CODE =
+  /^(?:NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|BASH_ENV|ENV|ZDOTDIR|PROMPT_COMMAND|PATH|SHELL|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_[A-Z_]{1,40}|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_SSH|GIT_SSH_COMMAND|GIT_EXEC_PATH|GIT_ASKPASS|SSH_ASKPASS|GIT_EDITOR|GIT_PAGER|EDITOR|VISUAL|PAGER|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_COUNT|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|CLAUDE_CODE_SHELL_PREFIX|CLAUDE_ENV_FILE)$/;
+/** An allow rule for the whole shell: `Bash`, or `Bash(...)` whose pattern is only a wildcard. */
+const WHOLE_SHELL = /^Bash(?:\((?:\*|:\*|\*\*| \*)\))?$/;
 
 function helperCommands(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
@@ -187,16 +198,45 @@ function helperCommands(f: JsonFile): AgentHit[] {
   return hits;
 }
 
+function envHits(f: JsonFile): AgentHit[] {
+  const named = Object.entries(ownObject(f.value, 'env') ?? {}).filter(
+    (pair): pair is [string, string] =>
+      typeof pair[1] === 'string' && (API_BASE_URL.test(pair[0]) || ENV_LOADS_CODE.test(pair[0])),
+  );
+  const list = firstEntries(f.path, 'env variables', named);
+  return [
+    ...list.cut,
+    ...list.items.map(([key, value]) =>
+      hit(
+        API_BASE_URL.test(key) ? 'agent-api-redirect' : 'agent-env',
+        f.path,
+        lineOf(f.text, ['"env"', quoted(key)]),
+        key,
+        value,
+      ),
+    ),
+  ];
+}
+
+/** Allow rules that hand the agent the whole shell, each spelling listed once. */
+function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
+  const allow = permissions === undefined ? [] : strings(own(permissions, 'allow'));
+  const rules = new Set(allow.map((rule) => rule.trim()).filter((rule) => WHOLE_SHELL.test(rule)));
+  return [...rules].map((rule) =>
+    hit(
+      'agent-broad-allow',
+      f.path,
+      lineOf(f.text, ['"permissions"', '"allow"', quoted(rule)]),
+      'permissions.allow',
+      rule,
+    ),
+  );
+}
+
 function settingsSwitches(f: JsonFile): AgentHit[] {
-  const hits: AgentHit[] = [];
-  const env = ownObject(f.value, 'env');
-  for (const [key, url] of Object.entries(env ?? {})) {
-    if (API_BASE_URL.test(key) && typeof url === 'string')
-      hits.push(
-        hit('agent-api-redirect', f.path, lineOf(f.text, ['"env"', quoted(key)]), key, url),
-      );
-  }
+  const hits: AgentHit[] = [...envHits(f)];
   const permissions = ownObject(f.value, 'permissions');
+  hits.push(...broadAllows(f, permissions));
   if (permissions !== undefined && own(permissions, 'defaultMode') === 'bypassPermissions')
     hits.push(
       hit(
@@ -274,6 +314,7 @@ export const CLAUDE_SETTINGS_KEYS = [
   'statusLine',
   ...HELPER_KEYS,
   '_BASE_URL',
+  '"env"',
   'bypassPermissions',
   'enableAllProjectMcpServers',
   'enabledPlugins',

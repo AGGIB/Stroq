@@ -27,6 +27,10 @@ function sentence(h: AgentHit, q: Quote): string {
       return `${name} runs: ${value}`;
     case 'agent-api-redirect':
       return `${name} sends the agent's API traffic, and its key, to: ${value}`;
+    case 'agent-env':
+      return `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`;
+    case 'agent-broad-allow':
+      return `permissions.allow lets the agent run any shell command without asking: ${value}`;
     case 'agent-permission-bypass':
       return h.name === 'permissions.defaultMode'
         ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'

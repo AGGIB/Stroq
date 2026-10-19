@@ -146,6 +146,10 @@ const many =
     return `${open}${parts.join(join)}${close}`;
   };
 
+/** `i` written in capital letters, for names that take only letters. */
+const letters = (i: number): string =>
+  [...i.toString(26)].map((d) => String.fromCharCode(65 + parseInt(d, 26))).join('');
+
 /**
  * One file with many entries: each entry's line was looked for from the top of the file, so
  * 40,000 servers in a megabyte took seconds. Every reader that reports one entry each is here.
@@ -175,6 +179,11 @@ const MANY: readonly (readonly [name: string, path: string, build: (size: number
     'enabled plugins',
     '.claude/settings.json',
     many((i) => `"p${i}@m":true`, ',', '{"enabledPlugins":{', '}}'),
+  ],
+  [
+    'env variables that load code',
+    '.claude/settings.json',
+    many((i) => `"DYLD_${letters(i)}":"x"`, ',', '{"env":{', '}}'),
   ],
   [
     'plugin sources',

@@ -111,6 +111,18 @@ export function folderOpenTasks(f: JsonFile, list: unknown, prefix: readonly str
 }
 
 const AUTO_APPROVE_KEYS = ['chat.tools.autoApprove', 'chat.tools.global.autoApprove'] as const;
+const TERMINAL_AUTO_APPROVE = 'chat.tools.terminal.autoApprove';
+
+/**
+ * `chat.tools.terminal.autoApprove` maps a command, or a `/regex/`, to `true`, `false` or
+ * `{ approve }`. A list that only refuses (`"rm": false`) approves nothing.
+ */
+const approvesTerminal = (value: unknown): boolean =>
+  value === true ||
+  (isPlainObject(value) &&
+    Object.values(value).some(
+      (rule) => rule === true || (isPlainObject(rule) && own(rule, 'approve') === true),
+    ));
 
 export function vscodeSettings(
   f: JsonFile,
@@ -133,9 +145,10 @@ export function vscodeSettings(
         'on',
       ),
     );
-  for (const key of AUTO_APPROVE_KEYS) {
+  for (const key of [...AUTO_APPROVE_KEYS, TERMINAL_AUTO_APPROVE]) {
     const value = own(settings, key);
-    if (autoApproves(value))
+    const approves = key === TERMINAL_AUTO_APPROVE ? approvesTerminal(value) : autoApproves(value);
+    if (approves)
       hits.push(
         hit(
           'agent-permission-bypass',

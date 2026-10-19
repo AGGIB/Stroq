@@ -32,7 +32,10 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
     'Claude Code runs this helper command by itself, for example to draw the status line or fetch a key.',
   'agent-api-redirect':
     "This sends the agent's API traffic, and the key with it, to another address.",
+  'agent-env':
+    'This sets a variable for every command the agent and its hooks start, and the variable loads code or sends traffic elsewhere.',
   'agent-permission-bypass': 'This lets the agent or editor run tools without asking you first.',
+  'agent-broad-allow': 'This lets the agent run any shell command without asking you first.',
   'agent-plugin':
     'This turns on a plugin, or adds a place plugins come from, for everyone who opens the repository.',
   'mcp-auto-approve':
