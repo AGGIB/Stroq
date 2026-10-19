@@ -119,7 +119,9 @@ describe('an MCP server whose stored copy is damaged', () => {
     const [remove, add] = commandsIn(failure);
     expect(remove.at(-1)).toBe('--force');
 
-    await removeMcp('demo', { ...f.mcpOptions, force: true });
+    // The printed remove command has no explicit target; use the recorded config.
+    const { config: _config, ...removeOptions } = f.mcpOptions;
+    await removeMcp('demo', { ...removeOptions, force: true });
     const { source, kind, options: again } = mcpOptionsOf(add, f.mcpOptions);
     const second = await addMcp(source, again);
 
