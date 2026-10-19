@@ -156,8 +156,13 @@ export class ProvenanceRecorder {
     // Report whether the permanent loss note was written. If it failed, an operation marker
     // can still keep the session reading as incomplete, and the failure is logged.
     const marked = lost && noted === null;
+    // The operation's marker comes off only when every loss is durably noted, the narrow one too.
+    // A note that could not be written leaves the marker as the evidence: it goes stale, and the
+    // session then asks about what nothing accounts for.
+    const digestsNoted = !digestsLost || digestNote === null;
+    const settles = (!lost || marked) && digestsNoted;
     if (readings.every((reading) => reading.atoms.length === 0)) {
-      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
+      if (settles) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted ?? digestNote, incomplete: marked };
     }
     const source = redact(summary).slice(0, MAX_STORED_CHARS);
@@ -179,12 +184,12 @@ export class ProvenanceRecorder {
     }
     try {
       await store.record(event.sessionId, inputs);
-      if (!lost || marked) await this.settle(store, event.sessionId, pendingOwner);
+      if (settles) await this.settle(store, event.sessionId, pendingOwner);
       return { error: noted ?? digestNote, incomplete: marked };
     } catch (err) {
       const failed = await this.note(store, event.sessionId);
       // If the permanent note failed too, the operation's marker is the evidence that remains.
-      if (failed === null) await this.settle(store, event.sessionId, pendingOwner);
+      if (failed === null && digestsNoted) await this.settle(store, event.sessionId, pendingOwner);
       return { error: messageOf(err), incomplete: failed === null };
     }
   }
