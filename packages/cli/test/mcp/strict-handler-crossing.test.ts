@@ -26,8 +26,8 @@ describe('the message that crosses the hostile cap', () => {
 
   it('is audited when it is the one that answers a waiting request', async () => {
     const rig = handlerRig({ maxWithheld: 1 });
-    rig.ledger.track({ id: 3, method: 'tools/call', toolName: 'mcp__srv__t' });
     await rig.feed(unknownId(1));
+    rig.ledger.track({ id: 3, method: 'tools/call', toolName: 'mcp__srv__t' });
     await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 3, result: 'not an object' }));
     expect(rig.ruleIds()).toEqual([
       'mcp-strict-unknown-id',

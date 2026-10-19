@@ -93,6 +93,32 @@ describe('add --kind mcp --strict', () => {
 });
 
 describe('add --kind mcp from an npx cache entry', () => {
+  it('refuses before confirmation when the stable copy cannot be created', async () => {
+    const { mcpFixture } = await import('../helpers/mcp-install.js');
+    const terminal = await import('../../src/ui/terminal.js');
+    const f = await mcpFixture();
+    const entry = join(f.root, '_npx', 'broken', 'node_modules', 'cli', 'index.js');
+    await mkdir(join(entry, '..'), { recursive: true });
+    await writeFile(entry, '// temporary entry\n');
+    await mkdir(f.options.stroqHome, { recursive: true });
+    await writeFile(join(f.options.stroqHome, 'cli'), 'not a directory');
+    vi.stubEnv('STROQ_HOME', f.options.stroqHome);
+    vi.spyOn(terminal, 'currentTerminal').mockReturnValue(f.terminal);
+    const install = vi.spyOn(mcpInstall, 'addMcp');
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const old = process.argv[1];
+    process.argv[1] = entry;
+    try {
+      await expect(runAdd([f.dir, '--kind', 'mcp', '--config', f.config])).rejects.toThrow(
+        /cannot create a stable Stroq entry.*npm install -g @stroq\/cli/,
+      );
+      expect(install).not.toHaveBeenCalled();
+      expect(output.mock.calls.flat().join('')).not.toContain('confirmed');
+    } finally {
+      process.argv[1] = old!;
+    }
+  });
+
   it('writes a stable entry path outside _npx and records the same launch in the lock', async () => {
     const { readFile } = await import('node:fs/promises');
     const { mcpFixture } = await import('../helpers/mcp-install.js');

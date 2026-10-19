@@ -5,6 +5,7 @@ import {
   type ClaudeHookEvent,
 } from '../adapters/claude-code.js';
 import { CWD_PLACEHOLDER } from '../attack/scenario.js';
+import type { AttackChannel, ChannelStatus } from '../hosts/channels.js';
 
 /**
  * One step of a scenario, run against the real engine and told apart by what actually happened.
@@ -32,7 +33,7 @@ export interface StepResult {
   readonly phase: 'pre' | 'post';
   readonly tool: string;
   readonly expect?: StepVerdict;
-  /** Null exactly when the step threw (see `error`): there is no verdict to report. */
+  /** Null when the step threw (see `error`) or was unsupported on the target host: there is no verdict to report. */
   readonly actual: StepVerdict | null;
   /** The rule that decided a tool call, or the first rule that matched a tool result. */
   readonly ruleId: string | null;
@@ -44,6 +45,12 @@ export interface StepResult {
   readonly timedOut: boolean;
   /** The message of what the step threw, with the context given to the runner. */
   readonly error?: string;
+  /** Which host channel this step uses (present when `--host` is set). */
+  readonly channel?: AttackChannel;
+  /** True when the target `--host` never sends this channel (`not seen` or `unknown`). */
+  readonly unsupported?: boolean;
+  /** The target host's status for this step's channel (present when `--host` is set). */
+  readonly hostStatus?: ChannelStatus;
 }
 
 /**
@@ -57,12 +64,14 @@ export interface StepResult {
  * - `timeout`: the answer depends on the clock (the scan budget, the reading deadline); a quieter
  *   machine might have said something else.
  * - `error`: the step threw, and there is no answer.
+ * - `unsupported`: under `--host <id>`, the host never sends this step's channel.
  */
-export type StepKind = 'decided' | 'asked-by-limit' | 'timeout' | 'error';
+export type StepKind = 'decided' | 'asked-by-limit' | 'timeout' | 'error' | 'unsupported';
 
 export function stepKind(
-  result: Pick<StepResult, 'actual' | 'signals' | 'timedOut' | 'error'>,
+  result: Pick<StepResult, 'actual' | 'signals' | 'timedOut' | 'error' | 'unsupported'>,
 ): StepKind {
+  if (result.unsupported === true) return 'unsupported';
   if (result.timedOut || result.signals.some(isClockSignal)) return 'timeout';
   if (result.error !== undefined) return 'error';
   if (result.actual === 'ask' && result.signals.some(isLimitSignal)) return 'asked-by-limit';

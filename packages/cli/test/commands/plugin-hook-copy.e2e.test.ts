@@ -146,7 +146,7 @@ done
     const npx = fakeNpx('printf "%s" "{}"; exit 0');
     const home = newHome();
     const r = await runWithCopy(preBash('ls'), npm, npx, home);
-    expect(r.code).toBe(0);
+    expect(r.code, r.stderr).toBe(0);
     expect(r.stderr).toContain('E503');
     expect(existsSync(copyOf(home))).toBe(false);
     expect(calls(npx.log)).toHaveLength(1);

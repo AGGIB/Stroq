@@ -24,10 +24,10 @@ const sampling = (id: unknown): string =>
 describe('the cap for malformed and hostile messages', () => {
   it('ends the server on the message after the limit, and answers every waiting request', async () => {
     const rig = handlerRig({ maxWithheld: 2 });
-    track(rig, 3);
-    track(rig, 4);
     await rig.feed(unknownId(1));
     await rig.feed(unknownId(2));
+    track(rig, 3);
+    track(rig, 4);
     expect(rig.terminated()).toBe(0);
     await rig.feed(unknownId(3));
     expect(rig.terminated()).toBe(1);
@@ -132,7 +132,7 @@ describe('the cap for the kinds a benign server also produces', () => {
     expect(rig.terminated()).toBe(0);
     await rig.feed(logLine(5));
     expect(rig.terminated()).toBe(1);
-    expect(JSON.stringify(rig.sent)).toContain('more than 5 withheld');
+    expect(JSON.stringify(rig.sent)).toContain('more than 5 benign-kind');
   });
 
   it('keeps the two counts apart', async () => {
@@ -165,6 +165,33 @@ describe('the cap for the kinds a benign server also produces', () => {
 });
 
 describe('ending a server', () => {
+  it('reports forwarded and mixed benign traffic without claiming it was all withheld', async () => {
+    const rig = handlerRig({ maxBenign: 2, scan: () => 'timeout' });
+    track(rig, 3);
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'ping', id: 'server-ping' }));
+    track(rig, 4);
+    await rig.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        result: { content: [{ type: 'text', text: 'ok' }] },
+      }),
+    );
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+    expect(rig.terminated()).toBe(1);
+    const response = rig.sent.find((value) => (value as { id?: unknown }).id === 3);
+    expect(JSON.stringify(response)).toContain('benign');
+    expect(JSON.stringify(response)).not.toContain('2 withheld messages');
+    expect(rig.notes.join('')).toContain('benign');
+    const ended = rig
+      .audit()
+      .find(
+        (entry) => (entry['decision'] as { ruleId?: string })?.ruleId === 'mcp-strict-terminated',
+      );
+    expect(JSON.stringify(ended)).toContain('benign');
+    expect(JSON.stringify(rig.audit())).toContain('benign-kind cap');
+  });
+
   it('asks for the process to be stopped before it writes anything to the client', async () => {
     // A client that has stopped reading never lets a write finish. The kill must not wait
     // behind it, or a hostile server stays alive for as long as the client is stuck.
@@ -224,5 +251,28 @@ describe('what is forwarded when a server starts the exchange', () => {
     await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: SENTENCE, method: 'ping' }));
     expect(JSON.stringify(rig.sent)).not.toContain('Ignore');
     expect(rig.ruleIds()).toEqual(['mcp-strict-unsolicited']);
+  });
+
+  it('is audited as mcp-strict-forwarded and counts toward the benign cap', async () => {
+    const rig = handlerRig();
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 'srv-ping', method: 'ping' }));
+    expect(rig.ruleIds()).toEqual(['mcp-strict-forwarded']);
+    expect(JSON.stringify(rig.audit())).toContain('forwarded a server request (ping)');
+  });
+
+  it('ends the server when forwarded server messages exceed the benign cap', async () => {
+    const rig = handlerRig({ maxBenign: 2 });
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }));
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' }));
+    expect(rig.terminated()).toBe(0);
+    await rig.feed(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'ping' }));
+    expect(rig.terminated()).toBe(1);
+    expect(rig.notes.join('')).toContain('strict mode ended the server');
+    expect(rig.ruleIds()).toEqual([
+      'mcp-strict-forwarded',
+      'mcp-strict-forwarded',
+      'mcp-strict-unsolicited',
+      'mcp-strict-terminated',
+    ]);
   });
 });

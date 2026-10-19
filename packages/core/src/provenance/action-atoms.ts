@@ -2,10 +2,14 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isShellTool } from '../actions/shell-tools.js';
 import { normalizeText } from '../normalize/normalizer.js';
+import { DEFAULT_MAX_CHARS } from '../scan/scanner.js';
 import type { ActionClass, Atom, AtomKind, ProvenanceHit } from '../types.js';
-import { collectStrings } from '../cloak/json-strings.js';
+import { collectStringsDeep } from '../cloak/json-strings.js';
 import { readRegularFile } from '../util/read-regular-file.js';
-import { extractAtoms, normalizePackageName } from './atoms.js';
+import { FLOOR_KINDS } from './atom-kinds.js';
+import { extractActionAtoms, normalizePackageName, type UnreadCause } from './atoms.js';
+import { pythonPackageName, type KnownPackages } from './package-name.js';
+import { commandTexts, isExecStyleTool } from './mcp-commands.js';
 
 // Actions whose hosts/URLs are worth attributing: a URL copied from content
 // into curl/ssh/git push (or a pipe-to-shell) is evidence; a URL copied into
@@ -15,7 +19,7 @@ const NETWORK_CLASSES: readonly ActionClass[] = [
   'git.push_external',
   'shell.exec_encoded',
 ];
-const ALWAYS_COUNTED: readonly AtomKind[] = ['pkg', 'pipe_shell', 'encoded'];
+const ALWAYS_COUNTED: readonly AtomKind[] = FLOOR_KINDS;
 const DEPENDENCY_SECTIONS = [
   'dependencies',
   'devDependencies',
@@ -121,16 +125,19 @@ function pythonNames(cwd: string): string[] {
 }
 
 /**
- * Package names the project already depends on or has installed. Running
- * one of these is not "an unknown package copied from tool output", so
- * `npx tsc` after reading the project's own README stays silent.
+ * Package names the project already depends on or has installed, by the registry they are from.
+ * Running one of these is not "an unknown package copied from tool output", so `npx tsc` after
+ * reading the project's own README stays silent. A name known to one registry is not known to
+ * another: `package.json` having `left-pad` says nothing about `pip install left-pad`.
  */
-export function knownPackages(cwd: string): ReadonlySet<string> {
-  return new Set(
-    [...packageJsonNames(cwd), ...binNames(cwd), ...pythonNames(cwd)]
-      .map(normalizePackageName)
-      .filter((name) => name.length > 0),
-  );
+export function knownPackages(cwd: string): KnownPackages {
+  const clean = (names: readonly string[]): string[] =>
+    names.map(normalizePackageName).filter((name) => name.length > 0);
+  return {
+    npm: new Set(clean([...packageJsonNames(cwd), ...binNames(cwd)])),
+    // A Python dependency is known in every spelling of its name (see `pythonPackageName`).
+    python: new Set(clean(pythonNames(cwd)).map(pythonPackageName)),
+  };
 }
 
 /**
@@ -140,31 +147,76 @@ export function knownPackages(cwd: string): ReadonlySet<string> {
  * in it is all there is to read, so it is serialised.
  */
 function textOfInput(toolInput: Readonly<Record<string, unknown>>): string {
-  const strings = collectStrings(toolInput);
-  return strings.length > 0 ? strings.join('\n') : JSON.stringify(toolInput);
+  const strings = collectStringsDeep(toolInput, 2 * DEFAULT_MAX_CHARS);
+  if (strings.length > 0) return strings.join('\n');
+  try {
+    return JSON.stringify(toolInput);
+  } catch {
+    return '';
+  }
+}
+
+/** The atoms of a proposed action, and whether some part of it could not be read (see `ActionExtraction`). */
+export interface ReadAction {
+  readonly atoms: Atom[];
+  readonly unread: boolean;
+  readonly unreadCause: UnreadCause | null;
+}
+
+const NOTHING_READ: ReadAction = { atoms: [], unread: false, unreadCause: null };
+
+/**
+ * Atoms of a proposed action that could have been copied from earlier tool output, and whether
+ * the action could be read to its end. The action text is normalized first, exactly like the
+ * scanned output it is matched against: otherwise a command carrying a zero-width space or a
+ * homoglyph would hash differently from the very content it was copied from, and vice versa.
+ */
+export function readActionAtoms(
+  toolName: string,
+  toolInput: Readonly<Record<string, unknown>>,
+  cwd: string,
+): ReadAction {
+  if (isShellTool(toolName)) {
+    const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
+    if (command === '') return NOTHING_READ;
+    return extractActionAtoms(normalizeText(command), true, knownPackages(cwd));
+  }
+  if (toolName.startsWith('mcp__')) return readMcpCall(toolName, toolInput);
+  return NOTHING_READ;
+}
+
+const atomKeyOf = (atom: Atom): string => `${atom.kind}\n${atom.value}`;
+
+/** What two readings of the same action find together: every atom, and a loss if either lost something. */
+function mergeReads(first: ReadAction, second: ReadAction): ReadAction {
+  const seen = new Set(first.atoms.map(atomKeyOf));
+  const atoms = [...first.atoms, ...second.atoms.filter((atom) => !seen.has(atomKeyOf(atom)))];
+  const causes = [first.unreadCause, second.unreadCause];
+  return {
+    atoms,
+    unread: first.unread || second.unread,
+    unreadCause: causes.includes('length') ? 'length' : causes.includes('name') ? 'name' : null,
+  };
 }
 
 /**
- * Atoms of a proposed action that could have been copied from earlier tool output.
- * The action text is normalized first, exactly like the scanned output it is matched
- * against: otherwise a command carrying a zero-width space or a homoglyph would hash
- * differently from the very content it was copied from, and vice versa.
+ * An MCP call: its arguments are text, in which a runner is a mention, and the ones that are a
+ * command line (see `commandTexts`) are also read as a shell reads one.
  */
+function readMcpCall(toolName: string, toolInput: Readonly<Record<string, unknown>>): ReadAction {
+  const asText = extractActionAtoms(normalizeText(textOfInput(toolInput)), false);
+  return commandTexts(toolInput, isExecStyleTool(toolName), 2 * DEFAULT_MAX_CHARS)
+    .map((text) => extractActionAtoms(normalizeText(text), true))
+    .reduce(mergeReads, asText);
+}
+
+/** The atoms alone: see `readActionAtoms`. */
 export function atomsForAction(
   toolName: string,
   toolInput: Readonly<Record<string, unknown>>,
   cwd: string,
 ): Atom[] {
-  if (isShellTool(toolName)) {
-    const command = typeof toolInput['command'] === 'string' ? toolInput['command'] : '';
-    if (command === '') return [];
-    const known = knownPackages(cwd);
-    return extractAtoms(normalizeText(command)).filter(
-      (atom) => atom.kind !== 'pkg' || !known.has(atom.value),
-    );
-  }
-  if (toolName.startsWith('mcp__')) return extractAtoms(normalizeText(textOfInput(toolInput)));
-  return [];
+  return readActionAtoms(toolName, toolInput, cwd).atoms;
 }
 
 export interface OriginClassification {
@@ -173,7 +225,7 @@ export interface OriginClassification {
   readonly counted: readonly ProvenanceHit[];
 }
 
-const isNetworkShaped = (classes: readonly ActionClass[]): boolean =>
+export const isNetworkShaped = (classes: readonly ActionClass[]): boolean =>
   classes.some((c) => NETWORK_CLASSES.includes(c));
 
 /**
@@ -198,7 +250,10 @@ export function floorAtoms(atoms: readonly Atom[]): Atom[] {
 /**
  * The `origin.*` classes of an action, from the records its atoms matched (`hits`) and
  * from `unverified`: atoms that can raise the floor, that no record holds, in a session
- * whose records are known to be incomplete (see `floorAtoms` for which can).
+ * whose records are known to be incomplete (see `floorAtoms` for which can). `doubt` is
+ * the same for what could not be checked: the part of the action that could not be read, a
+ * package name that cannot be read from the command, a result that could not be scanned. It is
+ * `origin.untrusted` too, for the same reasons.
  *
  * A record that matches keeps its class, `origin.suspect` included. An unverified atom is
  * `origin.untrusted` and never `origin.suspect`: the loss says the source cannot be ruled
@@ -213,11 +268,12 @@ export function originClasses(
   hits: readonly ProvenanceHit[],
   classes: readonly ActionClass[],
   unverified: readonly Atom[] = [],
+  doubt = false,
 ): OriginClassification {
   const networkShaped = isNetworkShaped(classes);
   const counted = hits.filter((h) => counts(h.atom, networkShaped));
   const out: ActionClass[] = [];
-  if (counted.length > 0 || unverified.length > 0) out.push('origin.untrusted');
+  if (counted.length > 0 || unverified.length > 0 || doubt) out.push('origin.untrusted');
   if (counted.some((h) => h.record.suspect)) out.push('origin.suspect');
   return { classes: out, counted };
 }

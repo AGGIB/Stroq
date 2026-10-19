@@ -1,0 +1,84 @@
+{
+  "name": "Stroq approved PRs",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "test (22)",
+            "integration_id": 15368
+          },
+          {
+            "context": "test (24)",
+            "integration_id": 15368
+          },
+          {
+            "context": "suite (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "suite (windows-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "python-oracle (ubuntu-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "python-oracle (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "mcp-probe-sandbox (ubuntu-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "mcp-probe-sandbox (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "maintainer-policy",
+            "integration_id": 15368
+          },
+          {
+            "context": "Analyze (javascript-typescript)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Analyze (actions)",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

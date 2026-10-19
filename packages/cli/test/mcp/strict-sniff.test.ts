@@ -62,9 +62,15 @@ describe('sniffId', () => {
 
   it('finds nothing in a head that is not an object, or is empty', () => {
     expect(sniffId('')).toBeNull();
-    expect(sniffId('[{"id":3}]')).toBeNull();
+    expect(sniffId('[1, 2, 3]')).toBeNull();
     expect(sniffId('"id":3')).toBeNull();
     expect(sniffId('not json at all')).toBeNull();
+  });
+
+  it('does not treat the first batch member as the whole response', () => {
+    expect(sniffId('[{"id":3,')).toBeNull();
+    expect(sniffId('[ {"id":"req-1",')).toBeNull();
+    expect(sniffId('\uFEFF \t[ {"id":3,')).toBeNull();
   });
 
   it('reads through a leading byte-order mark and blanks', () => {

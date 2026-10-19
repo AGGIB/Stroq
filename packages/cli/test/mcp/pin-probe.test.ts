@@ -40,7 +40,7 @@ it('never unwraps a pinned wrapper when exposure probes a server', async () => {
       }),
     );
     const result = await probeServers(
-      [{ client: 'claude-code', scope: 'project', file, stdio: 1, wrapped: 1, http: 0 }],
+      [{ client: 'claude-code', scope: 'project', file, stdio: 1, wrapped: 1, strict: 0, http: 0 }],
       { timeoutMs: 2000 },
     );
     expect(result[0]?.error).not.toBeNull();

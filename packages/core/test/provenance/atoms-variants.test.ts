@@ -42,9 +42,16 @@ describe('extractAtomsDeep', () => {
   });
 
   it('respects MAX_ATOMS across variants rather than per variant', () => {
-    const many = Array.from({ length: 400 }, (_, i) => `https://h${i}.example/x`).join(' ');
+    const many = Array.from({ length: 400 }, (_, i) => `npx helper-${i}`).join('\n');
     const both = `${many}\n${Buffer.from(many, 'utf8').toString('base64')}`;
     expect(extractAtomsDeep(both).length).toBeLessThanOrEqual(200);
+  });
+
+  it('respects the budget for URLs and hosts across variants rather than per variant', () => {
+    const many = Array.from({ length: 400 }, (_, i) => `https://h${i}.example/x`).join(' ');
+    const both = `${many}\n${Buffer.from(many, 'utf8').toString('base64')}`;
+    const network = extractAtomsDeep(both).filter((a) => a.kind === 'url' || a.kind === 'host');
+    expect(network.length).toBeLessThanOrEqual(200);
   });
 
   it('keeps first-seen order, so a raw-text atom precedes one found only in a decode', () => {
@@ -63,7 +70,7 @@ describe('extractAtomsDeep', () => {
   // assertion that can.
 
   it('never lets an atom that appears only in a later variant through once the raw text has already saturated MAX_ATOMS', () => {
-    const rawUrls = Array.from({ length: 100 }, (_, i) => `https://h${i}.example/p${i}`).join(' ');
+    const rawUrls = Array.from({ length: 200 }, (_, i) => `npx helper-${i}`).join('\n');
     const laterOnly = 'npx @only-in-a-decode/pkg';
     const payload = `${rawUrls}\n${Buffer.from(laterOnly, 'utf8').toString('base64')}`;
 
@@ -72,7 +79,7 @@ describe('extractAtomsDeep', () => {
   });
 
   it('stops running extraction on further variants once MAX_ATOMS is reached, rather than discarding wasted work', () => {
-    const rawUrls = Array.from({ length: 100 }, (_, i) => `https://h${i}.example/p${i}`).join(' ');
+    const rawUrls = Array.from({ length: 200 }, (_, i) => `npx helper-${i}`).join('\n');
     const fillerSentence =
       'the quick brown fox jumps over the lazy dog while this harmless sentence just keeps ' +
       'going with no url, package runner, pipe-to-shell, or encoded pattern anywhere in it';

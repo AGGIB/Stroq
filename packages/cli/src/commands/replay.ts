@@ -73,6 +73,7 @@ const ATOM_RANK: Readonly<Record<AtomKind, number>> = {
   pkg: 2,
   url: 1,
   host: 0,
+  digest: 0,
 };
 const atomRank = (ev: ProvenanceEvidence): number => ATOM_RANK[ev.kind] ?? 0;
 

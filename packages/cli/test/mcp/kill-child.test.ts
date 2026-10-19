@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { killChildTree, type KillSpawn } from '../../src/mcp/kill-child.js';
+import { killChildTree, type KillSignal, type KillSpawn } from '../../src/mcp/kill-child.js';
 
 /**
  * Killing a wrapped or probed MCP server, away from any real process.
@@ -36,11 +36,39 @@ function recordingSpawn(): KillSpawn & { calls: { file: string; args: readonly s
   return Object.assign(fn, { calls });
 }
 
+function recordingKillGroup(): KillSignal & { calls: { pid: number; signal: NodeJS.Signals }[] } {
+  const calls: { pid: number; signal: NodeJS.Signals }[] = [];
+  const fn: KillSignal = (pid, signal) => {
+    calls.push({ pid, signal });
+  };
+  return Object.assign(fn, { calls });
+}
+
 describe('killChildTree', () => {
+  it('signals the process group with -pid and the direct child on POSIX', () => {
+    const child = fakeChild(4242);
+    const spawn = recordingSpawn();
+    const group = recordingKillGroup();
+    killChildTree(child, 'SIGTERM', 'linux', spawn, group);
+    expect(group.calls).toEqual([{ pid: -4242, signal: 'SIGTERM' }]);
+    expect(child.signals).toEqual(['SIGTERM']);
+    expect(spawn.calls).toEqual([]);
+  });
+
+  it('does not send negative pid group signals on Windows', () => {
+    const child = fakeChild(4242);
+    const spawn = recordingSpawn();
+    const group = recordingKillGroup();
+    killChildTree(child, 'SIGTERM', 'win32', spawn, group);
+    expect(group.calls).toEqual([]);
+    expect(spawn.calls).toEqual([{ file: 'taskkill', args: ['/pid', '4242', '/T', '/F'] }]);
+    expect(child.signals).toEqual(['SIGTERM']);
+  });
+
   it('sends the signal and spawns nothing on POSIX', () => {
     const child = fakeChild(4242);
     const spawn = recordingSpawn();
-    killChildTree(child, 'SIGTERM', 'linux', spawn);
+    killChildTree(child, 'SIGTERM', 'linux', spawn, recordingKillGroup());
     expect(child.signals).toEqual(['SIGTERM']);
     expect(spawn.calls).toEqual([]);
   });
@@ -86,7 +114,7 @@ describe('killChildTree', () => {
       const child = { ...fakeChild(4242), ...state };
       const spawn = recordingSpawn();
       killChildTree(child, 'SIGTERM', 'win32', spawn);
-      killChildTree(child, 'SIGKILL', 'linux', spawn);
+      killChildTree(child, 'SIGKILL', 'linux', spawn, recordingKillGroup());
       expect(spawn.calls).toEqual([]);
       expect(child.signals).toEqual([]);
     }
@@ -98,5 +126,15 @@ describe('killChildTree', () => {
     killChildTree(child, 'SIGTERM', 'win32', spawn);
     expect(spawn.calls).toHaveLength(1);
     expect(child.signals).toEqual(['SIGTERM']);
+  });
+
+  it('escalates a POSIX group after its leader exited without signalling the old leader pid', () => {
+    for (const state of [{ exitCode: 0 }, { signalCode: 'SIGTERM' as const }]) {
+      const child = { ...fakeChild(4242), ...state };
+      const group = recordingKillGroup();
+      killChildTree(child, 'SIGKILL', 'linux', recordingSpawn(), group);
+      expect(group.calls).toEqual([{ pid: -4242, signal: 'SIGKILL' }]);
+      expect(child.signals).toEqual([]);
+    }
   });
 });

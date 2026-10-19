@@ -9,6 +9,7 @@ import { currentTerminal } from '../ui/terminal.js';
 export const ADD_OPTIONS = {
   user: { type: 'boolean' },
   restore: { type: 'boolean' },
+  rollback: { type: 'boolean' },
   kind: { type: 'string' },
   client: { type: 'string' },
   config: { type: 'string' },
@@ -60,10 +61,15 @@ export async function runAdd(args: readonly string[]): Promise<number> {
   }
   if (kind === 'mcp') {
     const { addMcp } = await import('../install/mcp-install.js');
-    const { hookArgv, stableEntry } = await import('./init.js');
+    const { hookArgv, stableEntry, runsFromNpxCache } = await import('./init.js');
     const { stroqVersion } = await import('../version.js');
     const home = stroqHome();
-    const entry = stableEntry(resolve(process.argv[1] ?? ''), home, stroqVersion());
+    const launched = resolve(process.argv[1] ?? '');
+    const entry = stableEntry(launched, home, stroqVersion());
+    if (runsFromNpxCache(entry))
+      throw new Error(
+        'cannot create a stable Stroq entry outside the npx cache; install globally with npm install -g @stroq/cli and run stroq add again',
+      );
     const [node, ...entryArgv] = hookArgv(process.execPath, entry);
     const names = parsed.values['pass-env'];
     const added = await addMcp(parsed.positionals[0]!, {
@@ -74,6 +80,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
       entryArgv,
       user: parsed.values.user === true,
       restore: parsed.values.restore === true,
+      rollback: parsed.values.rollback === true,
       ...(parsed.values.client === undefined ? {} : { client: parsed.values.client }),
       ...(parsed.values.config === undefined ? {} : { config: parsed.values.config }),
       ...(parsed.values.entrypoint === undefined ? {} : { entrypoint: parsed.values.entrypoint }),
@@ -94,6 +101,7 @@ export async function runAdd(args: readonly string[]): Promise<number> {
     terminal: currentTerminal(),
     user: parsed.values.user === true,
     restore: parsed.values.restore === true,
+    rollback: parsed.values.rollback === true,
     // Only what the person said: without --kind the files tell what the folder is.
     ...(parsed.values.kind === 'skill' ? { kind: 'skill' as const } : {}),
   });

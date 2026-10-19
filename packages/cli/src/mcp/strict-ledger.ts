@@ -26,6 +26,7 @@ function otherTypeKey(id: JsonRpcId): string | null {
 export class StrictLedger {
   private readonly entries = new Map<string, TrackedRequest>();
   private readonly cancelled = new Set<string>();
+  private readonly completed = new Set<string>();
 
   get size(): number {
     return this.entries.size;
@@ -35,6 +36,7 @@ export class StrictLedger {
   track(request: TrackedRequest): void {
     const key = keyOf(request.id);
     this.cancelled.delete(key);
+    this.completed.delete(key);
     this.entries.set(key, request);
     // A Map iterates in insertion order: the first key is the oldest request.
     for (const oldest of this.entries.keys()) {
@@ -47,8 +49,27 @@ export class StrictLedger {
   take(id: JsonRpcId): TrackedRequest | undefined {
     const key = keyOf(id);
     const request = this.entries.get(key);
-    if (request !== undefined) this.entries.delete(key);
+    if (request !== undefined) {
+      this.entries.delete(key);
+      this.completed.add(key);
+      for (const oldest of this.completed) {
+        if (this.completed.size <= STRICT_CANCELLED_MEMORY) break;
+        this.completed.delete(oldest);
+      }
+    }
     return request;
+  }
+
+  /** A duplicate late reply must not fail newer, unrelated requests. Bounded like cancellations. */
+  wasAnswered(id: JsonRpcId): boolean {
+    return this.completed.has(keyOf(id));
+  }
+
+  /** Fail pending requests when a server response cannot be associated, remembering their ids. */
+  failPending(): TrackedRequest[] {
+    const all = [...this.entries.values()];
+    for (const request of all) this.take(request.id);
+    return all;
   }
 
   /** The request a response id of the wrong TYPE was evidently meant for (`"3"` for `3`), left in place. */
