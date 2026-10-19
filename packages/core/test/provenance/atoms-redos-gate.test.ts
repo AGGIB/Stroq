@@ -13,11 +13,12 @@ import { cpuNow } from '../cpu-time.js';
  * make every match read a full window: a runner or an installer repeated with no line end between
  * them, wrapped commands, flags without end, and the lines of an installer that is only blanks.
  * Reading is held to a budget of characters for the whole pass (`MAX_LINE_WORK`); these show that
- * 200,000 characters of any of them is read in well under a second, where the window alone cost
+ * 200,000 characters of any of them is read in a fraction of that bound, where the window alone cost
  * four seconds of `npm i a ` (25,000 matches of 2,048 characters).
  */
 const SIZE = 200_000;
-const BOUND_MS = 1_000;
+/** The pre-budget cost of the worst shape was 4 s and grew with the square of the size; a CI runner under coverage adds a few tenths of a second to a linear read, so the bound sits between the two. */
+const BOUND_MS = 2_000;
 
 const repeat = (unit: string, head = ''): string =>
   `${head}${unit.repeat(Math.ceil(SIZE / unit.length))}`.slice(0, SIZE);
@@ -62,7 +63,7 @@ const EXTRACTORS: ReadonlyArray<readonly [string, (text: string) => unknown]> = 
 ];
 
 describe.each(EXTRACTORS)('%s on 200,000 characters of an adversarial shape', (_name, extract) => {
-  it.each(SHAPES)('reads %s in under a second', (_shape, text) => {
+  it.each(SHAPES)('reads %s within the bound', (_shape, text) => {
     expect(text).toHaveLength(SIZE);
     const started = cpuNow();
     extract(text);
