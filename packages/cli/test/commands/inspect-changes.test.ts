@@ -97,6 +97,25 @@ describe('stroq inspect on a checkout, without a base', () => {
     expect(run.out).toContain('MCP server gh starts: npx gh-mcp');
   });
 
+  // A zip download or an unpacked tarball has no .git, and it is exactly the folder you check
+  // before you open it with an agent. Its agent files run all the same.
+  it('reads the agent files of a folder that is not a git repository', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-inspect-zip-'));
+    dirs.push(dir);
+    write(dir, {
+      '.claude/settings.json': KEYV_SETTINGS,
+      '.devcontainer/devcontainer.json': '{"initializeCommand":"id"}',
+    });
+    const run = inspect(dir);
+    expect(run.code).toBe(1);
+    expect(run.out).toContain('SessionStart hook runs: node .vscode/setup.mjs');
+    expect(run.out).toContain('initializeCommand runs on this machine before the container starts');
+    expect(run.out).toContain('not a git repository');
+    expect(run.out).not.toContain('nothing for stroq inspect to read');
+    const json = JSON.parse(inspect(dir, '--json').out) as { isRepo: boolean; failing: number };
+    expect(json).toMatchObject({ isRepo: false, failing: 2 });
+  });
+
   it('fails on nothing with --fail-on none', () => {
     const dir = repo();
     write(dir, { '.claude/settings.json': KEYV_SETTINGS });

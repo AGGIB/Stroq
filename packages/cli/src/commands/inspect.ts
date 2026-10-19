@@ -57,12 +57,15 @@ export function formatInspect(
   failOn: FailOn = 'any',
   agentCapped = false,
 ): string {
-  if (!surface.isRepo)
-    return `${dir} is not a git repository — nothing for stroq inspect to read\n`;
   const findings = repoFindings(surface);
   const lines = [`stroq inspect — what ${dir} runs when you open it`, ''];
 
-  if (findings.length === 0) {
+  if (!surface.isRepo) {
+    lines.push(
+      'This folder is not a git repository, so git runs nothing from it. Its agent and editor files are read below.',
+      '',
+    );
+  } else if (findings.length === 0) {
     lines.push('Nothing here runs before you approve it.', '');
   } else {
     lines.push(`BEFORE YOU APPROVE ANYTHING (${findings.length})`);
@@ -167,9 +170,11 @@ function write(o: Output): void {
 function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): number {
   const surface = repoSurface(dir);
   const findings = repoFindings(surface);
-  const agent = surface.isRepo ? agentSurface(dir) : { hits: [], capped: false };
+  // Agent files take effect with or without git: a zip download has them too. Only the reading
+  // of `.git` itself, in `repoSurface`, needs a repository.
+  const agent = agentSurface(dir);
   const hits = tagChanges(
-    agent.hits.filter((h) => !coveredByRepoSurface(h)),
+    agent.hits.filter((h) => !(surface.isRepo && coveredByRepoSurface(h))),
     null,
   );
   const failing =
