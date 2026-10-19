@@ -24,25 +24,30 @@ const EXEC_WORDS = new Set([
   'terminal',
   'powershell',
   'pwsh',
-  'runcommand',
-  'execcommand',
-  'executecommand',
 ]);
 
-/** The lower-case words of a name, split at anything that is not a letter or a digit and at a camelCase step. */
+/** One word that is two run-words joined (`shellexec`, `runcommands`, `execsql`, `bashrun`), not a word that merely starts like one. */
+const EXEC_COMPOUND =
+  /^(?:(?:run|exec|execute)(?:shell|cmd|command|commands|bash|script|code|sql|terminal)|(?:shell|bash|terminal|cmd|sh)(?:exec|execute|run))s?$/;
+
+/** The lower-case words of a name, split at anything that is not a letter or a digit, at a camelCase step and after an acronym (`SSHExec`). */
 function nameWords(name: string): string[] {
   return name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word !== '');
 }
 
-/** Whether the name has an executor's word, or `run` right before `command` (`run_command`). */
+/** Whether the name has an executor's word or compound, or `run`/`exec` right before `command(s)` (`run_command`, `run_commands`). */
 export function isExecStyleTool(toolName: string): boolean {
   const words = nameWords(toolName);
   return words.some(
-    (word, i) => EXEC_WORDS.has(word) || (word === 'run' && words[i + 1] === 'command'),
+    (word, i) =>
+      EXEC_WORDS.has(word) ||
+      EXEC_COMPOUND.test(word) ||
+      (/^(?:run|exec|execute)$/.test(word) && /^commands?$/.test(words[i + 1] ?? '')),
   );
 }
 

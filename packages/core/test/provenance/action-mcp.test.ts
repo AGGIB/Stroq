@@ -72,6 +72,11 @@ describe('a tool that executes what it is given', () => {
     'mcp__x__runCommand',
     'mcp__x__execCommand',
     'mcp__PowerShell__invoke',
+    'mcp__x__shellexec',
+    'mcp__x__run_commands',
+    'mcp__x__SSHExec',
+    'mcp__x__execsql',
+    'mcp__x__runShell',
   ])('%s reads every string argument as a command', (tool) => {
     expect(isExecStyleTool(tool)).toBe(true);
     expect(read(tool, { input: 'npm install ev$X' }).unread).toBe(true);
