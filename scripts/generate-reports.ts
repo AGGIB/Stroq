@@ -10,10 +10,12 @@ import { join, resolve } from 'node:path';
 import { formatActionsBench, runDefaultActionsBench } from '../packages/cli/src/bench/actions.js';
 import { formatBench, runBench } from '../packages/cli/src/bench/run.js';
 import { buildCoverage, formatCoverage } from '../packages/cli/src/coverage/report.js';
+import { formatHostsMarkdown } from '../packages/cli/src/hosts/hosts-report.js';
 
 const root = resolve(import.meta.dirname, '..');
 const coverageFile = join(root, 'docs/COVERAGE.md');
 const benchFile = join(root, 'docs/BENCH.md');
+const hostsFile = join(root, 'docs/HOSTS.md');
 
 /**
  * Repo-relative, deliberately never resolved to an absolute path: `runBench`
@@ -259,6 +261,7 @@ interface Target {
 const targets: readonly Target[] = [
   { label: 'docs/COVERAGE.md', file: coverageFile, derive: deriveCoverage },
   { label: 'docs/BENCH.md', file: benchFile, derive: deriveBench },
+  { label: 'docs/HOSTS.md', file: hostsFile, derive: () => formatHostsMarkdown() },
 ];
 
 const checkMode = process.argv.includes('--check');
