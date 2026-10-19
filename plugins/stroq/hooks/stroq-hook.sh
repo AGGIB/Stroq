@@ -42,8 +42,10 @@
 # - The pin reaches the default branch before npm has the version (the release is
 #   staged and needs approving), and the plugin updates from that branch. Until then
 #   npx reports ETARGET for the pin; that one failure, and no other, is retried once
-#   with the newest release, so the window costs a version and not every PreToolUse.
-#   (The install fails the same way, and npx then goes straight to the newest release.)
+#   with the previous release (STROQ_FALLBACK_PIN), so the window costs a version and not
+#   every PreToolUse. (The install fails the same way, and npx then goes straight to the
+#   previous release.) Both are exact versions: what runs is never "whatever npm calls
+#   latest today".
 # - npx has no deadline of its own, and neither has npm. The whole path to a running
 #   stroq, the install and the pinned npx attempt and the fallback together, gets one
 #   deadline (NPX_DEADLINE, 11 s), after which what is running and everything it started
@@ -63,6 +65,8 @@
 #   from where it runs).
 set -u
 STROQ_PIN="@stroq/cli@0.27.0"
+# The release before the pin: run only while npm does not have the pin yet (see above).
+STROQ_FALLBACK_PIN="@stroq/cli@0.26.1"
 
 input="$(cat)"
 
@@ -299,16 +303,16 @@ run_npx() {
     return 1
   fi
   make_scratch || return 1
-  if [ "$pin_missing" -eq 1 ]; then package="@stroq/cli@latest"; fi
+  if [ "$pin_missing" -eq 1 ]; then package="$STROQ_FALLBACK_PIN"; fi
   npx_once "$package" "$left"
   code=$?
   cat "$work/err" >&2
-  # The pinned version is not on npm (yet): only then run the newest release, and only
+  # The pinned version is not on npm (yet): only then run the previous release, and only
   # if the first attempt left enough of the deadline for it.
   if [ "$code" -ne 0 ] && [ "$package" = "$STROQ_PIN" ] && grep -qE 'ETARGET|No matching version' "$work/err"; then
     left="$(budget_left)"
     if [ "$left" -ge "$MIN_FALLBACK_SECONDS" ]; then
-      npx_once "@stroq/cli@latest" "$left"
+      npx_once "$STROQ_FALLBACK_PIN" "$left"
       code=$?
       cat "$work/err" >&2
     fi

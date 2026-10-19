@@ -27,6 +27,7 @@ import {
   ETARGET_STDERR,
   stroqShim,
   PIN,
+  FALLBACK_PIN,
 } from '../helpers/plugin-wrapper.js';
 
 // The plugin's hook is a POSIX shell script. Claude Code on Windows runs hook commands
@@ -68,9 +69,9 @@ describe.skipIf(process.platform === 'win32')(
 );
 
 describe.skipIf(process.platform === 'win32')('the plugin wrapper, going through npx', () => {
-  const pinnedThenLatest = (): { dir: string; log: string } =>
+  const pinnedThenFallback = (): { dir: string; log: string } =>
     fakeNpx(`case "$*" in
-  *'@stroq/cli@latest'*) printf '%s' '{"hookSpecificOutput":{"permissionDecision":"allow"}}'; exit 0 ;;
+  *'@stroq/cli@${FALLBACK_PIN} '*) printf '%s' '{"hookSpecificOutput":{"permissionDecision":"allow"}}'; exit 0 ;;
   *) ${ETARGET_STDERR} ;;
 esac`);
 
@@ -78,19 +79,20 @@ esac`);
   // from, and the release is staged for approval. Until it is approved the pinned
   // version does not exist, npx says ETARGET, and the wrapper blocked every PreToolUse
   // of every plugin user without a global stroq.
-  it('runs the newest release when the pinned version is not on npm yet', async () => {
-    const npx = pinnedThenLatest();
+  it('runs the previous release when the pinned version is not on npm yet', async () => {
+    const npx = pinnedThenFallback();
     const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
     const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('permissionDecision');
     const seen = calls(npx.log);
     expect(seen).toHaveLength(2);
-    expect(seen[0]).toContain('@stroq/cli@0.');
-    expect(seen[1]).toContain('@stroq/cli@latest');
+    expect(seen[0]).toContain(`@stroq/cli@${PIN} `);
+    expect(seen[1]).toContain(`@stroq/cli@${FALLBACK_PIN} `);
+    expect(seen.join('\n')).not.toContain('@latest');
   }, 30_000);
 
-  it('does not fall back to latest when the failure is anything else', async () => {
+  it('does not fall back when the failure is anything else', async () => {
     const npx = fakeNpx("echo 'npm error code E503' >&2; exit 1");
     const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
     const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
@@ -98,7 +100,7 @@ esac`);
     expect(calls(npx.log)).toHaveLength(1);
   }, 30_000);
 
-  it('does not run latest because stroq itself failed on the pinned version', async () => {
+  it('does not run the fallback because stroq itself failed on the pinned version', async () => {
     const npx = fakeNpx("echo 'stroq: internal error' >&2; exit 1");
     const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
     const r = await runWrapper(preBash('ls'), `${npx.dir}:${BARE_PATH}`, home);
@@ -291,7 +293,7 @@ printf "%s" "{}"; exit 0`);
 
     it('starts the fallback when there is time for it', async () => {
       const npx = fakeNpx(`case "$*" in
-  *'@stroq/cli@latest'*) printf '%s' '{}'; exit 0 ;;
+  *'@stroq/cli@${FALLBACK_PIN} '*) printf '%s' '{}'; exit 0 ;;
   *) sleep 1; ${ETARGET_STDERR} ;;
 esac`);
       const home = mkdtempSync(join(tmpdir(), 'stroq-plugin-e2e-'));
@@ -329,5 +331,18 @@ describe('the Claude Code plugin wrapper', () => {
       version: string;
     };
     expect(pin).toBe(version);
+  });
+
+  // Anthropic's plugin directory refuses a launcher that runs whatever npm calls latest, and
+  // so should we: the code that acts as the firewall is named by an exact version, always.
+  it('falls back to an exact, earlier release and never to latest', () => {
+    const exact = /^\d+\.\d+\.\d+$/;
+    expect(FALLBACK_PIN).toMatch(exact);
+    const parts = (v: string): number[] => v.split('.').map(Number);
+    const [a, b] = [parts(FALLBACK_PIN), parts(PIN)];
+    const older =
+      a[0]! < b[0]! || (a[0] === b[0] && (a[1]! < b[1]! || (a[1] === b[1] && a[2]! < b[2]!)));
+    expect(older).toBe(true);
+    expect(readFileSync(wrapper, 'utf8')).not.toMatch(/@stroq\/cli@latest/);
   });
 });
