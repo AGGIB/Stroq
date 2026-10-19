@@ -11,6 +11,7 @@ import {
   readersFor,
   scanFile,
 } from '../../src/exposure/agent-surface.js';
+import { bareRepositories } from '../../src/exposure/agent-git.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -282,6 +283,10 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ['a file in a skill folder', (text) => scanFile('.claude/skills/s/ref.md', text)],
   ['an env name, tagged', (text) => tagChanges([hit('agent-env', 'f', 1, text, text)], null)],
   ['a link target', (text) => linkTarget('.claude/skills/x', text)],
+  [
+    'the names of a bare repository in a listing',
+    (text) => bareRepositories([`a/${text}`, `${text}/HEAD`, `${text}/objects/x`, `b/${text}/c`]),
+  ],
   ['an agent definition', (text) => scanFile('.claude/agents/a.md', `---\n${text}\n---\n`)],
   ['GitHub annotations', (text) => annotations([hostile(text)], 'new')],
   ['a GitHub summary', (text) => githubSummary([hostile(text)], { failOn: 'new' })],

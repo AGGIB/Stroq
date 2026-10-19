@@ -37,7 +37,7 @@ import {
   type TreeView,
 } from './git-tree.js';
 
-import { FILE_NAMES, gitDirName, looksLikeGitDir } from './git-dir-names.js';
+import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 import { stripJsonc } from './jsonc.js';
 
 export { GitError } from './git-read.js';
@@ -446,41 +446,48 @@ function limitHits(
 /**
  * Folders that git takes for a bare repository (see `git-dir-names.ts`): one committed as files.
  * Every part of a path is a name in the folder before it, whether a file, a link or a folder. A
- * folder is known by a running digest of its path rather than by the path itself, so a path of
- * a thousand parts named `HEAD` costs its length and not its length times its depth.
+ * folder is known by a number, given to each (folder, folded name) pair the first time it comes,
+ * so a path of a thousand parts named `HEAD` costs its length and not its length times its depth,
+ * and two folders are never taken for one by chance. Names are folded as the most forgiving disk
+ * folds them: `Evil/HEAD`, `evil/objects` and `EVIL/refs` are one folder on macOS or Windows.
  */
 export function bareRepositories(paths: Iterable<string>): string[] {
-  const names = new Map<string, Set<string>>();
-  const folders = new Map<string, string>();
+  /** The number of each folder, by the number of the folder it is in and its folded name. */
+  const ids = new Map<string, number>();
+  /** The first path each folder was seen by, and the names git looks for that it holds. */
+  const folders: string[] = [''];
+  const names: (Set<string> | undefined)[] = [undefined];
   for (const path of paths) {
-    let a = 0;
-    let b = 0;
+    let parent = 0;
     let start = 0;
-    for (let index = 0; ; index += 1) {
+    for (;;) {
       const end = path.indexOf('/', start);
-      const name =
-        index === 0 ? undefined : gitDirName(path.slice(start, end === -1 ? undefined : end));
+      const part = path.slice(start, end === -1 ? undefined : end);
+      const name = parent === 0 ? undefined : gitDirName(part);
       // `HEAD` and `commondir` are files: one that has paths under it is a folder.
       if (name !== undefined && !(end !== -1 && FILE_NAMES.has(name))) {
-        const key = `${a}:${b}:${start}`;
-        const found = names.get(key);
-        if (found === undefined) {
-          names.set(key, new Set([name]));
-          folders.set(key, path.slice(0, start - 1));
-        } else found.add(name);
+        const found = names[parent];
+        if (found === undefined) names[parent] = new Set([name]);
+        else found.add(name);
       }
       if (end === -1) break;
-      for (let at = start; at <= end; at += 1) {
-        const c = path.charCodeAt(at);
-        a = (Math.imul(a, 31) + c) >>> 0;
-        b = (Math.imul(b, 131) + c + 7) >>> 0;
+      const key = `${parent}/${foldName(part)}`;
+      let id = ids.get(key);
+      if (id === undefined) {
+        id = folders.length;
+        ids.set(key, id);
+        folders.push(path.slice(0, end));
+        names.push(undefined);
       }
+      parent = id;
       start = end + 1;
     }
   }
-  return [...names]
-    .filter(([, found]) => looksLikeGitDir(found))
-    .map(([key]) => folders.get(key) as string)
+  return folders
+    .filter((_, id) => {
+      const found = names[id];
+      return found !== undefined && looksLikeGitDir(found);
+    })
     .sort();
 }
 

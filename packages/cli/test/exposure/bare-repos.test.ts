@@ -41,6 +41,28 @@ describe('bareRepositories', () => {
     expect(bareRepositories(['e/HEAD', 'e/objects/x', 'f/refs/x', 'src/HEAD.md'])).toEqual([]);
   });
 
+  // Windows drops trailing dots and blanks and reads `name:stream` as `name`; macOS ignores the
+  // characters Unicode calls default ignorable; either folds case beyond ASCII (dotless i, long s).
+  it('folds the names as Windows and macOS open them, and errs toward a repository', () => {
+    expect(bareRepositories(['a/HEAD.', 'a/objects /x', 'a/refs::$DATA/x'])).toEqual(['a']);
+    expect(bareRepositories(['b/HE​AD', 'b/ob­jects/x', 'b/re️fs/x'])).toEqual(['b']);
+    expect(bareRepositories(['c/HEAD', 'c/confıg', 'c/objects/x'])).toEqual(['c']);
+    expect(bareRepositories(['d/HEAD', 'd/cómmondir'])).toEqual(['d']);
+  });
+
+  it('takes folders whose names differ only in letter case for one, as such a disk does', () => {
+    expect(bareRepositories(['Evil/HEAD', 'evil/objects/x', 'EVIL/refs/x'])).toEqual(['Evil']);
+    expect(bareRepositories(['x/Evil./HEAD', 'x/evil/objects/x', 'x/EVIL /refs/x'])).toEqual([
+      'x/Evil.',
+    ]);
+  });
+
+  it('keeps folders apart that only a running digest of their paths could confuse', () => {
+    const paths = Array.from({ length: 2000 }, (_, i) => `p${i}/q/HEAD`);
+    expect(bareRepositories([...paths, 'p0/q/objects/x'])).toEqual([]);
+    expect(bareRepositories([...paths, 'p0/q/objects/x', 'p0/q/refs/x'])).toEqual(['p0/q']);
+  });
+
   it('stays linear on a path made of the names', () => {
     const deep = Array.from({ length: 1500 }, () => 'HEAD').join('/');
     const started = performance.now();
