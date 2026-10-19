@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { addMcp, entrypointOf, removeMcp } from '../../src/install/mcp-install.js';
 import { addSkill } from '../../src/install/skill-install.js';
 import { readPassports } from '../../src/install/lock.js';
 import { storePath } from '../../src/install/store.js';
 import { parseMcpArgv } from '../../src/commands/mcp.js';
 import { preparePin } from '../../src/mcp/pin.js';
+import { stroqHome } from '../../src/paths.js';
 import { setup } from '../helpers/skill-install.js';
 import { tgzOf } from '../helpers/tar-writer.js';
 import { commitMcpConfig } from '../../src/install/mcp-config-transaction.js';
@@ -290,5 +291,28 @@ describe('confirmed MCP install', () => {
       }),
     ).rejects.toThrow(/outside config edit was preserved/);
     expect(await readFile(f.config, 'utf8')).toBe('{"owner":"changed"}');
+  });
+
+  it('refuses a symlinked STROQ_HOME or store folder before any prompt without writing config or lock', async () => {
+    const f = await fixture();
+    const realHome = join(f.root, 'real-stroq-home');
+    const linkedHome = join(f.root, 'linked-stroq-home');
+    await mkdir(realHome, { recursive: true });
+    await symlink(realHome, linkedHome, process.platform === 'win32' ? 'junction' : 'dir');
+    vi.stubEnv('STROQ_HOME', linkedHome);
+    const before = await readFile(f.config, 'utf8');
+
+    await expect(addMcp(f.dir, { ...f.mcpOptions, stroqHome: stroqHome() })).rejects.toThrow(
+      /cannot verify a linked store folder/,
+    );
+    await expect(addSkill(f.source, { ...f.options, stroqHome: stroqHome() })).rejects.toThrow(
+      /cannot verify a linked store folder/,
+    );
+
+    expect(f.prompts()).toBe(0);
+    expect(await readFile(f.config, 'utf8')).toBe(before);
+    await expect(readFile(join(realHome, 'passports.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });

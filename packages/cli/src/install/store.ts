@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
-import { storeDirIn } from '../paths.js';
+import { runDirIn, storeDirIn } from '../paths.js';
 import { outsideLine } from '../ui/layout.js';
 import { inNodeModules } from './path-names.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS } from './read-dir.js';
@@ -25,6 +25,24 @@ export async function assertPlainDirectory(path: string): Promise<boolean> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
+  }
+}
+
+/**
+ * The Stroq home, its `store/` and its `run/` must be plain directories when they exist: `pin.ts` refuses a
+ * linked home, store or runtime folder, so `add` checks the same condition before asking or writing.
+ */
+export async function assertPlainStoreHome(home: string): Promise<void> {
+  for (const folder of [home, storeDirIn(home), runDirIn(home)]) {
+    try {
+      const stat = await lstat(folder);
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error(
+          'cannot verify a linked store folder: the Stroq home, store or run path is a symbolic link or not a directory',
+        );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
 }
 
@@ -137,6 +155,7 @@ export async function readStoredTreeOf(
 
 export async function putStore(home: string, tree: Tree, digest: string): Promise<string> {
   assertWritableTree(tree, digest);
+  await assertPlainStoreHome(home);
   const target = storePath(home, digest);
   assertWriteAllowed(target, { root: home, initRule: false });
   if (await assertPlainDirectory(target)) {
