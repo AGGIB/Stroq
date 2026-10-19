@@ -400,8 +400,10 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
     const name = `${h.name} ${noun} in ${h.file}`;
     follower.begin();
     // As much as the entry that runs it: a hook's script fails, an ordinary server's code is
-    // listed to review, as the server is.
-    const severity: Severity = h.severity === 'error' ? 'error' : 'warning';
+    // listed to review, as the server is. A variable already there is a warning only for what it
+    // says itself: a file it names, or one put in a folder it names (PATH), fails when it changes.
+    const severity: Severity =
+      h.severity === 'error' || h.kind === 'agent-env' ? 'error' : 'warning';
     const queue: (readonly [command: string, depth: number])[] = [[h.value, 0]];
     const seen = new Set<string>();
     for (let next = queue.shift(); next !== undefined; next = queue.shift()) {

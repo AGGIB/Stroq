@@ -76,6 +76,7 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
   );
   hits.push(...env.cut);
   for (const [key, value] of env.items) {
+    // Named `CODEX_ENV_PREFIX` and the key, which is how `envNameOf` reads it back.
     const where = ['shell_environment_policy', 'set', key];
     const text = typeof value === 'string' ? value : boundedJson(value);
     hits.push(hit('agent-env', path, line(where), where.join('.'), text));

@@ -247,8 +247,18 @@ const HARMLESS_ENV =
   /^(?:LANG|LANGUAGE|LC_[A-Z]{1,20}|TZ|TERM|COLORTERM|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|DEBUG|CI|NODE_ENV|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE|PYTHONIOENCODING|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH|CLAUDE_CODE_MAX_OUTPUT_TOKENS|CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|CLAUDE_CODE_DISABLE_TERMINAL_TITLE|CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY|DISABLE_TELEMETRY|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_BUG_COMMAND|DISABLE_COST_WARNINGS|DISABLE_NON_ESSENTIAL_MODEL_CALLS|DISABLE_PROMPT_CACHING|DISABLE_INTERLEAVED_THINKING|USE_BUILTIN_RIPGREP|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_(?:OPUS|SONNET|HAIKU)_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)$/;
 /** Whether a variable is one of the few that `env` may set without a report. */
 export const isHarmlessEnv = (name: string): boolean => HARMLESS_ENV.test(name);
-/** Whether a variable is one of those known to load code or send traffic elsewhere. */
-export const envLoadsCode = (name: string): boolean => ENV_LOADS_CODE.test(name);
+/**
+ * Whether a variable is one of those known to load code or send traffic elsewhere, in any letter
+ * case: Windows reads `node_options` as `NODE_OPTIONS`, and which system opens the repository is
+ * not known.
+ */
+export const envLoadsCode = (name: string): boolean =>
+  ENV_LOADS_CODE.test(name) || ENV_LOADS_CODE.test(name.toUpperCase());
+/** Where Codex's `config.toml` sets a variable for every command: an env hit's name starts so. */
+export const CODEX_ENV_PREFIX = 'shell_environment_policy.set.';
+/** The variable an env hit sets: its name, without the keys of the table it is in. */
+export const envNameOf = (name: string): string =>
+  name.startsWith(CODEX_ENV_PREFIX) ? name.slice(CODEX_ENV_PREFIX.length) : name;
 /** An allow rule for the whole shell: `Bash`, or `Bash(...)` whose pattern is only a wildcard. */
 const WHOLE_SHELL = /^Bash(?:\((?:\*|:\*|\*\*| \*)\))?$/;
 

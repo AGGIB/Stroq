@@ -135,6 +135,44 @@ describe('tagChanges', () => {
       'NODE_EXTRA_CA_CERTS warning',
     ]);
   });
+
+  // A name already there that is neither harmless nor known to load code is a warning without a
+  // base. A known one stays an error in any letter case, since Windows reads `node_options` as
+  // NODE_OPTIONS, and so does the same name under Codex's `shell_environment_policy.set`. A change
+  // that adds or changes any name outside the harmless list fails.
+  it('makes a name nobody knows that was already there a warning, and keeps the known ones errors', () => {
+    const names = [
+      'SOMETHING_NEW',
+      'GIT_DIR',
+      'GIT_PAGER',
+      'CLAUDE_CODE_SHELL_PREFIX',
+      'CLAUDE_ENV_FILE',
+      'DYLD_INSERT_LIBRARIES',
+      'node_options',
+      'Ld_Preload',
+      'Bash_Env',
+      'Path',
+      'shell_environment_policy.set.SOMETHING',
+      'shell_environment_policy.set.BASH_ENV',
+    ];
+    const env = names.map((name) => hit('agent-env', '.claude/settings.json', 2, name, 'x'));
+    expect(tagChanges(env, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
+      'SOMETHING_NEW warning',
+      'GIT_DIR error',
+      'GIT_PAGER error',
+      'CLAUDE_CODE_SHELL_PREFIX error',
+      'CLAUDE_ENV_FILE error',
+      'DYLD_INSERT_LIBRARIES error',
+      'node_options error',
+      'Ld_Preload error',
+      'Bash_Env error',
+      'Path warning',
+      'shell_environment_policy.set.SOMETHING warning',
+      'shell_environment_policy.set.BASH_ENV error',
+    ]);
+    const added = tagChanges(env, []);
+    expect(added.filter((h) => !isFailing(h, 'new')).map((h) => h.name)).toEqual([]);
+  });
 });
 
 describe('isFailing', () => {

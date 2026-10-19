@@ -1,6 +1,6 @@
 import { showable } from '../install/inspect/safe-text.js';
 import { isFailing, type FailOn, type TaggedHit } from './agent-change.js';
-import { envLoadsCode } from './agent-json.js';
+import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 
 /**
@@ -33,7 +33,7 @@ function sentence(h: AgentHit, q: Quote): string {
         ? `${name} sends the agent's telemetry, which can hold your prompts, to: ${value}`
         : `${name} sends the agent's API traffic, and its key, to: ${value}`;
     case 'agent-env':
-      return envLoadsCode(h.name)
+      return envLoadsCode(envNameOf(h.name))
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow':

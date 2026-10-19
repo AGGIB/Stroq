@@ -79,6 +79,22 @@ describe('the spellings a hook names its script by', () => {
     },
   );
 
+  // A variable already there that names a folder or a file, however harmless it was as a warning,
+  // runs what the change puts there: PATH finds programs in it, a tool reads the other.
+  it('fails a file a change puts where an env variable already there points', () => {
+    const settings = JSON.stringify({
+      env: { PATH: './tools/bin:/usr/bin', SOMETHING: '.claude/x.sh' },
+    });
+    expect(
+      runFiles(
+        change(
+          { '.claude/settings.json': settings, 'tools/bin/a': 'x\n', '.claude/x.sh': 'true\n' },
+          { 'tools/bin/git': '#!/bin/sh\nid\n', '.claude/x.sh': 'id\n' },
+        ),
+      ),
+    ).toEqual(['changed .claude/x.sh .claude/x.sh', 'new tools/bin/git tools/bin/git']);
+  });
+
   it('does not take a file a formatter is given, or an address, for a script it runs', () => {
     expect(
       hookRuns(
