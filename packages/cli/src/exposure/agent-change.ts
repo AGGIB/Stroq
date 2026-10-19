@@ -1,4 +1,5 @@
-import type { AgentHit } from './agent-kinds.js';
+import type { AgentHit, AgentKind } from './agent-kinds.js';
+import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
 
 /**
  * Whether a hit came with the change being checked. Values are compared, not files: a hook
@@ -39,10 +40,41 @@ const takeOne = (counts: Map<string, number>, key: string): boolean => {
 const COMMON_ENV =
   /^(?:PATH|SHELL|EDITOR|VISUAL|PAGER|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/;
 
-const withStatus = (h: AgentHit, status: ChangeStatus): TaggedHit =>
-  status === 'present' && h.kind === 'agent-env' && COMMON_ENV.test(h.name)
-    ? { ...h, severity: 'warning', status }
-    : { ...h, status };
+/** Kinds that are ordinary in an honest repository, and an attack in some shapes. */
+const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
+  'package-script',
+  'devcontainer-command',
+  'mcp-server',
+]);
+/** Kinds that are listed to review when they were there, and fail when a change brings them. */
+const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set([
+  'agent-broad-allow',
+  'config-link-outside',
+]);
+/** A folder anyone on the machine can write, where an attacker can put the file a link reads. */
+const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/;
+
+/**
+ * A hit's severity once it is known whether the change brought it. One that was already there
+ * keeps its own, but for a common env variable, which is a warning. One the change brought fails
+ * when it is a whole-shell allow rule or a link out of the repository, and when it is an install
+ * script, a dev container command or a server that downloads and runs code, or decodes and runs
+ * it. A link to a shared temporary folder is an error either way.
+ */
+export function settle(h: AgentHit, status: ChangeStatus): TaggedHit {
+  if (h.kind === 'config-link-outside' && SHARED_FOLDER.test(h.value))
+    return { ...h, severity: 'error', status };
+  if (status === 'present')
+    return h.kind === 'agent-env' && COMMON_ENV.test(h.name)
+      ? { ...h, severity: 'warning', status }
+      : { ...h, status };
+  const fails =
+    FAILS_WHEN_NEW.has(h.kind) ||
+    (FAILS_IN_SHAPE.has(h.kind) && h.severity !== 'error' && runsFetchedOrHiddenCode(h.value));
+  return fails ? { ...h, severity: 'error', status } : { ...h, status };
+}
+
+const withStatus = settle;
 
 /**
  * `head` tagged against `base`; with no base at all, everything is `present`. Each base entry

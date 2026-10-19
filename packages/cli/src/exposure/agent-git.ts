@@ -1,5 +1,5 @@
 import { isPlainObject } from '../commands/config-file.js';
-import { tagChanges, type ChangeStatus, type TaggedHit } from './agent-change.js';
+import { settle, tagChanges, type TaggedHit } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { runFileChanges, type PackageScripts, type RunView } from './agent-run-files.js';
@@ -88,7 +88,7 @@ export function agentChanges(dir: string, rev: string): AgentChanges {
   }
 }
 
-const tagged = (h: AgentHit, status: ChangeStatus): TaggedHit => ({ ...h, status });
+const tagged = settle;
 const unique = <T>(items: Iterable<T>): T[] => [...new Set(items)];
 const entryAt = (tree: ReadonlyMap<string, TreeEntry>, path: string): TreeEntry =>
   tree.get(path) as TreeEntry;

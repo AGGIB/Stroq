@@ -1,5 +1,6 @@
 import { describe, it } from 'vitest';
-import { tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
+import { settle, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
+import { runsFetchedOrHiddenCode } from '../../src/exposure/fetch-shapes.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runFileChanges } from '../../src/exposure/agent-run-files.js';
 import { pathWords } from '../../src/exposure/run-words.js';
@@ -95,6 +96,18 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '.github/hooks/',
     '.devcontainer/',
     '.opencode/plugin/',
+    'curl a | ',
+    '| sh ',
+    '(',
+    '( ',
+    'sudo -a ',
+    'powershell ',
+    ' -e',
+    'eval ',
+    'base64 ',
+    'node -e ',
+    '$( ',
+    'a/',
     './a ',
     '"runOn": /**/',
     '---\n',
@@ -239,6 +252,14 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   ['the file words of a command line', (text) => pathWords(text)],
+  ['the shapes of downloaded code', (text) => runsFetchedOrHiddenCode(text)],
+  [
+    'a new entry settled',
+    (text) => [
+      settle(hit('package-script', 'package.json', 1, 'postinstall', text), 'new'),
+      settle(hit('config-link-outside', text, 1, 'link', text), 'present'),
+    ],
+  ],
   [
     'following a command already there to the files it runs',
     (text) =>
