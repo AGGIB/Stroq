@@ -108,6 +108,8 @@ export interface SummaryContext {
   readonly changedFrom?: string;
   readonly base?: string;
   readonly preTrust?: readonly PreTrustItem[];
+  /** True when a limit kept the check from reading every agent file or link. */
+  readonly capped?: boolean;
 }
 
 function preTrustList(items: readonly PreTrustItem[]): string[] {
@@ -146,6 +148,12 @@ export function githubSummary(hits: readonly TaggedHit[], context: SummaryContex
     verdict(groups, context),
     '',
     ...compared,
+    ...(context.capped === true
+      ? [
+          'Some agent files or links were not read: the check reached a limit. The entries that say "not read" name where.',
+          '',
+        ]
+      : []),
     ...preTrustList(context.preTrust ?? []),
     ...listed('Fails', groups.failing),
     ...listed('To review', groups.review),

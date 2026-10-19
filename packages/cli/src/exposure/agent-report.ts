@@ -75,6 +75,8 @@ function sentence(h: AgentHit, q: Quote): string {
         : `not read: ${value}`;
     case 'config-link-outside':
       return `is a link out of the repository, to: ${value}`;
+    case 'config-submodule':
+      return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
   }
 }
 

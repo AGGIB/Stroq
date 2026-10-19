@@ -198,6 +198,18 @@ export function readersFor(path: string): Reader[] {
 export const isSurfacePath = (path: string): boolean => readersFor(path).length > 0;
 
 /**
+ * Which files a check reads first when it cannot read them all: 0 for the configs at a fixed
+ * place and the agent folders themselves, 1 for any other file that can run something, 2 for a
+ * file that is only an instruction file.
+ */
+export function readTier(path: string): 0 | 1 | 2 {
+  const lower = path.toLowerCase();
+  if (AT_ROOT.has(lower) || AGENT_DIRS.has(lower)) return 0;
+  const readers = readersFor(path);
+  return readers.length > 0 && readers.every((r) => r === READERS.instruction) ? 2 : 1;
+}
+
+/**
  * A reader that cannot stop the check. Whatever a file makes a reader throw (a value nested
  * deeper than a library walks, say) becomes a failing entry for that file, with a digest of the
  * text as its value, so a file that changes is still a change.

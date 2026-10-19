@@ -31,6 +31,7 @@ export const KIND_SEVERITY = {
   'nested-bare-repo': 'error',
   'unreadable-config': 'error',
   'config-link-outside': 'warning',
+  'config-submodule': 'error',
 } as const;
 
 export type AgentKind = keyof typeof KIND_SEVERITY;

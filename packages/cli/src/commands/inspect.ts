@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -113,9 +113,25 @@ export function formatInspect(
   return `${lines.join('\n')}\n`;
 }
 
-/** The result of a change: the failing findings first, then the others, then the verdict. */
-export function formatChange(changedFrom: string, changes: AgentChanges, failOn: FailOn): string {
+/** Said when a limit kept the check from reading every agent file or link. */
+const CAPPED =
+  'Some agent files or links were not read: the check reached a limit. The entries that say "not read" name where.';
+
+/**
+ * The result of a change: the failing findings first, then the others, then the verdict. `dir`
+ * is the real path of the folder given, to say so when the repository's top is somewhere else.
+ */
+export function formatChange(
+  changedFrom: string,
+  changes: AgentChanges,
+  failOn: FailOn,
+  dir: string,
+): string {
   const groups = groupHits(changes.hits, failOn);
+  const where =
+    dir === changes.root
+      ? []
+      : [`It checks the whole repository at ${changes.root}, not only ${dir}.`, ''];
   const n = groups.failing.length;
   const verdict =
     n > 0
@@ -126,6 +142,7 @@ export function formatChange(changedFrom: string, changes: AgentChanges, failOn:
   return `${[
     `stroq inspect: what changed since ${changedFrom} (${changes.base.slice(0, 12)}) that an agent or editor runs by itself`,
     '',
+    ...where,
     ...textGroup(`FAILS (${n})`, groups.failing),
     ...textGroup(`TO REVIEW (${groups.review.length}, not failing)`, groups.review),
     ...textNotices(
@@ -136,11 +153,19 @@ export function formatChange(changedFrom: string, changes: AgentChanges, failOn:
       `ALREADY THERE BEFORE THIS CHANGE (${groups.present.length}, not failing)`,
       groups.present,
     ),
+    ...(changes.capped ? [CAPPED, ''] : []),
     verdict,
   ].join('\n')}\n`;
 }
 
 const asJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+const tryRealpath = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
 const withFailing = (hits: readonly TaggedHit[], failOn: FailOn) =>
   hits.map((h) => ({ ...h, failing: isFailing(h, failOn) }));
 const EMPTY_SURFACE: RepoSurface = { isRepo: true, preTrust: [], onOpen: [], capped: false };
@@ -219,21 +244,24 @@ function inspectChange(dir: string, format: InspectFormat, failOn: FailOn, rev: 
     return EXIT.error;
   }
   const failing = changes.hits.filter((h) => isFailing(h, failOn)).length;
+  const realDir = tryRealpath(dir);
   write({
     format,
     failOn,
     hits: changes.hits,
     surface: EMPTY_SURFACE,
     preTrust: [],
-    summary: { failOn, changedFrom: rev, base: changes.base },
-    text: () => formatChange(rev, changes, failOn),
+    summary: { failOn, changedFrom: rev, base: changes.base, capped: changes.capped },
+    text: () => formatChange(rev, changes, failOn, realDir),
     json: () => ({
       version: 1,
       dir,
+      root: changes.root,
       changedFrom: rev,
       base: changes.base,
       failOn,
       failing,
+      capped: changes.capped,
       agent: withFailing(changes.hits, failOn),
     }),
   });

@@ -58,6 +58,8 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
   'unreadable-config': 'This agent config could not be read, and it may run something.',
   'config-link-outside':
     'This agent config is a link to a file outside the repository, which was not read.',
+  'config-submodule':
+    'An agent folder or config is a submodule: what it holds comes from another repository when the submodule is checked out, and was not read.',
 };
 
 const ruleId = (kind: string): string => `stroq/${kind}`;

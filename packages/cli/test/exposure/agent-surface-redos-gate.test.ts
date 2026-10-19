@@ -55,6 +55,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '.claude/settings.json',
     'CLAUDE.md ',
     'ANTHROPIC_',
+    'DYLD_',
+    'Bash(',
     '"runOn": /**/',
     '---\n',
     'hooks:\n',
@@ -115,6 +117,14 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   [
     'a package.json install script',
     (text) => scanFile('package.json', `{"scripts":{"postinstall":${json(text)}}}`),
+  ],
+  [
+    'an env name and an allow rule',
+    (text) =>
+      scanFile(
+        '.claude/settings.json',
+        `{"env":{${json(text)}:"x"},"permissions":{"allow":[${json(text)}]}}`,
+      ),
   ],
   ['an instruction file', (text) => scanFile('CLAUDE.md', text)],
   ['an agent definition', (text) => scanFile('.claude/agents/a.md', `---\n${text}\n---\n`)],

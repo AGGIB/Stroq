@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runInspect } from '../../src/commands/inspect.js';
+import { formatChange, runInspect } from '../../src/commands/inspect.js';
+import { githubSummary } from '../../src/exposure/github-format.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -230,6 +231,40 @@ describe('stroq inspect --changed-from', () => {
     expect(run.code).toBe(1);
     expect(run.out).toContain('new: SessionStart hook runs: node .vscode/setup.mjs');
     expect(run.out).toContain('new: chat.tools.autoApprove approves tool calls without asking');
+  });
+
+  // A pull request changes the repository, so --changed-from reads all of it, from its top.
+  it('says it checked the whole repository when given a folder inside it', () => {
+    const dir = repo();
+    const base = commit(dir, { 'sub/README.md': 'x\n' });
+    commit(dir, { '.claude/settings.json': KEYV_SETTINGS });
+    const sub = join(dir, 'sub');
+    const text = inspect(sub, '--changed-from', base);
+    expect(text.out).toContain(`It checks the whole repository at ${realpathSync(dir)}`);
+    const record = JSON.parse(inspect(sub, '--changed-from', base, '--format', 'json').out) as {
+      dir: string;
+      root: string;
+      capped: boolean;
+    };
+    expect(record).toMatchObject({ dir: sub, root: realpathSync(dir), capped: false });
+    expect(inspect(dir, '--changed-from', base).out).not.toContain(
+      'It checks the whole repository',
+    );
+  });
+
+  it('says when a limit kept it from reading everything, in text and in the job summary', () => {
+    const changes = {
+      base: 'a'.repeat(40),
+      root: '/r',
+      capped: true,
+      hits: [],
+    };
+    expect(formatChange('main', changes, 'new', '/r')).toContain(
+      'Some agent files or links were not read',
+    );
+    expect(githubSummary([], { failOn: 'new', changedFrom: 'main', capped: true })).toContain(
+      'Some agent files or links were not read',
+    );
   });
 
   it('exits 3 when git cannot find the base or the folder is not a repository', () => {
