@@ -1,7 +1,7 @@
 import { agentDefinitionHasHooks } from '@stroq/core';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
 import { hookEntries, MAX_HOOKS } from './agent-json.js';
-import { digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineAt } from './jsonc.js';
 
 /**
@@ -92,7 +92,7 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
   const { entries, cut } = hookEntries(hooks);
   if (entries.length === 0) {
     // A hooks block with no command this reader can find is still a hooks block.
-    const declared = JSON.stringify(hooks) ?? '';
+    const declared = boundedJson(hooks);
     return declared === '{}' || declared === 'null' || declared === '[]'
       ? []
       : [hit('agent-definition-hook', path, line, 'hooks', declared)];

@@ -201,9 +201,24 @@ export function readersFor(path: string): Reader[] {
 
 export const isSurfacePath = (path: string): boolean => readersFor(path).length > 0;
 
+/**
+ * A reader that cannot stop the check. Whatever a file makes a reader throw (a value nested
+ * deeper than a library walks, say) becomes a failing entry for that file, with a digest of the
+ * text as its value, so a file that changes is still a change.
+ */
+export const guarded =
+  (read: Reader): Reader =>
+  (path, text) => {
+    try {
+      return read(path, text);
+    } catch {
+      return [hit('unreadable-config', path, 1, 'stopped', digestOf(text))];
+    }
+  };
+
 /** The hits of one file's text, in the order of their lines. */
 export function scanFile(path: string, text: string): readonly AgentHit[] {
-  return byLine(readersFor(path).flatMap((read) => read(path, text)));
+  return byLine(readersFor(path).flatMap((read) => guarded(read)(path, text)));
 }
 
 /** What a source found at a path. */

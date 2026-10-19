@@ -15,6 +15,7 @@ import { hardeningExports } from '../exposure/git-hardening.js';
 import { annotations, githubSummary, type PreTrustItem } from '../exposure/github-format.js';
 import { WHY, repoFindings, repoSurface, type RepoSurface } from '../exposure/repo-surface.js';
 import { inspectSarif } from '../exposure/sarif.js';
+import { neutralizeControls } from '../terminal-safe.js';
 import { stroqVersion } from '../version.js';
 
 /**
@@ -37,8 +38,8 @@ import { stroqVersion } from '../version.js';
 
 export { GIT_HARDENING, hardeningEnv, hardeningExports } from '../exposure/git-hardening.js';
 
-/** Exit codes: nothing fails, something fails, the arguments were wrong, git could not answer. */
-const EXIT = { pass: 0, fail: 1, usage: 2, git: 3 } as const;
+/** Exit codes: nothing fails, something fails, the arguments were wrong, the check could not run. */
+const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 } as const;
 
 /** The root dev container files and the root install scripts are already in `repoSurface`. */
 const COVERED_FILES: ReadonlySet<string> = new Set([
@@ -214,7 +215,7 @@ function inspectChange(dir: string, format: InspectFormat, failOn: FailOn, rev: 
   } catch (err) {
     if (!(err instanceof GitError)) throw err;
     process.stderr.write(`stroq inspect: ${err.message}\n`);
-    return EXIT.git;
+    return EXIT.error;
   }
   const failing = changes.hits.filter((h) => isFailing(h, failOn)).length;
   write({
@@ -324,7 +325,15 @@ export function runInspect(argv: readonly string[]): number {
   // Only what runs by itself fails the command, never the on-open list: a check that fails
   // on every repository with a pre-commit hook is one people stop running — which would
   // cost exactly the repositories this exists to catch.
-  return args.changedFrom === undefined
-    ? inspectCheckout(args.dir, args.format, args.failOn)
-    : inspectChange(args.dir, args.format, args.failOn, args.changedFrom);
+  try {
+    return args.changedFrom === undefined
+      ? inspectCheckout(args.dir, args.format, args.failOn)
+      : inspectChange(args.dir, args.format, args.failOn, args.changedFrom);
+  } catch (err) {
+    // Exit 1 means a report with findings. A check that stopped wrote none, and a CI step that
+    // lets exit 1 through to its upload must not let this through as well.
+    const why = neutralizeControls(err instanceof Error ? err.message : String(err)).slice(0, 300);
+    process.stderr.write(`stroq inspect: the check stopped before it finished: ${why}\n`);
+    return EXIT.error;
+  }
 }

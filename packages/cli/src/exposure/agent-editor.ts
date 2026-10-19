@@ -11,7 +11,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { autoApproves } from './privilege-surface.js';
 
@@ -134,7 +134,7 @@ export function vscodeSettings(
           f.path,
           lineOf(f.text, [...prefix, quoted(key)]),
           key,
-          JSON.stringify(value),
+          boundedJson(value),
         ),
       );
   }

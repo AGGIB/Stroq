@@ -58,6 +58,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['an unclosed string', (size) => `"${'x'.repeat(size)}`],
   ['a long key path', (size) => `${'a.'.repeat(size / 2)}b = 1`],
   ['nested arrays', (size) => `a = ${'['.repeat(size / 2)}`],
+  ['deep JSON arrays', (size) => `${'['.repeat(size / 2)}${']'.repeat(size / 2)}`],
+  ['deep JSON objects', (size) => `${'{"a":'.repeat(size / 6)}1${'}'.repeat(size / 6)}`],
   ['controls', repeat('\u0001\u001b\r\n')],
 ];
 
@@ -80,6 +82,10 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       ),
   ],
   ['a tasks.json, raw', (text) => scanFile('.vscode/tasks.json', text)],
+  [
+    'a VS Code auto-approve value',
+    (text) => scanFile('.vscode/settings.json', `{"chat.tools.autoApprove":${text}}`),
+  ],
   [
     'a tasks.json, as a task',
     (text) =>

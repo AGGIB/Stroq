@@ -64,6 +64,59 @@ export const hit = (
 export const digestOf = (text: string): string =>
   `sha256:${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
 
+/** The most characters of a value written out by `boundedJson` before it is cut. */
+const JSON_TEXT_MAX = 1024;
+
+interface Frame {
+  readonly close: string;
+  readonly items: readonly (readonly [key: string | null, value: unknown])[];
+  next: number;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * A value from a repository as JSON text, for a hit's value. `JSON.stringify` recurses, so a
+ * value nested 100,000 levels deep (which `JSON.parse` reads from under a megabyte) overflows
+ * the stack. This walks with a stack of its own and keeps the first `max` characters; when it
+ * cuts, a digest of the whole text follows, so two values that differ past the cut still differ.
+ */
+export function boundedJson(value: unknown, max = JSON_TEXT_MAX): string {
+  const hash = createHash('sha256');
+  let shown = '';
+  const emit = (text: string): void => {
+    hash.update(text);
+    if (shown.length <= max) shown += text.slice(0, max + 1);
+  };
+  const stack: Frame[] = [];
+  const open = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      emit('[');
+      stack.push({ close: ']', items: v.map((item) => [null, item] as const), next: 0 });
+    } else if (isRecord(v)) {
+      emit('{');
+      stack.push({ close: '}', items: Object.entries(v), next: 0 });
+    } else {
+      emit(JSON.stringify(v) ?? 'null');
+    }
+  };
+  open(value);
+  for (let top = stack.at(-1); top !== undefined; top = stack.at(-1)) {
+    if (top.next >= top.items.length) {
+      emit(top.close);
+      stack.pop();
+      continue;
+    }
+    const [key, item] = top.items[top.next] as readonly [string | null, unknown];
+    emit(`${top.next > 0 ? ',' : ''}${key === null ? '' : `${JSON.stringify(key)}:`}`);
+    top.next += 1;
+    open(item);
+  }
+  if (shown.length <= max) return shown;
+  return `${shown.slice(0, max)}... (sha256:${hash.digest('hex').slice(0, 16)})`;
+}
+
 /** The hits of one file in the order of their lines, the reader's order kept within a line. */
 export const byLine = (hits: readonly AgentHit[]): AgentHit[] =>
   hits

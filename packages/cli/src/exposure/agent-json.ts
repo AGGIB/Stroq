@@ -1,6 +1,6 @@
 import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
-import { hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -216,7 +216,7 @@ function pluginHits(f: JsonFile): AgentHit[] {
         f.path,
         lineOf(f.text, ['"extraKnownMarketplaces"', quoted(name)]),
         `extraKnownMarketplaces.${name}`,
-        JSON.stringify(source) ?? '',
+        boundedJson(source),
       ),
     );
   }

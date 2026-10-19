@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { scanFile, type AgentHit, type AgentKind } from '../../src/exposure/agent-surface.js';
+import {
+  guarded,
+  scanFile,
+  type AgentHit,
+  type AgentKind,
+} from '../../src/exposure/agent-surface.js';
 
 const of = (hits: readonly AgentHit[], kind: AgentKind): AgentHit[] =>
   hits.filter((h) => h.kind === kind);
@@ -339,6 +344,37 @@ describe('dev containers', () => {
       expect(values(scanFile(file, text), 'devcontainer-host-command')).toEqual(['id']);
     }
     expect(scanFile('docs/devcontainer.json', text)).toEqual([]);
+  });
+});
+
+// JSON.parse reads a 120,000-level value from 720 KB, but JSON.stringify of it overflows the
+// stack. A reader that stops on such a file must not stop the whole check.
+describe('a value nested deeper than JSON.stringify can print', () => {
+  const deep = (depth: number, inner = '1'): string =>
+    `${'{"a":'.repeat(depth)}${inner}${'}'.repeat(depth)}`;
+
+  it('reports a deep auto-approve setting, with its value cut', () => {
+    const hits = scanFile('.vscode/settings.json', `{"chat.tools.autoApprove": ${deep(120_000)}}`);
+    expect(hits).toMatchObject([{ kind: 'agent-permission-bypass', severity: 'error' }]);
+    expect(hits[0]?.value.length).toBeLessThan(2_000);
+  });
+
+  it('reports a deep plugin source, and tells two apart that differ only deep inside', () => {
+    const source = (inner: string): string =>
+      `{"extraKnownMarketplaces":{"x":{"source":${deep(120_000, inner)}}}}`;
+    const [a] = scanFile('.claude/settings.json', source('1'));
+    const [b] = scanFile('.claude/settings.json', source('2'));
+    expect(a).toMatchObject({ kind: 'agent-plugin', severity: 'error' });
+    expect(a?.value).not.toBe(b?.value);
+  });
+
+  it('turns a reader that stops into a failing entry for that file', () => {
+    const stops = guarded(() => {
+      throw new RangeError('Maximum call stack size exceeded');
+    });
+    expect(stops('.mcp.json', '{}')).toMatchObject([
+      { kind: 'unreadable-config', file: '.mcp.json', severity: 'error', name: 'stopped' },
+    ]);
   });
 });
 

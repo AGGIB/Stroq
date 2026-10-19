@@ -218,6 +218,20 @@ describe('stroq inspect --changed-from', () => {
     expect(log.runs[0]?.results.map((r) => r.properties.change)).toEqual(['present', 'new', 'new']);
   });
 
+  it('still reports a hook next to a settings file nested too deep to print', () => {
+    const dir = repo();
+    const base = commit(dir, { 'README.md': 'x\n' });
+    const deep = `${'{"a":'.repeat(120_000)}1${'}'.repeat(120_000)}`;
+    commit(dir, {
+      '.vscode/settings.json': `{"chat.tools.autoApprove": ${deep}}`,
+      '.claude/settings.json': KEYV_SETTINGS,
+    });
+    const run = inspect(dir, '--changed-from', base);
+    expect(run.code).toBe(1);
+    expect(run.out).toContain('new: SessionStart hook runs: node .vscode/setup.mjs');
+    expect(run.out).toContain('new: chat.tools.autoApprove approves tool calls without asking');
+  });
+
   it('exits 3 when git cannot find the base or the folder is not a repository', () => {
     const dir = repo();
     commit(dir, { 'README.md': 'x\n' });

@@ -1,6 +1,6 @@
 import { isPlainObject } from '../commands/config-file.js';
 import { hookEntries, MAX_HOOKS } from './agent-json.js';
-import { digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { mcpServerRunsCode } from '@stroq/core';
 import { lineOf } from './jsonc.js';
 
@@ -292,7 +292,7 @@ function serverHits(path: string, text: string, servers: unknown): AgentHit[] {
       return [hit(kind, path, line, name, [command, ...args].join(' '))];
     }
     if (command !== undefined)
-      return [hit('unreadable-config', path, 1, `mcp_servers.${name}`, JSON.stringify(command))];
+      return [hit('unreadable-config', path, 1, `mcp_servers.${name}`, boundedJson(command))];
     if (typeof url === 'string')
       return [hit('mcp-server', path, lineOf(text, ['mcp_servers', name, 'url']), name, url)];
     return [];
