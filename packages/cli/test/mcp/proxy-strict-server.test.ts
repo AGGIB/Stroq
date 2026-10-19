@@ -74,7 +74,11 @@ describe('notifications and requests a server starts', () => {
       .messages()
       .flatMap((m) => (typeof m['method'] === 'string' ? [m['method']] : []));
     expect(methods).toEqual(['notifications/progress', 'notifications/tools/list_changed', 'ping']);
-    expect(rig.ruleIds()).toEqual([]);
+    expect(rig.ruleIds()).toEqual([
+      'mcp-strict-forwarded',
+      'mcp-strict-forwarded',
+      'mcp-strict-forwarded',
+    ]);
     await rig.finish();
   });
 
@@ -131,12 +135,12 @@ describe('a server that withholds too much', () => {
     await rig.handshake();
     rig.call(3, 'flood', { count: 100 });
     const answer = await rig.answerFor(3);
-    expect(errorText(answer)).toContain('more than 30 withheld');
+    expect(errorText(answer)).toContain('more than 30 benign-kind');
     expect(await rig.done).toBe(1);
     expect(rig.ruleIds().filter((id) => id === 'mcp-strict-unsolicited')).toHaveLength(31);
   }, 60_000);
 
-  it('does not count what it forwards or what the client asked for', async () => {
+  it('does not count what it forwards toward the hostile cap', async () => {
     const rig = startRig({ strict: true, strictMaxWithheld: 1 });
     await rig.handshake();
     for (let id = 3; id < 8; id += 1) {

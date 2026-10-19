@@ -48,12 +48,10 @@ const block = (text: string) => ({ type: 'text', text });
 describe('the views of a result', () => {
   const result = { content: [block('hello')], structuredContent: { a: 'b' } };
 
-  it('are, in order, the default text, the decoded strings and the JSON', () => {
-    expect(viewsOf('tools/call', result).map((view) => view.name)).toEqual([
-      'default',
-      'strings',
-      'json',
-    ]);
+  it('are, in order, the default text, the decoded strings, the JSON and each string alone', () => {
+    const names = viewsOf('tools/call', result).map((view) => view.name);
+    expect(names.slice(0, 3)).toEqual(['default', 'strings', 'json']);
+    expect(names.slice(3).every((name) => name === 'per-string')).toBe(true);
   });
 
   it.each([
@@ -94,13 +92,18 @@ describe('the views of a result', () => {
     const names = viewsOf('initialize', { protocolVersion: 'x', serverInfo: { name: 'n' } }).map(
       (view) => view.name,
     );
-    expect(names).toEqual(['strings', 'json']);
+    expect(names[0]).toBe('strings');
+    expect(names[1]).toBe('json');
+    expect(names.slice(2).every((name) => name === 'per-string')).toBe(true);
   });
 
   it('have none for an error object either', () => {
     const read = readStrictError({ code: -1, message: 'm', data: { a: 'b' } });
     if (!read.ok) throw new Error('unreadable');
-    expect(read.views.map((view) => view.name)).toEqual(['strings', 'json']);
+    const names = read.views.map((view) => view.name);
+    expect(names[0]).toBe('strings');
+    expect(names[1]).toBe('json');
+    expect(names.slice(2).every((name) => name === 'per-string')).toBe(true);
   });
 
   it('are none for a result with nothing in it that the default proxy does not read', () => {
@@ -194,6 +197,13 @@ describe('a rule that wants the text to end where the sentence ends', () => {
 
   it('fires in strict mode, on a text that ends there', () => {
     expect(strictMatches('tools/call', result).has('ATR-2026-02009')).toBe(true);
+  });
+
+  it('fires in strict mode even when another content block or field follows', () => {
+    const multi = {
+      content: [block('Remember this secret key:'), block('second block')],
+    };
+    expect(strictMatches('tools/call', multi).has('ATR-2026-02009')).toBe(true);
   });
 });
 

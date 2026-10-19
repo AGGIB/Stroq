@@ -15,11 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Host-filtered attack replay checks partial visibility by phase and tool; absent shell output, page bodies and Claude WebSearch pre-hooks are unsupported. Generated host evidence escapes Markdown table separators and HTML placeholders. Benchmark report paths use forward slashes on every OS so `check:reports` is reproducible across Windows and POSIX.
 
+- **Unaddressable strict replies no longer leave clients waiting for their own timeout.** Malformed replies beyond the bounded id reader and responses with unknown ids fail the outstanding requests with fixed errors. This can also fail unrelated concurrent requests on that wrapper; duplicate completed replies do not fail newer requests.
+
+- **POSIX shutdown escalation reaches descendants after the launcher exits.** The process group still receives SIGKILL while inherited pipes remain open. Benign-message cap errors now identify the shared forwarded/withheld counter consistently in client responses, stderr and audit records.
+
+- **Strict scan cost documentation includes per-string views.** Each distinct decoded string adds a scan view; the 0.26.0 measurements below describe the original three aggregate views, not the current scan count or latency.
+
+- **Answer waiting client requests on batch server messages in strict mode.** A readable server array is withheld whole as `invalid-shape`, and all waiting client requests whose IDs it contains are promptly answered with fixed errors rather than left waiting. A malformed batch or one above the line limit fails all pending requests: its first id alone cannot identify every response being withheld.
+
 ### Added
 
 - **`stroq add <name> --rollback` restores the previous revision of an updated skill or MCP server.** Store garbage collection now retains exactly one previous revision per installed skill and MCP server until the next update or removal. `stroq doctor` reports retained previous revisions and the disk space they use. An update can be rolled back with `stroq add <name> --rollback`, requiring the typed digest and recording an audit receipt.
 
 - **Per-host channel reporting for `stroq attack` and generated `docs/HOSTS.md`.** `stroq attack --host <id>` filters scenario steps by the channels each host can actually see (shell commands, file writes, file reads, MCP calls, tool results, web fetches), counting steps a host never sends as `unsupported` rather than a defence. `docs/HOSTS.md` is generated from the machine-readable channel matrix and verified in CI alongside coverage and bench reports. Thanks @kok-o (#231).
+
+- **`stroq exposure` reports strict wrappers separately.** Matches `stroq doctor` by counting and displaying the number of wrapped MCP servers running under `--strict` in the `wrapped by Stroq` row.
+
+- **Process-group termination on POSIX.** MCP server processes are spawned detached on POSIX so that `killChildTree` terminates descendants by signalling the entire process group (`-pid`), preventing orphaned grandchildren when commands are launched via `sh -c` or `npx`.
+
+- **Decoded strings view for end-anchored rules under `--strict`.** Strict mode scans individual decoded strings in isolation so that rules requiring sentence-end matches (`$`) cannot be evaded by subsequent result fields.
+
+- **Forwarded server messages are counted, audited, and limited.** Server-initiated messages permitted in strict mode (`ping`, `list_changed`, plain `progress`) are audited as `mcp-strict-forwarded` and counted against the benign message limit.
 
 ## [0.26.1] - 2026-10-19
 
