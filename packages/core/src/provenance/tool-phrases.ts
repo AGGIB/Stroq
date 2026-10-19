@@ -20,12 +20,13 @@ export interface Phrase {
 
 const RUNNER_PHRASES = [
   'npx',
+  'pnpx',
   'bunx',
   'uvx',
   // `pnpm exec` runs a binary that is already installed and fetches nothing: it is no launch.
   'pnpm dlx|create',
   'yarn dlx|create',
-  'npm exec|x',
+  'npm exec|x|create|init|innit',
   'bun x|create',
   'pipx run',
   'uv tool run',
@@ -34,11 +35,11 @@ const RUNNER_PHRASES = [
 ];
 
 const INSTALLER_PHRASES = [
-  'npm i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|add|it|install-test',
-  'pnpm i|add|install|up',
-  'yarn add',
+  'npm i|in|ins|inst|insta|instal|install|isnt|isnta|isntal|add|it|install-test|up|update|upgrade|link|ln',
+  'pnpm i|add|install|up|update',
+  'yarn add|upgrade|up',
   'yarn global add',
-  'bun add|install|i',
+  'bun add|install|i|update',
   'pip install',
   'python -m pip install',
   'uv run python -m pip install',

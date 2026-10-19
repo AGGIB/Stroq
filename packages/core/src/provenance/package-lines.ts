@@ -206,9 +206,12 @@ const createdBy = (name: string): string => {
     : `${name.slice(0, slash + 1)}create-${name.slice(slash + 1)}`;
 };
 
+/** The verbs that run the package named `create-<name>` for `<name>`: `pnpm create`, `npm init`. */
+const CREATES: ReadonlySet<string> = new Set(['create', 'init', 'innit']);
+
 /** A `create` runs the package named `create-<name>`: both names are read. */
 const withCreated = (packages: readonly string[], verb: string): string[] =>
-  verb === 'create' ? [...packages, ...packages.map(createdBy)] : [...packages];
+  CREATES.has(verb) ? [...packages, ...packages.map(createdBy)] : [...packages];
 
 /** What one command that runs a runner or an installer names, read from its words. */
 function readCommand(text: string, start: number, command: LexedCommand): Found | null {

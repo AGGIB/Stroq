@@ -220,3 +220,48 @@ describe('a Python name is the same name in any spelling', () => {
     expect((await f.pre('yarn add Evil.Helper.Fix')).decision.effect).not.toBe('deny');
   });
 });
+
+describe('the verbs that update, link or initialise with a package', () => {
+  it.each([
+    `npm update ${NAME}`,
+    `npm up ${NAME}`,
+    `npm upgrade ${NAME}`,
+    `npm link ${NAME}`,
+    `npm ln ${NAME}`,
+    `npm init ${NAME}`,
+    `npm innit ${NAME}`,
+    `npm create ${NAME}`,
+    `pnpx ${NAME}`,
+    `pnpm update ${NAME}`,
+    `pnpm up ${NAME}`,
+    `yarn upgrade ${NAME}`,
+    `yarn up ${NAME}`,
+    `bun update ${NAME}`,
+  ])('is denied after a flagged page: %s', async (command) => {
+    const f = fixture();
+    await f.post(pageWith(`npx ${NAME}`));
+    expect((await f.pre(command)).decision).toMatchObject({
+      effect: 'deny',
+      ruleId: 'deny-origin-suspect',
+    });
+  });
+
+  it.each(['npm init', 'npm init -y', 'npm update', 'yarn upgrade', 'bun update'])(
+    'names nothing, so it is not denied for a flagged package elsewhere: %s',
+    async (command) => {
+      const f = fixture();
+      await f.post(pageWith(`npx ${NAME}`));
+      expect((await f.pre(command)).decision.effect).not.toBe('deny');
+    },
+  );
+
+  it('is denied through the package an initialiser runs, in both directions', async () => {
+    const page = fixture();
+    await page.post(pageWith(`npm init ${NAME}`));
+    expect((await page.pre(`npx create-${NAME}`)).decision.effect).toBe('deny');
+    expect((await page.pre(`npm create ${NAME}`)).decision.effect).toBe('deny');
+    const other = fixture();
+    await other.post(pageWith(`npx create-${NAME}`));
+    expect((await other.pre(`npm init ${NAME}`)).decision.effect).toBe('deny');
+  });
+});
