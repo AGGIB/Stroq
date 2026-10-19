@@ -46,6 +46,27 @@ export function commitFiles(dir: string, files: Readonly<Record<string, string>>
   return git(dir, 'rev-parse', 'HEAD').trim();
 }
 
+/**
+ * Stages a link at `path` whose target is `target`, written straight into git's objects: no
+ * file system has to be able to make it, so a target too long for one, or one that is a whole
+ * JSON file, can be committed too. Commit it with `git commit`, not `commitFiles`, whose
+ * `add -A` would stage the missing file as deleted.
+ */
+export function stageLink(dir: string, path: string, target: string): void {
+  const oid = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: dir,
+    input: target,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: dir,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(dir, '.none'),
+    },
+  }).trim();
+  git(dir, 'update-index', '--add', '--cacheinfo', `120000,${oid},${path}`);
+}
+
 /** A `.claude/settings.json` with one command hook per event. */
 export const hookSettings = (hooks: Readonly<Record<string, string>>): string =>
   JSON.stringify({

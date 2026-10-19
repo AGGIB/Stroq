@@ -44,7 +44,8 @@ export { GitError } from './git-read.js';
  *
  * The author of the change chooses its size, so no limit here may pass it quietly. The configs
  * at a fixed place are read first, then the files the change touched, then the rest; whatever a
- * limit keeps from being read is a failing entry when the change touched it.
+ * limit keeps from being read is a failing entry, and so is a link whose target was not read.
+ * The one exception is an instruction file the change did not touch: it runs nothing.
  */
 
 export const GIT_CAPS = {
@@ -119,8 +120,13 @@ interface Planned {
 }
 
 const linksOf = (at: Resolved): readonly string[] => (at.kind === 'none' ? [] : at.links);
+/** The path of the tree a host ends up at, there or not: a change to it is a change here. */
 const behind = (at: Resolved): string | undefined =>
-  at.kind === 'blob' || at.kind === 'submodule' || at.kind === 'folder' ? at.path : undefined;
+  at.kind === 'blob' || at.kind === 'submodule' || at.kind === 'folder'
+    ? at.path
+    : at.kind === 'dangling'
+      ? at.missing
+      : undefined;
 const linkChanged = (at: Resolved, changed: ReadonlyMap<string, Changed>): boolean =>
   linksOf(at).some((l) => changed.has(l));
 
@@ -197,6 +203,7 @@ function readPlan(
   const base = budget(olds, left, new Set(head.read.map((e) => e.oid)));
   const blobs = readBlobs(top, [...head.read, ...base.read]);
   return {
+    overBudget: head.over.size + base.over.size > 0,
     headSource: (entry: TreeEntry) => sourceOf(entry, head.over, blobs),
     baseSource: (oid: string) => {
       const size = sizes.get(oid);
@@ -230,15 +237,23 @@ function compare(top: string, base: string, head: string) {
           ),
         ];
       case 'unread': {
+        // What is behind a link left unread is not known, changed or not: this always fails.
         const why = `a link on the way was not read: ${p.at.link}`;
-        return [
-          tagged(hit('unreadable-config', p.path, 1, 'link', why), p.touched ? 'new' : 'present'),
-        ];
+        return [tagged(hit('unreadable-config', p.path, 1, 'link', why), 'new')];
       }
+      case 'dangling':
+        return hitsForRead(p.path, { kind: 'dangling', target: p.at.missing }).map((h) =>
+          tagged(h, p.touched ? 'new' : 'present'),
+        );
       case 'submodule':
         return submoduleHits(p.path, p.at, changed, moved);
       case 'blob': {
-        const now = hitsForRead(p.path, read.headSource(entryAt(tree, p.at.path)));
+        const headRead = read.headSource(entryAt(tree, p.at.path));
+        const now = hitsForRead(p.path, headRead);
+        // A file not read cannot be compared with its base. It fails unless it is an instruction
+        // file the change did not touch, which runs nothing and so hides nothing the change brought.
+        if (headRead.kind !== 'text')
+          return now.map((h) => tagged(h, !p.touched && p.tier === 2 ? 'present' : 'new'));
         if (!p.touched) return tagChanges(now, now);
         const oid = baseOid(p, changed);
         const source = oid === undefined ? undefined : read.baseSource(oid);
@@ -263,7 +278,8 @@ function compare(top: string, base: string, head: string) {
     ...bareChanges(tree, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
-  return { base, hits: hits.sort((a, b) => byPath(a.file, b.file)), capped: limits.length > 0 };
+  const byFile = hits.sort((a, b) => byPath(a.file, b.file));
+  return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };
 }
 
 function submoduleHits(
@@ -290,10 +306,9 @@ function limitHits(
   const hits: TaggedHit[] = [];
   const first = dropped[0];
   if (first !== undefined) {
+    // Even files the change did not touch: a config left out could run a file the change edits.
     const why = `${dropped.length} more agent files were not read: one check reads ${GIT_CAPS.candidates}`;
-    // Files the change did not touch hold what was already there; cutting them hides nothing new.
-    const status = dropped.some((p) => p.touched) ? 'new' : 'present';
-    hits.push(tagged(hit('unreadable-config', first.path, 1, 'file list', why), status));
+    hits.push(tagged(hit('unreadable-config', first.path, 1, 'file list', why), 'new'));
   }
   const link = cutLinks[0];
   if (link !== undefined) {

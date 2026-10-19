@@ -1,5 +1,5 @@
 import { readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { within } from '../commands/config-file.js';
 import { hit, type AgentHit } from './agent-kinds.js';
@@ -12,6 +12,7 @@ import {
   isSurfacePath,
   type SourceRead,
 } from './agent-surface.js';
+import { linkMatters } from './git-tree.js';
 
 /**
  * What a working tree runs by itself, read from the disk: `stroq inspect` without a base, on a
@@ -42,9 +43,9 @@ export interface AgentSurface {
 
 interface Candidate {
   readonly rel: string;
-  /** The real path when it is inside the repository, or the link's target when it is not. */
+  /** The real path of a file to read, or the text of a link that leads out or to nothing. */
   readonly real: string;
-  readonly outside: boolean;
+  readonly kind: 'file' | 'outside' | 'dangling';
 }
 
 interface Dir {
@@ -63,13 +64,15 @@ const tryRealpath = (path: string): string | undefined => {
   }
 };
 
-const linkText = (path: string): string => {
+const readlinkOrUndefined = (path: string): string | undefined => {
   try {
     return readlinkSync(path);
   } catch {
-    return 'outside the repository';
+    return undefined;
   }
 };
+
+const linkText = (path: string): string => readlinkOrUndefined(path) ?? 'outside the repository';
 
 const isDirectory = (path: string): boolean => {
   try {
@@ -87,10 +90,11 @@ const entriesOf = (path: string): Dirent[] => {
   }
 };
 
-/** Whether `real` is a folder on the way to `dir`: a link to it would walk in circles. */
-function isOnTheWay(dir: Dir | undefined, real: string): boolean {
-  for (let at = dir; at !== undefined; at = at.parent) if (at.real === real) return true;
-  return false;
+/** How many folders on the way to `dir`, itself included, are `real`. */
+function timesOnTheWay(dir: Dir | undefined, real: string): number {
+  let times = 0;
+  for (let at = dir; at !== undefined; at = at.parent) if (at.real === real) times += 1;
+  return times;
 }
 
 /** The queues of the walk: folders inside agent and editor folders are taken first. */
@@ -106,7 +110,11 @@ class Queue {
   add(dir: Dir): void {
     const isAgent = inAgentFolder(dir.rel);
     const key = isAgent ? `${dir.real}\0${dir.rel.toLowerCase()}` : dir.real;
-    if (this.seen.has(key) || isOnTheWay(dir.parent, dir.real)) return;
+    // A link back up to a folder on the way is a loop. One inside an agent folder is walked once
+    // all the same, since its name makes what is up there a skill or a rule: a host reads
+    // `.claude/skills/all/SKILL.md` through `.claude/skills/all -> ../..`.
+    const loops = timesOnTheWay(dir.parent, dir.real) > (isAgent ? 1 : 0);
+    if (this.seen.has(key) || loops) return;
     this.seen.add(key);
     (isAgent ? this.agent : this.other).push(dir);
   }
@@ -140,23 +148,43 @@ function walk(root: string): Walked {
       const abs = join(next.abs, entry.name);
       const isLink = entry.isSymbolicLink();
       const real = isLink ? tryRealpath(abs) : join(next.real, entry.name);
-      if (real === undefined) continue;
+      if (real === undefined) {
+        const broken = isLink ? brokenLink(abs, rel, [root, realRoot]) : undefined;
+        if (broken !== undefined) found.push(broken);
+        continue;
+      }
       if (isLink && !within(real, realRoot)) {
         if (isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase()))
-          found.push({ rel, real: linkText(abs), outside: true });
+          found.push({ rel, real: linkText(abs), kind: 'outside' });
         continue;
       }
       if (isLink ? isDirectory(real) : entry.isDirectory())
         queue.add({ abs, rel, real, parent: next });
-      else if (isSurfacePath(rel)) found.push({ rel, real, outside: false });
+      else if (isSurfacePath(rel)) found.push({ rel, real, kind: 'file' });
     }
   }
   return { found, stoppedAt: undefined };
 }
 
+/**
+ * A link that leads to nothing, as a candidate when a host would go through it: one inside the
+ * folder is reported as not read, one that leads out of it as a link out. Undefined otherwise.
+ */
+function brokenLink(abs: string, rel: string, roots: readonly string[]): Candidate | undefined {
+  const text = readlinkOrUndefined(abs);
+  if (text === undefined) return undefined;
+  const where = resolvePath(dirname(abs), text);
+  if (roots.some((root) => within(where, root)))
+    return linkMatters(rel) ? { rel, real: text, kind: 'dangling' } : undefined;
+  return isSurfacePath(rel) || AGENT_DIRS.has(rel.toLowerCase())
+    ? { rel, real: text, kind: 'outside' }
+    : undefined;
+}
+
 /** Reads one file, charging its size to what is `left` of the budget. */
 function readCandidate(candidate: Candidate, left: { bytes: number }): SourceRead {
-  if (candidate.outside) return { kind: 'outside', target: candidate.real };
+  if (candidate.kind === 'outside') return { kind: 'outside', target: candidate.real };
+  if (candidate.kind === 'dangling') return { kind: 'dangling', target: candidate.real };
   try {
     const size = statSync(candidate.real).size;
     if (size <= MAX_FILE_BYTES && size > left.bytes)

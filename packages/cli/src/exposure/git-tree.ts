@@ -36,8 +36,12 @@ export function lowerBound(sorted: readonly string[], prefix: string): number {
   return lo;
 }
 
-/** The paths of `sorted` under the folder `dir`, in order. */
+/** The paths of `sorted` under the folder `dir`, in order; every path for the root, `''`. */
 export function* under(sorted: readonly string[], dir: string): Generator<string> {
+  if (dir === '') {
+    yield* sorted;
+    return;
+  }
   const prefix = `${dir}/`;
   for (let i = lowerBound(sorted, prefix); i < sorted.length; i += 1) {
     const path = sorted[i] as string;
@@ -49,11 +53,17 @@ export function* under(sorted: readonly string[], dir: string): Generator<string
 const isFolder = (sorted: readonly string[], path: string): boolean =>
   !under(sorted, path).next().done;
 
-/** Where a link's target is in the tree, or null when it leads out of it (or is its root). */
+/**
+ * Where a link's target is in the tree: a path, `''` for the root of the tree, or null when it
+ * leads out of it.
+ */
 export function linkTarget(link: string, target: string): string | null {
   if (target === '' || target.startsWith('/') || /^[A-Za-z]:/.test(target)) return null;
-  const joined = posix.normalize(posix.join(posix.dirname(link), target));
-  return joined === '..' || joined.startsWith('../') || joined === '.' ? null : joined;
+  const normal = posix.normalize(posix.join(posix.dirname(link), target));
+  // `cfg/` names the folder `cfg`; normalize leaves at most one slash at the end.
+  const joined = normal.endsWith('/') ? normal.slice(0, -1) : normal;
+  if (joined === '.' || joined === '') return '';
+  return joined === '..' || joined.startsWith('../') ? null : joined;
 }
 
 export type Resolved =
@@ -68,6 +78,17 @@ export type Resolved =
   | { readonly kind: 'outside'; readonly target: string; readonly links: readonly string[] }
   /** A link on the way whose target was not read. */
   | { readonly kind: 'unread'; readonly link: string; readonly links: readonly string[] }
+  /**
+   * Links that lead to nothing in the tree: to `missing`, which is not there, or round in a loop
+   * (`missing` undefined). What a host opens there is whatever appears at the target later.
+   */
+  | {
+      readonly kind: 'dangling';
+      readonly link: string;
+      readonly missing: string | undefined;
+      readonly links: readonly string[];
+    }
+  /** No such path, and no link on the way to it. */
   | { readonly kind: 'none' };
 
 /** The first part of `parts` that is a link or a submodule, and its path; -1 when none is. */
@@ -81,22 +102,25 @@ function firstStop(parts: readonly string[], tree: ReadonlyMap<string, TreeEntry
   return { at: -1, path };
 }
 
+/** What is at `path`, a path with no link or submodule on the way to it. */
+function landed(path: string, links: readonly string[], view: TreeView): Resolved {
+  const entry = view.tree.get(path);
+  if (entry !== undefined && isBlob(entry)) return { kind: 'blob', path, links };
+  if (isFolder(view.sorted, path)) return { kind: 'folder', path, links };
+  const link = links.at(-1);
+  return link === undefined ? { kind: 'none' } : { kind: 'dangling', link, missing: path, links };
+}
+
 /**
  * `path` as a host on disk would open it: each link on the way replaced by where it points, as
  * long as that stays inside the tree. `links` are the link paths passed through.
  */
 export function resolve(path: string, view: TreeView): Resolved {
-  let parts = path.split('/');
+  let parts = path === '' ? [] : path.split('/');
   const links: string[] = [];
   for (let hops = 0; hops <= MAX_LINK_HOPS; hops += 1) {
     const stop = firstStop(parts, view.tree);
-    if (stop.at === -1) {
-      const entry = view.tree.get(stop.path);
-      if (entry !== undefined && isBlob(entry)) return { kind: 'blob', path: stop.path, links };
-      return isFolder(view.sorted, stop.path)
-        ? { kind: 'folder', path: stop.path, links }
-        : { kind: 'none' };
-    }
+    if (stop.at === -1) return landed(stop.path, links, view);
     const entry = view.tree.get(stop.path) as TreeEntry;
     if (entry.mode === GITLINK)
       return { kind: 'submodule', path: stop.path, oid: entry.oid, links };
@@ -105,9 +129,10 @@ export function resolve(path: string, view: TreeView): Resolved {
     if (raw === undefined) return { kind: 'unread', link: stop.path, links };
     const target = linkTarget(stop.path, raw);
     if (target === null) return { kind: 'outside', target: raw, links };
-    parts = [...target.split('/'), ...parts.slice(stop.at + 1)];
+    parts = [...(target === '' ? [] : target.split('/')), ...parts.slice(stop.at + 1)];
   }
-  return { kind: 'none' };
+  // More links in a row than a host follows: it gives up there, and so does this.
+  return { kind: 'dangling', link: links.at(-1) as string, missing: undefined, links };
 }
 
 /** A link whose target decides what an agent or editor loads. */
@@ -167,7 +192,9 @@ export interface Paths {
 
 /**
  * The paths a host would open: the tree's own, and those it reaches through a link to a folder,
- * links inside that folder included. `maxSteps` bounds the entries walked through links.
+ * links inside that folder included. A link that leads to no file or folder of the tree is one
+ * too, whatever its name, so that it is reported: what is behind it was not read. `maxSteps`
+ * bounds the entries walked through links.
  */
 export function openedPaths(view: TreeView, maxSteps: number): Paths {
   const paths = new Set(view.sorted.filter((path) => wanted(path, view.tree.get(path))));
@@ -177,13 +204,16 @@ export function openedPaths(view: TreeView, maxSteps: number): Paths {
   for (let next = 0; next < queue.length; next += 1) {
     const virtual = queue[next] as string;
     const at = resolve(virtual, view);
-    if (at.kind !== 'folder' || expanded.has(virtual) || loops(expanded, virtual, at.path))
+    if (at.kind !== 'folder') {
+      if (at.kind !== 'blob') paths.add(virtual);
       continue;
+    }
+    if (expanded.has(virtual) || loops(expanded, virtual, at.path)) continue;
     expanded.set(virtual, at.path);
     for (const real of under(view.sorted, at.path)) {
       steps += 1;
       if (steps > maxSteps) return { paths: [...paths], stoppedAt: virtual };
-      const seen = `${virtual}/${real.slice(at.path.length + 1)}`;
+      const seen = `${virtual}/${at.path === '' ? real : real.slice(at.path.length + 1)}`;
       const entry = view.tree.get(real);
       if (entry?.mode === SYMLINK && linkMatters(seen)) queue.push(seen);
       if (wanted(seen, entry)) paths.add(seen);

@@ -236,6 +236,11 @@ export type SourceRead =
   /** Past the budget of bytes one check reads, so not read; reported like a file too large. */
   | { readonly kind: 'over-budget'; readonly budget: number }
   | { readonly kind: 'outside'; readonly target: string }
+  /**
+   * A link inside the repository that leads to nothing: to `target`, which is not there, or round
+   * in a loop (`target` undefined). A host opens whatever appears there later, a build output say.
+   */
+  | { readonly kind: 'dangling'; readonly target: string | undefined }
   | { readonly kind: 'unreadable' };
 
 /** The most bytes of one file that are read. A real agent config is a few kilobytes. */
@@ -245,6 +250,13 @@ export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[]
   if (read.kind === 'text') return scanFile(path, read.text);
   if (read.kind === 'unreadable') return [];
   if (read.kind === 'outside') return [hit('config-link-outside', path, 1, 'link', read.target)];
+  if (read.kind === 'dangling') {
+    const why =
+      read.target === undefined
+        ? 'the links go round in a loop, or more of them in a row than a host follows'
+        : `the link points at ${read.target}, which is not there`;
+    return [hit('unreadable-config', path, 1, 'link', why)];
+  }
   const why =
     read.kind === 'too-large'
       ? `too large to read (${read.size} bytes)`
