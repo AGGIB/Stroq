@@ -32,6 +32,9 @@ const ESCAPES: Readonly<Record<string, string>> = {
 };
 /** The deepest arrays and inline tables are nested before the file counts as unreadable. */
 const MAX_DEPTH = 64;
+/** What a bare key may hold. */
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+const BYTE_ORDER_MARK = '﻿';
 
 interface Read {
   readonly v: string;
@@ -245,12 +248,17 @@ class Parser {
     if (t !== undefined && t.t !== 'nl') throw new Unreadable('more after a value');
   }
 
-  /** `a.b."c d"`: the parts of a dotted key. */
+  /**
+   * `a.b."c d"`: the parts of a dotted key. A bare part is ASCII letters, digits, `-` and `_`
+   * only; a part with anything else, a zero-width space or a stray byte order mark, is not a
+   * key TOML has, and a reader that took it as one would pass a key that Codex reads.
+   */
   key(): string[] {
     const parts: string[] = [];
     for (;;) {
       const t = this.peek();
       if (t === undefined || (t.t !== 'str' && t.t !== 'word')) throw new Unreadable('key');
+      if (t.t === 'word' && !BARE_KEY.test(t.v)) throw new Unreadable('bare key');
       parts.push(t.v);
       this.i += 1;
       if (!this.isPunct('.')) return parts;
@@ -360,10 +368,14 @@ export interface Toml {
   readonly keyLine: (table: Obj, key: string) => number | undefined;
 }
 
-/** The text as an object, or undefined when it uses something this reader does not follow. */
+/**
+ * The text as an object, or undefined when it uses something this reader does not follow. A byte
+ * order mark at the very start is skipped, as TOML readers do; git keeps it in the text it prints.
+ */
 export function parseToml(text: string): Toml | undefined {
   try {
-    const parser = new Parser(tokenize(text));
+    const body = text.startsWith(BYTE_ORDER_MARK) ? ` ${text.slice(1)}` : text;
+    const parser = new Parser(tokenize(body));
     const doc = parser.document();
     return { doc, keyLine: (table, key) => parser.lines.get(table)?.get(key) };
   } catch (err) {

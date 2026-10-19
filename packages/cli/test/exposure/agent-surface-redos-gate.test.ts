@@ -53,6 +53,8 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '\u{1F468}‍',
     '\u{E0041}',
     '\uFE0F',
+    '\uFEFF',
+    '\uFEFFa = 1\n',
     '\u2764\uFE0F\u200D',
     '\u{1F3FD}\u200D',
     '\u00AD',
