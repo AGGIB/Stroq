@@ -22,7 +22,7 @@ import {
   type McpRecord,
 } from './mcp-record.js';
 import { showMcpScreen } from './mcp-screen.js';
-import { recordedTarget, target, targetRules } from './mcp-target.js';
+import { recordedTarget, target, targetRules, type McpTarget } from './mcp-target.js';
 import { collectMcpStore, tidyStore } from './store-gc.js';
 import { putStore, readStoredTreeOf } from './store.js';
 
@@ -164,6 +164,22 @@ export async function addMcp(sourceOrName: string, options: McpInstallOptions): 
   });
 }
 
+/** Validate explicit selection, but keep the recorded target's project/home write boundary. */
+function removalTarget(
+  record: McpRecord | McpPendingRecord,
+  options: McpInstallOptions,
+): McpTarget {
+  const selected = recordedTarget(record);
+  if (options.client !== undefined || options.config !== undefined) {
+    const requested = target(options);
+    if (requested.file !== selected.file)
+      throw new Error(
+        'the MCP server is recorded in another client config; omit --client and --config to use its recorded target',
+      );
+  }
+  return selected;
+}
+
 export async function removeMcp(name: string, options: McpInstallOptions): Promise<void> {
   requirePerson(options);
   nameOf(name);
@@ -176,7 +192,7 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
       const replacement =
         restored?.written ??
         (isWrappedEntry(pending.replaced) ? pending.original : pending.replaced);
-      const selected = recordedTarget(pending);
+      const selected = removalTarget(pending, options);
       const { file } = selected;
       assertWriteAllowed(file, targetRules(selected));
       const current = currentEntry(loadConfig(file).config, name);
@@ -246,7 +262,7 @@ export async function removeMcp(name: string, options: McpInstallOptions): Promi
   }
   // Removing needs the digest from the lock and the entry in the client config, never the stored bytes: a
   // damaged store must not make a server impossible to take out.
-  const selected = recordedTarget(previous);
+  const selected = removalTarget(previous, options);
   const { file } = selected;
   assertWriteAllowed(file, targetRules(selected));
   const current = currentEntry(loadConfig(file).config, name);
