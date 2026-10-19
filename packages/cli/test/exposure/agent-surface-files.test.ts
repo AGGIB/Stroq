@@ -222,6 +222,86 @@ describe('instruction files', () => {
     expect(of(scanFile('CLAUDE.md', text), 'instruction-hidden-text')).toEqual([]);
   });
 
+  // Unicode's own list of characters a renderer may show as nothing, and the variation
+  // selectors, which can spell out bytes one after another behind a single emoji.
+  it('fails every character Unicode lists as ignorable, and a variation selector that hides', () => {
+    const cases: readonly (readonly [text: string, code: string])[] = [
+      ['­', 'U+00AD'],
+      ['͏', 'U+034F'],
+      ['؜', 'U+061C'],
+      ['ᅟ', 'U+115F'],
+      ['឴', 'U+17B4'],
+      ['᠎', 'U+180E'],
+      ['‎', 'U+200E'],
+      ['⁡', 'U+2061'],
+      ['⁪', 'U+206A'],
+      ['ㅤ', 'U+3164'],
+      ['ﾠ', 'U+FFA0'],
+      ['\u{1BCA0}', 'U+1BCA0'],
+      ['\u{1D173}', 'U+1D173'],
+      ['\u{E0001}', 'U+E0001'],
+      ['\u{E0100}', 'U+E0100'],
+      ['a︀', 'U+FE00'],
+      ['a️', 'U+FE0F'],
+      ['❤️️', 'U+FE0F'],
+      ['\u{1F600}︁', 'U+FE01'],
+      ['❤️‍x', 'U+200D'],
+    ];
+    for (const [text, code] of cases) {
+      const hits = of(scanFile('AGENTS.md', `Use ${text} pnpm.\n`), 'instruction-hidden-text');
+      expect(
+        hits.map((h) => h.value.split(' (')[0]),
+        code,
+      ).toEqual([`${code} x1`]);
+    }
+  });
+
+  it('leaves emoji alone: one variation selector after one, skin tones, and joined sequences', () => {
+    const text = [
+      'Love ❤️',
+      'keycap 1️⃣',
+      'coder \u{1F469}\u{1F3FD}‍\u{1F4BB}',
+      'flag \u{1F3F3}️‍\u{1F308}',
+      'fire ❤️‍\u{1F525}',
+      'text ☺︎',
+    ].join(', ');
+    expect(of(scanFile('CLAUDE.md', `${text}\n`), 'instruction-hidden-text')).toEqual([]);
+  });
+
+  // A host reads these files by their names, as text, NUL or not. Anything else in an agent
+  // folder that holds a NUL is a binary file, which the agent does not read as instructions.
+  it('fails a NUL in a file read by its name, and lists any other file with one as binary', () => {
+    for (const file of [
+      'CLAUDE.md',
+      'packages/a/AGENTS.md',
+      'GEMINI.md',
+      '.claude/skills/s/SKILL.md',
+      '.cursorrules',
+      '.windsurfrules',
+      '.github/copilot-instructions.md',
+      '.cursor/rules/style.mdc',
+      '.claude/commands/go.md',
+      '.claude/agents/review.md',
+    ]) {
+      expect(of(scanFile(file, 'Use pnpm.\0\n'), 'instruction-hidden-text'), file).toMatchObject([
+        { severity: 'error', value: expect.stringContaining('U+0000 x1') },
+      ]);
+    }
+    for (const file of [
+      '.claude/skills/s/reference.md',
+      '.claude/skills/s/data',
+      '.claude/rules/x.md',
+      '.github/instructions/a.instructions.md',
+    ]) {
+      const hits = scanFile(file, `\0​${String.fromCodePoint(0xe0041)}`);
+      expect(
+        hits.filter((h) => h.severity !== 'notice'),
+        file,
+      ).toEqual([]);
+      expect(of(hits, 'binary-file'), file).toMatchObject([{ severity: 'notice' }]);
+    }
+  });
+
   it('leaves files that are not instructions alone', () => {
     expect(scanFile('README.md', 'x​x')).toEqual([]);
     expect(scanFile('.claude/skills/s/logo.png', 'x​x')).toEqual([]);

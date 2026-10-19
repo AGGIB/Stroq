@@ -49,6 +49,8 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
   'instruction-hidden-text':
     'This instruction file holds characters that show nothing, which can hide text from a reviewer.',
   'instruction-file': 'The agent reads this instruction file in every session.',
+  'binary-file':
+    'This file in an agent folder holds a NUL byte, so it is a binary file, which an agent does not read as instructions.',
   'devcontainer-host-command': WHY['devcontainer-host-command'] ?? '',
   'devcontainer-command': 'The dev container runs this command when it is created or started.',
   'package-script-agent-path':

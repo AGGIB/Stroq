@@ -1,9 +1,10 @@
 import { describe, it } from 'vitest';
-import type { TaggedHit } from '../../src/exposure/agent-change.js';
+import { tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { pathWords } from '../../src/exposure/agent-run-files.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
+import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
 import { expectLinear, repeat, SIZES, type EntryPoint } from '../helpers/linear-gate.js';
 
@@ -51,6 +52,11 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '‍',
     '\u{1F468}‍',
     '\u{E0041}',
+    '\uFE0F',
+    '\u2764\uFE0F\u200D',
+    '\u{1F3FD}\u200D',
+    '\u00AD',
+    '\u0000',
     '.vscode/',
     '.vscode//',
     '.claude/settings.json',
@@ -131,6 +137,9 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ],
   ['the file words of a command line', (text) => pathWords(text)],
   ['an instruction file', (text) => scanFile('CLAUDE.md', text)],
+  ['a file in a skill folder', (text) => scanFile('.claude/skills/s/ref.md', text)],
+  ['an env name, tagged', (text) => tagChanges([hit('agent-env', 'f', 1, text, text)], null)],
+  ['a link target', (text) => linkTarget('.claude/skills/x', text)],
   ['an agent definition', (text) => scanFile('.claude/agents/a.md', `---\n${text}\n---\n`)],
   ['GitHub annotations', (text) => annotations([hostile(text)], 'new')],
   ['a GitHub summary', (text) => githubSummary([hostile(text)], { failOn: 'new' })],

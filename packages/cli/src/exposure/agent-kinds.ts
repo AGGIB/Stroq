@@ -24,6 +24,7 @@ export const KIND_SEVERITY = {
   'agent-definition-hook': 'error',
   'instruction-hidden-text': 'error',
   'instruction-file': 'notice',
+  'binary-file': 'notice',
   'devcontainer-host-command': 'error',
   'devcontainer-command': 'warning',
   'package-script-agent-path': 'error',

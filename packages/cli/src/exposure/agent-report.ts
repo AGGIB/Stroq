@@ -16,6 +16,8 @@ export const VALUE_MAX = 160;
 /** For a terminal and for SARIF: blanks folded, controls written out, cut to a length. */
 export const plainQuote: Quote = (text) => showable(text, VALUE_MAX) || '(empty)';
 
+const BINARY = 'a binary file (it holds a NUL byte), not read as instructions';
+
 function sentence(h: AgentHit, q: Quote): string {
   const name = q(h.name);
   const value = q(h.value);
@@ -58,6 +60,8 @@ function sentence(h: AgentHit, q: Quote): string {
       return `instruction file holds invisible characters: ${value}`;
     case 'instruction-file':
       return 'instruction file the agent reads in every session';
+    case 'binary-file':
+      return BINARY;
     case 'devcontainer-host-command':
       return `initializeCommand runs on this machine before the container starts: ${value}`;
     case 'devcontainer-command':
@@ -135,7 +139,12 @@ export function textNotices(heading: string, hits: readonly TaggedHit[]): string
   const more = hits.length > MAX_NOTICES ? [`  and ${hits.length - MAX_NOTICES} more`] : [];
   return [
     heading,
-    ...hits.slice(0, MAX_NOTICES).map((h) => `  ${plainQuote(h.file)} (${h.status})`),
+    ...hits
+      .slice(0, MAX_NOTICES)
+      .map(
+        (h) =>
+          `  ${plainQuote(h.file)} (${h.status})${h.kind === 'binary-file' ? `: ${BINARY}` : ''}`,
+      ),
     ...more,
     '',
   ];
