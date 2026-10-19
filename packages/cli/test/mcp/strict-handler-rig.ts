@@ -33,6 +33,7 @@ export interface HandlerRig {
 
 /** An engine whose scan always comes back clean: the handler's own decisions are what is tested. */
 const cleanEngine = {
+  abandon: async () => undefined,
   post: async () => ({
     scan: { verdict: 'clean', score: 0, matches: [] },
     taint: null,
