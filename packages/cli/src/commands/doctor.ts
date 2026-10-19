@@ -557,9 +557,10 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
       // withholding filter on and which only have the default scan.
       const strictCount = countStrict(config);
       const strict = strictCount > 0 ? ` (${strictCount} strict)` : '';
+      const init = `stroq init --agent mcp --client ${client}${client === 'cursor' && scope === 'user' ? ' --user' : ''}`;
       const stale =
         counted.stale > 0
-          ? ` (${counted.stale} stale wrapper${counted.stale === 1 ? '' : 's'}: entry missing)`
+          ? ` (${counted.stale} stale wrapper${counted.stale === 1 ? '' : 's'}: entry missing — run \`${init}\` or \`stroq add <name> --kind mcp --force\`)`
           : '';
       // A wrapper written before `--pass-env` keeps working, so nothing else would
       // ever mention it; this line is where a user learns that re-running `init`

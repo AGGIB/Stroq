@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
-import { stroqHome } from '../paths.js';
+import { join, resolve } from 'node:path';
+import { cliDirIn, stroqHome, storeDirIn, runDirIn } from '../paths.js';
 import { parseArgsProblem, usageError } from '../help.js';
 import { currentTerminal } from '../ui/terminal.js';
 
@@ -61,12 +61,32 @@ export async function runAdd(args: readonly string[]): Promise<number> {
   }
   if (kind === 'mcp') {
     const { addMcp } = await import('../install/mcp-install.js');
-    const { hookArgv } = await import('./init.js');
-    const [node, ...entryArgv] = hookArgv(process.execPath, resolve(process.argv[1] ?? ''));
+    const { hookArgv, stableEntry, runsFromNpxCache } = await import('./init.js');
+    const { stroqVersion } = await import('../version.js');
+    const home = stroqHome();
+    const { assertPlainDirectory } = await import('../install/store.js');
+    for (const folder of [home, storeDirIn(home), runDirIn(home)])
+      await assertPlainDirectory(folder);
+    const launched = resolve(process.argv[1] ?? '');
+    const version = stroqVersion();
+    const unstable =
+      'cannot create a stable Stroq entry outside the npx cache; install globally with npm install -g @stroq/cli and run stroq add again';
+    if (runsFromNpxCache(launched)) {
+      // The copy may replace a version directory; never follow a linked destination.
+      try {
+        for (const folder of [cliDirIn(home), join(cliDirIn(home), version)])
+          await assertPlainDirectory(folder);
+      } catch (error) {
+        throw new Error(unstable, { cause: error });
+      }
+    }
+    const entry = stableEntry(launched, home, version);
+    if (runsFromNpxCache(entry)) throw new Error(unstable);
+    const [node, ...entryArgv] = hookArgv(process.execPath, entry);
     const names = parsed.values['pass-env'];
     const added = await addMcp(parsed.positionals[0]!, {
       project: process.cwd(),
-      stroqHome: stroqHome(),
+      stroqHome: home,
       terminal: currentTerminal(),
       node: node!,
       entryArgv,
