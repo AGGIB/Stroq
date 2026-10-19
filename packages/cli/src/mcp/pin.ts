@@ -69,6 +69,7 @@ async function plainFolder(folder: string): Promise<void> {
 /** Read store bytes once. Both the digest and the private copy use these owned buffers. */
 async function verifiedTree(home: string, digest: string): Promise<{ tree: Tree; root: string }> {
   const store = join(storeDirIn(home), `sha256-${digest.slice(0, 32)}`);
+  await plainFolder(home);
   await plainFolder(storeDirIn(home));
   await plainFolder(store);
   const root = join(store, 'tree');
@@ -141,16 +142,16 @@ async function checked(
 }
 
 async function privateRunDir(home: string): Promise<string> {
-  await mkdir(home, { recursive: true, mode: 0o700 });
-  await plainFolder(home);
   const run = runDirIn(home);
-  await mkdir(run, { recursive: true, mode: 0o700 });
-  await plainFolder(run);
   for (const folder of [home, run]) {
+    const created = (await mkdir(folder, { recursive: true, mode: 0o700 })) !== undefined;
+    await plainFolder(folder);
     const info = await lstat(folder);
     if (process.getuid !== undefined && info.uid !== process.getuid())
       throw new Error('cannot use a runtime folder owned by another user');
-    await chmod(folder, 0o700);
+    if (process.platform !== 'win32' && (info.mode & 0o022) !== 0)
+      throw new Error('cannot use a runtime folder writable by other users');
+    if (created) await chmod(folder, 0o700);
   }
   return run;
 }
@@ -215,6 +216,12 @@ export async function inspectPin(
       return {
         ok: false,
         detail: `${error.message}; start refused (to confirm it again run: ${reconfirmCommand(options.server)})`,
+      };
+    if (error instanceof Error && error.message === 'cannot verify a linked store folder')
+      return {
+        ok: false,
+        detail:
+          'cannot verify a linked store folder; start refused (tamper-evident, not tamper-proof)',
       };
     return {
       ok: false,

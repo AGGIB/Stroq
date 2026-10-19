@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`stroq add` refuses a symlinked `~/.stroq`, `store` or `run` folder before asking for confirmation, and the runtime pin surfaces its fixed refusal phrase without changing the mode of existing folders.** Previously `stroq add --kind mcp` succeeded when `STROQ_HOME` was a symbolic link while the runtime pin then refused to start (`cannot verify a linked store folder`) behind the generic proxy refusal, and `privateRunDir` changed the mode of `~/.stroq` to `0700` even when it did not create the directory. On POSIX, existing runtime parents writable by other users are refused without changing their modes.
+
 - **The plugin wrapper keeps its scratch directory through an npm-to-npx fallback.** Only the parent wrapper runs cleanup: stopping a watchdog before it starts can otherwise run an inherited exit trap and remove the directory before npx uses it.
 
 - Garbage-collection warnings name the unreferenced copy that could not be removed, including orphaned copies, rather than a revision intentionally retained for rollback.
