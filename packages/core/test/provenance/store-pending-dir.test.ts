@@ -5,6 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FileProvenanceStore } from '../../src/provenance/store.js';
 
+/**
+ * A clock five minutes back. A marker the store writes with it is already stale: its deadline has
+ * passed, which is what a post that never finished leaves. A marker of a post that is running is no
+ * loss, and is tested in engine-live-marker.test.ts.
+ */
+const STALE_CLOCK = (): Date => new Date(Date.now() - 5 * 60_000);
+
 // The markers of results that are being recorded live in a directory of their own for each
 // session, one file for each. The directory is never removed by taking a marker off: it is one
 // empty directory for each session, removed by `clear` (`stroq untaint`), because taking it away
@@ -19,9 +26,9 @@ afterEach(() => {
 function fixture(renameFile?: typeof rename) {
   const dir = mkdtempSync(join(tmpdir(), 'stroq-pending-dir-'));
   dirs.push(dir);
-  const store = new FileProvenanceStore(dir, undefined, renameFile);
+  const store = new FileProvenanceStore(dir, STALE_CLOCK, renameFile);
   /** A second process: a store of its own on the same directory. */
-  const other = () => new FileProvenanceStore(dir);
+  const other = () => new FileProvenanceStore(dir, STALE_CLOCK);
   const leftovers = (): string[] => readdirSync(dir).filter((name) => name.includes('.prov.'));
   const markerDirs = (): string[] => leftovers().filter((name) => name.endsWith('.prov.pending.d'));
   return { store, other, dir, leftovers, markerDirs };

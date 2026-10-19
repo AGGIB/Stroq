@@ -408,12 +408,11 @@ export class FileProvenanceStore implements ProvenanceStore {
   async isIncomplete(sessionId: string): Promise<boolean> {
     try {
       if (await exists(this.incompleteFile(sessionId))) return true;
-      if (await exists(this.pendingFile(sessionId))) return true;
-      try {
-        if ((await readdir(this.pendingDir(sessionId))).length > 0) return true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      }
+      // A marker that a result is being recorded is a loss only once it is stale: a post that is
+      // running (its process alive, its deadline not passed) has lost nothing yet, and a call that
+      // runs beside it must not be asked about a package for that. A hook that was killed leaves
+      // a marker whose process is gone, and the marker an older version wrote names no owner.
+      if (await this.hasStaleMarker(sessionId)) return true;
       // A loss is noted by writing a file here. Where that cannot be done the note cannot
       // exist, and its absence says nothing.
       return !(await canWriteIn(this.dir));

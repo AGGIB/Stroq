@@ -194,10 +194,8 @@ describe('strict handler provenance across the real engine readings', () => {
 
       expect(f.pending()).toEqual(firstOwner);
       const restarted = f.reload();
-      expect(await restarted.provenance.isIncomplete('s1')).toBe(true);
-      expect((await restarted.pre('npx first-helper-fix')).decision.ruleId).toBe(
-        'ask-origin-untrusted',
-      );
+      // The first result is being recorded by a process that is alive: no loss yet.
+      expect(await restarted.provenance.isIncomplete('s1')).toBe(false);
       expect((await restarted.pre('npx second-helper-fix')).decision.ruleId).toBe(
         'deny-origin-suspect',
       );

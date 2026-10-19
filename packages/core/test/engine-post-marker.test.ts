@@ -10,6 +10,13 @@ import { loadBundledRules } from '../src/rules/bundle.js';
 import type { CompiledRule } from '../src/rules/compile.js';
 import { FileSessionStore } from '../src/taint/session-store.js';
 
+/**
+ * A clock five minutes back. A marker the store writes with it is already stale: its deadline has
+ * passed, which is what a post that never finished leaves. A marker of a post that is running is no
+ * loss, and is tested in engine-live-marker.test.ts.
+ */
+const STALE_CLOCK = (): Date => new Date(Date.now() - 5 * 60_000);
+
 // A scan that does not finish leaves the session marked incomplete. The result of a tool is
 // scanned, then recorded; a process that is stopped between the two (the hook's own deadline, a
 // crash, a regex that does not come back) used to leave a session with nothing recorded and nothing
@@ -51,7 +58,7 @@ function fixture(rules: readonly CompiledRule[] = loadBundledRules()) {
   const cwd = join(home, 'empty-project');
   const dir = join(home, 'sessions');
   const audit = new AuditLog(join(home, 'audit.jsonl'));
-  const provenance = new FileProvenanceStore(dir);
+  const provenance = new FileProvenanceStore(dir, STALE_CLOCK);
   const engine = new StroqEngine({
     rules,
     policy: DEFAULT_POLICY,

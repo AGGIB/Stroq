@@ -12,6 +12,13 @@ import { DEFAULT_MAX_CHARS } from '../src/scan/scanner.js';
 import { FileSecretIndex } from '../src/secrets/index.js';
 import { FileSessionStore } from '../src/taint/session-store.js';
 
+/**
+ * A clock five minutes back. A marker the store writes with it is already stale: its deadline has
+ * passed, which is what a post that never finished leaves. A marker of a post that is running is no
+ * loss, and is tested in engine-live-marker.test.ts.
+ */
+const STALE_CLOCK = (): Date => new Date(Date.now() - 5 * 60_000);
+
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,7 +39,7 @@ function fixture(
   const dir = join(home, 'sessions');
   const audit = new AuditLog(join(home, 'audit.jsonl'));
   const reload = () => {
-    const provenance = new FileProvenanceStore(dir);
+    const provenance = new FileProvenanceStore(dir, STALE_CLOCK);
     const sessions = new FileSessionStore(dir);
     const engine = new StroqEngine({
       rules,

@@ -15,9 +15,20 @@ import { describe, expect, it } from 'vitest';
 import { FileProvenanceStore, MAX_RECORDS } from '../../src/provenance/store.js';
 import { FileSessionStore, sessionKey } from '../../src/taint/session-store.js';
 
+/**
+ * A clock five minutes back. A marker the store writes with it is already stale: its deadline has
+ * passed, which is what a post that never finished leaves. A marker of a post that is running is no
+ * loss, and is tested in engine-live-marker.test.ts.
+ */
+const STALE_CLOCK = (): Date => new Date(Date.now() - 5 * 60_000);
+
 const fresh = () => {
   const dir = join(mkdtempSync(join(tmpdir(), 'stroq-prov-inc-')), 'sessions');
-  return { dir, store: new FileProvenanceStore(dir), sessions: new FileSessionStore(dir) };
+  return {
+    dir,
+    store: new FileProvenanceStore(dir, STALE_CLOCK),
+    sessions: new FileSessionStore(dir),
+  };
 };
 const input = (hash: string, suspect = false) => ({
   tool: 'Read',
@@ -251,7 +262,7 @@ describe('FileProvenanceStore.markIncomplete when the rename fails', () => {
       before?.();
       throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
     };
-    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+    return { dir, store: new FileProvenanceStore(dir, STALE_CLOCK, rename) };
   };
 
   it('leaves no temporary file behind, and says it failed', async () => {
@@ -441,7 +452,7 @@ describe('FileProvenanceStore when flagged records meet the cap', () => {
 describe('FileProvenanceStore pending marker', () => {
   it('settles only its own operation, including across store instances', async () => {
     const { dir, store } = fresh();
-    const other = new FileProvenanceStore(dir);
+    const other = new FileProvenanceStore(dir, STALE_CLOCK);
     await Promise.all([
       store.setPending('s1', true, 'operation-a'),
       other.setPending('s1', true, 'operation-b'),
@@ -523,7 +534,7 @@ describe('FileProvenanceStore when the note of an eviction cannot be written', (
       if (String(to).endsWith(suffix)) throw noSpace();
       await renameFile(from, to);
     };
-    return { dir, store: new FileProvenanceStore(dir, undefined, rename) };
+    return { dir, store: new FileProvenanceStore(dir, STALE_CLOCK, rename) };
   };
 
   it('still writes the records, and then fails closed on them, where the note would have been', async () => {
