@@ -210,6 +210,8 @@ export function scanFile(path: string, text: string): readonly AgentHit[] {
 export type SourceRead =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'too-large'; readonly size: number }
+  /** Past the budget of bytes one check reads, so not read; reported like a file too large. */
+  | { readonly kind: 'over-budget'; readonly budget: number }
   | { readonly kind: 'outside'; readonly target: string }
   | { readonly kind: 'unreadable' };
 
@@ -220,11 +222,15 @@ export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[]
   if (read.kind === 'text') return scanFile(path, read.text);
   if (read.kind === 'unreadable') return [];
   if (read.kind === 'outside') return [hit('config-link-outside', path, 1, 'link', read.target)];
+  const why =
+    read.kind === 'too-large'
+      ? `too large to read (${read.size} bytes)`
+      : `past the ${read.budget} bytes one check reads`;
   const onlyInstructions = readersFor(path).every((r) => r === READERS.instruction);
   return [
     onlyInstructions
-      ? hit('instruction-file', path, 1, 'content', `too large to read (${read.size} bytes)`)
-      : hit('unreadable-config', path, 1, 'size', `too large to read (${read.size} bytes)`),
+      ? hit('instruction-file', path, 1, 'content', why)
+      : hit('unreadable-config', path, 1, 'size', why),
   ];
 }
 

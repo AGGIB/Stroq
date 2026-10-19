@@ -36,6 +36,9 @@ const MAX_LISTING_BYTES = 256 * 1024 * 1024;
 const MAX_LINK_HOPS = 16;
 const MAX_LINKS = 500;
 const MAX_CANDIDATES = 2_000;
+/** The most bytes of agent files one check reads from a commit; real ones are kilobytes. */
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const MAX_LINK_BYTES = 4096;
 const SYMLINK = '120000';
 const isBlob = (e: TreeEntry): boolean => e.mode === '100644' || e.mode === '100755';
 
@@ -294,10 +297,37 @@ export function agentChanges(dir: string, rev: string): AgentChanges {
   }
 }
 
+/**
+ * What the blobs of the plan cost, in the order of their paths, until the budget is spent:
+ * the ones to read, and the ones past the budget, which are reported and not read.
+ */
+function budgeted(
+  plan: readonly { readonly at: Resolved }[],
+  tree: ReadonlyMap<string, TreeEntry>,
+): { wanted: TreeEntry[]; over: Set<string> } {
+  const wanted = new Map<string, TreeEntry>();
+  const over = new Set<string>();
+  let left = MAX_TOTAL_BYTES;
+  for (const { at } of plan) {
+    const entry = at.kind === 'blob' ? tree.get(at.path) : undefined;
+    if (entry === undefined || entry.size > MAX_FILE_BYTES || wanted.has(entry.oid)) continue;
+    if (entry.size > left) {
+      over.add(entry.oid);
+      continue;
+    }
+    left -= entry.size;
+    wanted.set(entry.oid, entry);
+  }
+  return { wanted: [...wanted.values()], over };
+}
+
 function compare(top: string, base: string, head: string): AgentChanges {
   const tree = listTree(top, head);
   const changed = changedPaths(top, base, head);
-  const links = [...tree].filter(([, e]) => e.mode === SYMLINK).slice(0, MAX_LINKS);
+  // A link's target is a path; one longer than a path can be is not a link a checkout makes.
+  const links = [...tree]
+    .filter(([, e]) => e.mode === SYMLINK && e.size <= MAX_LINK_BYTES)
+    .slice(0, MAX_LINKS);
   const linkBlobs = readBlobs(
     top,
     links.map(([, e]) => e),
@@ -307,12 +337,8 @@ function compare(top: string, base: string, head: string): AgentChanges {
     path,
     at: resolve(path, tree, targets),
   }));
-  const wanted = new Map<string, TreeEntry>();
-  for (const { at } of plan) {
-    const entry = at.kind === 'blob' ? tree.get(at.path) : undefined;
-    if (entry !== undefined && entry.size <= MAX_FILE_BYTES) wanted.set(entry.oid, entry);
-  }
-  const blobs = readBlobs(top, [...wanted.values()]);
+  const { wanted, over } = budgeted(plan, tree);
+  const blobs = readBlobs(top, wanted);
   const hits = plan.flatMap(({ path, at }) => {
     if (at.kind === 'none') return [];
     if (at.kind === 'outside') {
@@ -324,7 +350,9 @@ function compare(top: string, base: string, head: string): AgentChanges {
     const read: SourceRead =
       entry.size > MAX_FILE_BYTES
         ? { kind: 'too-large', size: entry.size }
-        : { kind: 'text', text: blobs.get(entry.oid) ?? '' };
+        : over.has(entry.oid)
+          ? { kind: 'over-budget', budget: MAX_TOTAL_BYTES }
+          : { kind: 'text', text: blobs.get(entry.oid) ?? '' };
     const now = hitsForRead(path, read);
     return tagChanges(now, baseHits(top, base, path, at, changed, now));
   });

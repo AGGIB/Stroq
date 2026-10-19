@@ -168,6 +168,23 @@ describe('agentChanges against a base commit', () => {
     ]);
   });
 
+  it('stops reading at a total budget and reports what it did not read', () => {
+    const dir = repo();
+    const base = commit(dir, { 'README.md': 'x\n' });
+    // Each file different: one blob shared by many paths is read, and counted, once.
+    const files = Object.fromEntries(
+      Array.from({ length: 80 }, (_, i) => [
+        `.github/hooks/h${String(i).padStart(2, '0')}.json`,
+        `{"a":"${i}${'x'.repeat(900_000)}"}`,
+      ]),
+    );
+    commit(dir, files);
+    const hits = agentChanges(dir, base).hits;
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.kind === 'unreadable-config' && h.severity === 'error')).toBe(true);
+    expect(hits.map((h) => h.file)).toContain('.github/hooks/h79.json');
+  });
+
   it('reports a file too large to read', () => {
     const dir = repo();
     const base = commit(dir, { 'README.md': 'x\n' });
