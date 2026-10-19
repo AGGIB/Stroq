@@ -89,9 +89,9 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `type: short d
 
 ## Issues
 
-Work is tracked in [GitHub issues](https://github.com/AGGIB/Stroq/issues). Pick a form when you open one: bug, false positive (Stroq stopped something harmless), classification gap, feature request, documentation, or question. Labels say what an issue is and who it suits:
+Work is tracked in [GitHub issues](https://github.com/AGGIB/Stroq/issues). Pick a form when you open one: bug, false positive (Stroq stopped something harmless), false negative (Stroq let something risky through), classification gap, feature request, documentation, question, or try-it report. Use false negative for one action Stroq let through, and classification gap for a kind of input you want Stroq to cover. Labels say what an issue is and who it suits:
 
-- `bug`, `enhancement`, `documentation`, `question`, `false-positive`, `classification-gap`: the kind.
+- `bug`, `enhancement`, `documentation`, `question`, `false-positive`, `false-negative`, `classification-gap`, `pilot-report`: the kind.
 - `good first issue`: small, local and testable, with no security weight; a good way to start.
 - `help wanted`: the maintainers would welcome a pull request for it.
 - `needs-info`: waiting for the reporter; `triaged`: checked against the code by a maintainer.

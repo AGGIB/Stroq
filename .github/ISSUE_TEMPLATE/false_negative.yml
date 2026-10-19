@@ -13,6 +13,8 @@ body:
         before the trick is public. If you are not sure, report it privately.
 
         This public form is for a risky action that Stroq does not claim to stop.
+        To ask Stroq to cover a kind of input, with no single action to show, use the
+        **Classification gap** form instead.
 
         **Remove secrets before you paste anything below:** keys, tokens, passwords,
         private hostnames and customer data.

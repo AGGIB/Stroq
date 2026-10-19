@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   GitHub,
@@ -601,6 +602,29 @@ test('form classification knows the false-positive and false-negative forms by t
   assert.equal(issueLabel(issue('[False positive]: x', older), labels), 'false-positive');
   assert.equal(issueLabel(issue('[False negative]: x', negative), labels), 'false-negative');
   assert.equal(issueLabel(issue('[False negative]: x', positive), labels), null);
+});
+
+test('every label an issue form sets is listed in CONTRIBUTING.md and in the triage skill', () => {
+  const root = new URL('../../', import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), 'utf8');
+  const forms = readdirSync(new URL('.github/ISSUE_TEMPLATE/', root)).filter(
+    (name) => name.endsWith('.yml') && name !== 'config.yml',
+  );
+  const labels = forms.flatMap((name) =>
+    [...read(`.github/ISSUE_TEMPLATE/${name}`).matchAll(/^labels: \['([a-z-]+)'\]$/gm)].map(
+      (m) => m[1],
+    ),
+  );
+  assert.equal(labels.length, forms.length, 'every form sets exactly one kind label');
+  const issues = read('CONTRIBUTING.md').split('## Issues')[1]?.split('\n## ')[0] ?? '';
+  const triage = read('.claude/skills/triage-issues/SKILL.md')
+    .split('\n')
+    .filter((line) => line.startsWith('8. **Labels**'))
+    .join('\n');
+  for (const label of labels) {
+    assert.ok(issues.includes(`\`${label}\``), `CONTRIBUTING.md does not list ${label}`);
+    assert.ok(triage.includes(`\`${label}\``), `the triage skill does not list ${label}`);
+  }
 });
 
 test('pagination retrieves a second page instead of silently dropping issues', async () => {
