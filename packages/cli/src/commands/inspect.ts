@@ -56,20 +56,36 @@ const SAME_ENTRY: Readonly<Partial<Record<AgentHit['kind'], RepoExecKind>>> = {
   'package-script': 'package-install-script',
 };
 
+const entryKey = (kind: string, file: string, what: string): string =>
+  `${kind}\0${file.split('\\').join('/')}\0${what}`;
+
+/** The key of the entry of the folder's reading that reports the same as `h`, when there is one. */
+const sameEntry = (h: AgentHit): string | undefined => {
+  const kind = SAME_ENTRY[h.kind];
+  return kind === undefined ? undefined : entryKey(kind, h.file, h.name);
+};
+
 /**
- * Whether the reading of the folder already reports this entry: the same kind, the same file and
- * the same key. Only such an exact duplicate is left out; any other entry of those files is kept.
+ * Each entry once. One the reading of the folder reports as a finding (the same kind, file and
+ * key) is left out of the agent entries. One it lists as ordinary is left out of them too, unless
+ * it fails there: then it is shown with the findings, and left out of the ordinary list instead.
  */
-function coveredBy(surface: RepoSurface): (h: AgentHit) => boolean {
-  const key = (kind: string, file: string, what: string): string =>
-    `${kind}\0${file.split('\\').join('/')}\0${what}`;
-  const reported = new Set(
-    [...surface.preTrust, ...surface.onOpen].map((h) => key(h.kind, h.file, h.what)),
-  );
-  return (h) => {
-    const kind = SAME_ENTRY[h.kind];
-    return kind !== undefined && reported.has(key(kind, h.file, h.name));
-  };
+function once(
+  surface: RepoSurface,
+  hits: readonly TaggedHit[],
+): { surface: RepoSurface; hits: TaggedHit[] } {
+  const keys = (list: RepoSurface['onOpen']) =>
+    new Set(list.map((h) => entryKey(h.kind, h.file, h.what)));
+  const findings = keys(surface.preTrust);
+  const ordinary = keys(surface.onOpen);
+  const kept = hits.filter((h) => {
+    const key = sameEntry(h);
+    if (key === undefined) return true;
+    return !findings.has(key) && (!ordinary.has(key) || h.severity === 'error');
+  });
+  const shown = new Set(kept.flatMap((h) => sameEntry(h) ?? []));
+  const onOpen = surface.onOpen.filter((h) => !shown.has(entryKey(h.kind, h.file, h.what)));
+  return { surface: { ...surface, onOpen }, hits: kept };
 }
 
 export function formatInspect(
@@ -221,17 +237,15 @@ function write(o: Output): void {
 
 function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): number {
   const inRepo = repoSurface(dir);
-  const surface = inRepo.isRepo ? inRepo : folderSurface(dir);
-  const findings = repoFindings(surface);
   // Agent files take effect with or without git: a zip download has them too. Only the reading
   // of `.git` itself, in `repoSurface`, needs a repository.
   const agent = agentSurface(dir);
   // A folder with no .git reads the root dev container and install scripts the same way.
-  const covered = coveredBy(surface);
-  const hits = tagChanges(
-    agent.hits.filter((h) => !covered(h)),
-    null,
+  const { surface, hits } = once(
+    inRepo.isRepo ? inRepo : folderSurface(dir),
+    tagChanges(agent.hits, null),
   );
+  const findings = repoFindings(surface);
   const failing =
     (failOn === 'any' ? findings.length : 0) + hits.filter((h) => isFailing(h, failOn)).length;
   const preTrust = surface.preTrust.map((h) => ({

@@ -130,11 +130,12 @@ describe('tagChanges', () => {
       'new EDITOR error',
       'new NODE_EXTRA_CA_CERTS error',
     ]);
+    // With no base nothing is proven there before, so a benign name is an error too.
     expect(tagChanges(head, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
       'PATH error',
       'HTTPS_PROXY error',
       'NODE_OPTIONS error',
-      'DO_NOT_TRACK warning',
+      'DO_NOT_TRACK error',
       'EDITOR error',
       'NODE_EXTRA_CA_CERTS error',
     ]);
@@ -142,8 +143,9 @@ describe('tagChanges', () => {
 
   // A name nobody knows is an error with or without a base, and so is a known one in any letter
   // case, since Windows reads `node_options` as NODE_OPTIONS, and the same name under Codex's
-  // `shell_environment_policy.set`. The benign names are a warning in any letter case. A change
-  // that adds or changes any name outside the harmless list fails, a benign one too.
+  // `shell_environment_policy.set`. The benign names are a warning in any letter case, when a base
+  // proves they were there. A change that adds or changes any name outside the harmless list
+  // fails, a benign one too, and with no base every one is an error.
   it('keeps a name nobody knows an error, and a benign one a warning in any letter case', () => {
     const names = [
       'SOMETHING_NEW',
@@ -164,7 +166,8 @@ describe('tagChanges', () => {
       'shell_environment_policy.set.TZ',
     ];
     const env = names.map((name) => hit('agent-env', '.claude/settings.json', 2, name, 'x'));
-    expect(tagChanges(env, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
+    expect(tagChanges(env, null).every((h) => h.severity === 'error')).toBe(true);
+    expect(tagChanges(env, env).map((h) => `${h.name} ${h.severity}`)).toEqual([
       'SOMETHING_NEW error',
       'GIT_DIR error',
       'GIT_PAGER error',

@@ -35,12 +35,12 @@ const takeOne = (counts: Map<string, number>, key: string): boolean => {
 };
 
 /**
- * The few env variables that are only a warning when they were already there: common in honest
- * settings, and they change no program a session starts, what it loads, or where it sends
- * anything. Matched in any letter case, so `node_env`, which the harmless list does not pass, is
- * one. Every other name an env sets stays an error, there before or not: plain `stroq inspect` on
- * a clone sees everything as there before, and that is the moment it matters most. What a name is
- * known to do only words the report; it never makes one milder.
+ * The few env variables that are only a warning when a base proves they were already there:
+ * common in honest settings, and they change no program a session starts, what it loads, or where
+ * it sends anything. Matched in any letter case, so `node_env`, which the harmless list does not
+ * pass, is one. Every other name an env sets stays an error, there before or not, and so does each
+ * of these in plain `stroq inspect`, which has no base: it sees a clone for the first time, and
+ * that is the moment it matters most. What a name is known to do only words the report.
  */
 const BENIGN_ENV: ReadonlySet<string> = new Set([
   'NODE_ENV',
@@ -65,16 +65,19 @@ const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
   'devcontainer-command',
   'mcp-server',
 ]);
-/** Kinds that are listed to review when they were there, and fail when a change brings them. */
+/** Kinds that are listed to review when a base proves they were there, and fail otherwise. */
 const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set([
   'agent-broad-allow',
   'config-link-outside',
 ]);
 /**
- * A folder anyone on the machine can write, where an attacker can put the file a link reads. In
- * any letter case: macOS opens `/TMP` as `/tmp`.
+ * A folder anyone on the machine can write, where an attacker can put the file a link reads: the
+ * temporary folders, the lock and crash folders, and macOS's shared and cache folders. In any
+ * letter case: macOS opens `/TMP` as `/tmp`. Only how a link is shown depends on it: every link
+ * out of the repository fails unless a base proves it was there.
  */
-const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/i;
+const SHARED_FOLDER =
+  /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm|run\/lock|var\/lock|var\/crash|var\/spool|users\/shared|library\/caches|library\/logs)(?:\/|$)/i;
 
 /**
  * Server lists whose host asks before it starts each server: Claude Code's `.mcp.json` (unless
@@ -104,17 +107,24 @@ export const inSharedFolder = (target: string): boolean =>
   target.startsWith('/') && SHARED_FOLDER.test(posix.normalize(target));
 
 /**
- * A hit's severity once it is known whether the change brought it. One that was already there
- * keeps its own, but for one of the few benign env variables, which is a warning. One the
- * change brought fails
- * when it is a whole-shell allow rule or a link out of the repository, and when it is an install
- * script, a dev container command or a server that downloads and runs code, or decodes and runs
- * it. A link to a shared temporary folder is an error either way.
+ * Whether a hit's status was worked out against a base revision (`compared`), or there was none to
+ * compare with (`none`, plain `stroq inspect`), so that `present` proves nothing.
  */
-export function settle(h: AgentHit, status: ChangeStatus): TaggedHit {
-  if (h.kind === 'config-link-outside' && inSharedFolder(h.value))
-    return { ...h, severity: 'error', status };
-  if (status === 'present')
+export type Against = 'compared' | 'none';
+
+/**
+ * A hit's severity once it is known whether the change brought it. One a base proves was already
+ * there keeps its own, but for one of the few benign env variables, which is a warning. Any other
+ * fails when it is a whole-shell allow rule or a link out of the repository, a server whose host
+ * starts it without asking, and an install script, a dev container command or a server that
+ * downloads and runs code, or decodes and runs it. With no base, nothing is proven there before.
+ */
+export function settle(
+  h: AgentHit,
+  status: ChangeStatus,
+  against: Against = 'compared',
+): TaggedHit {
+  if (status === 'present' && against === 'compared')
     return h.kind === 'agent-env' && warnsWhenPresent(h.name)
       ? { ...h, severity: 'warning', status }
       : { ...h, status };
@@ -128,7 +138,8 @@ export function settle(h: AgentHit, status: ChangeStatus): TaggedHit {
 const withStatus = settle;
 
 /**
- * `head` tagged against `base`; with no base at all, everything is `present`. Each base entry
+ * `head` tagged against `base`; with no base at all, everything is `present`, and settled as if a
+ * change brought it, since nothing proves it was there before. Each base entry
  * accounts for one head entry at most: first the ones with the same value (`present`), then,
  * in order, one with a new value in the same slot (`changed`). What is left over is `new`.
  */
@@ -136,7 +147,7 @@ export function tagChanges(
   head: readonly AgentHit[],
   base: readonly AgentHit[] | null,
 ): TaggedHit[] {
-  if (base === null) return head.map((h) => withStatus(h, 'present'));
+  if (base === null) return head.map((h) => withStatus(h, 'present', 'none'));
   const sameValue = new Map<string, number>();
   const sameSlot = new Map<string, number>();
   for (const h of base) {

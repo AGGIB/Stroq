@@ -78,15 +78,14 @@ describe('a change that adds what was a warning', () => {
     ]);
   });
 
-  it('keeps the same entries a warning when they were already there', () => {
-    const present = tagChanges(
-      [
-        hit('package-script', 'package.json', 1, 'postinstall', FETCH),
-        hit('agent-broad-allow', '.claude/settings.json', 1, 'permissions.allow', 'Bash(*)'),
-      ],
-      null,
-    );
-    expect(present.map((h) => h.severity)).toEqual(['warning', 'warning']);
+  it('keeps the same entries a warning only when a base proves they were already there', () => {
+    const entries = [
+      hit('package-script', 'package.json', 1, 'postinstall', FETCH),
+      hit('agent-broad-allow', '.claude/settings.json', 1, 'permissions.allow', 'Bash(*)'),
+    ];
+    expect(tagChanges(entries, entries).map((h) => h.severity)).toEqual(['warning', 'warning']);
+    // Plain `stroq inspect` has no base: nothing is proven there before.
+    expect(tagChanges(entries, null).map((h) => h.severity)).toEqual(['error', 'error']);
   });
 });
 
