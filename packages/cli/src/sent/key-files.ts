@@ -78,9 +78,11 @@ export function keyFileIndex(finder: KeyFinder, home: string | undefined): KeyFi
     }
   });
   const byName = new Map<string, string[]>();
-  // Every folder of the path: a path on this machine is no deeper than a path can be.
+  // Every folder of the path: a path on this machine is no deeper than a path can be. In lower
+  // case, as a command's names are looked up: a disk that opens `.ENV` as `.env` is checked by
+  // `namesFile`, which compares in the case the file's disk does.
   for (const path of keysOf.keys())
-    for (const name of new Set(path.split('/')))
+    for (const name of new Set(path.toLowerCase().split('/')))
       if (name !== '') byName.set(name, [...(byName.get(name) ?? []), path]);
   return { keysOf, byName, environment, all: [...keysOf.keys()] };
 }
@@ -116,7 +118,8 @@ export function keyFileUses(
   if (index.keysOf.size === 0 && index.environment.length === 0) return [];
   const named = namedEnds(command);
   const paths = new Set<string>();
-  for (const end of named.ends) for (const path of index.byName.get(end) ?? []) paths.add(path);
+  for (const end of named.ends)
+    for (const path of index.byName.get(end.toLowerCase()) ?? []) paths.add(path);
   const cut: KeyFileUse[] = [];
   if (named.wild) {
     // Past the run's time for reading commands, every key file is checked: none is read.
