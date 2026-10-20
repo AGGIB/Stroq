@@ -48,7 +48,11 @@ const PACKAGE_CONFIGS: ReadonlySet<string> = new Set([
  * Whether a path is the config of a package manager. A change to one fails as a whole, whatever
  * byte it is (see `agent-git.ts`); on disk, each line but a comment is an error.
  */
-export const isPackageConfig = (path: string): boolean => PACKAGE_CONFIGS.has(ruleName(path));
+export const isPackageConfig = (path: string): boolean =>
+  PACKAGE_CONFIGS.has(ruleName(path)) || PNPMFILE.test(ruleName(path));
+
+/** pnpm's hooks file, code it runs on every install. */
+const PNPMFILE = /^\.?pnpmfile\.[cm]?js$/;
 
 /** Attributes that make a checkout write other text than the blob git holds. */
 const REWRITES = /^(?:filter|working-tree-encoding)(?:=|$)/i;
@@ -104,9 +108,9 @@ const SEMICOLON_COMMENTS: ReadonlySet<string> = new Set(['.npmrc', '.yarnrc']);
 /** The hits of one file's lines, with the line each is on. */
 export function lineHits(path: string, text: string): AgentHit[] {
   const name = ruleName(path);
-  const rule = RULES.get(name)?.(path);
+  const rule = (RULES.get(name) ?? (PNPMFILE.test(name) ? setting : undefined))?.(path);
   if (rule === undefined) return [];
-  const isPackage = PACKAGE_CONFIGS.has(name);
+  const isPackage = PACKAGE_CONFIGS.has(name) || PNPMFILE.test(name);
   if (isPackage && HIDDEN_BREAK.test(text))
     return [
       hit(

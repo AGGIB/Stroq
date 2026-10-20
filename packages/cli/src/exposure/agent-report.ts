@@ -21,6 +21,7 @@ import {
   DEVCONTAINER_ENV_KEYS,
 } from './agent-editor.js';
 import { PACKAGE_CONFIG, PACKAGE_SETTING } from './agent-lines.js';
+import { PACKAGE_RUNS } from './package-configs.js';
 
 /**
  * One plain sentence per finding, for every output of `stroq inspect`. Every name and value in
@@ -105,6 +106,10 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       // The line can hold a token: neither it nor anything of it is shown.
       if (h.name === PACKAGE_SETTING)
         return "is a line of a package manager's config, which can name where packages come from, the shell scripts run in or code that loads first, so the next npx, install or script in this folder can run other code (the line is not shown)";
+      if (h.name === PACKAGE_RUNS)
+        return h.value === 'yarn'
+          ? "is under .yarn/releases or .yarn/plugins, yarn's own program and plugins, which it runs, and the change edits it"
+          : `is a file the package manager config ${value} names, which it runs or loads, and the change edits it`;
       if (h.name === PACKAGE_CONFIG)
         return "is a package manager's config that the change adds, edits or deletes, which can name where packages come from, the shell scripts run in or code that loads first, so the next npx, install or script in this folder can run other code (its text is not shown)";
       return /otel|telemetry/i.test(h.name)

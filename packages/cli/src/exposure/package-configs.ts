@@ -1,4 +1,6 @@
+import { posix } from 'node:path';
 import type { TaggedHit } from './agent-change.js';
+import { foldPath } from './agent-surface.js';
 import { hit } from './agent-kinds.js';
 import { PACKAGE_CONFIG, isPackageConfig, keyed } from './agent-lines.js';
 import { readBlobs, type Changed, type TreeEntry } from './git-read.js';
@@ -82,14 +84,68 @@ const unreadable = (path: string, why: string): TaggedHit => ({
   status: 'new',
 });
 
+/** Yarn's own program and its plugins, which it runs: any change under them fails. */
+const YARN_CODE = /(?:^|\/)\.yarn\/(?:releases|plugins)\//;
+/** A word of a config that looks like a path: with a `/`, from a `.`, or with an extension. */
+const PATHLIKE = /^(?:\.{1,2}\/|[^/][^:]*\/|[^@/:]+\.[A-Za-z0-9]{1,6}$)/;
+
+/**
+ * Every word of a package manager's config that looks like a path, from the config's folder: what
+ * `yarnPath`, `plugins`, `script-shell`, `preload` or `node-options` name, taken without reading
+ * which key a word is the value of. An address, an absolute path and `~` are left out.
+ */
+function namedPaths(config: string, text: string): string[] {
+  const folder = posix.dirname(config) === '.' ? '' : posix.dirname(config);
+  return text.split(/[\s"'=,;\[\]{}()]+/).flatMap((word) => {
+    if (word === '' || word.includes('://') || word.startsWith('/') || word.startsWith('~'))
+      return [];
+    if (!PATHLIKE.test(word)) return [];
+    const path = posix.normalize(posix.join(folder, word)).replace(/\/+$/, '');
+    return path === '.' || path === '..' || path.startsWith('../') ? [] : [path];
+  });
+}
+
+/** What a hit for a file a package manager runs or loads is named. */
+export const PACKAGE_RUNS = 'package manager runs it';
+
+/**
+ * A failing entry for each file the change adds or edits that a package manager runs or loads:
+ * under `.yarn/releases` or `.yarn/plugins`, or a path a config of `texts` names, or under it.
+ */
+function packageRunChanges(
+  texts: ReadonlyMap<string, string>,
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  const named = [...texts].flatMap(([config, text]) =>
+    namedPaths(config, text).map((path) => [foldPath(path), config] as const),
+  );
+  return [...changed].flatMap(([path, c]): TaggedHit[] => {
+    if (c.status === 'D') return [];
+    const folded = foldPath(path);
+    const by = YARN_CODE.test(folded)
+      ? 'yarn'
+      : named.find(([p]) => folded === p || folded.startsWith(`${p}/`))?.[1];
+    return by === undefined
+      ? []
+      : [
+          {
+            ...hit('agent-api-redirect', path, 1, PACKAGE_RUNS, by),
+            status: c.status === 'A' ? 'new' : 'changed',
+          },
+        ];
+  });
+}
+
 /** The failing entries for the package manager configs a change reaches, by path or by link. */
 export function packageConfigChanges(
   tree: ReadonlyMap<string, TreeEntry>,
   linked: { readonly view: TreeView; readonly unread: number },
   changed: ReadonlyMap<string, Changed>,
   maxSteps: number,
+  texts: ReadonlyMap<string, string> = new Map(),
 ): TaggedHit[] {
   const out = new Map<string, TaggedHit>();
+  for (const h of packageRunChanges(texts, changed)) out.set(`\u0000runs\u0000${h.file}`, h);
   const fails = (path: string, isNew: boolean, what: string): void => {
     if (!out.has(path))
       out.set(path, {

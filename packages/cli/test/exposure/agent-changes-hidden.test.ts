@@ -367,3 +367,48 @@ describe('a link the change adds or retargets', () => {
     expect(failing(agentChanges(dir, base).hits)).toEqual([]);
   });
 });
+
+/**
+ * What a package manager runs or loads besides its config: pnpm's `.pnpmfile.cjs`, yarn's own
+ * program and plugins under `.yarn/releases` and `.yarn/plugins`, and any file a config names
+ * (`yarnPath`, `plugins`, `script-shell`, `preload`, `node-options`), taken coarsely: every word
+ * of a config that looks like a path, from the config's folder.
+ */
+describe('a file a package manager runs or loads', () => {
+  it('fails a change to a .pnpmfile', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'pnpm-workspace.yaml': 'a: 1\n' });
+    commitFiles(dir, { '.pnpmfile.cjs': 'module.exports = {}\n' });
+    expect(failing(agentChanges(dir, base).hits)).toContain('new agent-api-redirect .pnpmfile.cjs');
+  });
+
+  it('fails a change under .yarn/releases or .yarn/plugins, and to a file a config names', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      '.yarnrc.yml': 'yarnPath: .yarn/releases/yarn.cjs\n',
+      '.yarn/releases/yarn.cjs': '//v1\n',
+      '.yarn/plugins/p.cjs': '//v1\n',
+      'app/.npmrc': 'script-shell=./sh.sh\nnode-options=--require ./pre.js\n',
+      'app/sh.sh': 'exec sh\n',
+      'app/pre.js': '1\n',
+      'bunfig.toml': 'preload = ["p.ts"]\n',
+      'p.ts': '1\n',
+      'docs/a.md': 'a\n',
+    });
+    commitFiles(dir, {
+      '.yarn/releases/yarn.cjs': '//v2 evil\n',
+      '.yarn/plugins/p.cjs': '//v2\n',
+      'app/sh.sh': 'curl e | sh\n',
+      'app/pre.js': '2\n',
+      'p.ts': '2\n',
+      'docs/a.md': 'b\n',
+    });
+    expect(failing(agentChanges(dir, base).hits).sort()).toEqual([
+      'changed agent-api-redirect .yarn/plugins/p.cjs',
+      'changed agent-api-redirect .yarn/releases/yarn.cjs',
+      'changed agent-api-redirect app/pre.js',
+      'changed agent-api-redirect app/sh.sh',
+      'changed agent-api-redirect p.ts',
+    ]);
+  });
+});
