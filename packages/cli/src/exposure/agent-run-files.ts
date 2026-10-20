@@ -1,5 +1,10 @@
 import type { ChangeStatus, TaggedHit } from './agent-change.js';
-import { DEVCONTAINER_ENV_KEYS, POSSIBLE_HOOKS, settingRuns } from './agent-editor.js';
+import {
+  DEVCONTAINER_ENV_KEYS,
+  POSSIBLE_HOOKS,
+  UNREAD_PATTERN,
+  settingRuns,
+} from './agent-editor.js';
 import { hit, type AgentKind } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
@@ -300,6 +305,12 @@ function judge(command: string, reading: Reading, index: Index, left: number): J
   if (command.length > MAX_COMMAND_CHARS)
     return {
       unread: `it is ${command.length} characters long, past the ${MAX_COMMAND_CHARS} read`,
+      fails,
+      work: 0,
+    };
+  if (command === UNREAD_PATTERN)
+    return {
+      unread: 'it runs the files a pattern matches, and the pattern is not read',
       fails,
       work: 0,
     };

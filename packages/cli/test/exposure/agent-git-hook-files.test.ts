@@ -370,3 +370,37 @@ describe('a hook manager key already there, read as what it runs', () => {
     );
   });
 });
+
+/**
+ * lint-staged runs each command on the staged files its pattern matches. A command whose program
+ * is a shell or an interpreter runs those files themselves: a change to any file its pattern could
+ * match fails. Any other command (eslint, prettier) is followed by its own words, as before.
+ */
+describe('a lint-staged command that runs the files it is given', () => {
+  const edit = (staged: object, path: string): string[] => {
+    const pkg = JSON.stringify({ name: 'x', 'lint-staged': staged });
+    return changedIn({ 'package.json': pkg, [path]: '1\n' }, { [path]: '2\n' });
+  };
+
+  it.each([
+    [{ '*.js': 'node' }, 'src/a.js'],
+    [{ '*.txt': 'sh' }, 'notes/a.txt'],
+    [{ '*.md': ['npx tsx'] }, 'docs/a.md'],
+  ])('fails %j when a change edits %s', (staged, path) => {
+    expect(edit(staged, path)).toContain(`changed agent-run-file-changed ${path}`);
+  });
+
+  it('fails one under a pattern it does not read, whatever the change', () => {
+    expect(edit({ '*.{md,txt}': 'sh' }, 'notes/a.txt')).toEqual([
+      'new unreadable-config package.json',
+    ]);
+  });
+
+  it('follows any other command by its own words', () => {
+    expect(edit({ '*.txt': 'eslint --fix' }, 'notes/a.txt')).toEqual([]);
+    // eslint is a runner, which loads the code of the repository: a code file still fails.
+    expect(edit({ '*.js': 'eslint --fix' }, 'src/a.js')).toContain(
+      'changed agent-run-file-changed src/a.js',
+    );
+  });
+});

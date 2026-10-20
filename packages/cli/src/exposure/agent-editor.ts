@@ -571,8 +571,65 @@ function hookManagerHit(
       `too long to read whole (${digestOf(text)})`,
     );
   const found = { ...hit('git-hook-file', f.path, line, name, text), severity: 'warning' as const };
-  // A known manager runs the strings it holds; its keys (lint-staged's patterns) are not commands.
-  return known ? { ...found, runs: stringsOf(value).join('\n') } : found;
+  if (!known) return found;
+  // A known manager runs the strings it holds; its keys (lint-staged's patterns) are not commands,
+  // but for a command that runs the files it is given, its pattern names what runs.
+  const patterns = name.endsWith('lint-staged') ? filesRunBy(value) : [];
+  // A pattern this does not read (a brace list, a class, a negation) could match any file: the
+  // entry's command is then one that cannot be read, which any change at all fails.
+  if (patterns.some((p) => /[{}[\]!()\\]/.test(p) || p === '*'))
+    return { ...found, runs: UNREAD_PATTERN };
+  return { ...found, runs: [...stringsOf(value), ...patterns].join('\n') };
+}
+
+/** What a lint-staged entry runs when one of its patterns is not read: no command at all. */
+export const UNREAD_PATTERN = '\u0000a pattern that is not read';
+
+/** Shells and interpreters: a lint-staged command they start runs the staged files themselves. */
+const RUNS_ITS_FILES: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'node',
+  'deno',
+  'bun',
+  'tsx',
+  'ts-node',
+  'python',
+  'python3',
+  'ruby',
+  'perl',
+  'php',
+]);
+/** Words in front of the program of a command: a package runner, `env`, an assignment, an option. */
+const WRAPPER =
+  /^(?:npx|pnpx|bunx|env|exec|dlx|pnpm|yarn|npm|--?[A-Za-z][\w-]*|[A-Za-z_][A-Za-z0-9_]*=.*)$/;
+
+/** The program a command starts, past the words in front of it, by its base name. */
+function programWord(command: string): string {
+  const word =
+    command
+      .trim()
+      .split(/\s+/)
+      .find((w) => !WRAPPER.test(w)) ?? '';
+  return posix.basename(word).toLowerCase();
+}
+
+/**
+ * The patterns of a lint-staged config whose command is a shell or an interpreter, which runs the
+ * files the pattern matches. A value this does not read as patterns and commands gives one
+ * pattern that matches anything, so every file counts.
+ */
+function filesRunBy(value: unknown): string[] {
+  if (!isPlainObject(value)) return ['*'];
+  return Object.entries(value).flatMap(([pattern, commands]) => {
+    const list = typeof commands === 'string' ? [commands] : commands;
+    if (!Array.isArray(list)) return ['*'];
+    return list.some((c) => typeof c !== 'string' || RUNS_ITS_FILES.has(programWord(c)))
+      ? [pattern]
+      : [];
+  });
 }
 
 /** Every string at or under `value`, in order. */
