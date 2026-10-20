@@ -342,21 +342,28 @@ function approvedServers(f: JsonFile): AgentHit[] {
   ];
 }
 
-/** Allow rules that hand the agent the whole shell, each spelling listed once. */
+/**
+ * Allow rules that hand the agent the whole shell, each spelling listed once, at most
+ * `MAX_ENTRIES` of them: past that, one failing entry stands for the rest.
+ */
 function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
   const allow = permissions === undefined ? [] : strings(own(permissions, 'allow'));
   const rules = new Set(
     allow.map((rule) => rule.trim()).filter((rule) => ruleRunsAnything(rule, SHELL_TOOLS)),
   );
-  return [...rules].map((rule) =>
-    hit(
-      'agent-broad-allow',
-      f.path,
-      lineOf(f.text, ['"permissions"', '"allow"', quoted(rule)]),
-      'permissions.allow',
-      rule,
+  const list = firstEntries(f.path, 'broad allow rules', [...rules]);
+  return [
+    ...list.cut,
+    ...list.items.map((rule) =>
+      hit(
+        'agent-broad-allow',
+        f.path,
+        lineOf(f.text, ['"permissions"', '"allow"', quoted(rule)]),
+        'permissions.allow',
+        rule,
+      ),
     ),
-  );
+  ];
 }
 
 function settingsSwitches(f: JsonFile): AgentHit[] {

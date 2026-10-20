@@ -141,6 +141,7 @@ describe('.claude/settings.json and settings.local.json', () => {
     const hits = of(scanFile('.claude/settings.json', text), 'agent-broad-allow');
     expect(hits.map((h) => [h.value, h.severity])).toEqual([
       ['Bash(*)', 'warning'],
+      ['Bash(npm test)', 'warning'],
       ['Bash', 'warning'],
       ['Bash(:*)', 'warning'],
     ]);

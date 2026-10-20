@@ -64,6 +64,34 @@ const WHOLE = [
   '*',
   'mcp__*',
   'B*',
+  // A package manager or git without a subcommand known to run nothing: the agent writes the
+  // script, the package, the hook or the config that subcommand runs.
+  'Bash(npm test)',
+  'Bash(npm run lint:*)',
+  'Bash(npm:*)',
+  'Bash(npm -g ls)',
+  'Bash(npm l*)',
+  'Bash(pnpm install:*)',
+  'Bash(cargo run:*)',
+  'Bash(go test:*)',
+  'Bash(pip install:*)',
+  'Bash(uv run:*)',
+  'Bash(git:*)',
+  'Bash(git commit:*)',
+  'Bash(git -c x=y status)',
+  // A task runner, a test runner or a tool whose config is code.
+  'Bash(make:*)',
+  'Bash(just build)',
+  'Bash(pytest:*)',
+  'Bash(prettier --write:*)',
+  // A first word that assigns, expands, or is spelled in pieces.
+  'Bash(FOO=1 git status)',
+  'Bash($SHELL:*)',
+  'Bash(b\\ash:*)',
+  'Bash("sh":*)',
+  "Bash('ba'sh -c:*)",
+  'Bash(C:\\bin\\sh.exe:*)',
+  'Bash({bash,x}:*)',
 ];
 
 describe('a Claude Code allow rule that hands the agent the whole shell', () => {
@@ -72,9 +100,13 @@ describe('a Claude Code allow rule that hands the agent the whole shell', () => 
   });
 
   it.each([
-    'Bash(npm test)',
-    'Bash(npm run lint:*)',
+    'Bash(npm ls)',
+    'Bash(npm view:*)',
     'Bash(git status:*)',
+    'Bash(git diff:*)',
+    'Bash(cargo fmt:*)',
+    'Bash(tsc --noEmit)',
+    'Bash(~/bin/tool:*)',
     'Bash(ls:*)',
     'Read',
     'Edit(*)',
@@ -95,6 +127,25 @@ describe('a Claude Code allow rule that hands the agent the whole shell', () => 
         .hits.filter((h) => isFailing(h, 'new'))
         .map((h) => `${h.status} ${h.kind} ${h.value}`),
     ).toEqual(['new agent-broad-allow Bash(bash:*)']);
+  });
+});
+
+describe('a long list of allow rules', () => {
+  it('lists the first 200 that hand over the shell, and fails for the rest', () => {
+    const rules = Array.from({ length: 250 }, (_, i) => `Bash(bash ./s${i}.sh)`);
+    const hits = scanFile(
+      '.claude/settings.json',
+      JSON.stringify({ permissions: { allow: rules } }),
+    );
+    expect(hits.filter((h) => h.kind === 'agent-broad-allow')).toHaveLength(200);
+    expect(hits.filter((h) => h.kind === 'unreadable-config').map((h) => h.name)).toEqual([
+      'too many broad allow rules',
+    ]);
+    const shell = rules.map((r) => r.replace('Bash(', 'run_shell_command('));
+    const gemini = scanFile('.gemini/settings.json', JSON.stringify({ tools: { allowed: shell } }));
+    expect(gemini.filter((h) => h.kind === 'unreadable-config').map((h) => h.name)).toEqual([
+      'too many broad allow rules',
+    ]);
   });
 });
 

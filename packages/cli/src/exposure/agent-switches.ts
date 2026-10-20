@@ -114,9 +114,13 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
   for (const [keys, list] of [
     [['tools', 'allowed'], strings(own(tools, 'allowed'))],
     [['allowedTools'], strings(own(f.value, 'allowedTools'))],
-  ] as const)
-    for (const rule of new Set(list.filter((r) => ruleRunsAnything(r, SHELL_TOOLS))))
-      add('agent-broad-allow', keys, rule);
+  ] as const) {
+    const broad = firstEntries(f.path, 'broad allow rules', [
+      ...new Set(list.filter((r) => ruleRunsAnything(r, SHELL_TOOLS))),
+    ]);
+    hits.push(...broad.cut);
+    for (const rule of broad.items) add('agent-broad-allow', keys, rule);
+  }
   for (const [table, keys] of [
     [tools, ['tools', 'discoveryCommand']],
     [tools, ['tools', 'callCommand']],

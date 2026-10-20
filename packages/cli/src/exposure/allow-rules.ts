@@ -1,12 +1,14 @@
 /**
  * Whether an allow rule hands the agent the whole shell: it lets a program run without asking
- * that runs whatever it is given, or its pattern is a wildcard however it is spelled. Coarse on
- * purpose: `Bash(python3 -m pytest:*)` counts, since python runs any code the agent writes.
+ * that runs whatever it is given, or whose subcommand is not one known to run nothing, or its
+ * pattern is a wildcard however it is spelled. Coarse on purpose: `Bash(python3 -m pytest:*)`
+ * counts, since python runs any code the agent writes, and so does `Bash(npm run lint:*)`, since
+ * the agent can write the script.
  *
  * Each step is an index search or a split, so the work is linear in the rule's length.
  */
 
-/** Shells, wrappers that run the command after them, and interpreters. */
+/** Shells, wrappers that run the command after them, interpreters, and runners of any code. */
 const RUNS_ANYTHING: ReadonlySet<string> = new Set([
   'sh',
   'bash',
@@ -36,6 +38,8 @@ const RUNS_ANYTHING: ReadonlySet<string> = new Set([
   'builtin',
   'exec',
   'eval',
+  'source',
+  '.',
   'time',
   'watch',
   'script',
@@ -52,7 +56,6 @@ const RUNS_ANYTHING: ReadonlySet<string> = new Set([
   'node',
   'nodejs',
   'deno',
-  'bun',
   'tsx',
   'ts-node',
   'ruby',
@@ -71,24 +74,133 @@ const RUNS_ANYTHING: ReadonlySet<string> = new Set([
   'bunx',
   'uvx',
   'pipx',
+  'corepack',
+  // Task and build runners: their recipes and build scripts are files the agent can write.
+  'make',
+  'gmake',
+  'just',
+  'task',
+  'rake',
+  'invoke',
+  'inv',
+  'nox',
+  'tox',
+  'gradle',
+  'gradlew',
+  'mvn',
+  'mvnw',
+  'ant',
+  'turbo',
+  'nx',
+  'lerna',
+  'pre-commit',
+  'lefthook',
+  'husky',
+  'docker',
+  'docker-compose',
+  'podman',
+  // Test runners and tools whose config is code the agent can write.
+  'jest',
+  'vitest',
+  'mocha',
+  'pytest',
+  'py.test',
+  'ava',
+  'playwright',
+  'cypress',
+  'nyc',
+  'c8',
+  'eslint',
+  'prettier',
+  'stylelint',
+  'lint-staged',
+  'vite',
+  'webpack',
+  'rollup',
+  'babel',
 ]);
 
-/** Package managers, and their subcommands that fetch a package, or start any program, and run it. */
-const RUNS_A_PACKAGE: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['npm', new Set(['exec', 'x'])],
-  ['pnpm', new Set(['exec', 'dlx'])],
-  ['yarn', new Set(['exec', 'dlx'])],
-  ['uv', new Set(['run', 'tool'])],
-]);
-
-/** `word` without the quotes around it: one pass from each end. */
-function unquoted(word: string): string {
-  let start = 0;
-  let end = word.length;
-  while (start < end && (word[start] === '"' || word[start] === "'")) start += 1;
-  while (end > start && (word[end - 1] === '"' || word[end - 1] === "'")) end -= 1;
-  return word.slice(start, end);
-}
+/**
+ * Package managers and git, and their subcommands known to run no script, no package and no hook:
+ * any other subcommand, none, or one that is not a plain word, can run whatever the agent writes.
+ */
+const SAFE_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  (
+    [
+      [
+        ['npm', 'pnpm', 'yarn', 'bun'],
+        [
+          'help',
+          'ls',
+          'list',
+          'why',
+          'outdated',
+          'audit',
+          'info',
+          'view',
+          'show',
+          'whoami',
+          'ping',
+          'search',
+          'docs',
+          'bugs',
+          'repo',
+          'prefix',
+          'root',
+          'bin',
+          'licenses',
+        ],
+      ],
+      [['uv'], ['help', 'tree', 'version']],
+      [
+        ['pip', 'pip3'],
+        ['help', 'list', 'show', 'freeze', 'check', 'inspect'],
+      ],
+      [
+        ['poetry', 'pipenv', 'pdm', 'hatch', 'rye'],
+        ['help', 'show', 'version'],
+      ],
+      [
+        ['cargo'],
+        ['help', 'fmt', 'tree', 'metadata', 'search', 'version', 'locate-project', 'pkgid'],
+      ],
+      [['go'], ['help', 'fmt', 'doc', 'version', 'list', 'vet']],
+      [
+        ['composer', 'bundle', 'gem'],
+        ['help', 'show', 'list', 'info', 'outdated', 'licenses'],
+      ],
+      [
+        ['git'],
+        [
+          'status',
+          'log',
+          'diff',
+          'show',
+          'add',
+          'rm',
+          'mv',
+          'restore',
+          'branch',
+          'fetch',
+          'ls-files',
+          'ls-tree',
+          'ls-remote',
+          'blame',
+          'rev-parse',
+          'describe',
+          'tag',
+          'grep',
+          'shortlog',
+          'reflog',
+          'stash',
+          'remote',
+          'cat-file',
+          'check-ignore',
+        ],
+      ],
+    ] as const
+  ).flatMap(([names, safe]) => names.map((name) => [name, new Set<string>(safe)] as const)),
+);
 
 /** The program a word names, as a shell finds it: its last part, in lower case, no extension. */
 const programName = (word: string): string =>
@@ -98,25 +210,44 @@ const programName = (word: string): string =>
     .replace(/\.(?:exe|cmd|bat|com)$/, '');
 
 const isWildcardOnly = (pattern: string): boolean => pattern.replace(/[*?:\s]/g, '') === '';
+/** What a shell expands or reads as an assignment: in a program's name, it can be any program. */
+const EXPANDS = /[*?[\]{}$`()=]/;
+
+/** The program word of a pattern and the word after it, `prefix:*` cut at its `:`. */
+function headOf(pattern: string): { readonly head: string; readonly second: string } {
+  const words = pattern.trim().split(/\s+/);
+  const first = words[0] ?? '';
+  // Past the `:` of a Windows drive, `C:\bin\sh.exe:*`.
+  const colon = first.indexOf(':', /^[A-Za-z]:[\\/]/.test(first) ? 2 : 0);
+  if (colon !== -1) return { head: first.slice(0, colon), second: '' };
+  return { head: first, second: (words[1] ?? '').split(':')[0] ?? '' };
+}
+
+/** Whether a program, by this name and with this subcommand, runs whatever it is given. */
+function nameRunsAnything(name: string, second: string): boolean {
+  if (name === '' || EXPANDS.test(name) || RUNS_ANYTHING.has(name)) return true;
+  const safe = SAFE_SUBCOMMANDS.get(name);
+  if (safe === undefined) return false;
+  const sub = second.toLowerCase();
+  return !(/^[a-z][a-z0-9-]*$/.test(sub) && safe.has(sub));
+}
 
 /**
  * Whether a command pattern (what is inside `Bash(...)`) lets any command run: a wildcard, a
- * program that runs anything, or a program name that is itself a wildcard.
+ * program that runs anything, a program name that expands or assigns, or a package manager or git
+ * without a subcommand known to run nothing. Quotes and backslashes are taken out first, as a
+ * shell takes them out of a word (`b\ash`, `"sh"`); a backslash is also read as a Windows folder
+ * separator, and either reading that runs anything counts.
  */
 export function patternRunsAnything(pattern: string): boolean {
   if (isWildcardOnly(pattern)) return true;
-  // `prefix:*` is the older spelling of a prefix: the program is the first word, before a blank
-  // or that `:`.
-  const words = pattern.trim().split(/\s+/);
-  const head = words[0] ?? '';
-  // Past the `:` of a Windows drive, `C:\bin\sh.exe:*`.
-  const colon = head.indexOf(':', /^[A-Za-z]:[\\/]/.test(head) ? 2 : 0);
-  const first = unquoted(colon === -1 ? head : head.slice(0, colon));
-  if (/[*?[]/.test(first)) return true;
-  const name = programName(first);
-  if (RUNS_ANYTHING.has(name)) return true;
-  const second = colon === -1 ? (words[1] ?? '') : '';
-  return RUNS_A_PACKAGE.get(name)?.has(unquoted(second.split(':')[0] ?? '').toLowerCase()) ?? false;
+  const withSlashes = headOf(pattern.replace(/["']/g, ''));
+  const plain = headOf(pattern.replace(/["'\\]/g, ''));
+  return (
+    nameRunsAnything(programName(withSlashes.head), withSlashes.second.replace(/\\/g, '')) ||
+    nameRunsAnything(programName(plain.head), plain.second) ||
+    EXPANDS.test(plain.head)
+  );
 }
 
 /**
