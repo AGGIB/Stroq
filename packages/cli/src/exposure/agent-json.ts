@@ -233,20 +233,31 @@ const API_BASE_URL = /^ANTHROPIC(?:_[A-Z]+)?_BASE_URL$/;
  * own `CLAUDE_CODE_SHELL_PREFIX` wraps every shell command, and `CLAUDE_ENV_FILE` is sourced
  * before each one. Git takes any setting from `GIT_CONFIG_PARAMETERS`, `core.fsmonitor`
  * included, and runs it on the next `git status`. This list only words the report: every name
- * that is not in `HARMLESS_ENV` is reported, since a list of the dangerous ones always misses one.
+ * that is not in `BENIGN_ENV` is reported, since a list of the dangerous ones always misses one.
  */
 const ENV_LOADS_CODE =
   /^(?:NODE_[A-Z_]{1,40}|BASH_ENV|BASH_FUNC_[^=]{1,256}|ENV|ZDOTDIR|PROMPT_COMMAND|PATH|SHELL|HOME|XDG_[A-Z_]{1,40}|LD_[A-Z_]{1,40}|DYLD_[A-Z_]{1,40}|PYTHON[A-Z_]{1,40}|PERL5[A-Z_]{1,40}|RUBY[A-Z_]{1,40}|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS|GIT_[A-Z_]{1,40}|SSH_[A-Z_]{1,40}|EDITOR|VISUAL|PAGER|(?:NPM|npm|YARN|yarn|PNPM|pnpm|BUN|bun)_[A-Za-z_]{1,64}|GO[A-Z_]{1,40}|CARGO[A-Z_]{0,40}|RUSTC[A-Z_]{0,40}|RUSTFLAGS|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy|NO_PROXY|no_proxy|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|OTEL_[A-Z_]{1,64}|AWS_[A-Z_]{1,64}|CLAUDE_[A-Z_]{1,64})$/;
 /**
- * The variables `env` may set without a report: they change no program a session starts, what
- * it loads, or where it sends anything. Locale, colour, debug output, timeouts and the model
- * Claude Code uses. Matched as they are spelled: `Path` is another variable to POSIX and the
- * same one to Windows, so only these spellings pass.
+ * The only variables `env` may set without a report, in any letter case: a short, explicit list
+ * of common names that change no program a session starts, what it loads, or where it sends
+ * anything. Every other name is an error, with a base and without one: a list of the dangerous
+ * ones always misses one, and a longer list of harmless ones is a longer claim to prove.
  */
-const HARMLESS_ENV =
-  /^(?:LANG|LANGUAGE|LC_[A-Z]{1,20}|TZ|TERM|COLORTERM|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|DEBUG|CI|NODE_ENV|PYTHONUNBUFFERED|PYTHONDONTWRITEBYTECODE|PYTHONIOENCODING|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH|CLAUDE_CODE_MAX_OUTPUT_TOKENS|CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|CLAUDE_CODE_DISABLE_TERMINAL_TITLE|CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY|DISABLE_TELEMETRY|DISABLE_AUTOUPDATER|DISABLE_ERROR_REPORTING|DISABLE_BUG_COMMAND|DISABLE_COST_WARNINGS|DISABLE_NON_ESSENTIAL_MODEL_CALLS|DISABLE_PROMPT_CACHING|DISABLE_INTERLEAVED_THINKING|USE_BUILTIN_RIPGREP|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_(?:OPUS|SONNET|HAIKU)_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)$/;
+const BENIGN_ENV: ReadonlySet<string> = new Set([
+  'NODE_ENV',
+  'TZ',
+  'LANG',
+  'LC_ALL',
+  'DISABLE_TELEMETRY',
+  'DO_NOT_TRACK',
+  'CLAUDE_CODE_ENABLE_TELEMETRY',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'FORCE_COLOR',
+  'NO_COLOR',
+  'CI',
+]);
 /** Whether a variable is one of the few that `env` may set without a report. */
-export const isHarmlessEnv = (name: string): boolean => HARMLESS_ENV.test(name);
+export const isHarmlessEnv = (name: string): boolean => BENIGN_ENV.has(name.toUpperCase());
 /**
  * Whether a variable is one of those known to load code or send traffic elsewhere, in any letter
  * case: Windows reads `node_options` as `NODE_OPTIONS`, and which system opens the repository is

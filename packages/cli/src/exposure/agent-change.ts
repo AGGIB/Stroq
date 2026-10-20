@@ -1,5 +1,4 @@
 import { posix } from 'node:path';
-import { envNameOf } from './agent-json.js';
 import type { AgentHit, AgentKind } from './agent-kinds.js';
 import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
 
@@ -33,31 +32,6 @@ const takeOne = (counts: Map<string, number>, key: string): boolean => {
   counts.set(key, left - 1);
   return true;
 };
-
-/**
- * The few env variables that are only a warning when a base proves they were already there:
- * common in honest settings, and they change no program a session starts, what it loads, or where
- * it sends anything. Matched in any letter case, so `node_env`, which the harmless list does not
- * pass, is one. Every other name an env sets stays an error, there before or not, and so does each
- * of these in plain `stroq inspect`, which has no base: it sees a clone for the first time, and
- * that is the moment it matters most. What a name is known to do only words the report.
- */
-const BENIGN_ENV: ReadonlySet<string> = new Set([
-  'NODE_ENV',
-  'TZ',
-  'LANG',
-  'LC_ALL',
-  'DISABLE_TELEMETRY',
-  'DO_NOT_TRACK',
-  'CLAUDE_CODE_ENABLE_TELEMETRY',
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-  'FORCE_COLOR',
-  'NO_COLOR',
-  'CI',
-]);
-
-/** Whether an env variable that was already there is only a warning: one of the few benign names. */
-const warnsWhenPresent = (name: string): boolean => BENIGN_ENV.has(envNameOf(name).toUpperCase());
 
 /**
  * Kinds that are ordinary in an honest repository, and an attack in some shapes: where no base
@@ -121,8 +95,7 @@ export const inAttackShape = (h: AgentHit): boolean =>
  *
  * With a base, whatever a change adds or changes fails, whatever it is or looks like: a hook, a
  * server, an install script, a dev container key, an allow rule. Only an instruction file, which
- * runs nothing, stays a notice. One a base proves was already there keeps its own severity, but
- * for one of the few benign env variables, which is a warning.
+ * runs nothing, stays a notice. One a base proves was already there keeps its own severity.
  *
  * With no base (plain `stroq inspect`), nothing is proven there before, and nothing is proven
  * new either: each keeps its own severity, so an allow rule is listed, and fails when it is a
@@ -140,11 +113,8 @@ export function settle(
     const fails = startsWithoutAsking(h) || inAttackShape(h);
     return fails ? { ...h, severity: 'error', status } : { ...h, status };
   }
-  if (status === 'present')
-    return h.kind === 'agent-env' && warnsWhenPresent(h.name)
-      ? { ...h, severity: 'warning', status }
-      : { ...h, status };
-  return h.severity === 'notice' ? { ...h, status } : { ...h, severity: 'error', status };
+  if (status === 'present' || h.severity === 'notice') return { ...h, status };
+  return { ...h, severity: 'error', status };
 }
 
 const withStatus = settle;

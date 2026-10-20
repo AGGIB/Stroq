@@ -131,6 +131,8 @@ describe('.claude/settings.json and settings.local.json', () => {
       ['HTTPS_PROXY', 'error'],
       ['NODE_EXTRA_CA_CERTS', 'error'],
       ['CLAUDE_CODE_SHELL_PREFIX', 'error'],
+      // Not on the benign list, so reported though it loads nothing.
+      ['DEBUG', 'error'],
     ]);
   });
 

@@ -187,7 +187,7 @@ describe('what makes an MCP server run other code than its command', () => {
     { env: { PATH: './bin' } },
     { env: { node_options: '--require ./x.js' } },
     { env: { SOMETHING_NEW: 'x' } },
-    { env: { Lang: 'C' } },
+    { env: { DEBUG: '1' } },
     { environment: { NODE_OPTIONS: '-r ./x.js' } },
     { env: { LANG: 'C' }, environment: { NODE_OPTIONS: '-r ./x.js' } },
     { env: 'NODE_OPTIONS=-r ./x.js' },
@@ -206,8 +206,9 @@ describe('what makes an MCP server run other code than its command', () => {
     expect(server('.mcp.json', entry)).toEqual(['mcp-server-runs-code s error']);
   });
 
-  it('keeps one with harmless env names, the top folder, or only absolute paths a warning', () => {
-    expect(server('.mcp.json', { env: { LANG: 'C', DEBUG: '1' } })).toEqual([
+  it('keeps one with benign env names, the top folder, or only absolute paths a warning', () => {
+    // The benign names pass in any letter case, as Windows reads them.
+    expect(server('.mcp.json', { env: { LANG: 'C', Lang: 'C', node_env: 'x' } })).toEqual([
       'mcp-server s warning',
     ]);
     expect(server('.vscode/mcp.json', { cwd: '${workspaceFolder}' })).toEqual([

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { GitError, agentChanges } from '../../src/exposure/agent-git.js';
 import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
+import { scanFile } from '../../src/exposure/agent-surface.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -102,91 +103,81 @@ describe('tagChanges', () => {
     expect(tagChanges([a, c], null).map((h) => h.status)).toEqual(['present', 'present']);
   });
 
-  // Only a short list of benign names (in any letter case) is a warning when it was already
-  // there. PATH, an editor, a proxy, a certificate or a name nobody knows stays an error: plain
-  // `stroq inspect` on a clone sees everything as already there.
-  it('makes only a benign env variable that was already there a warning', () => {
-    const env = (name: string, value: string) =>
-      hit('agent-env', '.claude/settings.json', 2, name, value);
-    const base = [
-      env('PATH', '/usr/bin'),
-      env('HTTPS_PROXY', 'http://p'),
-      env('NODE_OPTIONS', '-r x'),
-      env('DO_NOT_TRACK', '1'),
+  // `env` is set for every session and every hook. Only an explicit list of benign names, in any
+  // letter case, is left out; every other name is an error with a base and without one, whether a
+  // change brought it or not: plain `stroq inspect` on a clone is when it matters most. Names that
+  // only set a model, a timeout or debug output are not on that list, and fail too.
+  it('reports every env name but the benign few, as an error in both modes', () => {
+    const env = {
+      PATH: '/usr/bin',
+      DEBUG: '*',
+      ANTHROPIC_MODEL: 'x',
+      MCP_TIMEOUT: '9',
+      LC_CTYPE: 'C',
+      TERM: 'xterm',
+      EDITOR: 'vim',
+      node_options: '-r x',
+      NODE_ENV: 'development',
+      node_env: 'x',
+      TZ: 'UTC',
+      Lang: 'C',
+      LC_ALL: 'C',
+      DISABLE_TELEMETRY: '1',
+      DO_NOT_TRACK: '1',
+      claude_code_enable_telemetry: '0',
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      FORCE_COLOR: '1',
+      NO_COLOR: '1',
+      Ci: 'true',
+    };
+    const reported = [
+      'PATH',
+      'DEBUG',
+      'ANTHROPIC_MODEL',
+      'MCP_TIMEOUT',
+      'LC_CTYPE',
+      'TERM',
+      'EDITOR',
+      'node_options',
     ];
-    const head = [
-      env('PATH', '/usr/bin'),
-      env('HTTPS_PROXY', 'http://evil.invalid'),
-      env('NODE_OPTIONS', '-r x'),
-      env('DO_NOT_TRACK', '1'),
-      env('EDITOR', 'vim'),
-      env('NODE_EXTRA_CA_CERTS', './ca.pem'),
-    ];
-    expect(tagChanges(head, base).map((h) => `${h.status} ${h.name} ${h.severity}`)).toEqual([
-      'present PATH error',
-      'changed HTTPS_PROXY error',
-      'present NODE_OPTIONS error',
-      'present DO_NOT_TRACK warning',
-      'new EDITOR error',
-      'new NODE_EXTRA_CA_CERTS error',
-    ]);
-    // With no base nothing is proven there before, so a benign name is an error too.
-    expect(tagChanges(head, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
-      'PATH error',
-      'HTTPS_PROXY error',
-      'NODE_OPTIONS error',
-      'DO_NOT_TRACK error',
-      'EDITOR error',
-      'NODE_EXTRA_CA_CERTS error',
-    ]);
+    const claude = scanFile('.claude/settings.json', JSON.stringify({ env }));
+    expect(claude.map((h) => h.name)).toEqual(reported);
+    for (const hits of [
+      tagChanges(claude, null),
+      tagChanges(claude, claude),
+      tagChanges(claude, []),
+    ])
+      expect(hits.every((h) => h.severity === 'error')).toBe(true);
+    expect(tagChanges(claude, null).filter((h) => isFailing(h, 'any'))).toHaveLength(
+      reported.length,
+    );
+
+    const set = Object.entries(env)
+      .map(([k, v]) => `${k} = "${v}"`)
+      .join(', ');
+    const codex = scanFile('.codex/config.toml', `[shell_environment_policy]\nset = { ${set} }\n`);
+    expect(codex.map((h) => h.name)).toEqual(
+      reported.map((name) => `shell_environment_policy.set.${name}`),
+    );
   });
 
-  // A name nobody knows is an error with or without a base, and so is a known one in any letter
-  // case, since Windows reads `node_options` as NODE_OPTIONS, and the same name under Codex's
-  // `shell_environment_policy.set`. The benign names are a warning in any letter case, when a base
-  // proves they were there. A change that adds or changes any name outside the harmless list
-  // fails, a benign one too, and with no base every one is an error.
-  it('keeps a name nobody knows an error, and a benign one a warning in any letter case', () => {
-    const names = [
-      'SOMETHING_NEW',
-      'GIT_DIR',
-      'GIT_PAGER',
-      'CLAUDE_CODE_SHELL_PREFIX',
-      'CLAUDE_ENV_FILE',
-      'DYLD_INSERT_LIBRARIES',
-      'node_options',
-      'Ld_Preload',
-      'Bash_Env',
-      'Path',
-      'shell_environment_policy.set.SOMETHING',
-      'shell_environment_policy.set.BASH_ENV',
-      'node_env',
-      'Ci',
-      'claude_code_enable_telemetry',
-      'shell_environment_policy.set.TZ',
-    ];
+  // A server's own `env` is read by the same list: a name off it can make the program it starts
+  // run other code.
+  it('reads a server env by the same list', () => {
+    const server = (env: Record<string, string>) =>
+      scanFile(
+        '.mcp.json',
+        JSON.stringify({ mcpServers: { s: { command: 'npx', args: ['s'], env } } }),
+      )[0]?.kind;
+    expect(server({ DEBUG: '1' })).toBe('mcp-server-runs-code');
+    expect(server({ node_env: 'production', TZ: 'UTC' })).toBe('mcp-server');
+  });
+
+  it('settles an env name as an error, there before or not', () => {
+    const names = ['SOMETHING_NEW', 'Path', 'shell_environment_policy.set.SOMETHING', 'GIT_DIR'];
     const env = names.map((name) => hit('agent-env', '.claude/settings.json', 2, name, 'x'));
-    expect(tagChanges(env, null).every((h) => h.severity === 'error')).toBe(true);
-    expect(tagChanges(env, env).map((h) => `${h.name} ${h.severity}`)).toEqual([
-      'SOMETHING_NEW error',
-      'GIT_DIR error',
-      'GIT_PAGER error',
-      'CLAUDE_CODE_SHELL_PREFIX error',
-      'CLAUDE_ENV_FILE error',
-      'DYLD_INSERT_LIBRARIES error',
-      'node_options error',
-      'Ld_Preload error',
-      'Bash_Env error',
-      'Path error',
-      'shell_environment_policy.set.SOMETHING error',
-      'shell_environment_policy.set.BASH_ENV error',
-      'node_env warning',
-      'Ci warning',
-      'claude_code_enable_telemetry warning',
-      'shell_environment_policy.set.TZ warning',
-    ]);
-    const added = tagChanges(env, []);
-    expect(added.filter((h) => !isFailing(h, 'new')).map((h) => h.name)).toEqual([]);
+    for (const hits of [tagChanges(env, null), tagChanges(env, env), tagChanges(env, [])])
+      expect(hits.map((h) => h.severity)).toEqual(names.map(() => 'error'));
   });
 });
 

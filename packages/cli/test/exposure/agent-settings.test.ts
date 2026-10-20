@@ -146,7 +146,7 @@ describe('env variables in Claude Code settings', () => {
     expect(hits.map((h) => [h.name, h.severity])).toEqual([[name, 'error']]);
   });
 
-  it('passes the names known to be harmless, and reports a value that is not a string', () => {
+  it('passes only the benign names, and reports a value that is not a string', () => {
     const text = settings({
       env: {
         NODE_ENV: 'development',
@@ -162,7 +162,14 @@ describe('env variables in Claude Code settings', () => {
       },
     });
     const hits = of(scanFile('.claude/settings.json', text), 'agent-env');
-    expect(hits.map((h) => [h.name, h.value])).toEqual([['GIT_CONFIG_COUNT', '1']]);
+    // A debug switch, a token budget or a timeout is not on the benign list: reported all the same.
+    expect(hits.map((h) => [h.name, h.value])).toEqual([
+      ['DEBUG', '1'],
+      ['MAX_THINKING_TOKENS', '8000'],
+      ['BASH_DEFAULT_TIMEOUT_MS', '60000'],
+      ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'],
+      ['GIT_CONFIG_COUNT', '1'],
+    ]);
   });
 
   it('says why a name it does not know is reported', () => {
