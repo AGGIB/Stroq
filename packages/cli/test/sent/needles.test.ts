@@ -113,7 +113,9 @@ describe('byteMatcher', () => {
     expect(clean.failed).toBe(false);
     // Half of a value makes the file worth parsing (a key split in two by quotes), not a finding.
     expect(clean.triggered).toBe(true);
-    const missing = m.scanFile(join(tmpdir(), 'stroq-no-such-file-here.jsonl'));
+    // In a fresh folder of its own: a fixed name in the shared temp folder could be anyone's file.
+    const folder = mkdtempSync(join(tmpdir(), 'stroq-sent-missing-'));
+    const missing = m.scanFile(join(folder, 'no-such-session.jsonl'));
     expect(missing).toEqual({ keys: new Set(), failed: true });
   });
 });
