@@ -154,8 +154,9 @@ export function packageConfigChanges(
 }
 
 /**
- * Each link the change adds, edits or retypes, in any folder, that leads out of the repository, to
- * nothing (or round in a loop), or whose target was not read: what is behind it is in no change
+ * Each link the change adds, edits or retypes, in any folder, that leads anywhere but to a file or a
+ * folder of the tree: out of the repository, to nothing (or round in a loop), into a submodule, or
+ * through a link whose target was not read: what is behind it is in no change
  * to review, and a reader may never name it (a package config or an agent folder behind a folder
  * link out of the tree). `reported` holds the paths another reading already failed.
  */
@@ -190,6 +191,17 @@ export function changedLinkHits(
     else if (at.kind === 'unread')
       out.push({
         ...hit('unreadable-config', path, 1, 'link', `a link on the way was not read: ${at.link}`),
+        status,
+      });
+    else if (at.kind === 'submodule')
+      out.push({
+        ...hit(
+          'unreadable-config',
+          path,
+          1,
+          'link',
+          `the link leads into the submodule ${at.path}, whose files come from another repository`,
+        ),
         status,
       });
   }

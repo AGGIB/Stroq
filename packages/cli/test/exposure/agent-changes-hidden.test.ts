@@ -343,6 +343,21 @@ describe('a link the change adds or retargets', () => {
     expect(failing(agentChanges(dir, base).hits)).toEqual(['new unreadable-config tools/long']);
   });
 
+  it('fails one that leads into a submodule, whose files come from another repository', () => {
+    const dir = scratchRepo(dirs);
+    const commit = commitFiles(dir, { 'README.md': 'x\n' });
+    git(dir, 'update-index', '--add', '--cacheinfo', `160000,${commit},sub`);
+    git(dir, 'commit', '-q', '-m', 'c');
+    const base = git(dir, 'rev-parse', 'HEAD').trim();
+    stageLink(dir, 'tools/cfg', '../sub/config');
+    stageLink(dir, 'mod', 'sub');
+    git(dir, 'commit', '-q', '-m', 'c');
+    expect(failing(agentChanges(dir, base).hits).sort()).toEqual([
+      'new unreadable-config mod',
+      'new unreadable-config tools/cfg',
+    ]);
+  });
+
   posixOnly('passes one that leads to a file or a folder of the repository', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'docs/a.md': 'a\n' });
