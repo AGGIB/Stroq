@@ -21,6 +21,7 @@ import {
   scanFile,
   skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
+import { composePaths } from '../../src/exposure/agent-build-inputs.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
 import {
   baseGuardsOfText,
@@ -418,6 +419,7 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       ),
     ],
   ],
+  ['the paths a compose file names', (text) => composePaths(text)],
   [
     'the lines of a .gitattributes and a package manager config',
     (text) => [

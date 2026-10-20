@@ -1,3 +1,4 @@
+import { parseDocument } from 'yaml';
 import type { TaggedHit } from './agent-change.js';
 import {
   BUILD_CONTEXT,
@@ -6,6 +7,7 @@ import {
   BUILD_UNRESOLVED,
   COMPOSE_ANYWHERE,
   COMPOSE_FILE,
+  besideFile,
 } from './agent-editor.js';
 import { hit } from './agent-kinds.js';
 import { foldPath } from './agent-surface.js';
@@ -28,11 +30,78 @@ const MAX_PER_INPUT = 20;
 
 /** A file named like a compose file or a Dockerfile, by its folded name. */
 const COMPOSE_OR_DOCKERFILE =
-  /^(?:(?:docker-)?compose[^/]*\.ya?ml|dockerfile[^/]*|[^/]*\.dockerfile)$/;
+  /^(?:(?:docker-)?compose[^/]*\.ya?ml|dockerfile[^/]*|containerfile[^/]*|[^/]*\.(?:dockerfile|containerfile))$/;
+
+/** Keys of a compose file whose strings, wherever they are, are taken for paths. */
+const PATH_KEYS: ReadonlySet<string> = new Set([
+  'dockerfile',
+  'context',
+  'file',
+  'env_file',
+  'include',
+  'extends',
+  'additional_contexts',
+]);
+/** The most nodes of one compose file walked; past it, the file counts as one not read. */
+const MAX_COMPOSE_NODES = 100_000;
+/** The most compose files read in one check; past it, each one left counts as one not read. */
+export const MAX_COMPOSE_FILES = 16;
+/** How a compose file is read: merge keys, and a bounded number of aliases. */
+const COMPOSE_YAML = { merge: true, uniqueKeys: false, prettyErrors: false, maxAliasCount: 100 };
+
+/** Every string at or under `value`. */
+function stringsUnder(value: unknown, out: string[], budget: { left: number }): void {
+  const stack = [value];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    budget.left -= 1;
+    if (typeof next === 'string') out.push(next);
+    else if (typeof next === 'object' && next !== null) stack.push(...Object.values(next));
+  }
+}
+
+/**
+ * The paths a compose file names, read without understanding its services: every string under a
+ * key of `PATH_KEYS`, anywhere, and each `dockerfile` joined to each `context` too, as compose
+ * reads a Dockerfile from its context. Undefined when the file does not read as YAML, or is past
+ * the bound.
+ */
+export function composePaths(text: string): readonly string[] | undefined {
+  let value: unknown;
+  try {
+    const doc = parseDocument(text, COMPOSE_YAML);
+    if (doc.errors.length > 0) return undefined;
+    value = doc.toJS({ maxAliasCount: 100 });
+  } catch {
+    return undefined;
+  }
+  const named: string[] = [];
+  const dockerfiles: string[] = [];
+  const contexts: string[] = [];
+  const budget = { left: MAX_COMPOSE_NODES };
+  const stack = [value];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    budget.left -= 1;
+    if (budget.left < 0) return undefined;
+    if (typeof next !== 'object' || next === null) continue;
+    for (const [key, child] of Object.entries(next)) {
+      if (PATH_KEYS.has(key)) {
+        const found: string[] = [];
+        stringsUnder(child, found, budget);
+        named.push(...found);
+        if (key === 'dockerfile') dockerfiles.push(...found);
+        if (key === 'context') contexts.push(...found);
+      }
+      if (typeof child === 'object' && child !== null) stack.push(child);
+    }
+  }
+  if (budget.left < 0) return undefined;
+  const joined = contexts.flatMap((c) => dockerfiles.map((d) => `${c}/${d}`));
+  return [...new Set([...named, ...joined])];
+}
 
 /** One thing a dev container is built from: what it is, its path, and the dev container's file. */
 interface Input {
-  readonly kind: 'folder' | 'file' | 'names';
+  readonly kind: 'folder' | 'file' | 'compose' | 'names';
   readonly path: string;
   readonly devcontainer: string;
 }
@@ -40,7 +109,7 @@ interface Input {
 const KIND_OF: Readonly<Record<string, Input['kind']>> = {
   [BUILD_CONTEXT]: 'folder',
   [BUILD_FILE]: 'file',
-  [COMPOSE_FILE]: 'file',
+  [COMPOSE_FILE]: 'compose',
   [COMPOSE_ANYWHERE]: 'names',
 };
 
@@ -82,6 +151,7 @@ export function buildInputChanges(
   found: readonly TaggedHit[],
   changed: ReadonlyMap<string, Changed>,
   view: TreeView,
+  readText: (paths: readonly string[]) => ReadonlyMap<string, string>,
 ): TaggedHit[] {
   const inputs: Input[] = found.flatMap((h) => {
     const kind = h.kind === 'devcontainer-setting' ? KIND_OF[h.name] : undefined;
@@ -114,6 +184,7 @@ export function buildInputChanges(
         status: 'changed',
       });
   };
+  const composes: { input: Input; target: string }[] = [];
   for (const input of inputs) {
     if (input.kind === 'names') {
       const named = touched.filter((t) => COMPOSE_OR_DOCKERFILE.test(baseName(t.folded)));
@@ -130,6 +201,7 @@ export function buildInputChanges(
     for (const link of links)
       if (changed.has(link)) fails(link, input.devcontainer, changed.get(link));
     const folded = foldPath(target);
+    if (input.kind === 'compose' && at.kind === 'blob') composes.push({ input, target });
     if (at.kind === 'blob') {
       failsEach(
         input,
@@ -145,5 +217,36 @@ export function buildInputChanges(
       touched.filter((t) => prefix === '' || t.folded.startsWith(prefix)),
     );
   }
+  // What each compose file names, from its folder as named and as found through links. One that
+  // was not read, or does not read as YAML, could name anything: every change counts.
+  const texts = readText(composes.slice(0, MAX_COMPOSE_FILES).map((c) => c.target));
+  composes.forEach(({ input, target }, i) => {
+    const text = i < MAX_COMPOSE_FILES ? texts.get(target) : undefined;
+    const paths = text === undefined ? undefined : composePaths(text);
+    if (paths === undefined) {
+      failsEach(input, `the repository, as ${target} could not be read`, touched);
+      return;
+    }
+    const places = new Set(
+      [input.path, target].flatMap((from) =>
+        paths.flatMap((p) => {
+          if (p.includes('://')) return [];
+          const path = besideFile(from, p);
+          if (path === undefined) return [];
+          const at = resolve(path === '.' ? '' : path, view);
+          return at.kind === 'blob' || at.kind === 'folder' ? [path, at.path] : [path];
+        }),
+      ),
+    );
+    for (const place of places) {
+      const f = foldPath(place);
+      const prefix = place === '' || place === '.' ? '' : `${f}/`;
+      failsEach(
+        input,
+        place,
+        touched.filter((t) => prefix === '' || t.folded === f || t.folded.startsWith(prefix)),
+      );
+    }
+  });
   return [...out.values()];
 }
