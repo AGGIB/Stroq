@@ -1,11 +1,13 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import { digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { foldName } from './git-dir-names.js';
 
 /**
  * Files that are not agent configs, whose lines a change can use to bring what an agent runs
  * without a config showing it: a `.gitattributes` line that has a checkout write other text than
- * git holds (a filter such as Git LFS, an encoding), and the line of an npm, yarn or bun config
- * that names the registry packages come from, so the next `npx` or install in the folder runs
- * other code. Each line is a hit of its own, compared with the base by its value.
+ * git holds (a filter such as Git LFS, an encoding), and any line of an npm, yarn or bun config,
+ * which can name the registry packages come from, the shell scripts run in, code node preloads or
+ * the program yarn itself is. Each line is a hit of its own, compared with the base by its value.
  *
  * Every step is a split or one pass over a line, so the work is linear in the text.
  */
@@ -17,20 +19,21 @@ const LINE_MAX = 512;
 
 type LineRule = (line: string) => AgentHit | undefined;
 
-/** The name of the file a rule reads, in lower case, and the rule. */
+/** The name of the file a rule reads, folded as a disk opens it, and the rule. */
 const RULES: ReadonlyMap<string, (path: string) => LineRule> = new Map([
   ['.gitattributes', checkoutFilter],
-  ['.npmrc', registry],
-  ['.yarnrc', registry],
-  ['.yarnrc.yml', registry],
-  ['.yarnrc.yaml', registry],
-  ['bunfig.toml', registry],
+  ['.npmrc', setting],
+  ['.yarnrc', setting],
+  ['.yarnrc.yml', setting],
+  ['.yarnrc.yaml', setting],
+  ['bunfig.toml', setting],
 ]);
 
-const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+/** The name a rule is chosen by: the last part of the path, folded as the most forgiving disk opens it. */
+const ruleName = (path: string): string => foldName(path.slice(path.lastIndexOf('/') + 1));
 
 /** Whether the lines of this file are read for what they change. */
-export const isLineFile = (path: string): boolean => RULES.has(baseName(path).toLowerCase());
+export const isLineFile = (path: string): boolean => RULES.has(ruleName(path));
 
 /** Attributes that make a checkout write other text than the blob git holds. */
 const REWRITES = /^(?:filter|working-tree-encoding)(?:=|$)/i;
@@ -48,30 +51,24 @@ function checkoutFilter(path: string): LineRule {
 }
 
 /**
- * A line of a package manager's config that names a registry or an address: `registry=`,
- * `@scope:registry=`, `npmRegistryServer:`, a scope table of bunfig. Only the key is kept, with a
- * digest of the line: the rest of the line can hold a token.
+ * A key for this run only: the value of a package manager's line is a digest under it, so two
+ * revisions compare within one check, while nothing printed can be matched with a guessed line
+ * elsewhere. Such a line can hold a token.
  */
-function registry(path: string): LineRule {
-  return (line) => {
-    if (!/registry/i.test(line) && !line.includes('://')) return undefined;
-    return hit(
-      'agent-api-redirect',
-      path,
-      1,
-      'package registry',
-      `${keyOf(line)} ${digestOf(line)}`,
-    );
-  };
-}
+const RUN_KEY = randomBytes(32);
+const keyed = (text: string): string =>
+  `keyed:${createHmac('sha256', RUN_KEY).update(text).digest('hex').slice(0, 16)}`;
 
-/** The key of a config line: what comes before `=`, `: ` or a blank, cut short. */
-function keyOf(line: string): string {
-  const ends = [line.indexOf('='), line.indexOf(': '), line.search(/\s/)].filter((i) => i > 0);
-  const end = ends.length === 0 ? line.length : Math.min(...ends);
-  const key = line.slice(0, Math.min(end, 64));
-  // A key with no `=` after it could be the token itself: only its length is kept then.
-  return line.includes('=') || line.includes(':') ? key : `(${key.length} characters)`;
+/** What a package manager's line is called: no word of the line itself is ever shown. */
+export const PACKAGE_SETTING = 'package manager setting';
+
+/**
+ * Any line of a package manager's config: none of its keys is harmless enough to pass unread
+ * (`registry`, `script-shell`, `node-options`, `yarnPath`, `plugins`, `preload` all run or fetch
+ * other code), and a line that does not parse is read the same way.
+ */
+function setting(path: string): LineRule {
+  return (line) => hit('agent-api-redirect', path, 1, PACKAGE_SETTING, keyed(line));
 }
 
 const bounded = (line: string): string =>
@@ -79,7 +76,8 @@ const bounded = (line: string): string =>
 
 /** The hits of one file's lines, with the line each is on. */
 export function lineHits(path: string, text: string): AgentHit[] {
-  const rule = RULES.get(baseName(path).toLowerCase())?.(path);
+  const name = ruleName(path);
+  const rule = RULES.get(name)?.(path);
   if (rule === undefined) return [];
   const hits: AgentHit[] = [];
   let left = 0;
@@ -91,9 +89,9 @@ export function lineHits(path: string, text: string): AgentHit[] {
     if (hits.length < MAX_LINES) hits.push({ ...found, line: i + 1 });
     else left += 1;
   });
-  if (left > 0)
-    hits.push(
-      hit('unreadable-config', path, 1, 'lines', `${left} more such lines (${digestOf(text)})`),
-    );
+  if (left > 0) {
+    const all = name === '.gitattributes' ? digestOf(text) : keyed(text);
+    hits.push(hit('unreadable-config', path, 1, 'lines', `${left} more such lines (${all})`));
+  }
   return hits;
 }

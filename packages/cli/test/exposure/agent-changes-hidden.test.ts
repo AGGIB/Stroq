@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
+import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import {
   commitFiles,
   git,
@@ -202,7 +203,7 @@ describe('a name that a disk opens as the name of an agent config', () => {
   });
 });
 
-describe('a package registry the change sets for the folder', () => {
+describe('a line the change adds to the config of a package manager', () => {
   it.each([
     ['.npmrc', '@stroq:registry=https://evil.invalid/\n'],
     ['.npmrc', 'registry = https://evil.invalid/\n'],
@@ -210,17 +211,48 @@ describe('a package registry the change sets for the folder', () => {
     ['.yarnrc', 'registry "https://evil.invalid"\n'],
     ['bunfig.toml', '[install]\nregistry = "https://evil.invalid"\n'],
     ['pkg/.npmrc', '@scope:registry=https://evil.invalid/\n'],
-  ])('fails %s naming a registry', (path, text) => {
+    ['.npmrc', 'script-shell=./evil.sh\n'],
+    ['.npmrc', 'node-options=--require ./evil.js\n'],
+    ['.npmrc', 'r\\egistry=https://evil.invalid/\n'],
+    ['.npmrc', '"registry"="https://evil.invalid/"\n'],
+    ['.yarnrc.yml', 'yarnPath: ./evil.cjs\n'],
+    ['.yarnrc.yml', 'plugins:\n  - path: ./evil.cjs\n'],
+    ['bunfig.toml', 'preload = ["./evil.ts"]\n'],
+    ['.NPMRC', 'registry=https://evil.invalid/\n'],
+    ['.npmrc.', 'registry=https://evil.invalid/\n'],
+    ['sub/.Yarnrc.YML', 'yarnPath: ./evil.cjs\n'],
+  ])('fails %s with %j', (path, text) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, { [path]: text });
     expect(failing(agentChanges(dir, base).hits)).toContain(`new agent-api-redirect ${path}`);
   });
 
-  it('does not fail a registry that was already there, or a line that names none', () => {
+  it('fails any line it adds, and not one that was already there or a comment', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.npmrc': 'registry=https://mirror.invalid/\n' });
-    commitFiles(dir, { '.npmrc': 'registry=https://mirror.invalid/\nfund=false\n' });
-    expect(failing(agentChanges(dir, base).hits)).toEqual([]);
+    commitFiles(dir, {
+      '.npmrc': '# a comment\n; another\nregistry=https://mirror.invalid/\nfund=false\n',
+    });
+    const hits = agentChanges(dir, base).hits.filter((h) => h.file === '.npmrc');
+    expect(hits.map((h) => `${h.status} ${h.line} ${isFailing(h, 'new')}`)).toEqual([
+      'present 3 false',
+      'new 4 true',
+    ]);
+  });
+
+  it('never shows the text of a line, which can hold a token', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    const secret = 'npm_AAAAbbbbCCCCddddEEEEffff0123456789';
+    commitFiles(dir, {
+      '.npmrc': `//registry.npmjs.org/:_authToken=${secret}\n${secret}\n${'x=1\n'.repeat(70)}`,
+    });
+    const hits = agentChanges(dir, base).hits.filter((h) => h.file === '.npmrc');
+    expect(hits.length).toBeGreaterThan(64);
+    const shown = JSON.stringify(hits.map((h) => [h.name, h.value, sentenceOf(h, plainQuote)]));
+    expect(shown).not.toContain(secret.slice(4, 20));
+    expect(shown).not.toContain('_authToken');
+    expect(shown).not.toContain('registry.npmjs.org');
   });
 });

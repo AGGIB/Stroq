@@ -2,6 +2,7 @@ import { showable } from '../install/inspect/safe-text.js';
 import { isFailing, startsWithoutAsking, type FailOn, type TaggedHit } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
+import { PACKAGE_SETTING } from './agent-lines.js';
 import { REVIEW } from './agent-run-files.js';
 
 /**
@@ -30,8 +31,9 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'agent-helper-command':
       return `${name} runs: ${value}`;
     case 'agent-api-redirect':
-      if (h.name === 'package registry')
-        return `names where npm, yarn, pnpm or bun fetch packages from, so the next npx or install in this folder can run other code: ${value}`;
+      // The line can hold a token: neither it nor anything of it is shown.
+      if (h.name === PACKAGE_SETTING)
+        return "is a line of a package manager's config, which can name where packages come from, the shell scripts run in or code that loads first, so the next npx, install or script in this folder can run other code (the line is not shown)";
       return /otel|telemetry/i.test(h.name)
         ? `${name} sends the agent's telemetry, which can hold your prompts, to: ${value}`
         : `${name} sends the agent's API traffic, and its key, to: ${value}`;
