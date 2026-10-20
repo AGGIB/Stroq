@@ -99,7 +99,11 @@ describe('the spellings a hook names its script by', () => {
           { 'tools/bin/git': '#!/bin/sh\nid\n', '.claude/x.sh': 'id\n' },
         ),
       ),
-    ).toEqual(['changed .claude/x.sh .claude/x.sh', 'new tools/bin/git tools/bin/git']);
+    ).toEqual([
+      'changed .claude/x.sh .claude/x.sh',
+      'changed .claude/x.sh .claude/x.sh',
+      'new tools/bin/git tools/bin/git',
+    ]);
   });
 
   // Read as text, a command names whatever its words name: a file a formatter is given, or one
@@ -354,14 +358,21 @@ describe('the labels in the values of tasks', () => {
     ],
   });
 
-  it('follows what a dependency or a per-system command runs, and no more', () => {
+  // `other.sh` fails too: the task runs code of the repository, which may load any code file.
+  it('follows what a dependency or a per-system command runs, and leaves data out', () => {
     expect(
       runFiles(
         change(
-          { '.vscode/tasks.json': tasks, 'f.js': '1\n', 'mac.sh': 'true\n', 'other.sh': 'true\n' },
-          { 'f.js': '2\n', 'mac.sh': 'id\n', 'other.sh': 'id\n' },
+          {
+            '.vscode/tasks.json': tasks,
+            'f.js': '1\n',
+            'mac.sh': 'true\n',
+            'other.sh': 'true\n',
+            'notes.md': '1\n',
+          },
+          { 'f.js': '2\n', 'mac.sh': 'id\n', 'other.sh': 'id\n', 'notes.md': '2\n' },
         ),
       ),
-    ).toEqual(['changed f.js f.js', 'changed mac.sh mac.sh']);
+    ).toEqual(['changed f.js f.js', 'changed mac.sh mac.sh', 'changed other.sh other.sh']);
   });
 });

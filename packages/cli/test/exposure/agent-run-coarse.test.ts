@@ -185,7 +185,7 @@ describe('what a change does to a file a command already there names', () => {
 });
 
 describe('a hook script that runs a tool by a bare word', () => {
-  it('lists a change to that tool’s config to review, as code the hook may load', () => {
+  it('fails a change to that tool’s config, as code the hook may load', () => {
     const hits = change(
       {
         '.claude/settings.json': hookSettings({ Stop: 'bash .claude/hooks/lint.sh' }),
@@ -196,7 +196,7 @@ describe('a hook script that runs a tool by a bare word', () => {
     );
     expect(
       hits.filter((h) => h.kind === 'agent-run-file-changed').map((h) => `${h.file} ${h.severity}`),
-    ).toEqual(['eslint.config.js warning']);
+    ).toEqual(['eslint.config.js error']);
   });
 });
 

@@ -1,5 +1,5 @@
-import { startsWithoutAsking, type ChangeStatus, type TaggedHit } from './agent-change.js';
-import { hit, type AgentKind, type Severity } from './agent-kinds.js';
+import type { ChangeStatus, TaggedHit } from './agent-change.js';
+import { hit, type AgentKind } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
 import { byPath } from './git-tree.js';
@@ -21,11 +21,13 @@ import { RUNNER_WORDS, SCRIPT_FILE, isRunnerFile, type RunnerContext } from './r
  * - a command whose reach is not written on its line (a variable, inline code, a test runner, a
  *   recipe of make, a program not known) fails on a change to any code, agent or runner file;
  * - a command that cannot be read (too long, not text) fails;
- * - any other code the change edits, while an entry runs code of the repository, is listed to
- *   review: a file the command runs may load it, and what a file loads is not read.
+ * - any other code the change edits, while an entry runs code of the repository, fails as well: a
+ *   file the command runs may load it, and what a file loads is not read.
  *
- * The author of the change writes both the commands and the paths, so the work is bounded, and a
- * check that stops at the bound fails rather than passes.
+ * Every such finding is an error, whatever the entry: a server of `.mcp.json` was approved by its
+ * name, and npm runs an install script without asking, so what they run is as serious as what a
+ * hook runs. The author of the change writes both the commands and the paths, so the work is
+ * bounded, and a check that stops at the bound fails rather than passes.
  */
 
 /** The kinds whose value is a command line, and what to call one in a sentence. */
@@ -73,8 +75,6 @@ export const MAX_COMMAND_CHARS = 64 * 1024;
 export const MAX_FILES_PER_ENTRY = 20;
 /** The most findings the reading makes in one check; past it, one failing finding says so. */
 export const MAX_RUN_HITS = 2_000;
-/** The most code files listed to review; past it, one more finding says how many more. */
-export const MAX_REVIEW_FILES = 50;
 /** The most work, in characters looked at, that one check spends on command lines. */
 export const RUN_LOOKUP_BUDGET = 64 * 1024 * 1024;
 /** The most characters of names looked for in all; a change with more fails as not compared. */
@@ -263,8 +263,6 @@ interface Judged {
   readonly unread?: string;
   /** The touched files it fails on, by index. */
   readonly fails: ReadonlySet<number>;
-  /** Whether it runs code of the repository, so that any other code change is listed to review. */
-  readonly runsRepoCode: boolean;
   readonly work: number;
   /** True when the budget ran out before the command was compared with every file. */
   readonly over?: boolean;
@@ -277,11 +275,9 @@ function judge(command: string, isEnv: boolean, index: Index, left: number): Jud
     return {
       unread: `it is ${command.length} characters long, past the ${MAX_COMMAND_CHARS} read`,
       fails,
-      runsRepoCode: true,
       work: 0,
     };
-  if (NOT_TEXT.test(command))
-    return { unread: 'it holds bytes that are not text', fails, runsRepoCode: true, work: 0 };
+  if (NOT_TEXT.test(command)) return { unread: 'it holds bytes that are not text', fails, work: 0 };
   const text = normalText(command);
   let work = command.length * 4;
   const name = (id: number): void => {
@@ -308,7 +304,7 @@ function judge(command: string, isEnv: boolean, index: Index, left: number): Jud
     }
     for (let i = 0; i < index.files.length; i += 1) {
       // Past what is left of the budget, the rest is not compared, and the check fails.
-      if (work > left) return { fails, runsRepoCode: true, work, over: true };
+      if (work > left) return { fails, work, over: true };
       for (const form of (index.files[i] as Touched).forms) {
         work += form.length + pattern.length;
         if (holdsInOrder(form, parts)) {
@@ -329,31 +325,29 @@ function judge(command: string, isEnv: boolean, index: Index, left: number): Jud
       (t) =>
         t.includes('/') || (t.startsWith('.') && t.length > 1) || /\.[a-z][\w-]{0,15}$/.test(t),
     );
-  index.files.forEach((f, i) => {
-    if ((runner && f.runner) || (open && (f.code || f.agent || f.runner))) fails.add(i);
-  });
+  // What a file of the repository loads is not read, so code it runs reaches every code file.
   const runsRepoCode =
     isEnv || runner || open || pathLike || reaches.some((r) => r === 'runs' || r === 'runner');
-  return { fails, runsRepoCode, work: work + index.files.length };
+  index.files.forEach((f, i) => {
+    if (
+      (runner && f.runner) ||
+      (open && (f.code || f.agent || f.runner)) ||
+      (runsRepoCode && f.code)
+    )
+      fails.add(i);
+  });
+  return { fails, work: work + index.files.length };
 }
 
-/** An entry's severity for what it runs: a hook's script fails, an ordinary server's is listed. */
-const severityOf = (h: TaggedHit): Severity =>
-  h.severity === 'error' || h.kind === 'agent-env' || startsWithoutAsking(h) ? 'error' : 'warning';
-
 /**
- * One finding per changed file that a present entry may run, as severe as the entry that runs
- * it; one finding per entry whose command could not be read; and, listed to review, the other
- * code the change edits while an entry runs code of the repository.
+ * One failing finding per changed file that a present entry may run, whatever the entry, and one
+ * per entry whose command could not be read.
  */
 export function runFileChanges(hits: readonly TaggedHit[], view: RunView): TaggedHit[] {
   const entries = hits.filter(isRunEntry);
   if (entries.length === 0 || view.touchedFiles.length === 0) return [];
   const index = indexTouched(view);
   const out = new Map<string, TaggedHit>();
-  /** The files some entry runs: listed as such, so not listed again to review. */
-  const named = new Set<number>();
-  const review = new Map<number, string>();
   const unreadable = (file: string, name: string, why: string): void => {
     out.set(`\0unread\0${file}\0${name}\0${why}`, {
       ...hit('unreadable-config', file, 1, name, why),
@@ -386,13 +380,11 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
       );
       continue;
     }
-    const severity = severityOf(h);
     const fails = [...judged.fails].sort((a, b) => a - b);
     for (const i of fails.slice(0, MAX_FILES_PER_ENTRY)) {
       const f = index.files[i] as Touched;
       out.set(`${f.path}\0${name}`, {
         ...hit('agent-run-file-changed', f.path, 1, name, f.path),
-        severity,
         status: f.status,
       });
     }
@@ -405,13 +397,7 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
           name,
           `${fails.length - MAX_FILES_PER_ENTRY} more files the change touched`,
         ),
-        severity,
         status: 'new',
-      });
-    for (const i of fails) named.add(i);
-    if (judged.runsRepoCode)
-      index.files.forEach((f, i) => {
-        if (f.code && !judged.fails.has(i) && !review.has(i)) review.set(i, name);
       });
     if (out.size > MAX_RUN_HITS) {
       const why = `the entries already there run more than ${MAX_RUN_HITS} files the change touched, so not all are listed`;
@@ -424,29 +410,5 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
       break;
     }
   }
-  const listed = [...review].filter(([i]) => !named.has(i));
-  for (const [i, name] of listed.slice(0, MAX_REVIEW_FILES)) {
-    const f = index.files[i] as Touched;
-    out.set(`\0review\0${f.path}`, {
-      ...hit('agent-run-file-changed', f.path, 1, name, REVIEW),
-      severity: 'warning',
-      status: f.status,
-    });
-  }
-  if (listed.length > MAX_REVIEW_FILES)
-    out.set('\0review\0more', {
-      ...hit(
-        'agent-run-file-changed',
-        (index.files[(listed[MAX_REVIEW_FILES] as [number, string])[0]] as Touched).path,
-        1,
-        'code the entries already there may load',
-        `${listed.length - MAX_REVIEW_FILES} more code files the change touched`,
-      ),
-      severity: 'warning',
-      status: 'new',
-    });
   return [...out.values()];
 }
-
-/** The value of a finding that lists code an entry may load, to review. */
-export const REVIEW = 'code an entry already there may load';

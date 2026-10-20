@@ -244,7 +244,7 @@ describe('what the file a hook runs imports, sources or calls', () => {
     expect(failsOn(hookRuns(command, files, edits), file)).toBe(true);
   });
 
-  it('lists to review a change the file a hook runs does not name', () => {
+  it('fails every code file the change edits that the file a hook runs does not name', () => {
     const hits = change(
       {
         '.claude/settings.json': hookSettings({ PostToolUse: 'python3 .claude/hooks/guard.py' }),
@@ -255,10 +255,10 @@ describe('what the file a hook runs imports, sources or calls', () => {
       },
       { 'src/json.py': '2\n', 'src/app.js': '2\n', 'docs/guide.md': '2\n' },
     );
-    expect(failing(hits)).toEqual([]);
-    expect(
-      hits.filter((h) => h.kind === 'agent-run-file-changed').map((h) => `${h.file} ${h.severity}`),
-    ).toEqual(['src/app.js warning', 'src/json.py warning']);
+    expect(failing(hits)).toEqual([
+      'changed agent-run-file-changed src/app.js',
+      'changed agent-run-file-changed src/json.py',
+    ]);
   });
 });
 
@@ -277,18 +277,21 @@ describe('a change that hits many entries already there', () => {
 });
 
 /**
- * What a file a hook runs loads in turn is not read: no language is parsed. A change to code
- * outside the folders the hook names is listed to review by its path, not failed. These were
- * failures while the check read imports, sources and calls; that reading is gone, so they are
- * warnings now, the one place the coarse reading is milder than the reading it replaced.
+ * What a file a hook runs loads in turn is not read: no language is parsed. So any code the
+ * change edits fails while an entry already there runs code of the repository, outside the
+ * folders the hook names too: nothing proves the file the hook runs does not load it.
  */
 describe('what the file a hook runs loads from outside the folders it names', () => {
-  const reviewed = (hits: readonly TaggedHit[]): string[] =>
-    hits
-      .filter((h) => h.kind === 'agent-run-file-changed' && h.severity === 'warning')
-      .map((h) => `${h.status} ${h.file}`);
-
   it.each([
+    [
+      'node scripts/guard.js',
+      {
+        'scripts/guard.js': "require('../lib/util.js');\n",
+        'lib/util.js': 'module.exports = 1;\n',
+      },
+      { 'lib/util.js': "require('child_process').execSync('id');\n" },
+      'lib/util.js',
+    ],
     [
       'node .claude/hooks/guard.js',
       {
@@ -320,13 +323,52 @@ describe('what the file a hook runs loads from outside the folders it names', ()
       { 'scripts/lib.sh': '2\n' },
       'scripts/lib.sh',
     ],
-  ])('`%s` lists %s to review', (command, files, edits, file) => {
+  ])('`%s` fails on %s', (command, files, edits, file) => {
     const hits = change(
       { '.claude/settings.json': hookSettings({ PostToolUse: command }), ...files },
       edits,
     );
-    expect(failing(hits)).toEqual([]);
-    expect(reviewed(hits)).toEqual([`changed ${file}`]);
+    expect(failing(hits)).toEqual([`changed agent-run-file-changed ${file}`]);
+    expect(hits.filter((h) => h.severity === 'warning')).toEqual([]);
+  });
+});
+
+/**
+ * An ordinary entry already there, an MCP server of `.mcp.json` or an install script, is only
+ * listed when a change adds it. What it runs is another matter: the host approved the server by
+ * its name and npm asks nothing, so an edit to the file it runs fails as one to a hook's script.
+ */
+describe('what an ordinary entry already there runs', () => {
+  it.each([
+    [
+      '.mcp.json',
+      JSON.stringify({ mcpServers: { lint: { command: 'node', args: ['tools/lint-mcp.js'] } } }),
+      'tools/lint-mcp.js',
+    ],
+    [
+      '.vscode/mcp.json',
+      JSON.stringify({ servers: { lint: { command: 'node', args: ['tools/lint-mcp.js'] } } }),
+      'tools/lint-mcp.js',
+    ],
+    [
+      'package.json',
+      JSON.stringify({ name: 'x', scripts: { postinstall: 'node scripts/post.js' } }),
+      'scripts/post.js',
+    ],
+    [
+      '.devcontainer/devcontainer.json',
+      JSON.stringify({ postCreateCommand: 'bash scripts/setup.sh' }),
+      'scripts/setup.sh',
+    ],
+  ])('fails an edit to the file %s runs', (config, text, file) => {
+    const hits = change(
+      { [config]: text, [file]: '1\n', 'lib/other.js': '1\n' },
+      { [file]: "require('child_process').execSync('id');\n", 'lib/other.js': '2\n' },
+    );
+    expect(failing(hits)).toEqual([
+      'changed agent-run-file-changed lib/other.js',
+      `changed agent-run-file-changed ${file}`,
+    ]);
   });
 });
 

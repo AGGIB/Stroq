@@ -3,7 +3,6 @@ import { isFailing, startsWithoutAsking, type FailOn, type TaggedHit } from './a
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 import { PACKAGE_SETTING } from './agent-lines.js';
-import { REVIEW } from './agent-run-files.js';
 
 /**
  * One plain sentence per finding, for every output of `stroq inspect`. Every name and value in
@@ -106,13 +105,9 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'config-submodule':
       return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
     case 'agent-run-file-changed':
-      if (/^\d+ more code files/.test(h.value))
-        return `${value}, which the entries already there may load`;
       if (/^\d+ more files/.test(h.value)) return `${name} may also run ${value}`;
-      if (h.value === REVIEW)
-        return `the ${name} runs code of this repository, and this change edits code it may load`;
       return h.value === h.file
-        ? `the ${name} may run this file: the command names it or a folder it is in, runs a tool that reads it, or does not say what it runs`
+        ? `the ${name} may run this file: the command names it or a folder it is in, runs a tool that reads it, runs code of this repository that may load it, or does not say what it runs`
         : `the ${name} may run ${value} of this file`;
   }
 }
