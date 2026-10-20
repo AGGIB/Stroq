@@ -5,6 +5,7 @@ import {
   headGuardsOfText,
   removedGuards,
 } from './agent-guards.js';
+import { BUILD_FILE, BUILD_FILE_CHANGED } from './agent-editor.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
@@ -316,6 +317,7 @@ function compare(top: string, base: string, head: string) {
   const hits = [
     ...found,
     ...runFileChanges(found, runs),
+    ...buildFileChanges(found, changed),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
@@ -327,6 +329,31 @@ function compare(top: string, base: string, head: string) {
   // A stable sort: each file's hits keep the order of their lines.
   const byFile = hits.sort((a, b) => byPath(a.file, b.file));
   return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };
+}
+
+/**
+ * A change to a file a dev container builds from (its Dockerfile, its compose files), the dev
+ * container new or not: what the container is built from changes though none of its keys does.
+ * Matched in any letter case, as a disk that folds case opens the file.
+ */
+function buildFileChanges(
+  found: readonly TaggedHit[],
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  const byName = new Map([...changed].map(([path, c]) => [path.toLowerCase(), [path, c] as const]));
+  const out = new Map<string, TaggedHit>();
+  for (const h of found) {
+    if (h.kind !== 'devcontainer-setting' || h.name !== BUILD_FILE) continue;
+    const touched = byName.get(h.value.toLowerCase());
+    if (touched === undefined) continue;
+    const [path, c] = touched;
+    out.set(`${path}\u0000${h.file}`, {
+      ...hit('devcontainer-setting', path, 1, BUILD_FILE_CHANGED, h.file),
+      severity: 'error',
+      status: c.status === 'A' ? 'new' : 'changed',
+    });
+  }
+  return [...out.values()];
 }
 
 /**

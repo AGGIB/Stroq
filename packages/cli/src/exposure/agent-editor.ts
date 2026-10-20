@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import {
@@ -298,7 +299,8 @@ function lifecycleText(value: unknown): string | undefined {
 
 /**
  * The keys of a dev container that give it this machine's files, devices or powers: what its
- * commands then reach. Each fails unless what it holds is proven to stay inside.
+ * commands then reach. Each is an error wherever it is, whatever it holds: a mount or a `docker
+ * run` option is not parsed to prove it stays inside.
  */
 export const DEVCONTAINER_ACCESS_KEYS = [
   'mounts',
@@ -311,101 +313,88 @@ export const DEVCONTAINER_ACCESS_KEYS = [
 /** What a dev container builds in from elsewhere: listed, like a build step. */
 export const DEVCONTAINER_FEATURES = 'features';
 
-/** `docker run` options that give a container nothing of this machine, with and without a value. */
-const PLAIN_RUN_FLAGS: ReadonlySet<string> = new Set([
-  '--init',
-  '--rm',
-  '-i',
-  '-t',
-  '-it',
-  '--tty',
-]);
-const PLAIN_RUN_OPTIONS: ReadonlySet<string> = new Set([
-  '--name',
-  '--hostname',
-  '--shm-size',
-  '--label',
-  '--memory',
-  '--cpus',
-]);
-
-/** Whether every `runArgs` word is a plain flag, or a plain option with its value. */
-function runArgsStayInside(value: unknown): boolean {
-  if (!Array.isArray(value)) return false;
-  for (let i = 0; i < value.length; i += 1) {
-    const arg = value[i];
-    if (typeof arg !== 'string') return false;
-    if (PLAIN_RUN_FLAGS.has(arg)) continue;
-    const eq = arg.indexOf('=');
-    if (PLAIN_RUN_OPTIONS.has(eq === -1 ? arg : arg.slice(0, eq))) {
-      if (eq === -1) i += 1;
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
-/** The fields of a mount, from `source=...,target=...,type=...` or an object. */
-function mountFields(mount: unknown): { source: string; type: string } | undefined {
-  if (typeof mount === 'string') {
-    const fields = new Map<string, string>();
-    for (const part of mount.split(',')) {
-      const eq = part.indexOf('=');
-      if (eq !== -1) fields.set(part.slice(0, eq).trim().toLowerCase(), part.slice(eq + 1).trim());
-    }
-    return {
-      source: fields.get('source') ?? fields.get('src') ?? '',
-      type: fields.get('type') ?? '',
-    };
-  }
-  if (!isPlainObject(mount)) return undefined;
-  const source = argText(own(mount, 'source')) ?? argText(own(mount, 'src')) ?? '';
-  return { source, type: argText(own(mount, 'type')) ?? '' };
-}
-
-const WORKSPACE = '${localWorkspaceFolder}';
+/** The one top-level key that only names the container. */
+const COSMETIC_KEY = 'name';
+/** What a hit for a file the container builds from is named, and one for a change to that file. */
+export const BUILD_FILE = 'build file';
+export const BUILD_FILE_CHANGED = 'build file changed';
 
 /**
- * Whether a mount is proven to give the container nothing of this machine but the workspace: a
- * named volume or a tmpfs, or a bind of the workspace or a folder in it.
+ * `customizations` without what only dresses the editor: the VS Code extensions and the JetBrains
+ * settings. Anything else in it (VS Code's `settings`, another tool's block) is a setting of what
+ * runs in the container. Undefined when nothing is left.
  */
-function mountStaysInside(mount: unknown): boolean {
-  const fields = mountFields(mount);
-  if (fields === undefined) return false;
-  const { source, type } = fields;
-  if (type === 'volume' || type === 'tmpfs') return !/[\\/$~.%]/.test(source);
-  if (source !== WORKSPACE && !source.startsWith(`${WORKSPACE}/`)) return false;
-  const rest = source.slice(WORKSPACE.length);
-  return !rest.includes('$') && !rest.split('/').includes('..');
+function customizationsThatMatter(value: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  const rest: Obj = {};
+  for (const [tool, block] of Object.entries(value)) {
+    if (tool === 'jetbrains') continue;
+    if (tool === 'vscode' && isPlainObject(block)) {
+      const { extensions: _extensions, ...other } = block;
+      if (Object.keys(other).length > 0) rest[tool] = other;
+      continue;
+    }
+    rest[tool] = block;
+  }
+  return Object.keys(rest).length === 0 ? undefined : rest;
 }
 
-/** Whether what an access key holds is proven to give the container nothing of this machine. */
-function staysInside(key: (typeof DEVCONTAINER_ACCESS_KEYS)[number], value: unknown): boolean {
-  if (key === 'mounts') return Array.isArray(value) && value.every(mountStaysInside);
-  if (key === 'workspaceMount') return mountStaysInside(value);
-  if (key === 'runArgs') return runArgsStayInside(value);
-  if (key === 'privileged') return value === false;
-  return Array.isArray(value) && value.length === 0;
+/** The repository path of a file a dev container at `path` names, or undefined out of it. */
+function besideFile(path: string, name: string): string | undefined {
+  const folder = posix.dirname(path);
+  const joined = posix.normalize(posix.join(folder === '.' ? '' : folder, name));
+  return joined === '..' || joined.startsWith('../') || posix.isAbsolute(name) ? undefined : joined;
 }
 
-function devcontainerAccess(f: JsonFile): AgentHit[] {
+/** The Dockerfile and the compose files a dev container builds from, as repository paths. */
+function buildFiles(f: JsonFile): string[] {
+  const build = ownObject(f.value, 'build');
+  const named = [
+    ...strings([own(f.value, 'dockerFile'), own(f.value, 'dockerfile')]),
+    ...(build === undefined ? [] : strings([own(build, 'dockerfile'), own(build, 'dockerFile')])),
+    ...(typeof own(f.value, 'dockerComposeFile') === 'string'
+      ? [own(f.value, 'dockerComposeFile') as string]
+      : strings(own(f.value, 'dockerComposeFile'))),
+  ];
+  return [...new Set(named.flatMap((name) => besideFile(f.path, name) ?? []))];
+}
+
+/**
+ * Every other key of a dev container, but its name: each decides what is built or what runs, so
+ * one a change adds or edits fails. The keys that give it this machine are errors wherever they
+ * are. `features` stays a command, since what it installs runs as one.
+ */
+function devcontainerSettings(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
-  for (const key of DEVCONTAINER_ACCESS_KEYS) {
-    if (!Object.hasOwn(f.value, key)) continue;
-    const value = f.value[key];
-    if (staysInside(key, value)) continue;
+  const commands: ReadonlySet<string> = new Set([
+    DEVCONTAINER_HOST_KEY,
+    ...DEVCONTAINER_KEYS,
+    DEVCONTAINER_FEATURES,
+    COSMETIC_KEY,
+  ]);
+  for (const [key, raw] of Object.entries(f.value)) {
+    if (commands.has(key)) continue;
+    const value = key === 'customizations' ? customizationsThatMatter(raw) : raw;
+    if (value === undefined) continue;
     const found = hit(
-      'devcontainer-command',
+      'devcontainer-setting',
       f.path,
       lineOf(f.text, [quoted(key)]),
       key,
-      boundedJson(value),
+      boundedJson(value, undefined, true),
     );
-    hits.push({ ...found, severity: 'error' });
+    const access = (DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(key);
+    hits.push(access ? { ...found, severity: 'error' } : found);
   }
-  const features = ownObject(f.value, DEVCONTAINER_FEATURES);
-  if (features !== undefined && Object.keys(features).length > 0)
+  for (const file of buildFiles(f))
+    hits.push(hit('devcontainer-setting', f.path, 1, BUILD_FILE, file));
+  return hits;
+}
+
+export function devcontainer(f: JsonFile): AgentHit[] {
+  const hits: AgentHit[] = devcontainerSettings(f);
+  const features = own(f.value, DEVCONTAINER_FEATURES);
+  if (features !== undefined && !(isPlainObject(features) && Object.keys(features).length === 0))
     hits.push(
       hit(
         'devcontainer-command',
@@ -415,14 +404,11 @@ function devcontainerAccess(f: JsonFile): AgentHit[] {
         boundedJson(features, undefined, true),
       ),
     );
-  return hits;
-}
-
-export function devcontainer(f: JsonFile): AgentHit[] {
-  const hits: AgentHit[] = devcontainerAccess(f);
   for (const key of [DEVCONTAINER_HOST_KEY, ...DEVCONTAINER_KEYS]) {
-    const value = lifecycleText(own(f.value, key));
-    if (value === undefined) continue;
+    const raw = own(f.value, key);
+    if (raw === undefined) continue;
+    // A value that is not a command this reads is reported as it is: the host may run it.
+    const value = lifecycleText(raw) ?? boundedJson(raw);
     const kind =
       key === DEVCONTAINER_HOST_KEY ? 'devcontainer-host-command' : 'devcontainer-command';
     hits.push(hit(kind, f.path, lineOf(f.text, [quoted(key)]), key, value));

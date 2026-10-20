@@ -55,6 +55,8 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
     'This file in an agent folder holds a NUL byte, so it is a binary file, which an agent does not read as instructions.',
   'devcontainer-host-command': WHY['devcontainer-host-command'] ?? '',
   'devcontainer-command': 'The dev container runs this command when it is created or started.',
+  'devcontainer-setting':
+    'This dev container setting, or a file it builds from, decides what the container is built from, what it gets of this machine, or what runs in it.',
   'package-script-agent-path':
     'npm runs this install script, and it names a file an agent or editor loads by itself.',
   'package-script': 'npm runs this script when the dependencies are installed.',

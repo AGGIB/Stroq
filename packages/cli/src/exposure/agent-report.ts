@@ -9,7 +9,7 @@ import {
 } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
-import { DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
+import { BUILD_FILE, BUILD_FILE_CHANGED, DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
 import { PACKAGE_SETTING } from './agent-lines.js';
 
 /**
@@ -171,9 +171,14 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
     case 'devcontainer-command':
       if (h.name === 'features')
         return `features adds code the dev container runs as root when it is built: ${value}`;
+      return `${name} runs in the dev container${shapeNote(h)}: ${value}`;
+    case 'devcontainer-setting':
+      if (h.name === BUILD_FILE) return `the dev container builds from ${value}`;
+      if (h.name === BUILD_FILE_CHANGED)
+        return `the dev container in ${value} builds from this file, and the change edits it`;
       if ((DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(h.name))
         return `${name} gives the dev container this machine's files, devices or powers, which its commands then reach: ${value}`;
-      return `${name} runs in the dev container${shapeNote(h)}: ${value}`;
+      return `${name} decides what the dev container is built from or how it runs: ${value}`;
     case 'package-script-agent-path':
       return `npm runs the ${name} script on install, and it names an agent config file: ${value}`;
     case 'package-script':

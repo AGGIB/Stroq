@@ -27,6 +27,7 @@ export const KIND_SEVERITY = {
   'binary-file': 'notice',
   'devcontainer-host-command': 'error',
   'devcontainer-command': 'warning',
+  'devcontainer-setting': 'warning',
   'package-script-agent-path': 'error',
   'package-script': 'warning',
   'nested-bare-repo': 'error',

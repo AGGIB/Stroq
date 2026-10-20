@@ -124,9 +124,9 @@ describe('what sends credentials out, or hands them to a container', () => {
       }),
     });
     expect(failing(agentChanges(dir, base).hits)).toEqual([
-      'new devcontainer-command .devcontainer/devcontainer.json mounts',
-      'new devcontainer-command .devcontainer/devcontainer.json runArgs',
-      'new devcontainer-command .devcontainer/devcontainer.json capAdd',
+      'new devcontainer-setting .devcontainer/devcontainer.json mounts',
+      'new devcontainer-setting .devcontainer/devcontainer.json runArgs',
+      'new devcontainer-setting .devcontainer/devcontainer.json capAdd',
       'new devcontainer-command .devcontainer/devcontainer.json features',
       'new devcontainer-command .devcontainer/devcontainer.json postCreateCommand',
       'new mcp-server .mcp.json leak',
@@ -134,7 +134,9 @@ describe('what sends credentials out, or hands them to a container', () => {
     ]);
   });
 
-  it('fails the features a change adds to a dev container', () => {
+  // A mount of the workspace or a volume, and plain `docker run` options, are not parsed to prove
+  // them harmless: they fail too.
+  it('fails the features, mounts and options a change adds to a dev container', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, {
@@ -148,6 +150,8 @@ describe('what sends credentials out, or hands them to a container', () => {
       }),
     });
     expect(failing(agentChanges(dir, base).hits)).toEqual([
+      'new devcontainer-setting .devcontainer/devcontainer.json mounts',
+      'new devcontainer-setting .devcontainer/devcontainer.json runArgs',
       'new devcontainer-command .devcontainer/devcontainer.json features',
     ]);
   });
