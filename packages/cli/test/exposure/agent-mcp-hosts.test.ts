@@ -52,17 +52,20 @@ describe('a server a change adds to a host that starts it without asking', () =>
     expect(failing(agentChanges(dir, base).hits)).toEqual(['changed agent-run-file-changed s.js']);
   });
 
+  // A host that asks first still starts the server on the first yes, and the shape of its command
+  // is no proof it is harmless: a new one fails there too.
   it.each([
     ['.mcp.json', servers('mcpServers')],
     ['.vscode/mcp.json', servers('servers')],
-  ])('lists a new server in %s to review, since its host asks first', (path, text) => {
+  ])('fails a new server in %s too, though its host asks first', (path, text) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, { [path]: text, 's.js': '1\n' });
     const hits = agentChanges(dir, base).hits;
-    expect(failing(hits)).toEqual([]);
-    expect(hits.map((h) => `${h.status} ${h.kind} ${h.severity}`)).toContain(
-      'new mcp-server warning',
+    expect(failing(hits)).toEqual([`new mcp-server ${path}`]);
+    const server = hits.find((h) => h.kind === 'mcp-server') as TaggedHit;
+    expect(sentenceOf(server, plainQuote)).toBe(
+      'new: MCP server x is new, and starts once its host is told yes, or at once if the settings approve it: node s.js',
     );
   });
 });

@@ -95,7 +95,12 @@ describe('Claude Code settings that approve or run code', () => {
     ]);
     const evil = hits.find((h) => h.name === 'evil') as TaggedHit;
     expect(sentence(evil, plainQuote)).toBe(
-      'new: MCP server evil starts without asking, since the settings approve it: npx -y evil-pkg@latest',
+      'new: MCP server evil is new, and starts once its host is told yes, or at once if the settings approve it: npx -y evil-pkg@latest',
+    );
+    // One that was there before and that the settings approve says so.
+    const docs = hits.find((h) => h.name === 'docs') as TaggedHit;
+    expect(sentence(docs, plainQuote)).toBe(
+      'MCP server docs starts without asking, since the settings approve it: node docs.js',
     );
   });
 

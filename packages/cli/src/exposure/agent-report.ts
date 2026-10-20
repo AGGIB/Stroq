@@ -1,5 +1,6 @@
 import { showable } from '../install/inspect/safe-text.js';
 import {
+  inAttackShape,
   isFailing,
   startsWithoutAsking,
   type ChangeStatus,
@@ -10,7 +11,6 @@ import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 import { DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
 import { PACKAGE_SETTING } from './agent-lines.js';
-import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
 
 /**
  * One plain sentence per finding, for every output of `stroq inspect`. Every name and value in
@@ -27,6 +27,13 @@ export const VALUE_MAX = 160;
 export const plainQuote: Quote = (text) => showable(text, VALUE_MAX) || '(empty)';
 
 const BINARY = 'a binary file (it holds a NUL byte), not read as instructions';
+
+/**
+ * Words for an entry in the shape of an attack. Only words: a change fails what it adds whatever
+ * its shape, and the shape is a heuristic that proves nothing harmless.
+ */
+const shapeNote = (h: AgentHit): string =>
+  inAttackShape(h) ? ', and it looks like it downloads and runs code, or sends a secret out' : '';
 
 /** What an allow rule, or a folder it adds, lets the agent do. */
 function grantOf(h: AgentHit): string {
@@ -105,8 +112,10 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       if (startsWithoutAsking(h))
         return `MCP server ${name} starts without asking once the folder is trusted, as this host starts every server of the list: ${value}`;
       if (h.status === 'changed')
-        return `MCP server ${name} now starts something else, under a name the host may have approved before: ${value}`;
-      return runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value)
+        return `MCP server ${name} now starts something else, under a name the host may have approved before${shapeNote(h)}: ${value}`;
+      if (h.status === 'new')
+        return `MCP server ${name} is new, and starts once its host is told yes, or at once if the settings approve it${shapeNote(h)}: ${value}`;
+      return inAttackShape(h)
         ? `MCP server ${name} downloads and runs code, or sends a secret out: ${value}`
         : `MCP server ${name} starts without asking, since the settings approve it: ${value}`;
     case 'editor-autorun-task':
@@ -129,11 +138,11 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         return `features adds code the dev container runs as root when it is built: ${value}`;
       if ((DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(h.name))
         return `${name} gives the dev container this machine's files, devices or powers, which its commands then reach: ${value}`;
-      return `${name} runs in the dev container: ${value}`;
+      return `${name} runs in the dev container${shapeNote(h)}: ${value}`;
     case 'package-script-agent-path':
       return `npm runs the ${name} script on install, and it names an agent config file: ${value}`;
     case 'package-script':
-      return `npm runs the ${name} script on install: ${value}`;
+      return `npm runs the ${name} script on install${shapeNote(h)}: ${value}`;
     case 'nested-bare-repo':
       return 'a bare git repository is committed here as plain files';
     case 'unreadable-config':

@@ -59,14 +59,18 @@ const BENIGN_ENV: ReadonlySet<string> = new Set([
 /** Whether an env variable that was already there is only a warning: one of the few benign names. */
 const warnsWhenPresent = (name: string): boolean => BENIGN_ENV.has(envNameOf(name).toUpperCase());
 
-/** Kinds that are ordinary in an honest repository, and an attack in some shapes. */
+/**
+ * Kinds that are ordinary in an honest repository, and an attack in some shapes: where no base
+ * proves one was there before (plain `stroq inspect`), one in such a shape fails. The shape only
+ * ever makes an entry fail; nothing here makes one milder.
+ */
 const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
   'package-script',
   'devcontainer-command',
   'mcp-server',
 ]);
-/** Kinds that are listed to review when a base proves they were there, and fail otherwise. */
-const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set(['agent-broad-allow']);
+/** Kinds that fail where no base proves they were there before. */
+const FAILS_WITHOUT_BASE: ReadonlySet<AgentKind> = new Set(['agent-broad-allow']);
 /**
  * A folder anyone on the machine can write, where an attacker can put the file a link reads: the
  * temporary folders, the lock and crash folders, and macOS's shared and cache folders. In any
@@ -109,13 +113,23 @@ export const inSharedFolder = (target: string): boolean =>
  */
 export type Against = 'compared' | 'none';
 
+/** Whether an entry is in the shape of an attack: it downloads and runs code, or sends a secret. */
+export const inAttackShape = (h: AgentHit): boolean =>
+  FAILS_IN_SHAPE.has(h.kind) && (runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value));
+
 /**
  * A hit's severity once it is known whether the change brought it. A link out of the repository
- * is an error either way. One a base proves was already there keeps its own, but for one of the
- * few benign env variables, which is a warning. Any other fails when it is an allow rule that
- * grants too much, a server whose host starts it without asking or whose command a change
- * replaces, and an install script, a dev container command or a server that downloads and runs
- * code, decodes and runs it, or sends credentials out. With no base, nothing is proven there.
+ * is an error either way.
+ *
+ * With a base, whatever a change adds or changes fails, whatever it is or looks like: a hook, a
+ * server, an install script, a dev container key, an allow rule. Only an instruction file, which
+ * runs nothing, stays a notice. One a base proves was already there keeps its own severity, but
+ * for one of the few benign env variables, which is a warning.
+ *
+ * With no base (plain `stroq inspect`), nothing is proven there before, and nothing is proven
+ * new either: each keeps its own severity, and fails when it is an allow rule that grants too
+ * much, a server whose host starts it without asking, or an install script, a dev container
+ * command or a server in the shape of an attack.
  */
 export function settle(
   h: AgentHit,
@@ -124,19 +138,15 @@ export function settle(
 ): TaggedHit {
   // What a link out of the repository reads is in no change to review, there before it or not.
   if (h.kind === 'config-link-outside') return { ...h, severity: 'error', status };
-  if (status === 'present' && against === 'compared')
+  if (against === 'none') {
+    const fails = FAILS_WITHOUT_BASE.has(h.kind) || startsWithoutAsking(h) || inAttackShape(h);
+    return fails ? { ...h, severity: 'error', status } : { ...h, status };
+  }
+  if (status === 'present')
     return h.kind === 'agent-env' && warnsWhenPresent(h.name)
       ? { ...h, severity: 'warning', status }
       : { ...h, status };
-  const fails =
-    FAILS_WHEN_NEW.has(h.kind) ||
-    startsWithoutAsking(h) ||
-    // A host keeps the servers it may start by their names: one approved before starts this now.
-    (h.kind === 'mcp-server' && status === 'changed') ||
-    (FAILS_IN_SHAPE.has(h.kind) &&
-      h.severity !== 'error' &&
-      (runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value)));
-  return fails ? { ...h, severity: 'error', status } : { ...h, status };
+  return h.severity === 'notice' ? { ...h, status } : { ...h, severity: 'error', status };
 }
 
 const withStatus = settle;

@@ -1,8 +1,9 @@
 /**
  * Whether a command line downloads code and runs it, or runs code it decodes or evaluates: the
- * shape of an attack rather than of a build step. An install script, a dev container command or
- * an MCP server is ordinary in an honest repository, so one that was already there is listed to
- * review; one a change adds in this shape fails (see `agent-change.ts`).
+ * shape of an attack rather than of a build step. It never makes an entry milder: with a base, a
+ * change fails whatever it adds, and this only words the finding; with none (plain `stroq
+ * inspect`), an install script, a dev container command or an MCP server in this shape fails
+ * where a plain one is listed (see `agent-change.ts`).
  *
  * A heuristic, not a shell parser: it errs toward the shape, and a reviewer reads what it finds.
  * Every pattern is anchored or bounded, so each test is linear in the length of the text.
@@ -70,8 +71,8 @@ const SECRET_VARIABLE =
  * Whether a command line, an address or a server's fields send something out: curl or wget given
  * a body, a program that only sends (`nc`, `scp`), the home folder or a credential file read
  * where the network is reached, or a variable that holds a secret put into what runs or where it
- * goes. An install script, a dev container command or a server in this shape fails when a change
- * brings it, as one that downloads and runs code does. A heuristic, linear in the text.
+ * goes. Used as `runsFetchedOrHiddenCode` is: only to fail an entry or to word a finding, never to
+ * pass one. A heuristic, linear in the text.
  */
 export function sendsSecrets(text: string): boolean {
   const network = NETWORK.test(text) || SENDER.test(text);
