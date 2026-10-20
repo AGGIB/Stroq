@@ -1,4 +1,5 @@
 import { mcpServerRunsCode } from '@stroq/core';
+import { ruleRunsAnything } from './allow-rules.js';
 import { isPlainObject } from '../commands/config-file.js';
 import { boundedJson, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
@@ -259,8 +260,8 @@ export const CODEX_ENV_PREFIX = 'shell_environment_policy.set.';
 /** The variable an env hit sets: its name, without the keys of the table it is in. */
 export const envNameOf = (name: string): string =>
   name.startsWith(CODEX_ENV_PREFIX) ? name.slice(CODEX_ENV_PREFIX.length) : name;
-/** An allow rule for the whole shell: `Bash`, or `Bash(...)` whose pattern is only a wildcard. */
-const WHOLE_SHELL = /^Bash(?:\((?:\*|:\*|\*\*| \*)\))?$/;
+/** The tool whose allow rules can hand the agent the whole shell (see `allow-rules.ts`). */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash']);
 
 /** The top-level keys named as helpers are, whose string Claude Code runs. */
 function helperKeys(f: JsonFile): AgentHit[] {
@@ -344,7 +345,9 @@ function approvedServers(f: JsonFile): AgentHit[] {
 /** Allow rules that hand the agent the whole shell, each spelling listed once. */
 function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
   const allow = permissions === undefined ? [] : strings(own(permissions, 'allow'));
-  const rules = new Set(allow.map((rule) => rule.trim()).filter((rule) => WHOLE_SHELL.test(rule)));
+  const rules = new Set(
+    allow.map((rule) => rule.trim()).filter((rule) => ruleRunsAnything(rule, SHELL_TOOLS)),
+  );
   return [...rules].map((rule) =>
     hit(
       'agent-broad-allow',

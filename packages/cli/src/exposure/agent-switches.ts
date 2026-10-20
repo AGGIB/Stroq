@@ -1,4 +1,5 @@
 import { isPlainObject } from '../commands/config-file.js';
+import { ruleRunsAnything } from './allow-rules.js';
 import {
   firstEntries,
   hookHits,
@@ -94,8 +95,8 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
   return hits;
 }
 
-/** A rule of Gemini's `tools.allowed` that lets every shell command run without asking. */
-const WHOLE_SHELL = /^(?:run_shell_command|ShellTool)(?:\((?:\*|)\))?$/;
+/** Gemini's shell tools, whose `tools.allowed` rules can let every command run without asking. */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['run_shell_command', 'shelltool']);
 
 /** Gemini's (and Qwen Code's) settings, in the nested shape and the older flat one. */
 export function geminiSwitches(f: JsonFile): AgentHit[] {
@@ -114,7 +115,7 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
     [['tools', 'allowed'], strings(own(tools, 'allowed'))],
     [['allowedTools'], strings(own(f.value, 'allowedTools'))],
   ] as const)
-    for (const rule of new Set(list.filter((r) => WHOLE_SHELL.test(r.trim()))))
+    for (const rule of new Set(list.filter((r) => ruleRunsAnything(r, SHELL_TOOLS))))
       add('agent-broad-allow', keys, rule);
   for (const [table, keys] of [
     [tools, ['tools', 'discoveryCommand']],
