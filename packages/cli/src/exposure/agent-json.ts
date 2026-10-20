@@ -139,18 +139,8 @@ interface PathNode {
 interface Pending {
   readonly node: unknown;
   readonly at: PathNode | undefined;
-  /** Inside a handler that names a command: its own fields, not a handler of their own. */
-  readonly inHandler?: boolean;
 }
 
-/** Keys whose value says when a hook runs, not what it runs: not a handler, whatever it holds. */
-const TRIGGER_KEYS: ReadonlySet<string> = new Set([
-  'when',
-  'matcher',
-  'matchers',
-  'filter',
-  'conditions',
-]);
 const keysOf = (at: PathNode | undefined): string[] => {
   const keys: string[] = [];
   for (let n = at; n !== undefined; n = n.up) keys.push(n.key);
@@ -170,14 +160,12 @@ export function hookEntries(
     visited += 1;
     if (visited > MAX_HOOK_NODES || entries.length > MAX_HOOKS)
       return { entries, cut: true, opaque };
-    const { node, at, inHandler = false } = next;
+    const { node, at } = next;
     if (typeof node !== 'object' || node === null) continue;
     const children: Pending[] = [];
-    let handler = false;
     for (const [key, child] of Object.entries(node)) {
       const command = commandKeys.has(key) ? commandText(child) : undefined;
       if (command !== undefined) {
-        handler = true;
         const keys = keysOf(at).filter((k) => !isIndex(k));
         const event = keys.filter((k) => k.toLowerCase() !== 'hooks').join('.');
         const runs = `${command}${otherFields(node as Obj, isHandlerLabel)}`;
@@ -186,22 +174,54 @@ export function hookEntries(
         children.push({ node: child, at: { key, up: at } });
       }
     }
-    // A handler with no command key this reads, nor anything under it that could hold one: a
-    // prompt, an agent, a tool call, or a type not known. Not a trigger, nor a command's fields.
-    if (
-      findOpaque &&
-      at !== undefined &&
-      !inHandler &&
-      !handler &&
-      !Array.isArray(node) &&
-      children.length === 0 &&
-      !TRIGGER_KEYS.has(at.key)
-    )
-      opaque.push(node);
     // Pushed last to first, so the file's first entry is the next one taken.
-    stack.push(...children.reverse().map((c) => ({ ...c, inHandler: inHandler || handler })));
+    stack.push(...children.reverse());
   }
-  return { entries, cut: false, opaque };
+  return { entries, cut: false, opaque: findOpaque ? opaqueNodes(value, commandKeys) : opaque };
+}
+
+/** Whether an object names a command by one of `keys`: a handler this reads. */
+const namesCommand = (node: Obj, keys: ReadonlySet<string>): boolean =>
+  Object.entries(node).some(([key, child]) => keys.has(key) && commandText(child) !== undefined);
+
+/**
+ * The handlers under a hooks value with no command key this reads. Every object is a handler
+ * unless it is a container: the hooks value itself (the event map), a list, a group whose own
+ * `hooks` key holds the handlers, or a map whose values are all lists or maps (a hook name above
+ * its events). A handler that names a command is read, with all its fields; one that does not
+ * fails, whatever fields it has. A hooks value with a `then` (Kiro's one hook to a file) is one
+ * handler, read by what its `then` names. Walked with a stack of its own, to a bound.
+ */
+function opaqueNodes(value: unknown, keys: ReadonlySet<string>): unknown[] {
+  const opaque: unknown[] = [];
+  if (isPlainObject(value) && Object.hasOwn(value, 'then')) {
+    const then = value['then'];
+    if (!(isPlainObject(then) && namesCommand(then, keys))) opaque.push(value);
+    return opaque;
+  }
+  const stack: { node: unknown; root: boolean }[] = [{ node: value, root: true }];
+  let visited = 0;
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    visited += 1;
+    if (visited > MAX_HOOK_NODES) break;
+    const { node, root } = next;
+    if (Array.isArray(node)) {
+      for (const child of node) stack.push({ node: child, root: false });
+      continue;
+    }
+    if (!isPlainObject(node)) continue;
+    const group = Object.hasOwn(node, 'hooks') && typeof node['hooks'] === 'object';
+    if (group && !root) {
+      stack.push({ node: node['hooks'], root: false });
+      continue;
+    }
+    if (namesCommand(node, keys)) continue;
+    const values = Object.values(node);
+    const container = root || values.every((v) => typeof v === 'object' && v !== null);
+    if (container) for (const child of values) stack.push({ node: child, root: false });
+    else opaque.push(node);
+  }
+  return opaque;
 }
 
 /** A failing entry for each handler with no command this reads, with a digest of what it holds. */

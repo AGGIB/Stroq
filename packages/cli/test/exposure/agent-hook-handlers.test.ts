@@ -56,3 +56,38 @@ describe('a hook handler with no command this reads', () => {
     ]);
   });
 });
+
+/**
+ * Under a hooks key, every object is a handler unless it is a container: the event map, a list, a
+ * group whose own `hooks` key holds the handlers, or a map whose values are all lists or maps. A
+ * handler with no command key this reads fails, whatever other fields it has: a `matcher` or
+ * `when` object or a list among them does not make it a container.
+ */
+describe('what makes an object a handler rather than a container', () => {
+  it.each([
+    { type: 'prompt', prompt: 'x', matcher: { tool: 'Bash' } },
+    { type: 'prompt', prompt: 'x', when: { event: 'stop' } },
+    { type: 'prompt', prompt: 'x', tags: ['a', 'b'] },
+    { type: 'agent', agent: 'x', options: { a: [1] } },
+  ])('fails %j', (handler) => {
+    const value = { hooks: { Stop: [{ hooks: [handler] }] } };
+    expect(kinds('.claude/settings.json', JSON.stringify(value))).toContain(
+      'unreadable-config hook not read error',
+    );
+  });
+
+  it('reads a hook name above the event, and a Kiro command with its trigger, as clean', () => {
+    const named = { hooks: { lint: { PostToolUse: [{ command: 'npm run lint' }] } } };
+    expect(kinds('.agents/hooks.json', JSON.stringify(named))).toEqual([
+      'agent-hook lint.PostToolUse error',
+    ]);
+    const kiro = {
+      name: 'x',
+      when: { type: 'fileEdited', patterns: ['**/*.ts'] },
+      then: { type: 'runCommand', command: 'npm test' },
+    };
+    expect(
+      kinds('.kiro/hooks/a.kiro.hook', JSON.stringify(kiro)).filter((k) => !k.endsWith('notice')),
+    ).toEqual(['agent-hook then error']);
+  });
+});
