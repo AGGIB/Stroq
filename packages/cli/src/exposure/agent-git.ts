@@ -13,7 +13,12 @@ import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
 import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
-import { changedLinkHits, packageConfigChanges, withAllLinks } from './package-configs.js';
+import {
+  MAX_CONFIGS_READ,
+  changedLinkHits,
+  packageConfigChanges,
+  withAllLinks,
+} from './package-configs.js';
 import { gitHookFileChanges, isGitConfigName } from './git-hook-files.js';
 import {
   MAX_FILE_BYTES,
@@ -330,13 +335,7 @@ function compare(top: string, base: string, head: string) {
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
     ...lineChanges(top, tree, changed),
-    ...packageConfigChanges(
-      tree,
-      linked(),
-      changed,
-      GIT_CAPS.steps,
-      readTexts(top, tree, sorted.filter((p) => isPackageConfig(p)).slice(0, MAX_GIT_CONFIGS)),
-    ),
+    ...packageConfigs(top, tree, sorted, changed, linked()),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
     ...hookFiles(top, tree, linked().view, changed, found),
@@ -547,6 +546,28 @@ const realOr = (path: string): string => {
     return path;
   }
 };
+
+/**
+ * The package manager configs a change reaches (see `package-configs.ts`), each config of the tree
+ * read for the paths it names, up to a bound: one that is a link, too large or past the bound is
+ * counted as not read, and fails.
+ */
+function packageConfigs(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  sorted: readonly string[],
+  changed: ReadonlyMap<string, Changed>,
+  linked: ReturnType<typeof withAllLinks>,
+): TaggedHit[] {
+  const all = sorted.filter((p) => isPackageConfig(p));
+  const readable = all.filter((p) => {
+    const e = entryAt(tree, p);
+    return isBlob(e) && e.size <= MAX_FILE_BYTES;
+  });
+  const texts = readTexts(top, tree, readable.slice(0, MAX_CONFIGS_READ));
+  const unread = all.filter((p) => !texts.has(p));
+  return packageConfigChanges(tree, linked, changed, GIT_CAPS.steps, texts, unread);
+}
 
 /** The files of the change that git runs as hooks (see `git-hook-files.ts`). */
 function hookFiles(

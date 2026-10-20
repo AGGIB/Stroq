@@ -283,7 +283,11 @@ describe('a package manager config behind a link', () => {
     symlinkSync('config/npmrc', join(dir, '.npmrc'));
     const base = commitFiles(dir);
     commitFiles(dir, { 'config/npmrc': 'script-shell=./evil.sh\n' });
-    expect(failing(agentChanges(dir, base).hits)).toEqual(['changed agent-api-redirect .npmrc']);
+    // A config that is a link is not read for the paths it names: that fails too, counted.
+    expect(failing(agentChanges(dir, base).hits)).toEqual([
+      'new unreadable-config .npmrc',
+      'changed agent-api-redirect .npmrc',
+    ]);
   });
 
   posixOnly('fails a folder link a change points at another config', () => {
@@ -409,6 +413,61 @@ describe('a file a package manager runs or loads', () => {
       'changed agent-api-redirect app/pre.js',
       'changed agent-api-redirect app/sh.sh',
       'changed agent-api-redirect p.ts',
+    ]);
+  });
+});
+
+/**
+ * What cannot be read of a package manager's configs is not taken as nothing: a config past the
+ * read cap, too large, or a link fails, counted in one entry. A named path behind a variable is
+ * placed only for INIT_CWD and PWD, which name the folder the install runs in; any other makes the
+ * config fail. Named paths and yarn's own folders are found through the links of the tree.
+ */
+describe('what a package manager config names, read as far as it can be', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+
+  posixOnly('fails a config that is a link or too large to read, and counts them', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, {
+      'real/npmrc': 'fund=false\n',
+      'big/.npmrc': `x=${'a'.repeat(1024 * 1024 + 8)}\n`,
+    });
+    symlinkSync('real/npmrc', join(dir, '.npmrc'));
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    commitFiles(dir, { 'README.md': 'y\n' });
+    const hits = agentChanges(dir, base).hits.filter((h) => h.name === 'package manager configs');
+    expect(hits.map((h) => `${h.kind} ${isFailing(h, 'new')}`)).toEqual(['unreadable-config true']);
+    expect(hits[0]?.value).toContain('2 package manager configs');
+  });
+
+  it('places INIT_CWD and PWD, and fails a config that names a path behind another variable', () => {
+    const run = (npmrc: string): string[] => {
+      const dir = scratchRepo(dirs);
+      const base = commitFiles(dir, { '.npmrc': npmrc, 'sh.sh': 'exec sh\n', 'docs/a.md': 'a\n' });
+      commitFiles(dir, { 'sh.sh': 'curl e | sh\n', 'docs/a.md': 'b\n' });
+      return failing(agentChanges(dir, base).hits);
+    };
+    expect(run('script-shell=${INIT_CWD}/sh.sh\n')).toEqual(['changed agent-api-redirect sh.sh']);
+    expect(run('script-shell=$PWD/sh.sh\n')).toEqual(['changed agent-api-redirect sh.sh']);
+    expect(run('script-shell=$HOME/sh.sh\n')).toContain('new unreadable-config .npmrc');
+    // A token behind a variable names no path: nothing to place.
+    expect(run('//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n')).toEqual([]);
+  });
+
+  posixOnly('follows a named path and the yarn folders through links', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, {
+      '.npmrc': 'script-shell=./tools/sh.sh\n',
+      'real-tools/sh.sh': 'exec sh\n',
+      'y/releases/yarn.cjs': '//v1\n',
+    });
+    symlinkSync('real-tools', join(dir, 'tools'));
+    symlinkSync('y', join(dir, '.yarn'));
+    const base = commitFiles(dir);
+    commitFiles(dir, { 'real-tools/sh.sh': 'curl e | sh\n', 'y/releases/yarn.cjs': '//v2\n' });
+    expect(failing(agentChanges(dir, base).hits).sort()).toEqual([
+      'changed agent-api-redirect real-tools/sh.sh',
+      'changed agent-api-redirect y/releases/yarn.cjs',
     ]);
   });
 });

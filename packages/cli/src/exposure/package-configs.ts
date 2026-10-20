@@ -14,6 +14,8 @@ import { SYMLINK, linkMatters, resolve, under, type TreeView } from './git-tree.
  * behind a link that was not read, that leads nowhere or out of the repository, fails too.
  */
 
+/** The most package manager configs read for the paths they name. */
+export const MAX_CONFIGS_READ = 64;
 /** A link's target is a path; one longer than a path can be is not a link a checkout makes. */
 const MAX_LINK_BYTES = 4096;
 /** What a byte that is not UTF-8 decodes to. */
@@ -88,52 +90,125 @@ const unreadable = (path: string, why: string): TaggedHit => ({
 const YARN_CODE = /(?:^|\/)\.yarn\/(?:releases|plugins)\//;
 /** A word of a config that looks like a path: with a `/`, from a `.`, or with an extension. */
 const PATHLIKE = /^(?:\.{1,2}\/|[^/][^:]*\/|[^@/:]+\.[A-Za-z0-9]{1,6}$)/;
+/** The variables a path may start with that name the folder an install runs in. */
+const KNOWN_PREFIX = /^\$(?:INIT_CWD|PWD)(?![A-Za-z0-9_])\/*/;
+
+interface Named {
+  /** The paths named, from the config's folder and, for INIT_CWD and PWD, from the top. */
+  readonly paths: readonly string[];
+  /** True when a path is behind a variable this cannot place. */
+  readonly unplaced: boolean;
+}
 
 /**
  * Every word of a package manager's config that looks like a path, from the config's folder: what
  * `yarnPath`, `plugins`, `script-shell`, `preload` or `node-options` name, taken without reading
- * which key a word is the value of. An address, an absolute path and `~` are left out.
+ * which key a word is the value of. An address, an absolute path and `~` are left out. A path
+ * behind `$INIT_CWD` or `$PWD` is placed from the config's folder and from the top; one behind any
+ * other variable is not placed, and the config fails.
  */
-function namedPaths(config: string, text: string): string[] {
+function namedPaths(config: string, text: string): Named {
   const folder = posix.dirname(config) === '.' ? '' : posix.dirname(config);
-  return text.split(/[\s"'=,;\[\]{}()]+/).flatMap((word) => {
-    if (word === '' || word.includes('://') || word.startsWith('/') || word.startsWith('~'))
-      return [];
-    if (!PATHLIKE.test(word)) return [];
-    const path = posix.normalize(posix.join(folder, word)).replace(/\/+$/, '');
-    return path === '.' || path === '..' || path.startsWith('../') ? [] : [path];
-  });
+  const paths: string[] = [];
+  let unplaced = false;
+  const place = (from: string, word: string): void => {
+    const path = posix.normalize(posix.join(from, word)).replace(/\/+$/, '');
+    if (path !== '.' && path !== '..' && !path.startsWith('../')) paths.push(path);
+  };
+  // `${NAME}` is read as `$NAME`; any other `${...}` (a default, a slice) is not placed.
+  if (/\$\{(?![A-Za-z_][A-Za-z0-9_]*\})/.test(text)) unplaced = true;
+  const words = text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '$$$1');
+  for (const raw of words.split(/[\s"'=,;\[\]{}()]+/)) {
+    if (raw === '' || raw.includes('://') || raw.startsWith('/') || raw.startsWith('~')) continue;
+    const known = KNOWN_PREFIX.test(raw);
+    const word = known ? `./${raw.replace(KNOWN_PREFIX, '')}` : raw;
+    if (word.includes('$')) {
+      unplaced ||= /\/|\.[A-Za-z0-9]{1,6}$/.test(word);
+      continue;
+    }
+    if (!PATHLIKE.test(word)) continue;
+    place(folder, word);
+    if (known && folder !== '') place('', word);
+  }
+  return { paths, unplaced };
 }
 
 /** What a hit for a file a package manager runs or loads is named. */
 export const PACKAGE_RUNS = 'package manager runs it';
+/** What the hit for the configs that were not read is named. */
+export const PACKAGE_UNREAD = 'package manager configs';
+
+const unreadHit = (path: string, name: string, why: string): TaggedHit => ({
+  ...hit('unreadable-config', path, 1, name, why),
+  status: 'new',
+});
 
 /**
  * A failing entry for each file the change adds or edits that a package manager runs or loads:
- * under `.yarn/releases` or `.yarn/plugins`, or a path a config of `texts` names, or under it.
+ * under `.yarn/releases` or `.yarn/plugins`, or a path a config of `texts` names, or under it,
+ * each also found through the links of the tree; and one for a link on the way that was not read,
+ * or a config that names a path this cannot place.
  */
 function packageRunChanges(
   texts: ReadonlyMap<string, string>,
   changed: ReadonlyMap<string, Changed>,
+  view: TreeView,
 ): TaggedHit[] {
-  const named = [...texts].flatMap(([config, text]) =>
-    namedPaths(config, text).map((path) => [foldPath(path), config] as const),
-  );
-  return [...changed].flatMap(([path, c]): TaggedHit[] => {
-    if (c.status === 'D') return [];
+  const out: TaggedHit[] = [];
+  /** Folded folders or files, and the config (or `yarn`) that runs what is in them. */
+  const places: [string, string][] = [];
+  const follow = (path: string, by: string): void => {
+    places.push([foldPath(path), by]);
+    const at = resolve(path, view);
+    if (at.kind === 'unread') {
+      out.push(
+        unreadHit(
+          by === 'yarn' ? path : by,
+          'link',
+          `a link on the way to ${path}, which a package manager runs, was not read: ${at.link}`,
+        ),
+      );
+      return;
+    }
+    if (at.kind === 'none') return;
+    for (const link of at.links) if (changed.has(link)) places.push([foldPath(link), by]);
+    if (at.kind === 'blob' || at.kind === 'folder') places.push([foldPath(at.path), by]);
+  };
+  for (const [config, text] of texts) {
+    const named = namedPaths(config, text);
+    for (const path of named.paths) follow(path, config);
+    if (named.unplaced)
+      out.push(
+        unreadHit(
+          config,
+          'named path',
+          'it names a path behind a variable other than INIT_CWD or PWD, which cannot be placed, so what the package manager runs is not known',
+        ),
+      );
+  }
+  // Each .yarn folder of the tree, by its own path, links included.
+  const yarns = new Set<string>();
+  for (const path of view.sorted) {
+    const parts = path.split('/');
+    parts.forEach((part, i) => {
+      if (foldPath(part) === '.yarn') yarns.add(parts.slice(0, i + 1).join('/'));
+    });
+  }
+  for (const dir of yarns)
+    for (const sub of ['releases', 'plugins']) follow(`${dir}/${sub}`, 'yarn');
+  for (const [path, c] of changed) {
+    if (c.status === 'D') continue;
     const folded = foldPath(path);
     const by = YARN_CODE.test(folded)
       ? 'yarn'
-      : named.find(([p]) => folded === p || folded.startsWith(`${p}/`))?.[1];
-    return by === undefined
-      ? []
-      : [
-          {
-            ...hit('agent-api-redirect', path, 1, PACKAGE_RUNS, by),
-            status: c.status === 'A' ? 'new' : 'changed',
-          },
-        ];
-  });
+      : places.find(([p]) => folded === p || folded.startsWith(`${p}/`))?.[1];
+    if (by !== undefined)
+      out.push({
+        ...hit('agent-api-redirect', path, 1, PACKAGE_RUNS, by),
+        status: c.status === 'A' ? 'new' : 'changed',
+      });
+  }
+  return out;
 }
 
 /** The failing entries for the package manager configs a change reaches, by path or by link. */
@@ -143,9 +218,22 @@ export function packageConfigChanges(
   changed: ReadonlyMap<string, Changed>,
   maxSteps: number,
   texts: ReadonlyMap<string, string> = new Map(),
+  unreadConfigs: readonly string[] = [],
 ): TaggedHit[] {
   const out = new Map<string, TaggedHit>();
-  for (const h of packageRunChanges(texts, changed)) out.set(`\u0000runs\u0000${h.file}`, h);
+  for (const h of packageRunChanges(texts, changed, linked.view))
+    out.set(`\u0000runs\u0000${h.file}\u0000${h.name}`, h);
+  // A config not read (a link, too large, past the cap) could name anything: it fails, counted.
+  const firstUnread = unreadConfigs[0];
+  if (firstUnread !== undefined)
+    out.set(
+      '\u0000unread configs',
+      unreadHit(
+        firstUnread,
+        PACKAGE_UNREAD,
+        `${unreadConfigs.length} package manager configs were not read (a link, too large, or past the ${MAX_CONFIGS_READ} read), so what they name is not known`,
+      ),
+    );
   const fails = (path: string, isNew: boolean, what: string): void => {
     if (!out.has(path))
       out.set(path, {
