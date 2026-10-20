@@ -10,24 +10,25 @@ import type { RepoExecHit } from './repo-surface.js';
  * script tells husky to use. Each file is taken as one in `.git/hooks` is (see `hookOutcome`): a
  * file that is not a commit hook, or a commit hook that downloads and runs code, runs hidden code
  * or sends a secret out, fails before anyone commits, and so does one that is a link, cannot be
- * read, or comes past the files read. Any other is listed. A script that mentions
- * `core.hooksPath`, its quotes and backslashes taken off, and points it at no folder this can
- * place (a `$`, a quote around a blank, `~`, an absolute path, a key spelled with quotes) fails,
- * and so does one whose `git config` or `git -c` key the shell fills in (`$`, a backquote), and
- * one that mentions husky with a word after it (quotes and backslashes taken off) more often than
- * this places a folder husky is told to use, an option that takes no folder aside.
+ * read, or comes past the files read. Any other is listed.
+ *
+ * A script fails when it may point git at hooks in a folder this cannot place: one that mentions
+ * `core.hooksPath`, its quotes and backslashes taken off, more often than a plain
+ * `git config core.hooksPath <folder>` places one; one that runs `git config` or `git -c` (or a
+ * command the shell fills in) and holds a `$` or a backquote anywhere, since the shell may build
+ * the key or the folder; one that tells husky a folder this does not place; and one that mentions
+ * husky across more than one line. Each is one coarse reading, so no two can disagree.
  */
 
 /** What sets `core.hooksPath` in a script: `git config core.hooksPath <folder>`. */
 const SETS_HOOKS_PATH = /core\.hookspath["']?(?:\s*=\s*|\s+)([^\s;&|)]+)/gi;
 /**
- * What tells husky which folder to use: `husky <folder>` or `husky install <folder>`, its program
- * with a path in front (`./node_modules/.bin/husky`) or a version after (`husky@9`).
+ * What tells husky which folder to use, in a script with its quotes and backslashes taken off:
+ * `husky <folder>` or `husky install <folder>`, its program with a path in front
+ * (`./node_modules/.bin/husky`) or a version after (`husky@9`), never across a line.
  */
 const HUSKY_FOLDER =
-  /(?:^|[\s;&|(])(?:[^\s;&|()'"\\]*\/)?husky(?:@[^\s;&|()'"\\]*)?(?:\s+install)?\s+([^\s;&|)]+)/gi;
-/** Every mention of husky with a word after it, in a script with its quotes and `\` taken off. */
-const MENTIONS_HUSKY = /(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?husky(?:@[^\s;&|()]*)?[ \t]+([^\s;&|()]+)/g;
+  /(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?husky(?:@[^\s;&|()]*)?[ \t]+(?:install[ \t]+)?([^\s;&|()]+)/gi;
 /** Words husky takes that name no folder. */
 const HUSKY_FLAGS: ReadonlySet<string> = new Set(['-h', '--help', '-v', '--version']);
 /** A mention of the key, however it is spelled, once quotes and backslashes are taken off. */
@@ -36,31 +37,26 @@ const MENTIONS_HOOKS_PATH = /hookspath/g;
 const COMMANDS = /[;&|\n\r()]/;
 /** What a shell fills in at run time: a variable, a substitution. */
 const FILLED_IN = /[$`]/;
+/** A line break, which a backslash before it may join to the next line. */
+const LINE_BREAK = /[\n\r]/;
 
-/** A script as the shell may read it, for coarse matching: lower case, quotes and `\` taken off. */
-const stripped = (script: string): string => script.toLowerCase().replace(/["'\\]/g, '');
+/** A script with its quotes and backslashes taken off, as a shell may read its words. */
+const unquoted = (script: string): string => script.replace(/["'\\]/g, '');
 
 /**
- * Whether a `git` command of the (stripped) script sets a config key the shell fills in at run
- * time: `git config "core.$X" .h`, `git -c core.hooks${P} commit`. Such a key may be
- * `core.hooksPath`, pointing git at hooks in a folder nobody can place.
+ * Whether a script may set a git config key, or the folder it names, from what the shell fills in:
+ * it holds `config` or `-c` as a word, a `$` or a backquote anywhere, and `git` as a word or a
+ * command the shell fills in. A coarse reading: such a script fails whatever its words say.
  */
-function fillsInGitKey(text: string): boolean {
-  for (const part of text.split(COMMANDS)) {
-    const words = part.split(/\s+/).filter((w) => w !== '');
-    const git = words.findIndex((w) => posix.basename(w).replace(/\.exe$/, '') === 'git');
-    if (git === -1) continue;
-    for (let i = git + 1; i < words.length; i += 1) {
-      const key =
-        words[i] === '-c'
-          ? words[i + 1]
-          : words[i] === 'config'
-            ? words.slice(i + 1).find((w) => !w.startsWith('-'))
-            : undefined;
-      if (key !== undefined && FILLED_IN.test(key)) return true;
-    }
-  }
-  return false;
+function mayBuildGitConfig(text: string): boolean {
+  if (!FILLED_IN.test(text)) return false;
+  const parts = text.split(COMMANDS).map((part) => part.split(/\s+/).filter((w) => w !== ''));
+  const words = parts.flat();
+  if (!words.some((w) => w === 'config' || w === '-c')) return false;
+  return (
+    words.some((w) => posix.basename(w).replace(/\.exe$/, '') === 'git') ||
+    parts.some((p) => p[0] !== undefined && FILLED_IN.test(p[0]))
+  );
 }
 
 /** A plain relative path: no quote, blank, `$`, backquote or `~`, and not absolute. */
@@ -154,8 +150,8 @@ export function plainHookHits(
   };
   for (const script of scripts) {
     // Every mention must be one the exact reading placed; a spelling it cannot read fails.
-    const text = stripped(script);
-    const mentions = text.match(MENTIONS_HOOKS_PATH);
+    const text = unquoted(script);
+    const mentions = text.toLowerCase().match(MENTIONS_HOOKS_PATH);
     let placedCount = 0;
     let failed = false;
     for (const match of script.matchAll(SETS_HOOKS_PATH)) {
@@ -172,26 +168,18 @@ export function plainHookHits(
       unplaced('a core.hooksPath this does not read');
       failed = true;
     }
-    if (!failed && fillsInGitKey(text)) unplaced('a git config key the shell fills in');
-    // Every mention of husky with a word after it must be one the exact reading placed.
-    const huskyMentions = [...text.matchAll(MENTIONS_HUSKY)].filter(
-      (m) => !HUSKY_FLAGS.has(m[1] as string),
-    ).length;
-    let huskyPlaced = 0;
-    let huskyFailed = false;
-    for (const match of script.matchAll(HUSKY_FOLDER)) {
+    if (!failed && mayBuildGitConfig(text))
+      unplaced('a folder git config may build from what the shell fills in');
+    // One reading of husky: each folder it names is placed, or the script fails. A script over
+    // more than one line may join them with a backslash, which no reading of one line sees.
+    if (LINE_BREAK.test(script) && /husky/i.test(text)) unplaced('a husky folder on another line');
+    for (const match of text.matchAll(HUSKY_FOLDER)) {
       const value = match[1] as string;
       if (HUSKY_FLAGS.has(value.toLowerCase())) continue;
       const folder = value.startsWith('-') ? undefined : placed(value);
-      if (folder === undefined) {
-        unplaced(value);
-        huskyFailed = true;
-      } else {
-        folders.add(folder);
-        huskyPlaced += 1;
-      }
+      if (folder === undefined) unplaced(value);
+      else folders.add(folder);
     }
-    if (!huskyFailed && huskyMentions > huskyPlaced) unplaced('a husky folder this does not read');
   }
   return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder))];
 }

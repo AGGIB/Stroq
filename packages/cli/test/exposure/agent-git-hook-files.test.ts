@@ -188,10 +188,13 @@ describe('a git hook in plain stroq inspect', () => {
     },
   );
 
-  // Every mention of husky with a word after it names a folder; one this does not place fails.
+  // One reading of husky, over the script with its quotes and backslashes taken off, never across
+  // a line: each folder it names is placed and read, or the check fails.
   it.each([
     ['npx husky@9 .config/h', '.config/h'],
     ['./node_modules/.bin/husky "x"', 'x'],
+    ['"husky" .h', '.h'],
+    ['hus\\ky .h', '.h'],
   ])('reads the folder of %s', (script, folder) => {
     const pkg = JSON.stringify({ scripts: { prepare: script } });
     expect(surface({ 'package.json': pkg, [`${folder}/pre-commit`]: FETCH }).failing).toEqual([
@@ -199,13 +202,33 @@ describe('a git hook in plain stroq inspect', () => {
     ]);
   });
 
-  it.each(['husky --weird x', '"husky" .h', 'hus\\ky .h'])(
-    'fails a husky mention it cannot place: %s',
+  it.each(['husky --weird x', 'husky\n.h', 'husky \\\n.h'])(
+    'fails a husky folder it cannot place: %j',
     (script) => {
       const pkg = JSON.stringify({ scripts: { prepare: script } });
       expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
     },
   );
+
+  // A script that runs git config and lets the shell fill anything in may build the key or the
+  // folder: it fails, whatever the words around it.
+  it.each([
+    'git config set core.hookspath $D',
+    'echo $X && git --file x config core.hookspath .h',
+    'git config --get user.name && echo `date`',
+  ])('fails %s', (script) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
+
+  it('places and reads a plain git config core.hooksPath', () => {
+    for (const folder of ['.githooks', 'tools/h']) {
+      const pkg = JSON.stringify({ scripts: { prepare: `git config core.hooksPath ${folder}` } });
+      expect(surface({ 'package.json': pkg, [`${folder}/pre-commit`]: FETCH }).failing).toEqual([
+        `git-hook-routine ${folder}/pre-commit`,
+      ]);
+    }
+  });
 
   it('passes husky with no folder, or with a flag that takes none', () => {
     for (const script of ['husky', 'husky || true', 'husky install', 'husky --help'])
