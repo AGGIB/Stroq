@@ -2,7 +2,8 @@ import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
-import { MAX_COMMAND_CHARS } from '../../src/exposure/agent-run-files.js';
+import { hit } from '../../src/exposure/agent-kinds.js';
+import { MAX_COMMAND_CHARS, runFileChanges } from '../../src/exposure/agent-run-files.js';
 import {
   commitFiles,
   git,
@@ -196,5 +197,28 @@ describe('a hook script that runs a tool by a bare word', () => {
     expect(
       hits.filter((h) => h.kind === 'agent-run-file-changed').map((h) => `${h.file} ${h.severity}`),
     ).toEqual(['eslint.config.js warning']);
+  });
+});
+
+describe('the work one check spends on the commands already there', () => {
+  it('stops at its budget, and fails rather than passes', () => {
+    const patterns = Array.from({ length: 30 }, (_, k) => `*${k}*.sh`).join(' ');
+    const hits = runFileChanges(
+      [
+        {
+          ...hit('agent-hook', '.claude/settings.json', 1, 'S', `bash ${patterns}`),
+          status: 'present',
+        },
+      ],
+      {
+        touchedFiles: Array.from(
+          { length: 3000 },
+          (_, i) => [`d/${'x'.repeat(4000)}y${i}.md`, 'new'] as const,
+        ),
+      },
+    );
+    expect(
+      hits.some((h) => h.kind === 'unreadable-config' && /too long to compare/.test(h.value)),
+    ).toBe(true);
   });
 });

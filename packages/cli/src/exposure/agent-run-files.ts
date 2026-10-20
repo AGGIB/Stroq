@@ -263,10 +263,12 @@ interface Judged {
   /** Whether it runs code of the repository, so that any other code change is listed to review. */
   readonly runsRepoCode: boolean;
   readonly work: number;
+  /** True when the budget ran out before the command was compared with every file. */
+  readonly over?: boolean;
 }
 
 /** Reads one command line against the touched files. */
-function judge(command: string, isEnv: boolean, index: Index): Judged {
+function judge(command: string, isEnv: boolean, index: Index, left: number): Judged {
   const fails = new Set<number>();
   if (command.length > MAX_COMMAND_CHARS)
     return {
@@ -301,15 +303,17 @@ function judge(command: string, isEnv: boolean, index: Index): Judged {
       open = true;
       continue;
     }
-    index.files.forEach((f, i) => {
-      for (const form of f.forms) {
+    for (let i = 0; i < index.files.length; i += 1) {
+      // Past what is left of the budget, the rest is not compared, and the check fails.
+      if (work > left) return { fails, runsRepoCode: true, work, over: true };
+      for (const form of (index.files[i] as Touched).forms) {
         work += form.length + pattern.length;
         if (holdsInOrder(form, parts)) {
           fails.add(i);
-          return;
+          break;
         }
       }
-    });
+    }
   }
 
   const tokens = text.split(/[^a-z0-9_-]+/);
@@ -368,8 +372,9 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
   let spent = 0;
   for (const h of entries) {
     const name = `${h.name} ${RUNS[h.kind] as string} in ${h.file}`;
-    const judged = judge(h.value, h.kind === 'agent-env', index);
+    const judged = judge(h.value, h.kind === 'agent-env', index, RUN_LOOKUP_BUDGET - spent);
     spent += judged.work;
+    if (judged.over === true) spent = RUN_LOOKUP_BUDGET + 1;
     if (judged.unread !== undefined) {
       unreadable(
         h.file,
