@@ -66,15 +66,12 @@ const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
   'mcp-server',
 ]);
 /** Kinds that are listed to review when a base proves they were there, and fail otherwise. */
-const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set([
-  'agent-broad-allow',
-  'config-link-outside',
-]);
+const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set(['agent-broad-allow']);
 /**
  * A folder anyone on the machine can write, where an attacker can put the file a link reads: the
  * temporary folders, the lock and crash folders, and macOS's shared and cache folders. In any
  * letter case: macOS opens `/TMP` as `/tmp`. Only how a link is shown depends on it: every link
- * out of the repository fails unless a base proves it was there.
+ * out of the repository is an error.
  */
 const SHARED_FOLDER =
   /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm|run\/lock|var\/lock|var\/crash|var\/spool|users\/shared|library\/caches|library\/logs)(?:\/|$)/i;
@@ -113,18 +110,20 @@ export const inSharedFolder = (target: string): boolean =>
 export type Against = 'compared' | 'none';
 
 /**
- * A hit's severity once it is known whether the change brought it. One a base proves was already
- * there keeps its own, but for one of the few benign env variables, which is a warning. Any other
- * fails when it is a whole-shell allow rule or a link out of the repository, a server whose host
- * starts it without asking or whose command a change replaces, and an install script, a dev
- * container command or a server that downloads and runs code, decodes and runs it, or sends
- * credentials out. With no base, nothing is proven there before.
+ * A hit's severity once it is known whether the change brought it. A link out of the repository
+ * is an error either way. One a base proves was already there keeps its own, but for one of the
+ * few benign env variables, which is a warning. Any other fails when it is an allow rule that
+ * grants too much, a server whose host starts it without asking or whose command a change
+ * replaces, and an install script, a dev container command or a server that downloads and runs
+ * code, decodes and runs it, or sends credentials out. With no base, nothing is proven there.
  */
 export function settle(
   h: AgentHit,
   status: ChangeStatus,
   against: Against = 'compared',
 ): TaggedHit {
+  // What a link out of the repository reads is in no change to review, there before it or not.
+  if (h.kind === 'config-link-outside') return { ...h, severity: 'error', status };
   if (status === 'present' && against === 'compared')
     return h.kind === 'agent-env' && warnsWhenPresent(h.name)
       ? { ...h, severity: 'warning', status }

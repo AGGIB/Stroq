@@ -1,7 +1,7 @@
 import { rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
+import { isFailing, settle, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { agentSurface } from '../../src/exposure/agent-tree.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
@@ -274,6 +274,15 @@ describe('a link out of the repository', () => {
       expect(
         tagChanges([hit('config-link-outside', '.mcp.json', 1, 'link', target)], null)[0]?.severity,
       ).toBe('error');
+  });
+
+  // Whoever settles it, with a base or without: a link out reads a file nobody reviewed.
+  it('settles every link out as an error, wherever it leads', () => {
+    for (const target of ['/Users/Shared/x.json', '/Library/Caches/t.json', '/etc/x', '../x'])
+      for (const status of ['present', 'changed', 'new'] as const)
+        expect(
+          settle(hit('config-link-outside', '.mcp.json', 1, 'link', target), status),
+        ).toMatchObject({ severity: 'error' });
   });
 
   // A change can only be checked against what is in the repository: a link that leads out of it,
