@@ -15,6 +15,7 @@ import { GitError, agentChanges } from '../../src/exposure/agent-git.js';
 import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
+import { TEST_GIT_ARGS } from '../helpers/scratch-repo.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -29,7 +30,8 @@ function repo(): string {
 }
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+  // No hook of a fixture runs while it is built (see TEST_GIT_ARGS).
+  return execFileSync('git', [...TEST_GIT_ARGS, ...args], {
     cwd,
     encoding: 'utf8',
     env: {

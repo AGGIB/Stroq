@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
@@ -54,6 +55,19 @@ const hookRuns = (
 
 const runFile = (file: string, status = 'changed'): string =>
   `${status} agent-run-file-changed ${file}`;
+
+// The repositories of these tests are built without running a hook a fixture sets: Git for
+// Windows runs one whatever its mode, and a hook in a fixture is test data, never test code.
+describe('a repository a test builds', () => {
+  it.skipIf(process.platform === 'win32')('runs no hook the fixture sets', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { 'h/pre-commit': '#!/bin/sh\ntouch hook-ran\n' });
+    chmodSync(join(dir, 'h/pre-commit'), 0o755);
+    git(dir, 'config', 'core.hooksPath', 'h');
+    commitFiles(dir, { 'README.md': 'x\n' });
+    expect(existsSync(join(dir, 'hook-ran'))).toBe(false);
+  });
+});
 
 describe('the git hooks a git command already there runs', () => {
   it.each([

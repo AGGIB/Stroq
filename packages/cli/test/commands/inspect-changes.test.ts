@@ -6,14 +6,16 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatChange, runInspect } from '../../src/commands/inspect.js';
 import { githubSummary } from '../../src/exposure/github-format.js';
+import { TEST_GIT_ARGS } from '../helpers/scratch-repo.js';
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+// No hook of a fixture runs while it is built (see TEST_GIT_ARGS).
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+  execFileSync('git', [...TEST_GIT_ARGS, ...args], {
     cwd,
     encoding: 'utf8',
     env: {

@@ -9,8 +9,24 @@ import { dirname, join } from 'node:path';
  * setting of the machine running the tests reaches it.
  */
 
+/**
+ * An empty folder given to every git command of the tests as `core.hooksPath`: a fixture that
+ * sets its own `core.hooksPath`, or commits a hook, never has it run while the test builds the
+ * repository, on any system. A `-c` on the command line wins over the repository's config.
+ */
+export const NO_HOOKS = mkdtempSync(join(tmpdir(), 'stroq-test-no-hooks-'));
+/** The arguments every git command of the tests starts with: a test identity and no hooks. */
+export const TEST_GIT_ARGS: readonly string[] = [
+  '-c',
+  'user.name=t',
+  '-c',
+  'user.email=t@example.invalid',
+  '-c',
+  `core.hooksPath=${NO_HOOKS}`,
+];
+
 export function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+  return execFileSync('git', [...TEST_GIT_ARGS, ...args], {
     cwd,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
