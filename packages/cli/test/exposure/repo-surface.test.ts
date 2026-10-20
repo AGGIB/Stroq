@@ -325,7 +325,8 @@ describe('repoSurface — what a repository can run', () => {
     mkdirSync(join(bare, 'refs'), { recursive: true });
     writeFileSync(join(bare, 'HEAD'), 'ref: refs/heads/main\n');
     const hit = repoSurface(root).preTrust.find((h) => h.kind === 'nested-bare-repo');
-    expect(hit?.file).toBe(join('docs', 'assets', 'archive'));
+    // Every path the exposure code reports has `/` between its parts, on Windows too.
+    expect(hit?.file).toBe('docs/assets/archive');
   });
 
   it('does not mistake the repository’s own .git for a nested one', () => {
