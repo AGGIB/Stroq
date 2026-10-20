@@ -585,48 +585,74 @@ function hookManagerHit(
 /** What a lint-staged entry runs when one of its patterns is not read: no command at all. */
 export const UNREAD_PATTERN = '\u0000a pattern that is not read';
 
-/** Shells and interpreters: a lint-staged command they start runs the staged files themselves. */
-const RUNS_ITS_FILES: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'dash',
-  'node',
-  'deno',
-  'bun',
-  'tsx',
-  'ts-node',
-  'python',
-  'python3',
-  'ruby',
-  'perl',
-  'php',
+/**
+ * Tools a lint-staged command may start that are followed by their own words, as any other entry
+ * is. Every other program, one this does not know, a test runner, a shell, an interpreter, `.`,
+ * `xargs` or a word that cannot be read, is taken to run the files it is given.
+ */
+const FOLLOWED_TOOLS: ReadonlySet<string> = new Set([
+  'eslint',
+  'prettier',
+  'stylelint',
+  'biome',
+  'oxlint',
+  'dprint',
+  'tsc',
+  'markdownlint',
+  'markdownlint-cli2',
+  'rustfmt',
+  'gofmt',
+  'black',
+  'ruff',
+  'isort',
 ]);
-/** Words in front of the program of a command: a package runner, `env`, an assignment, an option. */
-const WRAPPER =
-  /^(?:npx|pnpx|bunx|env|exec|dlx|pnpm|yarn|npm|--?[A-Za-z][\w-]*|[A-Za-z_][A-Za-z0-9_]*=.*)$/;
+/** Words in front of the program of a command: a package runner, `run`, `--`, an assignment. */
+const WRAPPER = /^(?:npx|pnpx|bunx|env|exec|dlx|pnpm|yarn|npm|run|--|[A-Za-z_][A-Za-z0-9_]*=.*)$/;
+/**
+ * Options in front of the program that take no value. Any other option there may take the next
+ * word, or name the program itself (`npx -p eslint node`, `npm exec --call=x`): the command is
+ * then not read.
+ */
+const FLAGS: ReadonlySet<string> = new Set([
+  '-y',
+  '--yes',
+  '--no-install',
+  '-q',
+  '--quiet',
+  '-s',
+  '--silent',
+]);
+/** What makes a command more than one program with its words: a shell may run more. */
+const SHELL_TEXT = /[;&|$`<>()\n\r]/;
 
-/** The program a command starts, past the words in front of it, by its base name. */
+/**
+ * The program a command starts, past the words in front of it, by its base name, in lower case
+ * and without `.exe`, `.cmd` or `.bat`; empty when that cannot be read.
+ */
 function programWord(command: string): string {
-  const word =
-    command
-      .trim()
-      .split(/\s+/)
-      .find((w) => !WRAPPER.test(w)) ?? '';
-  return posix.basename(word).toLowerCase();
+  if (SHELL_TEXT.test(command)) return '';
+  for (const w of command.trim().split(/\s+/)) {
+    if (WRAPPER.test(w) || FLAGS.has(w)) continue;
+    if (w.startsWith('-')) return '';
+    return posix
+      .basename(w)
+      .toLowerCase()
+      .replace(/\.(?:exe|cmd|bat)$/, '');
+  }
+  return '';
 }
 
 /**
- * The patterns of a lint-staged config whose command is a shell or an interpreter, which runs the
- * files the pattern matches. A value this does not read as patterns and commands gives one
- * pattern that matches anything, so every file counts.
+ * The patterns of a lint-staged config whose command is not one of the tools followed by their
+ * own words: such a command runs the files the pattern matches. A value this does not read as
+ * patterns and commands gives one pattern that matches anything, so every file counts.
  */
 function filesRunBy(value: unknown): string[] {
   if (!isPlainObject(value)) return ['*'];
   return Object.entries(value).flatMap(([pattern, commands]) => {
     const list = typeof commands === 'string' ? [commands] : commands;
     if (!Array.isArray(list)) return ['*'];
-    return list.some((c) => typeof c !== 'string' || RUNS_ITS_FILES.has(programWord(c)))
+    return list.some((c) => typeof c !== 'string' || !FOLLOWED_TOOLS.has(programWord(c)))
       ? [pattern]
       : [];
   });

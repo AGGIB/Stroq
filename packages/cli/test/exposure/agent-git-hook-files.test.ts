@@ -360,11 +360,11 @@ describe('a hook manager key already there, read as what it runs', () => {
     expect(followed({ config: { commitizen: { path: 'scripts/check.sh' } } })).toEqual([]);
   });
 
-  it('reads the strings of lint-staged, not its patterns', () => {
+  it('reads the strings of lint-staged, not its patterns, for a tool on its list', () => {
     const dir = scratchRepo(dirs);
-    const pkg = JSON.stringify({ name: 'x', 'lint-staged': { '*.ts': 'echo hi' } });
-    const base = commitFiles(dir, { 'package.json': pkg, 'src/a.ts': '1\n' });
-    commitFiles(dir, { 'src/a.ts': '2\n' });
+    const pkg = JSON.stringify({ name: 'x', 'lint-staged': { '*.txt': 'prettier --check' } });
+    const base = commitFiles(dir, { 'package.json': pkg, 'notes/a.txt': '1\n' });
+    commitFiles(dir, { 'notes/a.txt': '2\n' });
     expect(agentChanges(dir, base).hits.filter((h) => h.kind === 'agent-run-file-changed')).toEqual(
       [],
     );
@@ -372,9 +372,10 @@ describe('a hook manager key already there, read as what it runs', () => {
 });
 
 /**
- * lint-staged runs each command on the staged files its pattern matches. A command whose program
- * is a shell or an interpreter runs those files themselves: a change to any file its pattern could
- * match fails. Any other command (eslint, prettier) is followed by its own words, as before.
+ * lint-staged runs each command on the staged files its pattern matches. Only a short list of
+ * tools (eslint, prettier, tsc, ruff, ...) is followed by its own words; any other program, one
+ * not known included, is taken to run the files it is given, so a change to any file its pattern
+ * could match fails. A mistake in finding the program can only make that stricter.
  */
 describe('a lint-staged command that runs the files it is given', () => {
   const edit = (staged: object, path: string): string[] => {
@@ -386,8 +387,45 @@ describe('a lint-staged command that runs the files it is given', () => {
     [{ '*.js': 'node' }, 'src/a.js'],
     [{ '*.txt': 'sh' }, 'notes/a.txt'],
     [{ '*.md': ['npx tsx'] }, 'docs/a.md'],
+    [{ '*.js': './run.sh' }, 'src/a.js'],
+    [{ '*.js': 'node.exe' }, 'src/a.js'],
+    [{ '*.js': 'yarn run custom' }, 'src/a.js'],
+    [{ '*.md': './run.sh' }, 'docs/a.md'],
+    [{ '*.md': 'node.exe' }, 'docs/a.md'],
+    [{ '*.md': 'yarn run custom' }, 'docs/a.md'],
+    [{ '*.md': 'python3.12' }, 'docs/a.md'],
+    [{ '*.md': 'xargs node' }, 'docs/a.md'],
+    [{ '*.md': '. ./x' }, 'docs/a.md'],
+    [{ '*.md': 'vitest related --run' }, 'docs/a.md'],
+    [{ '*.md': 'npx -p eslint node' }, 'docs/a.md'],
+    [{ '*.md': 'npm exec --call=./x eslint' }, 'docs/a.md'],
+    [{ '*.md': 'eslint --fix; node' }, 'docs/a.md'],
+    [{ '*.md': '' }, 'docs/a.md'],
   ])('fails %j when a change edits %s', (staged, path) => {
     expect(edit(staged, path)).toContain(`changed agent-run-file-changed ${path}`);
+  });
+
+  const runs = (staged: object): string | undefined =>
+    scanFile('package.json', JSON.stringify({ 'lint-staged': staged }))[0]?.runs;
+
+  // Each is followed by its own words, as any entry is; that reading may still fail a change.
+  it.each([
+    'npx --yes eslint --fix',
+    ['prettier --write', 'eslint'],
+    'pnpm exec markdownlint-cli2 --fix',
+    'NODE_ENV=x yarn run prettier.cmd --write',
+    'env -- black.exe -q',
+  ])('does not take %j, a tool on the list, to run its files', (commands) => {
+    expect(runs({ '*.md': commands })).not.toContain('*.md');
+  });
+
+  it('passes a change to a file a tool on the list only reads', () => {
+    expect(edit({ '*.md': 'npx --yes eslint --fix' }, 'docs/a.md')).toEqual([]);
+    expect(edit({ '*.md': ['prettier --write', 'eslint'] }, 'docs/a.md')).toEqual([]);
+    // Its pattern is not read as files it runs, so a pattern this does not read fails nothing.
+    expect(edit({ '*.{js,ts}': ['prettier --write', 'eslint'] }, 'notes/a.txt')).toEqual([]);
+    expect(runs({ '*.js': 'npx --yes eslint --fix' })).not.toContain('*.js');
+    expect(runs({ '*.{js,ts}': ['prettier --write', 'eslint'] })).not.toContain('*.{js,ts}');
   });
 
   it('fails one under a pattern it does not read, whatever the change', () => {
@@ -396,7 +434,7 @@ describe('a lint-staged command that runs the files it is given', () => {
     ]);
   });
 
-  it('follows any other command by its own words', () => {
+  it('still fails a code file a tool on the list loads', () => {
     expect(edit({ '*.txt': 'eslint --fix' }, 'notes/a.txt')).toEqual([]);
     // eslint is a runner, which loads the code of the repository: a code file still fails.
     expect(edit({ '*.js': 'eslint --fix' }, 'src/a.js')).toContain(
