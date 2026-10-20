@@ -19,6 +19,7 @@ import {
   COMPOSE_FILE,
   DEVCONTAINER_ACCESS_KEYS,
   DEVCONTAINER_ENV_KEYS,
+  HOOK_MANAGER_KEYS,
 } from './agent-editor.js';
 import { PACKAGE_CONFIG, PACKAGE_SETTING } from './agent-lines.js';
 import { PACKAGE_RUNS } from './package-configs.js';
@@ -228,7 +229,9 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
     case 'config-submodule':
       return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
     case 'git-hook-file':
-      return `is a git hook file (${name}), which git runs on a commit, a checkout or a merge without asking`;
+      return (HOOK_MANAGER_KEYS as readonly string[]).includes(h.name)
+        ? `${name} sets git hooks, which run on a commit without asking: ${value}`
+        : `is a git hook file (${name}), which git runs on a commit, a checkout or a merge without asking`;
     case 'agent-run-file-changed':
       if (/^\d+ more files/.test(h.value)) return `${name} may also run ${value}`;
       return h.value === h.file

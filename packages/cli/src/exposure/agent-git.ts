@@ -19,7 +19,7 @@ import {
   packageConfigChanges,
   withAllLinks,
 } from './package-configs.js';
-import { gitHookFileChanges, isGitConfigName } from './git-hook-files.js';
+import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -325,11 +325,13 @@ function compare(top: string, base: string, head: string) {
   // Every link of the tree, read once and only when a reading below needs them all.
   let all: ReturnType<typeof withAllLinks> | undefined;
   const linked = () => (all ??= withAllLinks(top, tree, links.view, MAX_RUN_LINKS));
-  const runs = runView(top, tree, sorted, changed, links.view, found);
+  const hooks = hookFiles(top, tree, linked().view, changed, found);
+  const entries = [...found, ...hooks.entries];
+  const runs = runView(top, tree, sorted, changed, links.view, entries);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
-    ...runFileChanges(found, runs),
+    ...runFileChanges(entries, runs),
     ...buildInputs(top, tree, () => linked().view, found, changed),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
@@ -338,7 +340,7 @@ function compare(top: string, base: string, head: string) {
     ...packageConfigs(top, tree, sorted, changed, linked()),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
-    ...hookFiles(top, tree, linked().view, changed, found),
+    ...hooks.hits,
   ];
   // Any other link the change brought that leads out, to nothing, or was not read.
   const reported = new Set(
@@ -514,6 +516,8 @@ function lineChanges(
   return out;
 }
 
+/** The most git hook files already there whose text is read; past it, one finding fails. */
+const MAX_HOOK_FILES = 200;
 /** The most committed git configs read for `core.hooksPath`; past it, one finding fails. */
 const MAX_GIT_CONFIGS = 64;
 
@@ -576,7 +580,7 @@ function hookFiles(
   view: TreeView,
   changed: ReadonlyMap<string, Changed>,
   found: readonly TaggedHit[],
-): TaggedHit[] {
+): { hits: TaggedHit[]; entries: TaggedHit[] } {
   const out: TaggedHit[] = [];
   const unread = (path: string, why: string): void => {
     out.push(tagged(hit('unreadable-config', path, 1, 'core.hooksPath', why), 'new'));
@@ -609,18 +613,28 @@ function hookFiles(
   const scripts = found
     .filter((h) => h.kind === 'package-script' || h.kind === 'package-script-agent-path')
     .map((h) => h.value);
-  out.push(
-    ...gitHookFileChanges(changed, {
-      hooksPaths: hooksPaths(top),
-      tops: [...new Set([top, realOr(top)])],
-      configs,
-      bareConfigs,
-      bareRepos,
-      scripts,
-      view,
-    }),
-  );
-  return out;
+  const ctx = {
+    hooksPaths: hooksPaths(top),
+    tops: [...new Set([top, realOr(top)])],
+    configs,
+    bareConfigs,
+    bareRepos,
+    scripts,
+    view,
+  };
+  out.push(...gitHookFileChanges(changed, ctx));
+  // The hooks already there, their text read as the command of an entry, for the files they run.
+  const present = hookFilesAt(ctx).filter((p) => !changed.has(p));
+  const texts = readTexts(top, tree, present.slice(0, MAX_HOOK_FILES));
+  const left = present.filter((p) => !texts.has(p));
+  if (left[0] !== undefined)
+    unread(left[0], `${left.length} git hook files were not read, so what they run is not known`);
+  const entries = [...texts].map(([path, text]): TaggedHit => ({
+    ...hit('git-hook-file', path, 1, posix.basename(path), text),
+    severity: 'warning',
+    status: 'present',
+  }));
+  return { hits: out, entries };
 }
 
 /**

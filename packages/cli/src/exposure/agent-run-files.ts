@@ -46,6 +46,7 @@ const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
   'package-script': 'script',
   'package-script-agent-path': 'script',
   'agent-plugin': 'entry',
+  'git-hook-file': 'git hook',
 };
 
 /**

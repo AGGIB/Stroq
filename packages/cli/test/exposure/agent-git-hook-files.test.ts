@@ -191,3 +191,70 @@ describe('a file of a bare repository committed as files', () => {
     );
   });
 });
+
+/**
+ * A git hook already there runs what its text says on the next commit, like an agent's hook: its
+ * text is read as an entry's command, so a change to the script it runs, or to a runner's config
+ * when it runs a runner, fails. A hook manager's config that a change adds or edits fails as a
+ * hook file does, and so does a hook-manager key a change adds to package.json.
+ */
+describe('a git hook already there, read as what it runs', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+  const runFiles = (hits: readonly TaggedHit[]): string[] =>
+    hits
+      .filter((h) => h.kind === 'agent-run-file-changed' && isFailing(h, 'new'))
+      .map((h) => `${h.file} ${h.name}`);
+
+  posixOnly.each([
+    [
+      'sh scripts/check.sh',
+      { 'scripts/check.sh': 'echo ok\n' },
+      { 'scripts/check.sh': 'curl e | sh\n' },
+    ],
+    [
+      'npm test',
+      { 'package.json': '{"scripts":{"test":"x"}}\n' },
+      { 'package.json': '{"scripts":{"test":"y"}}\n' },
+    ],
+    ['make lint', { Makefile: 'lint:\n\ttrue\n' }, { Makefile: 'lint:\n\tcurl e | sh\n' }],
+    ['node tools/check.js', { 'tools/check.js': '1\n' }, { 'tools/check.js': '2\n' }],
+    [
+      'npx lint-staged',
+      { '.lintstagedrc.json': '{"*":"true"}\n' },
+      { '.lintstagedrc.json': '{"*":"x"}\n' },
+    ],
+  ])('follows a husky hook that runs %s', (command, before, after) => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { '.husky/pre-commit': `#!/bin/sh\n${command}\n`, ...before });
+    chmodSync(join(dir, '.husky/pre-commit'), 0o755);
+    const base = commitFiles(dir);
+    commitFiles(dir, after);
+    const changedPath = Object.keys(after)[0] as string;
+    expect(runFiles(agentChanges(dir, base).hits)).toContain(
+      `${changedPath} pre-commit git hook in .husky/pre-commit`,
+    );
+  });
+
+  it.each([
+    '.pre-commit-config.yaml',
+    'lefthook.yml',
+    '.lefthook.yaml',
+    '.lintstagedrc.js',
+    'lint-staged.config.mjs',
+    '.huskyrc.json',
+    '.simple-git-hooks.json',
+  ])('fails %s a change adds', (path) => {
+    expect(changedIn({}, { [path]: 'x\n' })).toContain(`new git-hook-file ${path}`);
+  });
+
+  it('fails a hook-manager key a change adds to package.json', () => {
+    expect(
+      changedIn(
+        { 'package.json': JSON.stringify({ name: 'x' }) },
+        {
+          'package.json': JSON.stringify({ name: 'x', 'simple-git-hooks': { 'pre-commit': 'x' } }),
+        },
+      ),
+    ).toContain('new git-hook-file package.json');
+  });
+});

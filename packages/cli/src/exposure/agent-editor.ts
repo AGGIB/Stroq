@@ -519,11 +519,34 @@ const EDITOR_CONFIG_PATH = /\.vscode[/\\]+(?:tasks|settings|mcp)\.json/i;
 const namesAgentPath = (script: string): boolean =>
   SELF_CONFIG_FILE.test(script) || INSTRUCTION_FILE.test(script) || EDITOR_CONFIG_PATH.test(script);
 
+/** Keys of package.json a git hook manager reads its hooks from. */
+export const HOOK_MANAGER_KEYS = [
+  'simple-git-hooks',
+  'husky',
+  'lint-staged',
+  'pre-commit',
+  'gitHooks',
+  'ghooks',
+  'git-hooks',
+] as const;
+
 export function packageScripts(f: JsonFile): AgentHit[] {
   const scripts = ownObject(f.value, 'scripts');
-  return Object.entries(scripts ?? {}).flatMap(([name, script]) => {
+  const installs = Object.entries(scripts ?? {}).flatMap(([name, script]) => {
     if (!INSTALL_SCRIPTS.has(name) || typeof script !== 'string') return [];
     const kind = namesAgentPath(script) ? 'package-script-agent-path' : 'package-script';
     return [hit(kind, f.path, lineOf(f.text, ['"scripts"', quoted(name)]), name, script)];
   });
+  // What a hook manager runs on a commit: listed, and a change that adds or edits it fails.
+  const hooks = HOOK_MANAGER_KEYS.filter((key) => Object.hasOwn(f.value, key)).map((key) => ({
+    ...hit(
+      'git-hook-file',
+      f.path,
+      lineOf(f.text, [quoted(key)]),
+      key,
+      boundedJson(f.value[key], undefined, true),
+    ),
+    severity: 'warning' as const,
+  }));
+  return byLine([...installs, ...hooks]);
 }
