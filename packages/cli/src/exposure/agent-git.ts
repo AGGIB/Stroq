@@ -612,7 +612,7 @@ function hookFiles(
   }
   const scripts = found
     .filter((h) => h.kind === 'package-script' || h.kind === 'package-script-agent-path')
-    .map((h) => h.value);
+    .map((h) => h.runs ?? h.value);
   const ctx = {
     hooksPaths: hooksPaths(top),
     tops: [...new Set([top, realOr(top)])],

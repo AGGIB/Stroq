@@ -15,7 +15,15 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, byLine, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
+import {
+  boundedJson,
+  byLine,
+  digestOf,
+  hit,
+  otherFields,
+  shownHit,
+  type AgentHit,
+} from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { autoApproves } from './privilege-surface.js';
 
@@ -455,13 +463,12 @@ function devcontainerSettings(f: JsonFile): AgentHit[] {
   ]);
   for (const [key, value] of Object.entries(f.value)) {
     if (commands.has(key)) continue;
-    const found = hit(
-      'devcontainer-setting',
-      f.path,
-      lineOf(f.text, [quoted(key)]),
-      key,
-      boundedJson(value, undefined, true),
-    );
+    const raw = boundedJson(value, undefined, true);
+    const line = lineOf(f.text, [quoted(key)]);
+    // Variables in the container: their names, never their values.
+    const found = DEVCONTAINER_ENV_KEYS.has(key)
+      ? shownHit('devcontainer-setting', f.path, line, key, raw, `{"env":${raw}}`)
+      : hit('devcontainer-setting', f.path, line, key, raw);
     const inert = DATA_KEYS.has(key) || (DEVCONTAINER_ENV_KEYS.has(key) && benignVariables(value));
     hits.push(inert ? found : { ...found, severity: 'error' });
   }

@@ -5,9 +5,10 @@ import {
   MAX_HOOKS,
   serverFields,
   serverKind,
+  serverShown,
   tooMany,
 } from './agent-json.js';
-import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { type AgentHit, boundedJson, digestOf, hit, shownHit } from './agent-kinds.js';
 import { codexSwitches } from './agent-switches.js';
 import { lineOf } from './jsonc.js';
 import { parseToml, type Obj, type Toml } from './toml-lite.js';
@@ -51,7 +52,8 @@ function serverHits(path: string, text: string, toml: Toml): AgentHit[] {
       if (typeof command === 'string') {
         const line = serverLine(toml, text, entry, name, 'command');
         const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
-        return [hit(serverKind(command, args, entry, path), path, line, name, value)];
+        const kind = serverKind(command, args, entry, path);
+        return [shownHit(kind, path, line, name, value, serverShown([command, ...args], entry))];
       }
       if (command !== undefined)
         return [hit('unreadable-config', path, 1, `mcp_servers.${name}`, boundedJson(command))];

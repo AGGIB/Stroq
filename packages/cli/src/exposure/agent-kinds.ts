@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { shownValue, withDigest } from './shown-values.js';
 
 /**
  * What a repository can carry that an AI agent or an editor runs by itself once the folder
@@ -61,13 +62,40 @@ export interface AgentHit {
   readonly severity: Severity;
 }
 
+/**
+ * A finding whose value is read as `raw` and shown as `shown`, as `shownValue` lets it be shown:
+ * when that differs from `raw`, the value ends in a digest and a length of `raw`, and `raw` is kept
+ * in `runs` for the readings that need it, which no output writes.
+ */
+export function shownHit(
+  kind: AgentKind,
+  file: string,
+  line: number,
+  name: string,
+  raw: string,
+  shown: string,
+): AgentHit {
+  const base = { kind, file, line, name, value: raw, severity: KIND_SEVERITY[kind] };
+  const safe = shownValue(shown);
+  return safe === raw ? base : { ...base, value: withDigest(safe, raw), runs: raw };
+}
+
 export const hit = (
   kind: AgentKind,
   file: string,
   line: number,
   name: string,
   value: string,
-): AgentHit => ({ kind, file, line, name, value, severity: KIND_SEVERITY[kind] });
+): AgentHit => shownHit(kind, file, line, name, value, value);
+
+/** A finding whose value is never shown at all: only a digest and a length of it. */
+export const secretHit = (
+  kind: AgentKind,
+  file: string,
+  line: number,
+  name: string,
+  raw: string,
+): AgentHit => shownHit(kind, file, line, name, raw, '');
 
 /**
  * A short digest of a text, for a hit whose value is a whole file: an instruction file, or a

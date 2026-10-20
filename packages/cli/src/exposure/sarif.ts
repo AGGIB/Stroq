@@ -77,7 +77,9 @@ const isPreTrust = (kind: string): boolean => (PRE_TRUST as ReadonlySet<string>)
 
 const fingerprint = (h: TaggedHit): string =>
   createHash('sha256')
-    .update([h.kind, h.file, h.name, h.value].join('\u0000'))
+    // A value shown with a digest under this run's key would change every run: such a finding is
+    // known by where it is instead.
+    .update([h.kind, h.file, h.name, h.runs === undefined ? h.value : ''].join('\u0000'))
     .digest('hex')
     .slice(0, 32);
 

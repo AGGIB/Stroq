@@ -34,6 +34,7 @@ import { parseGitConfig } from '../../src/exposure/repo-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
+import { shownValue } from '../../src/exposure/shown-values.js';
 import { expectLinear, repeat, SIZES, type EntryPoint } from '../helpers/linear-gate.js';
 
 /**
@@ -48,6 +49,15 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ...[
     '/*',
     '//',
+    // What a finding hides: addresses, credentials, fields whose values are never shown.
+    '://',
+    'a://b@',
+    '://a?',
+    '"env":{',
+    '"env":"',
+    '"headers":[',
+    'Authorization: ',
+    'Bearer ',
     // What sets core.hooksPath, then blanks that end nowhere.
     'core.hooksPath ',
     'core.hooksPath=',
@@ -422,6 +432,7 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   ['the paths a compose file names', (text) => composePaths(text)],
+  ['the text a finding may show', (text) => shownValue(text)],
   [
     'the folders of git hooks a config or a script names',
     (text) =>

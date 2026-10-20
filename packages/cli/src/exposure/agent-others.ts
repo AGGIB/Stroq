@@ -7,11 +7,12 @@ import {
   quoted,
   serverFields,
   serverKind,
+  serverShown,
   strings,
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
+import { digestOf, hit, otherFields, shownHit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -24,7 +25,8 @@ import { lineOf } from './jsonc.js';
 function serverHit(f: JsonFile, line: number, name: string, parts: readonly string[], entry: Obj) {
   const [command = '', ...args] = parts;
   const value = `${parts.join(' ')}${serverFields(entry)}`;
-  return hit(serverKind(command, args, entry, f.path), f.path, line, name, value);
+  const kind = serverKind(command, args, entry, f.path);
+  return shownHit(kind, f.path, line, name, value, serverShown(parts, entry));
 }
 
 /** opencode's `mcp` servers (a local one's `command` is an array) and its `plugin` list. */
@@ -67,8 +69,10 @@ function zedServer(f: JsonFile, name: string, entry: Obj): AgentHit | undefined 
     if (path === undefined) return undefined;
     const parts = [path, ...strings(own(command, 'args'))];
     const fields = otherFields(command, (key) => key === 'path' || key === 'args');
-    const found = serverHit(f, line, name, parts, command);
-    return { ...found, value: `${parts.join(' ')}${fields}${serverFields(entry)}` };
+    const kind = serverKind(path, parts.slice(1), command, f.path);
+    const value = `${parts.join(' ')}${fields}${serverFields(entry)}`;
+    const shown = `${serverShown(parts, command)}${serverFields(entry)}`;
+    return shownHit(kind, f.path, line, name, value, shown);
   }
   const url = ownString(entry, 'url');
   return url === undefined

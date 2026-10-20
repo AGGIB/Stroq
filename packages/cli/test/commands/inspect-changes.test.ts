@@ -95,7 +95,9 @@ describe('stroq inspect on a checkout, without a base', () => {
     });
     const run = inspect(dir);
     expect(run.code).toBe(0);
-    expect(run.out).toContain('MCP server gh starts: npx gh-mcp');
+    expect(run.out).toMatch(
+      /MCP server gh starts: npx \[1 args\] \(keyed:[0-9a-f]{16}, 10 chars\)/,
+    );
   });
 
   // A zip download or an unpacked tarball has no .git, and it is exactly the folder you check

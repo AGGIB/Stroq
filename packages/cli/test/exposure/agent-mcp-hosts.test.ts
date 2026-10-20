@@ -64,8 +64,8 @@ describe('a server a change adds to a host that starts it without asking', () =>
     const hits = agentChanges(dir, base).hits;
     expect(failing(hits)).toEqual([`new mcp-server ${path}`]);
     const server = hits.find((h) => h.kind === 'mcp-server') as TaggedHit;
-    expect(sentenceOf(server, plainQuote)).toBe(
-      'new: MCP server x is new, and starts once its host is told yes, or at once if the settings approve it: node s.js',
+    expect(sentenceOf(server, plainQuote).replace(/keyed:[0-9a-f]{16}/, 'keyed:K')).toBe(
+      'new: MCP server x is new, and starts once its host is told yes, or at once if the settings approve it: node [1 args] (keyed:K, 9 chars)',
     );
   });
 });
@@ -89,8 +89,8 @@ describe('a server already there whose command a change replaces', () => {
     const hits = agentChanges(dir, base).hits;
     expect(failing(hits)).toContain(`changed mcp-server ${path}`);
     const docs = hits.find((h) => h.kind === 'mcp-server') as TaggedHit;
-    expect(sentenceOf(docs, plainQuote)).toBe(
-      'changed: MCP server docs now starts something else, under a name the host may have approved before: npx -y totally-evil-pkg@9',
+    expect(sentenceOf(docs, plainQuote).replace(/keyed:[0-9a-f]{16}/, 'keyed:K')).toBe(
+      'changed: MCP server docs now starts something else, under a name the host may have approved before: npx [2 args] (keyed:K, 25 chars)',
     );
   });
 });

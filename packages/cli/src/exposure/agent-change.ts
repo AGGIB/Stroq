@@ -87,7 +87,8 @@ export type Against = 'compared' | 'none';
 
 /** Whether an entry is in the shape of an attack: it downloads and runs code, or sends a secret. */
 export const inAttackShape = (h: AgentHit): boolean =>
-  FAILS_IN_SHAPE.has(h.kind) && (runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value));
+  FAILS_IN_SHAPE.has(h.kind) &&
+  (runsFetchedOrHiddenCode(h.runs ?? h.value) || sendsSecrets(h.runs ?? h.value));
 
 /**
  * A hit's severity once it is known whether the change brought it. A link out of the repository

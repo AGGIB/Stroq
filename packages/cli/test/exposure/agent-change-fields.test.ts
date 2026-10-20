@@ -180,6 +180,9 @@ describe('an entry already there whose other fields change', () => {
     const text = json({
       mcpServers: { d: { command: 'node', args: ['s.js'], cwd: 'x', type: 'stdio' } },
     });
-    expect(scanFile('.mcp.json', text).map((h) => h.value)).toEqual(['node s.js with {"cwd":"x"}']);
+    // Its arguments are never shown, only how many, and a digest of what runs.
+    expect(
+      scanFile('.mcp.json', text).map((h) => h.value.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')),
+    ).toEqual(['node [1 args] with {"cwd":"x"} (keyed:K, 26 chars)']);
   });
 });

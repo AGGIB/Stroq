@@ -13,7 +13,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
+import { boundedJson, hit, secretHit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -93,7 +93,7 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
     // Named `CODEX_ENV_PREFIX` and the key, which is how `envNameOf` reads it back.
     const where = ['shell_environment_policy', 'set', key];
     const text = typeof value === 'string' ? value : boundedJson(value);
-    hits.push(hit('agent-env', path, line(where), where.join('.'), text));
+    hits.push(secretHit('agent-env', path, line(where), where.join('.'), text));
   }
   const profiles = firstEntries(path, 'profiles', Object.entries(ownObject(doc, 'profiles') ?? {}));
   hits.push(...profiles.cut);

@@ -1,5 +1,5 @@
-import { createHmac, randomBytes } from 'node:crypto';
 import { digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { keyed } from './shown-values.js';
 import { foldName } from './git-dir-names.js';
 
 /**
@@ -70,13 +70,11 @@ function checkoutFilter(path: string): LineRule {
 }
 
 /**
- * A key for this run only: the value of a package manager's line is a digest under it, so two
- * revisions compare within one check, while nothing printed can be matched with a guessed line
- * elsewhere. Such a line can hold a token.
+ * The value of a package manager's line is a digest under a key made for this run (see
+ * `shown-values.ts`), so two revisions compare within one check, while nothing printed can be
+ * matched with a guessed line elsewhere. Such a line can hold a token.
  */
-const RUN_KEY = randomBytes(32);
-export const keyed = (text: string): string =>
-  `keyed:${createHmac('sha256', RUN_KEY).update(text).digest('hex').slice(0, 16)}`;
+export { keyed } from './shown-values.js';
 
 /** What a package manager's line is called: no word of the line itself is ever shown. */
 export const PACKAGE_SETTING = 'package manager setting';

@@ -1,6 +1,14 @@
 import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
-import { boundedJson, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
+import {
+  boundedJson,
+  digestOf,
+  hit,
+  otherFields,
+  secretHit,
+  shownHit,
+  type AgentHit,
+} from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -432,15 +440,14 @@ function envHits(f: JsonFile): AgentHit[] {
   const list = firstEntries(f.path, 'env variables', named);
   return [
     ...list.cut,
-    ...list.items.map(([key, value]) =>
-      hit(
-        API_BASE_URL.test(key) ? 'agent-api-redirect' : 'agent-env',
-        f.path,
-        lineOf(f.text, ['"env"', quoted(key)]),
-        key,
-        typeof value === 'string' ? value : boundedJson(value),
-      ),
-    ),
+    // The value of a variable is never shown; an address the API is sent to is, scrubbed.
+    ...list.items.map(([key, value]) => {
+      const text = typeof value === 'string' ? value : boundedJson(value);
+      const line = lineOf(f.text, ['"env"', quoted(key)]);
+      return API_BASE_URL.test(key)
+        ? hit('agent-api-redirect', f.path, line, key, text)
+        : secretHit('agent-env', f.path, line, key, text);
+    }),
   ];
 }
 
@@ -770,6 +777,10 @@ export function serverKind(
 export const serverFields = (entry: Obj): string =>
   otherFields(entry, (key) => SERVER_LABELS.has(key));
 
+/** How a server that starts a program is shown: the program, how many arguments, its fields. */
+export const serverShown = (parts: readonly string[], entry: Obj): string =>
+  `${parts[0] ?? ''}${parts.length > 1 ? ` [${parts.length - 1} args]` : ''}${serverFields(entry)}`;
+
 /** The servers under `key` of `container`, which sits at `prefix` in the file. */
 export function mcpServerHits(
   f: JsonFile,
@@ -788,7 +799,8 @@ export function mcpServerHits(
     if (command !== undefined) {
       const args = strings(own(entry, 'args'));
       const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
-      hits.push(hit(serverKind(command, args, entry, f.path), f.path, line, name, value));
+      const kind = serverKind(command, args, entry, f.path);
+      hits.push(shownHit(kind, f.path, line, name, value, serverShown([command, ...args], entry)));
     } else if (url !== undefined) {
       hits.push(hit('mcp-server', f.path, line, name, `${url}${serverFields(entry)}`));
     }

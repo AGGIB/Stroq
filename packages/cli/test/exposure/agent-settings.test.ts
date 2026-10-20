@@ -94,13 +94,13 @@ describe('Claude Code settings that approve or run code', () => {
       'changed agent-run-file-changed .mcp.json docs MCP server in .mcp.json',
     ]);
     const evil = hits.find((h) => h.name === 'evil') as TaggedHit;
-    expect(sentence(evil, plainQuote)).toBe(
-      'new: MCP server evil is new, and starts once its host is told yes, or at once if the settings approve it: npx -y evil-pkg@latest',
+    expect(sentence(evil, plainQuote).replace(/keyed:[0-9a-f]{16}/, 'keyed:K')).toBe(
+      'new: MCP server evil is new, and starts once its host is told yes, or at once if the settings approve it: npx [2 args] (keyed:K, 22 chars)',
     );
     // One that was there before and that the settings approve says so.
     const docs = hits.find((h) => h.name === 'docs') as TaggedHit;
-    expect(sentence(docs, plainQuote)).toBe(
-      'MCP server docs starts without asking, since the settings approve it: node docs.js',
+    expect(sentence(docs, plainQuote).replace(/keyed:[0-9a-f]{16}/, 'keyed:K')).toBe(
+      'MCP server docs starts without asking, since the settings approve it: node [1 args] (keyed:K, 12 chars)',
     );
   });
 
@@ -163,12 +163,13 @@ describe('env variables in Claude Code settings', () => {
     });
     const hits = of(scanFile('.claude/settings.json', text), 'agent-env');
     // A debug switch, a token budget or a timeout is not on the benign list: reported all the same.
-    expect(hits.map((h) => [h.name, h.value])).toEqual([
-      ['DEBUG', '1'],
-      ['MAX_THINKING_TOKENS', '8000'],
-      ['BASH_DEFAULT_TIMEOUT_MS', '60000'],
-      ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'],
-      ['GIT_CONFIG_COUNT', '1'],
+    // A variable's value is never shown: a digest and a length are.
+    expect(hits.map((h) => [h.name, h.value.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')])).toEqual([
+      ['DEBUG', '(keyed:K, 1 chars)'],
+      ['MAX_THINKING_TOKENS', '(keyed:K, 4 chars)'],
+      ['BASH_DEFAULT_TIMEOUT_MS', '(keyed:K, 5 chars)'],
+      ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', '(keyed:K, 4 chars)'],
+      ['GIT_CONFIG_COUNT', '(keyed:K, 1 chars)'],
     ]);
   });
 
@@ -177,8 +178,13 @@ describe('env variables in Claude Code settings', () => {
       scanFile('.claude/settings.json', settings({ env: { SOMETHING_NEW: 'x' } })),
       'agent-env',
     );
-    expect(sentence({ ...(h as AgentHit), status: 'new' }, plainQuote)).toBe(
-      'new: env sets SOMETHING_NEW for every command the agent and its hooks start, and it is not one of the few names known to be harmless: x',
+    expect(
+      sentence({ ...(h as AgentHit), status: 'new' }, plainQuote).replace(
+        /keyed:[0-9a-f]{16}/,
+        'keyed:K',
+      ),
+    ).toBe(
+      'new: env sets SOMETHING_NEW for every command the agent and its hooks start, and it is not one of the few names known to be harmless: (keyed:K, 1 chars)',
     );
   });
 });
