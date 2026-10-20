@@ -5,7 +5,7 @@ import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
-import { commitFiles, scratchRepo, writeFiles } from '../helpers/scratch-repo.js';
+import { commitFiles, git, scratchRepo, writeFiles } from '../helpers/scratch-repo.js';
 
 /**
  * Every key of a dev container but its `name` decides what is built and what runs in it: the
@@ -125,36 +125,53 @@ describe('what a dev container already there is built from', () => {
     ]);
   });
 
-  it('fails a change under the folder of a compose file, or to a Dockerfile it names', () => {
+  /**
+   * A compose file is not read for what its services build: with `dockerComposeFile`, any change
+   * under the folder of a compose file it names, under the dev container's folder, to a file named
+   * like a compose file or a Dockerfile anywhere fails. A compose file that does not read as YAML
+   * fails no more than one that does.
+   */
+  it('fails any change near a compose file, or to a compose file or a Dockerfile anywhere', () => {
     const files = {
-      [DC]: json({ dockerComposeFile: 'compose.yml', service: 'app' }),
-      '.devcontainer/compose.yml': [
-        'x-common: &common',
-        '  build:',
-        '    context: ../services',
-        '    dockerfile: app.Dockerfile',
-        'services:',
-        '  app:',
-        '    <<: *common',
-        '  db:',
-        '    build: ../db',
-        '',
-      ].join('\n'),
-      '.devcontainer/env': 'A=1\n',
+      [DC]: json({ dockerComposeFile: '../deploy/compose.yml', service: 'app' }),
+      'deploy/compose.yml': 'services: [unclosed\n',
+      'deploy/env/app.env': 'A=1\n',
+      '.devcontainer/notes.txt': 'x\n',
       'services/app.Dockerfile': 'FROM node:20\n',
-      'db/Dockerfile': 'FROM postgres\n',
+      'db/Dockerfile.dev': 'FROM postgres\n',
+      'ops/docker-compose.prod.yaml': 'services: {}\n',
+      'ops/Compose.override.yml': 'services: {}\n',
       'services/other.txt': 'x\n',
     };
-    expect(changedIn(files, { '.devcontainer/env': 'LD_PRELOAD=/x\n' })).toEqual([
-      'changed devcontainer-setting .devcontainer/env build input changed',
-    ]);
-    expect(changedIn(files, { 'services/app.Dockerfile': 'FROM evil\n' })).toEqual([
-      'changed devcontainer-setting services/app.Dockerfile build input changed',
-    ]);
-    expect(changedIn(files, { 'db/Dockerfile': 'FROM evil\n' })).toEqual([
-      'changed devcontainer-setting db/Dockerfile build input changed',
-    ]);
+    for (const path of [
+      'deploy/env/app.env',
+      '.devcontainer/notes.txt',
+      'services/app.Dockerfile',
+      'db/Dockerfile.dev',
+      'ops/docker-compose.prod.yaml',
+      'ops/Compose.override.yml',
+    ])
+      expect(changedIn(files, { [path]: 'changed\n' })).toEqual([
+        `changed devcontainer-setting ${path} build input changed`,
+      ]);
     expect(changedIn(files, { 'services/other.txt': 'y\n' })).toEqual([]);
+  });
+
+  // A disk that folds case opens `.DevContainer/x` as a file of `.devcontainer`.
+  it('matches what a change touches in any letter case', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      [DC]: json({ dockerComposeFile: 'compose.yml' }),
+      '.devcontainer/compose.yml': 'services: {}\n',
+    });
+    writeFiles(dir, { 'blob.tmp': 'evil\n' });
+    const oid = git(dir, 'hash-object', '-w', 'blob.tmp').trim();
+    rmSync(join(dir, 'blob.tmp'));
+    git(dir, 'update-index', '--add', '--cacheinfo', `100644,${oid},.DevContainer/hook.sh`);
+    git(dir, 'commit', '-q', '-m', 'c');
+    expect(ownFailing(agentChanges(dir, base).hits)).toEqual([
+      'new devcontainer-setting .DevContainer/hook.sh build input changed',
+    ]);
   });
 
   posixOnly('follows a link to the Dockerfile', () => {
@@ -179,13 +196,7 @@ describe('what a dev container already there is built from', () => {
 
   it.each([
     ['a Dockerfile that is not there', { [DC]: json({ build: { dockerfile: 'Missing' } }) }],
-    [
-      'a compose file that does not read as one',
-      {
-        [DC]: json({ dockerComposeFile: 'compose.yml' }),
-        '.devcontainer/compose.yml': 'services: [unclosed\n',
-      },
-    ],
+    ['a compose file that is not there', { [DC]: json({ dockerComposeFile: 'compose.yml' }) }],
   ])('fails %s', (_, files) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { ...files, 'README.md': 'x\n' });
@@ -242,6 +253,7 @@ describe('a dev container in plain stroq inspect', () => {
       'dockerComposeFile error',
       'build input outside error',
       'build input outside error',
+      'compose files and Dockerfiles anywhere warning',
     ]);
   });
 });

@@ -351,7 +351,17 @@ export const COMPOSE_FILE = 'compose file';
 export const BUILD_OUTSIDE = 'build input outside';
 export const BUILD_INPUT_CHANGED = 'build input changed';
 export const BUILD_UNRESOLVED = 'build input not resolved';
-const BUILD_INPUTS: ReadonlySet<string> = new Set([BUILD_CONTEXT, BUILD_FILE, COMPOSE_FILE]);
+/** Every file named like a compose file or a Dockerfile, wherever it is: what compose may build. */
+export const COMPOSE_ANYWHERE = 'compose files and Dockerfiles anywhere';
+const BUILD_INPUTS: ReadonlySet<string> = new Set([
+  BUILD_CONTEXT,
+  BUILD_FILE,
+  COMPOSE_FILE,
+  COMPOSE_ANYWHERE,
+]);
+
+/** How the hit for every compose file and Dockerfile names them. */
+const COMPOSE_NAMES = 'compose*.y*ml, docker-compose*.y*ml, Dockerfile*, *.dockerfile';
 
 /** Whether a dev container hit names something it is built from, to be followed in a change. */
 export const isBuildInput = (name: string): boolean => BUILD_INPUTS.has(name);
@@ -395,14 +405,20 @@ function buildInputs(f: JsonFile): AgentHit[] {
       build === undefined ? legacy : (own(build, 'dockerfile') ?? own(build, 'dockerFile'));
     for (const name of names(dockerfile)) wanted.push([BUILD_FILE, key, name]);
   }
-  for (const name of names(own(f.value, 'dockerComposeFile'))) {
-    wanted.push([COMPOSE_FILE, 'dockerComposeFile', name]);
-    wanted.push([BUILD_CONTEXT, 'dockerComposeFile', posix.dirname(name)]);
+  // A compose file is not read for what its services build: everything near it, the dev
+  // container's own folder, and every file named like a compose file or a Dockerfile count.
+  if (Object.hasOwn(f.value, 'dockerComposeFile')) {
+    for (const name of names(own(f.value, 'dockerComposeFile'))) {
+      wanted.push([COMPOSE_FILE, 'dockerComposeFile', name]);
+      wanted.push([BUILD_CONTEXT, 'dockerComposeFile', posix.dirname(name)]);
+    }
+    wanted.push([BUILD_CONTEXT, 'dockerComposeFile', '.']);
+    wanted.push([COMPOSE_ANYWHERE, 'dockerComposeFile', '.']);
   }
   const seen = new Set<string>();
   const hits: AgentHit[] = [];
   for (const [name, key, written] of wanted) {
-    const path = besideFile(f.path, written);
+    const path = name === COMPOSE_ANYWHERE ? COMPOSE_NAMES : besideFile(f.path, written);
     const found =
       path === undefined
         ? {

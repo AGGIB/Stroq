@@ -322,7 +322,7 @@ function compare(top: string, base: string, head: string) {
   const hits = [
     ...found,
     ...runFileChanges(found, runs),
-    ...buildInputs(top, tree, () => linked().view, found, changed),
+    ...buildInputs(() => linked().view, found, changed),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
@@ -343,27 +343,12 @@ function compare(top: string, base: string, head: string) {
  * was not read leaves its input unresolved, which fails.
  */
 function buildInputs(
-  top: string,
-  tree: ReadonlyMap<string, TreeEntry>,
   view: () => TreeView,
   found: readonly TaggedHit[],
   changed: ReadonlyMap<string, Changed>,
 ): TaggedHit[] {
   if (!found.some((h) => h.kind === 'devcontainer-setting' && isBuildInput(h.name))) return [];
-  const readText = (paths: readonly string[]): ReadonlyMap<string, string> => {
-    const entries = paths.flatMap((p) => {
-      const e = tree.get(p);
-      return e !== undefined && isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
-    });
-    const texts = readBlobs(
-      top,
-      entries.map(([, e]) => e),
-    );
-    return new Map(
-      entries.flatMap(([p, e]) => (texts.has(e.oid) ? [[p, texts.get(e.oid) as string]] : [])),
-    );
-  };
-  return buildInputChanges(found, changed, view(), readText);
+  return buildInputChanges(found, changed, view());
 }
 
 /**

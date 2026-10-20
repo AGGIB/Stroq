@@ -15,6 +15,7 @@ import {
   BUILD_INPUT_CHANGED,
   BUILD_OUTSIDE,
   BUILD_UNRESOLVED,
+  COMPOSE_ANYWHERE,
   COMPOSE_FILE,
   DEVCONTAINER_ACCESS_KEYS,
   DEVCONTAINER_ENV_KEYS,
@@ -188,6 +189,8 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       if (h.name === BUILD_FILE) return `the dev container builds from ${value}`;
       if (h.name === COMPOSE_FILE)
         return `the dev container is started by the compose file ${value}`;
+      if (h.name === COMPOSE_ANYWHERE)
+        return `the dev container is started by compose, which may build from any of: ${value}`;
       if (h.name === BUILD_OUTSIDE)
         return `the dev container builds from ${value}, out of the repository, which no change shows`;
       if (h.name === BUILD_UNRESOLVED)
