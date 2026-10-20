@@ -4,7 +4,7 @@ import { readFrontmatter } from '../install/inspect/frontmatter.js';
 import type { JsonObject } from '../install/inspect/json.js';
 import { firstEntries, hookEntries, MAX_HOOKS, mcpServerHits, tooMany } from './agent-json.js';
 import { boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
-import { ruleRunsAnything } from './allow-rules.js';
+import { claudeRuleIsBroad } from './allow-rules.js';
 import { lineAt } from './jsonc.js';
 
 type KeyLines = ReadonlyMap<string, number>;
@@ -188,7 +188,7 @@ function grantRules(value: unknown): string[] {
   return rules;
 }
 
-/** The grants of the shell a definition's front matter makes, each rule once. */
+/** The grants of the shell, of files outside or of the network a definition's front matter makes. */
 function definitionGrants(path: string, data: JsonObject, keyLines: KeyLines): AgentHit[] {
   const hits: AgentHit[] = [];
   for (const key of GRANT_KEYS) {
@@ -199,7 +199,7 @@ function definitionGrants(path: string, data: JsonObject, keyLines: KeyLines): A
     const readable = typeof value === 'string' || Array.isArray(value);
     const rules = readable ? grantRules(value) : [boundedJson(value)];
     const broad = [...new Set(rules)].filter(
-      (rule) => !readable || ruleRunsAnything(rule, SHELL_TOOLS),
+      (rule) => !readable || claudeRuleIsBroad(rule, SHELL_TOOLS),
     );
     const list = firstEntries(path, 'allowed tools', broad);
     const line = keyLines.get(key) ?? 1;

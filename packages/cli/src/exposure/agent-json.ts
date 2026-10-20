@@ -1,5 +1,5 @@
 import { mcpServerRunsCode } from '@stroq/core';
-import { ruleRunsAnything } from './allow-rules.js';
+import { claudeRuleIsBroad, leadsOutside } from './allow-rules.js';
 import { isPlainObject } from '../commands/config-file.js';
 import { boundedJson, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
@@ -343,13 +343,14 @@ function approvedServers(f: JsonFile): AgentHit[] {
 }
 
 /**
- * Allow rules that hand the agent the whole shell, each spelling listed once, at most
- * `MAX_ENTRIES` of them: past that, one failing entry stands for the rest.
+ * Allow rules that hand the agent the whole shell, files outside the repository or the network,
+ * each spelling listed once, at most `MAX_ENTRIES` of them: past that, one failing entry stands
+ * for the rest.
  */
 function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
   const allow = permissions === undefined ? [] : strings(own(permissions, 'allow'));
   const rules = new Set(
-    allow.map((rule) => rule.trim()).filter((rule) => ruleRunsAnything(rule, SHELL_TOOLS)),
+    allow.map((rule) => rule.trim()).filter((rule) => claudeRuleIsBroad(rule, SHELL_TOOLS)),
   );
   const list = firstEntries(f.path, 'broad allow rules', [...rules]);
   return [
@@ -366,18 +367,53 @@ function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
   ];
 }
 
+/**
+ * The folders besides the repository the agent may work in without asking, each that is not
+ * proven to be inside it: one from the home folder, the root, a variable or up a folder, or a
+ * value that is not a path.
+ */
+function outsideFolders(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
+  const value = permissions === undefined ? undefined : own(permissions, 'additionalDirectories');
+  if (value === undefined) return [];
+  const all = Array.isArray(value) ? value : [value];
+  const outside = all.map((d) => (typeof d === 'string' ? d : boundedJson(d)));
+  const list = firstEntries(
+    f.path,
+    'additional directories',
+    outside.filter(
+      (d, i) => typeof all[i] !== 'string' || leadsOutside(d) || d.trim().startsWith('/'),
+    ),
+  );
+  return [
+    ...list.cut,
+    ...list.items.map((dir) =>
+      hit(
+        'agent-broad-allow',
+        f.path,
+        lineOf(f.text, ['"permissions"', '"additionalDirectories"', quoted(dir)]),
+        'permissions.additionalDirectories',
+        dir,
+      ),
+    ),
+  ];
+}
+
+/** Modes that ask at least as often as the default: any other asks less, or is not known. */
+const ASKING_MODES: ReadonlySet<unknown> = new Set(['default', 'plan', 'dontAsk']);
+
 function settingsSwitches(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [...envHits(f)];
   const permissions = ownObject(f.value, 'permissions');
-  hits.push(...broadAllows(f, permissions));
-  if (permissions !== undefined && own(permissions, 'defaultMode') === 'bypassPermissions')
+  hits.push(...broadAllows(f, permissions), ...outsideFolders(f, permissions));
+  const mode = permissions === undefined ? undefined : own(permissions, 'defaultMode');
+  if (mode !== undefined && !ASKING_MODES.has(mode))
     hits.push(
       hit(
         'agent-permission-bypass',
         f.path,
         lineOf(f.text, ['"permissions"', '"defaultMode"']),
         'permissions.defaultMode',
-        'bypassPermissions',
+        typeof mode === 'string' ? mode : boundedJson(mode),
       ),
     );
   if (own(f.value, 'enableAllProjectMcpServers') === true)

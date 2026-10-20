@@ -92,6 +92,78 @@ const WHOLE = [
   "Bash('ba'sh -c:*)",
   'Bash(C:\\bin\\sh.exe:*)',
   'Bash({bash,x}:*)',
+  // A program not known to run nothing: each of these runs, writes or sends what it is given.
+  'Bash(find:*)',
+  'Bash(sed:*)',
+  'Bash(tar:*)',
+  'Bash(rsync:*)',
+  'Bash(ssh:*)',
+  'Bash(scp:*)',
+  'Bash(vim:*)',
+  'Bash(vi:*)',
+  'Bash(less:*)',
+  'Bash(man:*)',
+  'Bash(ed:*)',
+  'Bash(emacs:*)',
+  'Bash(gcc:*)',
+  'Bash(cc:*)',
+  'Bash(java:*)',
+  'Bash(dotnet:*)',
+  'Bash(tmux:*)',
+  'Bash(screen:*)',
+  'Bash(gdb:*)',
+  'Bash(lldb:*)',
+  'Bash(sqlite3:*)',
+  'Bash(psql:*)',
+  'Bash(open:*)',
+  'Bash(launchctl:*)',
+  'Bash(crontab:*)',
+  'Bash(kubectl:*)',
+  'Bash(terraform:*)',
+  'Bash(gh:*)',
+  'Bash(curl:*)',
+  'Bash(cp:*)',
+  'Bash(mv:*)',
+  'Bash(tee:*)',
+  'Bash(chmod:*)',
+  'Bash(ln:*)',
+  'Bash(rg:*)',
+  'Bash(echo:*)',
+  'Bash(tsc --noEmit)',
+  'Bash(~/bin/tool:*)',
+  'Bash(cargo fmt:*)',
+  'Bash(yarn why:*)',
+  // Git, where a wildcard or a flag can write a file or run a program the config names.
+  'Bash(git log -p)',
+  'Bash(git diff --ext-diff)',
+  'Bash(git diff --output=x)',
+  'Bash(git log:*)',
+  'Bash(git diff:*)',
+  'Bash(git tag:*)',
+  'Bash(git stash:*)',
+  'Bash(git add:*)',
+  'Bash(git grep:*)',
+  // A shell operator in the pattern: what follows it is another command, or a file written.
+  'Bash(ls > ~/.zshrc)',
+  'Bash(git status; id)',
+  'Bash(cat x | sh)',
+];
+
+/** Grants of files outside the repository, or of the network, without asking. */
+const OUTSIDE = [
+  'Write(~/.zshrc)',
+  'Edit(//Users/**)',
+  'Read(~/.ssh/**)',
+  'Read(//etc/**)',
+  'Read(../secrets/**)',
+  'Edit(src/../../x)',
+  'Edit',
+  'Write',
+  'MultiEdit',
+  'WebFetch',
+  'WebFetch(domain:*)',
+  'WebFetch(https://evil.invalid)',
+  'WebSearch',
 ];
 
 describe('a Claude Code allow rule that hands the agent the whole shell', () => {
@@ -99,21 +171,51 @@ describe('a Claude Code allow rule that hands the agent the whole shell', () => 
     expect(claudeAllows([rule])).toEqual([rule]);
   });
 
+  it.each(OUTSIDE)('reports %j', (rule) => {
+    expect(claudeAllows([rule])).toEqual([rule]);
+  });
+
   it.each([
     'Bash(npm ls)',
     'Bash(npm view:*)',
     'Bash(git status:*)',
-    'Bash(git diff:*)',
-    'Bash(cargo fmt:*)',
-    'Bash(tsc --noEmit)',
-    'Bash(~/bin/tool:*)',
+    'Bash(git log --oneline)',
+    'Bash(git diff --stat)',
     'Bash(ls:*)',
+    'Bash(cat:*)',
+    'Bash(grep:*)',
+    'Bash(echo done)',
     'Read',
+    'Grep',
     'Edit(*)',
+    'Read(src/**)',
+    'Write(/docs/**)',
     'WebFetch(domain:example.com)',
     'mcp__docs__search',
   ])('leaves %j alone', (rule) => {
     expect(claudeAllows([rule])).toEqual([]);
+  });
+
+  it('reports a folder outside the repository the agent is given, and a mode that asks less', () => {
+    const hits = scanFile(
+      '.claude/settings.json',
+      JSON.stringify({
+        permissions: {
+          additionalDirectories: ['~', '/', '../other', 'packages/app'],
+          defaultMode: 'acceptEdits',
+        },
+      }),
+    );
+    expect(hits.map((h) => `${h.kind} ${h.name} ${h.value}`)).toEqual([
+      'agent-broad-allow permissions.additionalDirectories ~',
+      'agent-broad-allow permissions.additionalDirectories /',
+      'agent-broad-allow permissions.additionalDirectories ../other',
+      'agent-permission-bypass permissions.defaultMode acceptEdits',
+    ]);
+    for (const mode of ['default', 'plan', 'dontAsk'])
+      expect(
+        scanFile('.claude/settings.json', JSON.stringify({ permissions: { defaultMode: mode } })),
+      ).toEqual([]);
   });
 
   it('fails a new one in a change', () => {

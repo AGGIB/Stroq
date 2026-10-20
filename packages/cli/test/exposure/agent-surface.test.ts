@@ -149,12 +149,21 @@ describe('.claude/settings.json and settings.local.json', () => {
 
   it('leaves ordinary settings alone', () => {
     const text = JSON.stringify({
-      permissions: { defaultMode: 'acceptEdits', allow: ['Read'] },
+      permissions: { defaultMode: 'default', allow: ['Read'] },
       enableAllProjectMcpServers: false,
       env: { NODE_ENV: 'development' },
       model: 'opus',
     });
     expect(scanFile('.claude/settings.json', text)).toEqual([]);
+  });
+
+  // acceptEdits takes every edit without asking: the agent can write a hook or a script that a
+  // command it may run later runs.
+  it('reports a mode that accepts edits without asking', () => {
+    const text = JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } });
+    expect(scanFile('.claude/settings.json', text)).toMatchObject([
+      { kind: 'agent-permission-bypass', value: 'acceptEdits', severity: 'error' },
+    ]);
   });
 
   it('reports each enabled plugin and each extra plugin source', () => {

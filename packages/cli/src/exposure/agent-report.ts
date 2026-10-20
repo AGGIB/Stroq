@@ -21,6 +21,29 @@ export const plainQuote: Quote = (text) => showable(text, VALUE_MAX) || '(empty)
 
 const BINARY = 'a binary file (it holds a NUL byte), not read as instructions';
 
+/** What an allow rule, or a folder it adds, lets the agent do. */
+function grantOf(h: AgentHit): string {
+  if (h.name === 'permissions.additionalDirectories')
+    return 'read and change the files of a folder outside this repository';
+  const tool = h.value.split('(')[0]?.trim().toLowerCase() ?? '';
+  if (tool === 'webfetch' || tool === 'websearch') return 'reach any address';
+  if (
+    [
+      'read',
+      'edit',
+      'write',
+      'multiedit',
+      'notebookedit',
+      'notebookread',
+      'glob',
+      'grep',
+      'ls',
+    ].includes(tool)
+  )
+    return 'read or change files that may be outside this repository';
+  return 'run any shell command';
+}
+
 function sentence(h: AgentHit, q: Quote): string {
   const name = q(h.name);
   const value = q(h.value);
@@ -42,10 +65,12 @@ function sentence(h: AgentHit, q: Quote): string {
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow':
-      return `${name} lets the agent run any shell command without asking: ${value}`;
+      return `${name} lets the agent ${grantOf(h)} without asking: ${value}`;
     case 'agent-permission-bypass':
       if (h.name === 'permissions.defaultMode')
-        return 'the agent runs every tool without asking (defaultMode is bypassPermissions)';
+        return h.value === 'bypassPermissions'
+          ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'
+          : `the agent asks less than by default (defaultMode is ${value})`;
       if (h.name.endsWith('sandbox_mode'))
         return `${name} runs every command outside the sandbox: ${value}`;
       if (h.name.endsWith('folderTrust.enabled'))
