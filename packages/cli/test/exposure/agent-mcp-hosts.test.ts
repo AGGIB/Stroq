@@ -65,3 +65,23 @@ describe('a server a change adds to a host that starts it without asking', () =>
     );
   });
 });
+
+/**
+ * Claude Code keeps the servers it was allowed to start by their names, so a name approved before
+ * starts whatever the change now puts under it. Only a server that is new is listed to review.
+ */
+describe('a server already there whose command a change replaces', () => {
+  const npx = (pkg: string) => ({ command: 'npx', args: ['-y', pkg] });
+
+  it.each([
+    ['.mcp.json', 'mcpServers'],
+    ['.vscode/mcp.json', 'servers'],
+  ])('fails in %s', (path, key) => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      [path]: JSON.stringify({ [key]: { docs: npx('docs-mcp@1.0.0') } }),
+    });
+    commitFiles(dir, { [path]: JSON.stringify({ [key]: { docs: npx('totally-evil-pkg@9') } }) });
+    expect(failing(agentChanges(dir, base).hits)).toContain(`changed mcp-server ${path}`);
+  });
+});
