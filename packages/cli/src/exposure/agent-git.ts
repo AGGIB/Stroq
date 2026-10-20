@@ -11,7 +11,7 @@ import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
 import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
-import { packageConfigChanges, withAllLinks } from './package-configs.js';
+import { changedLinkHits, packageConfigChanges, withAllLinks } from './package-configs.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -332,6 +332,13 @@ function compare(top: string, base: string, head: string) {
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
   ];
+  // Any other link the change brought that leads out, to nothing, or was not read.
+  const reported = new Set(
+    hits
+      .filter((h) => h.kind === 'config-link-outside' || h.kind === 'unreadable-config')
+      .map((h) => h.file),
+  );
+  hits.push(...changedLinkHits(tree, linked().view, changed, reported));
   // A stable sort: each file's hits keep the order of their lines.
   const byFile = hits.sort((a, b) => byPath(a.file, b.file));
   return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };

@@ -9,6 +9,7 @@ import {
   git,
   hookSettings,
   scratchRepo,
+  stageLink,
   writeFiles,
 } from '../helpers/scratch-repo.js';
 
@@ -304,5 +305,50 @@ describe('a package manager config behind a link', () => {
     symlinkSync('/etc/stroq-test-npmrc', join(dir, '.npmrc'));
     commitFiles(dir);
     expect(failing(agentChanges(dir, base).hits)).toContain('new agent-api-redirect .npmrc');
+  });
+});
+
+/**
+ * A link can bring in what no reader names: a package config or an agent folder behind a folder
+ * link out of the tree, say. So any link a change adds or retargets, in any folder, fails when it
+ * leads out of the repository, to nothing, or could not be read.
+ */
+describe('a link the change adds or retargets', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+
+  posixOnly('fails one that leads out of the repository or to nothing, wherever it is', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { 'docs/a.md': 'a\n' });
+    symlinkSync('docs', join(dir, 'pkg'));
+    const base = commitFiles(dir);
+    symlinkSync('/etc', join(dir, 'etc'));
+    symlinkSync('../../../../../shared', join(dir, 'docs', 'shared'));
+    symlinkSync('missing/file', join(dir, 'docs', 'gone'));
+    rmSync(join(dir, 'pkg'));
+    symlinkSync('/opt/pkg', join(dir, 'pkg'));
+    commitFiles(dir);
+    expect(failing(agentChanges(dir, base).hits).sort()).toEqual([
+      'changed config-link-outside pkg',
+      'new config-link-outside docs/shared',
+      'new config-link-outside etc',
+      'new unreadable-config docs/gone',
+    ]);
+  });
+
+  it('fails one whose target could not be read', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    stageLink(dir, 'tools/long', 'a/'.repeat(3000));
+    git(dir, 'commit', '-q', '-m', 'c');
+    expect(failing(agentChanges(dir, base).hits)).toEqual(['new unreadable-config tools/long']);
+  });
+
+  posixOnly('passes one that leads to a file or a folder of the repository', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'docs/a.md': 'a\n' });
+    symlinkSync('docs/a.md', join(dir, 'b.md'));
+    symlinkSync('docs', join(dir, 'd'));
+    commitFiles(dir);
+    expect(failing(agentChanges(dir, base).hits)).toEqual([]);
   });
 });

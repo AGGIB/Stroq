@@ -152,3 +152,46 @@ export function packageConfigChanges(
     );
   return [...out.values()];
 }
+
+/**
+ * Each link the change adds, edits or retypes, in any folder, that leads out of the repository, to
+ * nothing (or round in a loop), or whose target was not read: what is behind it is in no change
+ * to review, and a reader may never name it (a package config or an agent folder behind a folder
+ * link out of the tree). `reported` holds the paths another reading already failed.
+ */
+export function changedLinkHits(
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: TreeView,
+  changed: ReadonlyMap<string, Changed>,
+  reported: ReadonlySet<string>,
+): TaggedHit[] {
+  const out: TaggedHit[] = [];
+  for (const [path, c] of changed) {
+    if (c.status === 'D' || tree.get(path)?.mode !== SYMLINK || reported.has(path)) continue;
+    const status = c.status === 'A' ? 'new' : 'changed';
+    const at = resolve(path, view);
+    if (at.kind === 'outside')
+      out.push({
+        ...hit('config-link-outside', path, 1, 'link', at.target),
+        severity: 'error',
+        status,
+      });
+    else if (at.kind === 'dangling')
+      out.push({
+        ...hit(
+          'unreadable-config',
+          path,
+          1,
+          'link',
+          'the link leads to nothing, or round in a loop',
+        ),
+        status,
+      });
+    else if (at.kind === 'unread')
+      out.push({
+        ...hit('unreadable-config', path, 1, 'link', `a link on the way was not read: ${at.link}`),
+        status,
+      });
+  }
+  return out;
+}
