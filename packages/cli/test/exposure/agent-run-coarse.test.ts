@@ -121,6 +121,10 @@ describe('a command whose reach is not on its line', () => {
     'npm start',
     'pnpm test',
     'uv run pytest -q',
+    // A runner named by a path is judged by its name, not taken for a script of the repository.
+    './node_modules/.bin/jest --ci',
+    'node_modules/.bin/vitest run',
+    'tools/make lint',
   ])('`%s` fails on a change to any code file', (command) => {
     const fails = hookRuns(command, { 'src/app.py': '1\n' }, { 'src/app.py': '2\n' });
     expect(fails).toContain(runFile('src/app.py'));

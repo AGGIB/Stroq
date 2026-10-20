@@ -456,9 +456,7 @@ const firstPlain = (args: readonly string[]): string | undefined =>
 /** How far one program, given these arguments, reaches. */
 function reachOf(program: string, args: readonly string[]): Reach {
   if (program.includes('://')) return 'nothing';
-  const absolute = program.startsWith('/') || /^[A-Za-z]:[\\/]/.test(program);
-  // A file of the repository, named relative to a folder or behind a variable that is a prefix.
-  if (/[\\/]/.test(program) && !absolute && !program.startsWith('~')) return 'runs';
+  // Judged by its name first, wherever it is: `./node_modules/.bin/jest` is jest.
   const name = baseOf(program);
   if (args.some((a) => TEST_RUNNERS.has(baseOf(a)))) return 'open';
   if (TEST_RUNNERS.has(name)) return 'open';
@@ -488,6 +486,10 @@ function reachOf(program: string, args: readonly string[]): Reach {
   }
   if (RUNNER_WORDS.has(name))
     return args.some((a) => TEST_WORD.test(a.toLowerCase())) ? 'open' : 'runner';
+  // A file of the repository, named relative to a folder or behind a variable that is a prefix:
+  // what it is, is read by its name.
+  const absolute = program.startsWith('/') || /^[A-Za-z]:[\\/]/.test(program);
+  if (/[\\/]/.test(program) && !absolute && !program.startsWith('~')) return 'runs';
   if (RUNS_NOTHING.has(name)) return 'nothing';
   return 'open';
 }
