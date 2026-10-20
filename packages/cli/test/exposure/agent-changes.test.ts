@@ -156,9 +156,11 @@ describe('tagChanges', () => {
       .map(([k, v]) => `${k} = "${v}"`)
       .join(', ');
     const codex = scanFile('.codex/config.toml', `[shell_environment_policy]\nset = { ${set} }\n`);
-    expect(codex.map((h) => h.name)).toEqual(
-      reported.map((name) => `shell_environment_policy.set.${name}`),
-    );
+    // The table itself is listed too: it decides what the agent's commands are kept from.
+    expect(codex.map((h) => h.name)).toEqual([
+      'shell_environment_policy',
+      ...reported.map((name) => `shell_environment_policy.set.${name}`),
+    ]);
   });
 
   // A server's own `env` is read by the same list: a name off it can make the program it starts

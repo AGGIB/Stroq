@@ -263,7 +263,24 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
       : [hit('unreadable-config', path, 1, 'front matter', digestOf(text))];
   }
   const { data, keyLines } = front;
+  // The mode a subagent runs in: one that asks less fails wherever it is; any change fails.
+  const mode: unknown = Object.hasOwn(data, 'permissionMode') ? data['permissionMode'] : undefined;
+  const modes =
+    mode === undefined
+      ? []
+      : [
+          hit(
+            typeof mode === 'string' && ['default', 'plan', 'dontAsk'].includes(mode)
+              ? 'agent-broad-allow'
+              : 'agent-permission-bypass',
+            path,
+            keyLines.get('permissionMode') ?? 1,
+            'permissionMode',
+            typeof mode === 'string' ? mode : boundedJson(mode),
+          ),
+        ];
   return byLine([
+    ...modes,
     ...definitionHooks(path, data, keyLines),
     ...definitionGrants(path, data, keyLines),
     ...definitionServers(path, text, data, keyLines),

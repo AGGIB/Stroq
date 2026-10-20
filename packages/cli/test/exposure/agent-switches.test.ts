@@ -52,6 +52,8 @@ describe('Codex config.toml', () => {
       'agent-api-redirect openai_base_url error',
       'agent-api-redirect model_providers.evil.base_url error',
       'agent-api-redirect otel.exporter error',
+      // What keeps the agent's commands from the environment: listed, and any change fails.
+      'agent-broad-allow shell_environment_policy warning',
       'agent-env shell_environment_policy.set.NODE_OPTIONS error',
       'agent-permission-bypass profiles.fast.approval_policy error',
     ]);
@@ -83,7 +85,7 @@ describe('Codex config.toml', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, { '.codex/config.toml': CODEX });
-    expect(agentChanges(dir, base).hits.filter((h) => isFailing(h, 'new'))).toHaveLength(7);
+    expect(agentChanges(dir, base).hits.filter((h) => isFailing(h, 'new'))).toHaveLength(8);
   });
 });
 

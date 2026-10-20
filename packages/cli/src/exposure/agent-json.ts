@@ -644,10 +644,33 @@ function pluginHits(f: JsonFile): AgentHit[] {
   return hits;
 }
 
+/** Claude Code's settings that keep the agent from things: listed, and any change fails. */
+function protections(f: JsonFile): AgentHit[] {
+  const permissions = ownObject(f.value, 'permissions') ?? {};
+  const found: AgentHit[] = [];
+  for (const [name, table, key, at] of [
+    ['sandbox', f.value, 'sandbox', ['"sandbox"']],
+    ['permissions.ask', permissions, 'ask', ['"permissions"', '"ask"']],
+    ['disableAllHooks', f.value, 'disableAllHooks', ['"disableAllHooks"']],
+  ] as const)
+    if (Object.hasOwn(table, key))
+      found.push(
+        hit(
+          'agent-broad-allow',
+          f.path,
+          lineOf(f.text, at),
+          name,
+          boundedJson(table[key], undefined, true),
+        ),
+      );
+  return found;
+}
+
 export const claudeSettings = (f: JsonFile): AgentHit[] => [
   ...hookHits(f, own(f.value, 'hooks'), ['"hooks"']),
   ...helperCommands(f),
   ...settingsSwitches(f),
+  ...protections(f),
   ...pluginHits(f),
 ];
 

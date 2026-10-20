@@ -8,7 +8,7 @@ import {
   type TaggedHit,
 } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
-import type { AgentHit } from './agent-kinds.js';
+import { REMOVED_PROTECTION, isProtection, type AgentHit } from './agent-kinds.js';
 import {
   BUILD_CONTEXT,
   BUILD_FILE,
@@ -122,6 +122,8 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow': {
+      if (isProtection(h))
+        return `${name} decides what the agent is kept from, and a change to it can loosen that: ${value}`;
       const widens =
         h.status === 'new' || h.status === 'changed'
           ? ', and this change widens what the agent may do without asking'
@@ -131,6 +133,8 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         : `${name} lets the agent ${grantOf(h)} without asking${widens}: ${value}`;
     }
     case 'agent-permission-bypass':
+      if (h.value === REMOVED_PROTECTION)
+        return `takes ${name} away, which kept the agent from things`;
       if (h.name === 'permissions.deny')
         return `takes away the deny rule ${value}, so the agent is no longer refused it`;
       if (h.name === 'disabledMcpjsonServers')

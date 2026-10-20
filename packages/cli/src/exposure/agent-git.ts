@@ -10,7 +10,7 @@ import {
 import { buildInputChanges } from './agent-build-inputs.js';
 import { isBuildInput } from './agent-editor.js';
 import { escalateApproved } from './agent-json.js';
-import { hit, type AgentHit } from './agent-kinds.js';
+import { hit, removedProtections, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
 import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
 import {
@@ -27,6 +27,8 @@ import {
   foldPath,
   hitsForRead,
   holdsGuards,
+  isSurfacePath,
+  scanFile,
   readTier,
   type SourceRead,
 } from './agent-surface.js';
@@ -298,8 +300,10 @@ function compare(top: string, base: string, head: string) {
         if (!p.touched) return tagChanges(now, now);
         const oid = baseOid(p, changed);
         const source = oid === undefined ? undefined : read.baseSource(oid);
+        const before = source === undefined ? [] : hitsForRead(p.path, source);
         return [
-          ...tagChanges(now, source === undefined ? [] : hitsForRead(p.path, source)),
+          ...tagChanges(now, before),
+          ...removedProtections(now, before).map((h) => tagged(h, 'changed')),
           ...guardChanges(p, headRead.text, source),
         ];
       }
@@ -340,6 +344,7 @@ function compare(top: string, base: string, head: string) {
     ...packageConfigs(top, tree, sorted, changed, linked()),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
+    ...deletedProtections(top, changed),
     ...hooks.hits,
   ];
   // Any other link the change brought that leads out, to nothing, or was not read.
@@ -641,6 +646,33 @@ function hookFiles(
     status: 'present',
   }));
   return { hits: out, entries };
+}
+
+/**
+ * What kept the agent from things in each agent config the change deletes: all of it is taken
+ * away. A few files and none past the size cap are read; what is not read fails.
+ */
+function deletedProtections(top: string, changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const gone = [...changed]
+    .filter(([path, c]) => c.status === 'D' && isSurfacePath(path))
+    .sort(([a], [b]) => byPath(a, b))
+    .slice(0, MAX_LINE_FILES);
+  const files = gone.flatMap(([path, c]) =>
+    c.oldMode === '100644' || c.oldMode === '100755' ? [{ path, oid: c.oldOid }] : [],
+  );
+  const sizes = objectSizes(top, unique(files.map((f) => f.oid)));
+  const blobs = readBlobs(
+    top,
+    unique(files.map((f) => f.oid)).flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  );
+  return files.flatMap((f) => {
+    const text = blobs.get(f.oid);
+    if (text === undefined) return [];
+    return removedProtections([], scanFile(f.path, text)).map((h) => tagged(h, 'changed'));
+  });
 }
 
 /**

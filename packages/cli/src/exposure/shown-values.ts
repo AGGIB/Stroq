@@ -19,7 +19,7 @@ export const keyed = (text: string): string =>
 
 /** Keys whose values are never shown: their keys are, or a count. */
 const HIDDEN_KEYS =
-  /"(?:env|environment|headers|args|remoteEnv|containerEnv|secrets|httpHeaders)":/gi;
+  /"(?:env|environment|headers|args|remoteEnv|containerEnv|secrets|httpHeaders|set)":/gi;
 /** A word of text, between blanks and quotes: an address is scrubbed word by word. */
 const WORD = /[^\s'"`]+/g;
 /** The user and password of an address, from each `://` to the `@` before the next `/`. */

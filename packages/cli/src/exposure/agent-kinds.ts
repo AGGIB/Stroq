@@ -182,3 +182,39 @@ export const byLine = (hits: readonly AgentHit[]): AgentHit[] =>
     .map((h, i) => [h, i] as const)
     .sort(([a, i], [b, j]) => a.line - b.line || i - j)
     .map(([h]) => h);
+
+/**
+ * Settings that keep the agent from things: Claude Code's `sandbox`, `permissions.ask` and
+ * `disableAllHooks`, Codex's `sandbox_workspace_write` and `shell_environment_policy` (in a profile
+ * too), Gemini's `tools.exclude`, `excludeTools`, `tools.sandbox` and `sandbox`, an agent's
+ * `permissionMode`. Which change loosens one is not worked out: any change, a removal included,
+ * fails.
+ */
+const PROTECTION =
+  /^(?:sandbox|permissions\.ask|disableAllHooks|tools\.exclude|excludeTools|tools\.sandbox|permissionMode|(?:profiles\.[^.]+\.)?(?:sandbox_workspace_write|shell_environment_policy))$/;
+
+/** Whether a finding is one of those settings. */
+export const isProtection = (h: AgentHit): boolean =>
+  (h.kind === 'agent-broad-allow' || h.kind === 'agent-permission-bypass') &&
+  PROTECTION.test(h.name);
+
+/** The value a finding for a protection a change takes away is shown with. */
+export const REMOVED_PROTECTION = '(taken away)';
+
+/** A finding for each protection of `base` that `head` no longer has, by its name. */
+export function removedProtections(
+  head: readonly AgentHit[],
+  base: readonly AgentHit[],
+): AgentHit[] {
+  const kept = new Set(head.filter(isProtection).map((h) => `${h.file}\u0000${h.name}`));
+  return base
+    .filter((h) => isProtection(h) && !kept.has(`${h.file}\u0000${h.name}`))
+    .map((h) => ({
+      kind: 'agent-permission-bypass' as const,
+      file: h.file,
+      line: 1,
+      name: h.name,
+      value: REMOVED_PROTECTION,
+      severity: 'error' as const,
+    }));
+}

@@ -49,8 +49,24 @@ function codexBypass(path: string, table: Obj, prefix: string, line: Line): Agen
 }
 
 /** Codex's `config.toml`: the switches above, at the top and in each profile. */
+/** Codex's tables that keep the agent from things, in `table`: listed, and any change fails. */
+function codexProtections(path: string, table: Obj, prefix: string, line: Line): AgentHit[] {
+  const keys = prefix === '' ? [] : prefix.slice(0, -1).split('.');
+  return ['sandbox_workspace_write', 'shell_environment_policy']
+    .filter((key) => Object.hasOwn(table, key))
+    .map((key) =>
+      hit(
+        'agent-broad-allow',
+        path,
+        line([...keys, key]),
+        `${prefix}${key}`,
+        boundedJson(table[key], undefined, true),
+      ),
+    );
+}
+
 export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
-  const hits = codexBypass(path, doc, '', line);
+  const hits = [...codexBypass(path, doc, '', line), ...codexProtections(path, doc, '', line)];
   for (const key of ['openai_base_url', 'chatgpt_base_url']) {
     const url = ownString(doc, key);
     if (url !== undefined) hits.push(hit('agent-api-redirect', path, line([key]), key, url));
@@ -98,7 +114,11 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
   const profiles = firstEntries(path, 'profiles', Object.entries(ownObject(doc, 'profiles') ?? {}));
   hits.push(...profiles.cut);
   for (const [name, profile] of profiles.items)
-    if (isPlainObject(profile)) hits.push(...codexBypass(path, profile, `profiles.${name}.`, line));
+    if (isPlainObject(profile))
+      hits.push(
+        ...codexBypass(path, profile, `profiles.${name}.`, line),
+        ...codexProtections(path, profile, `profiles.${name}.`, line),
+      );
   return hits;
 }
 
@@ -135,6 +155,17 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
   ] as const) {
     const command = ownString(table, keys[keys.length - 1] as string);
     if (command !== undefined) add('agent-helper-command', keys, command);
+  }
+  // What keeps the agent from tools or runs it in a sandbox: listed, and any change fails.
+  for (const [table, keys] of [
+    [tools, ['tools', 'exclude']],
+    [f.value, ['excludeTools']],
+    [tools, ['tools', 'sandbox']],
+    [f.value, ['sandbox']],
+  ] as const) {
+    const key = keys[keys.length - 1] as string;
+    if (Object.hasOwn(table, key))
+      add('agent-broad-allow', keys, boundedJson(table[key], undefined, true));
   }
   const trust = ownObject(ownObject(f.value, 'security') ?? {}, 'folderTrust');
   if (trust !== undefined && own(trust, 'enabled') === false)
