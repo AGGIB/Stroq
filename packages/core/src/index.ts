@@ -20,6 +20,10 @@ export {
 } from './actions/agent-config.js';
 export * from './actions/limit-signals.js';
 export * from './actions/shell-tools.js';
+// The lexer and the word reader the classifier cuts a command with, for `stroq sent`, which places
+// a key by the same stages and words the hook judges.
+export { lex, type Lexed, type Stage as LexedStage } from './actions/shell-lex.js';
+export { REDIRECT, resolve, type Resolved, type Word } from './actions/shell-words.js';
 export * from './taint/trust.js';
 export * from './policy/policy-types.js';
 export * from './policy/default-policy.js';

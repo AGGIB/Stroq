@@ -32,6 +32,12 @@ export function writeUnfiltered(text: string): void {
   originalStdoutWrite(text);
 }
 
+/** The same for standard error: a progress line redrawn with `\r` (`stroq sent` on a terminal). */
+const originalStderrWrite: Write = process.stderr.write.bind(process.stderr);
+export function writeErrUnfiltered(text: string): void {
+  originalStderrWrite(text);
+}
+
 function safeWrite(original: Write, stream: NodeJS.WriteStream): Write {
   return function write(this: unknown, chunk: unknown, ...rest: unknown[]): boolean {
     const text =

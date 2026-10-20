@@ -5,7 +5,8 @@ import { createTranscriptParser } from '../../src/replay/transcript.js';
 import { createCodexParser } from '../../src/sent/codex.js';
 import { readObjectLiteral } from '../../src/sent/codex-literal.js';
 import { parseCursorStore } from '../../src/sent/cursor.js';
-import { withoutHeredocData } from '../../src/sent/heredoc.js';
+import { TIERS } from '../../src/sent/place.js';
+import { shellPlace } from '../../src/sent/shell-place.js';
 
 /**
  * Property tests for the readers `stroq sent` and `stroq replay` run over sessions
@@ -192,79 +193,43 @@ describe('Cursor store reader on arbitrary rows', () => {
   });
 });
 
-describe('heredoc filter on arbitrary commands', () => {
-  const heredocish = fc
+describe('where a shell command sent a key, on arbitrary commands', () => {
+  const KEY = { name: 'API_TOKEN', source: '.env', value: 'FAKEfuzzToken0123456789abcd' };
+  const ctx = { cwd: '/w', gitRemote: () => null };
+  const commandish = fc
     .array(
       fc.constantFrom(
-        'cat > f <<EOF',
-        "bash <<'X'",
-        '<<-EOF',
+        'curl',
+        'wget -q',
+        'git push',
+        'ssh a@b.example',
+        'echo',
+        KEY.value,
+        'https://collect.example/x',
+        'http://localhost:3000',
+        '|',
+        ';',
+        '&&',
+        "'",
+        '"',
+        '<<EOF',
         'EOF',
-        'X',
-        '\tEOF',
-        '~/.npmrc',
-        'echo hi',
-        '| sh',
-        'env A=b',
-        '<<<',
-        '$((1<<n))',
+        '\n',
+        '$(',
+        ')',
+        'npm publish',
         '',
       ),
-      { maxLength: 20 },
+      { maxLength: 24 },
     )
-    .map((lines) => lines.join('\n'));
+    .map((parts) => parts.join(' '));
 
-  it('only ever removes whole lines, keeps their order, and settles after one pass', () => {
+  it('always answers with one of the five places, and quickly', () => {
     fc.assert(
-      fc.property(fc.oneof(heredocish, fc.string({ maxLength: 300 })), (command) => {
-        const once = fast(() => withoutHeredocData(command));
-        const kept = once.split('\n');
-        const original = command.split('\n');
-        let at = 0;
-        for (const line of kept) {
-          while (at < original.length && original[at] !== line) at += 1;
-          expect(at).toBeLessThan(original.length);
-          at += 1;
-        }
-        expect(withoutHeredocData(once)).toBe(once);
-      }),
-      { numRuns: 500 },
-    );
-  });
-
-  // Well-formed heredocs, so the property is about bodies actually being judged:
-  // a body written to a file is dropped, a body a shell runs is kept, whatever
-  // surrounds them.
-  it('drops a body written to a file and keeps one a shell runs', () => {
-    const marker = '~/.npmrc';
-    const body = fc.array(fc.constantFrom('echo x', marker, 'ls', ''), {
-      minLength: 1,
-      maxLength: 4,
-    });
-    const heredoc = fc.record({
-      consumer: fc.constantFrom(
-        'cat > out.txt',
-        'tee notes.md',
-        'git commit -F -',
-        'bash',
-        'sh',
-        'python3 -',
-        'cat | sh',
-      ),
-      delim: fc.constantFrom('EOF', 'X', 'PY'),
-      quote: fc.constantFrom('', "'", '"'),
-      body,
-      before: fc.constantFrom('', 'cd /tmp && ', 'set -e; '),
-    });
-    fc.assert(
-      fc.property(heredoc, ({ consumer, delim, quote, body: lines, before }) => {
-        const [first, ...pipe] = consumer.split(' | ');
-        const header = `${before}${first} <<${quote}${delim}${quote}${pipe.length > 0 ? ` | ${pipe.join(' | ')}` : ''}`;
-        const command = [header, ...lines, delim].join('\n');
-        const out = fast(() => withoutHeredocData(command));
-        const runs = /^(bash|sh|python3 -)$/.test(first ?? '') || pipe.length > 0;
-        if (lines.includes(marker)) expect(out.includes(marker)).toBe(runs);
-        expect(out.startsWith(header)).toBe(true);
+      fc.property(fc.oneof(commandish, fc.string({ maxLength: 300 })), (command) => {
+        const place = fast(() => shellPlace(command, KEY, ctx));
+        expect(TIERS).toContain(place.tier);
+        expect(JSON.stringify(place)).not.toContain(KEY.value);
       }),
       { numRuns: 500 },
     );

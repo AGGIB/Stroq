@@ -9,169 +9,26 @@
 //
 // Nothing here writes to the user's real `~/.stroq`: the caller runs these events
 // against a throwaway home, exactly as `stroq attack` does.
-import { createReadStream, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { readClaudeSession } from './claude-session.js';
+import type { Transcript } from './transcript-parse.js';
 
-export interface TranscriptPre {
-  readonly kind: 'pre';
-  readonly id: string;
-  readonly tool: string;
-  readonly input: Readonly<Record<string, unknown>>;
-  readonly at: string;
-}
-
-export interface TranscriptPost {
-  readonly kind: 'post';
-  readonly id: string;
-  readonly tool: string;
-  readonly input: Readonly<Record<string, unknown>>;
-  readonly resultText: string;
-  readonly at: string;
-}
-
-export type TranscriptEvent = TranscriptPre | TranscriptPost;
-
-export interface Transcript {
-  readonly sessionId: string;
-  readonly cwd: string | null;
-  readonly events: readonly TranscriptEvent[];
-  /** Lines that were not valid JSON. A partially written transcript is normal. */
-  readonly skipped: number;
-}
-
-interface Block {
-  readonly type?: unknown;
-  readonly id?: unknown;
-  readonly name?: unknown;
-  readonly input?: unknown;
-  readonly tool_use_id?: unknown;
-  readonly content?: unknown;
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/** A tool result is a plain string or a list of content blocks; both reduce to text. */
-function resultText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((b) => {
-      if (typeof b === 'string') return b;
-      if (isRecord(b) && typeof b['text'] === 'string') return b['text'];
-      return '';
-    })
-    .filter((t) => t.length > 0)
-    .join('\n');
-}
-
-function blocksOf(record: Record<string, unknown>): Block[] {
-  const message = record['message'];
-  if (!isRecord(message)) return [];
-  const content = message['content'];
-  return Array.isArray(content) ? content.filter(isRecord) : [];
-}
-
-/**
- * Parses a Claude Code transcript into the events the hooks would have seen.
- *
- * A `tool_use` becomes the `pre` event at the point the agent decided to call the
- * tool, and its `tool_result` becomes the `post` event where the output came back.
- * Keeping that order is what makes provenance work: an atom has to be recorded by
- * the read before the later action can be matched against it.
- */
-export function parseTranscript(text: string): Transcript {
-  const parser = createTranscriptParser();
-  for (const line of text.split('\n')) parser.push(line);
-  return parser.finish();
-}
-
-/**
- * A parser fed one line at a time.
- *
- * It exists because `readFile(path, 'utf8')` cannot read every transcript: V8 caps
- * a string at 536,870,888 characters, and a long session goes past that. On the
- * machine this was written on, four transcripts are over 200 MB and the largest is
- * 1.3 GB — `stroq sent --last` in that project answered with a bare
- * `RangeError: Invalid string length` from inside `node:fs`.
- */
-export interface LineParser {
-  push(line: string): void;
-  finish(): Transcript;
-}
-
-export function createTranscriptParser(): LineParser {
-  const events: TranscriptEvent[] = [];
-  const pending = new Map<string, { tool: string; input: Record<string, unknown> }>();
-  let sessionId = 'transcript';
-  let cwd: string | null = null;
-  let skipped = 0;
-
-  function push(line: string): void {
-    if (line.trim().length === 0) return;
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      skipped += 1;
-      return;
-    }
-    if (!isRecord(record)) {
-      skipped += 1;
-      return;
-    }
-    if (typeof record['sessionId'] === 'string') sessionId = record['sessionId'];
-    if (cwd === null && typeof record['cwd'] === 'string') cwd = record['cwd'];
-    const at = typeof record['timestamp'] === 'string' ? record['timestamp'] : '';
-
-    for (const block of blocksOf(record)) {
-      if (block.type === 'tool_use' && typeof block.id === 'string') {
-        const tool = typeof block.name === 'string' ? block.name : 'unknown';
-        const input = isRecord(block.input) ? block.input : {};
-        pending.set(block.id, { tool, input });
-        events.push({ kind: 'pre', id: block.id, tool, input, at });
-        continue;
-      }
-      if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        const call = pending.get(block.tool_use_id);
-        if (!call) continue;
-        events.push({
-          kind: 'post',
-          id: block.tool_use_id,
-          tool: call.tool,
-          input: call.input,
-          resultText: resultText(block.content),
-          at,
-        });
-      }
-    }
-  }
-
-  return { push, finish: () => ({ sessionId, cwd, events, skipped }) };
-}
-
-/**
- * Feeds a JSONL file to a line parser without ever holding it as one string.
- *
- * `crlfDelay: Infinity` so a transcript written on Windows is split on `\r\n`
- * rather than leaving a `\r` on the end of every line, which would not break
- * `JSON.parse` but would survive into a recorded value.
- */
-export async function feedLines(path: string, parser: LineParser): Promise<Transcript> {
-  const lines = createInterface({
-    input: createReadStream(path, { encoding: 'utf8' }),
-    crlfDelay: Infinity,
-  });
-  try {
-    for await (const line of lines) parser.push(line);
-  } finally {
-    lines.close();
-  }
-  return parser.finish();
-}
+export {
+  createTranscriptParser,
+  feedLines,
+  parseTranscript,
+  type LineParser,
+  type ParserOptions,
+  type Transcript,
+  type TranscriptEvent,
+  type TranscriptPost,
+  type TranscriptPre,
+  type TranscriptSink,
+  type TranscriptText,
+} from './transcript-parse.js';
 
 /**
  * Claude Code's transcript directory for a working directory, by its own slug rule:
@@ -182,7 +39,11 @@ export function projectSlug(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
-export const transcriptRoot = (): string => join(homedir(), '.claude', 'projects');
+/** Where Claude Code keeps its sessions: under `CLAUDE_CONFIG_DIR` when it is set, else `~/.claude`. */
+export const transcriptRoot = (): string => {
+  const named = process.env['CLAUDE_CONFIG_DIR'];
+  return join(named === undefined || named === '' ? join(homedir(), '.claude') : named, 'projects');
+};
 
 export interface TranscriptFile {
   readonly path: string;
@@ -301,6 +162,10 @@ async function listJsonl(dir: string): Promise<TranscriptFile[] | null> {
   return files;
 }
 
+/**
+ * A Claude Code session: its main transcript, its subagents' transcripts and the large outputs
+ * it saved to files (see `claude-session.ts`).
+ */
 export async function readTranscript(path: string): Promise<Transcript> {
-  return feedLines(path, createTranscriptParser());
+  return readClaudeSession(path);
 }

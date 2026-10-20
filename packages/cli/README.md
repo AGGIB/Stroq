@@ -11,32 +11,42 @@
 
 # Stroq — find known secrets in AI coding-agent sessions
 
-**Check a session you already ran:** `stroq sent` looks for exact matches to credentials currently available on your machine in local Claude Code, Codex CLI and Cursor session records. It reports the credential name, source file and recorded tool call without printing the value. A match proves that the value appears in a local record; it does not prove that a model provider received it, that the credential is still valid or that a breach occurred.
+**Did your AI agent pass your keys on?** `stroq sent` reads the Claude Code, Codex and Cursor sessions on your machine and looks for the exact values of your keys in them. For each key it finds, it says where the key went: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked before it ran. It prints key names, never values, and writes nothing.
 
 ```bash
-npx @stroq/cli sent --last       # inspect the newest supported session in this project
+npx @stroq/cli sent              # every session on this machine
+npx @stroq/cli sent --here       # only the sessions of this project
+npx @stroq/cli sent --try        # a built-in sample with a made-up key; reads nothing
 npx @stroq/cli replay --last     # trace recorded content to later agent actions
 ```
 
-What a finding looks like (a synthetic session, trimmed):
+What a finding looks like (made-up keys, trimmed):
 
 ```text
-stroq sent — credential evidence in recorded agent sessions
+stroq sent: did your AI agent pass your keys on?
 
-✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+6 of your 6 keys appear in your agent sessions: 2 sent to another company, 1 maybe sent, 1 seen by the AI, 1 used with its own service, 1 blocked before it ran.
 
-CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+Checked 3 sessions (Claude Code 2, Codex 1), 2026-10-02 to 2026-10-19.
+Compared with 6 keys: ~/.aws/credentials, ~/.npmrc, ~/work/shop/.env, ~/work/api/.env.
 
-  ● aws_secret_access_key — ~/.aws/credentials
-      seen once, first at 2026-09-28T10:00:01Z
-      └─ in the result of    Read       ~/.aws/credentials
+SENT TO ANOTHER COMPANY: rotate these today (2)
+ 1. STRIPE_SECRET_KEY  from ~/work/shop/.env
+    went to  collector.example, in a curl command
+    when     2026-10-11 14:02 UTC · Claude Code · ~/work/shop
+    do       revoke it at https://dashboard.stripe.com/apikeys, then update ~/work/shop/.env
 
-NEXT
-  Rotate each credential named above that is still live.
-    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials
+SEEN BY THE AI: your agent's model saw these keys (1)
+ 4. aws_secret_access_key  from ~/.aws/credentials
+    seen in  the output of a Read of ~/.aws/credentials
+    when     2026-10-02 09:42 UTC · Claude Code · ~/work/api
+    note     Not ruled out: 2 later commands in that session could reach the network.
+    do       your agent's model saw it; rotate it if that matters: https://console.aws.amazon.com/iam/home#/security_credentials
+
+Stroq names a send only when it sees the key in the command that sent it. A script, a file or a variable can carry a key out without showing it.
 ```
 
-Run these commands from the project directory with Node.js 22 or newer. They work on sessions from before Stroq was installed. `npx` downloads the CLI from npm; `sent` reads local credential sources to know what values to match and does not upload them. See the [guide's coverage and limits](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md).
+Run these commands with Node.js 22 or newer. They work on sessions from before Stroq was installed. `npx` downloads the CLI from npm. To know what to look for, `sent` reads your key files (`~/.aws/credentials`, `~/.npmrc`, `~/.netrc`, `~/.docker/config.json`, project `.env` files) and your environment, and keeps the values in memory only. "Went to" means a recorded call carried the key; it does not show what the host kept. See the [guide's coverage and limits](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#which-credentials-appeared-in-a-recorded-agent-session).
 
 **Guard future sessions:** Stroq scans content visible to installed agent hooks, carries suspicion and source information into later decisions, and applies a local policy to the tool calls those hooks expose. It supports native hooks, an OpenClaw plugin and a stdio MCP proxy; coverage differs by agent and channel. The hooks do not send telemetry.
 
@@ -103,7 +113,7 @@ Task Lock starts Claude Code with a signed, confirmed scope and an isolated home
 | `stroq untaint [--session <id>] [--all]`                                                                                                                                                               | Clear a false-positive session's taint and provenance, or every session's                                                                                                                                                                                                                                                                                                                                                                       |
 | `stroq trust [<file>] [--list] [--remove <file>] [--json]`                                                                                                                                             | Waive a false positive on a file's exact content; any change to the file taints again. `--list`, or no argument, shows what is trusted; `--remove <file>` stops trusting a file; `--json` emits JSON                                                                                                                                                                                                                                            |
 | `stroq why [--seq <n>]`                                                                                                                                                                                | Explain the most recent denied/asked action: rule, provenance, taint                                                                                                                                                                                                                                                                                                                                                                            |
-| `stroq sent [--last] [--transcript <path>] [--try] [--json]`                                                                                                                                           | Match known local credentials against a recorded session, including tool results where a transcript is available; report names and sources, never values. `--try` scans a built-in sample session with an invented key in a throwaway folder                                                                                                                                                                                                    |
+| `stroq sent [--here] [--last] [--transcript <path>] [--try] [--json] [--counts] [--fail-if third-party\|any]`                                                                                          | Check the recorded sessions on this machine for the exact values of your keys, and say where each one went: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked. Prints names, never values, and writes nothing. `--try` runs the check on a built-in sample with a made-up key                                                                                                                          |
 | `stroq replay [--last] [--transcript <path>] [--json]`                                                                                                                                                 | Reconstruct which recorded content preceded later agent actions and show the matching evidence                                                                                                                                                                                                                                                                                                                                                  |
 | `stroq canary [--name <NAME>] [--file <path>]`                                                                                                                                                         | Print a canary secret to plant; its outbound use is denied and taints the session. `--file` plants it as a decoy file: any call naming the file is denied and taints the session                                                                                                                                                                                                                                                                |
 | `stroq attack [--json] [--only <id>] [--fuzz] [--host <id>]`                                                                                                                                           | Replay 36 documented-incident and synthetic scenarios against your policy; `--fuzz` crosses each with a deterministic mutation set and reports variants that reach `allow`; `--host` filters by host channels; exit 1 if any gets through                                                                                                                                                                                                       |

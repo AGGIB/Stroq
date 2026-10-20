@@ -21,7 +21,6 @@ import {
   type Transcript,
   type TranscriptFile,
 } from '../replay/transcript.js';
-import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { findCodexRolloutsScoped, readCodexRollout } from './codex.js';
 import {
@@ -31,9 +30,8 @@ import {
   readCursorSession,
   splitCursorSessionPath,
 } from './cursor.js';
-
-/** Enough of a transcript to hold its first record, whichever agent wrote it. */
-const HEAD_BYTES = 64 * 1024;
+import { smallest } from './extremes.js';
+import { firstLine } from './head.js';
 
 export interface TranscriptReader {
   /** The agent's name as the report prints it. */
@@ -166,22 +164,13 @@ export const READER_ROOTS = (): string => READERS.map((r) => r.root).join(' or '
  * an unrecognised file is most likely to be.
  */
 export async function readerForFile(path: string): Promise<TranscriptReader> {
-  let head = '';
-  try {
-    // A Cursor session is addressed as `<store>#<session>`, and only the store half
-    // is a file. Sniffing the literal string would fail to open and fall back to the
-    // Claude reader, which then reports the store as an empty session.
-    const handle = await open(splitCursorSessionPath(path).db, 'r');
-    try {
-      const buffer = Buffer.alloc(HEAD_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
-      head = buffer.subarray(0, bytesRead).toString('utf8').split('\n')[0] ?? '';
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return claudeCodeReader;
-  }
+  // A Cursor session is addressed as `<store>#<session>`, and only the store half
+  // is a file. Sniffing the literal string would fail to open and fall back to the
+  // Claude reader, which then reports the store as an empty session. The first line is
+  // read whole: a Codex `session_meta` carries the instructions Codex was given, and a
+  // first line cut short would be read as no format at all.
+  const head = await firstLine(splitCursorSessionPath(path).db);
+  if (head === null) return claudeCodeReader;
   return READERS.find((reader) => reader.claims(head)) ?? claudeCodeReader;
 }
 
@@ -215,7 +204,7 @@ export async function newestTranscript(cwd: string): Promise<FoundTranscript | n
   const withSessions = lists.filter((list) => list.scoped && list.files.length > 0);
   // Nearest folder first: sessions in this very directory beat newer ones only in a folder
   // above it, whichever agent recorded them.
-  const nearest = Math.min(...withSessions.map((list) => list.depth));
+  const nearest = smallest(withSessions, (list) => list.depth, Number.POSITIVE_INFINITY);
   const own = withSessions.filter((list) => list.depth === nearest);
   const candidates = own.length > 0 ? own : lists;
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,7 +11,14 @@ import {
   readCursorSession,
 } from '../../src/sent/cursor.js';
 import { readerForFile } from '../../src/sent/readers.js';
+import { extractEnv } from '@stroq/core';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
+
+/** The environment of the tests, without the shell's credential-shaped variables. */
+function shellWithoutKeys(): NodeJS.ProcessEnv {
+  const keys = new Set(extractEnv(process.env).map((k) => k.name));
+  return Object.fromEntries(Object.entries(process.env).filter(([name]) => !keys.has(name)));
+}
 
 /**
  * The half of the reader the pure parse tests cannot reach: opening a real store.
@@ -136,7 +143,7 @@ withStore('reading a real Cursor store', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-cursor-last-'));
     const project = mkdtempSync(join(tmpdir(), 'stroq-cursor-proj-'));
     const env = {
-      ...process.env,
+      ...shellWithoutKeys(),
       HOME: home,
       USERPROFILE: home,
       APPDATA: join(home, 'AppData', 'Roaming'),
@@ -169,8 +176,8 @@ withStore('reading a real Cursor store', () => {
         encoding: 'utf8',
         env,
       });
-      expect(run.stdout + run.stderr).not.toMatch(/no agent session recorded in/);
-      expect(run.stdout).toMatch(/· 1 tool call/);
+      expect(run.stdout + run.stderr).not.toMatch(/No agent session was recorded in/);
+      expect(run.stdout).toContain('Checked the newest session of this project (Cursor)');
       expect(run.status).toBe(0);
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -186,12 +193,71 @@ withStore('reading a real Cursor store', () => {
         [CLI_ENTRY, 'sent', '--transcript', cursorSessionPath(db, SESSION_A)],
         {
           encoding: 'utf8',
-          env: { ...process.env, HOME: home, USERPROFILE: home, STROQ_HOME: join(home, '.stroq') },
+          env: {
+            ...shellWithoutKeys(),
+            HOME: home,
+            USERPROFILE: home,
+            STROQ_HOME: join(home, '.stroq'),
+          },
         },
       );
-      expect(run.stdout + run.stderr).not.toMatch(/need node:sqlite|No tool calls recorded/);
-      expect(run.stdout).toMatch(/· 1 tool call/);
+      expect(run.stdout + run.stderr).not.toMatch(/need node:sqlite|Nothing is recorded/);
+      expect(run.stdout).toContain('Checked 1 session (Cursor)');
       expect(run.status).toBe(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+withStore('stroq sent over a whole machine, with a Cursor store', () => {
+  it('counts the Cursor session and the key it read, through the built CLI', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-cursor-machine-'));
+    const key = 'FAKEcursorMachineKey0123456789abcd';
+    const env = {
+      ...shellWithoutKeys(),
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      STROQ_HOME: join(home, '.stroq'),
+    };
+    mkdirSync(join(home, '.aws'), { recursive: true });
+    writeFileSync(join(home, '.aws', 'credentials'), `[default]\naws_secret_access_key = ${key}\n`);
+    const store = cursorStateDb(process.platform, env, home);
+    mkdirSync(dirname(store), { recursive: true });
+    const handle = new sqlite!.DatabaseSync(store);
+    handle.exec('create table cursorDiskKV (key text primary key, value text)');
+    handle.prepare('insert into cursorDiskKV (key, value) values (?, ?)').run(
+      'bubbleId:m1:b1',
+      JSON.stringify({
+        _v: 3,
+        type: 2,
+        bubbleId: 'b1',
+        createdAt: '2026-09-27T10:00:00.000Z',
+        toolFormerData: {
+          toolCallId: 'b1',
+          status: 'completed',
+          name: 'read_file_v2',
+          params: JSON.stringify({ targetFile: join(home, '.aws', 'credentials') }),
+          result: JSON.stringify({ contents: `aws_secret_access_key = ${key}\n` }),
+        },
+      }),
+    );
+    handle.close();
+    try {
+      const run = spawnSync(process.execPath, [CLI_ENTRY, 'sent', '--counts'], {
+        cwd: home,
+        encoding: 'utf8',
+        env,
+      });
+      expect(run.status).toBe(0);
+      const counts = JSON.parse(run.stdout) as {
+        agents: { cursor: { sessions: number } };
+        found: { seen: number };
+      };
+      expect(counts.agents.cursor.sessions).toBe(1);
+      expect(counts.found.seen).toBe(1);
+      expect(run.stdout).not.toContain(key);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
