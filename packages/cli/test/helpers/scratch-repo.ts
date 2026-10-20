@@ -112,6 +112,26 @@ export function commitIndexed(
   return git(dir, 'rev-parse', 'HEAD').trim();
 }
 
+/**
+ * Stages `text` at every one of `paths` through git's index: one blob, one call, no file on disk.
+ * For a test that needs thousands of files, which writing and hashing one by one makes slow.
+ * Commit with `git commit`, not `commitFiles`, whose `add -A` would stage them as deleted.
+ */
+export function stageSameText(dir: string, paths: readonly string[], text: string): void {
+  const oid = hashText(dir, text);
+  execFileSync('git', [...TEST_GIT_ARGS, 'update-index', '--add', '-z', '--index-info'], {
+    cwd: dir,
+    input: paths.map((path) => `100644 ${oid}\t${path}\0`).join(''),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: dir,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(dir, '.none'),
+    },
+  });
+}
+
 /** A `.claude/settings.json` with one command hook per event. */
 export const hookSettings = (hooks: Readonly<Record<string, string>>): string =>
   JSON.stringify({
