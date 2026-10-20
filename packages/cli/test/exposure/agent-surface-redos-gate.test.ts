@@ -22,8 +22,8 @@ import {
   skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
+import { guardsOfText, removedGuards } from '../../src/exposure/agent-guards.js';
 import { lineHits } from '../../src/exposure/agent-lines.js';
-import { ruleRunsAnything } from '../../src/exposure/allow-rules.js';
 import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
 import { parseGitConfig } from '../../src/exposure/repo-surface.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
@@ -401,9 +401,17 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   [
     'an allow rule',
     (text) => [
-      ruleRunsAnything(text, new Set(['bash'])),
-      ruleRunsAnything(`Bash(${text})`, new Set(['bash'])),
-      ruleRunsAnything(`run_shell_command(${text}`, new Set(['run_shell_command'])),
+      scanFile('.claude/settings.json', JSON.stringify({ permissions: { allow: [text] } })),
+      scanFile(
+        '.claude/settings.json',
+        JSON.stringify({ permissions: { deny: [`Bash(${text})`] } }),
+      ),
+      scanFile('.gemini/settings.json', JSON.stringify({ tools: { allowed: [text] } })),
+      removedGuards(
+        '.claude/settings.json',
+        guardsOfText(text),
+        guardsOfText(`{"permissions":{"deny":[${JSON.stringify(text)}]}}`),
+      ),
     ],
   ],
   [

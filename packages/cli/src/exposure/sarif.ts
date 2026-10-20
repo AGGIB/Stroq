@@ -34,8 +34,10 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
     "This sends the agent's API traffic, and the key with it, to another address.",
   'agent-env':
     'This sets a variable for every command the agent and its hooks start, and the variable loads code or sends traffic elsewhere.',
-  'agent-permission-bypass': 'This lets the agent or editor run tools without asking you first.',
-  'agent-broad-allow': 'This lets the agent run any shell command without asking you first.',
+  'agent-permission-bypass':
+    'This lets the agent or editor run tools without asking you first, or takes away a rule that refused it something.',
+  'agent-broad-allow':
+    'This allow rule, folder or mode lets the agent do something without asking you first.',
   'agent-plugin':
     'This turns on a plugin, or adds a place plugins come from, for everyone who opens the repository.',
   'mcp-auto-approve':

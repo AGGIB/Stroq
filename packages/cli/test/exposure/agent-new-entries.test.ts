@@ -7,7 +7,7 @@ import { agentSurface } from '../../src/exposure/agent-tree.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runsFetchedOrHiddenCode, sendsSecrets } from '../../src/exposure/fetch-shapes.js';
 import { repoSurface } from '../../src/exposure/repo-surface.js';
-import { commitFiles, git, scratchRepo, stageLink } from '../helpers/scratch-repo.js';
+import { commitFiles, git, scratchRepo, stageLink, writeFiles } from '../helpers/scratch-repo.js';
 
 /**
  * An install script, a dev container command or an MCP server is ordinary in an honest repository,
@@ -298,8 +298,9 @@ describe('a change that adds or changes what runs by itself', () => {
       hit('agent-broad-allow', '.claude/settings.json', 1, 'permissions.allow', 'Bash(*)'),
     ];
     expect(tagChanges(entries, entries).map((h) => h.severity)).toEqual(['warning', 'warning']);
-    // Plain `stroq inspect` has no base: nothing is proven there before.
-    expect(tagChanges(entries, null).map((h) => h.severity)).toEqual(['error', 'error']);
+    // Plain `stroq inspect` has no base: the script in the shape of an attack fails, and an allow
+    // rule already there is listed.
+    expect(tagChanges(entries, null).map((h) => h.severity)).toEqual(['error', 'warning']);
   });
 });
 
@@ -343,7 +344,10 @@ describe('a link out of the repository', () => {
       'new config-link-outside .claude/skills link',
     ]);
     const next = git(dir, 'rev-parse', 'HEAD').trim();
-    commitFiles(dir, { 'README.md': 'y\n' });
+    // Only README.md: `add -A` would stage the links, which are not on disk, as deleted.
+    writeFiles(dir, { 'README.md': 'y\n' });
+    git(dir, 'add', 'README.md');
+    git(dir, 'commit', '-q', '-m', 'c');
     expect(failing(agentChanges(dir, next).hits)).toEqual([]);
   });
 

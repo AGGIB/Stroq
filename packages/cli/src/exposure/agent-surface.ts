@@ -371,6 +371,9 @@ export function agentOnlyWhenFolded(path: string): boolean {
 
 export const isSurfacePath = (path: string): boolean => readersFor(path).length > 0;
 
+/** Whether a path is read as Claude Code's settings, whose deny rules a change can take away. */
+export const holdsGuards = (path: string): boolean => readersFor(path).includes(READERS.claude);
+
 /**
  * Which files a check reads first when it cannot read them all: 0 for the configs at a fixed
  * place and the agent folders themselves, 1 for any other file that can run something, 2 for a

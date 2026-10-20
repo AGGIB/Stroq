@@ -57,10 +57,13 @@ describe('Codex config.toml', () => {
     ]);
   });
 
-  it('leaves the ordinary settings alone', () => {
+  it('lists the approval policy and sandbox mode of ordinary settings, and nothing else', () => {
     const text =
       'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\nmodel = "o3"\n[otel]\nexporter = "none"\n';
-    expect(scanFile('.codex/config.toml', text)).toEqual([]);
+    expect(brief(scanFile('.codex/config.toml', text))).toEqual([
+      'agent-broad-allow approval_policy warning',
+      'agent-broad-allow sandbox_mode warning',
+    ]);
   });
 
   it('says where the key goes', () => {
@@ -109,6 +112,7 @@ describe('Gemini settings', () => {
     expect(brief(scanFile('.gemini/settings.json', text))).toEqual([
       'agent-permission-bypass general.defaultApprovalMode error',
       'agent-permission-bypass tools.autoAccept error',
+      'agent-broad-allow tools.allowed warning',
       'agent-broad-allow tools.allowed warning',
       'agent-helper-command tools.discoveryCommand error',
       'agent-helper-command tools.callCommand error',

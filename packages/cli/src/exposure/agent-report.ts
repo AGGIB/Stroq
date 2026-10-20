@@ -35,28 +35,52 @@ const BINARY = 'a binary file (it holds a NUL byte), not read as instructions';
 const shapeNote = (h: AgentHit): string =>
   inAttackShape(h) ? ', and it looks like it downloads and runs code, or sends a secret out' : '';
 
-/** What an allow rule, or a folder it adds, lets the agent do. */
+const SHELL_TOOLS: ReadonlySet<string> = new Set([
+  'bash',
+  'shell',
+  'shelltool',
+  'run_shell_command',
+]);
+const FILE_TOOLS: ReadonlySet<string> = new Set([
+  'read',
+  'edit',
+  'write',
+  'multiedit',
+  'notebookedit',
+  'notebookread',
+  'glob',
+  'grep',
+  'ls',
+  'read_file',
+  'write_file',
+  'replace',
+]);
+const WEB_TOOLS: ReadonlySet<string> = new Set(['webfetch', 'websearch', 'web_fetch']);
+
+/**
+ * What an allow rule, or a folder it adds, lets the agent do: by the tool it names, only to word
+ * the finding. Whether the rule is narrow enough to be harmless is not worked out.
+ */
 function grantOf(h: AgentHit): string {
   if (h.name === 'permissions.additionalDirectories')
-    return 'read and change the files of a folder outside this repository';
+    return 'read and change the files of another folder';
   const tool = h.value.split('(')[0]?.trim().toLowerCase() ?? '';
-  if (tool === 'webfetch' || tool === 'websearch') return 'reach any address';
-  if (
-    [
-      'read',
-      'edit',
-      'write',
-      'multiedit',
-      'notebookedit',
-      'notebookread',
-      'glob',
-      'grep',
-      'ls',
-    ].includes(tool)
-  )
-    return 'read or change files that may be outside this repository';
-  return 'run any shell command';
+  if (SHELL_TOOLS.has(tool)) return 'run shell commands';
+  if (FILE_TOOLS.has(tool)) return 'read or change files';
+  if (WEB_TOOLS.has(tool)) return 'reach the network';
+  return 'use a tool';
 }
+
+/** An allow-list setting that is a mode or a switch, not a list of tools. */
+const MODES: ReadonlySet<string> = new Set([
+  'permissions.defaultMode',
+  'general.defaultApprovalMode',
+  'chat.tools.autoApprove',
+  'chat.tools.global.autoApprove',
+  'chat.tools.terminal.autoApprove',
+]);
+const isMode = (name: string): boolean =>
+  MODES.has(name) || /(?:^|\.)(?:approval_policy|sandbox_mode)$/.test(name);
 
 function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): string {
   const name = q(h.name);
@@ -78,9 +102,20 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       return envLoadsCode(envNameOf(h.name))
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
-    case 'agent-broad-allow':
-      return `${name} lets the agent ${grantOf(h)} without asking: ${value}`;
+    case 'agent-broad-allow': {
+      const widens =
+        h.status === 'new' || h.status === 'changed'
+          ? ', and this change widens what the agent may do without asking'
+          : '';
+      return isMode(h.name)
+        ? `${name} sets when the agent asks before it acts${widens}: ${value}`
+        : `${name} lets the agent ${grantOf(h)} without asking${widens}: ${value}`;
+    }
     case 'agent-permission-bypass':
+      if (h.name === 'permissions.deny')
+        return `takes away the deny rule ${value}, so the agent is no longer refused it`;
+      if (h.name === 'disabledMcpjsonServers')
+        return `takes ${value} off disabledMcpjsonServers, so that server of .mcp.json can start again`;
       if (h.name === 'permissions.defaultMode')
         return h.value === 'bypassPermissions'
           ? 'the agent runs every tool without asking (defaultMode is bypassPermissions)'

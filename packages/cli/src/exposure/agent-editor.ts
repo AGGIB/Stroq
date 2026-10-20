@@ -240,19 +240,21 @@ export function vscodeSettings(
         'on',
       ),
     );
+  // Each of these, whatever it holds: one that approves something approves tool calls without
+  // asking; one that approves nothing is listed, and fails when a change sets it.
   for (const key of [...AUTO_APPROVE_KEYS, TERMINAL_AUTO_APPROVE]) {
     const value = own(settings, key);
+    if (value === undefined) continue;
     const approves = key === TERMINAL_AUTO_APPROVE ? approvesTerminal(value) : autoApproves(value);
-    if (approves)
-      hits.push(
-        hit(
-          'agent-permission-bypass',
-          f.path,
-          lineOf(f.text, [...prefix, quoted(key)]),
-          key,
-          boundedJson(value),
-        ),
-      );
+    hits.push(
+      hit(
+        approves ? 'agent-permission-bypass' : 'agent-broad-allow',
+        f.path,
+        lineOf(f.text, [...prefix, quoted(key)]),
+        key,
+        boundedJson(value),
+      ),
+    );
   }
   return [
     ...hits,

@@ -1,6 +1,6 @@
 import { isPlainObject } from '../commands/config-file.js';
-import { ruleRunsAnything } from './allow-rules.js';
 import {
+  allowRuleHits,
   firstEntries,
   hookHits,
   isHarmlessEnv,
@@ -9,7 +9,7 @@ import {
   ownObject,
   ownString,
   quoted,
-  strings,
+  ruleList,
   type JsonFile,
   type Obj,
 } from './agent-json.js';
@@ -26,18 +26,25 @@ import { lineOf } from './jsonc.js';
 /** The line of a key, by the path of keys to it. */
 type Line = (keys: readonly string[]) => number;
 
-/** `approval_policy = "never"` and `sandbox_mode = "danger-full-access"` in `table`. */
+/**
+ * `approval_policy` and `sandbox_mode` in `table`, whatever they hold: `never` and
+ * `danger-full-access` run every command without asking or outside the sandbox; any other value
+ * is listed, and fails when a change sets it.
+ */
 function codexBypass(path: string, table: Obj, prefix: string, line: Line): AgentHit[] {
   const keys = prefix === '' ? [] : prefix.slice(0, -1).split('.');
   const found: AgentHit[] = [];
-  for (const [key, value] of [
+  for (const [key, open] of [
     ['approval_policy', 'never'],
     ['sandbox_mode', 'danger-full-access'],
-  ] as const)
-    if (own(table, key) === value)
-      found.push(
-        hit('agent-permission-bypass', path, line([...keys, key]), `${prefix}${key}`, value),
-      );
+  ] as const) {
+    if (!Object.hasOwn(table, key)) continue;
+    const value = table[key];
+    const kind =
+      typeof value === 'string' && value !== open ? 'agent-broad-allow' : 'agent-permission-bypass';
+    const text = typeof value === 'string' ? value : boundedJson(value);
+    found.push(hit(kind, path, line([...keys, key]), `${prefix}${key}`, text));
+  }
   return found;
 }
 
@@ -95,9 +102,6 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
   return hits;
 }
 
-/** Gemini's shell tools, whose `tools.allowed` rules can let every command run without asking. */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['run_shell_command', 'shelltool']);
-
 /** Gemini's (and Qwen Code's) settings, in the nested shape and the older flat one. */
 export function geminiSwitches(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
@@ -106,20 +110,22 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
     hits.push(hit(kind, f.path, at(keys), keys.join('.'), value));
   const general = ownObject(f.value, 'general') ?? {};
   const tools = ownObject(f.value, 'tools') ?? {};
-  if (own(general, 'defaultApprovalMode') === 'yolo')
-    add('agent-permission-bypass', ['general', 'defaultApprovalMode'], 'yolo');
+  // Every approval mode: `yolo` runs every tool without asking, `auto_edit` every edit, and a mode
+  // this does not know may do either.
+  const mode = own(general, 'defaultApprovalMode');
+  if (mode !== undefined)
+    add(
+      typeof mode === 'string' && mode !== 'yolo' ? 'agent-broad-allow' : 'agent-permission-bypass',
+      ['general', 'defaultApprovalMode'],
+      typeof mode === 'string' ? mode : boundedJson(mode),
+    );
   if (own(tools, 'autoAccept') === true)
     add('agent-permission-bypass', ['tools', 'autoAccept'], 'true');
   if (own(f.value, 'autoAccept') === true) add('agent-permission-bypass', ['autoAccept'], 'true');
-  for (const [keys, list] of [
-    [['tools', 'allowed'], strings(own(tools, 'allowed'))],
-    [['allowedTools'], strings(own(f.value, 'allowedTools'))],
-  ] as const) {
-    const broad = firstEntries(f.path, 'broad allow rules', [
-      ...new Set(list.filter((r) => ruleRunsAnything(r, SHELL_TOOLS))),
-    ]);
-    hits.push(...broad.cut);
-    for (const rule of broad.items) add('agent-broad-allow', keys, rule);
+  for (const keys of [['tools', 'allowed'], ['allowedTools']] as const) {
+    const table = keys.length === 2 ? tools : f.value;
+    const rules = ruleList(own(table, keys[keys.length - 1] as string));
+    hits.push(...allowRuleHits(f, rules, keys.join('.'), () => at(keys)));
   }
   for (const [table, keys] of [
     [tools, ['tools', 'discoveryCommand']],

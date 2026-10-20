@@ -214,7 +214,7 @@ describe('plain stroq inspect, with nothing to compare against', () => {
     }
   };
 
-  it('fails servers a host starts without asking, and an allow rule that hands over the shell', () => {
+  it('fails servers a host starts without asking, and lists an allow rule already there', () => {
     const dir = repo();
     write(dir, {
       '.cursor/mcp.json': JSON.stringify({
@@ -234,7 +234,6 @@ describe('plain stroq inspect, with nothing to compare against', () => {
     const { code, failing } = failingOf(dir);
     expect(code).toBe(1);
     expect(failing).toEqual([
-      'agent-broad-allow .claude/settings.json',
       'mcp-server .cursor/mcp.json',
       'mcp-server .gemini/settings.json',
       'mcp-server .gemini/settings.json',

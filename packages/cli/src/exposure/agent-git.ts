@@ -1,4 +1,5 @@
 import { settle, tagChanges, type TaggedHit } from './agent-change.js';
+import { guardsOfText, guardsUnknown, removedGuards } from './agent-guards.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
@@ -8,6 +9,7 @@ import {
   MAX_TOTAL_BYTES,
   agentOnlyWhenFolded,
   hitsForRead,
+  holdsGuards,
   readTier,
   skippedConfigFolder,
   type SourceRead,
@@ -280,9 +282,27 @@ function compare(top: string, base: string, head: string) {
         if (!p.touched) return tagChanges(now, now);
         const oid = baseOid(p, changed);
         const source = oid === undefined ? undefined : read.baseSource(oid);
-        return tagChanges(now, source === undefined ? [] : hitsForRead(p.path, source));
+        return [
+          ...tagChanges(now, source === undefined ? [] : hitsForRead(p.path, source)),
+          ...guardChanges(p, headRead.text, source),
+        ];
       }
     }
+  };
+
+  /** The deny rules and disabled servers a touched settings file no longer has. */
+  const guardChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
+    if (!holdsGuards(p.path)) return [];
+    const head = guardsOfText(headText);
+    if (source !== undefined)
+      return source.kind === 'text'
+        ? removedGuards(p.path, head, guardsOfText(source.text))
+        : [guardsUnknown(p.path, 'its base was not read')];
+    // With no base to read, a file the change adds, through links it adds, refused nothing before.
+    // A file it replaces shows as deleted there, and is read as one. Any other is not known.
+    const way = [p.path, ...linksOf(p.at), behind(p.at) ?? p.path];
+    const added = way.every((path) => (changed.get(path)?.status ?? 'A') === 'A');
+    return added ? [] : [guardsUnknown(p.path, 'its base was not read')];
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
@@ -297,6 +317,7 @@ function compare(top: string, base: string, head: string) {
     ...skippedConfigs(changed),
     ...lineChanges(top, tree, changed),
     ...bareChanges(tree, changed),
+    ...deletedGuards(top, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
   const byFile = hits.sort((a, b) => byPath(a.file, b.file));
@@ -446,6 +467,44 @@ function lineChanges(
         baseText === undefined ? [] : lineHits(w.path, baseText),
       ),
     );
+  }
+  return out;
+}
+
+/**
+ * The deny rules and disabled servers of each Claude Code settings file the change deletes: all of
+ * them are taken away. A few files and none past the size cap are read; what is not read fails.
+ */
+function deletedGuards(top: string, changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const gone = [...changed]
+    .filter(([path, c]) => c.status === 'D' && holdsGuards(path))
+    .sort(([a], [b]) => byPath(a, b));
+  const out: TaggedHit[] = [];
+  const cut = gone[MAX_LINE_FILES];
+  if (cut !== undefined)
+    out.push(
+      guardsUnknown(
+        cut[0],
+        `${gone.length - MAX_LINE_FILES} more deleted settings files were not read`,
+      ),
+    );
+  const files = gone.slice(0, MAX_LINE_FILES).flatMap(([path, c]) => {
+    if (c.oldMode === '100644' || c.oldMode === '100755') return [{ path, oid: c.oldOid }];
+    out.push(guardsUnknown(path, 'it was not a file at the base'));
+    return [];
+  });
+  const sizes = objectSizes(top, unique(files.map((f) => f.oid)));
+  const blobs = readBlobs(
+    top,
+    unique(files.map((f) => f.oid)).flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  );
+  for (const f of files) {
+    const text = blobs.get(f.oid);
+    if (text === undefined) out.push(guardsUnknown(f.path, 'its base was not read'));
+    else out.push(...removedGuards(f.path, [], guardsOfText(text)));
   }
   return out;
 }

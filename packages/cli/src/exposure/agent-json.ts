@@ -1,5 +1,4 @@
 import { mcpServerRunsCode } from '@stroq/core';
-import { claudeRuleIsBroad, leadsOutside } from './allow-rules.js';
 import { isPlainObject } from '../commands/config-file.js';
 import { boundedJson, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
@@ -260,9 +259,6 @@ export const CODEX_ENV_PREFIX = 'shell_environment_policy.set.';
 /** The variable an env hit sets: its name, without the keys of the table it is in. */
 export const envNameOf = (name: string): string =>
   name.startsWith(CODEX_ENV_PREFIX) ? name.slice(CODEX_ENV_PREFIX.length) : name;
-/** The tool whose allow rules can hand the agent the whole shell (see `allow-rules.ts`). */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash']);
-
 /** The top-level keys named as helpers are, whose string Claude Code runs. */
 function helperKeys(f: JsonFile): AgentHit[] {
   const named = Object.entries(f.value).filter(
@@ -343,73 +339,50 @@ function approvedServers(f: JsonFile): AgentHit[] {
 }
 
 /**
- * Allow rules that hand the agent the whole shell, files outside the repository or the network,
- * each spelling listed once, at most `MAX_ENTRIES` of them: past that, one failing entry stands
- * for the rest.
+ * The rules of an allow list as a host may read them: each string, trimmed, and anything else as
+ * JSON, since what the host makes of it is not known. A value that is not a list is one rule.
  */
-function broadAllows(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
-  const allow = permissions === undefined ? [] : strings(own(permissions, 'allow'));
-  const rules = new Set(
-    allow.map((rule) => rule.trim()).filter((rule) => claudeRuleIsBroad(rule, SHELL_TOOLS)),
-  );
-  const list = firstEntries(f.path, 'broad allow rules', [...rules]);
-  return [
-    ...list.cut,
-    ...list.items.map((rule) =>
-      hit(
-        'agent-broad-allow',
-        f.path,
-        lineOf(f.text, ['"permissions"', '"allow"', quoted(rule)]),
-        'permissions.allow',
-        rule,
-      ),
-    ),
-  ];
+export function ruleList(value: unknown): string[] {
+  if (value === undefined) return [];
+  const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+  return items.map((item) => (typeof item === 'string' ? item.trim() : boundedJson(item)));
 }
 
 /**
- * The folders besides the repository the agent may work in without asking, each that is not
- * proven to be inside it: one from the home folder, the root, a variable or up a folder, or a
- * value that is not a path.
+ * Every rule of an allow list, each spelling once, at most `MAX_ENTRIES` of them: past that, one
+ * failing entry stands for the rest. Which rules are harmless is not worked out: a change that
+ * adds or edits any of them fails, and one already there is listed.
  */
-function outsideFolders(f: JsonFile, permissions: Obj | undefined): AgentHit[] {
-  const value = permissions === undefined ? undefined : own(permissions, 'additionalDirectories');
-  if (value === undefined) return [];
-  const all = Array.isArray(value) ? value : [value];
-  const outside = all.map((d) => (typeof d === 'string' ? d : boundedJson(d)));
-  const list = firstEntries(
-    f.path,
-    'additional directories',
-    outside.filter(
-      (d, i) => typeof all[i] !== 'string' || leadsOutside(d) || d.trim().startsWith('/'),
-    ),
-  );
+export function allowRuleHits(
+  f: { readonly path: string; readonly text: string },
+  rules: readonly string[],
+  name: string,
+  line: (rule: string) => number,
+): AgentHit[] {
+  const list = firstEntries(f.path, 'allow rules', [...new Set(rules)]);
   return [
     ...list.cut,
-    ...list.items.map((dir) =>
-      hit(
-        'agent-broad-allow',
-        f.path,
-        lineOf(f.text, ['"permissions"', '"additionalDirectories"', quoted(dir)]),
-        'permissions.additionalDirectories',
-        dir,
-      ),
-    ),
+    ...list.items.map((rule) => hit('agent-broad-allow', f.path, line(rule), name, rule)),
   ];
 }
 
-/** Modes that ask at least as often as the default: any other asks less, or is not known. */
+/** Modes that ask at least as often as the default: listed. Any other asks less, or is not known. */
 const ASKING_MODES: ReadonlySet<unknown> = new Set(['default', 'plan', 'dontAsk']);
 
 function settingsSwitches(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [...envHits(f)];
-  const permissions = ownObject(f.value, 'permissions');
-  hits.push(...broadAllows(f, permissions), ...outsideFolders(f, permissions));
-  const mode = permissions === undefined ? undefined : own(permissions, 'defaultMode');
-  if (mode !== undefined && !ASKING_MODES.has(mode))
+  const permissions = ownObject(f.value, 'permissions') ?? {};
+  for (const key of ['allow', 'additionalDirectories'])
+    hits.push(
+      ...allowRuleHits(f, ruleList(own(permissions, key)), `permissions.${key}`, (rule) =>
+        lineOf(f.text, ['"permissions"', quoted(key), quoted(rule)]),
+      ),
+    );
+  const mode = own(permissions, 'defaultMode');
+  if (mode !== undefined)
     hits.push(
       hit(
-        'agent-permission-bypass',
+        ASKING_MODES.has(mode) ? 'agent-broad-allow' : 'agent-permission-bypass',
         f.path,
         lineOf(f.text, ['"permissions"', '"defaultMode"']),
         'permissions.defaultMode',
@@ -427,6 +400,30 @@ function settingsSwitches(f: JsonFile): AgentHit[] {
       ),
     );
   return [...hits, ...approvedServers(f)];
+}
+
+/** One thing a settings file refuses: a deny rule, or a server of `.mcp.json` kept from starting. */
+export interface Guard {
+  readonly name: 'permissions.deny' | 'disabledMcpjsonServers';
+  readonly value: string;
+}
+
+/**
+ * What a Claude Code settings file refuses: its deny rules and the servers it disables. A change
+ * that takes one away lets the agent do what it was refused, so each is compared with the base.
+ */
+export function guardsOf(value: Obj): Guard[] {
+  const permissions = ownObject(value, 'permissions') ?? {};
+  return [
+    ...ruleList(own(permissions, 'deny')).map((rule) => ({
+      name: 'permissions.deny' as const,
+      value: rule,
+    })),
+    ...ruleList(own(value, 'disabledMcpjsonServers')).map((server) => ({
+      name: 'disabledMcpjsonServers' as const,
+      value: server,
+    })),
+  ];
 }
 
 /** A server list Claude Code reads as the project's: `.mcp.json`, wherever a session starts. */

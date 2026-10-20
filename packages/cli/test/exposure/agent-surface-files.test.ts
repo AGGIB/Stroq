@@ -176,25 +176,22 @@ describe('the grants and servers in the front matter of an agent definition', ()
   const front = (...lines: string[]): string => ['---', ...lines, '---', 'Body.'].join('\n');
 
   it.each([
-    ['.claude/skills/setup/SKILL.md', 'allowed-tools: Bash', 'Bash'],
-    ['.claude/commands/go.md', 'allowed-tools: Bash(*), Read', 'Bash(*)'],
-    ['.claude/commands/go.md', 'allowed-tools: Read Bash(npx:*)', 'Bash(npx:*)'],
+    ['.claude/skills/setup/SKILL.md', 'allowed-tools: Bash', ['Bash']],
+    ['.claude/commands/go.md', 'allowed-tools: Bash(*), Read', ['Bash(*)', 'Read']],
+    ['.claude/commands/go.md', 'allowed-tools: Read Bash(npx:*)', ['Read', 'Bash(npx:*)']],
     [
       '.claude/skills/s/SKILL.md',
       'allowed-tools:\n  - Read\n  - Bash(python3:*)',
-      'Bash(python3:*)',
+      ['Read', 'Bash(python3:*)'],
     ],
-    ['.claude/skills/s/SKILL.md', 'allowedTools: [Bash]', 'Bash'],
-  ])('reads %s with `%s`', (file, line, rule) => {
+    ['.claude/skills/s/SKILL.md', 'allowedTools: [Bash]', ['Bash']],
+    // A grant of tools that run no shell is a grant all the same: which are harmless is not read.
+    ['.claude/skills/s/SKILL.md', 'allowed-tools: Read, Grep, Glob', ['Read', 'Grep', 'Glob']],
+  ])('reads %s with `%s`', (file, line, rules) => {
     const hits = scanFile(file, front('name: x', line));
-    expect(of(hits, 'agent-broad-allow').map((h) => [h.name, h.value])).toEqual([
-      ['allowed-tools', rule],
-    ]);
-  });
-
-  it('leaves a grant of tools that run no shell alone', () => {
-    const hits = scanFile('.claude/skills/s/SKILL.md', front('allowed-tools: Read, Grep, Glob'));
-    expect(of(hits, 'agent-broad-allow')).toEqual([]);
+    expect(of(hits, 'agent-broad-allow').map((h) => [h.name, h.value])).toEqual(
+      rules.map((rule) => ['allowed-tools', rule]),
+    );
   });
 
   it.each([

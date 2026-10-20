@@ -69,8 +69,6 @@ const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
   'devcontainer-command',
   'mcp-server',
 ]);
-/** Kinds that fail where no base proves they were there before. */
-const FAILS_WITHOUT_BASE: ReadonlySet<AgentKind> = new Set(['agent-broad-allow']);
 /**
  * A folder anyone on the machine can write, where an attacker can put the file a link reads: the
  * temporary folders, the lock and crash folders, and macOS's shared and cache folders. In any
@@ -127,9 +125,9 @@ export const inAttackShape = (h: AgentHit): boolean =>
  * for one of the few benign env variables, which is a warning.
  *
  * With no base (plain `stroq inspect`), nothing is proven there before, and nothing is proven
- * new either: each keeps its own severity, and fails when it is an allow rule that grants too
- * much, a server whose host starts it without asking, or an install script, a dev container
- * command or a server in the shape of an attack.
+ * new either: each keeps its own severity, so an allow rule is listed, and fails when it is a
+ * server whose host starts it without asking, or an install script, a dev container command or a
+ * server in the shape of an attack.
  */
 export function settle(
   h: AgentHit,
@@ -139,7 +137,7 @@ export function settle(
   // What a link out of the repository reads is in no change to review, there before it or not.
   if (h.kind === 'config-link-outside') return { ...h, severity: 'error', status };
   if (against === 'none') {
-    const fails = FAILS_WITHOUT_BASE.has(h.kind) || startsWithoutAsking(h) || inAttackShape(h);
+    const fails = startsWithoutAsking(h) || inAttackShape(h);
     return fails ? { ...h, severity: 'error', status } : { ...h, status };
   }
   if (status === 'present')

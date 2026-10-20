@@ -2,9 +2,8 @@ import { agentDefinitionHasHooks } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
 import type { JsonObject } from '../install/inspect/json.js';
-import { firstEntries, hookEntries, MAX_HOOKS, mcpServerHits, tooMany } from './agent-json.js';
+import { allowRuleHits, hookEntries, MAX_HOOKS, mcpServerHits, tooMany } from './agent-json.js';
 import { boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
-import { claudeRuleIsBroad } from './allow-rules.js';
 import { lineAt } from './jsonc.js';
 
 type KeyLines = ReadonlyMap<string, number>;
@@ -160,8 +159,6 @@ function definitionHooks(path: string, data: JsonObject, keyLines: KeyLines): Ag
 
 /** The keys a skill or a command allows tools under, which it may then use without asking. */
 const GRANT_KEYS = ['allowed-tools', 'allowedTools', 'allowed_tools'] as const;
-/** The tools whose grant hands over the shell: Claude Code's, Copilot's and Gemini's. */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash', 'shell', 'run_shell_command']);
 
 /** The rules of a grant: a list, or one string of them split at commas and blanks outside `()`. */
 function grantRules(value: unknown): string[] {
@@ -188,25 +185,19 @@ function grantRules(value: unknown): string[] {
   return rules;
 }
 
-/** The grants of the shell, of files outside or of the network a definition's front matter makes. */
+/**
+ * Every tool a definition's front matter allows, whatever it is: which grants are harmless is not
+ * worked out. A value that is neither a string nor a list is reported as it is.
+ */
 function definitionGrants(path: string, data: JsonObject, keyLines: KeyLines): AgentHit[] {
   const hits: AgentHit[] = [];
   for (const key of GRANT_KEYS) {
     if (!Object.hasOwn(data, key)) continue;
     const value: unknown = data[key];
-    // A value that is neither a string nor a list is not a grant this reads, and the host may: it
-    // counts as one that hands over the shell.
     const readable = typeof value === 'string' || Array.isArray(value);
     const rules = readable ? grantRules(value) : [boundedJson(value)];
-    const broad = [...new Set(rules)].filter(
-      (rule) => !readable || claudeRuleIsBroad(rule, SHELL_TOOLS),
-    );
-    const list = firstEntries(path, 'allowed tools', broad);
     const line = keyLines.get(key) ?? 1;
-    hits.push(
-      ...list.cut.map((h) => ({ ...h, line })),
-      ...list.items.map((rule) => hit('agent-broad-allow', path, line, 'allowed-tools', rule)),
-    );
+    hits.push(...allowRuleHits({ path, text: '' }, rules, 'allowed-tools', () => line));
   }
   return hits;
 }

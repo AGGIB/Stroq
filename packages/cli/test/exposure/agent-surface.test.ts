@@ -134,7 +134,7 @@ describe('.claude/settings.json and settings.local.json', () => {
     ]);
   });
 
-  it('warns on an allow rule that lets every shell command run without asking', () => {
+  it('warns on every allow rule, whatever it lets run without asking', () => {
     const text = JSON.stringify({
       permissions: { allow: ['Bash(*)', 'Bash(npm test)', 'Bash', 'Read', 'Bash(:*)'] },
     });
@@ -143,18 +143,24 @@ describe('.claude/settings.json and settings.local.json', () => {
       ['Bash(*)', 'warning'],
       ['Bash(npm test)', 'warning'],
       ['Bash', 'warning'],
+      ['Read', 'warning'],
       ['Bash(:*)', 'warning'],
     ]);
   });
 
-  it('leaves ordinary settings alone', () => {
+  it('lists the rules and the mode of ordinary settings, and nothing else', () => {
     const text = JSON.stringify({
       permissions: { defaultMode: 'default', allow: ['Read'] },
       enableAllProjectMcpServers: false,
       env: { NODE_ENV: 'development' },
       model: 'opus',
     });
-    expect(scanFile('.claude/settings.json', text)).toEqual([]);
+    expect(
+      scanFile('.claude/settings.json', text).map((h) => `${h.kind} ${h.name} ${h.value}`),
+    ).toEqual([
+      'agent-broad-allow permissions.allow Read',
+      'agent-broad-allow permissions.defaultMode default',
+    ]);
   });
 
   // acceptEdits takes every edit without asking: the agent can write a hook or a script that a
@@ -427,7 +433,10 @@ describe('VS Code tasks, workspaces and settings', () => {
       'chat.tools.autoApprove': {},
       'editor.tabSize': 2,
     });
-    expect(scanFile('.vscode/settings.json', off)).toEqual([]);
+    // Approving nothing, it is only listed, and fails when a change sets it.
+    expect(scanFile('.vscode/settings.json', off).map((h) => `${h.kind} ${h.severity}`)).toEqual([
+      'agent-broad-allow warning',
+    ]);
   });
 
   it('reports terminal commands approved without asking, and not a list that only refuses', () => {
@@ -450,7 +459,9 @@ describe('VS Code tasks, workspaces and settings', () => {
     const refuse = JSON.stringify({
       'chat.tools.terminal.autoApprove': { rm: false, '/x/': { approve: false } },
     });
-    expect(scanFile('.vscode/settings.json', refuse)).toEqual([]);
+    expect(scanFile('.vscode/settings.json', refuse).map((h) => `${h.kind} ${h.severity}`)).toEqual(
+      ['agent-broad-allow warning'],
+    );
   });
 });
 
