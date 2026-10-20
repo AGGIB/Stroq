@@ -6,6 +6,7 @@ import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import {
   commitFiles,
+  commitIndexed,
   git,
   hookSettings,
   scratchRepo,
@@ -26,6 +27,9 @@ afterEach(() => {
 
 const failing = (hits: readonly TaggedHit[]): string[] =>
   hits.filter((h) => isFailing(h, 'new')).map((h) => `${h.status} ${h.kind} ${h.file}`);
+
+/** Why a case is skipped on Windows: see `commitIndexed`. */
+const WINDOWS_REFUSES = 'Git for Windows refuses this name in its index (core.protectNTFS)';
 
 const ONE = '1111111111111111111111111111111111111111';
 const TWO = '2222222222222222222222222222222222222222';
@@ -154,8 +158,14 @@ describe('a config that git fills in on checkout from somewhere else', () => {
   });
 });
 
+/**
+ * A name a Windows disk cannot hold (a part that ends in a dot or a blank, a `:` stream) is
+ * committed through git's index alone (`commitIndexed`), since no file can be written as it there.
+ * Git for Windows may refuse such a name in its index too: that case is skipped there, and only
+ * there; it runs on every other system.
+ */
 describe('a name that a disk opens as the name of an agent config', () => {
-  it.each([
+  it.for([
     '.claude./settings.json',
     '.claude /settings.json',
     '.claude/settings.json.',
@@ -165,33 +175,34 @@ describe('a name that a disk opens as the name of an agent config', () => {
     'CLAUDE~1/settings.json',
     '.claude/SETTIN~1.JSO',
     '.cla​ude/settings.json',
-  ])('fails a hook added at %j', (path) => {
+  ])('fails a hook added at %j', (path, { skip }) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.claude/settings.json': '{}\n' });
-    commitFiles(dir, { [path]: HOOK });
+    if (commitIndexed(dir, { [path]: HOOK }) === undefined) return skip(WINDOWS_REFUSES);
     expect(failing(agentChanges(dir, base).hits).length).toBeGreaterThan(0);
   });
 
-  it.each([
+  it.for([
     [
       '.vscode./tasks.json',
       '{"tasks":[{"label":"x","command":"id","runOptions":{"runOn":"folderOpen"}}]}',
     ],
     ['.mcp.json.', '{"mcpServers":{"a":{"command":"bash"}}}'],
-  ])('fails %s', (path, text) => {
+  ] as const)('fails %s', ([path, text], { skip }) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
-    commitFiles(dir, { [path]: text });
+    if (commitIndexed(dir, { [path]: text }) === undefined) return skip(WINDOWS_REFUSES);
     expect(failing(agentChanges(dir, base).hits).length).toBeGreaterThan(0);
   });
 
-  it('fails a file a hook runs, put under a name that a disk opens as it', () => {
+  it('fails a file a hook runs, put under a name that a disk opens as it', ({ skip }) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, {
       '.claude/settings.json': hookSettings({ Stop: 'bash scripts/guard.sh' }),
       'scripts/guard.sh': 'echo ok\n',
     });
-    commitFiles(dir, { 'scripts/guard.sh.': 'id\n' });
+    if (commitIndexed(dir, { 'scripts/guard.sh.': 'id\n' }) === undefined)
+      return skip(WINDOWS_REFUSES);
     expect(failing(agentChanges(dir, base).hits)).toContain(
       'new unreadable-config scripts/guard.sh.',
     );
@@ -206,7 +217,7 @@ describe('a name that a disk opens as the name of an agent config', () => {
 });
 
 describe('a line the change adds to the config of a package manager', () => {
-  it.each([
+  it.for([
     ['.npmrc', '@stroq:registry=https://evil.invalid/\n'],
     ['.npmrc', 'registry = https://evil.invalid/\n'],
     ['.yarnrc.yml', 'npmRegistryServer: "https://evil.invalid"\n'],
@@ -223,10 +234,11 @@ describe('a line the change adds to the config of a package manager', () => {
     ['.NPMRC', 'registry=https://evil.invalid/\n'],
     ['.npmrc.', 'registry=https://evil.invalid/\n'],
     ['sub/.Yarnrc.YML', 'yarnPath: ./evil.cjs\n'],
-  ])('fails %s with %j', (path, text) => {
+  ] as const)('fails %s with %j', ([path, text], { skip }) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
-    commitFiles(dir, { [path]: text });
+    // Through the index, so `.npmrc.`, which a Windows disk cannot hold, is committed as named.
+    if (commitIndexed(dir, { [path]: text }) === undefined) return skip(WINDOWS_REFUSES);
     expect(failing(agentChanges(dir, base).hits)).toContain(`new agent-api-redirect ${path}`);
   });
 

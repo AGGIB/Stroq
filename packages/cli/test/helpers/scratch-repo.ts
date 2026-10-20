@@ -69,9 +69,14 @@ export function commitFiles(dir: string, files: Readonly<Record<string, string>>
  * `add -A` would stage the missing file as deleted.
  */
 export function stageLink(dir: string, path: string, target: string): void {
-  const oid = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+  git(dir, 'update-index', '--add', '--cacheinfo', `120000,${hashText(dir, target)},${path}`);
+}
+
+/** Writes `text` into the repository's objects, as is, and returns its id. */
+function hashText(dir: string, text: string): string {
+  return execFileSync('git', [...TEST_GIT_ARGS, 'hash-object', '-w', '--stdin'], {
     cwd: dir,
-    input: target,
+    input: text,
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -80,7 +85,31 @@ export function stageLink(dir: string, path: string, target: string): void {
       GIT_CONFIG_GLOBAL: join(dir, '.none'),
     },
   }).trim();
-  git(dir, 'update-index', '--add', '--cacheinfo', `120000,${oid},${path}`);
+}
+
+/**
+ * Commits `files` through git's index alone, never on disk, and returns the commit: for a name a
+ * Windows disk cannot hold (a part that ends in a dot or a blank, a `:` stream), which a file
+ * cannot be written as there, so `git add` cannot stage it. Git for Windows may refuse such a
+ * name in its index too (core.protectNTFS): there, and only there, this returns undefined, for
+ * the test to skip that case; on any other system a refusal is an error. What is already staged
+ * is committed with it.
+ */
+export function commitIndexed(
+  dir: string,
+  files: Readonly<Record<string, string>>,
+): string | undefined {
+  for (const [path, text] of Object.entries(files)) {
+    const oid = hashText(dir, text);
+    try {
+      git(dir, 'update-index', '--add', '--cacheinfo', `100644,${oid},${path}`);
+    } catch (err) {
+      if (process.platform === 'win32') return undefined;
+      throw err;
+    }
+  }
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'c');
+  return git(dir, 'rev-parse', 'HEAD').trim();
 }
 
 /** A `.claude/settings.json` with one command hook per event. */
