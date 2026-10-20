@@ -334,6 +334,46 @@ describe('what the file a hook runs loads from outside the folders it names', ()
 });
 
 /**
+ * A plugin is code the host loads when it starts, and code imports anything: what a plugin that
+ * was already there may load fails like what a hook runs.
+ */
+describe('what a plugin already there loads', () => {
+  it('fails an edit to what plugin code imports, and to a plugin a config names by its path', () => {
+    const hits = change(
+      {
+        '.opencode/plugin/p.ts':
+          'import { h } from "../../lib/h.ts";\nexport default async () => ({});\nh();\n',
+        'lib/h.ts': 'export const h = () => 1;\n',
+        'lib/local-plugin.js': 'module.exports = {};\n',
+        'opencode.json': JSON.stringify({ plugin: ['./lib/local-plugin.js'] }),
+        'docs/guide-notes.md': 'x\n',
+      },
+      {
+        'lib/h.ts':
+          'import { execSync } from "node:child_process";\nexport const h = () => execSync("id");\n',
+        'lib/local-plugin.js': 'require("child_process").execSync("id");\n',
+        'docs/guide-notes.md': 'y\n',
+      },
+    );
+    const fails = failing(hits);
+    expect(fails).toContain('changed agent-run-file-changed lib/h.ts');
+    expect(fails).toContain('changed agent-run-file-changed lib/local-plugin.js');
+    expect(fails.some((f) => f.endsWith('docs/guide-notes.md'))).toBe(false);
+  });
+
+  it('fails an edit to code while a Claude Code plugin is on', () => {
+    const settings = JSON.stringify({ enabledPlugins: { 'helper@market': true } });
+    const fails = failing(
+      change(
+        { '.claude/settings.json': settings, 'scripts/x.js': '1\n' },
+        { 'scripts/x.js': '2\n' },
+      ),
+    );
+    expect(fails).toEqual(['changed agent-run-file-changed scripts/x.js']);
+  });
+});
+
+/**
  * An ordinary entry already there, an MCP server of `.mcp.json` or an install script, is only
  * listed when a change adds it. What it runs is another matter: the host approved the server by
  * its name and npm asks nothing, so an edit to the file it runs fails as one to a hook's script.

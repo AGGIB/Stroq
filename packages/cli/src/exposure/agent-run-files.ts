@@ -30,7 +30,7 @@ import { DATA_FILE, RUNNER_WORDS, isRunnerFile, type RunnerContext } from './run
  * bounded, and a check that stops at the bound fails rather than passes.
  */
 
-/** The kinds whose value is a command line, and what to call one in a sentence. */
+/** The kinds whose value is a command line, or names code the host loads, and what to call one. */
 const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
   'agent-hook': 'hook',
   'agent-helper-command': 'command',
@@ -43,7 +43,21 @@ const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
   'devcontainer-command': 'command',
   'package-script': 'script',
   'package-script-agent-path': 'script',
+  'agent-plugin': 'entry',
 };
+
+/**
+ * How an entry's value is read: a command line, the value of a variable, or code the host loads
+ * (a plugin), which imports anything and so reaches every code, agent and runner file.
+ */
+type Reading = 'command' | 'variable' | 'code';
+
+const readingOf = (h: TaggedHit): Reading =>
+  h.kind === 'agent-env' ? 'variable' : h.kind === 'agent-plugin' ? 'code' : 'command';
+
+/** What is read as an entry's command: plugin code by its own path, any other by its value. */
+const commandOf = (h: TaggedHit): string =>
+  h.kind === 'agent-plugin' && h.name === 'plugin code' ? h.file : h.value;
 
 /** Whether an entry already there holds a command line that the reading below follows. */
 export const isRunEntry = (h: TaggedHit): boolean =>
@@ -263,7 +277,8 @@ interface Judged {
 }
 
 /** Reads one command line against the touched files. */
-function judge(command: string, isEnv: boolean, index: Index, left: number): Judged {
+function judge(command: string, reading: Reading, index: Index, left: number): Judged {
+  const isEnv = reading === 'variable';
   const fails = new Set<number>();
   if (command.length > MAX_COMMAND_CHARS)
     return {
@@ -312,7 +327,7 @@ function judge(command: string, isEnv: boolean, index: Index, left: number): Jud
   const tokens = text.split(/[^a-z0-9_-]+/);
   const runner = tokens.some((t) => RUNNER_WORDS.has(t));
   const reaches = isEnv ? [] : reachesOf(command);
-  open ||= computesWhatRuns(command, isEnv) || reaches.includes('open');
+  open ||= reading === 'code' || computesWhatRuns(command, isEnv) || reaches.includes('open');
   const pathLike = text
     .split(/[\s;&|()<>=,]+/)
     .some(
@@ -363,7 +378,7 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
   let spent = 0;
   for (const h of entries) {
     const name = `${h.name} ${RUNS[h.kind] as string} in ${h.file}`;
-    const judged = judge(h.value, h.kind === 'agent-env', index, RUN_LOOKUP_BUDGET - spent);
+    const judged = judge(commandOf(h), readingOf(h), index, RUN_LOOKUP_BUDGET - spent);
     spent += judged.work;
     if (judged.over === true) spent = RUN_LOOKUP_BUDGET + 1;
     if (judged.unread !== undefined) {
