@@ -39,6 +39,11 @@ describe('the git that stroq inspect runs', () => {
       'a part of PATH inside the checkout',
       (dir: string, real: string) => `${join(dir, 'node_modules', '.bin')}:${real}`,
     ],
+    // A folder named `..x` is inside the checkout, though its relative path starts with `..`.
+    [
+      'a part of PATH in a folder of the checkout named ..x',
+      (dir: string, real: string) => `${join(dir, '..x')}:${real}`,
+    ],
   ])('is never one in the checkout, through %s', (_name, pathOf) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
@@ -47,6 +52,7 @@ describe('the git that stroq inspect runs', () => {
     dirs.push(marker);
     plantGit(dir, marker);
     plantGit(join(dir, 'node_modules', '.bin'), marker);
+    plantGit(join(dir, '..x'), marker);
     const real = realGitDir();
     process.env.PATH = pathOf(dir, real);
     const changes = agentChanges(dir, base);

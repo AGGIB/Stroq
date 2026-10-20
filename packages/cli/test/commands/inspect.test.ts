@@ -140,6 +140,29 @@ describe('stroq inspect', () => {
     expect(record.agent.map((h) => h.kind)).toEqual([]);
   });
 
+  // Only the very entry the reading of the folder reports is left out of the agent entries: a key
+  // that reading misses (here spelled with a JSON escape) is still reported.
+  it('leaves out only an entry the reading of the folder reports by the same key', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-inspect-folder-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.devcontainer'));
+    writeFileSync(
+      join(dir, '.devcontainer', 'devcontainer.json'),
+      '{ "initializeCommand": "./host.sh", "post\\u0043reateCommand": "./in.sh" }',
+    );
+    const out = capture();
+    runInspect([dir, '--json']);
+    out.restore();
+    const record = JSON.parse(out.lines.join('')) as {
+      onOpen: { what: string }[];
+      agent: { kind: string; name: string }[];
+    };
+    expect(record.onOpen.map((h) => h.what)).toEqual([]);
+    expect(record.agent.map((h) => `${h.kind} ${h.name}`)).toEqual([
+      'devcontainer-command postCreateCommand',
+    ]);
+  });
+
   it('emits SARIF with --sarif, keeping the exit code, for code scanning', () => {
     const dir = repo();
     git(dir, 'config', 'core.fsmonitor', '/tmp/pwn.sh');

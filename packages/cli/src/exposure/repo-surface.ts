@@ -71,95 +71,173 @@ const readTextOr = (file: string, fallback = ''): string => {
 };
 
 /**
- * Parses git's INI into dotted keys. Git's own parser accepts more than this — line
- * continuations, quoting rules — but a key this misses is a key `.git/config` sets in
- * a shape no tool writes, and the alternative is shelling out to `git config`, which
- * would execute the repository's configuration to read it.
+ * Parses git's INI into dotted keys, the way git reads it (see `parseGitConfig`): no tool's view of
+ * the file but git's, and no shelling out to `git config`, which would read the repository's
+ * configuration to read it.
  */
 export function gitConfigEntries(text: string): readonly { key: string; value: string }[] {
   return parseGitConfig(text).entries;
 }
 
-/** A key as git takes it: a letter, then letters, digits and `-`. */
-const GIT_KEY = /^[A-Za-z][A-Za-z0-9-]*$/;
+const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+const isAlpha = (c: string): boolean => /^[A-Za-z]$/.test(c);
+/** A character of a key or a section name as git takes it: a letter, a digit or `-`. */
+const isKeyChar = (c: string): boolean => /^[A-Za-z0-9-]$/.test(c);
 
-/**
- * The lines of a git config, a line that ends in a backslash joined with the next one, as git
- * continues a value.
- */
-function configLines(text: string): string[] {
-  const lines: string[] = [];
-  // The parts of a line continued so far, joined once it ends, and the backslashes it ends in.
-  let parts: string[] = [];
-  let trail = 0;
-  for (const raw of text.split('\n')) {
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
-    let slashes = 0;
-    while (slashes < line.length && line[line.length - 1 - slashes] === '\\') slashes += 1;
-    const total = slashes === line.length ? trail + slashes : slashes;
-    if (total % 2 === 1) {
-      parts.push(line.slice(0, -1));
-      trail = total - 1;
+/** The escapes git takes in a value; any other one makes the file one git refuses. */
+const VALUE_ESCAPES: Readonly<Record<string, string>> = {
+  t: '\t',
+  b: '\b',
+  n: '\n',
+  '\\': '\\',
+  '"': '"',
+};
+
+/** A git config read one character at a time, with the line each one is on. */
+class ConfigReader {
+  private at: number;
+  private line = 1;
+  /** The line of the last character read. */
+  lineOfLast = 1;
+  constructor(private readonly text: string) {
+    this.at = text.startsWith('\uFEFF') ? 1 : 0;
+  }
+
+  get done(): boolean {
+    return this.at >= this.text.length;
+  }
+
+  /** The next character; `\r\n` and the end of the file read as a newline, as git reads them. */
+  next(): string {
+    this.lineOfLast = this.line;
+    if (this.done) return '\n';
+    let c = this.text[this.at] as string;
+    this.at += 1;
+    if (c === '\r' && this.text[this.at] === '\n') {
+      c = '\n';
+      this.at += 1;
+    }
+    if (c === '\n') this.line += 1;
+    return c;
+  }
+}
+
+/** A section header after its `[`: `[core]`, `[remote "a\"b"]`, `[a.b]`; undefined when git refuses it. */
+function readSection(r: ConfigReader): string | undefined {
+  let name = '';
+  for (;;) {
+    if (r.done) return undefined;
+    let c = r.next();
+    if (c === ']') return name === '' ? undefined : name;
+    if (isSpace(c)) {
+      // `[name "subsection"]`: blanks, a quoted name whose `\` takes the next character, then `]`.
+      for (; isSpace(c); c = r.next()) if (c === '\n' || r.done) return undefined;
+      if (c !== '"' || name === '') return undefined;
+      let sub = '';
+      for (;;) {
+        c = r.next();
+        if (c === '\n') return undefined;
+        if (c === '"') break;
+        if (c === '\\') {
+          c = r.next();
+          if (c === '\n') return undefined;
+        }
+        sub += c;
+      }
+      return r.next() === ']' ? `${name}.${sub}` : undefined;
+    }
+    if (!isKeyChar(c) && c !== '.') return undefined;
+    name += c.toLowerCase();
+  }
+}
+
+/** A value after its `=`, to the end of its line, as git reads it; undefined when git refuses it. */
+function readValue(r: ConfigReader): string | undefined {
+  let value = '';
+  let quote = false;
+  let comment = false;
+  let blanks = 0;
+  for (;;) {
+    let c = r.next();
+    if (c === '\n') return quote ? undefined : value;
+    if (comment) continue;
+    if (isSpace(c) && !quote) {
+      if (value !== '') blanks += 1;
       continue;
     }
-    parts.push(line);
-    lines.push(parts.join(''));
-    parts = [];
-    trail = 0;
+    if (!quote && (c === ';' || c === '#')) {
+      comment = true;
+      continue;
+    }
+    value += ' '.repeat(blanks);
+    blanks = 0;
+    if (c === '\\') {
+      c = r.next();
+      // A value goes on past the end of its line only here, never from a comment.
+      if (c === '\n') continue;
+      const escaped = VALUE_ESCAPES[c];
+      if (escaped === undefined) return undefined;
+      value += escaped;
+      continue;
+    }
+    if (c === '"') {
+      quote = !quote;
+      continue;
+    }
+    value += c;
   }
-  if (parts.length > 0) lines.push(parts.join(''));
-  return lines;
 }
 
 /**
- * The entries of a git config, and the number of each line that could not be placed: a key
- * before any section, a section left open, a key git would not take. Git refuses a config with
- * such a line, but a reader that is wrong about one would skip a key git runs, so each is
- * reported rather than skipped. A key may follow its section on the same line (`[core] a = b`).
+ * The entries of a git config, read as git reads them: comments and blanks between entries, a
+ * section header with a quoted subsection whose `\` takes the next character, a key on the line of
+ * its section, a value with quotes, comments and escapes, continued past the end of its line only
+ * by a `\` inside the value. Keys and plain section names are in lower case, as git takes them.
+ *
+ * Git refuses a whole file it cannot read, and runs none of it; a reader that is wrong about a line
+ * would skip a key git runs. So the first line git would refuse ends the reading and is reported in
+ * `unplaced`, with what was read before it.
  */
 export function parseGitConfig(text: string): {
   readonly entries: readonly { key: string; value: string }[];
   readonly unplaced: readonly number[];
 } {
   const entries: { key: string; value: string }[] = [];
-  const unplaced: number[] = [];
-  let section = '';
-  configLines(text).forEach((raw, i) => {
-    let line = raw.trim();
-    if (line.startsWith('[')) {
-      const close = line.indexOf(']');
-      if (close === -1) {
-        section = '';
-        unplaced.push(i + 1);
-        return;
-      }
-      const inner = line.slice(1, close).trim();
-      const quote = inner.indexOf('"');
-      section =
-        quote === -1
-          ? inner.replace(/\s+/g, '.')
-          : `${inner.slice(0, quote).trim()}.${inner.slice(quote + 1).replace(/"$/, '')}`;
-      line = line.slice(close + 1).trim();
+  const r = new ConfigReader(text);
+  const refused = () => ({ entries, unplaced: [r.lineOfLast] });
+  let section: string | undefined;
+  let comment = false;
+  while (!r.done) {
+    const c = r.next();
+    if (c === '\n') {
+      comment = false;
+      continue;
     }
-    if (line === '' || line.startsWith('#') || line.startsWith(';')) return;
-    const eq = line.indexOf('=');
-    const name = (eq === -1 ? line : line.slice(0, eq)).trim();
-    if (section === '' || !GIT_KEY.test(name)) {
-      unplaced.push(i + 1);
-      return;
+    if (comment || isSpace(c)) continue;
+    if (c === '#' || c === ';') {
+      comment = true;
+      continue;
     }
-    entries.push({
-      key: `${section}.${name}`,
-      value:
-        eq === -1
-          ? 'true'
-          : line
-              .slice(eq + 1)
-              .trim()
-              .replace(/^"(.*)"$/, '$1'),
-    });
-  });
-  return { entries, unplaced };
+    if (c === '[') {
+      section = readSection(r);
+      if (section === undefined) return refused();
+      continue;
+    }
+    if (!isAlpha(c) || section === undefined) return refused();
+    let name = c.toLowerCase();
+    let d = r.next();
+    for (; isKeyChar(d); d = r.next()) name += d.toLowerCase();
+    while (d === ' ' || d === '\t') d = r.next();
+    if (d === '\n') {
+      entries.push({ key: `${section}.${name}`, value: 'true' });
+      continue;
+    }
+    if (d !== '=') return refused();
+    const value = readValue(r);
+    if (value === undefined) return refused();
+    entries.push({ key: `${section}.${name}`, value });
+  }
+  return { entries, unplaced: [] };
 }
 
 /** What a hit names for a line of a git config that could not be read. */
@@ -172,10 +250,25 @@ export const UNREAD_CONFIG_LINE = 'a line the check could not read';
  */
 const isBoolean = (value: string): boolean => /^(true|false|yes|no|on|off|1|0)$/i.test(value);
 
+/** A git config's text; `missing` when there is none, `unread` when it is there and was not read. */
+function configText(file: string): string | 'missing' | 'unread' {
+  try {
+    const read = readRegularFile(file, MAX_CONFIG_BYTES);
+    return read.kind === 'text' ? read.text : 'unread';
+  } catch (err) {
+    return (err as { code?: unknown }).code === 'ENOENT' ? 'missing' : 'unread';
+  }
+}
+
 /** The keys of a git config that run something, `label` being how the report names the file. */
 function gitConfigHits(file: string, label: string): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  const config = parseGitConfig(readTextOr(file));
+  const text = configText(file);
+  if (text === 'missing') return hits;
+  // Too large, not a file, or not readable: what git reads from it is not known.
+  if (text === 'unread')
+    return [{ kind: 'git-config-exec', file: label, what: `${UNREAD_CONFIG_LINE} (the file)` }];
+  const config = parseGitConfig(text);
   // At most one: each says the same, that the file must be read by eye.
   const line = config.unplaced[0];
   if (line !== undefined)
@@ -351,67 +444,68 @@ const labelOf = (root: string, abs: string): string =>
 /**
  * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
  * when a `commondir` file names another folder, that folder's two as well. Git reads the config of
- * the folder `commondir` names; one that points out of `root` is reported, not read.
+ * the folder `commondir` names; one that points out of `root` is reported, not read. Each is read
+ * under every name it has on disk: `config` and `CONFIG` are two files on a disk that keeps case,
+ * and the one a disk that folds case opens is not known.
  */
 function gitDirConfigHits(
   root: string,
   dir: string,
-  names: ReadonlyMap<string, string>,
+  names: ReadonlyMap<string, readonly string[]>,
 ): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  const read = (
-    folder: string,
-    configName: string | undefined,
-    worktreeName: string | undefined,
-  ) => {
-    for (const name of [configName, worktreeName])
-      if (name !== undefined) {
-        const file = join(folder, name);
-        hits.push(...gitConfigHits(file, labelOf(root, file)));
-      }
+  const read = (folder: string, found: ReadonlyMap<string, readonly string[]>) => {
+    for (const name of [...(found.get('config') ?? []), ...(found.get('config.worktree') ?? [])]) {
+      const file = join(folder, name);
+      hits.push(...gitConfigHits(file, labelOf(root, file)));
+    }
   };
-  read(dir, names.get('config'), names.get('config.worktree'));
-  const commondir = names.get('commondir');
-  if (commondir === undefined) return hits;
-  const target = readTextOr(join(dir, commondir)).trim();
-  if (target === '') return hits;
-  const common = resolve(dir, target);
-  if (!isWithin(common, root)) {
-    hits.push({
-      kind: 'nested-bare-repo',
-      file: labelOf(root, dir),
-      what: 'its commondir file points out of this folder, at a config that was not read',
-    });
-    return hits;
+  read(dir, names);
+  for (const commondir of names.get('commondir') ?? []) {
+    const target = readTextOr(join(dir, commondir)).trim();
+    if (target === '') continue;
+    const common = resolve(dir, target);
+    if (!isWithin(common, root)) {
+      hits.push({
+        kind: 'nested-bare-repo',
+        file: labelOf(root, dir),
+        what: 'its commondir file points out of this folder, at a config that was not read',
+      });
+      continue;
+    }
+    read(common, namesIn(common));
   }
-  const inCommon = namesIn(common);
-  read(common, inCommon.get('config'), inCommon.get('config.worktree'));
   return hits;
 }
 
+/** Whether `path` is `root` or inside it: a child folder named `..x` is inside. */
 const isWithin = (path: string, root: string): boolean => {
   const rel = relative(root, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith('../') && !isAbsolute(rel))
+  );
 };
 
 /**
- * The names git looks for in a folder, folded as a disk that ignores case opens them, each with
- * the name it has on disk. A folder named `HEAD` or `commondir` is not what git looks for.
+ * The names git looks for in a folder, folded as the most forgiving disk opens them, each with every
+ * name it has on disk. A folder named `HEAD` or `commondir` is not what git looks for.
  */
-function namesOf(entries: readonly Dirent[]): Map<string, string> {
-  const names = new Map<string, string>();
+function namesOf(entries: readonly Dirent[]): Map<string, string[]> {
+  const names = new Map<string, string[]>();
   for (const e of entries) {
     const name =
       gitDirName(e.name) ??
       (foldName(e.name) === 'config.worktree' ? 'config.worktree' : undefined);
-    if (name === undefined || (e.isDirectory() && FILE_NAMES.has(name)) || names.has(name))
-      continue;
-    names.set(name, e.name);
+    if (name === undefined || (e.isDirectory() && FILE_NAMES.has(name))) continue;
+    const list = names.get(name);
+    if (list === undefined) names.set(name, [e.name]);
+    else list.push(e.name);
   }
   return names;
 }
 
-function namesIn(dir: string): Map<string, string> {
+function namesIn(dir: string): Map<string, string[]> {
   try {
     return namesOf(readdirSync(dir, { withFileTypes: true }));
   } catch {

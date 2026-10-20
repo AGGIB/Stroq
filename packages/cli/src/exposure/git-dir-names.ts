@@ -8,16 +8,27 @@
 
 const NAMES: ReadonlySet<string> = new Set(['head', 'objects', 'refs', 'config', 'commondir']);
 
+/**
+ * Longer than any name a disk holds (255 units on every common one, 255 bytes on most), with room
+ * to spare: a part of a path this long is never checked out, so it is not folded, only put in lower
+ * case, and is no name git looks for.
+ */
+export const MAX_NAME = 1024;
+
 /** Printable ASCII: most names are, and fold with a few steps only. */
 const PLAIN = /^[\x20-\x7e]*$/;
 
 /**
- * Windows drops dots and blanks at the end of a name. One pass from the end: a pattern such as
- * `/[. ]+$/` tries every start in a long run of them, which is slow on a name built for it.
+ * Windows drops dots and blanks at the end of a name. One pass from the end, by char code: a
+ * pattern such as `/[. ]+$/` tries every start in a long run of them, which is slow on a name
+ * built for it (`. . . x`).
  */
 function dropTrailing(name: string): string {
   let end = name.length;
-  while (end > 0 && (name[end - 1] === '.' || name[end - 1] === ' ')) end -= 1;
+  for (let c = name.charCodeAt(end - 1); end > 0 && (c === 0x2e || c === 0x20);) {
+    end -= 1;
+    c = name.charCodeAt(end - 1);
+  }
   return name.slice(0, end);
 }
 /**
@@ -33,6 +44,7 @@ const DROPPED = /[\p{Default_Ignorable_Code_Point}\p{M}]/gu;
  * that fold to one text may be the same folder on some disk.
  */
 export function foldName(name: string): string {
+  if (name.length > MAX_NAME) return name.toLowerCase();
   const colon = name.indexOf(':');
   const stream = colon === -1 ? name : name.slice(0, colon);
   if (PLAIN.test(stream)) return dropTrailing(stream.toLowerCase());
@@ -70,6 +82,7 @@ export function windowsAlias(name: string): boolean {
 
 /** The name as git looks for it (`head`, `objects`...), or undefined for any other name. */
 export function gitDirName(name: string): string | undefined {
+  if (name.length > MAX_NAME) return undefined;
   const folded = foldName(name);
   return NAMES.has(folded) ? folded : undefined;
 }

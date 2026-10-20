@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,17 @@ function repo(files: Record<string, string> = {}): string {
     writeFileSync(path, content);
   }
   return root;
+}
+
+/** Whether the disk of the temporary folder opens `A` as `a`. */
+function foldsCase(): boolean {
+  const root = mkdtempSync(join(tmpdir(), 'stroq-case-'));
+  try {
+    writeFileSync(join(root, 'a'), '');
+    return existsSync(join(root, 'A'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 const kinds = (root: string, group: 'preTrust' | 'onOpen') =>
@@ -57,6 +68,47 @@ describe('gitConfigEntries', () => {
     const [entry] = gitConfigEntries(text);
     expect(entry?.key.toLowerCase()).toBe('core.fsmonitor');
     expect(entry?.value).toBe(value);
+  });
+});
+
+describe('gitConfigEntries, read as git reads a config', () => {
+  it.each([
+    // A `\\` at the end of a comment does not carry the next line into it.
+    ['[core]\n\tx = a # c \\\n\tfsmonitor = id\n', 'core.fsmonitor', 'id'],
+    ['[core] ; \\\n\tfsmonitor = id\n', 'core.fsmonitor', 'id'],
+    // Quotes, a comment after them, and an escape in the value.
+    ['[core]\n\tfsmonitor = "a;b" # c\n', 'core.fsmonitor', 'a;b'],
+    ['[core]\n\tfsmonitor = a\\"b\n', 'core.fsmonitor', 'a"b'],
+    ['[core]\r\n\tfsmonitor = i\\\r\nd\r\n', 'core.fsmonitor', 'id'],
+    // A `]` and an escaped quote inside a quoted subsection do not close the header.
+    ['[includeIf "gitdir:a]b/"]\n\tpath = x\n', 'includeif.gitdir:a]b/.path', 'x'],
+    ['[remote "a\\"]b"] url = x\n', 'remote.a"]b.url', 'x'],
+    ['[Core.Sub]\n\tFsmonitor\n', 'core.sub.fsmonitor', 'true'],
+    ['\uFEFF[core]\n\tfsmonitor = id\n', 'core.fsmonitor', 'id'],
+  ])('reads %j', (text, key, value) => {
+    expect(gitConfigEntries(text)).toContainEqual({ key, value });
+  });
+
+  it.each([
+    '[core]\n\tfsmonitor = "open\n',
+    '[core]\n\tfsmonitor = a\\q\n',
+    '[core]\n\tfsmonitor # c\n',
+    '[core "x" ]\n\tfsmonitor = id\n',
+    '[core "x\n"]\n\tfsmonitor = id\n',
+    '[]\n\tfsmonitor = id\n',
+    '[co re]\n\tfsmonitor = id\n',
+  ])('reports %j, which git refuses, as a line it could not read', (text) => {
+    const root = repo();
+    writeFileSync(join(root, '.git', 'config'), text);
+    const [finding] = repoFindings(repoSurface(root));
+    expect(finding?.detail).toContain('could not read');
+  });
+
+  it('reports a config too large to read', () => {
+    const root = repo();
+    writeFileSync(join(root, '.git', 'config'), `[core]\n${'\t# x\n'.repeat(80_000)}`);
+    const [finding] = repoFindings(repoSurface(root));
+    expect(finding?.detail).toContain('could not read');
   });
 });
 
@@ -143,7 +195,8 @@ describe('folderSurface — a folder with no .git', () => {
     });
     expect(lines(folderSurface(root).preTrust)).toEqual([
       'nested-bare-repo . HEAD, objects, refs',
-      'git-config-exec config.worktree core.sshCommand',
+      // Git takes a key in lower case, and so does the report.
+      'git-config-exec config.worktree core.sshcommand',
       'git-config-exec common/config core.fsmonitor',
     ]);
   });
@@ -161,6 +214,30 @@ describe('folderSurface — a folder with no .git', () => {
       'nested-bare-repo b/commondir a commondir file, which points git at the folder of another repository',
       'nested-bare-repo c/gitdir a gitdir file, which points git at the folder of another repository',
     ]);
+  });
+
+  it('reads the config a commondir names in a folder named ..x, which is inside', () => {
+    const root = folder({
+      HEAD: BARE.HEAD,
+      commondir: '..x\n',
+      '..x/objects/x': '',
+      '..x/refs/x': '',
+      '..x/config': '[core]\n\tfsmonitor = ./pwn.sh\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toContain(
+      'git-config-exec ..x/config core.fsmonitor',
+    );
+  });
+
+  // A disk that keeps letter case holds `config` and `CONFIG` side by side; which one a disk that
+  // folds case opens is not known, so both are read.
+  it.skipIf(foldsCase())('reads every name a config has on disk', () => {
+    const root = folder({
+      ...BARE,
+      config: '[core]\n\tbare = true\n',
+      CONFIG: '[core]\n\tfsmonitor = ./pwn.sh\n',
+    });
+    expect(lines(folderSurface(root).preTrust)).toContain('git-config-exec CONFIG core.fsmonitor');
   });
 
   it('reports a .git folder or file deeper in, and the commands its config runs', () => {

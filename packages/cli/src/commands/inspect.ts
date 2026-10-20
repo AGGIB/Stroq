@@ -19,6 +19,7 @@ import {
   folderSurface,
   repoFindings,
   repoSurface,
+  type RepoExecKind,
   type RepoSurface,
 } from '../exposure/repo-surface.js';
 import { inspectSarif } from '../exposure/sarif.js';
@@ -48,15 +49,28 @@ export { GIT_HARDENING, hardeningEnv, hardeningExports } from '../exposure/git-h
 /** Exit codes: nothing fails, something fails, the arguments were wrong, the check could not run. */
 const EXIT = { pass: 0, fail: 1, usage: 2, error: 3 } as const;
 
-/** The root dev container files and the root install scripts are already in `repoSurface` and `folderSurface`. */
-const COVERED_FILES: ReadonlySet<string> = new Set([
-  '.devcontainer/devcontainer.json',
-  '.devcontainer.json',
-]);
-const coveredByRepoSurface = (h: AgentHit): boolean =>
-  ((h.kind === 'devcontainer-host-command' || h.kind === 'devcontainer-command') &&
-    COVERED_FILES.has(h.file)) ||
-  (h.kind === 'package-script' && h.file === 'package.json');
+/** The kind `repoSurface` and `folderSurface` report the same entry under, for the kinds both read. */
+const SAME_ENTRY: Readonly<Partial<Record<AgentHit['kind'], RepoExecKind>>> = {
+  'devcontainer-host-command': 'devcontainer-host-command',
+  'devcontainer-command': 'devcontainer-command',
+  'package-script': 'package-install-script',
+};
+
+/**
+ * Whether the reading of the folder already reports this entry: the same kind, the same file and
+ * the same key. Only such an exact duplicate is left out; any other entry of those files is kept.
+ */
+function coveredBy(surface: RepoSurface): (h: AgentHit) => boolean {
+  const key = (kind: string, file: string, what: string): string =>
+    `${kind}\0${file.split('\\').join('/')}\0${what}`;
+  const reported = new Set(
+    [...surface.preTrust, ...surface.onOpen].map((h) => key(h.kind, h.file, h.what)),
+  );
+  return (h) => {
+    const kind = SAME_ENTRY[h.kind];
+    return kind !== undefined && reported.has(key(kind, h.file, h.name));
+  };
+}
 
 export function formatInspect(
   dir: string,
@@ -213,8 +227,9 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
   // of `.git` itself, in `repoSurface`, needs a repository.
   const agent = agentSurface(dir);
   // A folder with no .git reads the root dev container and install scripts the same way.
+  const covered = coveredBy(surface);
   const hits = tagChanges(
-    agent.hits.filter((h) => !coveredByRepoSurface(h)),
+    agent.hits.filter((h) => !covered(h)),
     null,
   );
   const failing =

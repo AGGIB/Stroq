@@ -322,7 +322,7 @@ When you open or build it (1, ordinary — not findings)
   .husky/pre-commit — pre-commit
 ```
 
-Exit 1 on anything in the first group, 0 otherwise; the second group never fails the command. It reads `.git/config` as git does, a key on the line of its section (`[core] fsmonitor = ...`) and a value continued with a backslash included, without running git; a line it cannot place in a section is a finding of its own, to read in a text editor.
+Exit 1 on anything in the first group, 0 otherwise; the second group never fails the command. It reads `.git/config` as git does, without running git: comments and quotes, a key on the line of its section (`[core] fsmonitor = ...`), a quoted subsection that holds a `]` or an escaped quote, the escapes git takes in a value, and a value continued with a backslash, which git does only inside a value and never from a comment. Git refuses a whole config it cannot read and runs none of it, so the first line git would refuse is a finding of its own, to read in a text editor, and so is a config too large to read (over 256 KiB). Keys are named in lower case, as git names them. In a bare repository it finds in the folder, a config is read under every name it has on disk (`config` and `CONFIG` side by side), and a `commondir` that names a folder inside, one called `..x` included, is followed.
 
 **Stroq's hooks cannot cover that moment, and this is the honest reason the command exists.** Agents run `git status` at startup to orient themselves. On Claude Code that happens before the workspace-trust prompt, and a `SessionStart` hook is gated on that same prompt, so no hook Stroq installs can get in front of it. A command you run first can.
 
