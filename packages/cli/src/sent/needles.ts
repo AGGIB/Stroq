@@ -18,6 +18,7 @@
 // There is no pattern in it that can backtrack.
 import { closeSync, readSync } from 'node:fs';
 import { MIN_SECRET_LENGTH } from '@stroq/core';
+import { largest, smallest } from './extremes.js';
 import { openRegularFile } from './regular-file.js';
 
 const BLOCK = 3;
@@ -143,8 +144,7 @@ function groupsOf(spellings: readonly ArrayLike<number>[], window: number): Grou
 /** The jump table for spellings given as code units (UTF-16 or bytes), at least `BLOCK` long. */
 function buildTable(spellings: readonly ArrayLike<number>[], owners: readonly number[]): Table {
   // A loop, not a spread: a call takes only so many arguments, and there may be more spellings.
-  let window = MAX_WINDOW;
-  for (const units of spellings) if (units.length < window) window = units.length;
+  const window = smallest(spellings, (units) => units.length, MAX_WINDOW);
   const shift = new Uint8Array(1 << BITS).fill(window - BLOCK + 1);
   spellings.forEach((units) => {
     for (let q = BLOCK - 1; q < window; q += 1) {
@@ -333,9 +333,11 @@ export function byteMatcher(values: readonly string[], words: readonly string[] 
     triggerTexts,
     triggerTexts.map(() => 0),
   );
-  let longest = 0;
-  for (const needle of [...(keys?.needles ?? []), ...(triggers?.needles ?? [])])
-    if (needle.length > longest) longest = needle.length;
+  const longest = largest(
+    [...(keys?.needles ?? []), ...(triggers?.needles ?? [])],
+    (needle) => needle.length,
+    0,
+  );
 
   /** Windows of `t` that start before `limit`, in `buf[0..end)`. */
   function scan(

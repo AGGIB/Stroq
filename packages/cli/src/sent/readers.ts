@@ -30,6 +30,7 @@ import {
   readCursorSession,
   splitCursorSessionPath,
 } from './cursor.js';
+import { smallest } from './extremes.js';
 import { firstLine } from './head.js';
 
 export interface TranscriptReader {
@@ -203,8 +204,7 @@ export async function newestTranscript(cwd: string): Promise<FoundTranscript | n
   const withSessions = lists.filter((list) => list.scoped && list.files.length > 0);
   // Nearest folder first: sessions in this very directory beat newer ones only in a folder
   // above it, whichever agent recorded them.
-  let nearest = Number.POSITIVE_INFINITY;
-  for (const list of withSessions) if (list.depth < nearest) nearest = list.depth;
+  const nearest = smallest(withSessions, (list) => list.depth, Number.POSITIVE_INFINITY);
   const own = withSessions.filter((list) => list.depth === nearest);
   const candidates = own.length > 0 ? own : lists;
   let best: (FoundTranscript & { mtimeMs: number }) | null = null;
