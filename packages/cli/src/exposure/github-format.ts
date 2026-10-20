@@ -137,6 +137,14 @@ function verdict(groups: ReturnType<typeof groupHits>, context: SummaryContext):
     : '**Passes.** Nothing in this change runs by itself when an agent or editor opens the repository.';
 }
 
+/**
+ * The one line that says why an edit to code no entry names fails: what a file of the repository
+ * loads is not read, so other code an entry already there may load fails too, and is not left as a
+ * warning to review.
+ */
+const MAY_LOAD =
+  'Other code of the repository that an entry already there may load fails too: what a file loads is not read, so it is not left for review.';
+
 export function githubSummary(hits: readonly TaggedHit[], context: SummaryContext): string {
   const groups = groupHits(hits, context.failOn);
   const compared =
@@ -161,6 +169,7 @@ export function githubSummary(hits: readonly TaggedHit[], context: SummaryContex
       : []),
     ...preTrustList(context.preTrust ?? []),
     ...listed('Fails', groups.failing),
+    ...(groups.failing.some((h) => h.kind === 'agent-run-file-changed') ? [MAY_LOAD, ''] : []),
     ...listed('To review', groups.review),
     ...noticeList(groups.notices),
     ...listed(context.changedFrom === undefined ? 'Not failing' : presentHeading, groups.present),
