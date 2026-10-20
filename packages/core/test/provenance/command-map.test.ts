@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commandMap } from '../../src/provenance/command-map.js';
+import { cpuNow } from '../cpu-time.js';
 
 // Where the commands of a command line are, as a shell reads them. A runner or installer that is
 // the command word of a simple command is a command that will run; one inside quotes, a
@@ -219,12 +220,14 @@ describe('what the reading is not sure of', () => {
 });
 
 describe('the cost of reading', () => {
+  // In processor time, as a reference machine would have used it: a shared runner with coverage on
+  // took 406 ms of wall time for one unit, past the bound, on code nobody had changed.
   it('stays linear on long runs of constructs', () => {
     for (const unit of ['a;', '(', '"', "'", '$(', '`', '\\\n', '<<EOF\n', 'npm i a ', '#']) {
       const text = unit.repeat(40_000);
-      const started = performance.now();
+      const started = cpuNow();
       commandMap(text, wanted, WINDOW);
-      expect(performance.now() - started, JSON.stringify(unit)).toBeLessThan(400);
+      expect(cpuNow() - started, JSON.stringify(unit)).toBeLessThan(400);
     }
   });
 });
