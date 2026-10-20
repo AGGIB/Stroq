@@ -20,6 +20,7 @@ import {
   withAllLinks,
 } from './package-configs.js';
 import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
+import { hiddenTextChanges } from './hidden-text-changes.js';
 import { protectionsUnknown, protectiveChanges, protectiveKeys } from './protective-keys.js';
 import {
   MAX_FILE_BYTES,
@@ -372,6 +373,17 @@ function compare(top: string, base: string, head: string) {
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
     ...lineChanges(top, tree, changed),
+    // A file its readers already failed for hidden text, or as not read, is not failed twice.
+    ...hiddenTextChanges(
+      top,
+      tree,
+      changed,
+      new Set(
+        found
+          .filter((h) => h.kind === 'instruction-hidden-text' || h.kind === 'unreadable-config')
+          .map((h) => h.file),
+      ),
+    ),
     ...packageConfigs(top, tree, sorted, changed, linked()),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),

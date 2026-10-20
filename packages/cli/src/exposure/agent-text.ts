@@ -25,19 +25,27 @@ type KeyLines = ReadonlyMap<string, number>;
  * every character Unicode lists as default ignorable, which a renderer may show as nothing.
  * Among them are the zero-width spaces and joiners, the direction marks, overrides and
  * isolates, the fillers, the variation selectors, and the tag characters U+E0000 to U+E007F,
- * which spell out a whole hidden message in what looks like an empty line. A NUL is one too in
- * a file a host reads by its name: it reads the file as text past it, while many viewers stop at
- * it or call the file binary. Matched as single characters, so the scan stays linear.
+ * which spell out a whole hidden message in what looks like an empty line. With them, the
+ * controls but a tab and a line feed: the C0 controls (NUL, which a host reads past while many
+ * viewers stop at it, and ESC, which starts a terminal's sequences that hide or move text), DEL
+ * and the C1 controls. A carriage return passes only before a line feed. Matched as single
+ * characters, so the scan stays linear.
  */
-const HIDDEN = /[\u0000\p{Default_Ignorable_Code_Point}]/gu;
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\p{Default_Ignorable_Code_Point}]/gu;
 
 const ZERO_WIDTH_JOINER = 0x200d;
 const BYTE_ORDER_MARK = 0xfeff;
+const CARRIAGE_RETURN = 0x0d;
+const LINE_FEED = 0x0a;
 /** The two variation selectors that choose how an emoji is drawn: as text, or as a picture. */
 const EMOJI_STYLE: ReadonlySet<number> = new Set([0xfe0e, 0xfe0f]);
 const PICTOGRAPH = /^\p{Extended_Pictographic}$/u;
-const EMOJI = /^\p{Emoji}$/u;
 const SKIN_TONE = /^\p{Emoji_Modifier}$/u;
+/** What a keycap emoji is made of: a digit, `#` or `*`, a style selector, then U+20E3. */
+const KEYCAP_BASE = /^[0-9#*]$/;
+const KEYCAP = 0x20e3;
+/** The most joiners one emoji is spelled with: a family of four has three. */
+const MAX_JOINS = 3;
 const matches = (re: RegExp, code: number | undefined): boolean =>
   code !== undefined && re.test(String.fromCodePoint(code));
 
@@ -51,27 +59,35 @@ function before(
   return { code: text.codePointAt(start), at: start };
 }
 
+/** Whether a style selector at `at` styles an emoji: right after a pictograph, or a keycap's. */
+function stylesEmoji(text: string, at: number): boolean {
+  const prev = before(text, at).code;
+  if (matches(PICTOGRAPH, prev)) return true;
+  return matches(KEYCAP_BASE, prev) && text.codePointAt(at + 1) === KEYCAP;
+}
+
 /**
- * Whether the hidden character at `at` is part of how an emoji is spelled, and so hides nothing:
- * one style selector right after an emoji, or a joiner between two pictographs (a family, a
- * flag), the first of which may carry a style selector or a skin tone.
+ * Where the pictograph a joiner at `at` joins from starts, past one style selector or skin tone
+ * on it; -1 when the joiner is not between two pictographs.
  */
-function spellsEmoji(text: string, at: number, code: number): boolean {
+function joinedFrom(text: string, at: number): number {
   const prev = before(text, at);
-  if (EMOJI_STYLE.has(code)) return matches(EMOJI, prev.code);
-  if (code !== ZERO_WIDTH_JOINER) return false;
   const base =
     prev.code !== undefined && (EMOJI_STYLE.has(prev.code) || matches(SKIN_TONE, prev.code))
-      ? before(text, prev.at).code
-      : prev.code;
-  return matches(PICTOGRAPH, base) && matches(PICTOGRAPH, text.codePointAt(at + 1));
+      ? before(text, prev.at)
+      : prev;
+  return matches(PICTOGRAPH, base.code) && matches(PICTOGRAPH, text.codePointAt(at + 1))
+    ? base.at
+    : -1;
 }
 
 const codeName = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
 
 /**
  * The hidden characters of `text`, counted by code point, in the order they come, and the offset
- * of the first. A byte order mark at the very start is how some editors save a file.
+ * of the first. A byte order mark at the very start is how some editors save a file, a carriage
+ * return before a line feed ends a line, and a style selector or a joiner that spells an emoji
+ * hides nothing; anything else this cannot place as one of those counts.
  */
 function hiddenCharacters(text: string): {
   counts: Map<number, number>;
@@ -81,15 +97,49 @@ function hiddenCharacters(text: string): {
   const counts = new Map<number, number>();
   const order: string[] = [];
   let first = -1;
+  // The joiners of the emoji being spelled: where its next pictograph starts, and how many.
+  let next = -1;
+  let joins = 0;
   for (const match of text.matchAll(HIDDEN)) {
     const at = match.index;
     const code = match[0].codePointAt(0) ?? 0;
-    if ((at === 0 && code === BYTE_ORDER_MARK) || spellsEmoji(text, at, code)) continue;
+    if (at === 0 && code === BYTE_ORDER_MARK) continue;
+    if (code === CARRIAGE_RETURN && text.charCodeAt(at + 1) === LINE_FEED) continue;
+    if (EMOJI_STYLE.has(code) && stylesEmoji(text, at)) continue;
+    if (code === ZERO_WIDTH_JOINER) {
+      const from = joinedFrom(text, at);
+      if (from !== -1) {
+        joins = from === next ? joins + 1 : 1;
+        next = at + 1;
+        if (joins <= MAX_JOINS) continue;
+      }
+    }
     counts.set(code, (counts.get(code) ?? 0) + 1);
     order.push(match[0]);
     if (first === -1) first = at;
   }
   return { counts, order: order.join(''), first };
+}
+
+/**
+ * A finding for what `text` hides, or none: its value counts the hidden characters and ends with
+ * a digest of them in order, so a hidden message swapped for another of the same characters is a
+ * change.
+ */
+export function hiddenTextHit(path: string, text: string): AgentHit | undefined {
+  const { counts, order, first } = hiddenCharacters(text);
+  if (counts.size === 0) return undefined;
+  const value = [...counts.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([code, count]) => `${codeName(code)} x${count}`)
+    .join(', ');
+  return hit(
+    'instruction-hidden-text',
+    path,
+    lineAt(text, first),
+    'hidden',
+    `${value} (${digestOf(order)})`,
+  );
 }
 
 /** Base names a host reads as instructions wherever they are. */
@@ -134,15 +184,9 @@ export function isReadByName(path: string): boolean {
 export function instructionFile(path: string, text: string): AgentHit[] {
   if (text.includes('\u0000') && !isReadByName(path))
     return [hit('binary-file', path, 1, 'binary', digestOf(text))];
-  const { counts, order, first } = hiddenCharacters(text);
   const notice = hit('instruction-file', path, 1, 'content', digestOf(text));
-  if (counts.size === 0) return [notice];
-  const value = [...counts.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([code, count]) => `${codeName(code)} x${count}`)
-    .join(', ');
-  const hidden = `${value} (${digestOf(order)})`;
-  return [hit('instruction-hidden-text', path, lineAt(text, first), 'hidden', hidden), notice];
+  const hidden = hiddenTextHit(path, text);
+  return hidden === undefined ? [notice] : [hidden, notice];
 }
 
 /** The hooks a definition's front matter declares. */
