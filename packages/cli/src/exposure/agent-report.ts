@@ -9,7 +9,16 @@ import {
 } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
-import { BUILD_FILE, BUILD_FILE_CHANGED, DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
+import {
+  BUILD_CONTEXT,
+  BUILD_FILE,
+  BUILD_INPUT_CHANGED,
+  BUILD_OUTSIDE,
+  BUILD_UNRESOLVED,
+  COMPOSE_FILE,
+  DEVCONTAINER_ACCESS_KEYS,
+  DEVCONTAINER_ENV_KEYS,
+} from './agent-editor.js';
 import { PACKAGE_CONFIG, PACKAGE_SETTING } from './agent-lines.js';
 
 /**
@@ -175,9 +184,20 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         return `features adds code the dev container runs as root when it is built: ${value}`;
       return `${name} runs in the dev container${shapeNote(h)}: ${value}`;
     case 'devcontainer-setting':
+      if (h.name === BUILD_CONTEXT) return `the dev container builds from what is in ${value}`;
       if (h.name === BUILD_FILE) return `the dev container builds from ${value}`;
-      if (h.name === BUILD_FILE_CHANGED)
-        return `the dev container in ${value} builds from this file, and the change edits it`;
+      if (h.name === COMPOSE_FILE)
+        return `the dev container is started by the compose file ${value}`;
+      if (h.name === BUILD_OUTSIDE)
+        return `the dev container builds from ${value}, out of the repository, which no change shows`;
+      if (h.name === BUILD_UNRESOLVED)
+        return `not read: what the dev container is built from could not be worked out (${value})`;
+      if (h.name === BUILD_INPUT_CHANGED)
+        return /^\d+ more files under /.test(h.value)
+          ? `the dev container builds from ${value} that the change edits too`
+          : `the dev container in ${value} builds from this file, and the change edits it`;
+      if (DEVCONTAINER_ENV_KEYS.has(h.name))
+        return `${name} sets variables in the dev container, which can load code there: ${value}`;
       if ((DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(h.name))
         return `${name} gives the dev container this machine's files, devices or powers, which its commands then reach: ${value}`;
       return `${name} decides what the dev container is built from or how it runs: ${value}`;

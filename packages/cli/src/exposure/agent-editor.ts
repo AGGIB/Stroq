@@ -4,6 +4,7 @@ import { isPlainObject } from '../commands/config-file.js';
 import {
   commandText,
   firstEntries,
+  isHarmlessEnv,
   tooMany,
   mcpServerHits,
   own,
@@ -313,56 +314,120 @@ export const DEVCONTAINER_ACCESS_KEYS = [
 /** What a dev container builds in from elsewhere: listed, like a build step. */
 export const DEVCONTAINER_FEATURES = 'features';
 
-/** The one top-level key that only names the container. */
+/** The one top-level key that only names the container: nothing else of a dev container is. */
 const COSMETIC_KEY = 'name';
-/** What a hit for a file the container builds from is named, and one for a change to that file. */
-export const BUILD_FILE = 'build file';
-export const BUILD_FILE_CHANGED = 'build file changed';
 
 /**
- * `customizations` without what only dresses the editor: the VS Code extensions and the JetBrains
- * settings. Anything else in it (VS Code's `settings`, another tool's block) is a setting of what
- * runs in the container. Undefined when nothing is left.
+ * Keys whose value describes the container and holds no command, variable or code: an image to
+ * start from, ports, users, a folder inside it, switches of the tool. Listed where no change
+ * brought them, and not read as a command. Any other key is an error wherever it is, unless it is
+ * a table of variables whose every name is on the benign list.
  */
-function customizationsThatMatter(value: unknown): unknown {
-  if (!isPlainObject(value)) return value;
-  const rest: Obj = {};
-  for (const [tool, block] of Object.entries(value)) {
-    if (tool === 'jetbrains') continue;
-    if (tool === 'vscode' && isPlainObject(block)) {
-      const { extensions: _extensions, ...other } = block;
-      if (Object.keys(other).length > 0) rest[tool] = other;
-      continue;
-    }
-    rest[tool] = block;
-  }
-  return Object.keys(rest).length === 0 ? undefined : rest;
-}
+const DATA_KEYS: ReadonlySet<string> = new Set([
+  '$schema',
+  'image',
+  'forwardPorts',
+  'portsAttributes',
+  'otherPortsAttributes',
+  'appPort',
+  'remoteUser',
+  'containerUser',
+  'updateRemoteUserUID',
+  'workspaceFolder',
+  'shutdownAction',
+  'overrideCommand',
+  'hostRequirements',
+  'waitFor',
+  'service',
+  'runServices',
+]);
+/** The keys that set variables in the container: read as variables, not as commands. */
+export const DEVCONTAINER_ENV_KEYS: ReadonlySet<string> = new Set(['remoteEnv', 'containerEnv']);
 
-/** The repository path of a file a dev container at `path` names, or undefined out of it. */
-function besideFile(path: string, name: string): string | undefined {
+/** What the hits for what a dev container is built from are named, and what is found of them. */
+export const BUILD_CONTEXT = 'build context';
+export const BUILD_FILE = 'build file';
+export const COMPOSE_FILE = 'compose file';
+export const BUILD_OUTSIDE = 'build input outside';
+export const BUILD_INPUT_CHANGED = 'build input changed';
+export const BUILD_UNRESOLVED = 'build input not resolved';
+const BUILD_INPUTS: ReadonlySet<string> = new Set([BUILD_CONTEXT, BUILD_FILE, COMPOSE_FILE]);
+
+/** Whether a dev container hit names something it is built from, to be followed in a change. */
+export const isBuildInput = (name: string): boolean => BUILD_INPUTS.has(name);
+
+/**
+ * Whether a dev container setting already there is read as a command (or as variables) for the
+ * files a change edits: every key but the ones that hold no command, and the build inputs, which
+ * are followed on their own.
+ */
+export const settingRuns = (name: string): boolean =>
+  !DATA_KEYS.has(name) && !BUILD_INPUTS.has(name) && name !== BUILD_OUTSIDE;
+
+/** The repository path of what a file at `path` names, `.` for the top; undefined out of it. */
+export function besideFile(path: string, name: string): string | undefined {
+  if (posix.isAbsolute(name) || /^[A-Za-z]:[\\/]/.test(name) || name.includes('://'))
+    return undefined;
   const folder = posix.dirname(path);
   const joined = posix.normalize(posix.join(folder === '.' ? '' : folder, name));
-  return joined === '..' || joined.startsWith('../') || posix.isAbsolute(name) ? undefined : joined;
+  const clean = joined.endsWith('/') ? joined.slice(0, -1) : joined;
+  return clean === '..' || clean.startsWith('../') ? undefined : clean === '' ? '.' : clean;
 }
 
-/** The Dockerfile and the compose files a dev container builds from, as repository paths. */
-function buildFiles(f: JsonFile): string[] {
+/** A string, or each string of a list: what a key names files by. */
+const names = (value: unknown): string[] =>
+  typeof value === 'string' ? [value] : Array.isArray(value) ? strings(value) : [];
+
+/**
+ * What a dev container is built from: the build context (its own folder when none is named), the
+ * Dockerfile, each compose file and the folder it is in. Each as a hit, at the line of its key; one
+ * that leads out of the repository is an error, since nothing of it is in a change to review.
+ */
+function buildInputs(f: JsonFile): AgentHit[] {
+  const wanted: [name: string, key: string, path: string][] = [];
   const build = ownObject(f.value, 'build');
-  const named = [
-    ...strings([own(f.value, 'dockerFile'), own(f.value, 'dockerfile')]),
-    ...(build === undefined ? [] : strings([own(build, 'dockerfile'), own(build, 'dockerFile')])),
-    ...(typeof own(f.value, 'dockerComposeFile') === 'string'
-      ? [own(f.value, 'dockerComposeFile') as string]
-      : strings(own(f.value, 'dockerComposeFile'))),
-  ];
-  return [...new Set(named.flatMap((name) => besideFile(f.path, name) ?? []))];
+  const legacy = own(f.value, 'dockerFile') ?? own(f.value, 'dockerfile');
+  if (build !== undefined || legacy !== undefined) {
+    const context = build === undefined ? own(f.value, 'context') : own(build, 'context');
+    const key = build === undefined ? 'dockerFile' : 'build';
+    wanted.push([BUILD_CONTEXT, key, typeof context === 'string' ? context : '.']);
+    const dockerfile =
+      build === undefined ? legacy : (own(build, 'dockerfile') ?? own(build, 'dockerFile'));
+    for (const name of names(dockerfile)) wanted.push([BUILD_FILE, key, name]);
+  }
+  for (const name of names(own(f.value, 'dockerComposeFile'))) {
+    wanted.push([COMPOSE_FILE, 'dockerComposeFile', name]);
+    wanted.push([BUILD_CONTEXT, 'dockerComposeFile', posix.dirname(name)]);
+  }
+  const seen = new Set<string>();
+  const hits: AgentHit[] = [];
+  for (const [name, key, written] of wanted) {
+    const path = besideFile(f.path, written);
+    const found =
+      path === undefined
+        ? {
+            ...hit('devcontainer-setting', f.path, 1, BUILD_OUTSIDE, written),
+            severity: 'error' as const,
+          }
+        : hit('devcontainer-setting', f.path, 1, name, path);
+    const id = `${found.name}\u0000${found.value}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    hits.push({ ...found, line: lineOf(f.text, [quoted(key)]) });
+  }
+  return hits;
 }
+
+/** Whether what a key holds is a table of variables whose every name is on the benign list. */
+const benignVariables = (value: unknown): boolean =>
+  isPlainObject(value) && Object.keys(value).every((name) => isHarmlessEnv(name));
 
 /**
  * Every other key of a dev container, but its name: each decides what is built or what runs, so
- * one a change adds or edits fails. The keys that give it this machine are errors wherever they
- * are. `features` stays a command, since what it installs runs as one.
+ * one a change adds or edits fails. One that holds no command (see `DATA_KEYS`), or only benign
+ * variables, is listed where no change brought it; any other is an error wherever it is, since
+ * what it runs is not proven inert, and so is each key that gives the container this machine.
+ * `features` stays a command, since what it installs runs as one.
  */
 function devcontainerSettings(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
@@ -372,10 +437,8 @@ function devcontainerSettings(f: JsonFile): AgentHit[] {
     DEVCONTAINER_FEATURES,
     COSMETIC_KEY,
   ]);
-  for (const [key, raw] of Object.entries(f.value)) {
+  for (const [key, value] of Object.entries(f.value)) {
     if (commands.has(key)) continue;
-    const value = key === 'customizations' ? customizationsThatMatter(raw) : raw;
-    if (value === undefined) continue;
     const found = hit(
       'devcontainer-setting',
       f.path,
@@ -383,12 +446,10 @@ function devcontainerSettings(f: JsonFile): AgentHit[] {
       key,
       boundedJson(value, undefined, true),
     );
-    const access = (DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(key);
-    hits.push(access ? { ...found, severity: 'error' } : found);
+    const inert = DATA_KEYS.has(key) || (DEVCONTAINER_ENV_KEYS.has(key) && benignVariables(value));
+    hits.push(inert ? found : { ...found, severity: 'error' });
   }
-  for (const file of buildFiles(f))
-    hits.push(hit('devcontainer-setting', f.path, 1, BUILD_FILE, file));
-  return hits;
+  return [...hits, ...buildInputs(f)];
 }
 
 export function devcontainer(f: JsonFile): AgentHit[] {

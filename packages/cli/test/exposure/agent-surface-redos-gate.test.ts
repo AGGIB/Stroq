@@ -21,6 +21,7 @@ import {
   scanFile,
   skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
+import { composeDockerfiles } from '../../src/exposure/agent-build-inputs.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
 import {
   baseGuardsOfText,
@@ -417,6 +418,10 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
         baseGuardsOfText(`{"permissions":{"deny":[${JSON.stringify(text)}]}}`),
       ),
     ],
+  ],
+  [
+    'a compose file a dev container names',
+    (text) => composeDockerfiles('.devcontainer/c.yml', text),
   ],
   [
     'the lines of a .gitattributes and a package manager config',

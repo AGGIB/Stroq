@@ -5,7 +5,8 @@ import {
   headGuardsOfText,
   removedGuards,
 } from './agent-guards.js';
-import { BUILD_FILE, BUILD_FILE_CHANGED } from './agent-editor.js';
+import { buildInputChanges } from './agent-build-inputs.js';
+import { isBuildInput } from './agent-editor.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
@@ -317,7 +318,7 @@ function compare(top: string, base: string, head: string) {
   const hits = [
     ...found,
     ...runFileChanges(found, runs),
-    ...buildFileChanges(found, changed),
+    ...buildInputs(top, tree, links.view, found, changed),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
@@ -333,28 +334,42 @@ function compare(top: string, base: string, head: string) {
 }
 
 /**
- * A change to a file a dev container builds from (its Dockerfile, its compose files), the dev
- * container new or not: what the container is built from changes though none of its keys does.
- * Matched in any letter case, as a disk that folds case opens the file.
+ * What the dev containers of `found` are built from, followed through the change (see
+ * `agent-build-inputs.ts`), with every link of the tree read, up to a bound: a link on the way that
+ * was not read leaves its input unresolved, which fails.
  */
-function buildFileChanges(
+function buildInputs(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: TreeView,
   found: readonly TaggedHit[],
   changed: ReadonlyMap<string, Changed>,
 ): TaggedHit[] {
-  const byName = new Map([...changed].map(([path, c]) => [path.toLowerCase(), [path, c] as const]));
-  const out = new Map<string, TaggedHit>();
-  for (const h of found) {
-    if (h.kind !== 'devcontainer-setting' || h.name !== BUILD_FILE) continue;
-    const touched = byName.get(h.value.toLowerCase());
-    if (touched === undefined) continue;
-    const [path, c] = touched;
-    out.set(`${path}\u0000${h.file}`, {
-      ...hit('devcontainer-setting', path, 1, BUILD_FILE_CHANGED, h.file),
-      severity: 'error',
-      status: c.status === 'A' ? 'new' : 'changed',
-    });
+  if (!found.some((h) => h.kind === 'devcontainer-setting' && isBuildInput(h.name))) return [];
+  const missing = view.sorted
+    .filter((p) => tree.get(p)?.mode === SYMLINK && !view.targets.has(p))
+    .slice(0, MAX_RUN_LINKS);
+  const targets = new Map(view.targets);
+  const small = missing.map((p) => entryAt(tree, p)).filter((e) => e.size <= MAX_LINK_BYTES);
+  const blobs = readBlobs(top, small);
+  for (const p of missing) {
+    const text = blobs.get(entryAt(tree, p).oid);
+    if (text !== undefined && !text.includes(REPLACEMENT)) targets.set(p, text);
   }
-  return [...out.values()];
+  const readText = (paths: readonly string[]): ReadonlyMap<string, string> => {
+    const entries = paths.flatMap((p) => {
+      const e = tree.get(p);
+      return e !== undefined && isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
+    });
+    const texts = readBlobs(
+      top,
+      entries.map(([, e]) => e),
+    );
+    return new Map(
+      entries.flatMap(([p, e]) => (texts.has(e.oid) ? [[p, texts.get(e.oid) as string]] : [])),
+    );
+  };
+  return buildInputChanges(found, changed, { ...view, targets }, readText);
 }
 
 /**

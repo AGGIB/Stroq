@@ -1,4 +1,5 @@
 import type { ChangeStatus, TaggedHit } from './agent-change.js';
+import { DEVCONTAINER_ENV_KEYS, settingRuns } from './agent-editor.js';
 import { hit, type AgentKind } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
@@ -41,6 +42,7 @@ const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
   'agent-definition-hook': 'hook',
   'devcontainer-host-command': 'command',
   'devcontainer-command': 'command',
+  'devcontainer-setting': 'dev container setting',
   'package-script': 'script',
   'package-script-agent-path': 'script',
   'agent-plugin': 'entry',
@@ -53,15 +55,25 @@ const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
 type Reading = 'command' | 'variable' | 'code';
 
 const readingOf = (h: TaggedHit): Reading =>
-  h.kind === 'agent-env' ? 'variable' : h.kind === 'agent-plugin' ? 'code' : 'command';
+  h.kind === 'agent-env' || (h.kind === 'devcontainer-setting' && DEVCONTAINER_ENV_KEYS.has(h.name))
+    ? 'variable'
+    : h.kind === 'agent-plugin'
+      ? 'code'
+      : 'command';
 
 /** What is read as an entry's command: plugin code by its own path, any other by its value. */
 const commandOf = (h: TaggedHit): string =>
   h.kind === 'agent-plugin' && h.name === 'plugin code' ? h.file : h.value;
 
-/** Whether an entry already there holds a command line that the reading below follows. */
+/**
+ * Whether an entry already there holds a command line that the reading below follows. A dev
+ * container setting that holds no command (an image, ports, a user) is not one, and what it is
+ * built from is followed on its own (`agent-build-inputs.ts`).
+ */
 export const isRunEntry = (h: TaggedHit): boolean =>
-  RUNS[h.kind] !== undefined && h.status === 'present';
+  RUNS[h.kind] !== undefined &&
+  h.status === 'present' &&
+  (h.kind !== 'devcontainer-setting' || settingRuns(h.name));
 
 export interface RunView {
   /**
