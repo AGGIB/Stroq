@@ -18,10 +18,9 @@
 // one of whose names is dropped (past the names one file goes by, or the names a session follows)
 // may be sent by that name, unseen. Names are looked for with `includes`, and the characters
 // compared are counted before each look.
-import { isAbsolute, join } from 'node:path';
 import type { CallFacts } from './call-facts.js';
 import { nameOf } from './call-facts.js';
-import { normalPath } from './file-paths.js';
+import { isAbsolutePath, joinPath, normalPath } from './path-form.js';
 import { plainText } from './key-text.js';
 import type { KeyFinder } from './keys.js';
 import { farther, type Place, type Then } from './place.js';
@@ -130,9 +129,9 @@ export function createFollower(ctx: FollowContext): Follower {
 
   /** The names a file goes by: its own, and the folder it is in, in lower case. */
   function namesOf(path: string): string[] {
-    const whole = isAbsolute(path) || path.startsWith('~') || ctx.cwd === null;
-    const parts = normalPath(whole ? path : join(ctx.cwd as string, path))
-      .split(/[\\/]/)
+    const whole = isAbsolutePath(path) || path.startsWith('~') || ctx.cwd === null;
+    const parts = (whole ? normalPath(path) : joinPath(ctx.cwd as string, path))
+      .split('/')
       .filter((part) => part !== '');
     const names = [nameOf(parts.at(-1) ?? ''), parts.length > 1 ? nameOf(parts.at(-2) ?? '') : ''];
     return [...new Set(names.filter((n) => n !== '').map((n) => n.slice(0, 255)))];

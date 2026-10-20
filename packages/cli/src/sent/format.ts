@@ -9,6 +9,7 @@
 import { displayPath, neutralizeControls } from '@stroq/core';
 import { SPILL_BUDGET_BYTES } from '../replay/spilled.js';
 import type { Finding } from './findings.js';
+import { slashed } from './path-form.js';
 import { TIERS, type Tier } from './place.js';
 import type { SentReport } from './report.js';
 import { inTier, keysLeftOut, stoppedTowardOthers } from './report.js';
@@ -223,7 +224,9 @@ function shown(f: Finding, home: string): Finding {
     PATH_ROUTES.has(f.place.route) ||
     (f.place.route === 'result' && (f.place.tool === 'Read' || f.place.tool === 'Grep'));
   if (detail === undefined || !isPath) return f;
-  return { ...f, place: { ...f.place, detail: displayPath(detail, home) } };
+  // A written file's path is slashed (`path-form.ts`): so is the home folder it is shown from.
+  const from = PATH_ROUTES.has(f.place.route) ? slashed(home) : home;
+  return { ...f, place: { ...f.place, detail: displayPath(detail, from) } };
 }
 
 function findingLines(raw: Finding, n: number, home: string): string[] {

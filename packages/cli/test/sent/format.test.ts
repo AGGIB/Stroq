@@ -198,6 +198,14 @@ describe('formatSent', () => {
     expect(out).toContain('do       check ~/work/api/src/db.ts was not in what you pushed');
   });
 
+  // A written file's path is slashed (`path-form.ts`); the home folder Windows gives is not.
+  it('writes a file path under a Windows home folder with ~ too', () => {
+    const write = finding('seen', { route: 'write', detail: 'C:/Users/u/work/api/.env' });
+    const out = formatSent(report([write]), 'C:\\Users\\u');
+    expect(out).toContain('~/work/api/.env');
+    expect(out).not.toContain('C:/Users/u/work');
+  });
+
   it('names Cursor when it could not be read', () => {
     expect(formatSent(report([], { notChecked: ['cursor'] }), HOME)).toContain(
       'Not checked: Cursor sessions (they need node:sqlite, in Node 22.23 or newer);',

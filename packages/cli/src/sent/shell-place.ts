@@ -13,18 +13,17 @@
 // kept with every text written to it in the command, and what it holds is read as a command too:
 // a script that sends the key, run in the same command or a later one, sent it there. The
 // session's later calls are matched to the file by its name (`analyze.ts`).
-import { basename, isAbsolute, join } from 'node:path';
 import { commandUrls, REDIRECT, type Word } from '@stroq/core';
 import {
   changedFolders,
   commandPathWords,
   namesFile,
   namesFileHow,
-  normalPath,
   type Folders,
 } from './file-paths.js';
 import { plainText, valueHolds } from './key-text.js';
 import { shellJoined } from './needles.js';
+import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
 import { farther, type KeyOf, type Place, type Route } from './place.js';
 import {
   commandReading,
@@ -142,7 +141,11 @@ function placeIn(
     place = pick(place, found);
   };
   const write = (file: string, text: string): void => {
-    const path = cwd === null || isAbsolute(file) || file.startsWith('~') ? file : join(cwd, file);
+    // One spelling on every system: a later call names the file in either (`path-form.ts`).
+    const path =
+      cwd === null || isAbsolutePath(file) || file.startsWith('~')
+        ? normalPath(file)
+        : joinPath(cwd, file);
     const held = written.get(path);
     if (held === undefined && written.size >= MAX_WRITTEN) {
       writtenCut = true;
@@ -308,12 +311,12 @@ function judgedWhole(place: Place, reading: CommandReading, key: KeyOf, word: st
  * Null when none ran it.
  */
 function ranInCommand(file: WrittenFile, reading: CommandReading): Place | null {
-  const name = basename(file.path).toLowerCase();
+  const name = baseName(file.path).toLowerCase();
   if (name === '') return null;
   for (const stage of runStages(reading)) {
     const facts = reading.facts(stage);
     if (facts.inert || !plainText(stage.text).includes(name)) continue;
-    if (facts.writes.some((out) => basename(out).toLowerCase() === name)) continue;
+    if (facts.writes.some((out) => baseName(out).toLowerCase() === name)) continue;
     const word = isProgramName(facts.name) ? facts.name : '';
     return { tier: 'maybe', route: 'command-ran', tool: 'Bash', ...detailOf(word) };
   }

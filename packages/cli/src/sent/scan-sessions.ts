@@ -4,7 +4,7 @@
 // `needles.ts`); nothing is parsed. Only a session where that finds a key is read again,
 // streamed through its agent's parser into the analyzer, which keeps what matched and lets
 // the rest go. On a machine where no session holds a key, no JSON is parsed at all.
-import { basename, dirname, isAbsolute } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { claudeSessionFiles } from './claude-files.js';
 import { accountedParser, analyzeSession, type Sighting } from './analyze.js';
 import { createCodexParser } from './codex.js';
@@ -13,6 +13,7 @@ import type { SessionSightings } from './findings.js';
 import type { KeyFinder } from './keys.js';
 import type { McpServers } from './mcp-config.js';
 import { byteMatcher } from './needles.js';
+import { baseName, isAbsolutePath } from './path-form.js';
 import type { SessionRef } from './sessions.js';
 import { spillReader, type SpillReader } from '../replay/spilled.js';
 import { feedLines } from '../replay/transcript.js';
@@ -65,7 +66,7 @@ function parseWords(finder: KeyFinder): string[] {
   for (const key of finder.keys)
     for (const source of [key.source, ...(key.alsoIn ?? [])]) {
       if (source === 'env') environment = true;
-      else if (isAbsolute(source) || source.startsWith('~/')) words.add(basename(source));
+      else if (isAbsolutePath(source) || source.startsWith('~/')) words.add(baseName(source));
     }
   return [...words, ...(environment ? ENVIRONMENT_WORDS : [])];
 }

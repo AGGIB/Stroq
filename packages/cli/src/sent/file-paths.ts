@@ -22,7 +22,7 @@
 // The words are also cut at blanks, quotes and the shell's operators by one class, for the paths
 // a quoted script names (`python3 -c "open('.env')"`): those are read as the paths they spell,
 // never as patterns. Nothing backtracks.
-import { basename, isAbsolute, join, normalize, sep } from 'node:path';
+import { baseName, driveOf, isAbsolutePath, joinPath, normalPath, slashed } from './path-form.js';
 import { lex, REDIRECT, resolve, splitCommand, type Resolved, type Word } from '@stroq/core';
 import { readBudgetLeft } from './shell-read.js';
 
@@ -45,22 +45,6 @@ export interface Folders {
   readonly more?: readonly string[];
 }
 
-/**
- * A path with its `.` and `..` parts read, as `normalize` reads it, in time linear in its length:
- * `normalize` is quadratic in the `..` that lead a relative path, and the path is the agent's.
- */
-export function normalPath(path: string): string {
-  if (isAbsolute(path)) return normalize(path);
-  const parts: string[] = [];
-  for (const part of path.split(sep)) {
-    if (part === '' || part === '.') continue;
-    if (part === '..' && parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
-    else parts.push(part);
-  }
-  const joined = parts.join(sep);
-  return joined === '' ? '.' : joined;
-}
-
 /** Characters that make a word a pattern the shell or curl fills in. */
 const WILD = /[*?[{]/;
 /** Characters the shell fills in on its own: a brace with no comma is plain text to it. */
@@ -69,8 +53,9 @@ const SHELL_WILD = /[*?[]/;
 /** A pattern that is more than braces and brackets: `{`, `}` and `[]` alone name no file. */
 const pathLike = (word: string): boolean => word.replace(/[{}[\],]/g, '') !== '';
 
+/** A slashed path without the slash that ends it, unless it is a root (`/`, `C:/`). */
 const trimSep = (path: string): string =>
-  path.length > 1 && path.endsWith(sep) ? path.slice(0, -1) : path;
+  path.length > 1 && path.endsWith('/') && !/^[A-Za-z]:\/$/.test(path) ? path.slice(0, -1) : path;
 
 /** Options of `find` whose value it matches file names against. */
 const FIND_NAMES: ReadonlySet<string> = new Set([
@@ -227,7 +212,7 @@ function candidatesOf(word: string): string[] {
     word.slice(word.indexOf('=') + 1),
   ]);
   return [...found].filter(
-    (c) => c !== '' && !c.includes('://') && (isAbsolute(c) || !c.includes(':')),
+    (c) => c !== '' && !c.includes('://') && (isAbsolutePath(c) || !c.includes(':')),
   );
 }
 
@@ -247,7 +232,7 @@ export function namedEnds(command: string): { readonly ends: Set<string>; readon
   for (const word of commandPathWords(command))
     for (const c of candidatesOf(word.text)) {
       if ((word.pattern && WILD.test(c) && pathLike(c)) || /^\.{1,2}\/?$/.test(c)) wild = true;
-      ends.add(basename(trimSep(c)));
+      ends.add(baseName(trimSep(slashed(c))));
     }
   return { ends, wild };
 }
@@ -279,8 +264,8 @@ function partMatches(pattern: string, part: string): 'yes' | 'dot' | 'no' {
 
 /** How an absolute pattern names a file, one folder at a time. */
 function patternNames(pattern: string, file: string): Naming | null {
-  const want = trimSep(pattern).split(sep);
-  const have = file.split(sep);
+  const want = trimSep(pattern).split('/');
+  const have = file.split('/');
   if (want.length > have.length) return null;
   let sure = true;
   for (let i = 0; i < want.length; i += 1) {
@@ -293,12 +278,27 @@ function patternNames(pattern: string, file: string): Naming | null {
   return { kind: want.length === have.length ? 'file' : 'folder', sure };
 }
 
-/** How one absolute path names a file, read as a pattern or as the path it spells. */
+/**
+ * A path from a root as a file on a drive is named: Git Bash names `C:/w` as `/c/w`. Only for a
+ * file on a drive: elsewhere `/c/w` is a folder `c`.
+ */
+function onDriveOf(path: string, file: string): string {
+  const drive = driveOf(file);
+  const msys = /^\/([A-Za-z])(?=\/|$)/.exec(path);
+  if (drive === '' || msys === null) return path;
+  return `${(msys[1] as string).toUpperCase()}:${path.slice(2) || '/'}`;
+}
+
+/**
+ * How one absolute path names a file, read as a pattern or as the path it spells. The file is
+ * slashed (`normalPath`).
+ */
 function absoluteNames(path: string, file: string, pattern: boolean): Naming | null {
-  if (pattern && WILD.test(path)) return patternNames(normalize(path), file);
-  const clean = trimSep(normalize(path));
+  const spelled = onDriveOf(normalPath(path), file);
+  if (pattern && WILD.test(path)) return patternNames(spelled, file);
+  const clean = trimSep(spelled);
   if (clean === file) return { kind: 'file', sure: true };
-  return file.startsWith(clean.endsWith(sep) ? clean : `${clean}${sep}`)
+  return file.startsWith(clean.endsWith('/') ? clean : `${clean}/`)
     ? { kind: 'folder', sure: true }
     : null;
 }
@@ -306,9 +306,9 @@ function absoluteNames(path: string, file: string, pattern: boolean): Naming | n
 /** A relative path with what leads it (`./`, `../`, `~/`) dropped. */
 const endOf = (path: string): string =>
   normalPath(path)
-    .split(sep)
+    .split('/')
     .filter((part) => part !== '' && part !== '.' && part !== '..' && part !== '~')
-    .join(sep);
+    .join('/');
 
 /**
  * How a relative path names a file as the end of its path: `leak.txt` and `work/leak.txt` name
@@ -317,9 +317,8 @@ const endOf = (path: string): string =>
 function endNames(path: string, file: string): Naming | null {
   const rest = endOf(path);
   if (rest === '') return null;
-  if (file === `${sep}${rest}` || file.endsWith(`${sep}${rest}`))
-    return { kind: 'file', sure: true };
-  return file.includes(`${sep}${rest}${sep}`) ? { kind: 'folder', sure: true } : null;
+  if (file === `/${rest}` || file.endsWith(`/${rest}`)) return { kind: 'file', sure: true };
+  return file.includes(`/${rest}/`) ? { kind: 'folder', sure: true } : null;
 }
 
 /** The better of two namings: a file over a folder, a sure one over a maybe. */
@@ -330,7 +329,10 @@ const better = (a: Naming | null, b: Naming | null): Naming | null => {
   return rank(b) < rank(a) ? b : a;
 };
 
-/** How a word of a command names a file: the file itself, a folder it is in, or neither. */
+/**
+ * How a word of a command names a file: the file itself, a folder it is in, or neither. The file
+ * is spelled as `normalPath` spells it.
+ */
 export function namesFileHow(
   word: PathWord,
   file: string,
@@ -345,14 +347,14 @@ export function namesFileHow(
     if (pattern && !pathLike(c)) continue;
     const take = (n: Naming | null): Naming | null =>
       n === null ? null : { kind: n.kind, sure: n.sure && word.sure };
-    if (isAbsolute(c)) found = better(found, take(absoluteNames(c, file, pattern)));
+    if (isAbsolutePath(c)) found = better(found, take(absoluteNames(c, file, pattern)));
     else {
       if (c.startsWith('~')) {
-        if (c === file) found = better(found, take({ kind: 'file', sure: true }));
+        if (normalPath(c) === file) found = better(found, take({ kind: 'file', sure: true }));
       } else if (pattern || endOf(c) === '')
         // A pattern, or a word that is only `.` and `..`: read against each folder.
         for (const base of basesOf(where))
-          found = better(found, take(absoluteNames(join(base, c), file, pattern)));
+          found = better(found, take(absoluteNames(joinPath(base, c), file, pattern)));
       // Any other relative path is read as the end of a path below, whatever folder it is under.
       if (!pattern) found = better(found, take(endNames(c, file)));
     }
@@ -408,12 +410,12 @@ export function folderChanges(command: string, from: string | null): FolderChang
       unread = true;
       continue;
     }
-    if (!isAbsolute(target) && now === null) {
+    if (!isAbsolutePath(target) && now === null) {
       unread = true;
       continue;
     }
     if (folders.length >= MAX_CHANGED) return { folders, unread, cut: true };
-    now = trimSep(normalPath(isAbsolute(target) ? target : join(now as string, target)));
+    now = trimSep(normalPath(isAbsolutePath(target) ? target : joinPath(now as string, target)));
     folders.push(now);
   }
   return { folders, unread, cut: false };

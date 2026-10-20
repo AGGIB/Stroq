@@ -5,10 +5,10 @@
 // sent (`env | curl -d @-`). A program that only looks at a file here (`ls`, `stat`, `rm`) is not
 // counted. The file is named by its path, read against the folders the session ran in
 // (`file-paths.ts`).
-import { isAbsolute, join, sep } from 'node:path';
 import { shellCallFacts } from './call-facts.js';
-import { namedEnds, normalPath } from './file-paths.js';
+import { namedEnds } from './file-paths.js';
 import type { KeyFinder } from './keys.js';
+import { isAbsolutePath, joinPath, normalPath } from './path-form.js';
 import type { Cut, Place } from './place.js';
 import { environmentUse, fileUse, NO_KEY, type ShellContext } from './shell-place.js';
 import { readBudgetLeft } from './shell-read.js';
@@ -59,23 +59,28 @@ const LOOKS_ONLY: ReadonlySet<string> = new Set([
 const asSent = (place: Place): Place =>
   place.tier === 'maybe' && place.local === true ? { ...place, tier: 'third_party' } : place;
 
-/** The key files keys were read from, by path, and the names they and their folders go by. */
+/**
+ * The key files keys were read from, by path, and the names they and their folders go by. A path
+ * is spelled as `normalPath` spells it, so a command in either system's spelling names it; `~/`
+ * is the home folder this machine gave (`USERPROFILE` on Windows).
+ */
 export function keyFileIndex(finder: KeyFinder, home: string | undefined): KeyFileIndex {
   const keysOf = new Map<string, number[]>();
   const environment: number[] = [];
   finder.keys.forEach((key, i) => {
     for (const source of [key.source, ...(key.alsoIn ?? [])]) {
       if (source === 'env') environment.push(i);
-      const path =
-        source.startsWith('~/') && home !== undefined ? join(home, source.slice(2)) : source;
-      if (!isAbsolute(path) && !path.startsWith('~/')) continue;
+      const path = normalPath(
+        source.startsWith('~/') && home !== undefined ? joinPath(home, source.slice(2)) : source,
+      );
+      if (!isAbsolutePath(path) && !path.startsWith('~/')) continue;
       keysOf.set(path, [...(keysOf.get(path) ?? []), i]);
     }
   });
   const byName = new Map<string, string[]>();
   // Every folder of the path: a path on this machine is no deeper than a path can be.
   for (const path of keysOf.keys())
-    for (const name of new Set(normalPath(path).split(sep)))
+    for (const name of new Set(path.split('/')))
       if (name !== '') byName.set(name, [...(byName.get(name) ?? []), path]);
   return { keysOf, byName, environment, all: [...keysOf.keys()] };
 }
