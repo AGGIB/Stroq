@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
+import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import { commitFiles, scratchRepo } from '../helpers/scratch-repo.js';
 
 /**
@@ -82,6 +83,11 @@ describe('a server already there whose command a change replaces', () => {
       [path]: JSON.stringify({ [key]: { docs: npx('docs-mcp@1.0.0') } }),
     });
     commitFiles(dir, { [path]: JSON.stringify({ [key]: { docs: npx('totally-evil-pkg@9') } }) });
-    expect(failing(agentChanges(dir, base).hits)).toContain(`changed mcp-server ${path}`);
+    const hits = agentChanges(dir, base).hits;
+    expect(failing(hits)).toContain(`changed mcp-server ${path}`);
+    const docs = hits.find((h) => h.kind === 'mcp-server') as TaggedHit;
+    expect(sentenceOf(docs, plainQuote)).toBe(
+      'changed: MCP server docs now starts something else, under a name the host may have approved before: npx -y totally-evil-pkg@9',
+    );
   });
 });

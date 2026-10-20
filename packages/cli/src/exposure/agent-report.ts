@@ -1,9 +1,16 @@
 import { showable } from '../install/inspect/safe-text.js';
-import { isFailing, startsWithoutAsking, type FailOn, type TaggedHit } from './agent-change.js';
+import {
+  isFailing,
+  startsWithoutAsking,
+  type ChangeStatus,
+  type FailOn,
+  type TaggedHit,
+} from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 import { DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
 import { PACKAGE_SETTING } from './agent-lines.js';
+import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
 
 /**
  * One plain sentence per finding, for every output of `stroq inspect`. Every name and value in
@@ -44,7 +51,7 @@ function grantOf(h: AgentHit): string {
   return 'run any shell command';
 }
 
-function sentence(h: AgentHit, q: Quote): string {
+function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): string {
   const name = q(h.name);
   const value = q(h.value);
   const unparsed = h.name === 'unparsed';
@@ -95,8 +102,12 @@ function sentence(h: AgentHit, q: Quote): string {
       // An approval makes an ordinary server an error (see `escalateApproved`), and so does a
       // change that adds one to a host that does not ask (see `startsWithoutAsking`).
       if (h.severity !== 'error') return `MCP server ${name} starts: ${value}`;
-      return startsWithoutAsking(h)
-        ? `MCP server ${name} starts without asking once the folder is trusted, as this host starts every server of the list: ${value}`
+      if (startsWithoutAsking(h))
+        return `MCP server ${name} starts without asking once the folder is trusted, as this host starts every server of the list: ${value}`;
+      if (h.status === 'changed')
+        return `MCP server ${name} now starts something else, under a name the host may have approved before: ${value}`;
+      return runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value)
+        ? `MCP server ${name} downloads and runs code, or sends a secret out: ${value}`
         : `MCP server ${name} starts without asking, since the settings approve it: ${value}`;
     case 'editor-autorun-task':
       if (unparsed) return 'a task runs when the folder opens (the file could not be fully read)';
