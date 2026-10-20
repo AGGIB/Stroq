@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
-import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
+import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
 import { plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
@@ -347,19 +347,6 @@ function runsAsGitHook(file: string, plat: NodeJS.Platform): boolean {
   }
 }
 
-/**
- * The hooks that run only when someone commits or pushes, the ones the pre-commit and husky
- * installers write. Every other hook git runs during routine use (`post-index-change` on a
- * `git status`, `post-checkout`, `reference-transaction` on any ref update), and any other file
- * there may be one a hook sources.
- */
-const COMMIT_HOOKS: ReadonlySet<string> = new Set([
-  'pre-commit',
-  'pre-push',
-  'commit-msg',
-  'prepare-commit-msg',
-]);
-
 /** What a hook file that could not be read as text holds: not known, so not ordinary either. */
 const UNREAD_HOOK = '\u0000';
 
@@ -369,9 +356,10 @@ const UNREAD_HOOK = '\u0000';
  */
 function gitHookHit(dir: string, name: string): RepoExecHit {
   const file = `.git/hooks/${name}`;
-  if (!COMMIT_HOOKS.has(foldName(name))) return { kind: 'git-hook-routine', file, what: name };
   const text = readTextOr(join(dir, name), UNREAD_HOOK);
-  if (text === UNREAD_HOOK || runsFetchedOrHiddenCode(text) || sendsSecrets(text))
+  const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
+  if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
+  if (outcome === 'unsafe')
     return {
       kind: 'git-hook-routine',
       file,

