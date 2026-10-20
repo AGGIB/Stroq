@@ -187,6 +187,32 @@ describe('a git hook in plain stroq inspect', () => {
       expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
     },
   );
+
+  // Every mention of husky with a word after it names a folder; one this does not place fails.
+  it.each([
+    ['npx husky@9 .config/h', '.config/h'],
+    ['./node_modules/.bin/husky "x"', 'x'],
+  ])('reads the folder of %s', (script, folder) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg, [`${folder}/pre-commit`]: FETCH }).failing).toEqual([
+      `git-hook-routine ${folder}/pre-commit`,
+    ]);
+  });
+
+  it.each(['husky --weird x', '"husky" .h', 'hus\\ky .h'])(
+    'fails a husky mention it cannot place: %s',
+    (script) => {
+      const pkg = JSON.stringify({ scripts: { prepare: script } });
+      expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+    },
+  );
+
+  it('passes husky with no folder, or with a flag that takes none', () => {
+    for (const script of ['husky', 'husky || true', 'husky install', 'husky --help'])
+      expect(
+        surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
+      ).toEqual([]);
+  });
 });
 
 /**

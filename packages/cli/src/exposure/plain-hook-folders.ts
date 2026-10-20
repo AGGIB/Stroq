@@ -13,13 +13,23 @@ import type { RepoExecHit } from './repo-surface.js';
  * read, or comes past the files read. Any other is listed. A script that mentions
  * `core.hooksPath`, its quotes and backslashes taken off, and points it at no folder this can
  * place (a `$`, a quote around a blank, `~`, an absolute path, a key spelled with quotes) fails,
- * and so does one whose `git config` or `git -c` key the shell fills in (`$`, a backquote).
+ * and so does one whose `git config` or `git -c` key the shell fills in (`$`, a backquote), and
+ * one that mentions husky with a word after it (quotes and backslashes taken off) more often than
+ * this places a folder husky is told to use, an option that takes no folder aside.
  */
 
 /** What sets `core.hooksPath` in a script: `git config core.hooksPath <folder>`. */
 const SETS_HOOKS_PATH = /core\.hookspath["']?(?:\s*=\s*|\s+)([^\s;&|)]+)/gi;
-/** What tells husky which folder to use: `husky <folder>` or `husky install <folder>`. */
-const HUSKY_FOLDER = /(?:^|[\s;&|(])husky(?:\s+install)?\s+([^\s;&|)]+)/gi;
+/**
+ * What tells husky which folder to use: `husky <folder>` or `husky install <folder>`, its program
+ * with a path in front (`./node_modules/.bin/husky`) or a version after (`husky@9`).
+ */
+const HUSKY_FOLDER =
+  /(?:^|[\s;&|(])(?:[^\s;&|()'"\\]*\/)?husky(?:@[^\s;&|()'"\\]*)?(?:\s+install)?\s+([^\s;&|)]+)/gi;
+/** Every mention of husky with a word after it, in a script with its quotes and `\` taken off. */
+const MENTIONS_HUSKY = /(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?husky(?:@[^\s;&|()]*)?[ \t]+([^\s;&|()]+)/g;
+/** Words husky takes that name no folder. */
+const HUSKY_FLAGS: ReadonlySet<string> = new Set(['-h', '--help', '-v', '--version']);
 /** A mention of the key, however it is spelled, once quotes and backslashes are taken off. */
 const MENTIONS_HOOKS_PATH = /hookspath/g;
 /** The parts of a script a shell runs one after another, or in a subshell. */
@@ -163,13 +173,25 @@ export function plainHookHits(
       failed = true;
     }
     if (!failed && fillsInGitKey(text)) unplaced('a git config key the shell fills in');
+    // Every mention of husky with a word after it must be one the exact reading placed.
+    const huskyMentions = [...text.matchAll(MENTIONS_HUSKY)].filter(
+      (m) => !HUSKY_FLAGS.has(m[1] as string),
+    ).length;
+    let huskyPlaced = 0;
+    let huskyFailed = false;
     for (const match of script.matchAll(HUSKY_FOLDER)) {
       const value = match[1] as string;
-      if (value.startsWith('-')) continue;
-      const folder = placed(value);
-      if (folder === undefined) unplaced(value);
-      else folders.add(folder);
+      if (HUSKY_FLAGS.has(value.toLowerCase())) continue;
+      const folder = value.startsWith('-') ? undefined : placed(value);
+      if (folder === undefined) {
+        unplaced(value);
+        huskyFailed = true;
+      } else {
+        folders.add(folder);
+        huskyPlaced += 1;
+      }
     }
+    if (!huskyFailed && huskyMentions > huskyPlaced) unplaced('a husky folder this does not read');
   }
   return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder))];
 }
