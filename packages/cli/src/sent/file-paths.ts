@@ -278,27 +278,41 @@ function patternNames(pattern: string, file: string): Naming | null {
   return { kind: want.length === have.length ? 'file' : 'folder', sure };
 }
 
+/** A drive as Git Bash (`/c/w`), Cygwin (`/cygdrive/c/w`) and WSL (`/mnt/c/w`) name it. */
+const POSIX_DRIVE = /^\/(?:cygdrive\/|mnt\/)?([A-Za-z])(?=\/|$)/;
+
 /**
- * A path from a root as a file on a drive is named: Git Bash names `C:/w` as `/c/w`. Only for a
- * file on a drive: elsewhere `/c/w` is a folder `c`.
+ * A path from a root as a file on a drive is named: Git Bash names `C:/w` as `/c/w`, Cygwin as
+ * `/cygdrive/c/w`, WSL as `/mnt/c/w`. Only for a file on a drive: elsewhere `/c/w` is a folder `c`.
  */
 function onDriveOf(path: string, file: string): string {
   const drive = driveOf(file);
-  const msys = /^\/([A-Za-z])(?=\/|$)/.exec(path);
-  if (drive === '' || msys === null) return path;
-  return `${(msys[1] as string).toUpperCase()}:${path.slice(2) || '/'}`;
+  const posixDrive = POSIX_DRIVE.exec(path);
+  if (drive === '' || posixDrive === null) return path;
+  return `${(posixDrive[1] as string).toUpperCase()}:${path.slice(posixDrive[0].length) || '/'}`;
 }
+
+/**
+ * A path as a file on a drive, or on a Mac, is compared: in any letter case, since a Windows disk
+ * and a Mac's default disk open `.AWS/Credentials` as `.aws/credentials`. Elsewhere a path is
+ * compared as spelled.
+ */
+const CASE_BLIND_HOST = process.platform === 'darwin' || process.platform === 'win32';
+const foldFor = (file: string): ((path: string) => string) =>
+  CASE_BLIND_HOST || driveOf(file) !== '' ? (path) => path.toLowerCase() : (path) => path;
 
 /**
  * How one absolute path names a file, read as a pattern or as the path it spells. The file is
  * slashed (`normalPath`).
  */
 function absoluteNames(path: string, file: string, pattern: boolean): Naming | null {
-  const spelled = onDriveOf(normalPath(path), file);
-  if (pattern && WILD.test(path)) return patternNames(spelled, file);
+  const fold = foldFor(file);
+  const spelled = fold(onDriveOf(normalPath(path), file));
+  const target = fold(file);
+  if (pattern && WILD.test(path)) return patternNames(spelled, target);
   const clean = trimSep(spelled);
-  if (clean === file) return { kind: 'file', sure: true };
-  return file.startsWith(clean.endsWith('/') ? clean : `${clean}/`)
+  if (clean === target) return { kind: 'file', sure: true };
+  return target.startsWith(clean.endsWith('/') ? clean : `${clean}/`)
     ? { kind: 'folder', sure: true }
     : null;
 }
@@ -315,10 +329,12 @@ const endOf = (path: string): string =>
  * `/tmp/work/leak.txt`, `work` a folder it is in.
  */
 function endNames(path: string, file: string): Naming | null {
-  const rest = endOf(path);
+  const fold = foldFor(file);
+  const rest = fold(endOf(path));
   if (rest === '') return null;
-  if (file === `/${rest}` || file.endsWith(`/${rest}`)) return { kind: 'file', sure: true };
-  return file.includes(`/${rest}/`) ? { kind: 'folder', sure: true } : null;
+  const target = fold(file);
+  if (target === `/${rest}` || target.endsWith(`/${rest}`)) return { kind: 'file', sure: true };
+  return target.includes(`/${rest}/`) ? { kind: 'folder', sure: true } : null;
 }
 
 /** The better of two namings: a file over a folder, a sure one over a maybe. */
