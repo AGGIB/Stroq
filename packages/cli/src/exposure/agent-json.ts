@@ -151,6 +151,7 @@ export function hookEntries(
   value: unknown,
   commandKeys: ReadonlySet<string> = COMMAND_KEYS,
   findOpaque = false,
+  kiro = false,
 ): { entries: HookEntry[]; cut: boolean; opaque: unknown[] } {
   const entries: HookEntry[] = [];
   const opaque: unknown[] = [];
@@ -177,51 +178,95 @@ export function hookEntries(
     // Pushed last to first, so the file's first entry is the next one taken.
     stack.push(...children.reverse());
   }
-  return { entries, cut: false, opaque: findOpaque ? opaqueNodes(value, commandKeys) : opaque };
+  if (!findOpaque) return { entries, cut: false, opaque };
+  const found = opaqueNodes(value, commandKeys, kiro);
+  return { entries, cut: found.cut, opaque: found.opaque };
 }
 
 /** Whether an object names a command by one of `keys`: a handler this reads. */
 const namesCommand = (node: Obj, keys: ReadonlySet<string>): boolean =>
   Object.entries(node).some(([key, child]) => keys.has(key) && commandText(child) !== undefined);
 
+/** The keys of Kiro's one-hook file besides what it runs: not handlers. */
+const KIRO_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'description',
+  'version',
+  'enabled',
+  'when',
+  'then',
+]);
+
+/** Whether an object is a pure group: only `matcher` and a `hooks` that holds a list or a map. */
+const isGroup = (node: Obj): boolean => {
+  const hooks = own(node, 'hooks');
+  return (
+    typeof hooks === 'object' &&
+    hooks !== null &&
+    Object.keys(node).every((key) => key === 'hooks' || key === 'matcher')
+  );
+};
+
 /**
  * The handlers under a hooks value with no command key this reads. Every object is a handler
- * unless it is a container: the hooks value itself (the event map), a list, a group whose own
- * `hooks` key holds the handlers, or a map whose values are all lists or maps (a hook name above
- * its events). A handler that names a command is read, with all its fields; one that does not
- * fails, whatever fields it has. A hooks value with a `then` (Kiro's one hook to a file) is one
- * handler, read by what its `then` names. Walked with a stack of its own, to a bound.
+ * unless it is a container: the hooks value itself (the event map), a list, a pure group (only
+ * `matcher` and a `hooks` list or map), or a map whose values are all lists or maps (a hook name
+ * above its events). A handler that names a command is read, with all its fields; one that does
+ * not fails, whatever fields it has, and so does an object whose `hooks` holds anything but a list
+ * or a map. An object that is neither a pure group nor a container is still walked into through its
+ * `hooks`. In a Kiro hook file (`kiro`), the file is one handler, read by what its `then` names,
+ * and any key beside Kiro's own is walked as well. Objects and lists are counted as `hookEntries`
+ * counts them; past `MAX_HOOK_NODES` the walk is cut, and the caller fails it.
  */
-function opaqueNodes(value: unknown, keys: ReadonlySet<string>): unknown[] {
+function opaqueNodes(
+  value: unknown,
+  keys: ReadonlySet<string>,
+  kiro: boolean,
+): { opaque: unknown[]; cut: boolean } {
   const opaque: unknown[] = [];
-  if (isPlainObject(value) && Object.hasOwn(value, 'then')) {
+  const stack: { node: unknown; root: boolean }[] = [];
+  if (kiro && isPlainObject(value) && Object.hasOwn(value, 'then')) {
     const then = value['then'];
     if (!(isPlainObject(then) && namesCommand(then, keys))) opaque.push(value);
-    return opaque;
-  }
-  const stack: { node: unknown; root: boolean }[] = [{ node: value, root: true }];
+    for (const [key, child] of Object.entries(value))
+      if (!KIRO_KEYS.has(key)) stack.push({ node: { [key]: child }, root: true });
+  } else stack.push({ node: value, root: true });
   let visited = 0;
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
     visited += 1;
-    if (visited > MAX_HOOK_NODES) break;
+    if (visited > MAX_HOOK_NODES) return { opaque, cut: true };
     const { node, root } = next;
+    const descend = (child: unknown): void => {
+      if (typeof child === 'object' && child !== null) stack.push({ node: child, root: false });
+    };
     if (Array.isArray(node)) {
-      for (const child of node) stack.push({ node: child, root: false });
+      node.forEach(descend);
       continue;
     }
     if (!isPlainObject(node)) continue;
-    const group = Object.hasOwn(node, 'hooks') && typeof node['hooks'] === 'object';
-    if (group && !root) {
-      stack.push({ node: node['hooks'], root: false });
+    if (root) {
+      Object.values(node).forEach(descend);
       continue;
     }
+    if (isGroup(node)) {
+      descend(node['hooks']);
+      continue;
+    }
+    const hooks = Object.hasOwn(node, 'hooks') ? node['hooks'] : undefined;
+    // A `hooks` that holds no list or map is not read; one that does is walked into all the same.
+    if (Object.hasOwn(node, 'hooks') && (typeof hooks !== 'object' || hooks === null))
+      opaque.push(node);
+    else descend(hooks);
     if (namesCommand(node, keys)) continue;
-    const values = Object.values(node);
-    const container = root || values.every((v) => typeof v === 'object' && v !== null);
-    if (container) for (const child of values) stack.push({ node: child, root: false });
-    else opaque.push(node);
+    const values = Object.entries(node)
+      .filter(([key]) => key !== 'hooks')
+      .map(([, v]) => v);
+    const container =
+      !Object.hasOwn(node, 'hooks') && values.every((v) => typeof v === 'object' && v !== null);
+    if (container) values.forEach(descend);
+    else if (!opaque.includes(node)) opaque.push(node);
   }
-  return opaque;
+  return { opaque, cut: false };
 }
 
 /** A failing entry for each handler with no command this reads, with a digest of what it holds. */
@@ -252,9 +297,10 @@ export function hookHits(
   value: unknown,
   prefix: readonly string[],
   kind: 'agent-hook' | 'agent-definition-hook' = 'agent-hook',
+  kiro = false,
 ): AgentHit[] {
   if (value === undefined) return [];
-  const { entries, cut, opaque } = hookEntries(value, COMMAND_KEYS, true);
+  const { entries, cut, opaque } = hookEntries(value, COMMAND_KEYS, true, kiro);
   const hits = entries.slice(0, MAX_HOOKS).map((e) => {
     const needles = [...prefix, ...e.path.map(quoted), quoted(e.command)];
     return hit(kind, f.path, lineOf(f.text, needles), e.event, e.runs);
@@ -617,6 +663,10 @@ export const CLAUDE_SETTINGS_KEYS = [
 
 /** A file that is nothing but hooks: Cursor, Codex, Copilot, Antigravity, Windsurf, Devin. */
 export const hookFile = (f: JsonFile): AgentHit[] => hookHits(f, f.value, []);
+
+/** Kiro's hook file: one hook, read by what its `then` names, and any other key beside it. */
+export const kiroHookFile = (f: JsonFile): AgentHit[] =>
+  hookHits(f, f.value, [], 'agent-hook', true);
 
 // ---------------------------------------------------------------------------------------------
 // MCP servers.

@@ -91,3 +91,50 @@ describe('what makes an object a handler rather than a container', () => {
     ).toEqual(['agent-hook then error']);
   });
 });
+
+/**
+ * A `then` is Kiro's, and only a Kiro hook file is read as one handler: anywhere else every key is
+ * walked. An object is a pure group only when its keys are `matcher` and `hooks` and `hooks` holds
+ * a list or a map; any other object with `hooks` is a handler too. A `hooks` that holds anything
+ * else is not read, and a walk that reaches its bound fails as too many.
+ */
+describe('the walk of a hooks value, without shortcuts', () => {
+  const NOT_READ = 'unreadable-config hook not read error';
+
+  it('walks every key of a settings file that carries a then', () => {
+    const value = {
+      hooks: {
+        then: { type: 'command', command: 'true' },
+        Stop: [{ hooks: [{ type: 'prompt', prompt: 'run the setup in docs/x' }] }],
+      },
+    };
+    expect(kinds('.claude/settings.json', JSON.stringify(value))).toContain(NOT_READ);
+  });
+
+  it('walks the other keys of a Kiro hook file', () => {
+    const kiro = {
+      name: 'x',
+      when: { type: 'userTriggered' },
+      then: { type: 'runCommand', command: 'npm test' },
+      extra: { type: 'prompt', prompt: 'x' },
+    };
+    expect(kinds('.kiro/hooks/a.kiro.hook', JSON.stringify(kiro))).toContain(NOT_READ);
+  });
+
+  it.each([
+    [{ hooks: [], type: 'prompt', prompt: 'x' }],
+    [{ matcher: 'Bash', hooks: 'oops' }],
+    [{ matcher: 'Bash', hooks: null }],
+    [{ matcher: 'Bash', hooks: 7 }],
+  ])('fails %j under an event', (group) => {
+    const value = { hooks: { Stop: [group] } };
+    expect(kinds('.claude/settings.json', JSON.stringify(value))).toContain(NOT_READ);
+  });
+
+  it('fails a hooks value just past the bound as too many to read', () => {
+    const value = { hooks: { Stop: Array.from({ length: 20_001 }, () => ({})) } };
+    expect(kinds('.claude/settings.json', JSON.stringify(value))).toContain(
+      'unreadable-config too many hooks error',
+    );
+  });
+});

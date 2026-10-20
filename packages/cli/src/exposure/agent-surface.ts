@@ -19,6 +19,7 @@ import {
   CLAUDE_SETTINGS_KEYS,
   claudeSettings,
   hookFile,
+  kiroHookFile,
   mcpFile,
   type JsonFile,
 } from './agent-json.js';
@@ -161,6 +162,7 @@ const READERS = {
     ),
   ),
   hooks: json(hookFile, mentions(RUN_KEYS)),
+  kiro: json(kiroHookFile, mentions(RUN_KEYS)),
   tasks: json(vscodeTasks, either(editorText, mentions(RUN_KEYS))),
   settings: json(vscodeSettingsFile, either(editorText, mentions(['autoApprove', '"servers"']))),
   workspace: json(codeWorkspace, either(editorText, mentions(['autoApprove', ...RUN_KEYS]))),
@@ -260,11 +262,9 @@ function folderReaders(parts: readonly string[]): Reader[] {
   // A server list straight inside an agent's own folder: `.amazonq/mcp.json`, `.trae/mcp.json`.
   const parent = parts[parts.length - 2] ?? '';
   if (base === 'mcp.json' && parent.length > 1 && parent.startsWith('.')) readers.push(READERS.mcp);
-  if (
-    endsIn(parts, ['.github', 'hooks'], (b) => b.endsWith('.json')) ||
-    endsIn(parts, ['.kiro', 'hooks'], (b) => b.endsWith('.kiro.hook'))
-  )
-    readers.push(READERS.hooks);
+  if (endsIn(parts, ['.github', 'hooks'], (b) => b.endsWith('.json'))) readers.push(READERS.hooks);
+  if (endsIn(parts, ['.kiro', 'hooks'], (b) => b.endsWith('.kiro.hook')))
+    readers.push(READERS.kiro);
   if (endsIn(parts, ['.github', 'copilot'], (b) => b.startsWith('settings') && b.endsWith('.json')))
     readers.push(READERS.claude);
   if (
