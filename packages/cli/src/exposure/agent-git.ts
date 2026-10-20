@@ -22,7 +22,6 @@ import {
   hitsForRead,
   holdsGuards,
   readTier,
-  skippedConfigFolder,
   type SourceRead,
 } from './agent-surface.js';
 import {
@@ -329,7 +328,6 @@ function compare(top: string, base: string, head: string) {
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
-    ...skippedConfigs(changed),
     ...lineChanges(top, tree, changed),
     ...packageConfigChanges(tree, linked(), changed, GIT_CAPS.steps),
     ...bareChanges(tree, changed),
@@ -379,27 +377,6 @@ function buildInputs(
     );
   };
   return buildInputChanges(found, changed, view(), readText);
-}
-
-/**
- * A config a change adds or edits in a folder of other people's code (`vendor`, `build`, `dist`),
- * which the readers skip as the walk on disk does. A host started in that folder reads it, so it
- * is named to review, though not read. A change to `node_modules` is not.
- */
-function skippedConfigs(changed: ReadonlyMap<string, Changed>): TaggedHit[] {
-  return [...changed].flatMap(([path, c]): TaggedHit[] => {
-    if (c.status !== 'A' && c.status !== 'M' && c.status !== 'T') return [];
-    const folder = skippedConfigFolder(path);
-    if (folder === undefined) return [];
-    const why = `an agent config in ${folder}, a folder of other people's code, so it was not read; a host started in that folder reads it`;
-    const status = c.status === 'A' ? 'new' : 'changed';
-    return [
-      {
-        ...tagged(hit('unreadable-config', path, 1, 'skipped folder', why), status),
-        severity: 'warning',
-      },
-    ];
-  });
 }
 
 /**

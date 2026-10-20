@@ -63,7 +63,8 @@ export interface RepoSurface {
 /** A repository is a working tree, not a corpus; this is generous for one. */
 const MAX_DIRS = 4_000;
 const MAX_CONFIG_BYTES = 256 * 1024;
-const SKIP_DIRS = new Set(['node_modules', '.venv', 'venv', 'vendor', 'target', 'dist', 'build']);
+/** Only `node_modules` is skipped: a bare repository under `vendor` or `build` runs as well. */
+const SKIP_DIRS = new Set(['node_modules']);
 
 const readTextOr = (file: string, fallback = ''): string => {
   try {
