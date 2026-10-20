@@ -53,14 +53,15 @@ describe('parseCursorStore', () => {
         kind: 'pre',
         id: 'b1',
         tool: 'Bash',
-        input: { command: 'cat .env' },
+        // Every field is kept: a key in one beside the command is placed from there.
+        input: { command: 'cat .env', cwd: '', isBackground: false },
         at: '2026-04-27T11:07:08.780Z',
       },
       {
         kind: 'post',
         id: 'b1',
         tool: 'Bash',
-        input: { command: 'cat .env' },
+        input: { command: 'cat .env', cwd: '', isBackground: false },
         resultText: 'AWS_SECRET=abc\n',
         at: '2026-04-27T11:07:08.780Z',
       },
@@ -87,7 +88,7 @@ describe('parseCursorStore', () => {
       ['pre', 'Read'],
       ['post', 'Read'],
     ]);
-    expect(session?.transcript.events[0]?.input).toEqual({ file_path: '/w/app/.npmrc' });
+    expect(session?.transcript.events[0]?.input).toMatchObject({ file_path: '/w/app/.npmrc' });
     const post = session?.transcript.events[1];
     expect(post?.kind === 'post' && post.resultText).toBe('//registry.npmjs.org/:_authToken=tok\n');
   });

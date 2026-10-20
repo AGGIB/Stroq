@@ -1,16 +1,20 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { SecretHit, SecretMatch } from '../types.js';
 import { withLock } from '../util/lock.js';
 import type { SecretCandidate } from './candidates.js';
 import {
+  MAX_TEXT_CHARS,
   extractDockerAuths,
   extractEnv,
   extractKeyValues,
+  extractKeyValuesWholeCounted,
   extractNetrc,
+  netrcIsCut,
   type ExtractedSecret,
+  type ExtractOptions,
 } from './extract.js';
 
 export interface SecretIndexStats {
@@ -104,8 +108,14 @@ export const HOME_SECRET_SOURCES: readonly string[] = [
   '.netrc',
   '.docker/config.json',
 ];
-const PROJECT_ENV = /^\.env(\.[\w-]+)?$/;
-const EXAMPLE_ENV = /\.(example|sample|template|dist)$/;
+/**
+ * A project's env files: `.env` and any name it starts with dots after (`.env.production.local`),
+ * a name that ends in `.env` (`prod.env`), and direnv's `.envrc`. Each part is one class with no
+ * part that can repeat into another: nothing backtracks.
+ */
+const PROJECT_ENV = /^(?:\.env(?:\.[\w-]+)*|[\w-][\w.-]*\.env|\.envrc)$/;
+/** An example of one, not a key: `.env.example`, `example.env`, `.env.sample.local`. */
+const EXAMPLE_ENV = /(?:^|\.)(?:example|sample|template|dist)(?:\.|$)/;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
 
@@ -131,25 +141,84 @@ export function displayPath(path: string, home: string): string {
   return `~${path.slice(base.length).replace(/\\/g, '/')}`;
 }
 
-function extractFor(path: string, text: string): ExtractedSecret[] {
+/**
+ * The credential values in one source file's text, read by the file's kind: `.netrc`, a Docker
+ * `config.json`, or `NAME=VALUE` lines. Exported so a reader that must not build the index
+ * (`stroq sent`, which writes nothing) applies the same rules to the same files.
+ */
+export function extractSourceSecrets(path: string, text: string): ExtractedSecret[] {
   const name = basename(path);
   if (name === '.netrc') return extractNetrc(text);
   if (name === 'config.json') return extractDockerAuths(text);
   return extractKeyValues(text);
 }
 
-/** The first `MAX_PROJECT_ENV_FILES` `.env*` files in the project, sorted by name. */
-function projectEnvFiles(cwd: string): { readonly files: string[]; readonly truncated: boolean } {
+/**
+ * `extractSourceSecrets` for a reader that reads once and reports what it could not read
+ * (`stroq sent`). A `NAME=VALUE` file is read whole, a piece under the extractor's limits at a
+ * time, so a key after line 5,000 or past the first 256 KiB is found. A `.netrc` or a Docker
+ * `config.json` past those limits is read as far as they go, and `cut` says so. `rejected` counts
+ * the lines named like a key whose value is not taken. `options` asks for more than the live
+ * guard's index takes (the password in a URL value); by default it reads as the index does.
+ */
+export function extractSourceSecretsWhole(
+  path: string,
+  text: string,
+  options: ExtractOptions = {},
+): { readonly secrets: ExtractedSecret[]; readonly cut: boolean; readonly rejected: number } {
+  const name = basename(path);
+  if (name === '.netrc') return { secrets: extractNetrc(text), cut: netrcIsCut(text), rejected: 0 };
+  if (name === 'config.json')
+    return { secrets: extractDockerAuths(text), cut: text.length > MAX_TEXT_CHARS, rejected: 0 };
+  const read = extractKeyValuesWholeCounted(text, options);
+  return { secrets: read.secrets, cut: false, rejected: read.rejected };
+}
+
+/** Folders above a session's folder looked at for its repository's root, at most. */
+const MAX_REPOSITORY_DEPTH = 64;
+
+/**
+ * The folders whose env files belong to a project folder: the folder, and when it is in a
+ * repository, every folder above it up to the repository's root (the first one that holds `.git`).
+ * A folder in no repository is read alone: the folders above it are not the project's.
+ */
+export function projectFolders(cwd: string): string[] {
+  const chain: string[] = [];
+  let dir = resolve(cwd);
+  for (let depth = 0; depth < MAX_REPOSITORY_DEPTH; depth += 1) {
+    chain.push(dir);
+    if (existsSync(join(dir, '.git'))) return chain;
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return [resolve(cwd)];
+}
+
+/**
+ * The first `max` `.env*` files in the project, sorted by name, and how many it has. `max` is
+ * `MAX_PROJECT_ENV_FILES` for the index; a reader that reports what it left out can ask for more.
+ */
+export function projectEnvFiles(
+  cwd: string,
+  max: number = MAX_PROJECT_ENV_FILES,
+): {
+  readonly files: string[];
+  readonly truncated: boolean;
+  /** How many `.env*` files the project has, read or not. */
+  readonly found: number;
+} {
   try {
     const found = readdirSync(cwd)
       .filter((f) => PROJECT_ENV.test(f) && !EXAMPLE_ENV.test(f))
       .sort();
     return {
-      files: found.slice(0, MAX_PROJECT_ENV_FILES).map((f) => join(cwd, f)),
-      truncated: found.length > MAX_PROJECT_ENV_FILES,
+      files: found.slice(0, max).map((f) => join(cwd, f)),
+      truncated: found.length > max,
+      found: found.length,
     };
   } catch {
-    return { files: [], truncated: false };
+    return { files: [], truncated: false, found: 0 };
   }
 }
 
@@ -211,7 +280,8 @@ export class FileSecretIndex implements SecretIndex {
 
   private sources(cwd: string): { readonly list: IndexedSource[]; readonly truncated: boolean } {
     const homeFiles = HOME_SECRET_SOURCES.map((rel) => join(this.home, rel));
-    const projects = [...new Set([cwd, ...this.extraProjectDirs])].map(projectEnvFiles);
+    const folders = [cwd, ...this.extraProjectDirs].flatMap((dir) => projectFolders(dir));
+    const projects = [...new Set(folders)].map((dir) => projectEnvFiles(dir));
     return {
       list: statSources([...homeFiles, ...projects.flatMap((project) => project.files)]),
       truncated: projects.some((project) => project.truncated),
@@ -258,7 +328,7 @@ export class FileSecretIndex implements SecretIndex {
       try {
         const text = await readFile(source.path, 'utf8');
         const display = displayPath(source.path, this.home);
-        for (const s of extractFor(source.path, text)) {
+        for (const s of extractSourceSecrets(source.path, text)) {
           all.push({
             hash: hashSecret(salt, s.value),
             name: s.name,
