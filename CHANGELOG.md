@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`stroq inspect --changed-from <rev>` checks what a pull request adds that an AI agent or an editor runs by itself.** It reads hooks, MCP servers, folder-open tasks, helper commands, dev container commands, install scripts and instruction files. It compares their values with the base and fails on what is new or changed. `--format github` writes a job summary and annotations. SARIF results gain a line, a fingerprint and `properties.change`. `--fail-on new|any|none` picks what fails. Exit 2 is a usage error, now also for a missing folder (it was 1), and for `--fail-on new` without `--changed-from`. Exit 3 means the check could not run: git cannot read the base, or the check stopped on an error. An edit to a script that a hook already there runs fails too. Every limit that keeps the check from reading a file the change touched fails it. Plain `stroq inspect` now lists the same entries, also in a folder without `.git`, and fails on a hook or a folder-open task: before, it said "Open it" for a repository whose `SessionStart` hook runs a script. On the last 20 commits of 30 public repositories that ship `.claude/settings.json` or `.mcp.json`, 2 of 600 commits failed, and both added or changed a hook. That was measured before the checks for `env` variables, hook scripts and submodules were added.
 
+### Changed
+
+- The Claude Code plugin no longer falls back to `@stroq/cli@latest` while npm does not have the pinned version yet. It runs the previous release instead (`STROQ_FALLBACK_PIN`), so the code that guards your agent is always an exact version. The plugin also has its own README, saying what it runs, downloads and writes.
+
 ## [0.27.0] - 2026-10-19
 
 ### Fixed

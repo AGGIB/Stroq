@@ -122,7 +122,7 @@ Releases are cut from `main` once CI is green. Merging a pull request does not b
    - `packages/core/package.json` (private)
    - `.claude-plugin/marketplace.json` (both `metadata.version` and `plugins[0].version`)
    - `plugins/stroq/.claude-plugin/plugin.json`
-   - `plugins/stroq/hooks/stroq-hook.sh` (`STROQ_PIN`)
+   - `plugins/stroq/hooks/stroq-hook.sh` (`STROQ_PIN`; set `STROQ_FALLBACK_PIN` to the old `STROQ_PIN`, the release the plugin runs until npm has the new one)
    - `packages/cli/openclaw-plugin/package.json`
    - `packages/cli/openclaw-plugin/openclaw.plugin.json`
 3. Commit the release changes, merge them into `main`, and wait for green CI before tagging that commit. Push only the intended tag, for example:
