@@ -165,6 +165,23 @@ describe('a protective setting no reader knows', () => {
   it('passes a change to a key that holds none of the words', () => {
     expect(changed('.claude/settings.json', json({ x: 1 }), json({ x: 2 }))).toEqual([]);
   });
+
+  // A model's name cannot send anything elsewhere: the top-level `model` with a plain name is left
+  // out. A provider, a nested `model`, a table or an address in it still fail.
+  it('passes a top-level model name changed, and nothing else named for a model', () => {
+    expect(changed('.claude/settings.json', json({ model: 'a' }), json({ model: 'b' }))).toEqual(
+      [],
+    );
+    expect(changed('.codex/config.toml', 'model = "a"\n', 'model = "b"\n')).toEqual([]);
+    for (const [path, before, after] of [
+      ['.codex/config.toml', 'model = "a"\n', 'model = "https://e.invalid/m"\n'],
+      ['.codex/config.toml', 'model_provider = "a"\n', 'model_provider = "b"\n'],
+      ['.gemini/settings.json', json({ model: { name: 'a' } }), json({ model: { name: 'b' } })],
+      ['.claude/settings.json', json({ x: { model: 'a' } }), json({ x: { model: 'b' } })],
+      ['.claude/settings.json', json({ Model: 'a' }), json({ Model: 'b' })],
+    ])
+      expect(changed(path, before, after).length, `${path} ${after}`).toBeGreaterThan(0);
+  });
 });
 
 /** What a protection was in the base must be read, or the change fails. */

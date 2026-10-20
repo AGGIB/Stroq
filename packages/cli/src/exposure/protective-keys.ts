@@ -6,7 +6,8 @@ import { settingsOf } from './agent-surface.js';
  * A coarse net under the readers of Claude Code's, Codex's and Gemini's settings: any key whose
  * path holds one of a few words that may say it keeps the agent from things, which a change adds,
  * edits or takes away, fails, though no reader knows the key. An honest change to such a key, a
- * `model` included, fails too. The readers' own findings for the keys they know stay as they are.
+ * `model_provider` included, fails too; only the top-level `model` with a plain name is left out.
+ * The readers' own findings for the keys they know stay as they are.
  */
 
 /** Words in a key that say it may keep the agent from things, in any letter case. */
@@ -15,6 +16,14 @@ const PROTECTIVE = /sandbox|permission|approval|policy|exclude|trust|allow|deny|
 const MAX_NODES = 20_000;
 /** The deepest a key is looked for; a file nested deeper is not read. */
 const MAX_DEPTH = 64;
+
+/**
+ * The one key left out: the top-level `model` holding a plain name, which picks a model and can
+ * send nothing elsewhere. A provider, a table, a `model` deeper in, or a name with an address in
+ * it is not this.
+ */
+const isModelName = (key: string, value: unknown): boolean =>
+  key === 'model' && typeof value === 'string' && !value.includes('://');
 
 /** What a finding for such a key says happened to it. */
 export const SETTING_CHANGE = {
@@ -47,6 +56,7 @@ export function protectiveKeys(
     left -= children.length;
     if (left < 0) return undefined;
     for (const [key, child] of children) {
+      if (keys.length === 0 && isModelName(key, child)) continue;
       const at = [...keys, key];
       if (PROTECTIVE.test(key)) found.set(JSON.stringify(at), boundedJson(child, undefined, true));
       else stack.push([at, child]);
