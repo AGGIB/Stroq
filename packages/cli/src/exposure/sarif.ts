@@ -66,6 +66,8 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
     'This agent config is a link to a file outside the repository, which was not read.',
   'config-submodule':
     'An agent folder or config is a submodule: what it holds comes from another repository when the submodule is checked out, and was not read.',
+  'git-hook-file':
+    'Git runs this file as a hook, on a commit, a checkout or a merge, without asking anyone, and the change adds or edits it.',
   'agent-run-file-changed':
     'An entry that runs by itself may start or load this file, and the change edits it, so what runs may change though the entry does not.',
 };

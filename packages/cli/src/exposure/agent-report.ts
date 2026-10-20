@@ -220,6 +220,8 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       return `is a link out of the repository, to: ${value}`;
     case 'config-submodule':
       return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
+    case 'git-hook-file':
+      return `is a git hook file (${name}), which git runs on a commit, a checkout or a merge without asking`;
     case 'agent-run-file-changed':
       if (/^\d+ more files/.test(h.value)) return `${name} may also run ${value}`;
       return h.value === h.file

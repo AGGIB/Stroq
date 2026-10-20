@@ -23,6 +23,7 @@ import {
 } from '../../src/exposure/agent-surface.js';
 import { composePaths } from '../../src/exposure/agent-build-inputs.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
+import { gitHookFileChanges } from '../../src/exposure/git-hook-files.js';
 import {
   baseGuardsOfText,
   headGuardsOfText,
@@ -48,6 +49,9 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ...[
     '/*',
     '//',
+    // What sets core.hooksPath, then blanks that end nowhere.
+    'core.hooksPath ',
+    'core.hooksPath=',
     // Comments that a carriage return or a separator ends, as VS Code ends them.
     '//\r',
     '//  ',
@@ -420,6 +424,19 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   ['the paths a compose file names', (text) => composePaths(text)],
+  [
+    'the folders of git hooks a config or a script names',
+    (text) =>
+      gitHookFileChanges(
+        new Map([[`a/${text.slice(0, 200)}`, { status: 'A', oldMode: '', oldOid: '' }]]),
+        {
+          hooksPaths: [],
+          configs: new Map([['.gitconfig', text]]),
+          bareRepos: [],
+          scripts: [`git config core.hooksPath ${text}`, text],
+        },
+      ),
+  ],
   [
     'the lines of a .gitattributes and a package manager config',
     (text) => [

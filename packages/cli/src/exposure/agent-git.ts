@@ -12,6 +12,7 @@ import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
 import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
 import { changedLinkHits, packageConfigChanges, withAllLinks } from './package-configs.js';
+import { gitHookFileChanges, isGitConfigName } from './git-hook-files.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -331,6 +332,7 @@ function compare(top: string, base: string, head: string) {
     ...packageConfigChanges(tree, linked(), changed, GIT_CAPS.steps),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
+    ...hookFiles(top, tree, sorted, changed, found),
   ];
   // Any other link the change brought that leads out, to nothing, or was not read.
   const reported = new Set(
@@ -525,6 +527,59 @@ function lineChanges(
     );
   }
   return out;
+}
+
+/** The most committed git configs read for `core.hooksPath`; past it, one finding fails. */
+const MAX_GIT_CONFIGS = 64;
+
+/** The files of the change that git runs as hooks (see `git-hook-files.ts`). */
+function hookFiles(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  sorted: readonly string[],
+  changed: ReadonlyMap<string, Changed>,
+  found: readonly TaggedHit[],
+): TaggedHit[] {
+  const named = sorted.filter((p) => isGitConfigName(p) && tree.get(p) !== undefined);
+  const wanted = named.slice(0, MAX_GIT_CONFIGS).flatMap((p) => {
+    const e = entryAt(tree, p);
+    return isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
+  });
+  const blobs = readBlobs(
+    top,
+    wanted.map(([, e]) => e),
+  );
+  const configs = new Map(
+    wanted.flatMap(([p, e]) => {
+      const text = blobs.get(e.oid);
+      return text === undefined ? [] : [[p, text] as const];
+    }),
+  );
+  const unread = named.filter((p) => !configs.has(p));
+  const scripts = found
+    .filter((h) => h.kind === 'package-script' || h.kind === 'package-script-agent-path')
+    .map((h) => h.value);
+  const hits = gitHookFileChanges(changed, {
+    hooksPaths: hooksPaths(top),
+    configs,
+    bareRepos: bareRepositories(sorted),
+    scripts,
+  });
+  const first = unread[0];
+  if (first !== undefined)
+    hits.push(
+      tagged(
+        hit(
+          'unreadable-config',
+          first,
+          1,
+          'core.hooksPath',
+          `${unread.length} git configs of the tree were not read, so a folder of git hooks they name is not known`,
+        ),
+        'new',
+      ),
+    );
+  return hits;
 }
 
 /**

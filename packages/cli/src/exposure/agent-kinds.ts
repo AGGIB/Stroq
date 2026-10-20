@@ -35,6 +35,7 @@ export const KIND_SEVERITY = {
   'config-link-outside': 'warning',
   'config-submodule': 'error',
   'agent-run-file-changed': 'error',
+  'git-hook-file': 'error',
 } as const;
 
 export type AgentKind = keyof typeof KIND_SEVERITY;
