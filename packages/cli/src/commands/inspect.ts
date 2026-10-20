@@ -207,8 +207,9 @@ const tryRealpath = (path: string): string => {
     return path;
   }
 };
+/** The findings as JSON: `runs`, the text a hook manager's value holds, is never written out. */
 const withFailing = (hits: readonly TaggedHit[], failOn: FailOn) =>
-  hits.map((h) => ({ ...h, failing: isFailing(h, failOn) }));
+  hits.map(({ runs: _runs, ...h }) => ({ ...h, failing: isFailing(h, failOn) }));
 const EMPTY_SURFACE: RepoSurface = { isRepo: true, preTrust: [], onOpen: [], capped: false };
 
 interface Output {

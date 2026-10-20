@@ -53,6 +53,11 @@ export interface AgentHit {
   readonly name: string;
   /** What runs, or what decides what runs. Two revisions are compared by this. */
   readonly value: string;
+  /**
+   * What the reading of run files takes for the command, when it is not `value`: the strings a
+   * hook manager's value holds, without its keys. Never shown: every output leaves it out.
+   */
+  readonly runs?: string;
   readonly severity: Severity;
 }
 

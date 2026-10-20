@@ -230,7 +230,7 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
     case 'config-submodule':
       return `is a submodule, so what it holds comes from another repository and was not read: ${value}`;
     case 'git-hook-file':
-      return (HOOK_MANAGER_KEYS as readonly string[]).includes(h.name) ||
+      return (HOOK_MANAGER_KEYS as readonly string[]).includes(h.name.replace(/^config\./, '')) ||
         h.name.startsWith(POSSIBLE_HOOKS)
         ? `${name} sets git hooks, which run on a commit without asking: ${value}`
         : `is a git hook file (${name}), which git runs on a commit, a checkout or a merge without asking`;

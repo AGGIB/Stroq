@@ -519,16 +519,21 @@ const EDITOR_CONFIG_PATH = /\.vscode[/\\]+(?:tasks|settings|mcp)\.json/i;
 const namesAgentPath = (script: string): boolean =>
   SELF_CONFIG_FILE.test(script) || INSTRUCTION_FILE.test(script) || EDITOR_CONFIG_PATH.test(script);
 
-/** Keys of package.json a git hook manager reads its hooks from. */
+/** Keys of package.json a known git hook manager reads its hooks from, at the top or under `config`. */
 export const HOOK_MANAGER_KEYS = [
   'simple-git-hooks',
   'husky',
   'lint-staged',
   'pre-commit',
+  'precommit',
+  'pre-push',
+  'prepush',
   'gitHooks',
   'ghooks',
   'git-hooks',
   'yorkie',
+  'lefthook',
+  'overcommit',
 ] as const;
 /** What a key of package.json that may set git hooks, though it is on no list, is named. */
 export const POSSIBLE_HOOKS = 'possible git hook manager key';
@@ -546,6 +551,7 @@ function hookManagerHit(
   keys: readonly string[],
   name: string,
   value: unknown,
+  known: boolean,
 ): AgentHit {
   const line = lineOf(f.text, keys.map(quoted));
   const text = boundedJson(value, MAX_HOOK_VALUE, true);
@@ -557,7 +563,21 @@ function hookManagerHit(
       name,
       `too long to read whole (${digestOf(text)})`,
     );
-  return { ...hit('git-hook-file', f.path, line, name, text), severity: 'warning' };
+  const found = { ...hit('git-hook-file', f.path, line, name, text), severity: 'warning' as const };
+  // A known manager runs the strings it holds; its keys (lint-staged's patterns) are not commands.
+  return known ? { ...found, runs: stringsOf(value).join('\n') } : found;
+}
+
+/** Every string at or under `value`, in order. */
+function stringsOf(value: unknown): string[] {
+  const out: string[] = [];
+  const stack = [value];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    if (typeof next === 'string') out.push(next);
+    else if (typeof next === 'object' && next !== null)
+      stack.push(...Object.values(next).reverse());
+  }
+  return out;
 }
 
 export function packageScripts(f: JsonFile): AgentHit[] {
@@ -571,12 +591,16 @@ export function packageScripts(f: JsonFile): AgentHit[] {
   const known: ReadonlySet<string> = new Set(HOOK_MANAGER_KEYS);
   const hooks: AgentHit[] = [];
   for (const [key, value] of Object.entries(f.value))
-    if (known.has(key)) hooks.push(hookManagerHit(f, [key], key, value));
+    if (known.has(key)) hooks.push(hookManagerHit(f, [key], key, value, true));
     else if (HOOKISH_KEY.test(key))
-      hooks.push(hookManagerHit(f, [key], `${POSSIBLE_HOOKS} ${key}`, value));
+      hooks.push(hookManagerHit(f, [key], `${POSSIBLE_HOOKS} ${key}`, value, false));
   const config = ownObject(f.value, 'config');
   for (const [key, value] of Object.entries(config ?? {}))
-    if (known.has(key) || HOOKISH_KEY.test(key))
-      hooks.push(hookManagerHit(f, ['config', key], `${POSSIBLE_HOOKS} config.${key}`, value));
+    if (known.has(key))
+      hooks.push(hookManagerHit(f, ['config', key], `config.${key}`, value, true));
+    else if (HOOKISH_KEY.test(key))
+      hooks.push(
+        hookManagerHit(f, ['config', key], `${POSSIBLE_HOOKS} config.${key}`, value, false),
+      );
   return byLine([...installs, ...hooks]);
 }

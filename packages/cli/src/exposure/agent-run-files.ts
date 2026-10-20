@@ -64,7 +64,7 @@ const readingOf = (h: TaggedHit): Reading =>
 
 /** What is read as an entry's command: plugin code by its own path, any other by its value. */
 const commandOf = (h: TaggedHit): string =>
-  h.kind === 'agent-plugin' && h.name === 'plugin code' ? h.file : h.value;
+  h.kind === 'agent-plugin' && h.name === 'plugin code' ? h.file : (h.runs ?? h.value);
 
 /**
  * Whether an entry already there holds a command line that the reading below follows. A dev
