@@ -77,30 +77,87 @@ const readTextOr = (file: string, fallback = ''): string => {
  * would execute the repository's configuration to read it.
  */
 export function gitConfigEntries(text: string): readonly { key: string; value: string }[] {
-  const out: { key: string; value: string }[] = [];
-  let section = '';
+  return parseGitConfig(text).entries;
+}
+
+/** A key as git takes it: a letter, then letters, digits and `-`. */
+const GIT_KEY = /^[A-Za-z][A-Za-z0-9-]*$/;
+
+/**
+ * The lines of a git config, a line that ends in a backslash joined with the next one, as git
+ * continues a value.
+ */
+function configLines(text: string): string[] {
+  const lines: string[] = [];
+  let held = '';
   for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
-    const header = /^\[([^\]]+)\]$/.exec(line);
-    if (header) {
-      const inner = header[1] ?? '';
-      const named = /^(\S+)\s+"(.*)"$/.exec(inner);
-      section = named ? `${named[1]}.${named[2]}` : inner.replace(/\s+/g, '.');
+    const line = held + raw.replace(/\r$/, '');
+    let slashes = 0;
+    while (slashes < line.length && line[line.length - 1 - slashes] === '\\') slashes += 1;
+    if (slashes % 2 === 1) {
+      held = line.slice(0, -1);
       continue;
     }
-    const eq = line.indexOf('=');
-    if (eq === -1 || section === '') continue;
-    out.push({
-      key: `${section}.${line.slice(0, eq).trim()}`,
-      value: line
-        .slice(eq + 1)
-        .trim()
-        .replace(/^"(.*)"$/, '$1'),
-    });
+    held = '';
+    lines.push(line);
   }
-  return out;
+  if (held !== '') lines.push(held);
+  return lines;
 }
+
+/**
+ * The entries of a git config, and the number of each line that could not be placed: a key
+ * before any section, a section left open, a key git would not take. Git refuses a config with
+ * such a line, but a reader that is wrong about one would skip a key git runs, so each is
+ * reported rather than skipped. A key may follow its section on the same line (`[core] a = b`).
+ */
+export function parseGitConfig(text: string): {
+  readonly entries: readonly { key: string; value: string }[];
+  readonly unplaced: readonly number[];
+} {
+  const entries: { key: string; value: string }[] = [];
+  const unplaced: number[] = [];
+  let section = '';
+  configLines(text).forEach((raw, i) => {
+    let line = raw.trim();
+    if (line.startsWith('[')) {
+      const close = line.indexOf(']');
+      if (close === -1) {
+        section = '';
+        unplaced.push(i + 1);
+        return;
+      }
+      const inner = line.slice(1, close).trim();
+      const quote = inner.indexOf('"');
+      section =
+        quote === -1
+          ? inner.replace(/\s+/g, '.')
+          : `${inner.slice(0, quote).trim()}.${inner.slice(quote + 1).replace(/"$/, '')}`;
+      line = line.slice(close + 1).trim();
+    }
+    if (line === '' || line.startsWith('#') || line.startsWith(';')) return;
+    const eq = line.indexOf('=');
+    const name = (eq === -1 ? line : line.slice(0, eq)).trim();
+    if (section === '' || !GIT_KEY.test(name)) {
+      unplaced.push(i + 1);
+      return;
+    }
+    entries.push({
+      key: `${section}.${name}`,
+      value:
+        eq === -1
+          ? 'true'
+          : line
+              .slice(eq + 1)
+              .trim()
+              .replace(/^"(.*)"$/, '$1'),
+    });
+  });
+  return { entries, unplaced };
+}
+
+/** What a hit names for a line of a git config that could not be read. */
+export const UNREAD_CONFIG_LINE = 'a line the check could not read';
 
 /**
  * `core.fsmonitor = true` is git's own built-in file monitor and runs no command;
@@ -112,7 +169,16 @@ const isBoolean = (value: string): boolean => /^(true|false|yes|no|on|off|1|0)$/
 /** The keys of a git config that run something, `label` being how the report names the file. */
 function gitConfigHits(file: string, label: string): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  for (const { key, value } of gitConfigEntries(readTextOr(file))) {
+  const config = parseGitConfig(readTextOr(file));
+  // At most one: each says the same, that the file must be read by eye.
+  const line = config.unplaced[0];
+  if (line !== undefined)
+    hits.push({
+      kind: 'git-config-exec',
+      file: label,
+      what: `${UNREAD_CONFIG_LINE} (line ${line})`,
+    });
+  for (const { key, value } of config.entries) {
     if (!isGitExecKey(key)) continue;
     if (/^core\.fsmonitor$/i.test(key) && isBoolean(value)) continue;
     const include = /^include(if)?\./i.test(key);
@@ -499,8 +565,9 @@ export function repoFindings(surface: RepoSurface): readonly Finding[] {
     class: 'repo-exec-surface' as const,
     severity: 'critical' as const,
     detail: `${hit.file} — ${hit.what}: ${WHY[hit.kind] ?? 'repository-supplied execution'}`,
-    fix:
-      hit.kind !== 'nested-bare-repo'
+    fix: hit.what.startsWith(UNREAD_CONFIG_LINE)
+      ? `read ${hit.file} in a text editor, not with git, which may run what it names, and remove that line if you did not write it`
+      : hit.kind !== 'nested-bare-repo'
         ? `git config --get ${hit.what} — and remove it if you did not set it`
         : hit.file === '.'
           ? 'this folder is itself a bare repository: clone it into a new folder and open the clone, which leaves its config behind'

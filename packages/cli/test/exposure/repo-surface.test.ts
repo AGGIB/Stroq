@@ -44,6 +44,43 @@ describe('gitConfigEntries', () => {
   it('survives a config it cannot fully parse rather than throwing', () => {
     expect(gitConfigEntries('nonsense\n[unclosed\n= 3\n')).toEqual([]);
   });
+
+  // Git takes a key on the line of its section, and a value continued on the next line.
+  it.each([
+    ['[core] fsmonitor = id\n', 'id'],
+    ['[core]fsmonitor=id\n', 'id'],
+    ['[core]; c\n\tfsmonitor = id\n', 'id'],
+    ['[core] # c\n\tfsmonitor = id\n', 'id'],
+    ['[core]\n\tfsmonitor = i\\\nd\n', 'id'],
+    ['[CORE] FSMONITOR = id\n', 'id'],
+  ])('reads %j', (text, value) => {
+    const [entry] = gitConfigEntries(text);
+    expect(entry?.key.toLowerCase()).toBe('core.fsmonitor');
+    expect(entry?.value).toBe(value);
+  });
+});
+
+describe('a git config key written in a shape git reads', () => {
+  it.each(['[core] fsmonitor = id\n', '[core]fsmonitor = id\n', '[core] sshCommand = id\n'])(
+    'reports %j',
+    (text) => {
+      const root = repo();
+      writeFileSync(join(root, '.git', 'config'), text);
+      expect(kinds(root, 'preTrust')).toEqual(['git-config-exec']);
+    },
+  );
+
+  it.each([
+    'fsmonitor = id\n',
+    '[core\n\tfsmonitor = id\n',
+    '[core]\n\t= id\n',
+    '[core]\n\tx y = 1\n',
+  ])('reports a line it cannot place in a section, %j, rather than skip it', (text) => {
+    const root = repo();
+    writeFileSync(join(root, '.git', 'config'), text);
+    const [finding] = repoFindings(repoSurface(root));
+    expect(finding?.detail).toContain('could not read');
+  });
 });
 
 describe('folderSurface — a folder with no .git', () => {
