@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { posix } from 'node:path';
 import { settle, tagChanges, type TaggedHit } from './agent-change.js';
 import {
   baseGuardsOfText,
@@ -332,7 +334,7 @@ function compare(top: string, base: string, head: string) {
     ...packageConfigChanges(tree, linked(), changed, GIT_CAPS.steps),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
-    ...hookFiles(top, tree, sorted, changed, found),
+    ...hookFiles(top, tree, linked().view, changed, found),
   ];
   // Any other link the change brought that leads out, to nothing, or was not read.
   const reported = new Set(
@@ -532,54 +534,88 @@ function lineChanges(
 /** The most committed git configs read for `core.hooksPath`; past it, one finding fails. */
 const MAX_GIT_CONFIGS = 64;
 
-/** The files of the change that git runs as hooks (see `git-hook-files.ts`). */
-function hookFiles(
+/** The texts of the files at `paths` of the tree that can be read, by their path. */
+function readTexts(
   top: string,
   tree: ReadonlyMap<string, TreeEntry>,
-  sorted: readonly string[],
-  changed: ReadonlyMap<string, Changed>,
-  found: readonly TaggedHit[],
-): TaggedHit[] {
-  const named = sorted.filter((p) => isGitConfigName(p) && tree.get(p) !== undefined);
-  const wanted = named.slice(0, MAX_GIT_CONFIGS).flatMap((p) => {
-    const e = entryAt(tree, p);
-    return isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
+  paths: readonly string[],
+): Map<string, string> {
+  const wanted = paths.flatMap((p) => {
+    const e = tree.get(p);
+    return e !== undefined && isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
   });
   const blobs = readBlobs(
     top,
     wanted.map(([, e]) => e),
   );
-  const configs = new Map(
+  return new Map(
     wanted.flatMap(([p, e]) => {
       const text = blobs.get(e.oid);
       return text === undefined ? [] : [[p, text] as const];
     }),
   );
-  const unread = named.filter((p) => !configs.has(p));
+}
+
+const realOr = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+/** The files of the change that git runs as hooks (see `git-hook-files.ts`). */
+function hookFiles(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: TreeView,
+  changed: ReadonlyMap<string, Changed>,
+  found: readonly TaggedHit[],
+): TaggedHit[] {
+  const out: TaggedHit[] = [];
+  const unread = (path: string, why: string): void => {
+    out.push(tagged(hit('unreadable-config', path, 1, 'core.hooksPath', why), 'new'));
+  };
+  const named = view.sorted.filter((p) => isGitConfigName(p) && tree.has(p));
+  const configs = readTexts(top, tree, named.slice(0, MAX_GIT_CONFIGS));
+  const first = named.find((p) => !configs.has(p));
+  if (first !== undefined)
+    unread(
+      first,
+      `${named.filter((p) => !configs.has(p)).length} git configs of the tree were not read, so a folder of git hooks they name is not known`,
+    );
+  const bareRepos = bareRepositories(view.sorted);
+  const bareConfigs = new Map<string, string>();
+  for (const bare of bareRepos) {
+    const files = view.sorted.filter(
+      (p) =>
+        posix.dirname(p) === bare &&
+        ['config', 'config.worktree'].includes(foldName(posix.basename(p))),
+    );
+    const texts = readTexts(top, tree, files);
+    for (const file of files)
+      if (!texts.has(file))
+        unread(
+          file,
+          'the config of a bare repository committed here was not read, so the folder of its git hooks is not known',
+        );
+    bareConfigs.set(bare, [...texts.values()].join('\n'));
+  }
   const scripts = found
     .filter((h) => h.kind === 'package-script' || h.kind === 'package-script-agent-path')
     .map((h) => h.value);
-  const hits = gitHookFileChanges(changed, {
-    hooksPaths: hooksPaths(top),
-    configs,
-    bareRepos: bareRepositories(sorted),
-    scripts,
-  });
-  const first = unread[0];
-  if (first !== undefined)
-    hits.push(
-      tagged(
-        hit(
-          'unreadable-config',
-          first,
-          1,
-          'core.hooksPath',
-          `${unread.length} git configs of the tree were not read, so a folder of git hooks they name is not known`,
-        ),
-        'new',
-      ),
-    );
-  return hits;
+  out.push(
+    ...gitHookFileChanges(changed, {
+      hooksPaths: hooksPaths(top),
+      tops: [...new Set([top, realOr(top)])],
+      configs,
+      bareConfigs,
+      bareRepos,
+      scripts,
+      view,
+    }),
+  );
+  return out;
 }
 
 /**

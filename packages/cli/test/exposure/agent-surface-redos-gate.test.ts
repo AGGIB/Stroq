@@ -431,9 +431,12 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
         new Map([[`a/${text.slice(0, 200)}`, { status: 'A', oldMode: '', oldOid: '' }]]),
         {
           hooksPaths: [],
+          tops: ['/r'],
           configs: new Map([['.gitconfig', text]]),
-          bareRepos: [],
+          bareConfigs: new Map([['b', text]]),
+          bareRepos: ['b'],
           scripts: [`git config core.hooksPath ${text}`, text],
+          view: { tree: new Map(), sorted: [`.husky/${text.slice(0, 200)}`], targets: new Map() },
         },
       ),
   ],
