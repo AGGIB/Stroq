@@ -404,7 +404,8 @@ function devcontainerHits(root: string): RepoExecHit[] {
   for (const file of candidates) {
     const text = readTextOr(file);
     if (text === '') continue;
-    const rel = relative(root, file);
+    // With `/` between the parts on every system, as every path this reports.
+    const rel = labelOf(root, file);
     // Read as text rather than JSON: devcontainer.json is jsonc, comments and all,
     // and a parse failure must not hide the key it was looking for.
     for (const key of DEVCONTAINER_HOST_KEYS) {
