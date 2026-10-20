@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
+import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
 import type { Finding } from './findings.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 
@@ -34,6 +35,7 @@ export type RepoExecKind =
   | 'nested-bare-repo'
   | 'gitattributes-driver'
   | 'devcontainer-host-command'
+  | 'git-hook-routine'
   | 'git-hook'
   | 'husky-hook'
   | 'devcontainer-command'
@@ -46,6 +48,7 @@ export const PRE_TRUST: ReadonlySet<RepoExecKind> = new Set([
   'nested-bare-repo',
   'gitattributes-driver',
   'devcontainer-host-command',
+  'git-hook-routine',
 ]);
 
 export interface RepoSurface {
@@ -341,6 +344,39 @@ function runsAsGitHook(file: string, plat: NodeJS.Platform): boolean {
   }
 }
 
+/**
+ * The hooks that run only when someone commits or pushes, the ones the pre-commit and husky
+ * installers write. Every other hook git runs during routine use (`post-index-change` on a
+ * `git status`, `post-checkout`, `reference-transaction` on any ref update), and any other file
+ * there may be one a hook sources.
+ */
+const COMMIT_HOOKS: ReadonlySet<string> = new Set([
+  'pre-commit',
+  'pre-push',
+  'commit-msg',
+  'prepare-commit-msg',
+]);
+
+/** What a hook file that could not be read as text holds: not known, so not ordinary either. */
+const UNREAD_HOOK = '\u0000';
+
+/**
+ * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
+ * opens it, and its text was read and does not download and run code.
+ */
+function gitHookHit(dir: string, name: string): RepoExecHit {
+  const file = `.git/hooks/${name}`;
+  if (!COMMIT_HOOKS.has(foldName(name))) return { kind: 'git-hook-routine', file, what: name };
+  const text = readTextOr(join(dir, name), UNREAD_HOOK);
+  if (text === UNREAD_HOOK || runsFetchedOrHiddenCode(text))
+    return {
+      kind: 'git-hook-routine',
+      file,
+      what: `${name}, whose text downloads and runs code or could not be read`,
+    };
+  return { kind: 'git-hook', file, what: name };
+}
+
 function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
   const dir = join(root, '.git', 'hooks');
   if (!existsSync(dir)) return [];
@@ -348,7 +384,7 @@ function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
     return readdirSync(dir)
       .filter((name) => !name.endsWith('.sample'))
       .filter((name) => runsAsGitHook(join(dir, name), plat))
-      .map((what) => ({ kind: 'git-hook' as const, file: `.git/hooks/${what}`, what }));
+      .map((name) => gitHookHit(dir, name));
   } catch {
     return [];
   }
@@ -658,6 +694,8 @@ export const WHY: Readonly<Record<string, string>> = {
     'a path in this repository is routed through a driver whose command is defined in its own git configuration',
   'devcontainer-host-command':
     'initializeCommand runs on this machine before the container exists, so the container gives it no isolation',
+  'git-hook-routine':
+    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources',
 };
 
 export function repoFindings(surface: RepoSurface): readonly Finding[] {
@@ -667,10 +705,12 @@ export function repoFindings(surface: RepoSurface): readonly Finding[] {
     detail: `${hit.file} — ${hit.what}: ${WHY[hit.kind] ?? 'repository-supplied execution'}`,
     fix: hit.what.startsWith(UNREAD_CONFIG_LINE)
       ? `read ${hit.file} in a text editor, not with git, which may run what it names, and remove that line if you did not write it`
-      : hit.kind !== 'nested-bare-repo'
-        ? `git config --get ${hit.what} — and remove it if you did not set it`
-        : hit.file === '.'
-          ? 'this folder is itself a bare repository: clone it into a new folder and open the clone, which leaves its config behind'
-          : `inspect and remove ${hit.file} before opening this repository with an agent`,
+      : hit.kind === 'git-hook-routine'
+        ? `read ${hit.file} in a text editor and delete it if you did not install it, before you run any git command here`
+        : hit.kind !== 'nested-bare-repo'
+          ? `git config --get ${hit.what} — and remove it if you did not set it`
+          : hit.file === '.'
+            ? 'this folder is itself a bare repository: clone it into a new folder and open the clone, which leaves its config behind'
+            : `inspect and remove ${hit.file} before opening this repository with an agent`,
   }));
 }
