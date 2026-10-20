@@ -1,8 +1,13 @@
 import { agentDefinitionHasHooks } from '@stroq/core';
+import { isPlainObject } from '../commands/config-file.js';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
-import { hookEntries, MAX_HOOKS, tooMany } from './agent-json.js';
-import { boundedJson, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import type { JsonObject } from '../install/inspect/json.js';
+import { firstEntries, hookEntries, MAX_HOOKS, mcpServerHits, tooMany } from './agent-json.js';
+import { boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { ruleRunsAnything } from './allow-rules.js';
 import { lineAt } from './jsonc.js';
+
+type KeyLines = ReadonlyMap<string, number>;
 
 /**
  * Text files an agent loads by itself: the instruction files it reads in every session, and
@@ -134,22 +139,11 @@ export function instructionFile(path: string, text: string): AgentHit[] {
   return [hit('instruction-hidden-text', path, lineAt(text, first), 'hidden', hidden), notice];
 }
 
-/**
- * A skill, subagent or command whose front matter declares hooks. Front matter that cannot be
- * read is read again as text by the gate's own test, and a `hooks:` key found that way is an
- * error: the host may read the YAML more leniently than this does.
- */
-export function agentDefinition(path: string, text: string): AgentHit[] {
-  const front = readFrontmatter({ text });
-  if (front.status === 'absent') return [];
-  if (front.status === 'broken') {
-    return agentDefinitionHasHooks(path, text)
-      ? [hit('agent-definition-hook', path, 1, 'hooks (unread)', digestOf(text))]
-      : [];
-  }
-  if (!Object.hasOwn(front.data, 'hooks')) return [];
-  const hooks: unknown = front.data['hooks'];
-  const line = front.keyLines.get('hooks') ?? 1;
+/** The hooks a definition's front matter declares. */
+function definitionHooks(path: string, data: JsonObject, keyLines: KeyLines): AgentHit[] {
+  if (!Object.hasOwn(data, 'hooks')) return [];
+  const hooks: unknown = data['hooks'];
+  const line = keyLines.get('hooks') ?? 1;
   const { entries, cut } = hookEntries(hooks);
   if (entries.length === 0) {
     // A hooks block with no command this reader can find is still a hooks block.
@@ -162,4 +156,115 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
     .slice(0, MAX_HOOKS)
     .map((e) => hit('agent-definition-hook', path, line, e.event, e.runs));
   return cut ? [...hits, { ...tooMany(path, 'hooks', MAX_HOOKS, hooks), line }] : hits;
+}
+
+/** The keys a skill or a command allows tools under, which it may then use without asking. */
+const GRANT_KEYS = ['allowed-tools', 'allowedTools', 'allowed_tools'] as const;
+/** The tools whose grant hands over the shell: Claude Code's, Copilot's and Gemini's. */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash', 'shell', 'run_shell_command']);
+
+/** The rules of a grant: a list, or one string of them split at commas and blanks outside `()`. */
+function grantRules(value: unknown): string[] {
+  const parts = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  const rules: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== 'string') {
+      rules.push(boundedJson(part));
+      continue;
+    }
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i <= part.length; i += 1) {
+      const c = part[i];
+      if (c === '(') depth += 1;
+      else if (c === ')') depth = Math.max(0, depth - 1);
+      else if (c === undefined || (depth === 0 && (c === ',' || /\s/.test(c)))) {
+        const rule = part.slice(start, i).trim();
+        if (rule !== '') rules.push(rule);
+        start = i + 1;
+      }
+    }
+  }
+  return rules;
+}
+
+/** The grants of the shell a definition's front matter makes, each rule once. */
+function definitionGrants(path: string, data: JsonObject, keyLines: KeyLines): AgentHit[] {
+  const hits: AgentHit[] = [];
+  for (const key of GRANT_KEYS) {
+    if (!Object.hasOwn(data, key)) continue;
+    const value: unknown = data[key];
+    // A value that is neither a string nor a list is not a grant this reads, and the host may: it
+    // counts as one that hands over the shell.
+    const readable = typeof value === 'string' || Array.isArray(value);
+    const rules = readable ? grantRules(value) : [boundedJson(value)];
+    const broad = [...new Set(rules)].filter(
+      (rule) => !readable || ruleRunsAnything(rule, SHELL_TOOLS),
+    );
+    const list = firstEntries(path, 'allowed tools', broad);
+    const line = keyLines.get(key) ?? 1;
+    hits.push(
+      ...list.cut.map((h) => ({ ...h, line })),
+      ...list.items.map((rule) => hit('agent-broad-allow', path, line, 'allowed-tools', rule)),
+    );
+  }
+  return hits;
+}
+
+/** The keys a subagent or an agent profile starts its own MCP servers under. */
+const SERVER_KEYS = ['mcpServers', 'mcp-servers', 'mcp_servers'] as const;
+
+/**
+ * The servers a definition's front matter starts: a table of them, or a list whose items are
+ * tables of them or the names of servers configured elsewhere (reported where they are). Any
+ * other shape is not read, and fails.
+ */
+function definitionServers(
+  path: string,
+  text: string,
+  data: JsonObject,
+  keyLines: KeyLines,
+): AgentHit[] {
+  const hits: AgentHit[] = [];
+  for (const key of SERVER_KEYS) {
+    if (!Object.hasOwn(data, key)) continue;
+    const value: unknown = data[key];
+    const line = keyLines.get(key) ?? 1;
+    const tables = isPlainObject(value)
+      ? [value]
+      : Array.isArray(value)
+        ? value.filter((item) => typeof item !== 'string')
+        : [value];
+    for (const table of tables) {
+      if (!isPlainObject(table)) {
+        hits.push(hit('unreadable-config', path, line, key, boundedJson(table)));
+        continue;
+      }
+      const f = { path, text, value: { [key]: table } };
+      hits.push(...mcpServerHits(f, f.value, key).map((h) => ({ ...h, line })));
+    }
+  }
+  return hits;
+}
+
+/**
+ * A skill, subagent or command whose front matter declares hooks, allows the shell or starts MCP
+ * servers. Front matter that cannot be read fails: the host may read the YAML more leniently than
+ * this does, so what it declares is not known. A `hooks:` key the gate's own test finds in it is
+ * named so.
+ */
+export function agentDefinition(path: string, text: string): AgentHit[] {
+  const front = readFrontmatter({ text });
+  if (front.status === 'absent') return [];
+  if (front.status === 'broken') {
+    return agentDefinitionHasHooks(path, text)
+      ? [hit('agent-definition-hook', path, 1, 'hooks (unread)', digestOf(text))]
+      : [hit('unreadable-config', path, 1, 'front matter', digestOf(text))];
+  }
+  const { data, keyLines } = front;
+  return byLine([
+    ...definitionHooks(path, data, keyLines),
+    ...definitionGrants(path, data, keyLines),
+    ...definitionServers(path, text, data, keyLines),
+  ]);
 }
