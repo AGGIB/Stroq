@@ -125,29 +125,46 @@ const isPathLike = (s: string): boolean =>
   s.startsWith('../') ||
   (s.includes('/') && !s.includes('://') && !/\s/.test(s));
 
-/** The modules of one Python line: `import a.b as c, d` and `from .x import y, z`. */
-function pythonImports(line: string, into: string[]): void {
-  const words = line.trim().split(/\s+/);
-  if (words[0] === 'import') {
-    for (const part of words.slice(1).join(' ').split(','))
-      into.push(part.trim().split(/\s+/)[0] ?? '');
-    return;
-  }
-  if (words[0] !== 'from' || words[1] === undefined) return;
-  const from = words[1];
-  into.push(from);
-  const at = words.indexOf('import');
-  if (at === -1) return;
-  // `from a import b` may import the module a.b; `from . import b` the module .b.
-  for (const part of words
-    .slice(at + 1)
-    .join(' ')
-    .replace(/[()]/g, '')
-    .split(',')) {
+/** Each name of an import list (`a as b, c`) as a module of `from`, after a `from ... import`. */
+function importedNames(list: string, from: string, into: string[]): void {
+  for (const part of list.replace(/[()\\]/g, ' ').split(',')) {
     const name = part.trim().split(/\s+/)[0] ?? '';
     if (name !== '' && name !== '*')
       into.push(from.endsWith('.') ? `${from}${name}` : `${from}.${name}`);
   }
+}
+
+/**
+ * The modules a Python file imports: `import a.b as c, d` and `from .x import y, z`, statements
+ * split at a line's end or a `;`, and a `from x import (` list read on to its `)`.
+ */
+function pythonImports(text: string): string[] {
+  const out: string[] = [];
+  let open: string | undefined;
+  for (const raw of text.split(/[\n;]/)) {
+    const hash = raw.indexOf('#');
+    const statement = hash === -1 ? raw : raw.slice(0, hash);
+    if (open !== undefined) {
+      importedNames(statement, open, out);
+      if (statement.includes(')')) open = undefined;
+      continue;
+    }
+    const words = statement.trim().split(/\s+/);
+    if (words[0] === 'import') {
+      for (const part of words.slice(1).join(' ').split(','))
+        out.push(part.trim().split(/\s+/)[0] ?? '');
+      continue;
+    }
+    const from = words[1];
+    if (words[0] !== 'from' || from === undefined) continue;
+    out.push(from);
+    const at = words.indexOf('import');
+    if (at === -1) continue;
+    const list = words.slice(at + 1).join(' ');
+    importedNames(list, from, out);
+    if ((list.includes('(') && !list.includes(')')) || list.endsWith('\\')) open = from;
+  }
+  return out;
 }
 
 /** The names a file of the given language holds. */
@@ -167,9 +184,7 @@ export function referencesOf(text: string, lang: Lang): References {
       if (lang === 'py' && MODULE.test(s)) modules.push(s);
     }
     if (lang === 'py') {
-      const found: string[] = [];
-      for (const line of text.split('\n')) pythonImports(line, found);
-      modules.push(...found.filter((m) => MODULE.test(m)));
+      modules.push(...pythonImports(text).filter((m) => MODULE.test(m)));
     }
   }
   const total = paths.length + modules.length + packages.length;

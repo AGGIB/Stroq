@@ -200,6 +200,21 @@ describe('what the file a hook runs imports, sources or calls', () => {
     ],
     [
       'python3 .claude/hooks/guard.py',
+      { '.claude/hooks/guard.py': 'import json; print(1)\n' },
+      { '.claude/hooks/json.py': 'import os\n' },
+      '.claude/hooks/json.py',
+    ],
+    [
+      'python3 .claude/hooks/guard.py',
+      {
+        '.claude/hooks/guard.py': 'from helpers import (\n  a,\n  io,\n)\n',
+        '.claude/hooks/helpers/io.py': '1\n',
+      },
+      { '.claude/hooks/helpers/io.py': '2\n' },
+      '.claude/hooks/helpers/io.py',
+    ],
+    [
+      'python3 .claude/hooks/guard.py',
       {
         '.claude/hooks/guard.py': 'from helpers.io import read\n',
         '.claude/hooks/helpers/io.py': '1\n',
