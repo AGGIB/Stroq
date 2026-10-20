@@ -1,6 +1,6 @@
 import { describe, it } from 'vitest';
 import { settle, tagChanges, type TaggedHit } from '../../src/exposure/agent-change.js';
-import { runsFetchedOrHiddenCode } from '../../src/exposure/fetch-shapes.js';
+import { runsFetchedOrHiddenCode, sendsSecrets } from '../../src/exposure/fetch-shapes.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runFileChanges } from '../../src/exposure/agent-run-files.js';
 import { NameMatcher, normalText } from '../../src/exposure/run-names.js';
@@ -167,6 +167,16 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     ':*',
     'C:\\',
     'version https://git-lfs.github.com/spec/v1\n',
+    'curl -d ',
+    '-X POST ',
+    'nc ',
+    '://',
+    '~/',
+    '$a_',
+    '${env:a_',
+    '%a_',
+    'source=${localWorkspaceFolder}/',
+    '.cargo/',
   ].map((unit): readonly [string, Shape] => [JSON.stringify(unit), repeat(unit)]),
   ['long blanks', (size) => `{${' '.repeat(size)}`],
   ['an unclosed comment', (size) => `/*${'x'.repeat(size)}`],
@@ -314,6 +324,15 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   ['the shapes of downloaded code', (text) => runsFetchedOrHiddenCode(text)],
+  ['the shapes of what is sent', (text) => sendsSecrets(text)],
+  [
+    'a dev container that mounts and runs with options',
+    (text) =>
+      scanFile(
+        '.devcontainer/devcontainer.json',
+        `{"mounts":[${json(text)}],"runArgs":[${json(text)}],"workspaceMount":${json(text)}}`,
+      ),
+  ],
   [
     'a new entry settled',
     (text) => [

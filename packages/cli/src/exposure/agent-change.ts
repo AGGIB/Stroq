@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { envNameOf } from './agent-json.js';
 import type { AgentHit, AgentKind } from './agent-kinds.js';
-import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
+import { runsFetchedOrHiddenCode, sendsSecrets } from './fetch-shapes.js';
 
 /**
  * Whether a hit came with the change being checked. Values are compared, not files: a hook
@@ -117,8 +117,8 @@ export type Against = 'compared' | 'none';
  * there keeps its own, but for one of the few benign env variables, which is a warning. Any other
  * fails when it is a whole-shell allow rule or a link out of the repository, a server whose host
  * starts it without asking or whose command a change replaces, and an install script, a dev
- * container command or a server that downloads and runs code, or decodes and runs it. With no
- * base, nothing is proven there before.
+ * container command or a server that downloads and runs code, decodes and runs it, or sends
+ * credentials out. With no base, nothing is proven there before.
  */
 export function settle(
   h: AgentHit,
@@ -134,7 +134,9 @@ export function settle(
     startsWithoutAsking(h) ||
     // A host keeps the servers it may start by their names: one approved before starts this now.
     (h.kind === 'mcp-server' && status === 'changed') ||
-    (FAILS_IN_SHAPE.has(h.kind) && h.severity !== 'error' && runsFetchedOrHiddenCode(h.value));
+    (FAILS_IN_SHAPE.has(h.kind) &&
+      h.severity !== 'error' &&
+      (runsFetchedOrHiddenCode(h.value) || sendsSecrets(h.value)));
   return fails ? { ...h, severity: 'error', status } : { ...h, status };
 }
 

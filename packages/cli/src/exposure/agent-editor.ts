@@ -13,7 +13,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, hit, otherFields, type AgentHit } from './agent-kinds.js';
+import { boundedJson, byLine, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { autoApproves } from './privilege-surface.js';
 
@@ -294,8 +294,130 @@ function lifecycleText(value: unknown): string | undefined {
   return read.length === 0 ? undefined : read.join('; ');
 }
 
-export function devcontainer(f: JsonFile): AgentHit[] {
+/**
+ * The keys of a dev container that give it this machine's files, devices or powers: what its
+ * commands then reach. Each fails unless what it holds is proven to stay inside.
+ */
+export const DEVCONTAINER_ACCESS_KEYS = [
+  'mounts',
+  'workspaceMount',
+  'runArgs',
+  'privileged',
+  'capAdd',
+  'securityOpt',
+] as const;
+/** What a dev container builds in from elsewhere: listed, like a build step. */
+export const DEVCONTAINER_FEATURES = 'features';
+
+/** `docker run` options that give a container nothing of this machine, with and without a value. */
+const PLAIN_RUN_FLAGS: ReadonlySet<string> = new Set([
+  '--init',
+  '--rm',
+  '-i',
+  '-t',
+  '-it',
+  '--tty',
+]);
+const PLAIN_RUN_OPTIONS: ReadonlySet<string> = new Set([
+  '--name',
+  '--hostname',
+  '--shm-size',
+  '--label',
+  '--memory',
+  '--cpus',
+]);
+
+/** Whether every `runArgs` word is a plain flag, or a plain option with its value. */
+function runArgsStayInside(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i += 1) {
+    const arg = value[i];
+    if (typeof arg !== 'string') return false;
+    if (PLAIN_RUN_FLAGS.has(arg)) continue;
+    const eq = arg.indexOf('=');
+    if (PLAIN_RUN_OPTIONS.has(eq === -1 ? arg : arg.slice(0, eq))) {
+      if (eq === -1) i += 1;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/** The fields of a mount, from `source=...,target=...,type=...` or an object. */
+function mountFields(mount: unknown): { source: string; type: string } | undefined {
+  if (typeof mount === 'string') {
+    const fields = new Map<string, string>();
+    for (const part of mount.split(',')) {
+      const eq = part.indexOf('=');
+      if (eq !== -1) fields.set(part.slice(0, eq).trim().toLowerCase(), part.slice(eq + 1).trim());
+    }
+    return {
+      source: fields.get('source') ?? fields.get('src') ?? '',
+      type: fields.get('type') ?? '',
+    };
+  }
+  if (!isPlainObject(mount)) return undefined;
+  const source = argText(own(mount, 'source')) ?? argText(own(mount, 'src')) ?? '';
+  return { source, type: argText(own(mount, 'type')) ?? '' };
+}
+
+const WORKSPACE = '${localWorkspaceFolder}';
+
+/**
+ * Whether a mount is proven to give the container nothing of this machine but the workspace: a
+ * named volume or a tmpfs, or a bind of the workspace or a folder in it.
+ */
+function mountStaysInside(mount: unknown): boolean {
+  const fields = mountFields(mount);
+  if (fields === undefined) return false;
+  const { source, type } = fields;
+  if (type === 'volume' || type === 'tmpfs') return !/[\\/$~.%]/.test(source);
+  if (source !== WORKSPACE && !source.startsWith(`${WORKSPACE}/`)) return false;
+  const rest = source.slice(WORKSPACE.length);
+  return !rest.includes('$') && !rest.split('/').includes('..');
+}
+
+/** Whether what an access key holds is proven to give the container nothing of this machine. */
+function staysInside(key: (typeof DEVCONTAINER_ACCESS_KEYS)[number], value: unknown): boolean {
+  if (key === 'mounts') return Array.isArray(value) && value.every(mountStaysInside);
+  if (key === 'workspaceMount') return mountStaysInside(value);
+  if (key === 'runArgs') return runArgsStayInside(value);
+  if (key === 'privileged') return value === false;
+  return Array.isArray(value) && value.length === 0;
+}
+
+function devcontainerAccess(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
+  for (const key of DEVCONTAINER_ACCESS_KEYS) {
+    if (!Object.hasOwn(f.value, key)) continue;
+    const value = f.value[key];
+    if (staysInside(key, value)) continue;
+    const found = hit(
+      'devcontainer-command',
+      f.path,
+      lineOf(f.text, [quoted(key)]),
+      key,
+      boundedJson(value),
+    );
+    hits.push({ ...found, severity: 'error' });
+  }
+  const features = ownObject(f.value, DEVCONTAINER_FEATURES);
+  if (features !== undefined && Object.keys(features).length > 0)
+    hits.push(
+      hit(
+        'devcontainer-command',
+        f.path,
+        lineOf(f.text, [quoted(DEVCONTAINER_FEATURES)]),
+        DEVCONTAINER_FEATURES,
+        boundedJson(features, undefined, true),
+      ),
+    );
+  return hits;
+}
+
+export function devcontainer(f: JsonFile): AgentHit[] {
+  const hits: AgentHit[] = devcontainerAccess(f);
   for (const key of [DEVCONTAINER_HOST_KEY, ...DEVCONTAINER_KEYS]) {
     const value = lifecycleText(own(f.value, key));
     if (value === undefined) continue;
@@ -303,7 +425,7 @@ export function devcontainer(f: JsonFile): AgentHit[] {
       key === DEVCONTAINER_HOST_KEY ? 'devcontainer-host-command' : 'devcontainer-command';
     hits.push(hit(kind, f.path, lineOf(f.text, [quoted(key)]), key, value));
   }
-  return hits;
+  return byLine(hits);
 }
 
 // ---------------------------------------------------------------------------------------------

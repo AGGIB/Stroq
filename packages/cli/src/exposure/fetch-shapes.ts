@@ -49,3 +49,36 @@ export function runsFetchedOrHiddenCode(text: string): boolean {
     (INLINE_PROGRAM.test(text) && (text.includes('://') || FETCHER.test(text)))
   );
 }
+
+/** A program that sends what it is given over the network, as a word of its own. */
+const SENDER =
+  /(?:^|[\s;&|(`'"])(?:nc|ncat|netcat|socat|scp|sftp|rsync|ftp|tftp|telnet)(?:\.exe)?(?=$|[\s;&|)`'"])/i;
+/** An option of curl or wget that sends a body: data, a form, a file, a post or put request. */
+const UPLOAD =
+  /(?:^|\s)(?:-[A-Za-z]{0,6}[dFT]|--data[a-z-]{0,12}|--form[a-z-]{0,8}|--upload-file|--json|--post-(?:data|file)|--body-(?:data|file)|-X[ \t]*(?:POST|PUT|PATCH)|--request[ =\t]*(?:POST|PUT|PATCH))(?=$|[\s=@'"])/i;
+/** An address, or a program that talks to the network. */
+const NETWORK =
+  /:\/\/|(?:^|[\s;&|(`'"])(?:curl|wget|aria2c|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i;
+/** The home folder, or a file of credentials in it, however a shell or Windows spells it. */
+const SECRET_PATH =
+  /\$\{?home\b|\$env:(?:userprofile|home)\b|%userprofile%|(?:^|[\s'"=:(@<])~[\\/]|\/root\/|\.ssh\b|\.aws\b|\.npmrc\b|\.netrc\b|\.git-credentials|\.docker[\\/]config|\.kube\b|\.gnupg\b|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\bcredentials\b|\/etc\/(?:passwd|shadow)\b/i;
+/** A variable whose name says it holds a secret, as a shell, PowerShell, Windows or VS Code expands it. */
+const SECRET_VARIABLE =
+  /(?:\$\{?(?:env:|input:)?|%)[a-z0-9_]{0,40}(?:token|secret|passw(?:or)?d|credential|api_?key|private_?key|access_?key|auth|key)\b/i;
+
+/**
+ * Whether a command line, an address or a server's fields send something out: curl or wget given
+ * a body, a program that only sends (`nc`, `scp`), the home folder or a credential file read
+ * where the network is reached, or a variable that holds a secret put into what runs or where it
+ * goes. An install script, a dev container command or a server in this shape fails when a change
+ * brings it, as one that downloads and runs code does. A heuristic, linear in the text.
+ */
+export function sendsSecrets(text: string): boolean {
+  const network = NETWORK.test(text) || SENDER.test(text);
+  return (
+    SENDER.test(text) ||
+    (FETCHER.test(text) && UPLOAD.test(text)) ||
+    (network && SECRET_PATH.test(text)) ||
+    SECRET_VARIABLE.test(text)
+  );
+}

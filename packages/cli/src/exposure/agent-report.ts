@@ -2,6 +2,7 @@ import { showable } from '../install/inspect/safe-text.js';
 import { isFailing, startsWithoutAsking, type FailOn, type TaggedHit } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
+import { DEVCONTAINER_ACCESS_KEYS } from './agent-editor.js';
 import { PACKAGE_SETTING } from './agent-lines.js';
 
 /**
@@ -88,6 +89,10 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'devcontainer-host-command':
       return `initializeCommand runs on this machine before the container starts: ${value}`;
     case 'devcontainer-command':
+      if (h.name === 'features')
+        return `features adds code the dev container runs as root when it is built: ${value}`;
+      if ((DEVCONTAINER_ACCESS_KEYS as readonly string[]).includes(h.name))
+        return `${name} gives the dev container this machine's files, devices or powers, which its commands then reach: ${value}`;
       return `${name} runs in the dev container: ${value}`;
     case 'package-script-agent-path':
       return `npm runs the ${name} script on install, and it names an agent config file: ${value}`;
