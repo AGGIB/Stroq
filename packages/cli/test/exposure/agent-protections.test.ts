@@ -178,6 +178,21 @@ describe('a base that is not read', () => {
     );
   });
 
+  // The net walks a bounded number of values: a head past it is not read whole, whatever its
+  // readers made of it, so what it took away is not known.
+  it('fails a head too big for the net to walk', () => {
+    const pad = Array.from({ length: 20_001 }, () => 0);
+    const found = changed(
+      '.claude/settings.json',
+      json({ permissions: { ask: ['Bash(git push:*)'] }, futureSandbox: 1 }),
+      json({ pad }),
+    );
+    expect(found).toContain('changed unreadable-config .claude/settings.json protections');
+    expect(found).toContain(
+      'changed agent-permission-bypass .claude/settings.json permissions.ask',
+    );
+  });
+
   it('fails a deleted settings file whose base is too big to read', () => {
     const dir = scratchRepo(dirs);
     const big = json({ sandbox: { enabled: true }, pad: 'x'.repeat(1024 * 1024) });

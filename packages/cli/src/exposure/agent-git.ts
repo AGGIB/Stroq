@@ -348,12 +348,12 @@ function compare(top: string, base: string, head: string) {
     const base =
       source?.kind === 'text' ? protectiveKeys(p.path, source.text) : new Map<string, string>();
     if (base === undefined)
-      return [
-        protectionsUnknown(p.path, 'protections in the base unknown: its base does not parse'),
-      ];
-    // A head that does not parse fails by its readers already.
+      return [protectionsUnknown(p.path, 'protections in the base unknown: not read whole')];
+    // A head not read whole, past the walk or not parsed, fails whatever its readers made of it.
     const head = protectiveKeys(p.path, headText);
-    return head === undefined ? [] : protectiveChanges(p.path, head, base);
+    return head === undefined
+      ? [protectionsUnknown(p.path, 'protections in the head unknown: not read whole')]
+      : protectiveChanges(p.path, head, base);
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
@@ -721,7 +721,7 @@ function deletedProtections(top: string, changed: ReadonlyMap<string, Changed>):
     const base = protectiveKeys(f.path, text);
     out.push(
       ...(base === undefined
-        ? [protectionsUnknown(f.path, 'protections in the base unknown: its base does not parse')]
+        ? [protectionsUnknown(f.path, 'protections in the base unknown: not read whole')]
         : protectiveChanges(f.path, new Map(), base)),
     );
   }
