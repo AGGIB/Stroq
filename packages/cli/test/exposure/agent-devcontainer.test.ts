@@ -170,8 +170,6 @@ describe('what a dev container already there is built from', () => {
     '    build:',
     '      context: ../svc',
     '      dockerfile: build.docker',
-    '      additional_contexts:',
-    '        tools: ../tools',
     '    env_file: ../config/app.env',
     '  db:',
     '    build: ../db',
@@ -182,7 +180,6 @@ describe('what a dev container already there is built from', () => {
     '.devcontainer/compose.yml': COMPOSE,
     'svc/build.docker': 'FROM node\n',
     'svc/src/x.ts': '1\n',
-    'tools/t.sh': 'x\n',
     'config/app.env': 'A=1\n',
     'db/init.sql': 'x\n',
     'db/Dockerfile': 'FROM postgres\n',
@@ -190,13 +187,7 @@ describe('what a dev container already there is built from', () => {
   };
 
   it('fails a change to any file or folder a compose file names, by whatever name', () => {
-    for (const path of [
-      'svc/build.docker',
-      'svc/src/x.ts',
-      'tools/t.sh',
-      'config/app.env',
-      'db/init.sql',
-    ])
+    for (const path of ['svc/build.docker', 'svc/src/x.ts', 'config/app.env', 'db/init.sql'])
       expect(changedIn(named, { [path]: 'changed\n' })).toEqual([
         `changed devcontainer-setting ${path} build input changed`,
       ]);
@@ -219,6 +210,28 @@ describe('what a dev container already there is built from', () => {
       'extends a service',
       'services:\n  a:\n    extends:\n      file: ../c.yml\n      service: b\n',
     ],
+
+    // A build key that can name a local path (a cache, an SSH key, a secret) is not read either.
+    [
+      'builds from a local cache',
+      'services:\n  a:\n    build:\n      context: .\n      cache_from: [type=local,src=../cache]\n',
+    ],
+    [
+      'writes a local cache',
+      'services:\n  a:\n    build:\n      context: .\n      cache_to: [type=local,dest=../cache]\n',
+    ],
+    [
+      'hands a build an SSH key',
+      'services:\n  a:\n    build:\n      context: .\n      ssh: [default=../keys/id]\n',
+    ],
+    [
+      'hands a build another context',
+      'services:\n  a:\n    build:\n      context: .\n      additional_contexts: {t: ../tools}\n',
+    ],
+    [
+      'hands a build a secret',
+      'services:\n  a:\n    build:\n      context: .\n      secrets: [token]\n',
+    ],
     [
       'builds with a key this does not know',
       'services:\n  a:\n    build:\n      context: .\n      weird: 1\n',
@@ -227,11 +240,23 @@ describe('what a dev container already there is built from', () => {
     const files = {
       [DC]: json({ dockerComposeFile: 'compose.yml' }),
       '.devcontainer/compose.yml': compose,
+      '.devcontainer/Dockerfile': 'FROM node\n',
       'docs/a.md': 'a\n',
     };
     expect(changedIn(files, { 'docs/a.md': 'b\n' })).toEqual([
       'changed devcontainer-setting docs/a.md build input changed',
     ]);
+  });
+
+  it('passes an unrelated change when every build key is one that names no path', () => {
+    const files = {
+      [DC]: json({ dockerComposeFile: 'compose.yml' }),
+      '.devcontainer/compose.yml':
+        'services:\n  a:\n    build:\n      context: .\n      args: {A: 1}\n      target: dev\n',
+      '.devcontainer/Dockerfile': 'FROM node\n',
+      'docs/a.md': 'a\n',
+    };
+    expect(changedIn(files, { 'docs/a.md': 'b\n' })).toEqual([]);
   });
 
   // A disk that folds case opens `.DevContainer/x` as a file of `.devcontainer`.

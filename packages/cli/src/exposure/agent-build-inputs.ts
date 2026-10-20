@@ -33,15 +33,17 @@ const COMPOSE_OR_DOCKERFILE =
   /^(?:(?:docker-)?compose[^/]*\.ya?ml|dockerfile[^/]*|containerfile[^/]*|[^/]*\.(?:dockerfile|containerfile))$/;
 
 /** Keys of a compose file whose strings, wherever they are, are taken for paths from its folder. */
-const PATH_KEYS: ReadonlySet<string> = new Set(['file', 'env_file', 'additional_contexts']);
+const PATH_KEYS: ReadonlySet<string> = new Set(['file', 'env_file']);
 /** Keys that bring in another compose file: not followed, so every change counts. */
 const OTHER_FILES: ReadonlySet<string> = new Set(['include', 'extends']);
-/** The keys of a service's `build` this knows; any other makes every change count. */
+/**
+ * The keys of a service's `build` known to name no file: the context and the Dockerfile, read on
+ * their own, and settings that point at nothing on disk. Any other makes every change count, and so
+ * do the ones that can name a local path: `cache_from` and `cache_to` (`type=local,src=...`), `ssh`
+ * (a key file), `secrets` (a file the top-level `secrets` name), `additional_contexts`.
+ */
 const BUILD_KEYS: ReadonlySet<string> = new Set([
-  'additional_contexts',
   'args',
-  'cache_from',
-  'cache_to',
   'context',
   'dockerfile',
   'dockerfile_inline',
@@ -53,12 +55,8 @@ const BUILD_KEYS: ReadonlySet<string> = new Set([
   'no_cache',
   'platforms',
   'privileged',
-  'provenance',
   'pull',
-  'sbom',
-  'secrets',
   'shm_size',
-  'ssh',
   'tags',
   'target',
   'ulimits',
@@ -99,7 +97,7 @@ function servicePaths(build: unknown): string[] | undefined {
 /**
  * The paths a compose file names, from its folder, read without following it any further: each
  * service's build context (a string `build` is one) and its Dockerfile from that context, and
- * every string under `file`, `env_file` or `additional_contexts` anywhere. Undefined, so that every
+ * every string under `file` or `env_file` anywhere. Undefined, so that every
  * change counts, when the file does not read as YAML or is past the bound, brings in another
  * compose file (`include`, `extends`), builds with a key this does not know, or names a path with
  * a `$`, which compose expands from the environment.
