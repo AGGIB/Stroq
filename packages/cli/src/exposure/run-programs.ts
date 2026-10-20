@@ -296,7 +296,10 @@ const INTERPRETER_OPEN: ReadonlySet<string> = new Set(['task', 'test', 'bench', 
 /**
  * Programs that run no file of the repository and load no code from it: they print, notify, move
  * text or files about, or talk to the network. A program on no list here is not known, and
- * counts as one that could run anything.
+ * counts as one that could run anything. One that a config file, an env variable or an option can
+ * make start a program is left off, in doubt: `rg` (`RIPGREP_CONFIG_PATH` can add `--pre`), `wget`
+ * (`.wgetrc`), `gh` (aliases, extensions), `find` (`-exec`), `sort` (`--compress-program`), `yq`,
+ * `terminal-notifier` (`-execute`).
  */
 const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'echo',
@@ -305,7 +308,6 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'head',
   'tail',
   'wc',
-  'sort',
   'uniq',
   'cut',
   'tr',
@@ -332,13 +334,10 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'stat',
   'du',
   'df',
-  'find',
   'grep',
   'egrep',
   'fgrep',
-  'rg',
   'jq',
-  'yq',
   'diff',
   'cmp',
   'true',
@@ -370,11 +369,9 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'say',
   'afplay',
   'notify-send',
-  'terminal-notifier',
   'pbcopy',
   'pbpaste',
   'curl',
-  'wget',
   'md5sum',
   'shasum',
   'sha256sum',
@@ -387,7 +384,6 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'clang-format',
   'taplo',
   'yamllint',
-  'gh',
 ]);
 /** Git commands that run the repository's hooks, which can run anything. */
 const GIT_RUNS_HOOKS: ReadonlySet<string> = new Set([
@@ -490,8 +486,6 @@ function reachOf(program: string, args: readonly string[]): Reach {
   // what it is, is read by its name.
   const absolute = program.startsWith('/') || /^[A-Za-z]:[\\/]/.test(program);
   if (/[\\/]/.test(program) && !absolute && !program.startsWith('~')) return 'runs';
-  // rg runs the program `--pre` names on every file it searches.
-  if (name === 'rg' && args.some((a) => a === '--pre' || a.startsWith('--pre='))) return 'open';
   if (RUNS_NOTHING.has(name)) return 'nothing';
   return 'open';
 }

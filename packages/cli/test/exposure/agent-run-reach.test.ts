@@ -65,8 +65,18 @@ describe('rg given a preprocessor', () => {
     },
   );
 
-  it('keeps a plain rg one that runs nothing', () => {
-    expect(reachesOf('rg -n foo src')).toEqual(['nothing']);
+  // rg reads RIPGREP_CONFIG_PATH, which can add --pre; others read a config, an env variable or an
+  // option that can start a program. None is taken for a program that runs nothing.
+  it.each([
+    'rg -n foo src',
+    'wget https://example.invalid/x',
+    'gh pr list',
+    'find . -name x',
+    'sort a.txt',
+    'yq .a x.yml',
+    'terminal-notifier -message hi',
+  ])('%s reaches anything too', (command) => {
+    expect(reachesOf(command)).toEqual(['open']);
   });
 
   it('fails a change to code under a hook that runs it', () => {
