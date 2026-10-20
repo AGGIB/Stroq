@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import type { ChangeStatus, TaggedHit } from './agent-change.js';
+import { startsWithoutAsking, type ChangeStatus, type TaggedHit } from './agent-change.js';
 import { hit, type AgentKind, type Severity } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { byPath, under } from './git-tree.js';
@@ -562,10 +562,13 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
     const name = `${h.name} ${noun} in ${h.file}`;
     follower.begin();
     // As much as the entry that runs it: a hook's script fails, an ordinary server's code is
-    // listed to review, as the server is. A variable already there is a warning only for what it
-    // says itself: a file it names, or one put in a folder it names (PATH), fails when it changes.
+    // listed to review, as the server is, unless its host starts it without asking. A variable
+    // already there is a warning only for what it says itself: a file it names, or one put in a
+    // folder it names (PATH), fails when it changes.
     const severity: Severity =
-      h.severity === 'error' || h.kind === 'agent-env' ? 'error' : 'warning';
+      h.severity === 'error' || h.kind === 'agent-env' || startsWithoutAsking(h)
+        ? 'error'
+        : 'warning';
     const add = (f: Found): void => {
       const key = `${f.file}\0${f.value}\0${name}`;
       if (!out.has(key))

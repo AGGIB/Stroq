@@ -1,5 +1,5 @@
 import { showable } from '../install/inspect/safe-text.js';
-import { isFailing, type FailOn, type TaggedHit } from './agent-change.js';
+import { isFailing, startsWithoutAsking, type FailOn, type TaggedHit } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import type { AgentHit } from './agent-kinds.js';
 
@@ -64,10 +64,12 @@ function sentence(h: AgentHit, q: Quote): string {
         ? 'an MCP server starts a shell or inline code (the file could not be fully read)'
         : `MCP server ${name} starts a shell or inline code, or its env or folder can make it run other code: ${value}`;
     case 'mcp-server':
-      // Only an approval makes an ordinary server an error: see `escalateApproved`.
-      return h.severity === 'error'
-        ? `MCP server ${name} starts without asking, since the settings approve it: ${value}`
-        : `MCP server ${name} starts: ${value}`;
+      // An approval makes an ordinary server an error (see `escalateApproved`), and so does a
+      // change that adds one to a host that does not ask (see `startsWithoutAsking`).
+      if (h.severity !== 'error') return `MCP server ${name} starts: ${value}`;
+      return startsWithoutAsking(h)
+        ? `MCP server ${name} starts without asking once the folder is trusted, as this host starts every server of the list: ${value}`
+        : `MCP server ${name} starts without asking, since the settings approve it: ${value}`;
     case 'editor-autorun-task':
       if (unparsed) return 'a task runs when the folder opens (the file could not be fully read)';
       return h.name === 'task.allowAutomaticTasks'

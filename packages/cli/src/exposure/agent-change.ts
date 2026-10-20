@@ -70,6 +70,29 @@ const FAILS_WHEN_NEW: ReadonlySet<AgentKind> = new Set([
  */
 const SHARED_FOLDER = /^(?:\/private)?\/(?:tmp|var\/tmp|dev\/shm)(?:\/|$)/i;
 
+/**
+ * Server lists whose host asks before it starts each server: Claude Code's `.mcp.json` (unless
+ * settings approve it, see `escalateApproved`) and VS Code's workspace servers. The other hosts
+ * (Codex, Gemini, Qwen, opencode, Zed, Cursor, Roo, Kiro and the like) start every server of the
+ * project's list once the folder is trusted, the moment a hook would run.
+ */
+function asksPerServer(file: string): boolean {
+  const lower = file.toLowerCase();
+  const base = lower.slice(lower.lastIndexOf('/') + 1);
+  return (
+    base === '.mcp.json' ||
+    lower === '.vscode/mcp.json' ||
+    lower.endsWith('/.vscode/mcp.json') ||
+    lower === '.vscode/settings.json' ||
+    lower.endsWith('/.vscode/settings.json') ||
+    lower.endsWith('.code-workspace')
+  );
+}
+
+/** An ordinary server in a list whose host starts it without asking. */
+export const startsWithoutAsking = (h: AgentHit): boolean =>
+  h.kind === 'mcp-server' && !asksPerServer(h.file);
+
 /** Whether an absolute link target, once `//`, `.` and `..` are resolved, is in a shared folder. */
 export const inSharedFolder = (target: string): boolean =>
   target.startsWith('/') && SHARED_FOLDER.test(posix.normalize(target));
@@ -91,6 +114,7 @@ export function settle(h: AgentHit, status: ChangeStatus): TaggedHit {
       : { ...h, status };
   const fails =
     FAILS_WHEN_NEW.has(h.kind) ||
+    startsWithoutAsking(h) ||
     (FAILS_IN_SHAPE.has(h.kind) && h.severity !== 'error' && runsFetchedOrHiddenCode(h.value));
   return fails ? { ...h, severity: 'error', status } : { ...h, status };
 }
