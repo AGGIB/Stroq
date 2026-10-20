@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { GIT_CAPS, agentChanges } from '../../src/exposure/agent-git.js';
@@ -302,6 +302,9 @@ describe('the repository it checks', () => {
   it('names the top of the repository that holds the folder it was given', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'sub/README.md': 'x\n' });
-    expect(agentChanges(join(dir, 'sub'), base).root).toBe(realpathSync(dir));
+    // Git names the folder in full; a temporary folder can be RUNNER~1 on Windows: compared as one
+    // spelling, the real path with `/` between the parts.
+    const spelled = (path: string): string => realpathSync.native(path).split(sep).join('/');
+    expect(spelled(agentChanges(join(dir, 'sub'), base).root)).toBe(spelled(dir));
   });
 });

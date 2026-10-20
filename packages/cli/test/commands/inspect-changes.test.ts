@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatChange, runInspect } from '../../src/commands/inspect.js';
@@ -275,14 +275,20 @@ describe('stroq inspect --changed-from', () => {
     const base = commit(dir, { 'sub/README.md': 'x\n' });
     commit(dir, { '.claude/settings.json': KEYV_SETTINGS });
     const sub = join(dir, 'sub');
+    // One spelling of a folder on every system: its real path, long names on Windows (a temporary
+    // folder can be RUNNER~1 there, while git names it in full), with `/` between the parts.
+    const spelled = (path: string): string => realpathSync.native(path).split(sep).join('/');
     const text = inspect(sub, '--changed-from', base);
-    expect(text.out).toContain(`It checks the whole repository at ${realpathSync(dir)}`);
+    expect(text.out).toContain(
+      `It checks the whole repository at ${spelled(dir)}, not only ${spelled(sub)}.`,
+    );
     const record = JSON.parse(inspect(sub, '--changed-from', base, '--format', 'json').out) as {
       dir: string;
       root: string;
       capped: boolean;
     };
-    expect(record).toMatchObject({ dir: sub, root: realpathSync(dir), capped: false });
+    expect(record).toMatchObject({ dir: sub, capped: false });
+    expect(spelled(record.root)).toBe(spelled(dir));
     expect(inspect(dir, '--changed-from', base).out).not.toContain(
       'It checks the whole repository',
     );

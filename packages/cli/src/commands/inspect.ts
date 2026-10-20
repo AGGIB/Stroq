@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   FAIL_ON,
@@ -160,7 +160,8 @@ const CAPPED =
 
 /**
  * The result of a change: the failing findings first, then the others, then the verdict. `dir`
- * is the real path of the folder given, to say so when the repository's top is somewhere else.
+ * is the real path of the folder given, to say so when the repository's top is somewhere else;
+ * both it and `changes.root` come in one spelling (see `spelled`), so one folder reads as one.
  */
 export function formatChange(
   changedFrom: string,
@@ -200,12 +201,19 @@ export function formatChange(
 }
 
 const asJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
-const tryRealpath = (path: string): string => {
+/**
+ * A path in one spelling, so two names of one folder compare equal and print alike: its real path
+ * as the system gives it (long names, not `RUNNER~1`, on Windows), with `/` between the parts.
+ * Git spells the top of a repository `C:/Users/...`; a temporary folder can be `C:\Users\RUNNER~1`.
+ */
+const spelled = (path: string): string => {
+  let real = path;
   try {
-    return realpathSync(path);
+    real = realpathSync.native(path);
   } catch {
-    return path;
+    // Not there to resolve: compared and shown as given.
   }
+  return real.split(sep).join('/');
 };
 /**
  * The findings as JSON, each value as it may be shown: a value as the repository holds it, and
@@ -299,7 +307,7 @@ function inspectChange(dir: string, format: InspectFormat, failOn: FailOn, rev: 
     return EXIT.error;
   }
   const failing = changes.hits.filter((h) => isFailing(h, failOn)).length;
-  const realDir = tryRealpath(dir);
+  const realDir = spelled(dir);
   write({
     format,
     failOn,
@@ -307,7 +315,7 @@ function inspectChange(dir: string, format: InspectFormat, failOn: FailOn, rev: 
     surface: EMPTY_SURFACE,
     preTrust: [],
     summary: { failOn, changedFrom: rev, base: changes.base, capped: changes.capped },
-    text: () => formatChange(rev, changes, failOn, realDir),
+    text: () => formatChange(rev, { ...changes, root: spelled(changes.root) }, failOn, realDir),
     json: () => ({
       version: 1,
       dir,
