@@ -96,7 +96,8 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'nested-bare-repo':
       return 'a bare git repository is committed here as plain files';
     case 'unreadable-config':
-      if (unparsed) return 'could not be read, and it names a key that runs something';
+      if (unparsed)
+        return "could not be read, and a host's own reader may still find what it runs in it";
       return h.name === 'stopped'
         ? 'could not be read to the end, so what it runs is not known'
         : `not read: ${value}`;

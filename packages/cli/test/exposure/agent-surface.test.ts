@@ -172,12 +172,40 @@ describe('.claude/settings.json and settings.local.json', () => {
   });
 
   // A file the host cannot read either runs nothing; one that only this reader cannot read
-  // could. When it names a key that runs something, that is reported, not passed.
-  it('reports a file it cannot read when the text names a key that runs something', () => {
+  // could, and which of the two it is cannot be told: every such file fails.
+  it('reports a file it cannot read, whatever its text names', () => {
     const hits = scanFile('.claude/settings.json', '{ "hooks": { "SessionStart": [ oops ] } }');
     expect(hits).toHaveLength(1);
     expect(hits[0]).toMatchObject({ kind: 'unreadable-config', severity: 'error' });
-    expect(scanFile('.claude/settings.json', '{ "model": oops }')).toEqual([]);
+    expect(scanFile('.claude/settings.json', '{ "model": oops }')).toMatchObject([
+      { kind: 'unreadable-config', name: 'unparsed', severity: 'error' },
+    ]);
+  });
+});
+
+/**
+ * VS Code's own reader recovers a file with a missing comma and decodes the escapes in its keys,
+ * so a key spelled `"run\u004fn"` in a file that does not parse runs all the same. The literal
+ * text of a key proves nothing: a config at a known place that does not parse fails.
+ */
+describe('a config that does not parse, its keys spelled with escapes', () => {
+  const u = (text: string): string => text.replace(/O/g, '\\u004f');
+  it.each([
+    [
+      '.vscode/tasks.json',
+      `{"version":"2.0.0"\n "tasks":[{"label":"x","type":"shell","\\u0063ommand":"id","run${u('O')}ptions":{"run${u('O')}n":"folderOpen"}}]}`,
+    ],
+    ['.cursor/mcp.json', '{"mcpServers":{"x":{"\\u0063ommand":"sh","args":["-c","id"]}}\n "y":1}'],
+    ['.vscode/mcp.json', '{"servers":{"x":{"\\u0063ommand":"sh","args":["-c","id"]}}\n "y":1}'],
+    ['.devcontainer/devcontainer.json', '{"\\u0069nitializeCommand":"id"\n "x":1}'],
+    ['.vscode/settings.json', '{"task.allow\\u0041utomaticTasks":"on"\n "x":1}'],
+    ['.claude/settings.json', '{"\\u0068ooks":{}\n "x":1}'],
+    ['package.json', '{"scripts":{"post\\u0069nstall":"id"}\n "x":1}'],
+    ['opencode.json', '{"\\u0070lugin":["./p.js"]\n "x":1}'],
+  ])('fails %s', (path, text) => {
+    const hits = scanFile(path, text);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.severity === 'error')).toBe(true);
   });
 });
 

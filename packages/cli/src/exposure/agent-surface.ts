@@ -52,9 +52,9 @@ type Reader = (path: string, text: string) => AgentHit[];
 type Fallback = (path: string, raw: string, stripped: string) => AgentHit[];
 
 /**
- * Reads JSON with comments; a file that does not parse goes to `fallback`, never to nothing. One
- * whose bytes are not text (a NUL, or bytes that are not UTF-8, as a filter such as git-crypt
- * stores it) is not read at all: what a checkout writes there is not this.
+ * Reads JSON with comments; a file that does not parse goes to `fallback`, which always reports
+ * it: a host's own reader may recover what this one rejects (VS Code's reads past a missing comma
+ * and decodes the `\u` escapes a key can be spelled with), so its text proves nothing.
  */
 const json =
   (read: (f: JsonFile) => AgentHit[], fallback: Fallback): Reader =>
@@ -64,21 +64,24 @@ const json =
     try {
       value = JSON.parse(stripped);
     } catch {
-      const hits = fallback(path, raw, stripped);
-      if (hits.length > 0 || !(raw.includes('\u0000') || raw.includes('�'))) return hits;
-      const why = `its bytes are not text, as a checkout filter stores a file (${digestOf(raw)})`;
-      return [hit('unreadable-config', path, 1, 'not text', why)];
+      return fallback(path, raw, stripped);
     }
     return isPlainObject(value) ? read({ path, text: stripped, value }) : [];
   };
 
-/** A file that could not be read is reported when its text names a key that runs something. */
+/**
+ * A file that could not be read, reported whatever it holds; `keys` only place it on a line. One
+ * whose bytes are not text (a NUL, or bytes that are not UTF-8, as a filter such as git-crypt
+ * stores it) is said to be so: what a checkout writes there is not this.
+ */
 const mentions =
   (keys: readonly string[]): Fallback =>
   (path, raw, stripped) => {
-    const key = keys.find((k) => stripped.includes(k));
-    if (key === undefined) return [];
-    return [hit('unreadable-config', path, lineOf(stripped, [key]), 'unparsed', digestOf(raw))];
+    if (raw.includes('\u0000') || raw.includes('\uFFFD')) {
+      const why = `its bytes are not text, as a checkout filter stores a file (${digestOf(raw)})`;
+      return [hit('unreadable-config', path, 1, 'not text', why)];
+    }
+    return [hit('unreadable-config', path, lineOf(stripped, keys), 'unparsed', digestOf(raw))];
   };
 
 const either =
@@ -121,8 +124,9 @@ const editorText: Fallback = (path, raw, stripped) =>
       ]
     : [];
 
-const devcontainerText: Fallback = (path, raw, stripped) =>
-  [DEVCONTAINER_HOST_KEY, ...DEVCONTAINER_KEYS]
+const devcontainerText: Fallback = (path, raw, stripped) => {
+  const keys = [DEVCONTAINER_HOST_KEY, ...DEVCONTAINER_KEYS];
+  const found = keys
     .filter((key) => stripped.includes(`"${key}"`))
     .map((key) =>
       hit(
@@ -133,6 +137,9 @@ const devcontainerText: Fallback = (path, raw, stripped) =>
         digestOf(raw),
       ),
     );
+  // Whatever else it holds is not known either: the file fails as well.
+  return [...found, ...mentions(keys)(path, raw, stripped)];
+};
 
 const READERS = {
   claude: json(claudeSettings, mentions(CLAUDE_SETTINGS_KEYS)),
@@ -158,7 +165,7 @@ const READERS = {
   settings: json(vscodeSettingsFile, either(editorText, mentions(['autoApprove', '"servers"']))),
   workspace: json(codeWorkspace, either(editorText, mentions(['autoApprove', ...RUN_KEYS]))),
   devcontainer: json(devcontainer, devcontainerText),
-  package: json(packageScripts, () => []),
+  package: json(packageScripts, mentions(['"scripts"'])),
   opencode: json(opencodeConfig, mentions(['"mcp"', '"plugin"'])),
   zed: json(zedSettings, mentions(['context_servers', '"binary"'])),
   plugin: pluginCode,
