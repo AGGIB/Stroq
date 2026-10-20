@@ -17,15 +17,25 @@ const SLASH = 0x2f;
 const STAR = 0x2a;
 const COMMA = 0x2c;
 const NEWLINE = 0x0a;
+const RETURN = 0x0d;
+const LINE_SEPARATOR = 0x2028;
+const PARAGRAPH_SEPARATOR = 0x2029;
 const BYTE_ORDER_MARK = 0xfeff;
 
 const isJsonSpace = (code: number): boolean =>
-  code === 0x20 || code === 0x09 || code === NEWLINE || code === 0x0d;
+  code === 0x20 || code === 0x09 || code === NEWLINE || code === RETURN;
 
-/** Where a line comment that starts at `start` ends: at its newline, which is kept. */
+/**
+ * The line breaks of VS Code's reader (jsonc-parser): a newline, a bare carriage return, U+2028 and
+ * U+2029. Any of them ends a `//` comment there, so a task after `// note` and a lone `\r` runs.
+ */
+const isLineBreak = (code: number): boolean =>
+  code === NEWLINE || code === RETURN || code === LINE_SEPARATOR || code === PARAGRAPH_SEPARATOR;
+
+/** Where a line comment that starts at `start` ends: at its line break, which is kept. */
 function lineCommentEnd(text: string, start: number): number {
-  const end = text.indexOf('\n', start);
-  return end === -1 ? text.length : end;
+  for (let i = start; i < text.length; i += 1) if (isLineBreak(text.charCodeAt(i))) return i;
+  return text.length;
 }
 
 /** Where a block comment that starts at `start` ends, past its `*\/`; -1 when it never does. */
@@ -46,8 +56,10 @@ function isTrailingComma(chars: readonly string[], at: number): boolean {
 
 /**
  * `text` with its comments, its trailing commas and a leading byte order mark turned into
- * spaces. Every newline stays where it was, so an offset in the result is the same offset in
- * the file. A block comment that is never closed is left as it is, and the parse then fails.
+ * spaces, and U+2028 and U+2029 between tokens too, which VS Code reads as line breaks and
+ * `JSON.parse` refuses. Every newline stays where it was, so an offset in the result is the same
+ * offset in the file. A block comment that is never closed is left as it is, and the parse then
+ * fails.
  */
 export function stripJsonc(text: string): string {
   const chars = text.split('');
@@ -65,6 +77,8 @@ export function stripJsonc(text: string): string {
     }
     if (code === QUOTE) {
       inString = true;
+    } else if (code === LINE_SEPARATOR || code === PARAGRAPH_SEPARATOR) {
+      chars[i] = ' ';
     } else if (code === SLASH && text.charCodeAt(i + 1) === SLASH) {
       const end = lineCommentEnd(text, i);
       blank(i, end);

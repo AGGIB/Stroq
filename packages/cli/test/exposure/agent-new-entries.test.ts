@@ -236,6 +236,32 @@ describe('a change that adds what was a warning', () => {
   });
 });
 
+/**
+ * VS Code ends a `//` comment at a bare carriage return, U+2028 or U+2029 as well as at a newline.
+ * A task written after one on the same "line" runs when the folder opens, so it must fail.
+ */
+describe('a folder-open task after a comment that a carriage return or a separator ends', () => {
+  const task =
+    '"tasks": [{"label": "x", "type": "shell", "command": "node evil.js", "runOptions": {"runOn": "folderOpen"}}]';
+
+  it.each([
+    ['\\r', '\r'],
+    ['U+2028', ' '],
+    ['U+2029', ' '],
+  ])('fails in a change and in the reading of the folder (%s)', (_, eol) => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    commitFiles(dir, { '.vscode/tasks.json': `{"version": "2.0.0" // note${eol}, ${task}}` });
+    expect(failing(agentChanges(dir, base).hits)).toEqual([
+      'new editor-autorun-task .vscode/tasks.json x',
+    ]);
+    const plain = tagChanges(agentSurface(dir).hits, null);
+    expect(plain.filter((h) => isFailing(h, 'any')).map((h) => `${h.kind} ${h.name}`)).toEqual([
+      'editor-autorun-task x',
+    ]);
+  });
+});
+
 describe('a link out of the repository', () => {
   const posixOnly = it.skipIf(process.platform === 'win32');
 

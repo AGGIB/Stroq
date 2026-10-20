@@ -43,6 +43,9 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ...[
     '/*',
     '//',
+    // Comments that a carriage return or a separator ends, as VS Code ends them.
+    '//\r',
+    '//  ',
     '/',
     '*/',
     '"',

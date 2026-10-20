@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { lineOf, parseJsonc, stripJsonc } from '../../src/exposure/jsonc.js';
 
@@ -49,6 +50,80 @@ describe('parseJsonc', () => {
   it('answers undefined for a document nested deeper than the parser can walk', () => {
     const deep = `${'['.repeat(200_000)}${']'.repeat(200_000)}`;
     expect(() => parseJsonc(deep)).not.toThrow();
+  });
+});
+
+/**
+ * VS Code's own reader (jsonc-parser) ends a `//` comment at any of four line breaks: `\n`, a bare
+ * `\r`, U+2028 and U+2029, and reads those as blank space between tokens. A reader that ended the
+ * comment only at `\n` read `"version": "2.0.0" // note<CR>, "tasks": [...]` as a file with no
+ * tasks, while VS Code ran its folder-open task. `vscodeReading` is that rule written out on its
+ * own, a scan of the text the way jsonc-parser's scanner walks it, and `parseJsonc` must agree.
+ */
+const VSCODE_BREAKS = new Set(['\n', '\r', ' ', ' ']);
+
+function vscodeReading(text: string): unknown {
+  let out = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i] as string;
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && text[i + 1] === '/') {
+      // A comment is blank space between tokens: `1/* */1` is two numbers, not `11`.
+      while (i + 1 < text.length && !VSCODE_BREAKS.has(text[i + 1] as string)) i += 1;
+      out += ' ';
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end === -1) return undefined;
+      i = end + 1;
+      out += ' ';
+    } else {
+      out += c === ' ' || c === ' ' ? ' ' : c;
+    }
+  }
+  try {
+    return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+const FOLDER_OPEN =
+  '"tasks": [{"label": "x", "type": "shell", "command": "node evil.js", "runOptions": {"runOn": "folderOpen"}}]';
+
+describe('a line comment ends where VS Code ends it', () => {
+  it.each([
+    ['a bare carriage return', '\r'],
+    ['a line separator', ' '],
+    ['a paragraph separator', ' '],
+    ['a newline', '\n'],
+    ['a carriage return and a newline', '\r\n'],
+  ])('at %s', (_, eol) => {
+    const text = `{"version": "2.0.0" // note${eol}, ${FOLDER_OPEN}}`;
+    const read = parseJsonc(text);
+    expect(read).toEqual(vscodeReading(text));
+    expect(read).toMatchObject({ tasks: [{ runOptions: { runOn: 'folderOpen' } }] });
+  });
+
+  it('keeps a line separator inside a string as part of the string, as both readers do', () => {
+    const text = '{"a": "x y" // c , "b": 1}';
+    expect(parseJsonc(text)).toEqual({ a: 'x y', b: 1 });
+    expect(parseJsonc(text)).toEqual(vscodeReading(text));
+  });
+
+  it('agrees with that reading on every mix of comments, breaks and commas', () => {
+    const pieces = ['{', '}', '[', ']', '"a"', '"//"', ':', '1', ',', ' ', '// c', '/* d */'];
+    const breaks = ['\n', '\r', ' ', ' ', '\r\n'];
+    fc.assert(
+      fc.property(fc.array(fc.constantFrom(...pieces, ...breaks), { maxLength: 24 }), (parts) => {
+        const text = parts.join('');
+        expect(parseJsonc(text)).toEqual(vscodeReading(text));
+      }),
+      { numRuns: 2000 },
+    );
   });
 });
 
