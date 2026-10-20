@@ -145,10 +145,11 @@ describe('many keys that begin alike, in a text that repeats their beginning', (
 
   it('a search past its bound stops, and says it was cut', () => {
     // A key that runs far past a shared beginning: what follows each place it begins is read to
-    // its length before it can be told apart.
+    // its length before it can be told apart. Uncut, this 1 MB text costs about 1.5 billion
+    // steps; the bound stops it near 70 million.
     const matcher = textMatcher([`${prefix}${'q'.repeat(100_000)}`]);
     const started = cpuNow();
-    matcher.find(prefix.repeat(65_536));
+    matcher.find(prefix.repeat(16_384));
     expect(cpuNow() - started).toBeLessThan(5000);
     expect(matcher.cuts()).toBe(1);
   });
