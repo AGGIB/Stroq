@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs';
+import { rmSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
@@ -265,5 +266,43 @@ describe('a line the change adds to the config of a package manager', () => {
     expect(shown).not.toContain(secret.slice(4, 20));
     expect(shown).not.toContain('_authToken');
     expect(shown).not.toContain('registry.npmjs.org');
+  });
+});
+
+/**
+ * A package manager opens its config through links, as a host opens an agent config: a change to
+ * the file a link leads to, or to a link on the way, changes what it reads.
+ */
+describe('a package manager config behind a link', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+
+  posixOnly('fails a change to the file the config links to', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { 'config/npmrc': 'fund=false\n' });
+    symlinkSync('config/npmrc', join(dir, '.npmrc'));
+    const base = commitFiles(dir);
+    commitFiles(dir, { 'config/npmrc': 'script-shell=./evil.sh\n' });
+    expect(failing(agentChanges(dir, base).hits)).toEqual(['changed agent-api-redirect .npmrc']);
+  });
+
+  posixOnly('fails a folder link a change points at another config', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { 'pkgs/a/.npmrc': 'fund=false\n', 'pkgs/b/.npmrc': 'registry=x\n' });
+    symlinkSync('pkgs/a', join(dir, 'app'));
+    const base = commitFiles(dir);
+    rmSync(join(dir, 'app'));
+    symlinkSync('pkgs/b', join(dir, 'app'));
+    commitFiles(dir);
+    expect(failing(agentChanges(dir, base).hits)).toEqual([
+      'changed agent-api-redirect app/.npmrc',
+    ]);
+  });
+
+  posixOnly('fails a config a change links out of the repository', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    symlinkSync('/etc/stroq-test-npmrc', join(dir, '.npmrc'));
+    commitFiles(dir);
+    expect(failing(agentChanges(dir, base).hits)).toContain('new agent-api-redirect .npmrc');
   });
 });

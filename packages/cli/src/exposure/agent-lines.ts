@@ -91,16 +91,38 @@ function setting(path: string): LineRule {
 const bounded = (line: string): string =>
   line.length <= LINE_MAX ? line : `${line.slice(0, LINE_MAX)}... (${digestOf(line)})`;
 
+/**
+ * What makes a package manager's lines other than these: a carriage return that ends no line, which
+ * npm, yarn and bun read as the end of one, a NUL, another control byte, or a byte that was not
+ * UTF-8. A file that holds one fails as a whole.
+ */
+const HIDDEN_BREAK = /\r(?!\n)|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]/;
+
+/** The files whose lines a `;` makes a comment of: the ini ones. YAML and TOML read it as text. */
+const SEMICOLON_COMMENTS: ReadonlySet<string> = new Set(['.npmrc', '.yarnrc']);
+
 /** The hits of one file's lines, with the line each is on. */
 export function lineHits(path: string, text: string): AgentHit[] {
   const name = ruleName(path);
   const rule = RULES.get(name)?.(path);
   if (rule === undefined) return [];
+  const isPackage = PACKAGE_CONFIGS.has(name);
+  if (isPackage && HIDDEN_BREAK.test(text))
+    return [
+      hit(
+        'unreadable-config',
+        path,
+        1,
+        'lines',
+        'it holds a carriage return that ends no line, a NUL or another control byte, which its program may read as another line (its text is not shown)',
+      ),
+    ];
+  const semicolon = SEMICOLON_COMMENTS.has(name);
   const hits: AgentHit[] = [];
   let left = 0;
-  text.split('\n').forEach((raw, i) => {
+  text.split(isPackage ? /\r\n|\r|\n/ : '\n').forEach((raw, i) => {
     const line = raw.trim();
-    if (line === '' || line.startsWith('#') || line.startsWith(';')) return;
+    if (line === '' || line.startsWith('#') || (semicolon && line.startsWith(';'))) return;
     const found = rule(line);
     if (found === undefined) return;
     if (hits.length < MAX_LINES) hits.push({ ...found, line: i + 1 });

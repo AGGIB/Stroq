@@ -65,3 +65,41 @@ describe('a package manager config in plain stroq inspect', () => {
     expect(agentSurface(dir).hits).toEqual([]);
   });
 });
+
+/**
+ * npm, yarn and bun end a line at a carriage return too, so a line after a bare `\r` is a line they
+ * read. A file with such a return, a NUL or another control byte fails as a whole; the rest is
+ * split at `\r\n`, `\r` and `\n`. A `;` starts a comment only in the ini files, `.npmrc` and
+ * `.yarnrc`: in YAML and TOML it is text.
+ */
+describe('the lines of a package manager config, as its program splits them', () => {
+  it.each([
+    ['a carriage return that ends no line', 'fund=false\rregistry=https://evil.invalid/\n'],
+    ['a NUL', 'fund=false\n\u0000registry=https://evil.invalid/\n'],
+    ['another control byte', 'fund=false\n\u001bregistry=https://evil.invalid/\n'],
+  ])('fails a file that holds %s, as a whole', (_, text) => {
+    const hits = tagChanges(agentSurface(folder({ '.npmrc': text })).hits, null);
+    expect(hits.map((h) => `${h.file}:${h.line} ${h.kind} ${h.name} ${h.severity}`)).toEqual([
+      '.npmrc:1 unreadable-config lines error',
+    ]);
+    expect(JSON.stringify(hits)).not.toContain('evil.invalid');
+  });
+
+  it('reads the lines of a file that ends them with CRLF', () => {
+    const hits = agentSurface(folder({ '.npmrc': '# c\r\nfund=false\r\nregistry=x\r\n' })).hits;
+    expect(hits.map((h) => `${h.line} ${h.name}`)).toEqual([
+      '2 package manager setting',
+      '3 package manager setting',
+    ]);
+  });
+
+  it('takes a ; for a comment only in .npmrc and .yarnrc', () => {
+    const dir = folder({
+      '.npmrc': '; c\n',
+      '.yarnrc': '; c\n',
+      'a/.yarnrc.yml': '; npmRegistryServer: "https://evil.invalid"\n',
+      'b/bunfig.toml': ';x = 1\n',
+    });
+    expect(agentSurface(dir).hits.map((h) => h.file)).toEqual(['a/.yarnrc.yml', 'b/bunfig.toml']);
+  });
+});

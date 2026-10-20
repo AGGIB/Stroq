@@ -10,7 +10,8 @@ import { isBuildInput } from './agent-editor.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
-import { PACKAGE_CONFIG, isLineFile, isPackageConfig, keyed, lineHits } from './agent-lines.js';
+import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
+import { packageConfigChanges, withAllLinks } from './package-configs.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -313,18 +314,21 @@ function compare(top: string, base: string, head: string) {
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
+  // Every link of the tree, read once and only when a reading below needs them all.
+  let all: ReturnType<typeof withAllLinks> | undefined;
+  const linked = () => (all ??= withAllLinks(top, tree, links.view, MAX_RUN_LINKS));
   const runs = runView(top, tree, sorted, changed, links.view, found);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
     ...runFileChanges(found, runs),
-    ...buildInputs(top, tree, links.view, found, changed),
+    ...buildInputs(top, tree, () => linked().view, found, changed),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
     ...skippedConfigs(changed),
     ...lineChanges(top, tree, changed),
-    ...packageConfigChanges(tree, changed),
+    ...packageConfigChanges(tree, linked(), changed, GIT_CAPS.steps),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
   ];
@@ -341,21 +345,11 @@ function compare(top: string, base: string, head: string) {
 function buildInputs(
   top: string,
   tree: ReadonlyMap<string, TreeEntry>,
-  view: TreeView,
+  view: () => TreeView,
   found: readonly TaggedHit[],
   changed: ReadonlyMap<string, Changed>,
 ): TaggedHit[] {
   if (!found.some((h) => h.kind === 'devcontainer-setting' && isBuildInput(h.name))) return [];
-  const missing = view.sorted
-    .filter((p) => tree.get(p)?.mode === SYMLINK && !view.targets.has(p))
-    .slice(0, MAX_RUN_LINKS);
-  const targets = new Map(view.targets);
-  const small = missing.map((p) => entryAt(tree, p)).filter((e) => e.size <= MAX_LINK_BYTES);
-  const blobs = readBlobs(top, small);
-  for (const p of missing) {
-    const text = blobs.get(entryAt(tree, p).oid);
-    if (text !== undefined && !text.includes(REPLACEMENT)) targets.set(p, text);
-  }
   const readText = (paths: readonly string[]): ReadonlyMap<string, string> => {
     const entries = paths.flatMap((p) => {
       const e = tree.get(p);
@@ -369,7 +363,7 @@ function buildInputs(
       entries.flatMap(([p, e]) => (texts.has(e.oid) ? [[p, texts.get(e.oid) as string]] : [])),
     );
   };
-  return buildInputChanges(found, changed, { ...view, targets }, readText);
+  return buildInputChanges(found, changed, view(), readText);
 }
 
 /**
@@ -458,32 +452,6 @@ const FOLDED_ALIAS =
 
 /** The most files whose lines `lineChanges` reads in one check. */
 const MAX_LINE_FILES = 64;
-
-/**
- * The config of npm, yarn or bun that a change adds, edits, retypes or deletes, in any folder: one
- * failing entry for the file, whatever byte changed, since which key a package manager reads, and
- * how, is not worked out here. Nothing of its text is read or shown; the value is a digest under a
- * key made for this run.
- */
-function packageConfigChanges(
-  tree: ReadonlyMap<string, TreeEntry>,
-  changed: ReadonlyMap<string, Changed>,
-): TaggedHit[] {
-  return [...changed]
-    .filter(([path]) => isPackageConfig(path))
-    .map(([path, c]) =>
-      tagged(
-        hit(
-          'agent-api-redirect',
-          path,
-          1,
-          PACKAGE_CONFIG,
-          keyed(`${c.status} ${tree.get(path)?.oid ?? 'deleted'}`),
-        ),
-        c.status === 'A' ? 'new' : 'changed',
-      ),
-    );
-}
 
 /**
  * The lines a change adds to a `.gitattributes` that make a checkout write other text than git
