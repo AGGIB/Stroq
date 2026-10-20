@@ -441,11 +441,16 @@ class Follower {
     };
     for (const ref of refs.paths) {
       if (this.over) return;
-      // A shell script's words are paths from the folder it runs in as well as its own.
-      if (lang === 'sh') this.word(ref, from, false, found);
+      // A shell script's words are paths from the folder it runs in as well as its own, and one
+      // with a folder in it may follow a prefix the check cannot read (`$ROOT/x.sh`): it is
+      // looked up by its ends as a command's word is. A bare word (`package.json`) is looked up
+      // where the script is and where it runs only.
+      const shellPath = lang === 'sh' && ref.includes('/');
+      if (shellPath) this.word(ref, from, false, found);
       const bases = ref.startsWith('./') || ref.startsWith('../') ? [dir] : from;
-      for (const base of bases) {
-        const path = posix.normalize(base === '' ? ref : posix.join(base, ref));
+      const paths = bases.map((base) => posix.normalize(base === '' ? ref : posix.join(base, ref)));
+      if (shellPath) paths.push(...pathEnds(ref, MAX_ENDS));
+      for (const path of new Set(paths)) {
         if (path.startsWith('../') || path.startsWith('/') || path === '..') continue;
         for (const candidate of lang === 'js' ? jsCandidates(path) : [path]) next(candidate);
       }

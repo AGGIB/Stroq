@@ -289,3 +289,28 @@ describe('a change that hits many entries already there', () => {
     expect(hits.some((h) => /more/.test(h.value))).toBe(true);
   });
 });
+
+describe('what a shell script a hook runs only mentions', () => {
+  it('does not take a bare word for a file anywhere in the tree', () => {
+    expect(
+      hookRuns(
+        'bash .claude/hooks/a.sh',
+        { '.claude/hooks/a.sh': 'jq -r .version package.json\n', 'pkg/package.json': '{}\n' },
+        { 'pkg/package.json': '{"name":"x"}\n' },
+      ),
+    ).toEqual([]);
+  });
+
+  it('follows a path behind a prefix it cannot read, by its ends', () => {
+    const fails = hookRuns(
+      'bash .claude/hooks/a.sh',
+      {
+        '.claude/hooks/a.sh': 'bash "$ROOT/scripts/check.sh"\n',
+        'scripts/check.sh': 'source lib.sh\n',
+        'scripts/lib.sh': '1\n',
+      },
+      { 'scripts/lib.sh': '2\n' },
+    );
+    expect(failsOn(fails, 'scripts/lib.sh')).toBe(true);
+  });
+});
