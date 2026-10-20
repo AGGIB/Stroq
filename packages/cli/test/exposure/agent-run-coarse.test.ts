@@ -222,3 +222,53 @@ describe('the work one check spends on the commands already there', () => {
     ).toBe(true);
   });
 });
+
+describe('a link of the tree that leads to a folder above itself', () => {
+  it('names a file through it once, and does not take every file for one a command names', () => {
+    const hits = runFileChanges(
+      [
+        {
+          ...hit('agent-hook', '.claude/settings.json', 1, 'S', 'bash .claude/hooks/x.sh'),
+          status: 'present',
+        },
+      ],
+      {
+        touchedFiles: [
+          ['.claude/hooks/x.sh', 'changed'],
+          ['docs/readme.md', 'changed'],
+        ],
+        links: new Map([
+          ['other/up', ''],
+          ['docs/loop', 'docs'],
+        ]),
+      },
+    );
+    expect(
+      hits
+        .filter((h) => h.kind === 'agent-run-file-changed' && h.severity === 'error')
+        .map((h) => h.file),
+    ).toEqual(['.claude/hooks/x.sh']);
+  });
+
+  // `tools` leads to `lib`, and `lib/up` to the top, so docs/readme.md is also tools/up/docs/readme.md.
+  it('names a file a link chain puts under a folder the command names', () => {
+    const hits = runFileChanges(
+      [
+        {
+          ...hit('agent-hook', '.claude/settings.json', 1, 'S', 'bash tools/x.sh'),
+          status: 'present',
+        },
+      ],
+      {
+        touchedFiles: [['docs/readme.md', 'changed']],
+        links: new Map([
+          ['tools', 'lib'],
+          ['lib/up', ''],
+        ]),
+      },
+    );
+    expect(hits.map((h) => `${h.kind} ${h.file} ${h.severity}`)).toEqual([
+      'agent-run-file-changed docs/readme.md error',
+    ]);
+  });
+});

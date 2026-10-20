@@ -82,7 +82,7 @@ export const MAX_NAME_CHARS_TOTAL = 4 * 1024 * 1024;
 /** The most patterns in one command that are matched; a command with more counts as open. */
 const MAX_PATTERNS = 32;
 /** The most other paths one file is reached by through links; past it, every command names it. */
-const MAX_ALIASES = 16;
+const MAX_ALIASES = 64;
 /** As many links on one path as a host follows. */
 const MAX_LINK_HOPS = 16;
 
@@ -159,6 +159,9 @@ function aliasesOf(path: string, through: Through | undefined): string[] | null 
       let offset = 0;
       for (let i = 0; node !== undefined; i += 1) {
         for (const link of node.links) {
+          // A link to a folder above itself nests without end (`l/l/l/x`): once through it is all
+          // the names it adds.
+          if (at === link || at.startsWith(`${link}/`)) continue;
           const alias = offset === 0 ? `${link}/${at}` : `${link}${at.slice(offset - 1)}`;
           if (seen.has(alias)) continue;
           if (found.length >= MAX_ALIASES) return null;
