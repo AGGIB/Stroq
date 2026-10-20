@@ -5,6 +5,7 @@ import { within } from '../commands/config-file.js';
 import { inSharedFolder } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
+import { isPackageConfig, lineHits } from './agent-lines.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -55,6 +56,9 @@ const tryRealpath = (path: string): string | undefined => {
     return undefined;
   }
 };
+
+/** A file the walk reads: an agent or editor config, or the config of a package manager. */
+const isWanted = (rel: string): boolean => isSurfacePath(rel) || isPackageConfig(rel);
 
 const readlinkOrUndefined = (path: string): string | undefined => {
   try {
@@ -158,13 +162,13 @@ function walk(root: string): Walked {
         continue;
       }
       if (isLink && !within(real, realRoot)) {
-        if (isSurfacePath(rel) || isAgentDir(rel))
+        if (isWanted(rel) || isAgentDir(rel))
           found.push({ rel, real: outsideText(abs, real), kind: 'outside' });
         continue;
       }
       if (isLink ? isDirectory(real) : entry.isDirectory())
         queue.add({ abs, rel, real, parent: next });
-      else if (isSurfacePath(rel)) found.push({ rel, real, kind: 'file' });
+      else if (isWanted(rel)) found.push({ rel, real, kind: 'file' });
     }
   }
   return { found, stoppedAt: undefined };
@@ -179,8 +183,10 @@ function brokenLink(abs: string, rel: string, roots: readonly string[]): Candida
   if (text === undefined) return undefined;
   const where = resolvePath(dirname(abs), text);
   if (roots.some((root) => within(where, root)))
-    return linkMatters(rel) ? { rel, real: text, kind: 'dangling' } : undefined;
-  return isSurfacePath(rel) || isAgentDir(rel)
+    return linkMatters(rel) || isPackageConfig(rel)
+      ? { rel, real: text, kind: 'dangling' }
+      : undefined;
+  return isWanted(rel) || isAgentDir(rel)
     ? { rel, real: outsideText(abs), kind: 'outside' }
     : undefined;
 }
@@ -205,6 +211,16 @@ function readCandidate(candidate: Candidate, left: { bytes: number }): SourceRea
 
 const byRel = (a: Candidate, b: Candidate): number => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
 
+/**
+ * The hits of one file read from disk. The config of npm, yarn or bun is read line by line: each
+ * line but a comment fails, by its file and line, and none of its text is shown.
+ */
+function hitsOfRead(rel: string, read: SourceRead): readonly AgentHit[] {
+  return isPackageConfig(rel) && read.kind === 'text'
+    ? lineHits(rel, read.text)
+    : hitsForRead(rel, read);
+}
+
 /** What the working tree at `root` runs by itself, file by file in the order of their paths. */
 export function agentSurface(root: string): AgentSurface {
   const { found, stoppedAt } = walk(root);
@@ -212,7 +228,7 @@ export function agentSurface(root: string): AgentSurface {
   const hits = escalateApproved(
     [...found]
       .sort(byRel)
-      .flatMap((candidate) => hitsForRead(candidate.rel, readCandidate(candidate, left))),
+      .flatMap((candidate) => hitsOfRead(candidate.rel, readCandidate(candidate, left))),
   );
   if (stoppedAt === undefined) return { hits, capped: false };
   const why = `the walk stopped here, after ${WALK_CAPS.dirs} folders or ${WALK_CAPS.files} agent files`;

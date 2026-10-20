@@ -228,17 +228,28 @@ describe('a line the change adds to the config of a package manager', () => {
     expect(failing(agentChanges(dir, base).hits)).toContain(`new agent-api-redirect ${path}`);
   });
 
-  it('fails any line it adds, and not one that was already there or a comment', () => {
+  // Which line a package manager reads, and how, is not worked out: a comment, a blank or a line
+  // moved is a byte that changed, and the whole file fails once.
+  it.each([
+    ['a comment', '# a comment\nregistry=https://mirror.invalid/\n'],
+    ['a blank', 'registry=https://mirror.invalid/ \n'],
+    ['a line', 'registry=https://mirror.invalid/\nfund=false\n'],
+  ])('fails the whole file once for %s it adds', (_, head) => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.npmrc': 'registry=https://mirror.invalid/\n' });
-    commitFiles(dir, {
-      '.npmrc': '# a comment\n; another\nregistry=https://mirror.invalid/\nfund=false\n',
-    });
+    commitFiles(dir, { '.npmrc': head });
     const hits = agentChanges(dir, base).hits.filter((h) => h.file === '.npmrc');
-    expect(hits.map((h) => `${h.status} ${h.line} ${isFailing(h, 'new')}`)).toEqual([
-      'present 3 false',
-      'new 4 true',
+    expect(hits.map((h) => `${h.status} ${h.kind} ${h.name} ${isFailing(h, 'new')}`)).toEqual([
+      'changed agent-api-redirect package manager config true',
     ]);
+  });
+
+  it('fails a package manager config the change deletes, and none it leaves alone', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { '.npmrc': 'ignore-scripts=true\n', 'a/.yarnrc': 'x\n' });
+    git(dir, 'rm', '-q', '.npmrc');
+    git(dir, 'commit', '-q', '-m', 'c');
+    expect(failing(agentChanges(dir, base).hits)).toEqual(['changed agent-api-redirect .npmrc']);
   });
 
   it('never shows the text of a line, which can hold a token', () => {
@@ -249,7 +260,7 @@ describe('a line the change adds to the config of a package manager', () => {
       '.npmrc': `//registry.npmjs.org/:_authToken=${secret}\n${secret}\n${'x=1\n'.repeat(70)}`,
     });
     const hits = agentChanges(dir, base).hits.filter((h) => h.file === '.npmrc');
-    expect(hits.length).toBeGreaterThan(64);
+    expect(hits).toHaveLength(1);
     const shown = JSON.stringify(hits.map((h) => [h.name, h.value, sentenceOf(h, plainQuote)]));
     expect(shown).not.toContain(secret.slice(4, 20));
     expect(shown).not.toContain('_authToken');

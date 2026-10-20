@@ -35,6 +35,21 @@ const ruleName = (path: string): string => foldName(path.slice(path.lastIndexOf(
 /** Whether the lines of this file are read for what they change. */
 export const isLineFile = (path: string): boolean => RULES.has(ruleName(path));
 
+/** The configs of npm, yarn and bun, by the name a disk opens them as. */
+const PACKAGE_CONFIGS: ReadonlySet<string> = new Set([
+  '.npmrc',
+  '.yarnrc',
+  '.yarnrc.yml',
+  '.yarnrc.yaml',
+  'bunfig.toml',
+]);
+
+/**
+ * Whether a path is the config of a package manager. A change to one fails as a whole, whatever
+ * byte it is (see `agent-git.ts`); on disk, each line but a comment is an error.
+ */
+export const isPackageConfig = (path: string): boolean => PACKAGE_CONFIGS.has(ruleName(path));
+
 /** Attributes that make a checkout write other text than the blob git holds. */
 const REWRITES = /^(?:filter|working-tree-encoding)(?:=|$)/i;
 
@@ -56,11 +71,13 @@ function checkoutFilter(path: string): LineRule {
  * elsewhere. Such a line can hold a token.
  */
 const RUN_KEY = randomBytes(32);
-const keyed = (text: string): string =>
+export const keyed = (text: string): string =>
   `keyed:${createHmac('sha256', RUN_KEY).update(text).digest('hex').slice(0, 16)}`;
 
 /** What a package manager's line is called: no word of the line itself is ever shown. */
 export const PACKAGE_SETTING = 'package manager setting';
+/** What a package manager's whole config is called, when a change adds, edits or deletes it. */
+export const PACKAGE_CONFIG = 'package manager config';
 
 /**
  * Any line of a package manager's config: none of its keys is harmless enough to pass unread

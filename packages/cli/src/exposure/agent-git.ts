@@ -9,7 +9,7 @@ import { BUILD_FILE, BUILD_FILE_CHANGED } from './agent-editor.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
-import { isLineFile, lineHits } from './agent-lines.js';
+import { PACKAGE_CONFIG, isLineFile, isPackageConfig, keyed, lineHits } from './agent-lines.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -323,6 +323,7 @@ function compare(top: string, base: string, head: string) {
     ...aliases(sorted, changed),
     ...skippedConfigs(changed),
     ...lineChanges(top, tree, changed),
+    ...packageConfigChanges(tree, changed),
     ...bareChanges(tree, changed),
     ...deletedGuards(top, changed),
   ];
@@ -444,9 +445,35 @@ const FOLDED_ALIAS =
 const MAX_LINE_FILES = 64;
 
 /**
- * The lines a change adds to a `.gitattributes`, or to an npm, yarn or bun config, that make a
- * checkout write other text than git holds or name where packages come from (`agent-lines.ts`).
- * Read at the head and at the base, a few files and none past the size cap; what is not read fails.
+ * The config of npm, yarn or bun that a change adds, edits, retypes or deletes, in any folder: one
+ * failing entry for the file, whatever byte changed, since which key a package manager reads, and
+ * how, is not worked out here. Nothing of its text is read or shown; the value is a digest under a
+ * key made for this run.
+ */
+function packageConfigChanges(
+  tree: ReadonlyMap<string, TreeEntry>,
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  return [...changed]
+    .filter(([path]) => isPackageConfig(path))
+    .map(([path, c]) =>
+      tagged(
+        hit(
+          'agent-api-redirect',
+          path,
+          1,
+          PACKAGE_CONFIG,
+          keyed(`${c.status} ${tree.get(path)?.oid ?? 'deleted'}`),
+        ),
+        c.status === 'A' ? 'new' : 'changed',
+      ),
+    );
+}
+
+/**
+ * The lines a change adds to a `.gitattributes` that make a checkout write other text than git
+ * holds (`agent-lines.ts`). Read at the head and at the base, a few files and none past the size
+ * cap; what is not read fails.
  */
 function lineChanges(
   top: string,
@@ -455,7 +482,10 @@ function lineChanges(
 ): TaggedHit[] {
   const files = [...changed]
     .filter(
-      ([path, c]) => (c.status === 'A' || c.status === 'M' || c.status === 'T') && isLineFile(path),
+      ([path, c]) =>
+        (c.status === 'A' || c.status === 'M' || c.status === 'T') &&
+        isLineFile(path) &&
+        !isPackageConfig(path),
     )
     .map(([path]) => path)
     .sort(byPath);
