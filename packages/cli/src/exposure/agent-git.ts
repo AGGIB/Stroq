@@ -307,6 +307,13 @@ function compare(top: string, base: string, head: string) {
     if (at.kind === 'unread') return 'unknown';
     return at.kind === 'folder' || at.kind === 'blob' ? at.path : undefined;
   };
+  // A submodule's files are another repository's: what it holds is not known.
+  const kind = (path: string): 'file' | 'folder' | 'unknown' | undefined => {
+    const at = resolve(path, links.view);
+    if (at.kind === 'unread' || at.kind === 'submodule') return 'unknown';
+    return at.kind === 'blob' ? 'file' : at.kind === 'folder' ? 'folder' : undefined;
+  };
+  const text = followReader(top, tree, links.view);
   // Links and submodules too: one a change puts in a folder a hook runs is run.
   const touchedFiles = [...changed].flatMap(([path, c]): RunView['touchedFiles'] => {
     const entry = tree.get(path);
@@ -317,7 +324,7 @@ function compare(top: string, base: string, head: string) {
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
-    ...runFileChanges(found, { touched, touchedFiles, scripts, real }),
+    ...runFileChanges(found, { touched, touchedFiles, scripts, real, kind, text }),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
@@ -480,6 +487,41 @@ function lineChanges(
 const NOT_UTF8 =
   'its name is not UTF-8, so the check cannot tell it from another name that reads the same';
 const TWO_PATHS = 'two paths of the tree read as this one name, so the check saw only one of them';
+
+/** The most files the follow reads for what they import, and the most bytes of them, in one check. */
+const MAX_FOLLOW_FILES = 512;
+const MAX_FOLLOW_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The text at the head of the files the follow reads for what they import or source: each read
+ * once, none past the size cap, and no more than a few hundred in all. One past a limit, or behind
+ * a link that was not read, is `unread`, which widens the follow.
+ */
+function followReader(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: TreeView,
+): (path: string) => string | 'unread' | undefined {
+  const texts = new Map<string, string>();
+  let files = 0;
+  let bytes = 0;
+  return (path) => {
+    const at = resolve(path, view);
+    if (at.kind === 'unread' || at.kind === 'submodule') return 'unread';
+    if (at.kind !== 'blob') return undefined;
+    const entry = entryAt(tree, at.path);
+    const known = texts.get(entry.oid);
+    if (known !== undefined) return known;
+    if (entry.size > MAX_FILE_BYTES || files >= MAX_FOLLOW_FILES) return 'unread';
+    if (bytes + entry.size > MAX_FOLLOW_BYTES) return 'unread';
+    files += 1;
+    bytes += Math.max(entry.size, 0);
+    const text = readBlobs(top, [entry]).get(entry.oid);
+    if (text === undefined) return 'unread';
+    texts.set(entry.oid, text);
+    return text;
+  };
+}
 
 /** The most package.json files one check reads for the npm scripts that entries already there run. */
 const MAX_PACKAGE_FILES = 64;

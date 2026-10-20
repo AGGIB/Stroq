@@ -89,19 +89,25 @@ const GIT_KEY = /^[A-Za-z][A-Za-z0-9-]*$/;
  */
 function configLines(text: string): string[] {
   const lines: string[] = [];
-  let held = '';
+  // The parts of a line continued so far, joined once it ends, and the backslashes it ends in.
+  let parts: string[] = [];
+  let trail = 0;
   for (const raw of text.split('\n')) {
-    const line = held + raw.replace(/\r$/, '');
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     let slashes = 0;
     while (slashes < line.length && line[line.length - 1 - slashes] === '\\') slashes += 1;
-    if (slashes % 2 === 1) {
-      held = line.slice(0, -1);
+    const total = slashes === line.length ? trail + slashes : slashes;
+    if (total % 2 === 1) {
+      parts.push(line.slice(0, -1));
+      trail = total - 1;
       continue;
     }
-    held = '';
-    lines.push(line);
+    parts.push(line);
+    lines.push(parts.join(''));
+    parts = [];
+    trail = 0;
   }
-  if (held !== '') lines.push(held);
+  if (parts.length > 0) lines.push(parts.join(''));
   return lines;
 }
 

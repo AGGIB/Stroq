@@ -4,6 +4,17 @@ import { hit, type AgentKind, type Severity } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { byPath, under } from './git-tree.js';
 import {
+  JS_RUNNERS,
+  PY_RUNNERS,
+  jsCandidates,
+  langOf,
+  pyCandidates,
+  referencesOf,
+  type Lang,
+  type References,
+} from './run-imports.js';
+import {
+  baseOf,
   computesWhatRuns,
   npmPlan,
   programOf,
@@ -22,6 +33,14 @@ import {
   pathEnds,
   pathOf,
 } from './run-words.js';
+import {
+  CHANGES_FOLDER,
+  LOADS_CODE,
+  RUNNER_FILE,
+  RUNS_WHAT_FOLLOWS,
+  SCRIPT_FILE,
+  TOOL_CONFIGS,
+} from './run-tables.js';
 
 /**
  * A hook that was already there can start a file of the repository, and a change can edit that
@@ -95,10 +114,20 @@ export interface RunView {
    * none, `unknown` when one of them was not read, undefined when there is nothing there.
    */
   readonly real?: (path: string) => string | 'unknown' | undefined;
+  /** What is at `path` through the links on the way: a file, a folder, `unknown`, or nothing. */
+  readonly kind?: (path: string) => 'file' | 'folder' | 'unknown' | undefined;
+  /** The text of the file at `path`; `unread` when it could not be read, undefined when none. */
+  readonly text?: (path: string) => string | 'unread' | undefined;
 }
 
 /** How many scripts deep a hook's npm scripts are followed; deeper, the check widens. */
 const MAX_SCRIPT_DEPTH = 4;
+/** How many files deep what a hook's file imports or sources is read; deeper, the check widens. */
+const MAX_IMPORT_DEPTH = 6;
+/** The most files one entry is reported for; past it, one more finding says how many more. */
+export const MAX_FILES_PER_ENTRY = 20;
+/** The most findings the follow makes in one check; past it, one failing finding says so. */
+export const MAX_RUN_HITS = 2_000;
 /** How many commands inside commands (`bash -c "..."`) are read; deeper, the check widens. */
 const MAX_INNER_DEPTH = 4;
 /** How many ends of one path are looked up; a longer path widens the check. */
@@ -106,74 +135,6 @@ const MAX_ENDS = 64;
 /** The most work, in characters looked up, that one check spends on following commands. */
 export const RUN_LOOKUP_BUDGET = 64 * 1024 * 1024;
 
-/** Words after which a pattern or a folder is what runs: a shell, an interpreter, a loop. */
-const RUNS_WHAT_FOLLOWS: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'dash',
-  'ksh',
-  'fish',
-  'source',
-  '.',
-  'exec',
-  'node',
-  'deno',
-  'bun',
-  'tsx',
-  'ts-node',
-  'python',
-  'python3',
-  'ruby',
-  'perl',
-  'php',
-  'pwsh',
-  'powershell',
-  'run-parts',
-  'in',
-]);
-/** Words after which the next word is the folder the rest runs in. */
-const CHANGES_FOLDER: ReadonlySet<string> = new Set([
-  'cd',
-  'pushd',
-  '--prefix',
-  '-C',
-  '--dir',
-  '--cwd',
-  '--cd',
-]);
-
-/** Tools that load a file of the repository as code, and the names of those files. */
-const LOADS_CODE: readonly (readonly [tools: readonly string[], file: RegExp])[] = [
-  [['make', 'gmake'], /^(?:gnumakefile|makefile)$|\.mk$/i],
-  [['just'], /^\.?justfile$/i],
-  [['task'], /^taskfile(?:\.dist)?\.ya?ml$/i],
-  [['rake'], /^rakefile(?:\.rb)?$/i],
-  [['gradle', 'gradlew'], /^(?:build|settings)\.gradle(?:\.kts)?$/i],
-  [['cargo'], /^build\.rs$/i],
-  [['nox'], /^noxfile\.py$/i],
-  [['invoke', 'inv'], /^tasks\.py$/i],
-  [['pre-commit'], /^\.pre-commit-config\.ya?ml$/i],
-  [['eslint'], /^(?:eslint\.config|\.eslintrc)\.[cm]?[jt]s$/i],
-  [['prettier'], /^(?:prettier\.config|\.prettierrc)\.[cm]?[jt]s$/i],
-  [['stylelint'], /^(?:stylelint\.config|\.stylelintrc)\.[cm]?[jt]s$/i],
-  [['lint-staged'], /^(?:lint-staged\.config|\.lintstagedrc)\.[cm]?[jt]s$/i],
-  [['jest'], /^jest\.config\.[cm]?[jt]s$/i],
-  [['vitest', 'vite'], /^(?:vitest|vite)\.(?:config|workspace)\.[cm]?[jt]s$/i],
-  [['mocha'], /^\.mocharc\.[cm]?js$/i],
-  [['pytest', 'py.test'], /^conftest\.py$/i],
-];
-
-/**
- * Files that set up a package or task runner, or are its recipes: what a runner the follow cannot
- * follow to the end may run. Workspace configs, Makefiles, justfiles, Taskfiles and the like, and
- * the configs of npm, yarn, pnpm and bun, which can name the shell scripts run in.
- */
-const RUNNER_FILE =
-  /(?:^|\/)(?:pnpm-workspace\.ya?ml|lerna\.json|nx\.json|turbo\.json|rush\.json|project\.json|workspace\.json|gnumakefile|makefile|[^/]*\.mk|\.?justfile|taskfile(?:\.dist)?\.ya?ml|rakefile(?:\.rb)?|tasks\.py|noxfile\.py|tox\.ini|(?:build|settings)\.gradle(?:\.kts)?|gradlew(?:\.bat)?|pom\.xml|mvnw(?:\.cmd)?|cargo\.toml|build\.rs|deno\.jsonc?|composer\.json|gemfile|pyproject\.toml|pipfile|\.pre-commit-config\.ya?ml|lefthook\.ya?ml|\.npmrc|\.yarnrc(?:\.ya?ml)?|bunfig\.toml|\.?pnpmfile\.[cm]?js|(?:docker-)?compose\.ya?ml|dockerfile)$|(?:^|\/)(?:\.yarn|\.mvn|gradle\/wrapper|\.husky|\.githooks)\//i;
-/** A file a shell or an interpreter runs as a script. */
-const SCRIPT_FILE =
-  /\.(?:sh|bash|zsh|fish|ksh|ps1|psm1|bat|cmd|[cm]?[jt]sx?|py|rb|pl|pm|php|lua|r)$/i;
 const EXECUTABLE = '100755';
 
 /** Where one command of a line ends and the next begins. */
@@ -193,13 +154,19 @@ interface Index {
   readonly status: ReadonlyMap<string, 'new' | 'changed'>;
   readonly mode: ReadonlyMap<string, string>;
   readonly byTool: ReadonlyMap<string, readonly string[]>;
+  /** By the last part of the path, in lower case: a disk may open `Guard.sh` as `guard.sh`. */
   readonly byName: ReadonlyMap<string, readonly string[]>;
+  /** By the whole path in lower case, for the same reason. */
+  readonly byLower: ReadonlyMap<string, readonly string[]>;
   readonly packages: readonly string[];
+  /** Whether the change touched a file in a `node_modules` folder, which a package name finds. */
+  readonly nodeModules: boolean;
 }
 
 function indexTouched(files: RunView['touchedFiles']): Index {
   const byTool = new Map<string, string[]>();
   const byName = new Map<string, string[]>();
+  const byLower = new Map<string, string[]>();
   const add = (map: Map<string, string[]>, key: string, path: string): void => {
     const list = map.get(key);
     if (list === undefined) map.set(key, [path]);
@@ -208,18 +175,22 @@ function indexTouched(files: RunView['touchedFiles']): Index {
   const mode = new Map<string, string>();
   for (const [path, , m] of files) {
     const base = baseName(path);
-    add(byName, base, path);
+    add(byName, base.toLowerCase(), path);
+    add(byLower, path.toLowerCase(), path);
     if (m !== undefined) mode.set(path, m);
     for (const [tools, file] of LOADS_CODE)
       if (file.test(base)) for (const tool of tools) add(byTool, tool, path);
   }
+  const paths = files.map(([path]) => path);
   return {
-    sorted: files.map(([path]) => path).sort(byPath),
+    sorted: [...paths].sort(byPath),
     status: new Map(files.map(([path, status]) => [path, status])),
     mode,
     byTool,
     byName,
-    packages: files.map(([path]) => path).filter((p) => baseName(p) === 'package.json'),
+    byLower,
+    packages: paths.filter((p) => baseName(p) === 'package.json'),
+    nodeModules: paths.some((p) => /(?:^|\/)node_modules\//i.test(p)),
   };
 }
 
@@ -248,6 +219,8 @@ class Follower {
   /** How far the commands of the entry being followed reach past what is followed. */
   private reach: Reach = 'paths';
   private wide: { readonly runner: Found[]; readonly any: Found[] } | undefined;
+  /** What each file read names, by its language and path: read once a check. */
+  private readonly refs = new Map<string, References | 'unread' | undefined>();
   constructor(
     private readonly view: RunView,
     private readonly index: Index,
@@ -319,17 +292,43 @@ class Follower {
 
   /**
    * The touched files whose path ends with `path`: the file it names whatever folder the command
-   * runs in, since that is not always known (a session started in a subfolder, a `popd`).
+   * runs in, since that is not always known (a session started in a subfolder, a `popd`). In any
+   * letter case, as macOS and Windows open a name.
    */
   private endingIn(path: string, found: Found[]): void {
-    const tail = path.replace(/^(?:\.\.\/)+/, '').replace(/^\/+/, '');
+    const tail = path
+      .replace(/^(?:\.\.\/)+/, '')
+      .replace(/^\/+/, '')
+      .toLowerCase();
     if (tail === '') return;
     const list = this.index.byName.get(baseName(tail)) ?? [];
     this.spent += list.length + tail.length;
     this.all(
-      list.filter((file) => file === tail || file.endsWith(`/${tail}`)),
+      list.filter((file) => {
+        const lower = file.toLowerCase();
+        return lower === tail || lower.endsWith(`/${tail}`);
+      }),
       found,
     );
+  }
+
+  /** `path` when the change touched it, in its own letter case or in another. */
+  private touchedAt(path: string, found: Found[]): void {
+    const status = this.lookup(path);
+    if (status === 'unknown') this.widen('any');
+    else if (status !== undefined)
+      found.push({ file: path, value: path, status, kind: 'agent-run-file-changed' });
+    this.otherCase(path, found);
+  }
+
+  /** The touched files whose path is `path` in another letter case. */
+  private otherCase(path: string, found: Found[]): void {
+    const same = this.index.byLower.get(path.toLowerCase());
+    if (same !== undefined)
+      this.all(
+        same.filter((file) => file !== path),
+        found,
+      );
   }
 
   /** One word of a command: the file it names, the folder or pattern it runs, the tool it is. */
@@ -355,11 +354,129 @@ class Follower {
         else if (status !== undefined)
           found.push({ file: end, value: end, status, kind: 'agent-run-file-changed' });
         else if (runsIt || inAgentFolder(end)) this.underFolder(end, found);
+        this.otherCase(end, found);
       }
     this.endingIn(path, found);
     const tool = baseName(path).toLowerCase();
     const configs = this.index.byTool.get(tool);
     if (configs !== undefined && this.once(`tool\0${tool}`)) this.all(configs, found);
+  }
+
+  /** The paths of the tree a word may name, from each folder the command may run in. */
+  private wholesOf(path: string, folders: readonly string[]): string[] {
+    if (path.startsWith('/')) return pathEnds(path, MAX_ENDS);
+    const joined = folders.map((f) => (f === '' ? path : posix.join(f, path)));
+    return [...new Set([path, ...joined])].filter(
+      (p) => p.length <= MAX_PATH_CHARS && p !== '..' && !p.startsWith('../'),
+    );
+  }
+
+  /**
+   * What a program that runs the word `path` finds for it: a JavaScript runtime tries extensions,
+   * an index and a package.json, Python a folder's `__main__.py`. Each is looked up, and each file
+   * there is read for what it imports in turn.
+   */
+  private runs(path: string, runner: string, folders: readonly string[], found: Found[]): void {
+    const js = JS_RUNNERS.has(runner);
+    const tried = js
+      ? jsCandidates(path)
+      : PY_RUNNERS.has(runner) || /^python[\d.]*$/.test(runner)
+        ? [path, `${path}/__main__.py`]
+        : [path];
+    for (const candidate of tried) {
+      const wholes = this.wholesOf(candidate, folders);
+      // The word itself was looked up by every end; what the program tries for it is looked up
+      // where it is, or wherever the command runs.
+      if (candidate !== path) {
+        for (const whole of wholes) this.touchedAt(whole, found);
+        this.endingIn(candidate, found);
+      }
+      for (const whole of wholes) {
+        const kind = this.view.kind?.(whole);
+        if (kind === 'unknown') this.widen('any');
+        else if (kind !== 'file') continue;
+        // Its `main` can name any file: not followed.
+        else if (baseName(whole) === 'package.json') this.widen('any');
+        else this.read(whole, langOf(whole, runner), folders, found, 0);
+      }
+    }
+  }
+
+  /** What `file` imports, requires, sources or names, read once a check, or why it was not. */
+  private referencesIn(file: string, lang: Lang): References | 'unread' | undefined {
+    const key = `${lang}\0${file}`;
+    if (this.refs.has(key)) return this.refs.get(key);
+    const text = this.view.text?.(file);
+    const refs = typeof text === 'string' ? referencesOf(text, lang) : text;
+    if (typeof text === 'string') this.spent += text.length;
+    this.refs.set(key, refs);
+    return refs;
+  }
+
+  /**
+   * The files a file of the repository loads in turn, as far as `referencesIn` names them: each
+   * one the change touched is found, and each one that is there is read the same way, to a depth.
+   */
+  private read(
+    file: string,
+    lang: Lang,
+    folders: readonly string[],
+    found: Found[],
+    depth: number,
+  ): void {
+    if (this.view.text === undefined || this.over || !this.once(`read\0${file}`)) return;
+    if (depth > MAX_IMPORT_DEPTH) return this.widen('any');
+    const refs = this.referencesIn(file, lang);
+    if (refs === undefined) return;
+    if (refs === 'unread' || refs.cut) this.widen('any');
+    if (refs === 'unread') return;
+    const dir = posix.dirname(file) === '.' ? '' : posix.dirname(file);
+    const from = [dir, ...folders];
+    const next = (path: string): void => {
+      this.touchedAt(path, found);
+      const kind = this.view.kind?.(path);
+      if (kind === 'unknown') this.widen('any');
+      if (kind === 'file')
+        this.read(path, langOf(path, lang === 'sh' ? 'sh' : ''), folders, found, depth + 1);
+    };
+    for (const ref of refs.paths) {
+      if (this.over) return;
+      // A shell script's words are paths from the folder it runs in as well as its own.
+      if (lang === 'sh') this.word(ref, from, false, found);
+      const bases = ref.startsWith('./') || ref.startsWith('../') ? [dir] : from;
+      for (const base of bases) {
+        const path = posix.normalize(base === '' ? ref : posix.join(base, ref));
+        if (path.startsWith('../') || path.startsWith('/') || path === '..') continue;
+        for (const candidate of lang === 'js' ? jsCandidates(path) : [path]) next(candidate);
+      }
+    }
+    for (const module of refs.modules) {
+      const dots = module.length - module.replace(/^\.+/, '').length;
+      let base = dir;
+      for (let up = 1; up < dots; up += 1)
+        base = posix.dirname(base) === '.' ? '' : posix.dirname(base);
+      const name = module.slice(dots);
+      if (name === '') continue;
+      for (const folder of dots > 0 ? [base] : from)
+        for (const candidate of pyCandidates(name, folder)) next(candidate);
+    }
+    if (this.index.nodeModules)
+      for (const pkg of refs.packages)
+        for (const up of new Set(from.flatMap(foldersUp)))
+          this.underFolder(posix.join(up, 'node_modules', pkg), found);
+  }
+
+  /** The configs of a tool a command runs, from each folder up, read for the plugins they name. */
+  private toolConfigs(tool: string, folders: readonly string[], found: Found[]): void {
+    const names = TOOL_CONFIGS.get(tool);
+    if (names === undefined || this.view.kind === undefined) return;
+    for (const up of new Set(folders.flatMap(foldersUp)))
+      for (const name of names) {
+        const path = up === '' ? name : `${up}/${name}`;
+        const kind = this.view.kind(path);
+        if (kind === 'unknown') this.widen('any');
+        if (kind === 'file') this.read(path, 'js', folders, found, 1);
+      }
   }
 
   /**
@@ -385,11 +502,14 @@ class Follower {
           else cwd = to.startsWith('/') ? to : posix.join(cwd, to);
         }
         // The first word runs, and so does what follows a shell, an interpreter or a loop.
-        const runsIt =
-          isEnv || before === '' || RUNS_WHAT_FOLLOWS.has(baseName(before).toLowerCase());
+        const runner = baseOf(before);
+        const runsIt = isEnv || before === '' || RUNS_WHAT_FOLLOWS.has(runner);
         if (!word.startsWith('-')) before = word;
-        const path = pathOf(word);
-        if (path !== undefined) this.word(path, [cwd, home], runsIt, found);
+        // `node .` runs the folder's index or what its package.json names.
+        const path = word === '.' && JS_RUNNERS.has(runner) ? '' : pathOf(word);
+        if (path === undefined) continue;
+        if (path !== '') this.word(path, [cwd, home], runsIt, found);
+        if (runsIt && !isEnv) this.runs(path, runner, [cwd, home], found);
       }
       if (!isEnv) this.program(part, [cwd, home], found, scripts, 0);
     }
@@ -419,18 +539,24 @@ class Follower {
       return;
     }
     if (reach === 'npm') {
+      // `bun test` is bun's own test runner, which runs every test file it finds.
+      if (baseOf(program) === 'bun' && args.find((a) => !a.startsWith('-')) === 'test')
+        this.widen('any');
       const plan = npmPlan(program, args);
       if (plan.runner) this.widen('runner');
       if (plan.names.length > 0) this.packageScripts(plan, folders, found, scripts);
       return;
     }
-    // `python -m a.b` runs a/b.py, or the folder a/b, from where it starts.
+    this.toolConfigs(baseOf(program), folders, found);
+    // `python -m a.b` runs a/__init__.py and a/b.py, or the folder a/b, from where it starts.
+    // The folder it starts in comes first on its path, so a module there named like any module
+    // the program imports (`json.py`) runs instead: what that is, is not followed.
     const module = /^py(?:thon[\d.]*)?$/i.test(baseName(program)) ? args.indexOf('-m') : -1;
     const name = module === -1 ? undefined : args[module + 1];
     if (name !== undefined) {
-      const path = name.replace(/\./g, '/');
-      for (const file of [`${path}.py`, `${path}/__main__.py`, `${path}/__init__.py`])
-        this.word(file, folders, true, found);
+      for (const folder of folders)
+        for (const file of pyCandidates(name, folder)) this.word(file, [], true, found);
+      this.widen('any');
     }
     this.widen(reach);
   }
@@ -569,10 +695,18 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
       h.severity === 'error' || h.kind === 'agent-env' || startsWithoutAsking(h)
         ? 'error'
         : 'warning';
+    // At most `MAX_FILES_PER_ENTRY` files an entry runs are listed; the rest are counted.
+    const extra = new Set<string>();
+    let listed = 0;
     const add = (f: Found): void => {
       const key = `${f.file}\0${f.value}\0${name}`;
-      if (!out.has(key))
-        out.set(key, { ...hit(f.kind, f.file, 1, name, f.value), severity, status: f.status });
+      if (out.has(key) || extra.has(key)) return;
+      if (listed >= MAX_FILES_PER_ENTRY && f.kind === 'agent-run-file-changed') {
+        extra.add(key);
+        return;
+      }
+      listed += 1;
+      out.set(key, { ...hit(f.kind, f.file, 1, name, f.value), severity, status: f.status });
     };
     const home = homeOf(h.file);
     const queue: (readonly [command: string, depth: number])[] = [[h.value, 0]];
@@ -594,6 +728,26 @@ export function runFileChanges(hits: readonly TaggedHit[], view: RunView): Tagge
     // script a change touches, and would fail nothing.
     if (!follower.over && severity === 'error')
       for (const f of follower.wideFound(follower.reachNow)) add(f);
+    if (extra.size > 0)
+      out.set(`\0more\0${name}`, {
+        ...hit(
+          'agent-run-file-changed',
+          h.file,
+          1,
+          name,
+          `${extra.size} more files the change touched`,
+        ),
+        severity,
+        status: 'new',
+      });
+    if (out.size > MAX_RUN_HITS) {
+      const why = `the entries already there run more than ${MAX_RUN_HITS} files the change touched, so not all are listed`;
+      out.set('\0many', {
+        ...hit('unreadable-config', h.file, 1, 'run files', why),
+        status: 'new',
+      });
+      break;
+    }
     if (follower.over) {
       const why = `the commands of the entries already there were too long to follow, past ${RUN_LOOKUP_BUDGET} characters`;
       out.set('\0over', {

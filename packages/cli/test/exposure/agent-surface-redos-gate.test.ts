@@ -11,6 +11,8 @@ import {
   shellTokens,
 } from '../../src/exposure/run-programs.js';
 import {
+  agentOnlyWhenFolded,
+  foldPath,
   inAgentDir,
   isAgentDir,
   readTier,
@@ -19,6 +21,11 @@ import {
   skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
+import { lineHits } from '../../src/exposure/agent-lines.js';
+import { ruleRunsAnything } from '../../src/exposure/allow-rules.js';
+import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
+import { parseGitConfig } from '../../src/exposure/repo-surface.js';
+import { referencesOf } from '../../src/exposure/run-imports.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -134,6 +141,32 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
     '"runOn": /**/',
     '---\n',
     'hooks:\n',
+    '~1',
+    'A~1.B/',
+    '. ',
+    '.',
+    ' /',
+    '::$DATA/',
+    'import ',
+    'import a.',
+    'from . import ',
+    'from a import (',
+    "require('./",
+    'import x from "../',
+    'source ./',
+    '. "$(dirname "$0")/',
+    '[core] a = ',
+    '[core',
+    '\\\n',
+    'filter=',
+    'a filter=lfs ',
+    'registry=',
+    '@a:registry=',
+    'Bash(bash:*)',
+    'Bash(',
+    ':*',
+    'C:\\',
+    'version https://git-lfs.github.com/spec/v1\n',
   ].map((unit): readonly [string, Shape] => [JSON.stringify(unit), repeat(unit)]),
   ['long blanks', (size) => `{${' '.repeat(size)}`],
   ['an unclosed comment', (size) => `/*${'x'.repeat(size)}`],
@@ -325,6 +358,64 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
           scripts: () => ({ head: { a: text }, base: { a: 'x' }, setup: { head: text, base: '' } }),
         },
       ),
+  ],
+  [
+    'what the follow reads in a file',
+    (text) => [
+      referencesOf(text, 'js'),
+      referencesOf(text, 'py'),
+      referencesOf(text, 'sh'),
+      referencesOf(text, 'other'),
+    ],
+  ],
+  [
+    'following a command into the files it imports',
+    (text) =>
+      runFileChanges(
+        [
+          {
+            ...hit(
+              'agent-hook',
+              '.claude/settings.json',
+              1,
+              'S',
+              'node a.js && bash b.sh && python3 c.py && prettier .',
+            ),
+            status: 'present',
+          },
+        ],
+        {
+          touched: (path) => (path.endsWith('x.sh') ? 'changed' : undefined),
+          touchedFiles: [
+            ['.claude/hooks/x.sh', 'changed'],
+            ['node_modules/a/x.js', 'new'],
+          ],
+          scripts: () => undefined,
+          kind: (path) => (path.length < 64 ? 'file' : undefined),
+          text: () => text,
+        },
+      ),
+  ],
+  [
+    'an allow rule',
+    (text) => [
+      ruleRunsAnything(text, new Set(['bash'])),
+      ruleRunsAnything(`Bash(${text})`, new Set(['bash'])),
+      ruleRunsAnything(`run_shell_command(${text}`, new Set(['run_shell_command'])),
+    ],
+  ],
+  [
+    'the lines of a .gitattributes and a package manager config',
+    (text) => [
+      lineHits('.gitattributes', text),
+      lineHits('.npmrc', text),
+      lineHits('.yarnrc.yml', text),
+    ],
+  ],
+  ['a git config', (text) => parseGitConfig(text)],
+  [
+    'a name a disk may fold',
+    (text) => [foldName(text), windowsAlias(text), foldPath(text), agentOnlyWhenFolded(text)],
   ],
   ['an instruction file', (text) => scanFile('CLAUDE.md', text)],
   ['a file in a skill folder', (text) => scanFile('.claude/skills/s/ref.md', text)],

@@ -430,7 +430,10 @@ export function reachOf(program: string, args: readonly string[]): Reach | 'npm'
   if (/[\\/]/.test(program) && !program.startsWith('/')) return 'paths';
   if (SHELLS.has(name)) return 'shell';
   if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') return 'npm';
-  if (name === 'deno' && args.find((a) => !a.startsWith('-')) === 'task') return 'any';
+  const first = args.find((a) => !a.startsWith('-'));
+  if (name === 'deno' && (first === 'task' || first === 'test' || first === 'bench')) return 'any';
+  // A test runner runs every test file it finds, and what they import.
+  if (TEST_RUNNERS.has(name) || (name === 'node' && args.includes('--test'))) return 'any';
   if (INTERPRETERS.has(name)) return args.some((a) => INLINE_CODE.test(a)) ? 'any' : 'paths';
   if (PACKAGE_EXEC.has(name)) return 'runner';
   if (TASK_RUNNERS.has(name)) return 'any';
@@ -441,6 +444,26 @@ export function reachOf(program: string, args: readonly string[]): Reach | 'npm'
   if (RUNS_NOTHING.has(name) || LOADS_CODE_TOOLS.has(name)) return 'paths';
   return 'any';
 }
+
+/** Test runners: what they run is every test file they find, which is not followed. */
+const TEST_RUNNERS: ReadonlySet<string> = new Set([
+  'jest',
+  'vitest',
+  'mocha',
+  'pytest',
+  'py.test',
+  'ava',
+  'tap',
+  'jasmine',
+  'karma',
+  'playwright',
+  'cypress',
+  'rspec',
+  'phpunit',
+  'pest',
+  'nyc',
+  'c8',
+]);
 
 /** Tools whose config is code, followed to that config (see `LOADS_CODE` in agent-run-files.ts). */
 export const LOADS_CODE_TOOLS: ReadonlySet<string> = new Set([
