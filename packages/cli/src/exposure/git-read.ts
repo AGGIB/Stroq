@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { hardeningEnv } from './git-hardening.js';
 
 /**
@@ -31,8 +33,79 @@ const MAX_BATCH_BYTES = 32 * 1024 * 1024;
 /** The longest one call to git may take before it is stopped. */
 export const GIT_TIMEOUT_MS = 60_000;
 
+/** The folder a checkout is in: `dir` or the nearest folder above it that holds a `.git`. */
+function checkoutOf(dir: string): string {
+  let real: string;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+  for (let at = real; ; at = dirname(at)) {
+    if (existsSync(join(at, '.git'))) return at;
+    if (dirname(at) === at) return real;
+  }
+}
+
+const inside = (folder: string, path: string): boolean => {
+  const rel = relative(folder, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+};
+
+const isProgram = (path: string): boolean => {
+  try {
+    if (!statSync(path).isFile()) return false;
+    if (process.platform !== 'win32') accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The git found for each checkout, by its folder and the PATH it was looked up in. */
+const found = new Map<string, string | null>();
+
+/**
+ * The git to run for a check that starts in `cwd`, by its full path: the first one in a folder of
+ * PATH that is written out in full and is not inside the checkout. A bare `git` would be looked
+ * up in the folder it starts in first on Windows, and on POSIX for an empty or relative part of
+ * PATH, and that folder's files are the change being checked; a folder of PATH inside the
+ * checkout, such as its `node_modules/.bin`, holds the change's files too.
+ */
+export function gitProgram(cwd: string): string | null {
+  const checkout = checkoutOf(cwd);
+  const key = `${checkout}\0${process.env.PATH ?? ''}`;
+  const known = found.get(key);
+  if (known !== undefined) return known;
+  const names = process.platform === 'win32' ? ['git.exe'] : ['git'];
+  let program: string | null = null;
+  for (const part of (process.env.PATH ?? '').split(delimiter)) {
+    if (part === '' || !isAbsolute(part)) continue;
+    let folder: string;
+    try {
+      folder = realpathSync(part);
+    } catch {
+      continue;
+    }
+    if (inside(checkout, folder)) continue;
+    const hit = names.map((n) => join(folder, n)).find(isProgram);
+    if (hit !== undefined) {
+      program = hit;
+      break;
+    }
+  }
+  found.set(key, program);
+  return program;
+}
+
 function run(top: string, args: readonly string[], maxBuffer: number, input?: string): Buffer {
-  return execFileSync('git', ['--no-optional-locks', ...args], {
+  const program = gitProgram(top);
+  if (program === null)
+    throw Object.assign(new Error('no git'), {
+      code: 'ENOENT',
+      stderr: 'git was not found in a folder of PATH outside the folder being checked',
+    });
+  return execFileSync(program, ['--no-optional-locks', ...args], {
     cwd: top,
     maxBuffer,
     timeout: GIT_TIMEOUT_MS,
