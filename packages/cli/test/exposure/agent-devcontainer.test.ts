@@ -157,62 +157,76 @@ describe('what a dev container already there is built from', () => {
   });
 
   /**
-   * Without reading what a service builds, every string of a key that names a file or a folder
-   * (`dockerfile`, `context`, `file`, `env_file`, `include`, `extends`, `additional_contexts`) is
-   * taken as a path from the compose file's folder, a `dockerfile` from each `context` too. A
-   * compose file that does not read as YAML makes any change fail.
+   * What a compose file names is taken coarsely: each service's build context (a string `build` is
+   * one) and its Dockerfile from that context, and every string under `file`, `env_file` or
+   * `additional_contexts` anywhere, from the compose file's folder. Whatever cannot be placed that
+   * way makes every change of the pull request count: a path with a `$`, one that is not there or
+   * leads out, an `include` or an `extends`, a key of a build this does not know, a compose file
+   * that does not read as YAML.
    */
+  const COMPOSE = [
+    'services:',
+    '  app:',
+    '    build:',
+    '      context: ../svc',
+    '      dockerfile: build.docker',
+    '      additional_contexts:',
+    '        tools: ../tools',
+    '    env_file: ../config/app.env',
+    '  db:',
+    '    build: ../db',
+    '',
+  ].join('\n');
+  const named = {
+    [DC]: json({ dockerComposeFile: 'compose.yml' }),
+    '.devcontainer/compose.yml': COMPOSE,
+    'svc/build.docker': 'FROM node\n',
+    'svc/src/x.ts': '1\n',
+    'tools/t.sh': 'x\n',
+    'config/app.env': 'A=1\n',
+    'db/init.sql': 'x\n',
+    'db/Dockerfile': 'FROM postgres\n',
+    'docs/a.md': 'a\n',
+  };
+
   it('fails a change to any file or folder a compose file names, by whatever name', () => {
-    const files = {
-      [DC]: json({ dockerComposeFile: 'compose.yml' }),
-      '.devcontainer/compose.yml': [
-        'include:',
-        '  - ../infra/base.yml',
-        'services:',
-        '  app:',
-        '    build:',
-        '      context: ../svc',
-        '      dockerfile: build.docker',
-        '      additional_contexts:',
-        '        tools: ../tools',
-        '    env_file: ../config/app.env',
-        '    extends:',
-        '      file: ../common/svc.yml',
-        '      service: base',
-        '',
-      ].join('\n'),
-      'svc/build.docker': 'FROM node\n',
-      'svc/src/x.ts': '1\n',
-      'tools/t.sh': 'x\n',
-      'config/app.env': 'A=1\n',
-      'infra/base.yml': 'services: {}\n',
-      'common/svc.yml': 'services: {}\n',
-      'docs/a.md': 'a\n',
-    };
     for (const path of [
       'svc/build.docker',
       'svc/src/x.ts',
       'tools/t.sh',
       'config/app.env',
-      'infra/base.yml',
-      'common/svc.yml',
+      'db/init.sql',
     ])
-      expect(changedIn(files, { [path]: 'changed\n' })).toEqual([
+      expect(changedIn(named, { [path]: 'changed\n' })).toEqual([
         `changed devcontainer-setting ${path} build input changed`,
       ]);
-    expect(changedIn(files, { 'docs/a.md': 'b\n' })).toEqual([]);
+    expect(changedIn(named, { 'docs/a.md': 'b\n' })).toEqual([]);
     expect(
       changedIn(
-        { ...files, 'ops/Containerfile.dev': 'FROM x\n' },
+        { ...named, 'ops/Containerfile.dev': 'FROM x\n' },
         { 'ops/Containerfile.dev': 'FROM evil\n' },
       ),
     ).toEqual(['changed devcontainer-setting ops/Containerfile.dev build input changed']);
   });
 
-  it('fails any change when a compose file does not read as YAML', () => {
+  it.each([
+    ['does not read as YAML', 'services: [unclosed\n'],
+    ['names a path with a $', 'services:\n  a:\n    env_file: ${ENV_DIR}/a.env\n'],
+    ['names a path that is not there', 'services:\n  a:\n    env_file: ../missing.env\n'],
+    ['names a path out of the repository', 'services:\n  a:\n    build: ../../..\n'],
+    ['includes another', 'include:\n  - ../infra/base.yml\nservices: {}\n'],
+    [
+      'extends a service',
+      'services:\n  a:\n    extends:\n      file: ../c.yml\n      service: b\n',
+    ],
+    [
+      'builds with a key this does not know',
+      'services:\n  a:\n    build:\n      context: .\n      weird: 1\n',
+    ],
+  ])('fails any change when a compose file %s', (_, compose) => {
     const files = {
       [DC]: json({ dockerComposeFile: 'compose.yml' }),
-      '.devcontainer/compose.yml': 'services: [unclosed\n',
+      '.devcontainer/compose.yml': compose,
       'docs/a.md': 'a\n',
     };
     expect(changedIn(files, { 'docs/a.md': 'b\n' })).toEqual([

@@ -32,15 +32,36 @@ const MAX_PER_INPUT = 20;
 const COMPOSE_OR_DOCKERFILE =
   /^(?:(?:docker-)?compose[^/]*\.ya?ml|dockerfile[^/]*|containerfile[^/]*|[^/]*\.(?:dockerfile|containerfile))$/;
 
-/** Keys of a compose file whose strings, wherever they are, are taken for paths. */
-const PATH_KEYS: ReadonlySet<string> = new Set([
-  'dockerfile',
-  'context',
-  'file',
-  'env_file',
-  'include',
-  'extends',
+/** Keys of a compose file whose strings, wherever they are, are taken for paths from its folder. */
+const PATH_KEYS: ReadonlySet<string> = new Set(['file', 'env_file', 'additional_contexts']);
+/** Keys that bring in another compose file: not followed, so every change counts. */
+const OTHER_FILES: ReadonlySet<string> = new Set(['include', 'extends']);
+/** The keys of a service's `build` this knows; any other makes every change count. */
+const BUILD_KEYS: ReadonlySet<string> = new Set([
   'additional_contexts',
+  'args',
+  'cache_from',
+  'cache_to',
+  'context',
+  'dockerfile',
+  'dockerfile_inline',
+  'entitlements',
+  'extra_hosts',
+  'isolation',
+  'labels',
+  'network',
+  'no_cache',
+  'platforms',
+  'privileged',
+  'provenance',
+  'pull',
+  'sbom',
+  'secrets',
+  'shm_size',
+  'ssh',
+  'tags',
+  'target',
+  'ulimits',
 ]);
 /** The most nodes of one compose file walked; past it, the file counts as one not read. */
 const MAX_COMPOSE_NODES = 100_000;
@@ -49,7 +70,10 @@ export const MAX_COMPOSE_FILES = 16;
 /** How a compose file is read: merge keys, and a bounded number of aliases. */
 const COMPOSE_YAML = { merge: true, uniqueKeys: false, prettyErrors: false, maxAliasCount: 100 };
 
-/** Every string at or under `value`. */
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Every string at or under `value`, charged to `budget`. */
 function stringsUnder(value: unknown, out: string[], budget: { left: number }): void {
   const stack = [value];
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
@@ -59,11 +83,26 @@ function stringsUnder(value: unknown, out: string[], budget: { left: number }): 
   }
 }
 
+/** The context and the Dockerfile one service builds from, or undefined for a build not known. */
+function servicePaths(build: unknown): string[] | undefined {
+  if (build === undefined || build === null) return [];
+  if (typeof build === 'string') return [build, `${build}/Dockerfile`];
+  if (!isObj(build) || Object.keys(build).some((key) => !BUILD_KEYS.has(key))) return undefined;
+  const context = build['context'] ?? '.';
+  const dockerfile =
+    build['dockerfile'] ?? (build['dockerfile_inline'] === undefined ? 'Dockerfile' : undefined);
+  if (typeof context !== 'string') return undefined;
+  if (dockerfile === undefined) return [context];
+  return typeof dockerfile === 'string' ? [context, `${context}/${dockerfile}`] : undefined;
+}
+
 /**
- * The paths a compose file names, read without understanding its services: every string under a
- * key of `PATH_KEYS`, anywhere, and each `dockerfile` joined to each `context` too, as compose
- * reads a Dockerfile from its context. Undefined when the file does not read as YAML, or is past
- * the bound.
+ * The paths a compose file names, from its folder, read without following it any further: each
+ * service's build context (a string `build` is one) and its Dockerfile from that context, and
+ * every string under `file`, `env_file` or `additional_contexts` anywhere. Undefined, so that every
+ * change counts, when the file does not read as YAML or is past the bound, brings in another
+ * compose file (`include`, `extends`), builds with a key this does not know, or names a path with
+ * a `$`, which compose expands from the environment.
  */
 export function composePaths(text: string): readonly string[] | undefined {
   let value: unknown;
@@ -74,9 +113,7 @@ export function composePaths(text: string): readonly string[] | undefined {
   } catch {
     return undefined;
   }
-  const named: string[] = [];
-  const dockerfiles: string[] = [];
-  const contexts: string[] = [];
+  const paths: string[] = [];
   const budget = { left: MAX_COMPOSE_NODES };
   const stack = [value];
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
@@ -84,19 +121,21 @@ export function composePaths(text: string): readonly string[] | undefined {
     if (budget.left < 0) return undefined;
     if (typeof next !== 'object' || next === null) continue;
     for (const [key, child] of Object.entries(next)) {
-      if (PATH_KEYS.has(key)) {
-        const found: string[] = [];
-        stringsUnder(child, found, budget);
-        named.push(...found);
-        if (key === 'dockerfile') dockerfiles.push(...found);
-        if (key === 'context') contexts.push(...found);
-      }
+      if (OTHER_FILES.has(key)) return undefined;
+      if (PATH_KEYS.has(key)) stringsUnder(child, paths, budget);
       if (typeof child === 'object' && child !== null) stack.push(child);
     }
   }
-  if (budget.left < 0) return undefined;
-  const joined = contexts.flatMap((c) => dockerfiles.map((d) => `${c}/${d}`));
-  return [...new Set([...named, ...joined])];
+  const services = isObj(value) ? value['services'] : undefined;
+  if (services !== undefined && services !== null && !isObj(services)) return undefined;
+  for (const service of Object.values(services ?? {})) {
+    if (!isObj(service)) continue;
+    const built = servicePaths(service['build']);
+    if (built === undefined) return undefined;
+    paths.push(...built);
+  }
+  if (budget.left < 0 || paths.some((p) => p.includes('$'))) return undefined;
+  return [...new Set(paths)];
 }
 
 /** One thing a dev container is built from: what it is, its path, and the dev container's file. */
@@ -227,17 +266,32 @@ export function buildInputChanges(
       failsEach(input, `the repository, as ${target} could not be read`, touched);
       return;
     }
-    const places = new Set(
-      [input.path, target].flatMap((from) =>
-        paths.flatMap((p) => {
-          if (p.includes('://')) return [];
-          const path = besideFile(from, p);
-          if (path === undefined) return [];
-          const at = resolve(path === '.' ? '' : path, view);
-          return at.kind === 'blob' || at.kind === 'folder' ? [path, at.path] : [path];
-        }),
-      ),
-    );
+    const places = new Set<string>();
+    let open = false;
+    for (const from of [input.path, target])
+      for (const p of paths) {
+        const path = besideFile(from, p);
+        const at = path === undefined ? undefined : resolve(path === '.' ? '' : path, view);
+        if (
+          path === undefined ||
+          at === undefined ||
+          (at.kind !== 'blob' && at.kind !== 'folder')
+        ) {
+          open = true;
+          continue;
+        }
+        places.add(path);
+        places.add(at.path);
+        for (const link of at.links) places.add(link);
+      }
+    if (open) {
+      failsEach(
+        input,
+        `the repository, as ${target} names a path that was not worked out`,
+        touched,
+      );
+      return;
+    }
     for (const place of places) {
       const f = foldPath(place);
       const prefix = place === '' || place === '.' ? '' : `${f}/`;
