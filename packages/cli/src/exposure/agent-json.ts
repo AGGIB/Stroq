@@ -139,7 +139,18 @@ interface PathNode {
 interface Pending {
   readonly node: unknown;
   readonly at: PathNode | undefined;
+  /** Inside a handler that names a command: its own fields, not a handler of their own. */
+  readonly inHandler?: boolean;
 }
+
+/** Keys whose value says when a hook runs, not what it runs: not a handler, whatever it holds. */
+const TRIGGER_KEYS: ReadonlySet<string> = new Set([
+  'when',
+  'matcher',
+  'matchers',
+  'filter',
+  'conditions',
+]);
 const keysOf = (at: PathNode | undefined): string[] => {
   const keys: string[] = [];
   for (let n = at; n !== undefined; n = n.up) keys.push(n.key);
@@ -149,19 +160,24 @@ const keysOf = (at: PathNode | undefined): string[] => {
 export function hookEntries(
   value: unknown,
   commandKeys: ReadonlySet<string> = COMMAND_KEYS,
-): { entries: HookEntry[]; cut: boolean } {
+  findOpaque = false,
+): { entries: HookEntry[]; cut: boolean; opaque: unknown[] } {
   const entries: HookEntry[] = [];
+  const opaque: unknown[] = [];
   const stack: Pending[] = [{ node: value, at: undefined }];
   let visited = 0;
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
     visited += 1;
-    if (visited > MAX_HOOK_NODES || entries.length > MAX_HOOKS) return { entries, cut: true };
-    const { node, at } = next;
+    if (visited > MAX_HOOK_NODES || entries.length > MAX_HOOKS)
+      return { entries, cut: true, opaque };
+    const { node, at, inHandler = false } = next;
     if (typeof node !== 'object' || node === null) continue;
     const children: Pending[] = [];
+    let handler = false;
     for (const [key, child] of Object.entries(node)) {
       const command = commandKeys.has(key) ? commandText(child) : undefined;
       if (command !== undefined) {
+        handler = true;
         const keys = keysOf(at).filter((k) => !isIndex(k));
         const event = keys.filter((k) => k.toLowerCase() !== 'hooks').join('.');
         const runs = `${command}${otherFields(node as Obj, isHandlerLabel)}`;
@@ -170,11 +186,42 @@ export function hookEntries(
         children.push({ node: child, at: { key, up: at } });
       }
     }
+    // A handler with no command key this reads, nor anything under it that could hold one: a
+    // prompt, an agent, a tool call, or a type not known. Not a trigger, nor a command's fields.
+    if (
+      findOpaque &&
+      at !== undefined &&
+      !inHandler &&
+      !handler &&
+      !Array.isArray(node) &&
+      children.length === 0 &&
+      !TRIGGER_KEYS.has(at.key)
+    )
+      opaque.push(node);
     // Pushed last to first, so the file's first entry is the next one taken.
-    stack.push(...children.reverse());
+    stack.push(...children.reverse().map((c) => ({ ...c, inHandler: inHandler || handler })));
   }
-  return { entries, cut: false };
+  return { entries, cut: false, opaque };
 }
+
+/** A failing entry for each handler with no command this reads, with a digest of what it holds. */
+export const opaqueHandlers = (
+  path: string,
+  line: number,
+  opaque: readonly unknown[],
+): AgentHit[] =>
+  opaque.map((node) =>
+    hit(
+      'unreadable-config',
+      path,
+      line,
+      HOOK_NOT_READ,
+      `a hook handler with no command this reads, which may hand text or a tool call to the agent (${digestOf(boundedJson(node, undefined, true))})`,
+    ),
+  );
+
+/** What a failing entry for such a handler is named. */
+export const HOOK_NOT_READ = 'hook not read';
 
 /**
  * The hooks under `value` as hits of `kind`. `prefix` is where `value` sits in the file, as the
@@ -187,12 +234,15 @@ export function hookHits(
   kind: 'agent-hook' | 'agent-definition-hook' = 'agent-hook',
 ): AgentHit[] {
   if (value === undefined) return [];
-  const { entries, cut } = hookEntries(value);
+  const { entries, cut, opaque } = hookEntries(value, COMMAND_KEYS, true);
   const hits = entries.slice(0, MAX_HOOKS).map((e) => {
     const needles = [...prefix, ...e.path.map(quoted), quoted(e.command)];
     return hit(kind, f.path, lineOf(f.text, needles), e.event, e.runs);
   });
-  return cut ? [...hits, tooMany(f.path, 'hooks', MAX_HOOKS, value)] : hits;
+  const unread = opaqueHandlers(f.path, lineOf(f.text, prefix), opaque);
+  return cut
+    ? [...hits, ...unread, tooMany(f.path, 'hooks', MAX_HOOKS, value)]
+    : [...hits, ...unread];
 }
 
 // ---------------------------------------------------------------------------------------------

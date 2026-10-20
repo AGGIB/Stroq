@@ -2,7 +2,14 @@ import { agentDefinitionHasHooks } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
 import type { JsonObject } from '../install/inspect/json.js';
-import { allowRuleHits, hookEntries, MAX_HOOKS, mcpServerHits, tooMany } from './agent-json.js';
+import {
+  allowRuleHits,
+  hookEntries,
+  MAX_HOOKS,
+  mcpServerHits,
+  opaqueHandlers,
+  tooMany,
+} from './agent-json.js';
 import { boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineAt } from './jsonc.js';
 
@@ -143,7 +150,7 @@ function definitionHooks(path: string, data: JsonObject, keyLines: KeyLines): Ag
   if (!Object.hasOwn(data, 'hooks')) return [];
   const hooks: unknown = data['hooks'];
   const line = keyLines.get('hooks') ?? 1;
-  const { entries, cut } = hookEntries(hooks);
+  const { entries, cut, opaque } = hookEntries(hooks, undefined, true);
   if (entries.length === 0) {
     // A hooks block with no command this reader can find is still a hooks block.
     const declared = boundedJson(hooks);
@@ -151,9 +158,12 @@ function definitionHooks(path: string, data: JsonObject, keyLines: KeyLines): Ag
       ? []
       : [hit('agent-definition-hook', path, line, 'hooks', declared)];
   }
-  const hits = entries
-    .slice(0, MAX_HOOKS)
-    .map((e) => hit('agent-definition-hook', path, line, e.event, e.runs));
+  const hits = [
+    ...entries
+      .slice(0, MAX_HOOKS)
+      .map((e) => hit('agent-definition-hook', path, line, e.event, e.runs)),
+    ...opaqueHandlers(path, line, opaque),
+  ];
   return cut ? [...hits, { ...tooMany(path, 'hooks', MAX_HOOKS, hooks), line }] : hits;
 }
 
