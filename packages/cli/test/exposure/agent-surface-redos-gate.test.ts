@@ -22,7 +22,11 @@ import {
   skippedConfigFolder,
 } from '../../src/exposure/agent-surface.js';
 import { bareRepositories } from '../../src/exposure/agent-git.js';
-import { guardsOfText, removedGuards } from '../../src/exposure/agent-guards.js';
+import {
+  baseGuardsOfText,
+  headGuardsOfText,
+  removedGuards,
+} from '../../src/exposure/agent-guards.js';
 import { lineHits } from '../../src/exposure/agent-lines.js';
 import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
 import { parseGitConfig } from '../../src/exposure/repo-surface.js';
@@ -409,8 +413,8 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       scanFile('.gemini/settings.json', JSON.stringify({ tools: { allowed: [text] } })),
       removedGuards(
         '.claude/settings.json',
-        guardsOfText(text),
-        guardsOfText(`{"permissions":{"deny":[${JSON.stringify(text)}]}}`),
+        headGuardsOfText(text),
+        baseGuardsOfText(`{"permissions":{"deny":[${JSON.stringify(text)}]}}`),
       ),
     ],
   ],

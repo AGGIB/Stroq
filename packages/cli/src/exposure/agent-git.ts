@@ -1,5 +1,10 @@
 import { settle, tagChanges, type TaggedHit } from './agent-change.js';
-import { guardsOfText, guardsUnknown, removedGuards } from './agent-guards.js';
+import {
+  baseGuardsOfText,
+  guardsUnknown,
+  headGuardsOfText,
+  removedGuards,
+} from './agent-guards.js';
 import { escalateApproved } from './agent-json.js';
 import { hit, type AgentHit } from './agent-kinds.js';
 import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
@@ -293,10 +298,10 @@ function compare(top: string, base: string, head: string) {
   /** The deny rules and disabled servers a touched settings file no longer has. */
   const guardChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
     if (!holdsGuards(p.path)) return [];
-    const head = guardsOfText(headText);
+    const head = headGuardsOfText(headText);
     if (source !== undefined)
       return source.kind === 'text'
-        ? removedGuards(p.path, head, guardsOfText(source.text))
+        ? removedGuards(p.path, head, baseGuardsOfText(source.text))
         : [guardsUnknown(p.path, 'its base was not read')];
     // With no base to read, a file the change adds, through links it adds, refused nothing before.
     // A file it replaces shows as deleted there, and is read as one. Any other is not known.
@@ -504,7 +509,7 @@ function deletedGuards(top: string, changed: ReadonlyMap<string, Changed>): Tagg
   for (const f of files) {
     const text = blobs.get(f.oid);
     if (text === undefined) out.push(guardsUnknown(f.path, 'its base was not read'));
-    else out.push(...removedGuards(f.path, [], guardsOfText(text)));
+    else out.push(...removedGuards(f.path, [], baseGuardsOfText(text)));
   }
   return out;
 }

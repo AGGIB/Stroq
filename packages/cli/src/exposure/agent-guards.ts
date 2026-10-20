@@ -11,11 +11,28 @@ import { stripJsonc } from './jsonc.js';
  * adds. Compared as a set of values, so moving a rule within the file changes nothing.
  */
 
-/** The guards of a settings file's text; none when it does not parse, since a host reads none. */
-export function guardsOfText(text: string): readonly Guard[] {
+/**
+ * The guards of the head of a settings file, read as strictly as Claude Code reads it: as JSON with
+ * no comment and no trailing comma, each list a list of strings. A file or a list that does not
+ * read so refuses nothing, so everything the base refused counts as taken away.
+ */
+export function headGuardsOfText(text: string): readonly Guard[] {
+  try {
+    const value: unknown = JSON.parse(text);
+    return isPlainObject(value) ? guardsOf(value, true) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The guards of the base, read leniently: comments and trailing commas read past, every entry
+ * counted. Reading more there can only find more taken away. None when it does not parse at all.
+ */
+export function baseGuardsOfText(text: string): readonly Guard[] {
   try {
     const value: unknown = JSON.parse(stripJsonc(text));
-    return isPlainObject(value) ? guardsOf(value) : [];
+    return isPlainObject(value) ? guardsOf(value, false) : [];
   } catch {
     return [];
   }

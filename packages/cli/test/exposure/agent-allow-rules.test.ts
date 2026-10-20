@@ -186,6 +186,49 @@ describe('a change to the allow rules', () => {
     ]);
   });
 
+  /**
+   * Claude Code reads its settings as strict JSON, and a list it does not read as a list of strings
+   * refuses nothing. So the head is read as strictly as that: a comment, a value that is not such a
+   * list, or a rule spelled with a blank more, keeps none of what the base refused.
+   */
+  it.each([
+    [
+      'a head with a comment',
+      '{\n  // keep\n  "permissions": {"deny": ["Bash(curl:*)"]},\n  "disabledMcpjsonServers": ["shell"]\n}',
+    ],
+    [
+      'a head with a trailing comma',
+      '{"permissions": {"deny": ["Bash(curl:*)"]}, "disabledMcpjsonServers": ["shell"],}',
+    ],
+    [
+      'a rule with a blank more',
+      json({ permissions: { deny: ['Bash(curl:*) '] }, disabledMcpjsonServers: [' shell'] }),
+    ],
+    [
+      'lists that are not lists',
+      json({ permissions: { deny: 'Bash(curl:*)' }, disabledMcpjsonServers: 'shell' }),
+    ],
+    [
+      'lists with an entry that is not a string',
+      json({ permissions: { deny: ['Bash(curl:*)', 1] }, disabledMcpjsonServers: ['shell', null] }),
+    ],
+  ])('fails what the base refused when it is %s', (_, head) => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, {
+      '.claude/settings.json': json({
+        permissions: { deny: ['Bash(curl:*)'] },
+        disabledMcpjsonServers: ['shell'],
+      }),
+    });
+    commitFiles(dir, { '.claude/settings.json': head });
+    expect(
+      failing(agentChanges(dir, base).hits).filter((h) => h.includes('agent-permission-bypass')),
+    ).toEqual([
+      'changed agent-permission-bypass permissions.deny Bash(curl:*)',
+      'changed agent-permission-bypass disabledMcpjsonServers shell',
+    ]);
+  });
+
   it('passes a change that adds a deny rule or disables a server', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.claude/settings.json': json({}) });

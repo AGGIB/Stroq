@@ -420,17 +420,34 @@ export interface Guard {
 }
 
 /**
- * What a Claude Code settings file refuses: its deny rules and the servers it disables. A change
- * that takes one away lets the agent do what it was refused, so each is compared with the base.
+ * The entries of one guard list, each as it is written. `strict` (the head of a change) keeps a
+ * list only when it is a list of strings, as a host that reads the file strictly would: anything
+ * else refuses nothing. Otherwise (the base) every entry counts, one that is not a string as JSON,
+ * so that more is found taken away, never less.
  */
-export function guardsOf(value: Obj): Guard[] {
+function guardList(value: unknown, strict: boolean): string[] {
+  if (value === undefined) return [];
+  if (strict)
+    return Array.isArray(value) && value.every((v) => typeof v === 'string')
+      ? (value as string[])
+      : [];
+  const items: readonly unknown[] = Array.isArray(value) ? value : [value];
+  return items.map((item) => (typeof item === 'string' ? item : boundedJson(item)));
+}
+
+/**
+ * What a Claude Code settings file refuses: its deny rules and the servers it disables, compared
+ * as written, a blank included. A change that takes one away lets the agent do what it was
+ * refused, so each is compared with the base; see `guardList` for `strict`.
+ */
+export function guardsOf(value: Obj, strict: boolean): Guard[] {
   const permissions = ownObject(value, 'permissions') ?? {};
   return [
-    ...ruleList(own(permissions, 'deny')).map((rule) => ({
+    ...guardList(own(permissions, 'deny'), strict).map((rule) => ({
       name: 'permissions.deny' as const,
       value: rule,
     })),
-    ...ruleList(own(value, 'disabledMcpjsonServers')).map((server) => ({
+    ...guardList(own(value, 'disabledMcpjsonServers'), strict).map((server) => ({
       name: 'disabledMcpjsonServers' as const,
       value: server,
     })),
