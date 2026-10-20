@@ -120,8 +120,8 @@ describe('extractKeyValues', () => {
       'AUTH0_CLIENT_SECRET=stroq_test_client_secret_0123456789',
       'DATABASE_URL=postgres://user:stroq_test_pw_0123456789@db.internal:5432/app',
     ].join('\n');
-    // Documented v1 limit: a connection URL is skipped whole, so the password
-    // inside `DATABASE_URL` is not indexed.
+    // Documented limit of the live guard: a connection URL is skipped whole, so the password
+    // inside `DATABASE_URL` is not indexed (`stroq sent` asks for it with `urlPasswords`).
     expect(names(extractKeyValues(dotenv))).toEqual(['AUTH0_CLIENT_SECRET']);
   });
 

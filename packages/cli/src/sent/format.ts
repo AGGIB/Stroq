@@ -1,282 +1,412 @@
-// Rendering a retroactive exposure report as something a developer will believe.
+// The report as text: what was found, as counts, first, then what was compared, then each key
+// under the place it went, most external first. Every finding ends with what to do.
 //
-// The hard part here is not the layout, it is the claim. A local transcript proves
-// where a credential appeared in that record; it does not prove a later model
-// request or delivery to a provider. The distinction is asserted in the tests.
-import { ageLabel } from '@stroq/core';
-import type { SentCredential, SentFileEvidence, SentOccurrence, SentReport } from './report.js';
+// It says only what it saw. A key is in a milder place because no send of it was seen, never
+// because one was ruled out, so no line says a key did not go somewhere: not the first line, not a
+// heading, not a do-line. The words are chosen for someone who has never heard of Stroq: "sent to
+// another company", "seen by the AI". A host, a file or a folder printed here came from a session,
+// so control characters in it are written out as visible escapes.
+import { displayPath, neutralizeControls } from '@stroq/core';
+import { SPILL_BUDGET_BYTES } from '../replay/spilled.js';
+import type { Finding } from './findings.js';
+import { TIERS, type Tier } from './place.js';
+import type { SentReport } from './report.js';
+import { inTier, keysLeftOut, stoppedTowardOthers } from './report.js';
+import { countParts, describePlace, doLine, LABEL, SEND_LIMIT, when } from './phrases.js';
+import { MAX_FOLDER_BYTES, MAX_FOLDER_ENV_FILES, MAX_KEYS } from './keys.js';
+import { CANARY_SOURCE } from './session-canaries.js';
 
-const VIA_LABEL: Readonly<Record<SentOccurrence['via'], string>> = {
-  tool_result: 'in the result of  ',
-  tool_argument: 'in the arguments of',
+const AGENTS: Readonly<Record<string, string>> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+  'audit-log': "Stroq's log",
 };
+
+const HEADINGS: Readonly<Record<Tier, string>> = {
+  third_party: 'SENT TO ANOTHER COMPANY: rotate these today',
+  maybe: 'MAYBE SENT: check these',
+  seen: "SEEN BY THE AI: your agent's model saw these keys",
+  own_service: 'USED WITH ITS OWN SERVICE: check you expected this',
+  blocked: 'BLOCKED BEFORE IT RAN: the AI still saw these keys',
+};
+
+/** Findings printed per place; the rest are counted, and all are in `--json`. */
+const MAX_SHOWN = 25;
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+const safe = (text: string): string => neutralizeControls(text);
+
+const day = (iso: string | null): string =>
+  iso === null || Number.isNaN(Date.parse(iso))
+    ? 'an unknown day'
+    : new Date(iso).toISOString().slice(0, 10);
+
+/** Said after the first line whenever anything was not checked: the first line is no all-clear. */
+const NOT_EVERY_KEY = 'Not every key was compared: see Not checked.';
 
 /**
- * One clause per evidence kind, because the two are not the same observation and
- * printing them identically is how a report loses a reader who knows the difference.
+ * The first lines: what was found, as counts, and on the lines after it what keys left out of the
+ * comparison, session files that could not be read and a search cut short leave unread.
  */
-const FILE_EVIDENCE_LINE: Readonly<Record<SentFileEvidence, string>> = {
-  read: 'a Read/Grep call was recorded for this path; its returned content is not established here',
-  named: 'named in a shell command; whether it read or printed the file is unknown',
-};
-
-function timestamp(iso: string): string {
-  return Number.isNaN(Date.parse(iso)) ? 'an unrecorded time' : iso.replace('.000Z', 'Z');
+function verdictLines(report: SentReport): string[] {
+  const lines = [
+    ...countLines(report),
+    ...(report.notChecked.length > 0 && report.keys.compared > 0 ? [NOT_EVERY_KEY] : []),
+  ];
+  const unread = report.unreadable;
+  const cut = report.searchCut ?? 0;
+  if (unread === 0 && cut === 0) return lines;
+  const gaps = [
+    ...(unread > 0 ? [`${plural(unread, 'session file', 'session files')} could not be read`] : []),
+    ...(cut > 0
+      ? [`the search for keys was cut short in ${plural(cut, 'session text', 'session texts')}`]
+      : []),
+  ];
+  const first = gaps.join(' and ');
+  return [...lines, `${first.charAt(0).toUpperCase()}${first.slice(1)}. See "Not checked" below.`];
 }
 
-function duration(report: SentReport): string {
-  if (!report.first || !report.last) return '';
-  return ` · ${ageLabel(report.first, new Date(report.last))} long`;
-}
-
-function origin(report: SentReport): string {
-  if (report.synthetic) {
-    return '  from built-in sample session (synthetic)';
-  }
-  if (report.origin === 'audit-log') {
-    return "  from Stroq's own audit log";
-  }
-  return `  from ${report.path ?? 'a transcript'} (${report.agent ?? 'agent'} transcript)`;
-}
-
-function occurrenceLine(occurrence: SentOccurrence, last: boolean): string {
-  const elbow = last ? '      └─' : '      ├─';
-  return `${elbow} ${VIA_LABEL[occurrence.via]}  ${occurrence.tool.padEnd(10)} ${occurrence.call}`;
-}
-
-function credentialBlock(credential: SentCredential): string[] {
-  const mark = credential.canary ? '◆' : '●';
-  const tag = credential.canary ? '  (a Stroq canary — you planted this to find out)' : '';
-  const times = credential.count === 1 ? 'once' : `${credential.count} times`;
-  const shown = credential.occurrences;
-  const hidden = credential.count - shown.length;
+/** What was found, as counts: never a claim that a key did not go somewhere. */
+function countLines(report: SentReport): string[] {
+  const k = report.keys;
+  if (k.compared === 0 && report.scope !== 'audit-log')
+    return keysLeftOut(k)
+      ? ['No keys were compared: key files were not read whole. See "Not checked" below.']
+      : ['No keys found on this machine, so there was nothing to look for.'];
+  const found = Object.fromEntries(TIERS.map((t) => [t, inTier(report, t).length])) as Record<
+    Tier,
+    number
+  >;
+  const n = report.findings.length;
+  const parts = countParts(found).join(', ');
+  if (report.scope === 'audit-log')
+    return [
+      n === 0
+        ? "Stroq's log recorded no key in the calls of this session."
+        : `Stroq's log recorded ${plural(n, 'key', 'keys')} in the calls of this session: ${parts}.`,
+    ];
+  if (n === 0)
+    return [
+      k.compared === 1
+        ? "Your 1 key's value does not appear in these session logs."
+        : `None of your ${k.compared} keys' values appear in these session logs.`,
+    ];
   return [
-    `  ${mark} ${credential.name} — ${credential.source}${tag}`,
-    `      seen ${times}, first at ${timestamp(credential.first)}`,
-    ...shown.map((o, i) => occurrenceLine(o, i === shown.length - 1 && hidden === 0)),
-    ...(hidden > 0 ? [`      └─ and ${hidden} more`] : []),
-    '',
+    `${n} of your ${plural(k.compared, 'key', 'keys')} ${n === 1 ? 'appears' : 'appear'} in your agent sessions: ${parts}.`,
+    ...canaryLines(report),
+    ...stoppedLines(report),
   ];
 }
 
-/**
- * The limits of the answer, printed whether or not anything was found. A run that
- * matched against an empty index and a run that matched against forty credentials
- * both print "nothing found" without this, and only one of them means it.
- */
-function coverageLines(report: SentReport): string[] {
-  if (report.synthetic) {
+/** A canary sent away: nothing to rotate, and the sign that something steered the agent. */
+function canaryLines(report: SentReport): string[] {
+  const n = inTier(report, 'third_party').filter((f) => f.canary === true).length;
+  if (n === 0) return [];
+  return [
+    `${n === 1 ? 'A canary' : `${n} canaries`} you planted with \`stroq canary\` went to another company. Look at what the agent read before it.`,
+  ];
+}
+
+/** Calls to another company the session records as stopped: only their results say so. */
+function stoppedLines(report: SentReport): string[] {
+  const n = stoppedTowardOthers(report);
+  if (n === 0) return [];
+  return [
+    `${plural(n, 'key was', 'keys were')} in a call to another company that the session records as stopped. Check below.`,
+  ];
+}
+
+/** ` (Claude Code 388, Codex 24)`, or ` (Claude Code)` when one agent recorded them all. */
+function agentList(report: SentReport): string {
+  const seen = Object.entries(report.sessions.agents);
+  if (seen.length === 1) return ` (${AGENTS[seen[0]?.[0] ?? ''] ?? seen[0]?.[0]})`;
+  const parts = seen.map(([agent, s]) => `${AGENTS[agent] ?? agent} ${s?.sessions ?? 0}`);
+  return parts.length === 0 ? '' : ` (${parts.join(', ')})`;
+}
+
+/** ` on 2026-10-15`, or `, 2026-09-20 to 2026-10-19`. */
+function span(report: SentReport): string {
+  const from = day(report.sessions.first);
+  const to = day(report.sessions.last);
+  return from === to ? ` on ${from}` : `, ${from} to ${to}`;
+}
+
+function sessionLines(report: SentReport): string[] {
+  const s = report.sessions;
+  if (report.scope === 'audit-log')
     return [
-      'COVERAGE',
-      '  Built-in synthetic sample session with an invented key in a throwaway folder.',
-      '  No real local credential files or environment variables were opened or read.',
+      "Checked Stroq's own log of this session. It keeps the keys Stroq saw in a call,",
+      'not what came back. `stroq sent --last` reads the agent’s own record.',
+    ];
+  if (report.scope === 'last') {
+    const more =
+      s.inProject !== undefined && s.inProject > 1
+        ? [`This project has ${s.inProject} sessions. Check them all with \`stroq sent --here\`.`]
+        : [];
+    return [
+      `Checked the newest session of this project${agentList(report)}${span(report)}.`,
+      ...more,
     ];
   }
-  const c = report.coverage;
-  const sources =
-    c.indexedSources.length > 0 ? c.indexedSources.join(', ') : 'nothing on this machine';
-  const lines = [
-    'COVERAGE',
-    `  Matched against ${c.indexedSecrets} value(s) indexed from: ${sources}`,
-    ...(c.projectDirs === undefined || c.projectDirs.length === 0
-      ? []
-      : [`  (project .env files were read from ${c.projectDirs.join(' and ')})`]),
-    '  To match known values, this command reads supported local credential files',
-    '  and project .env sources. It stores and prints names and sources, never values.',
-    '  Credential-shaped variables in the environment this command ran with are matched',
-    '  too, and are not counted above.',
-    '  A credential you have rotated or deleted since that session is not in the index,',
-    '  so it cannot appear above.',
+  const where = report.scope === 'project' ? ' of this project' : '';
+  return [
+    `Checked ${plural(s.total, 'session', 'sessions')}${where}${agentList(report)}${span(report)}.`,
   ];
-  if (c.sessionsInProject !== undefined && c.sessionsInProject > 1) {
-    lines.push(
-      `  Read the newest of ${c.sessionsInProject} sessions recorded for this project; the`,
-      '  others were not read. Name one with --transcript <path>.',
-    );
-  }
-  if (c.toolResultsRead) {
-    lines.push(
-      `  Recorded tool result text was scanned from the agent transcript (${c.results} of ${c.calls} calls).`,
-    );
-  } else {
-    lines.push(
-      '  The audit log records call arguments, never what came back, so only recorded',
-      '  argument matches and supported file-path references are covered here.',
-      "  Run `stroq sent --last` to read the agent's own transcript instead,",
-      '  which may still have the result text.',
-    );
+}
+
+function keyLines(report: SentReport): string[] {
+  if (report.scope === 'audit-log') return [];
+  const k = report.keys;
+  const home = k.files.filter((f) => f.startsWith('~/.') && !/(^|\/)\.env[^/]*$/.test(f));
+  const envFiles = k.files.filter((f) => !home.includes(f));
+  const parts = [
+    ...home,
+    ...(envFiles.length > 2 ? [`${envFiles.length} .env files`] : envFiles),
+    ...(k.env > 0 ? ['your shell environment'] : []),
+  ].map(safe);
+  const unread =
+    k.unreadable > 0 ? ` ${plural(k.unreadable, 'key file', 'key files')} could not be read.` : '';
+  return [
+    `Compared with ${plural(k.compared, 'key', 'keys')}${parts.length > 0 ? `: ${parts.join(', ')}` : ''}.${unread}${leftOut(k)}`,
+  ];
+}
+
+/** ` 3 key files were not read whole and 40 .env files were not read, so …`, or ''. */
+function leftOut(k: SentReport['keys']): string {
+  const partial = k.partial?.length ?? 0;
+  const skipped = k.skippedFiles ?? 0;
+  const parts = [
+    ...(partial > 0 ? [`${plural(partial, 'key file was', 'key files were')} not read whole`] : []),
+    ...(skipped > 0 ? [`${plural(skipped, '.env file was', '.env files were')} not read`] : []),
+  ];
+  if (parts.length > 0) return ` ${parts.join(' and ')}, so some keys were not compared.`;
+  return k.truncated === true
+    ? ' Some keys found were left out, so not every key was compared.'
+    : '';
+}
+
+/** Paths of key files not read whole printed in "Not checked"; the rest are counted. */
+const MAX_PARTIAL_SHOWN = 5;
+
+/** What "Not checked" says of keys left out of the comparison, or nothing. */
+function keysNotChecked(k: SentReport['keys']): string[] {
+  const partial = k.partial ?? [];
+  const shown = partial.slice(0, MAX_PARTIAL_SHOWN).map(safe);
+  const more = partial.length - shown.length;
+  const files =
+    more > 0 ? `${shown.join(', ')} and ${plural(more, 'more', 'more')}` : shown.join(', ');
+  return [
+    ...(partial.length > 0
+      ? [
+          `keys in ${plural(partial.length, 'key file', 'key files')} Stroq did not read whole, too large or holding too many keys: ${files}`,
+        ]
+      : []),
+    ...(k.skippedFiles === undefined
+      ? []
+      : [
+          `the keys in ${plural(k.skippedFiles, '.env file', '.env files')} past the first ${MAX_FOLDER_ENV_FILES} of a folder, or its first ${MAX_FOLDER_BYTES / 1024 / 1024} MB`,
+        ]),
+    ...(k.truncated === true && partial.length === 0
+      ? [`keys past the first ${MAX_KEYS} Stroq compares`]
+      : []),
+  ];
+}
+
+/** Routes whose `detail` is a file path, shown with `~` like every other path in the report. */
+const PATH_ROUTES = new Set(['write', 'write-script', 'write-sent', 'write-push']);
+
+/** The finding as it is shown: a file path in its place with the home written as `~`. */
+function shown(f: Finding, home: string): Finding {
+  const detail = f.place.detail;
+  const isPath =
+    PATH_ROUTES.has(f.place.route) ||
+    (f.place.route === 'result' && (f.place.tool === 'Read' || f.place.tool === 'Grep'));
+  if (detail === undefined || !isPath) return f;
+  return { ...f, place: { ...f.place, detail: displayPath(detail, home) } };
+}
+
+function findingLines(raw: Finding, n: number, home: string): string[] {
+  const f = shown(raw, home);
+  const source = f.source === 'env' ? 'your shell environment' : safe(f.source);
+  const where = [
+    when(f.at),
+    AGENTS[f.session.agent] ?? f.session.agent,
+    ...(f.session.cwd === null ? [] : [safe(displayPath(f.session.cwd, home))]),
+    ...(f.subagent === undefined ? [] : [`in subagent ${safe(f.subagent)}`]),
+    ...(f.sessions > 1 ? [`seen in ${f.sessions} sessions`] : []),
+  ];
+  const decoy = f.canary === true ? ' (a canary you planted with `stroq canary`)' : '';
+  // A canary found in a session by its hash was read from no file: it has no source to name.
+  const from = f.canary === true && f.source === CANARY_SOURCE ? ' ' : `  from ${source}`;
+  return [
+    ` ${n}. ${safe(f.name)}${from}${decoy}`,
+    `    ${(f.place.route === 'record' || f.place.route === 'cut' ? 'seen in' : LABEL[f.tier]).padEnd(8)} ${safe(describePlace(f.place))}`,
+    `    when     ${where.join(' · ')}`,
+    ...notRuledOut(f),
+    `    do       ${safe(doLine(f))}`,
+  ];
+}
+
+/** For a key the AI saw: the later calls that could have taken it out without showing it. */
+function notRuledOut(f: Finding): string[] {
+  const n = f.laterNetworkCommands ?? 0;
+  if (f.tier !== 'seen' || n === 0) return [];
+  const where =
+    (f.laterNetworkSessions ?? 1) > 1 ? 'in the sessions it was seen in' : 'in that session';
+  return [
+    `    note     Not ruled out: ${plural(n, 'later command', 'later commands')} ${where} could reach the network.`,
+  ];
+}
+
+function tierLines(report: SentReport, home: string): string[] {
+  const lines: string[] = [];
+  let n = 0;
+  for (const tier of TIERS) {
+    const found = inTier(report, tier);
+    if (found.length === 0) continue;
+    lines.push(`${HEADINGS[tier]} (${found.length})`);
+    for (const f of found.slice(0, MAX_SHOWN)) {
+      n += 1;
+      lines.push(...findingLines(f, n, home));
+    }
+    if (found.length > MAX_SHOWN) {
+      n += found.length - MAX_SHOWN;
+      lines.push(` … and ${found.length - MAX_SHOWN} more. \`stroq sent --json\` lists them all.`);
+    }
+    lines.push('');
   }
   return lines;
 }
 
-/**
- * The claim, stated at its real strength and no higher. A local record establishes
- * a match or file reference, not a later model request, provider delivery, or the
- * current validity of a credential.
- */
-const MEANING: readonly string[] = [
-  'WHAT THIS SAYS, AND WHAT IT DOES NOT',
-  '  These findings come from a local agent transcript or Stroq audit log.',
-  '  Where shown, a matching value appeared in a tool result or call argument.',
-  '  A file entry records a supported tool using or naming its path.',
-  '  This record alone cannot confirm a later model request, delivery to a provider,',
-  '  the recipient, retention, human access, or whether a credential is still valid.',
-  '  It does not prove a breach. Review the session and rotate active credentials',
-  '  when the potential exposure warrants it.',
-];
+const CALL_ROUTES = new Set([
+  'command',
+  'command-near',
+  'command-ran',
+  'command-unread',
+  'post',
+  'secret-store',
+  'ssh',
+  'git-push',
+  'publish',
+  'web-fetch',
+  'web-search',
+  'mcp',
+  'write-script',
+  'write-sent',
+]);
 
-/**
- * Where a credential of this kind is rotated, when the credential itself says which
- * provider issued it. A finding that ends in "rotate it" and no address is one more
- * search the user has to do before acting on it; one that ends in the wrong address is
- * worse, so nothing is printed when the provider is not known.
- *
- * Decided by the NAME the index gave the value, whole words only (`NPM_TOKEN`, not
- * `PNPM_HOME`), and never by the folder it was found in: a Stripe key in a directory
- * called `GitHub` is a Stripe key. The source is used only where it is itself a
- * provider's file, and for what such a file holds.
- */
-const ROTATE: ReadonlyArray<{
-  readonly name: RegExp;
-  readonly file: RegExp | null;
-  readonly url: string;
-}> = [
-  {
-    name: /(?:^|[^a-z])aws(?:[^a-z]|$)/i,
-    file: /^~?[/\\]?(?:.*[/\\])?\.aws[/\\]credentials$/i,
-    url: 'https://console.aws.amazon.com/iam/home#/security_credentials',
-  },
-  {
-    name: /github|(?:^|_)gh[a-z]?_/i,
-    file: null,
-    url: 'https://github.com/settings/tokens',
-  },
-  {
-    name: /(?:^|[^a-z])npm(?:[^a-z]|$)|_authtoken/i,
-    file: /(?:^|[/\\])\.npmrc$/i,
-    url: 'https://www.npmjs.com/settings/~/tokens',
-  },
-  { name: /openai/i, file: null, url: 'https://platform.openai.com/api-keys' },
-  { name: /anthropic/i, file: null, url: 'https://console.anthropic.com/settings/keys' },
-  { name: /stripe/i, file: null, url: 'https://dashboard.stripe.com/apikeys' },
-];
-
-const rotationUrl = (credential: SentCredential): string | null =>
-  (
-    ROTATE.find(({ name }) => name.test(credential.name)) ??
-    ROTATE.find(({ file }) => file?.test(credential.source) === true)
-  )?.url ?? null;
-
-/**
- * The one line that says what the scan concluded, before any detail: the line a user
- * acts on, and the one they would share. Clean carries the numbers that make it mean
- * something, and a credential file touched without an indexed value is not clean.
- */
-function verdictLine(report: SentReport): string {
-  const found = report.credentials.length;
-  if (found > 0) {
-    const names = report.credentials.map((c) => c.name);
-    const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3}` : '');
-    return `✗ ${found} known credential value(s) in this session's recorded tool calls: ${shown}`;
-  }
-  if (report.files.length > 0)
-    return `! No known credential value matched, but the session touched ${report.files.length} credential file(s) — see below`;
-  const { calls, indexedSecrets, toolResultsRead } = report.coverage;
-  // A tick over "checked against 0 values" is comfort with nothing behind it, and this
-  // is the line the report opens with. Environment variables are still matched, so the
-  // wording says what was missing, not that nothing was checked.
-  if (indexedSecrets === 0)
-    return `? Nothing to compare with: no credential files or .env files were indexed, so only credential-shaped environment variables were checked in ${calls} tool call(s) — see coverage`;
-  return `✓ No known credential value in ${calls} tool call(s), checked against ${indexedSecrets} indexed value(s)${toolResultsRead ? '' : ' — arguments only, see coverage'}`;
+function notChecked(report: SentReport): string {
+  const s = report.sessions;
+  const parts = [
+    ...(report.notChecked.includes('cursor')
+      ? ['Cursor sessions (they need node:sqlite, in Node 22.23 or newer)']
+      : []),
+    ...(report.notChecked.includes('cursor-recent')
+      ? [
+          "Cursor's newest changes, still in its write-ahead file, which Stroq cannot read without writing beside Cursor's store (quit Cursor, then run this again)",
+        ]
+      : []),
+    ...(report.unreadable > 0
+      ? [
+          plural(
+            report.unreadable,
+            'session file that could not be read',
+            'session files that could not be read',
+          ),
+        ]
+      : []),
+    ...(report.searchCut === undefined
+      ? []
+      : [
+          `the rest of ${plural(report.searchCut, 'session text', 'session texts')} whose search for keys was cut short by many keys that begin alike (possible tampering)`,
+        ]),
+    ...(report.workCut === undefined
+      ? []
+      : [
+          report.workCut === 0
+            ? 'commands past the time Stroq spends reading commands in one run, which were not read'
+            : `${plural(report.workCut, 'command', 'commands')} not read, past the time Stroq spends reading commands in one run: each key they could carry is placed as maybe sent`,
+        ]),
+    ...(report.savedOutputsSkipped === undefined
+      ? []
+      : [
+          `which call printed a key found in ${plural(report.savedOutputsSkipped, 'saved large output', 'saved large outputs')} read past the first ${SPILL_BUDGET_BYTES / 1024 / 1024} MB of them`,
+        ]),
+    ...(s.skipped === undefined
+      ? []
+      : [
+          `${plural(s.skipped, 'session', 'sessions')} whose folder is not recorded, which --here cannot place`,
+        ]),
+    ...keysNotChecked(report.keys),
+    ...(report.keys.rejectedLines === undefined
+      ? []
+      : [
+          `${plural(report.keys.rejectedLines, 'line', 'lines')} named like a key whose value Stroq does not compare (too short, a placeholder, a path or an address)`,
+        ]),
+    ...(report.keys.subfolderEnvFiles === undefined
+      ? []
+      : [
+          `${plural(report.keys.subfolderEnvFiles, 'env file', 'env files')} in a subfolder of a project (config/.env), not read`,
+        ]),
+    ...(report.keys.canariesNotFound === undefined
+      ? []
+      : [
+          `${plural(report.keys.canariesNotFound, 'canary', 'canaries')} from \`stroq canary\` whose value is in no file Stroq reads`,
+        ]),
+    ...(report.keys.canaryCheckCut === undefined
+      ? []
+      : [
+          `the rest of ${plural(report.keys.canaryCheckCut, 'session file', 'session files')}: canary check cut short by too many canary-shaped values (possible tampering)`,
+        ]),
+    ...(s.noFolder === undefined
+      ? []
+      : [
+          `the .env files of ${plural(s.noFolder, 'session', 'sessions')} whose folder is not recorded`,
+        ]),
+    'a key split, encoded or rebuilt before it was sent (base64, reversed, in pieces), which a search for its value or its file cannot see',
+    'keys in ~/.ssh, kube and gcloud config, and the keychain',
+    'secrets kept in JSON, YAML or TOML files',
+    'Copilot, Windsurf and Antigravity sessions',
+    'Claude Code sessions older than its cleanupPeriodDays (30 days by default), which it deletes',
+  ];
+  return `Not checked: ${parts.join('; ')}.`;
 }
 
-export function formatSent(report: SentReport): string {
-  const lines: string[] = [
-    'stroq sent — credential evidence in recorded agent sessions',
+export function formatSent(report: SentReport, home: string): string {
+  const fromCalls = report.findings.some(
+    (f) => f.tier !== 'seen' && CALL_ROUTES.has(f.place.route),
+  );
+  const lines = [
+    'stroq sent: did your AI agent pass your keys on?',
     '',
-    ...(report.synthetic
+    ...(report.synthetic === true
       ? [
-          'SAMPLE SESSION (SYNTHETIC)',
-          '  This is a built-in demonstration with a made-up key in a temporary folder.',
-          '  Nothing on this machine was scanned to produce this report.',
+          'This is a built-in sample. The key and the session are made up.',
+          'Nothing on this machine was read.',
           '',
         ]
       : []),
-    verdictLine(report),
+    ...verdictLines(report),
     '',
-    `  session ${report.sessionId} · ${report.coverage.calls} tool call(s)${duration(report)}`,
-    origin(report),
+    ...sessionLines(report),
+    ...keyLines(report),
     '',
-  ];
-
-  if (report.credentials.length > 0) {
-    lines.push(`CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (${report.credentials.length})`, '');
-    for (const credential of report.credentials) lines.push(...credentialBlock(credential));
-  }
-
-  if (report.files.length > 0) {
-    lines.push(`CREDENTIAL FILES THIS SESSION TOUCHED (${report.files.length})`, '');
-    for (const file of report.files) {
-      lines.push(`  ■ ${file.path} — ${file.tool} at ${timestamp(file.at)}`);
-      lines.push(`      ${FILE_EVIDENCE_LINE[file.evidence]}`);
-    }
-    if (report.files.some((f) => f.evidence === 'read')) {
-      lines.push(
-        '',
-        "  A Read/Grep result may contain sensitive content absent from today's index.",
-        '  Inspect the agent transcript to learn what was actually returned.',
-      );
-    }
-    lines.push('');
-  }
-
-  if (report.credentials.length === 0 && report.files.length === 0) {
-    lines.push(
-      'No indexed credential match or credential-file finding was recorded for',
-      'this session. Read the coverage below before treating that as clean.',
-      '',
-    );
-  } else if (report.synthetic) {
-    lines.push(
-      'WHAT THIS SAYS, AND WHAT IT DOES NOT',
-      '  This is a built-in demonstration session with an invented credential.',
-      '  In a real session, findings come from local agent transcripts or audit logs.',
-      '  A finding records that a credential value or file was accessed in a tool call.',
-      '  It does not prove delivery to a model provider or an external breach.',
-      '',
-    );
-  } else {
-    lines.push(...MEANING, '');
-  }
-
-  lines.push(...coverageLines(report), '', ...nextLines(report));
-  return `${lines.join('\n')}\n`;
-}
-
-/**
- * Where to go from here. A report that ended on its coverage left a newcomer with a
- * finding and no move to make: rotating comes first when there is something to
- * rotate, then the command that shows what the session did, then the one that guards
- * the next session.
- */
-function nextLines(report: SentReport): string[] {
-  if (report.synthetic) {
-    return [
-      'NEXT',
-      '  stroq sent --last      scan the newest real session recorded on this machine',
-      '  stroq init             guard the next session (--agent <name> for another agent)',
-    ];
-  }
-  const rotations = report.credentials.flatMap((c) => {
-    const url = c.canary ? null : rotationUrl(c);
-    return url === null ? [] : [`    ${c.name}: ${url}`];
-  });
-  return [
-    'NEXT',
-    ...(report.credentials.length > 0
-      ? ['  Rotate each credential named above that is still live.', ...rotations]
+    ...tierLines(report, home),
+    SEND_LIMIT,
+    ...(fromCalls
+      ? ['A key in a call was written by the AI, so your AI provider saw it too.']
       : []),
-    '  stroq replay --last    what the session read, and which later actions matched it',
-    '  stroq init             guard the next session (--agent <name> for another agent)',
+    ...(report.synthetic === true ? [] : [notChecked(report)]),
+    report.synthetic === true
+      ? 'Stroq read a made-up session here: this check sent nothing and wrote nothing. No key values are printed.'
+      : 'This check only read files: it sent nothing and wrote nothing. No key values are printed.',
+    ...(report.synthetic === true
+      ? [
+          '',
+          'Next: `stroq sent` checks every session on this machine. `stroq init` guards the next one.',
+        ]
+      : []),
   ];
+  return `${lines.join('\n')}\n`;
 }

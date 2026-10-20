@@ -41,7 +41,7 @@ export interface CommandClassification {
   readonly scripts?: readonly string[];
 }
 
-export { commandWord, splitSegments } from './shell-segments.js';
+export { commandWord, splitCommand, splitSegments, type SplitCommand } from './shell-segments.js';
 import { codeInValue } from './code-in-values.js';
 import { COMMAND_ENVIRONMENT } from './command-environment.js';
 import { fetchedExecSignals } from './fetched-exec.js';
@@ -641,6 +641,23 @@ function consumerContext(
     nodeOptions: flat.some((text) => /NODE_OPTIONS/.test(text)),
     untrusted: flat.some((text) => COMMAND_ENVIRONMENT.test(text)),
   };
+}
+
+/**
+ * Whether one stage of `command` only reads what it is handed, as a stage that a pipe feeds is
+ * judged (`pipeConsumer`): a program on the short list of the ones that only read, with no option
+ * that makes it run one (`data-consumers.ts`); a line processor whose program runs nothing; a Python
+ * or Node program that names only what cannot run code, write a file or open a socket. What the
+ * whole command says is read once: a function it defines under a listed name, or a `PATH`, pager or
+ * editor it sets, makes that name not the program it says. Nothing in a command too costly to read
+ * only reads. For a reader of past sessions (`stroq sent`), which asks it of each stage that held a
+ * key: "the command only printed it" is this answer, not a second list kept somewhere else.
+ */
+export function stageReader(command: string): (stage: string) => boolean {
+  if (isTooCostly(command)) return () => false;
+  const split = splitCommand(command, null);
+  const context = consumerContext([command], split.segments, []);
+  return (stage) => pipeConsumer(stage, commandWord(stage), isShell(stage), context) === 'none';
 }
 
 /** Whether the stage is a decoder (`base64 -d`, `openssl base64 -d`, `xxd -r`) and not text that says so. */

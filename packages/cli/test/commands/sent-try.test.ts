@@ -1,227 +1,106 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runSent } from '../../src/commands/sent.js';
-import { secretsFile } from '../../src/paths.js';
+import { SAMPLE_KEY } from '../../src/sent/sample.js';
+import { AWS_KEY, machine, sent, type Machine } from '../helpers/sent-machine.js';
 
-let home = '';
-let cwd = '';
-let stroqHome = '';
+/**
+ * `stroq sent --try`: the check on a built-in sample with a made-up key. It reads nothing on
+ * this machine, so real keys planted in the fake HOME, the project and the environment must
+ * not show up anywhere in what it prints.
+ */
+
+let m: Machine;
+const REAL_ENV = 'super-secret-real-env-token-12345';
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'stroq-sent-try-test-home-'));
-  cwd = mkdtempSync(join(tmpdir(), 'stroq-sent-try-test-cwd-'));
-  stroqHome = mkdtempSync(join(tmpdir(), 'stroq-sent-try-test-stroq-'));
-
-  process.env['HOME'] = home;
-  process.env['USERPROFILE'] = home;
-  process.env['STROQ_HOME'] = stroqHome;
-  process.env['REAL_SECRET_KEY_FOR_TEST'] = 'super-secret-real-env-token-12345';
-
-  // Plant real credentials in fake HOME and project CWD
-  mkdirSync(join(home, '.aws'), { recursive: true });
-  writeFileSync(
-    join(home, '.aws', 'credentials'),
-    '[default]\naws_secret_access_key = wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n',
-  );
-  writeFileSync(join(cwd, '.env'), 'OPENAI_API_KEY=sk-proj-RealKeyThatMustNotBeRead987654321\n');
-
-  vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+  m = machine();
+  vi.stubEnv('REAL_SECRET_KEY_FOR_TEST', REAL_ENV);
+  mkdirSync(m.cwd, { recursive: true });
+  writeFileSync(join(m.cwd, '.env'), 'OPENAI_API_KEY=sk-proj-RealKeyThatMustNotBeRead987654321\n');
 });
 
 afterEach(() => {
-  delete process.env['REAL_SECRET_KEY_FOR_TEST'];
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
-function capture(): {
-  stdout: () => string;
-  stderr: () => string;
-  restore: () => void;
-} {
-  const outLines: string[] = [];
-  const errLines: string[] = [];
-  const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
-    outLines.push(String(chunk));
-    return true;
-  });
-  const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
-    errLines.push(String(chunk));
-    return true;
-  });
-  return {
-    stdout: () => outLines.join(''),
-    stderr: () => errLines.join(''),
-    restore: () => {
-      outSpy.mockRestore();
-      errSpy.mockRestore();
-    },
-  };
-}
-
 describe('stroq sent --try', () => {
-  it('runs against an isolated synthetic session and touches no real credentials', async () => {
-    const io = capture();
-    try {
-      const exitCode = await runSent(['--try']);
-      expect(exitCode).toBe(0);
-
-      const out = io.stdout();
-      expect(out).toContain('SAMPLE SESSION (SYNTHETIC)');
-      expect(out).toContain('STRIPE_SECRET_KEY');
-
-      // The secret value is never printed
-      expect(out).not.toContain('sk_test_51Hx9QfAkeKeyForStroqDemo7Zq3LmN8vB2');
-
-      // Real machine secrets must not be in the output or index
-      expect(out).not.toContain('aws_secret_access_key');
-      expect(out).not.toContain('wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY');
-      expect(out).not.toContain('OPENAI_API_KEY');
-      expect(out).not.toContain('REAL_SECRET_KEY_FOR_TEST');
-
-      // The real secrets.json in STROQ_HOME was never created
-      expect(existsSync(secretsFile())).toBe(false);
-    } finally {
-      io.restore();
-    }
+  it('runs on the sample and touches no real key', async () => {
+    const { code, out } = await sent(['--try']);
+    expect(code).toBe(0);
+    expect(out).toContain('This is a built-in sample. The key and the session are made up.');
+    expect(out).toContain('STRIPE_SECRET_KEY');
+    expect(out).toContain('collector.example, in a curl command');
+    for (const text of [
+      SAMPLE_KEY.value,
+      AWS_KEY,
+      'aws_secret_access_key',
+      'OPENAI_API_KEY',
+      'REAL_SECRET_KEY_FOR_TEST',
+      REAL_ENV,
+    ])
+      expect(out).not.toContain(text);
   });
 
-  it('prints guidance pointing to sent --last and init', async () => {
-    const io = capture();
-    try {
-      await runSent(['--try']);
-      const out = io.stdout();
-
-      expect(out).toContain('NEXT');
-      expect(out).toContain('stroq sent --last');
-      expect(out).toContain('stroq init');
-    } finally {
-      io.restore();
-    }
+  it('points to the commands to run next', async () => {
+    const { out } = await sent(['--try']);
+    expect(out).toContain('`stroq sent` checks every session on this machine.');
+    expect(out).toContain('`stroq init` guards the next one.');
   });
 
-  it('exits 0 by default, and exits 1 with --fail-on-finding', async () => {
-    const io = capture();
-    try {
-      const zero = await runSent(['--try']);
-      expect(zero).toBe(0);
-
-      const one = await runSent(['--try', '--fail-on-finding']);
-      expect(one).toBe(1);
-    } finally {
-      io.restore();
-    }
+  it('exits 0 by default, and 1 with --fail-if third-party or --fail-on-finding', async () => {
+    expect((await sent(['--try'])).code).toBe(0);
+    expect((await sent(['--try', '--fail-if', 'third-party'])).code).toBe(1);
+    expect((await sent(['--try', '--fail-on-finding'])).code).toBe(1);
   });
 
-  it('removes temporary directories after execution', async () => {
-    const io = capture();
-    try {
-      await runSent(['--try']);
-      const leftover = readdirSync(tmpdir()).filter(
-        (name) => name.startsWith('stroq-sent-try-') && !name.includes('test'),
-      );
-      expect(leftover).toEqual([]);
-    } finally {
-      io.restore();
-    }
+  it('makes no temporary folder', async () => {
+    const before = readdirSync(tmpdir()).filter(
+      (n) => n.startsWith('stroq-sent-try-') && !n.includes('test'),
+    );
+    await sent(['--try']);
+    const after = readdirSync(tmpdir()).filter(
+      (n) => n.startsWith('stroq-sent-try-') && !n.includes('test'),
+    );
+    expect(after).toEqual(before);
   });
 
-  it('cleans up temporary directory even if scanning throws', async () => {
-    const scanModule = await import('../../src/sent/scan.js');
-    const spy = vi
-      .spyOn(scanModule, 'scanTranscript')
-      .mockRejectedValueOnce(new Error('simulated failure'));
-    try {
-      await expect(runSent(['--try'])).rejects.toThrow('simulated failure');
-      const leftover = readdirSync(tmpdir()).filter(
-        (name) => name.startsWith('stroq-sent-try-') && !name.includes('test'),
-      );
-      expect(leftover).toEqual([]);
-    } finally {
-      spy.mockRestore();
-    }
+  it('marks the JSON report, the counts and the card as the sample', async () => {
+    const report = JSON.parse((await sent(['--try', '--json'])).out) as {
+      synthetic: boolean;
+      findings: { name: string; tier: string }[];
+    };
+    expect(report.synthetic).toBe(true);
+    expect(report.findings.map((f) => [f.name, f.tier])).toEqual([
+      ['STRIPE_SECRET_KEY', 'third_party'],
+    ]);
+    expect(JSON.parse((await sent(['--try', '--counts'])).out)).toMatchObject({ synthetic: true });
+    expect(JSON.parse((await sent(['--try', '--card', '--json'])).out)).toMatchObject({
+      synthetic: true,
+    });
+    expect((await sent(['--try', '--card'])).out).toContain('made-up key');
   });
 
-  it('emits machine-readable report with --json', async () => {
-    const io = capture();
-    try {
-      const exitCode = await runSent(['--try', '--json']);
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(io.stdout());
-      expect(parsed.synthetic).toBe(true);
-      expect(parsed.sessionId).toBe('sample-session');
-      expect(parsed.credentials).toHaveLength(1);
-      expect(parsed.credentials[0].name).toBe('STRIPE_SECRET_KEY');
-    } finally {
-      io.restore();
-    }
+  it('keeps the sample marker in an HTML card written to a file', async () => {
+    const path = join(m.root, 'sample-card.html');
+    expect((await sent(['--try', '--card', '--html', '--out', path])).code).toBe(0);
+    const html = readFileSync(path, 'utf8');
+    expect(html).toMatch(/made-up key/);
+    expect(html).toContain('sent --try');
   });
 
-  it('prints a card with --card', async () => {
-    const io = capture();
-    try {
-      const exitCode = await runSent(['--try', '--card']);
-      expect(exitCode).toBe(0);
-
-      const out = io.stdout();
-      expect(out).toContain('# Stroq session check');
-      expect(out).toContain('Stripe 1');
-      expect(out).toMatch(/synthetic/i);
-      expect(out).not.toContain('from my machine');
-    } finally {
-      io.restore();
-    }
-  });
-
-  it('marks the JSON card as synthetic', async () => {
-    const io = capture();
-    try {
-      expect(await runSent(['--try', '--card', '--json'])).toBe(0);
-      expect(JSON.parse(io.stdout())).toMatchObject({ synthetic: true, credentials: 1 });
-    } finally {
-      io.restore();
-    }
-  });
-
-  it('keeps the synthetic marker in an exported HTML card', async () => {
-    const path = join(cwd, 'sample-card.html');
-    const io = capture();
-    try {
-      expect(await runSent(['--try', '--card', '--html', '--out', path])).toBe(0);
-      const html = readFileSync(path, 'utf8');
-      expect(html).toMatch(/synthetic/i);
-      expect(html).not.toContain('from my machine');
-      expect(html).toContain('sent --try');
-    } finally {
-      io.restore();
-    }
-  });
-
-  it('refuses conflicting session arguments', async () => {
-    const io = capture();
-    try {
-      const withLast = await runSent(['--try', '--last']);
-      expect(withLast).toBe(2);
-      expect(io.stderr()).toContain('--try does not take a session, --last, or --transcript');
-
-      const withTranscript = await runSent(['--try', '--transcript', 'foo.jsonl']);
-      expect(withTranscript).toBe(2);
-      expect(io.stderr()).toContain('--try does not take a session, --last, or --transcript');
-
-      const withPositional = await runSent(['--try', 'session-123']);
-      expect(withPositional).toBe(2);
-      expect(io.stderr()).toContain('--try does not take a session, --last, or --transcript');
-    } finally {
-      io.restore();
+  it('refuses a session, --last, --transcript or --here beside it', async () => {
+    for (const args of [
+      ['--try', '--last'],
+      ['--try', '--transcript', 'foo.jsonl'],
+      ['--try', 'session-123'],
+      ['--try', '--here'],
+    ]) {
+      const { code, err } = await sent(args);
+      expect(code).toBe(2);
+      expect(err).toContain('--try does not take a session');
     }
   });
 });
