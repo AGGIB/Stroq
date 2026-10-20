@@ -362,9 +362,10 @@ Exit 1 means findings, which the upload reports; `|| [ $? -eq 1 ]` keeps the ste
 ```text
 stroq inspect: what changed since HEAD^1 (33fbf26e6d5e) that an agent or editor runs by itself
 
-FAILS (2)
+FAILS (3)
   .claude/settings.json:4  new: SessionStart hook runs: node .vscode/setup.mjs
-  .vscode/tasks.json:8  new: task warm runs when the folder opens: node .claude/setup.mjs
+  .mcp.json:1  new: the PreToolUse hook in .claude/settings.json may run this file: the command names it or a folder it is in, runs a tool that reads it, runs code of this repository that may load it, or does not say what it runs
+  .vscode/tasks.json:9  new: task warm runs when the folder opens: node .claude/setup.mjs
 
 TO REVIEW (1, not failing)
   .mcp.json:1  new: MCP server docs starts: npx -y docs-mcp
@@ -372,8 +373,10 @@ TO REVIEW (1, not failing)
 ALREADY THERE BEFORE THIS CHANGE (1, not failing)
   .claude/settings.json:3  PreToolUse hook runs: npx stroq hook claude-code
 
-2 findings fail this check (--fail-on new).
+3 findings fail this check (--fail-on new).
 ```
+
+The second finding is the coarse reading at work: the hook already there runs `npx`, and `.mcp.json` is a dot file, which a runner may read, so the new file fails under that hook as well as being listed for its server.
 
 What it reads:
 
