@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
+import { SETTING_CHANGE } from '../../src/exposure/protective-keys.js';
 import { commitFiles, git, scratchRepo, writeFiles } from '../helpers/scratch-repo.js';
 
 /**
@@ -173,13 +174,14 @@ describe('a protective setting no reader knows', () => {
       [],
     );
     expect(changed('.codex/config.toml', 'model = "a"\n', 'model = "b"\n')).toEqual([]);
-    for (const [path, before, after] of [
+    const failing: readonly (readonly [path: string, before: string, after: string])[] = [
       ['.codex/config.toml', 'model = "a"\n', 'model = "https://e.invalid/m"\n'],
       ['.codex/config.toml', 'model_provider = "a"\n', 'model_provider = "b"\n'],
       ['.gemini/settings.json', json({ model: { name: 'a' } }), json({ model: { name: 'b' } })],
       ['.claude/settings.json', json({ x: { model: 'a' } }), json({ x: { model: 'b' } })],
       ['.claude/settings.json', json({ Model: 'a' }), json({ Model: 'b' })],
-    ])
+    ];
+    for (const [path, before, after] of failing)
       expect(changed(path, before, after).length, `${path} ${after}`).toBeGreaterThan(0);
   });
 });
@@ -245,5 +247,62 @@ describe('a base that is not read', () => {
     expect(failing(agentChanges(dir, base).hits)).toContain(
       'changed unreadable-config p64/.codex/config.toml protections',
     );
+  });
+});
+
+/**
+ * A list whose growth only adds protection (`permissions.deny`, `permissions.ask`, Gemini's
+ * `tools.exclude` and `excludeTools`, a server's `excludeTools`) may grow without the net failing:
+ * every base element still there, all of them plain strings, nothing else under the key changed.
+ * A removal, a dropped element, an element that is not a string, or any other change still fails.
+ */
+describe('a protective list a change only adds to', () => {
+  const net = (path: string, before: object, after: object): string[] => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { [path]: json(before), 'README.md': 'x\n' });
+    commitFiles(dir, { [path]: json(after) });
+    const words: ReadonlySet<string> = new Set(Object.values(SETTING_CHANGE));
+    return agentChanges(dir, base)
+      .hits.filter((h) => isFailing(h, 'new') && words.has(h.value))
+      .map((h) => h.name);
+  };
+  const CLAUDE = '.claude/settings.json';
+
+  it('passes a deny rule added, to a list or as a new one', () => {
+    const allow = ['Bash(ls:*)'];
+    expect(
+      changed(
+        CLAUDE,
+        json({ permissions: { deny: ['Read(.env)'], allow } }),
+        json({ permissions: { deny: ['Read(.env)', 'Bash(curl:*)'], allow } }),
+      ),
+    ).toEqual([]);
+    expect(changed(CLAUDE, json({}), json({ permissions: { deny: ['Bash(curl:*)'] } }))).toEqual(
+      [],
+    );
+  });
+
+  it.each([
+    ['a deny rule removed', { deny: ['a', 'b'] }, { deny: ['a'] }],
+    ['a deny rule swapped', { deny: ['a'] }, { deny: ['b'] }],
+    ['an element that is not a string', { deny: ['a'] }, { deny: ['a', { x: 1 }] }],
+    ['another key under permissions', { deny: ['a'] }, { deny: ['a', 'b'], defaultMode: 'plan' }],
+    ['the list made something else', { deny: ['a'] }, { deny: 'a' }],
+  ])('fails %s', (_, before, after) => {
+    expect(net(CLAUDE, { permissions: before }, { permissions: after })).toContain('permissions');
+  });
+
+  it('lets the other protective lists grow without the net failing', () => {
+    const G = '.gemini/settings.json';
+    expect(
+      net(CLAUDE, { permissions: { ask: ['a'] } }, { permissions: { ask: ['a', 'b'] } }),
+    ).toEqual([]);
+    expect(net(G, { tools: { exclude: ['a'] } }, { tools: { exclude: ['b', 'a'] } })).toEqual([]);
+    expect(net(G, { excludeTools: ['a'] }, { excludeTools: ['a', 'b'] })).toEqual([]);
+    const server = (tools: string[]) => ({
+      mcpServers: { s: { command: 'x', excludeTools: tools } },
+    });
+    expect(net(G, server(['a']), server(['a', 'b']))).toEqual([]);
+    expect(net(G, server(['a', 'b']), server(['a']))).toEqual(['mcpServers.s.excludeTools']);
   });
 });

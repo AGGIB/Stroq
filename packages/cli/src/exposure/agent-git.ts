@@ -21,7 +21,12 @@ import {
 } from './package-configs.js';
 import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
 import { hiddenTextChanges } from './hidden-text-changes.js';
-import { protectionsUnknown, protectiveChanges, protectiveKeys } from './protective-keys.js';
+import {
+  protectionsUnknown,
+  protectiveChanges,
+  protectiveKeys,
+  type ProtectiveValue,
+} from './protective-keys.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -347,7 +352,9 @@ function compare(top: string, base: string, head: string) {
     if (source === undefined ? !added(p) : source.kind !== 'text') return unread;
     if (!holdsSettingKeys(p.path)) return [];
     const base =
-      source?.kind === 'text' ? protectiveKeys(p.path, source.text) : new Map<string, string>();
+      source?.kind === 'text'
+        ? protectiveKeys(p.path, source.text)
+        : new Map<string, ProtectiveValue>();
     if (base === undefined)
       return [protectionsUnknown(p.path, 'protections in the base unknown: not read whole')];
     // A head not read whole, past the walk or not parsed, fails whatever its readers made of it.

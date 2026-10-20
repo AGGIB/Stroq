@@ -25,6 +25,60 @@ const MAX_DEPTH = 64;
 const isModelName = (key: string, value: unknown): boolean =>
   key === 'model' && typeof value === 'string' && !value.includes('://');
 
+/**
+ * Lists whose growth only adds protection, by their path of keys (`*` for any one key): a deny or
+ * ask rule, a tool kept out. One may grow without the net failing; see `onlyGrows`.
+ */
+const GROW_ONLY: readonly (readonly string[])[] = [
+  ['permissions', 'deny'],
+  ['permissions', 'ask'],
+  ['tools', 'exclude'],
+  ['excludeTools'],
+  ['mcpServers', '*', 'excludeTools'],
+];
+const fits = (path: readonly string[], pattern: readonly string[], whole: boolean): boolean =>
+  (whole ? path.length === pattern.length : path.length < pattern.length) &&
+  path.every((key, i) => pattern[i] === '*' || pattern[i] === key);
+const isStrings = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === 'string');
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const ownOf = (o: Record<string, unknown>, key: string): unknown =>
+  Object.hasOwn(o, key) ? o[key] : undefined;
+const same = (a: unknown, b: unknown): boolean =>
+  a !== undefined &&
+  b !== undefined &&
+  boundedJson(a, undefined, true) === boundedJson(b, undefined, true);
+
+/**
+ * Whether `now` only adds to `before` at `path`, so that nothing that kept the agent from things
+ * is gone: at a list of `GROW_ONLY`, both are lists of plain strings (`before` may be missing) and
+ * every element of `before` is still in `now`; above one, both are objects (`before` may be
+ * missing) and each of their keys only adds to the other in the same sense; anywhere else, the
+ * two are the same. Proof for a mild outcome, so anything else is not.
+ */
+function onlyGrows(path: readonly string[], before: unknown, now: unknown): boolean {
+  if (GROW_ONLY.some((p) => fits(path, p, true))) {
+    const was = before ?? [];
+    if (!isStrings(was) || !isStrings(now)) return false;
+    const kept = new Set(now);
+    return was.every((x) => kept.has(x));
+  }
+  if (GROW_ONLY.some((p) => fits(path, p, false)) && isObject(now)) {
+    const was = before ?? {};
+    if (!isObject(was)) return false;
+    const keys = new Set([...Object.keys(was), ...Object.keys(now)]);
+    return [...keys].every((k) => onlyGrows([...path, k], ownOf(was, k), ownOf(now, k)));
+  }
+  return same(before, now);
+}
+
+/** A protective key's value: as text, compared, and as read, for `onlyGrows`. */
+export interface ProtectiveValue {
+  readonly text: string;
+  readonly value: unknown;
+}
+
 /** What a finding for such a key says happened to it. */
 export const SETTING_CHANGE = {
   added: '(a protective setting added)',
@@ -40,10 +94,10 @@ export const SETTING_CHANGE = {
 export function protectiveKeys(
   path: string,
   text: string,
-): ReadonlyMap<string, string> | undefined {
+): ReadonlyMap<string, ProtectiveValue> | undefined {
   const parsed = settingsOf(path, text);
   if (parsed === undefined) return undefined;
-  const found = new Map<string, string>();
+  const found = new Map<string, ProtectiveValue>();
   const stack: (readonly [keys: readonly string[], value: unknown])[] = [[[], parsed.doc]];
   let left = MAX_NODES;
   for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
@@ -58,18 +112,22 @@ export function protectiveKeys(
     for (const [key, child] of children) {
       if (keys.length === 0 && isModelName(key, child)) continue;
       const at = [...keys, key];
-      if (PROTECTIVE.test(key)) found.set(JSON.stringify(at), boundedJson(child, undefined, true));
+      if (PROTECTIVE.test(key))
+        found.set(JSON.stringify(at), { text: boundedJson(child, undefined, true), value: child });
       else stack.push([at, child]);
     }
   }
   return found;
 }
 
-/** A failing finding for each such key `head` adds, edits or takes away against `base`. */
+/**
+ * A failing finding for each such key `head` adds, edits or takes away against `base`, but one a
+ * change only adds protection to (see `onlyGrows`).
+ */
 export function protectiveChanges(
   file: string,
-  head: ReadonlyMap<string, string>,
-  base: ReadonlyMap<string, string>,
+  head: ReadonlyMap<string, ProtectiveValue>,
+  base: ReadonlyMap<string, ProtectiveValue>,
 ): TaggedHit[] {
   const out: TaggedHit[] = [];
   const name = (key: string): string => (JSON.parse(key) as string[]).join('.');
@@ -77,12 +135,16 @@ export function protectiveChanges(
     ...hit('agent-permission-bypass', file, 1, name(key), SETTING_CHANGE[what]),
     status: what === 'added' ? 'new' : 'changed',
   });
-  for (const [key, value] of base) {
+  const grows = (key: string, before: unknown, now: unknown): boolean =>
+    onlyGrows(JSON.parse(key) as string[], before, now);
+  for (const [key, was] of base) {
     const now = head.get(key);
     if (now === undefined) out.push(finding(key, 'removed'));
-    else if (now !== value) out.push(finding(key, 'changed'));
+    else if (now.text !== was.text && !grows(key, was.value, now.value))
+      out.push(finding(key, 'changed'));
   }
-  for (const key of head.keys()) if (!base.has(key)) out.push(finding(key, 'added'));
+  for (const [key, now] of head)
+    if (!base.has(key) && !grows(key, undefined, now.value)) out.push(finding(key, 'added'));
   return out;
 }
 

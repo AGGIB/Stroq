@@ -237,9 +237,9 @@ describe('a change to the allow rules', () => {
     ]);
   });
 
-  // Adding one refuses more, so its own reading passes; the change to `permissions` still fails,
-  // as any change to a protective setting does, since which way it goes is not worked out.
-  it('passes a change that adds a deny rule or disables a server, but for permissions', () => {
+  // Adding one refuses more: its own reading passes, and so does the net over `permissions`, since
+  // the deny list only grew and nothing else under it changed.
+  it('passes a change that adds a deny rule or disables a server', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.claude/settings.json': json({}) });
     commitFiles(dir, {
@@ -249,10 +249,7 @@ describe('a change to the allow rules', () => {
       }),
     });
     const hits = agentChanges(dir, base).hits;
-    expect(failing(hits)).toEqual([]);
-    expect(hits.filter((h) => isFailing(h, 'new')).map((h) => `${h.name} ${h.value}`)).toEqual([
-      `permissions ${SETTING_CHANGE.added}`,
-    ]);
+    expect(hits.filter((h) => isFailing(h, 'new'))).toEqual([]);
   });
 });
 
