@@ -4,6 +4,7 @@ import { isFailing } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentence, plainQuote } from '../../src/exposure/agent-report.js';
 import { MAX_ENTRIES } from '../../src/exposure/agent-json.js';
+import { SETTING_CHANGE } from '../../src/exposure/protective-keys.js';
 import { scanFile, type AgentHit } from '../../src/exposure/agent-surface.js';
 import { commitFiles, scratchRepo } from '../helpers/scratch-repo.js';
 
@@ -85,7 +86,24 @@ describe('Codex config.toml', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { 'README.md': 'x\n' });
     commitFiles(dir, { '.codex/config.toml': CODEX });
-    expect(agentChanges(dir, base).hits.filter((h) => isFailing(h, 'new'))).toHaveLength(8);
+    const found = agentChanges(dir, base).hits.filter((h) => isFailing(h, 'new'));
+    const protective: ReadonlySet<string> = new Set(Object.values(SETTING_CHANGE));
+    // Each of its readers' findings, and each key whose name says it may keep the agent out.
+    expect(found.filter((h) => !protective.has(h.value))).toHaveLength(8);
+    // `model` holds `mode`: an honest change to a model fails too.
+    expect(
+      found
+        .filter((h) => protective.has(h.value))
+        .map((h) => h.name)
+        .sort(),
+    ).toEqual([
+      'approval_policy',
+      'model_provider',
+      'model_providers',
+      'profiles.fast.approval_policy',
+      'sandbox_mode',
+      'shell_environment_policy',
+    ]);
   });
 });
 

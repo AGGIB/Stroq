@@ -30,6 +30,7 @@ import { geminiSettings } from './agent-switches.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
 import { codexConfig } from './agent-toml.js';
 import { lineOf, stripJsonc } from './jsonc.js';
+import { parseToml } from './toml-lite.js';
 
 export {
   AGENT_KINDS,
@@ -353,6 +354,35 @@ export const isSurfacePath = (path: string): boolean => readersFor(path).length 
 
 /** Whether a path is read as Claude Code's settings, whose deny rules a change can take away. */
 export const holdsGuards = (path: string): boolean => readersFor(path).includes(READERS.claude);
+
+const SETTINGS_READERS: readonly Reader[] = [READERS.claude, READERS.codex, READERS.gemini];
+
+/** Whether a path is read as Claude Code's, Codex's or Gemini's (or Qwen Code's) settings. */
+export const holdsSettingKeys = (path: string): boolean =>
+  readersFor(path).some((r) => SETTINGS_READERS.includes(r));
+
+/**
+ * Whether the readers of a path can find a setting that keeps the agent from things: those
+ * settings files and agent definitions. No other reader makes such a finding.
+ */
+export const holdsProtections = (path: string): boolean =>
+  holdsSettingKeys(path) || readersFor(path).includes(READERS.definition);
+
+/**
+ * What a settings file of `holdsSettingKeys` holds, parsed as its reader parses it: TOML for
+ * Codex, JSON with comments for the others. Undefined when it does not parse.
+ */
+export function settingsOf(path: string, text: string): { readonly doc: unknown } | undefined {
+  if (readersFor(path).includes(READERS.codex)) {
+    const toml = parseToml(text);
+    return toml === undefined ? undefined : { doc: toml.doc };
+  }
+  try {
+    return { doc: JSON.parse(stripJsonc(text)) as unknown };
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Which files a check reads first when it cannot read them all: 0 for the configs at a fixed

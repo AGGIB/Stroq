@@ -9,6 +9,7 @@ import {
 } from './agent-change.js';
 import { envLoadsCode, envNameOf } from './agent-json.js';
 import { REMOVED_PROTECTION, isProtection, type AgentHit } from './agent-kinds.js';
+import { SETTING_CHANGE } from './protective-keys.js';
 import {
   BUILD_CONTEXT,
   BUILD_FILE,
@@ -32,6 +33,13 @@ import { PACKAGE_RUNS } from './package-configs.js';
  * Markdown.
  */
 export type Quote = (text: string) => string;
+
+/** What a change did to a key `protectiveKeys` found, by the value of its finding. */
+const SETTING_WORDS: ReadonlyMap<string, string> = new Map([
+  [SETTING_CHANGE.added, 'is added'],
+  [SETTING_CHANGE.changed, 'is changed'],
+  [SETTING_CHANGE.removed, 'is taken away'],
+]);
 
 /** The most characters of one value that are shown. */
 export const VALUE_MAX = 160;
@@ -122,7 +130,7 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         ? `env sets ${name} for every command the agent starts, which can load code or send traffic elsewhere: ${value}`
         : `env sets ${name} for every command the agent and its hooks start, and it is not one of the few names known to be harmless: ${value}`;
     case 'agent-broad-allow': {
-      if (isProtection(h))
+      if (isProtection(h) && !isMode(h.name))
         return `${name} decides what the agent is kept from, and a change to it can loosen that: ${value}`;
       const widens =
         h.status === 'new' || h.status === 'changed'
@@ -133,6 +141,8 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
         : `${name} lets the agent ${grantOf(h)} without asking${widens}: ${value}`;
     }
     case 'agent-permission-bypass':
+      if (SETTING_WORDS.has(h.value))
+        return `protective setting changed: ${name} ${SETTING_WORDS.get(h.value)}, and a setting whose name holds sandbox, permission, approval, policy, exclude, trust, allow, deny or mode may decide what the agent is kept from`;
       if (h.value === REMOVED_PROTECTION)
         return `takes ${name} away, which kept the agent from things`;
       if (h.name === 'permissions.deny')

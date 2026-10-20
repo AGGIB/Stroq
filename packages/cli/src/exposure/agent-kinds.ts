@@ -67,6 +67,11 @@ export interface AgentHit {
    * hook manager's value holds, without its keys. Never shown: every output leaves it out.
    */
   readonly runs?: string;
+  /**
+   * Set by the reader that made the finding, from the path of keys it read, when the setting keeps
+   * the agent from things. Never worked out from `name`, which joins keys that can hold dots.
+   */
+  readonly protection?: true;
   readonly severity: Severity;
 }
 
@@ -199,19 +204,17 @@ export const byLine = (hits: readonly AgentHit[]): AgentHit[] =>
     .map(([h]) => h);
 
 /**
- * Settings that keep the agent from things: Claude Code's `sandbox`, `permissions.ask` and
- * `disableAllHooks`, Codex's `sandbox_workspace_write` and `shell_environment_policy` (in a profile
- * too), Gemini's `tools.exclude`, `excludeTools`, `tools.sandbox` and `sandbox`, an agent's
- * `permissionMode`. Which change loosens one is not worked out: any change, a removal included,
- * fails.
+ * A finding for a setting that keeps the agent from things: Claude Code's `sandbox`,
+ * `permissions.ask`, `permissions.defaultMode` and `disableAllHooks`; Codex's `approval_policy`,
+ * `sandbox_mode`, `sandbox_workspace_write` and `shell_environment_policy`, in a profile too;
+ * Gemini's `general.defaultApprovalMode`, `tools.exclude`, `excludeTools`, `tools.sandbox` and
+ * `sandbox`; an agent's `permissionMode`. Which change loosens one is not worked out: any change,
+ * a removal included, fails.
  */
-const PROTECTION =
-  /^(?:sandbox|permissions\.ask|disableAllHooks|tools\.exclude|excludeTools|tools\.sandbox|permissionMode|(?:profiles\.[^.]+\.)?(?:sandbox_workspace_write|shell_environment_policy))$/;
+export const asProtection = (h: AgentHit): AgentHit => ({ ...h, protection: true });
 
-/** Whether a finding is one of those settings. */
-export const isProtection = (h: AgentHit): boolean =>
-  (h.kind === 'agent-broad-allow' || h.kind === 'agent-permission-bypass') &&
-  PROTECTION.test(h.name);
+/** Whether a finding is one of those settings, as the reader that made it said. */
+export const isProtection = (h: AgentHit): boolean => h.protection === true;
 
 /** The value a finding for a protection a change takes away is shown with. */
 export const REMOVED_PROTECTION = '(taken away)';
@@ -231,6 +234,7 @@ export function removedProtections(
       name: h.name,
       value: REMOVED_PROTECTION,
       shown: REMOVED_PROTECTION,
+      protection: true as const,
       severity: 'error' as const,
     }));
 }

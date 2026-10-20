@@ -1,6 +1,7 @@
 import { mcpServerRunsCode } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import {
+  asProtection,
   boundedJson,
   digestOf,
   hit,
@@ -515,12 +516,14 @@ function settingsSwitches(f: JsonFile): AgentHit[] {
   const mode = own(permissions, 'defaultMode');
   if (mode !== undefined)
     hits.push(
-      hit(
-        ASKING_MODES.has(mode) ? 'agent-broad-allow' : 'agent-permission-bypass',
-        f.path,
-        lineOf(f.text, ['"permissions"', '"defaultMode"']),
-        'permissions.defaultMode',
-        typeof mode === 'string' ? mode : boundedJson(mode),
+      asProtection(
+        hit(
+          ASKING_MODES.has(mode) ? 'agent-broad-allow' : 'agent-permission-bypass',
+          f.path,
+          lineOf(f.text, ['"permissions"', '"defaultMode"']),
+          'permissions.defaultMode',
+          typeof mode === 'string' ? mode : boundedJson(mode),
+        ),
       ),
     );
   if (own(f.value, 'enableAllProjectMcpServers') === true)
@@ -655,12 +658,14 @@ function protections(f: JsonFile): AgentHit[] {
   ] as const)
     if (Object.hasOwn(table, key))
       found.push(
-        hit(
-          'agent-broad-allow',
-          f.path,
-          lineOf(f.text, at),
-          name,
-          boundedJson(table[key], undefined, true),
+        asProtection(
+          hit(
+            'agent-broad-allow',
+            f.path,
+            lineOf(f.text, at),
+            name,
+            boundedJson(table[key], undefined, true),
+          ),
         ),
       );
   return found;

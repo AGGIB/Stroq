@@ -10,7 +10,7 @@ import {
   opaqueHandlers,
   tooMany,
 } from './agent-json.js';
-import { boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { asProtection, boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
 import { lineAt } from './jsonc.js';
 
 type KeyLines = ReadonlyMap<string, number>;
@@ -269,14 +269,16 @@ export function agentDefinition(path: string, text: string): AgentHit[] {
     mode === undefined
       ? []
       : [
-          hit(
-            typeof mode === 'string' && ['default', 'plan', 'dontAsk'].includes(mode)
-              ? 'agent-broad-allow'
-              : 'agent-permission-bypass',
-            path,
-            keyLines.get('permissionMode') ?? 1,
-            'permissionMode',
-            typeof mode === 'string' ? mode : boundedJson(mode),
+          asProtection(
+            hit(
+              typeof mode === 'string' && ['default', 'plan', 'dontAsk'].includes(mode)
+                ? 'agent-broad-allow'
+                : 'agent-permission-bypass',
+              path,
+              keyLines.get('permissionMode') ?? 1,
+              'permissionMode',
+              typeof mode === 'string' ? mode : boundedJson(mode),
+            ),
           ),
         ];
   return byLine([

@@ -20,6 +20,7 @@ import {
   withAllLinks,
 } from './package-configs.js';
 import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
+import { protectionsUnknown, protectiveChanges, protectiveKeys } from './protective-keys.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
@@ -27,7 +28,8 @@ import {
   foldPath,
   hitsForRead,
   holdsGuards,
-  isSurfacePath,
+  holdsProtections,
+  holdsSettingKeys,
   scanFile,
   readTier,
   type SourceRead,
@@ -304,11 +306,21 @@ function compare(top: string, base: string, head: string) {
         return [
           ...tagChanges(now, before),
           ...removedProtections(now, before).map((h) => tagged(h, 'changed')),
+          ...protectionChanges(p, headRead.text, source),
           ...guardChanges(p, headRead.text, source),
         ];
       }
     }
   };
+
+  /**
+   * With no base to read, a file the change adds, through links it adds, held nothing before. A
+   * file it replaces shows as deleted there, and is read as one. Any other is not known.
+   */
+  const added = (p: Planned): boolean =>
+    [p.path, ...linksOf(p.at), behind(p.at) ?? p.path].every(
+      (path) => (changed.get(path)?.status ?? 'A') === 'A',
+    );
 
   /** The deny rules and disabled servers a touched settings file no longer has. */
   const guardChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
@@ -318,11 +330,30 @@ function compare(top: string, base: string, head: string) {
       return source.kind === 'text'
         ? removedGuards(p.path, head, baseGuardsOfText(source.text))
         : [guardsUnknown(p.path, 'its base was not read')];
-    // With no base to read, a file the change adds, through links it adds, refused nothing before.
-    // A file it replaces shows as deleted there, and is read as one. Any other is not known.
-    const way = [p.path, ...linksOf(p.at), behind(p.at) ?? p.path];
-    const added = way.every((path) => (changed.get(path)?.status ?? 'A') === 'A');
-    return added ? [] : [guardsUnknown(p.path, 'its base was not read')];
+    return added(p) ? [] : [guardsUnknown(p.path, 'its base was not read')];
+  };
+
+  /**
+   * What kept the agent from things in a touched file that can hold it: a base that is not read
+   * fails, and so does any key of a settings file whose path holds a protective word and that the
+   * change adds, edits or takes away (see `protectiveKeys`).
+   */
+  const protectionChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
+    if (!holdsProtections(p.path)) return [];
+    const unread = [
+      protectionsUnknown(p.path, 'protections in the base unknown: its base was not read'),
+    ];
+    if (source === undefined ? !added(p) : source.kind !== 'text') return unread;
+    if (!holdsSettingKeys(p.path)) return [];
+    const base =
+      source?.kind === 'text' ? protectiveKeys(p.path, source.text) : new Map<string, string>();
+    if (base === undefined)
+      return [
+        protectionsUnknown(p.path, 'protections in the base unknown: its base does not parse'),
+      ];
+    // A head that does not parse fails by its readers already.
+    const head = protectiveKeys(p.path, headText);
+    return head === undefined ? [] : protectiveChanges(p.path, head, base);
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
@@ -650,16 +681,27 @@ function hookFiles(
 
 /**
  * What kept the agent from things in each agent config the change deletes: all of it is taken
- * away. A few files and none past the size cap are read; what is not read fails.
+ * away. A few files and none past the size cap are read; what is not read fails: past the files
+ * one check reads, a path that was not a file at the base, a base too big to read.
  */
 function deletedProtections(top: string, changed: ReadonlyMap<string, Changed>): TaggedHit[] {
   const gone = [...changed]
-    .filter(([path, c]) => c.status === 'D' && isSurfacePath(path))
-    .sort(([a], [b]) => byPath(a, b))
-    .slice(0, MAX_LINE_FILES);
-  const files = gone.flatMap(([path, c]) =>
-    c.oldMode === '100644' || c.oldMode === '100755' ? [{ path, oid: c.oldOid }] : [],
-  );
+    .filter(([path, c]) => c.status === 'D' && holdsProtections(path))
+    .sort(([a], [b]) => byPath(a, b));
+  const out: TaggedHit[] = [];
+  const cut = gone[MAX_LINE_FILES];
+  if (cut !== undefined)
+    out.push(
+      protectionsUnknown(
+        cut[0],
+        `too many deleted agent files to read: ${gone.length - MAX_LINE_FILES} more were not read`,
+      ),
+    );
+  const files = gone.slice(0, MAX_LINE_FILES).flatMap(([path, c]) => {
+    if (c.oldMode === '100644' || c.oldMode === '100755') return [{ path, oid: c.oldOid }];
+    out.push(protectionsUnknown(path, 'protections in the base not read: it was not a file there'));
+    return [];
+  });
   const sizes = objectSizes(top, unique(files.map((f) => f.oid)));
   const blobs = readBlobs(
     top,
@@ -668,11 +710,22 @@ function deletedProtections(top: string, changed: ReadonlyMap<string, Changed>):
       return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
     }),
   );
-  return files.flatMap((f) => {
+  for (const f of files) {
     const text = blobs.get(f.oid);
-    if (text === undefined) return [];
-    return removedProtections([], scanFile(f.path, text)).map((h) => tagged(h, 'changed'));
-  });
+    if (text === undefined) {
+      out.push(protectionsUnknown(f.path, 'protections in the base not read'));
+      continue;
+    }
+    out.push(...removedProtections([], scanFile(f.path, text)).map((h) => tagged(h, 'changed')));
+    if (!holdsSettingKeys(f.path)) continue;
+    const base = protectiveKeys(f.path, text);
+    out.push(
+      ...(base === undefined
+        ? [protectionsUnknown(f.path, 'protections in the base unknown: its base does not parse')]
+        : protectiveChanges(f.path, new Map(), base)),
+    );
+  }
+  return out;
 }
 
 /**

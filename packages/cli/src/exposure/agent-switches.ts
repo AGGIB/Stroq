@@ -13,7 +13,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, hit, secretHit, type AgentHit } from './agent-kinds.js';
+import { asProtection, boundedJson, hit, secretHit, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 
 /**
@@ -43,7 +43,7 @@ function codexBypass(path: string, table: Obj, prefix: string, line: Line): Agen
     const kind =
       typeof value === 'string' && value !== open ? 'agent-broad-allow' : 'agent-permission-bypass';
     const text = typeof value === 'string' ? value : boundedJson(value);
-    found.push(hit(kind, path, line([...keys, key]), `${prefix}${key}`, text));
+    found.push(asProtection(hit(kind, path, line([...keys, key]), `${prefix}${key}`, text)));
   }
   return found;
 }
@@ -55,12 +55,14 @@ function codexProtections(path: string, table: Obj, prefix: string, line: Line):
   return ['sandbox_workspace_write', 'shell_environment_policy']
     .filter((key) => Object.hasOwn(table, key))
     .map((key) =>
-      hit(
-        'agent-broad-allow',
-        path,
-        line([...keys, key]),
-        `${prefix}${key}`,
-        boundedJson(table[key], undefined, true),
+      asProtection(
+        hit(
+          'agent-broad-allow',
+          path,
+          line([...keys, key]),
+          `${prefix}${key}`,
+          boundedJson(table[key], undefined, true),
+        ),
       ),
     );
 }
@@ -126,8 +128,15 @@ export function codexSwitches(path: string, doc: Obj, line: Line): AgentHit[] {
 export function geminiSwitches(f: JsonFile): AgentHit[] {
   const hits: AgentHit[] = [];
   const at = (keys: readonly string[]): number => lineOf(f.text, keys.map(quoted));
-  const add = (kind: Parameters<typeof hit>[0], keys: readonly string[], value: string) =>
-    hits.push(hit(kind, f.path, at(keys), keys.join('.'), value));
+  const add = (
+    kind: Parameters<typeof hit>[0],
+    keys: readonly string[],
+    value: string,
+    protection = false,
+  ) => {
+    const found = hit(kind, f.path, at(keys), keys.join('.'), value);
+    hits.push(protection ? asProtection(found) : found);
+  };
   const general = ownObject(f.value, 'general') ?? {};
   const tools = ownObject(f.value, 'tools') ?? {};
   // Every approval mode: `yolo` runs every tool without asking, `auto_edit` every edit, and a mode
@@ -138,6 +147,7 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
       typeof mode === 'string' && mode !== 'yolo' ? 'agent-broad-allow' : 'agent-permission-bypass',
       ['general', 'defaultApprovalMode'],
       typeof mode === 'string' ? mode : boundedJson(mode),
+      true,
     );
   if (own(tools, 'autoAccept') === true)
     add('agent-permission-bypass', ['tools', 'autoAccept'], 'true');
@@ -165,7 +175,7 @@ export function geminiSwitches(f: JsonFile): AgentHit[] {
   ] as const) {
     const key = keys[keys.length - 1] as string;
     if (Object.hasOwn(table, key))
-      add('agent-broad-allow', keys, boundedJson(table[key], undefined, true));
+      add('agent-broad-allow', keys, boundedJson(table[key], undefined, true), true);
   }
   const trust = ownObject(ownObject(f.value, 'security') ?? {}, 'folderTrust');
   if (trust !== undefined && own(trust, 'enabled') === false)

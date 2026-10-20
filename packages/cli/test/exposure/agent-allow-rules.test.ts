@@ -4,6 +4,7 @@ import { isFailing, tagChanges, type TaggedHit } from '../../src/exposure/agent-
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import { scanFile } from '../../src/exposure/agent-surface.js';
+import { SETTING_CHANGE } from '../../src/exposure/protective-keys.js';
 import { commitFiles, git, scratchRepo } from '../helpers/scratch-repo.js';
 
 /**
@@ -20,8 +21,15 @@ afterEach(() => {
 });
 
 const json = (value: object): string => JSON.stringify(value, null, 2);
+/**
+ * The failing findings of the readers. Any change under `permissions` also fails as a protective
+ * setting changed (see `protectiveKeys`), which these tests about the rules leave out.
+ */
 const failing = (hits: readonly TaggedHit[]): string[] =>
-  hits.filter((h) => isFailing(h, 'new')).map((h) => `${h.status} ${h.kind} ${h.name} ${h.value}`);
+  hits
+    .filter((h) => isFailing(h, 'new') && !PROTECTIVE.has(h.value))
+    .map((h) => `${h.status} ${h.kind} ${h.name} ${h.value}`);
+const PROTECTIVE: ReadonlySet<string> = new Set(Object.values(SETTING_CHANGE));
 
 const claudeAllows = (rules: readonly unknown[]): string[] =>
   scanFile('.claude/settings.json', JSON.stringify({ permissions: { allow: rules } }))
@@ -167,7 +175,7 @@ describe('a change to the allow rules', () => {
       'changed agent-permission-bypass permissions.deny Bash(curl:*)',
       'changed agent-permission-bypass disabledMcpjsonServers shell',
     ]);
-    const [deny] = hits;
+    const deny = hits.find((h) => h.name === 'permissions.deny');
     expect(sentenceOf(deny as TaggedHit, plainQuote)).toBe(
       'changed: takes away the deny rule Bash(curl:*), so the agent is no longer refused it',
     );
@@ -229,7 +237,9 @@ describe('a change to the allow rules', () => {
     ]);
   });
 
-  it('passes a change that adds a deny rule or disables a server', () => {
+  // Adding one refuses more, so its own reading passes; the change to `permissions` still fails,
+  // as any change to a protective setting does, since which way it goes is not worked out.
+  it('passes a change that adds a deny rule or disables a server, but for permissions', () => {
     const dir = scratchRepo(dirs);
     const base = commitFiles(dir, { '.claude/settings.json': json({}) });
     commitFiles(dir, {
@@ -238,7 +248,11 @@ describe('a change to the allow rules', () => {
         disabledMcpjsonServers: ['shell'],
       }),
     });
-    expect(failing(agentChanges(dir, base).hits)).toEqual([]);
+    const hits = agentChanges(dir, base).hits;
+    expect(failing(hits)).toEqual([]);
+    expect(hits.filter((h) => isFailing(h, 'new')).map((h) => `${h.name} ${h.value}`)).toEqual([
+      `permissions ${SETTING_CHANGE.added}`,
+    ]);
   });
 });
 
