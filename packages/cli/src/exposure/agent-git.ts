@@ -3,9 +3,11 @@ import { settle, tagChanges, type TaggedHit } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
 import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
 import { runFileChanges, type PackageScripts, type RunView } from './agent-run-files.js';
+import { isLineFile, lineHits } from './agent-lines.js';
 import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
+  agentOnlyWhenFolded,
   hitsForRead,
   readTier,
   skippedConfigFolder,
@@ -38,7 +40,13 @@ import {
   type TreeView,
 } from './git-tree.js';
 
-import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
+import {
+  FILE_NAMES,
+  foldName,
+  gitDirName,
+  looksLikeGitDir,
+  windowsAlias,
+} from './git-dir-names.js';
 import { stripJsonc } from './jsonc.js';
 
 export { GitError } from './git-read.js';
@@ -281,7 +289,8 @@ function compare(top: string, base: string, head: string) {
   const statusOf = (c: Changed | undefined): 'new' | 'changed' | undefined =>
     c?.status === 'A' ? 'new' : c?.status === 'M' || c?.status === 'T' ? 'changed' : undefined;
   // How a path a command names changed: itself (a file, a link, a submodule), a link on the way,
-  // or the file behind; `unknown` when a link on the way was not read.
+  // the file behind, or a submodule it is in, whose files come from the commit it points at;
+  // `unknown` when a link on the way was not read.
   const touched = (path: string): 'new' | 'changed' | 'unknown' | undefined => {
     const direct = statusOf(changed.get(path));
     if (direct !== undefined) return direct;
@@ -289,7 +298,9 @@ function compare(top: string, base: string, head: string) {
     if (at.kind === 'unread') return 'unknown';
     if (at.kind === 'none') return undefined;
     if (linkChanged(at, changed)) return 'changed';
-    return at.kind === 'blob' ? statusOf(changed.get(at.path)) : undefined;
+    return at.kind === 'blob' || at.kind === 'submodule'
+      ? statusOf(changed.get(at.path))
+      : undefined;
   };
   const real = (path: string): string | 'unknown' | undefined => {
     const at = resolve(path, links.view);
@@ -309,7 +320,9 @@ function compare(top: string, base: string, head: string) {
     ...runFileChanges(found, { touched, touchedFiles, scripts, real }),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
+    ...aliases(sorted, changed),
     ...skippedConfigs(changed),
+    ...lineChanges(top, tree, changed),
     ...bareChanges(tree, changed),
   ];
   // A stable sort: each file's hits keep the order of their lines.
@@ -368,6 +381,100 @@ function unnamed(
       add(p.path, NOT_UTF8, p.touched);
   }
   return [...found.values()];
+}
+
+/**
+ * A path a disk may open as another name: a part Windows reads as another (a dot or blank at its
+ * end, a `:` stream, the shape of a short 8.3 name), wherever it is, since it can stand for the
+ * file a hook runs as well as for a config; or a path that is an agent config or in an agent
+ * folder only once folded (`.cla​ude`). What was checked under its name is not what such a
+ * disk opens. It fails when the change brought it.
+ */
+function aliases(paths: readonly string[], changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const out: TaggedHit[] = [];
+  for (const path of paths) {
+    const why = path.split('/').some(windowsAlias)
+      ? WINDOWS_ALIAS
+      : agentOnlyWhenFolded(path)
+        ? FOLDED_ALIAS
+        : undefined;
+    if (why !== undefined)
+      out.push(
+        tagged(
+          hit('unreadable-config', path, 1, 'path', why),
+          changed.has(path) ? 'new' : 'present',
+        ),
+      );
+  }
+  return out;
+}
+
+const WINDOWS_ALIAS =
+  'Windows opens this name as another one (a dot or blank at the end of a part, a : stream, a short 8.3 name), so what the check read here may not be what a host opens';
+const FOLDED_ALIAS =
+  'only with its invisible characters, accents or letter case folded is this an agent config, as some disks open it, so what the check read here may not be what a host opens';
+
+/** The most files whose lines `lineChanges` reads in one check. */
+const MAX_LINE_FILES = 64;
+
+/**
+ * The lines a change adds to a `.gitattributes`, or to an npm, yarn or bun config, that make a
+ * checkout write other text than git holds or name where packages come from (`agent-lines.ts`).
+ * Read at the head and at the base, a few files and none past the size cap; what is not read fails.
+ */
+function lineChanges(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  const files = [...changed]
+    .filter(
+      ([path, c]) => (c.status === 'A' || c.status === 'M' || c.status === 'T') && isLineFile(path),
+    )
+    .map(([path]) => path)
+    .sort(byPath);
+  const out: TaggedHit[] = [];
+  const unread = (path: string, why: string): void => {
+    out.push(tagged(hit('unreadable-config', path, 1, 'lines', why), 'new'));
+  };
+  const now = files.slice(0, MAX_LINE_FILES);
+  const cut = files[MAX_LINE_FILES];
+  if (cut !== undefined)
+    unread(
+      cut,
+      `${files.length - MAX_LINE_FILES} more such files were not read: one check reads ${MAX_LINE_FILES}`,
+    );
+  const wanted: { path: string; head: TreeEntry; base: string | undefined }[] = [];
+  for (const path of now) {
+    const head = tree.get(path);
+    const c = changed.get(path) as Changed;
+    if (head === undefined || !isBlob(head) || head.size > MAX_FILE_BYTES) {
+      unread(path, 'not a file within the size the check reads');
+      continue;
+    }
+    const base = c.oldMode === '100644' || c.oldMode === '100755' ? c.oldOid : undefined;
+    wanted.push({ path, head, base });
+  }
+  const bases = unique(wanted.flatMap((w) => w.base ?? []));
+  const sizes = objectSizes(top, bases);
+  const blobs = readBlobs(top, [
+    ...wanted.map((w) => w.head),
+    ...bases.flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  ]);
+  for (const w of wanted) {
+    const headText = blobs.get(w.head.oid) ?? '';
+    const baseText = w.base === undefined ? undefined : blobs.get(w.base);
+    out.push(
+      ...tagChanges(
+        lineHits(w.path, headText),
+        baseText === undefined ? [] : lineHits(w.path, baseText),
+      ),
+    );
+  }
+  return out;
 }
 
 const NOT_UTF8 =

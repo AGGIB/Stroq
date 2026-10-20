@@ -10,8 +10,16 @@ const NAMES: ReadonlySet<string> = new Set(['head', 'objects', 'refs', 'config',
 
 /** Printable ASCII: most names are, and fold with a few steps only. */
 const PLAIN = /^[\x20-\x7e]*$/;
-/** Windows drops dots and blanks at the end of a name. */
-const TRAILING = /[. ]+$/;
+
+/**
+ * Windows drops dots and blanks at the end of a name. One pass from the end: a pattern such as
+ * `/[. ]+$/` tries every start in a long run of them, which is slow on a name built for it.
+ */
+function dropTrailing(name: string): string {
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === '.' || name[end - 1] === ' ')) end -= 1;
+  return name.slice(0, end);
+}
 /**
  * Characters macOS ignores in a name (zero-width ones, soft hyphens, variation selectors), and
  * the marks that only accent a letter: `cómmondir` is read as `commondir`, in doubt.
@@ -27,14 +35,37 @@ const DROPPED = /[\p{Default_Ignorable_Code_Point}\p{M}]/gu;
 export function foldName(name: string): string {
   const colon = name.indexOf(':');
   const stream = colon === -1 ? name : name.slice(0, colon);
-  if (PLAIN.test(stream)) return stream.toLowerCase().replace(TRAILING, '');
+  if (PLAIN.test(stream)) return dropTrailing(stream.toLowerCase());
   const folded = stream
     .normalize('NFKD')
     .replace(DROPPED, '')
     .toUpperCase()
     .toLowerCase()
     .normalize('NFKC');
-  return folded.replace(TRAILING, '');
+  return dropTrailing(folded);
+}
+
+/**
+ * Whether a name is one Windows opens as another name, or may: dots or blanks at its end, a `:`
+ * stream, or the shape of a short 8.3 name (`CLAUDE~1`, `SETTIN~1.JSO`), which NTFS gives a long
+ * name such as `.claude` next to its own. Git for Windows refuses the first two on checkout, but
+ * other tools and settings do not.
+ */
+export function windowsAlias(name: string): boolean {
+  if (name.includes(':')) return true;
+  if (name !== dropTrailing(name)) return true;
+  const tilde = name.indexOf('~');
+  if (tilde === -1 || tilde > 6) return false;
+  const dot = name.indexOf('.', tilde);
+  const stem = dot === -1 ? name : name.slice(0, dot);
+  const ext = dot === -1 ? '' : name.slice(dot + 1);
+  return (
+    stem.length <= 8 &&
+    ext.length <= 3 &&
+    !ext.includes('.') &&
+    !stem.slice(0, tilde).includes('.') &&
+    /^[0-9]+$/.test(stem.slice(tilde + 1))
+  );
 }
 
 /** The name as git looks for it (`head`, `objects`...), or undefined for any other name. */

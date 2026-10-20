@@ -156,12 +156,16 @@ export function listTree(top: string, commit: string): Tree {
 
 /**
  * `git diff --raw -z --no-abbrev`: each path that differs between the two commits, with its mode
- * and blob at the base, so the old contents can be read by id in one batch.
+ * and blob at the base, so the old contents can be read by id in one batch. A submodule is
+ * compared too, whatever `.gitmodules` says: `ignore = all` there, which the change itself can
+ * write, would otherwise leave a new or moved submodule out of the diff.
  */
 export function changedPaths(top: string, base: string, head: string): Map<string, Changed> {
   const out = run(
     top,
     [
+      '-c',
+      'diff.ignoreSubmodules=none',
       'diff',
       '--raw',
       '-z',
@@ -169,6 +173,7 @@ export function changedPaths(top: string, base: string, head: string): Map<strin
       '--no-renames',
       '--no-ext-diff',
       '--no-textconv',
+      '--ignore-submodules=none',
       base,
       head,
     ],

@@ -29,6 +29,8 @@ function sentence(h: AgentHit, q: Quote): string {
     case 'agent-helper-command':
       return `${name} runs: ${value}`;
     case 'agent-api-redirect':
+      if (h.name === 'package registry')
+        return `names where npm, yarn, pnpm or bun fetch packages from, so the next npx or install in this folder can run other code: ${value}`;
       return /otel|telemetry/i.test(h.name)
         ? `${name} sends the agent's telemetry, which can hold your prompts, to: ${value}`
         : `${name} sends the agent's API traffic, and its key, to: ${value}`;

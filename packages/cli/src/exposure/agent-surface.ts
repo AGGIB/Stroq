@@ -23,6 +23,7 @@ import {
   type JsonFile,
 } from './agent-json.js';
 import { byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
+import { foldName } from './git-dir-names.js';
 import { opencodeConfig, pluginCode, zedSettings } from './agent-others.js';
 import { geminiSettings } from './agent-switches.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
@@ -50,7 +51,11 @@ export {
 type Reader = (path: string, text: string) => AgentHit[];
 type Fallback = (path: string, raw: string, stripped: string) => AgentHit[];
 
-/** Reads JSON with comments; a file that does not parse goes to `fallback`, never to nothing. */
+/**
+ * Reads JSON with comments; a file that does not parse goes to `fallback`, never to nothing. One
+ * whose bytes are not text (a NUL, or bytes that are not UTF-8, as a filter such as git-crypt
+ * stores it) is not read at all: what a checkout writes there is not this.
+ */
 const json =
   (read: (f: JsonFile) => AgentHit[], fallback: Fallback): Reader =>
   (path, raw) => {
@@ -59,7 +64,10 @@ const json =
     try {
       value = JSON.parse(stripped);
     } catch {
-      return fallback(path, raw, stripped);
+      const hits = fallback(path, raw, stripped);
+      if (hits.length > 0 || !(raw.includes('\u0000') || raw.includes('�'))) return hits;
+      const why = `its bytes are not text, as a checkout filter stores a file (${digestOf(raw)})`;
+      return [hit('unreadable-config', path, 1, 'not text', why)];
     }
     return isPlainObject(value) ? read({ path, text: stripped, value }) : [];
   };
@@ -222,7 +230,8 @@ function othersCodeFolder(path: string): string | undefined {
   const parts = path.split('/');
   for (let i = 0; i < parts.length - 1; i += 1) {
     const part = parts[i] as string;
-    if (AGENT_DIR_NAMES.has(part.toLowerCase())) return undefined;
+    if (AGENT_DIR_NAMES.has(part.toLowerCase()) || AGENT_DIR_NAMES.has(foldName(part)))
+      return undefined;
     if (SKIP_DIRS.has(part)) return part;
   }
   return undefined;
@@ -295,9 +304,21 @@ function isTextName(path: string): boolean {
   );
 }
 
-/** Every reader for a repository-relative path with `/` separators; none for most files. */
-export function readersFor(path: string): Reader[] {
+/** A path whose parts may fold to other names: past printable ASCII, a `:`, a dot or blank at an end. */
+const MAY_FOLD = /[^\x20-\x7e]|[. ](?:\/|$)|:/;
+
+/**
+ * A path as the most forgiving disk opens it, each part folded by `foldName`: a dot or blank at
+ * the end of a part dropped and a `:` stream cut off (Windows), invisible characters and accents
+ * dropped (macOS), letter case folded. `.claude./settings.json` is `.claude/settings.json`.
+ */
+export function foldPath(path: string): string {
   const lower = path.toLowerCase();
+  return MAY_FOLD.test(path) ? path.split('/').map(foldName).join('/') : lower;
+}
+
+/** The readers of a path, by its name in lower case or folded, as `lower` gives it. */
+function readersOf(path: string, lower: string): Reader[] {
   const parts = lower.split('/');
   const readers: Reader[] = [];
   if (!inOthersCode(path)) {
@@ -306,10 +327,39 @@ export function readersFor(path: string): Reader[] {
     readers.push(...folderReaders(parts).filter((r) => r !== fixed));
     if (lower.endsWith('.code-workspace')) readers.push(READERS.workspace);
   }
+  return readers;
+}
+
+/**
+ * Every reader for a repository-relative path with `/` separators; none for most files. A path is
+ * read by its own name and by the name a disk may open it as, so `.claude /settings.json` is read
+ * as settings too.
+ */
+export function readersFor(path: string): Reader[] {
+  const lower = path.toLowerCase();
+  const folded = foldPath(path);
+  const readers = readersOf(path, lower);
+  if (folded !== lower)
+    for (const reader of readersOf(path, folded))
+      if (!readers.includes(reader)) readers.push(reader);
   if (isAgentDefinitionPath(path) && lower.endsWith('.md')) readers.push(READERS.definition);
   if (INSTRUCTION_FILE.test(path) && !isMcpConfigPath(path) && isTextName(path))
     readers.push(READERS.instruction);
   return readers;
+}
+
+/**
+ * Whether a path is an agent config or in an agent folder only by the name a disk may open it as,
+ * not by its own: `.cla​ude/settings.json`, `.vscode./tasks.json`. What the check read
+ * under that name may not be what a host on another disk opens.
+ */
+export function agentOnlyWhenFolded(path: string): boolean {
+  const lower = path.toLowerCase();
+  const folded = foldPath(path);
+  if (folded === lower) return false;
+  const agent = (name: string): boolean =>
+    readersOf(path, name).length > 0 || agentFolderIn(name) || agentDirIs(name);
+  return agent(folded) && !agent(lower);
 }
 
 export const isSurfacePath = (path: string): boolean => readersFor(path).length > 0;
@@ -321,7 +371,9 @@ export const isSurfacePath = (path: string): boolean => readersFor(path).length 
  */
 export function readTier(path: string): 0 | 1 | 2 {
   const lower = path.toLowerCase();
-  if (AT_ROOT.has(lower) || AGENT_DIRS.has(lower)) return 0;
+  const folded = foldPath(path);
+  if (AT_ROOT.has(lower) || AGENT_DIRS.has(lower) || AT_ROOT.has(folded) || AGENT_DIRS.has(folded))
+    return 0;
   const readers = readersFor(path);
   return readers.length > 0 && readers.every((r) => r === READERS.instruction) ? 2 : 1;
 }
@@ -363,8 +415,24 @@ export type SourceRead =
 /** The most bytes of one file that are read. A real agent config is a few kilobytes. */
 export const MAX_FILE_BYTES = 1024 * 1024;
 
+/** What a Git LFS pointer starts with: the file a checkout writes here is fetched from elsewhere. */
+const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
+
 export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[] {
-  if (read.kind === 'text') return scanFile(path, read.text);
+  if (read.kind === 'text') {
+    // What git holds here is not what a checkout with Git LFS writes, so it was not read.
+    if (read.text.startsWith(LFS_POINTER) && readersFor(path).length > 0)
+      return [
+        hit(
+          'unreadable-config',
+          path,
+          1,
+          'lfs pointer',
+          `a Git LFS pointer: a checkout fills it in from elsewhere (${digestOf(read.text)})`,
+        ),
+      ];
+    return scanFile(path, read.text);
+  }
   if (read.kind === 'unreadable') return [];
   if (read.kind === 'outside') return [hit('config-link-outside', path, 1, 'link', read.target)];
   if (read.kind === 'dangling') {
@@ -452,24 +520,35 @@ const AGENT_DIR_NAMES: ReadonlySet<string> = new Set([
  */
 export function isAgentDir(path: string): boolean {
   if (inOthersCode(path)) return false;
-  const parts = path.toLowerCase().split('/');
+  return agentDirIs(path.toLowerCase()) || agentDirIs(foldPath(path));
+}
+
+/** `isAgentDir` of a path already in lower case or folded. */
+function agentDirIs(lower: string): boolean {
+  const parts = lower.split('/');
   return [1, 2].some((n) => parts.length >= n && AGENT_DIRS.has(parts.slice(-n).join('/')));
 }
 
 /** Inside an agent folder, at any depth: not `.github` as a whole, whose workflows are not one. */
 export function inAgentDir(path: string): boolean {
   if (inOthersCode(path)) return false;
-  const slashed = `/${path.toLowerCase()}`;
-  for (const dir of AGENT_DIRS) {
-    if (slashed.endsWith(`/${dir}`)) return true;
-    if (dir !== '.github' && slashed.includes(`/${dir}/`)) return true;
-  }
-  return false;
+  return [path.toLowerCase(), foldPath(path)].some((lower) => {
+    const slashed = `/${lower}`;
+    for (const dir of AGENT_DIRS) {
+      if (slashed.endsWith(`/${dir}`)) return true;
+      if (dir !== '.github' && slashed.includes(`/${dir}/`)) return true;
+    }
+    return false;
+  });
 }
 
-/** Whether a repository-relative path goes through a folder an agent or editor loads from. */
+/** `inAgentFolder` of a path already in lower case or folded. */
+const agentFolderIn = (lower: string): boolean =>
+  lower.split('/').some((part) => AGENT_DIR_NAMES.has(part));
+
+/**
+ * Whether a repository-relative path goes through a folder an agent or editor loads from, by
+ * its own name or by the name a disk may open it as.
+ */
 export const inAgentFolder = (path: string): boolean =>
-  path
-    .toLowerCase()
-    .split('/')
-    .some((part) => AGENT_DIR_NAMES.has(part));
+  agentFolderIn(path.toLowerCase()) || agentFolderIn(foldPath(path));

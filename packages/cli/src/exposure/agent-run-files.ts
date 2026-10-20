@@ -292,6 +292,12 @@ class Follower {
   /** The touched files under `folder`, and under where its links lead, once for this entry. */
   private underFolder(folder: string, found: Found[]): void {
     if (!this.once(`folder\0${folder}`)) return;
+    // The folder itself, when it is a submodule the change moved or is in one, or a link on the
+    // way to it changed: what is under it is not in the tree to list.
+    const itself = folder === '' ? undefined : this.lookup(folder);
+    if (itself === 'unknown') this.widen('any');
+    else if (itself !== undefined)
+      found.push({ file: folder, value: folder, status: itself, kind: 'agent-run-file-changed' });
     const files = [...under(this.index.sorted, folder)];
     const real = folder === '' ? folder : this.view.real?.(folder);
     if (real === 'unknown') this.widen('any');
