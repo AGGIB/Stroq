@@ -3,11 +3,12 @@ import { settle, tagChanges, type TaggedHit } from '../../src/exposure/agent-cha
 import { runsFetchedOrHiddenCode } from '../../src/exposure/fetch-shapes.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runFileChanges } from '../../src/exposure/agent-run-files.js';
-import { pathWords } from '../../src/exposure/run-words.js';
+import { NameMatcher, normalText } from '../../src/exposure/run-names.js';
 import {
   computesWhatRuns,
-  npmPlan,
   programOf,
+  reachesOf,
+  segments,
   shellTokens,
 } from '../../src/exposure/run-programs.js';
 import {
@@ -25,7 +26,6 @@ import { lineHits } from '../../src/exposure/agent-lines.js';
 import { ruleRunsAnything } from '../../src/exposure/allow-rules.js';
 import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
 import { parseGitConfig } from '../../src/exposure/repo-surface.js';
-import { referencesOf } from '../../src/exposure/run-imports.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -176,6 +176,9 @@ const SHAPES: readonly (readonly [name: string, shape: Shape])[] = [
   ['deep JSON arrays', (size) => `${'['.repeat(size / 2)}${']'.repeat(size / 2)}`],
   ['deep JSON objects', (size) => `${'{"a":'.repeat(size / 6)}1${'}'.repeat(size / 6)}`],
   ['controls', repeat('\u0001\u001b\r\n')],
+  // A name of blanks with a letter at its end: one pass from the end trims it.
+  ['blanks, then a letter', (size) => `${' '.repeat(size - 1)}x`],
+  ['dots and blanks, then a letter', (size) => `${'. '.repeat(size / 2 - 1)}x`],
   // A link target down many folders and back up them, normalized before it is judged.
   ['down and back up', (size) => `/${'a/'.repeat(size / 5)}${'../'.repeat(size / 5)}tmp/x`],
 ];
@@ -310,7 +313,6 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
       skippedConfigFolder(`vendor/${text}/.mcp.json`),
     ],
   ],
-  ['the file words of a command line', (text) => pathWords(text)],
   ['the shapes of downloaded code', (text) => runsFetchedOrHiddenCode(text)],
   [
     'a new entry settled',
@@ -320,81 +322,60 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   [
-    'following a command already there to the files it runs',
+    'reading a command already there against the files a change touched',
     (text) =>
       runFileChanges(
         [{ ...hit('agent-hook', '.claude/settings.json', 1, 'S', text), status: 'present' }],
         {
-          touched: (path) => (path.endsWith('x.sh') ? 'changed' : undefined),
           touchedFiles: [
             ['.claude/hooks/x.sh', 'changed'],
             ['a/a/a/Makefile', 'new'],
             ['package.json', 'changed'],
+            [`${text.slice(0, 200)}/x.sh`, 'new', '100755'],
           ],
-          scripts: () => ({ head: { a: text, lint: text }, base: {} }),
+          links: new Map([['.claude/hooks', 'a/a']]),
+          packageFolders: new Set(['']),
+          hooksPaths: ['.husky'],
         },
       ),
   ],
   [
-    'which program a command starts',
+    'what a command line starts, and how far that reaches',
     (text) => [
       computesWhatRuns(text),
       programOf(shellTokens(text)),
-      npmPlan('pnpm', shellTokens(text)),
+      reachesOf(text),
+      segments(text),
     ],
   ],
   [
-    'what a command it cannot follow could run',
+    'the names of what a change touched, read from the change',
     (text) =>
       runFileChanges(
-        [{ ...hit('agent-hook', '.claude/settings.json', 1, 'S', 'mytool'), status: 'present' }],
+        [{ ...hit('agent-hook', '.claude/settings.json', 1, 'S', 'bash x.sh'), status: 'present' }],
         {
-          touched: () => undefined,
           touchedFiles: [
             [text, 'new'],
             [`${text}/x.sh`, 'changed', '100755'],
             [`.claude/${text}`, 'new'],
+            [text.split('').join('/'), 'new'],
           ],
-          scripts: () => ({ head: { a: text }, base: { a: 'x' }, setup: { head: text, base: '' } }),
+          links: new Map([
+            [text.slice(0, 64), ''],
+            ['l', text.slice(0, 1024)],
+          ]),
         },
       ),
   ],
   [
-    'what the follow reads in a file',
-    (text) => [
-      referencesOf(text, 'js'),
-      referencesOf(text, 'py'),
-      referencesOf(text, 'sh'),
-      referencesOf(text, 'other'),
-    ],
-  ],
-  [
-    'following a command into the files it imports',
-    (text) =>
-      runFileChanges(
-        [
-          {
-            ...hit(
-              'agent-hook',
-              '.claude/settings.json',
-              1,
-              'S',
-              'node a.js && bash b.sh && python3 c.py && prettier .',
-            ),
-            status: 'present',
-          },
-        ],
-        {
-          touched: (path) => (path.endsWith('x.sh') ? 'changed' : undefined),
-          touchedFiles: [
-            ['.claude/hooks/x.sh', 'changed'],
-            ['node_modules/a/x.js', 'new'],
-          ],
-          scripts: () => undefined,
-          kind: (path) => (path.length < 64 ? 'file' : undefined),
-          text: () => text,
-        },
-      ),
+    'names looked for in a text',
+    (text) => {
+      const matcher = new NameMatcher();
+      for (const name of [text.slice(0, 255), 'a', 'aa', 'aaa', text.slice(0, 16)])
+        matcher.add(name);
+      matcher.build();
+      return matcher.scan(normalText(text), () => undefined);
+    },
   ],
   [
     'an allow rule',

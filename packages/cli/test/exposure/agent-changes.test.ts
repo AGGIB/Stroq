@@ -213,6 +213,8 @@ describe('agentChanges against a base commit', () => {
       'new agent-hook .claude/settings.json SessionStart',
       'new editor-autorun-task .vscode/tasks.json w',
       'changed instruction-file CLAUDE.md content',
+      // Read as text, the hook names `claude`, which is CLAUDE.md without its extension.
+      'changed agent-run-file-changed CLAUDE.md PreToolUse hook in .claude/settings.json',
     ]);
   });
 

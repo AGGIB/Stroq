@@ -140,8 +140,11 @@ describe('an entry already there whose other fields change', () => {
         }),
       ),
     ).toEqual(['changed agent-hook .github/hooks/h.json sessionStart FAILS']);
+    // The hook is compared by its value alone, but read as text its command `./s.sh` holds `h`,
+    // the name of h.json without its extension, so the edited file fails as one it may run.
     expect(brief(change(before, { '.github/hooks/h.json': hooks({ timeoutSec: 30 }) }))).toEqual([
       'present agent-hook .github/hooks/h.json sessionStart passes',
+      'changed agent-run-file-changed .github/hooks/h.json sessionStart hook in .github/hooks/h.json FAILS',
     ]);
   });
 

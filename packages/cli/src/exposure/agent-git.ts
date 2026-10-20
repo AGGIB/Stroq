@@ -1,8 +1,7 @@
-import { isPlainObject } from '../commands/config-file.js';
 import { settle, tagChanges, type TaggedHit } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
-import { boundedJson, hit, type AgentHit } from './agent-kinds.js';
-import { runFileChanges, type PackageScripts, type RunView } from './agent-run-files.js';
+import { hit, type AgentHit } from './agent-kinds.js';
+import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
 import { isLineFile, lineHits } from './agent-lines.js';
 import {
   MAX_FILE_BYTES,
@@ -16,6 +15,7 @@ import {
 import {
   GitError,
   changedPaths,
+  hooksPaths,
   isGitFailure,
   listTree,
   objectSizes,
@@ -33,6 +33,7 @@ import {
   byPath,
   isBlob,
   linkMatters,
+  linkTarget,
   linksOnTheWay,
   openedPaths,
   resolve,
@@ -47,7 +48,6 @@ import {
   looksLikeGitDir,
   windowsAlias,
 } from './git-dir-names.js';
-import { stripJsonc } from './jsonc.js';
 
 export { GitError } from './git-read.js';
 
@@ -286,45 +286,11 @@ function compare(top: string, base: string, head: string) {
   };
 
   const found = escalateApproved(kept.flatMap(hitsOf));
-  const statusOf = (c: Changed | undefined): 'new' | 'changed' | undefined =>
-    c?.status === 'A' ? 'new' : c?.status === 'M' || c?.status === 'T' ? 'changed' : undefined;
-  // How a path a command names changed: itself (a file, a link, a submodule), a link on the way,
-  // the file behind, or a submodule it is in, whose files come from the commit it points at;
-  // `unknown` when a link on the way was not read.
-  const touched = (path: string): 'new' | 'changed' | 'unknown' | undefined => {
-    const direct = statusOf(changed.get(path));
-    if (direct !== undefined) return direct;
-    const at = resolve(path, links.view);
-    if (at.kind === 'unread') return 'unknown';
-    if (at.kind === 'none') return undefined;
-    if (linkChanged(at, changed)) return 'changed';
-    return at.kind === 'blob' || at.kind === 'submodule'
-      ? statusOf(changed.get(at.path))
-      : undefined;
-  };
-  const real = (path: string): string | 'unknown' | undefined => {
-    const at = resolve(path, links.view);
-    if (at.kind === 'unread') return 'unknown';
-    return at.kind === 'folder' || at.kind === 'blob' ? at.path : undefined;
-  };
-  // A submodule's files are another repository's: what it holds is not known.
-  const kind = (path: string): 'file' | 'folder' | 'unknown' | undefined => {
-    const at = resolve(path, links.view);
-    if (at.kind === 'unread' || at.kind === 'submodule') return 'unknown';
-    return at.kind === 'blob' ? 'file' : at.kind === 'folder' ? 'folder' : undefined;
-  };
-  const text = followReader(top, tree, links.view);
-  // Links and submodules too: one a change puts in a folder a hook runs is run.
-  const touchedFiles = [...changed].flatMap(([path, c]): RunView['touchedFiles'] => {
-    const entry = tree.get(path);
-    const status = statusOf(c);
-    return entry === undefined || status === undefined ? [] : [[path, status, entry.mode]];
-  });
-  const scripts = packageScripts(top, tree, changed, links.view);
+  const runs = runView(top, tree, sorted, changed, links.view, found);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
     ...found,
-    ...runFileChanges(found, { touched, touchedFiles, scripts, real, kind, text }),
+    ...runFileChanges(found, runs),
     ...limits,
     ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
     ...aliases(sorted, changed),
@@ -488,121 +454,57 @@ const NOT_UTF8 =
   'its name is not UTF-8, so the check cannot tell it from another name that reads the same';
 const TWO_PATHS = 'two paths of the tree read as this one name, so the check saw only one of them';
 
-/** The most files the follow reads for what they import, and the most bytes of them, in one check. */
-const MAX_FOLLOW_FILES = 512;
-const MAX_FOLLOW_BYTES = 16 * 1024 * 1024;
+/** The most links of the tree whose targets are read to find what reaches a touched file. */
+const MAX_RUN_LINKS = 4_096;
 
 /**
- * The text at the head of the files the follow reads for what they import or source: each read
- * once, none past the size cap, and no more than a few hundred in all. One past a limit, or behind
- * a link that was not read, is `unread`, which widens the follow.
+ * What the reading of the entries already there needs of the change: each path it touched, deleted
+ * ones too, and, when some entry already there runs a command, the links of the tree, the folders
+ * that hold a package.json, and the folders `core.hooksPath` names.
  */
-function followReader(
+function runView(
   top: string,
   tree: ReadonlyMap<string, TreeEntry>,
-  view: TreeView,
-): (path: string) => string | 'unread' | undefined {
-  const texts = new Map<string, string>();
-  let files = 0;
-  let bytes = 0;
-  return (path) => {
-    const at = resolve(path, view);
-    if (at.kind === 'unread' || at.kind === 'submodule') return 'unread';
-    if (at.kind !== 'blob') return undefined;
-    const entry = entryAt(tree, at.path);
-    const known = texts.get(entry.oid);
-    if (known !== undefined) return known;
-    if (entry.size > MAX_FILE_BYTES || files >= MAX_FOLLOW_FILES) return 'unread';
-    if (bytes + entry.size > MAX_FOLLOW_BYTES) return 'unread';
-    files += 1;
-    bytes += Math.max(entry.size, 0);
-    const text = readBlobs(top, [entry]).get(entry.oid);
-    if (text === undefined) return 'unread';
-    texts.set(entry.oid, text);
-    return text;
-  };
-}
-
-/** The most package.json files one check reads for the npm scripts that entries already there run. */
-const MAX_PACKAGE_FILES = 64;
-
-/** The fields of a package.json that set up the runner, compared as one value. */
-const RUNNER_FIELDS = ['workspaces', 'packageManager', 'pnpm', 'config', 'bin'] as const;
-
-/** The `scripts` of a package.json's text, and its runner settings; null when it is not JSON. */
-function packageIn(
-  text: string | undefined,
-): { readonly scripts: Readonly<Record<string, unknown>>; readonly setup: string } | null {
-  if (text === undefined) return null;
-  try {
-    const value: unknown = JSON.parse(stripJsonc(text));
-    if (!isPlainObject(value)) return null;
-    const scripts = Object.hasOwn(value, 'scripts') ? value['scripts'] : undefined;
-    const setup = boundedJson(
-      Object.fromEntries(
-        RUNNER_FIELDS.map((key) => [key, Object.hasOwn(value, key) ? value[key] : null]),
-      ),
-      1024,
-      true,
-    );
-    return { scripts: isPlainObject(scripts) ? scripts : {}, setup };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The scripts of a package.json at the head and at the base, read when a command already there
- * runs npm: a few files, each read once, at most `MAX_PACKAGE_FILES` of them. One that cannot be
- * read, or one past that count, is `unread`, which fails.
- */
-function packageScripts(
-  top: string,
-  tree: ReadonlyMap<string, TreeEntry>,
+  sorted: readonly string[],
   changed: ReadonlyMap<string, Changed>,
   view: TreeView,
-): RunView['scripts'] {
-  const cache = new Map<string, PackageScripts | 'unread' | undefined>();
-  let reads = 0;
-  const read = (path: string): PackageScripts | 'unread' | undefined => {
-    const at = resolve(path, view);
-    if (at.kind === 'none' || at.kind === 'folder') return undefined;
-    if (at.kind !== 'blob') return 'unread';
-    // Only a file that is there counts toward the limit: asking about a folder with none is free.
-    reads += 1;
-    if (reads > MAX_PACKAGE_FILES) return 'unread';
-    const entry = entryAt(tree, at.path);
-    const c = changed.get(at.path);
-    const old = linkChanged(at, changed)
-      ? undefined
-      : c === undefined
-        ? entry.oid
-        : c.status !== 'A' && (c.oldMode === '100644' || c.oldMode === '100755')
-          ? c.oldOid
-          : undefined;
-    const oids = unique([entry.oid, ...(old === undefined ? [] : [old])]);
-    const sizes = objectSizes(top, oids);
-    if (oids.some((oid) => (sizes.get(oid) ?? MAX_FILE_BYTES + 1) > MAX_FILE_BYTES))
-      return 'unread';
-    const blobs = readBlobs(
-      top,
-      oids.map((oid) => ({ oid, size: sizes.get(oid) ?? 0 })),
-    );
-    const head = packageIn(blobs.get(entry.oid));
-    if (head === null) return 'unread';
-    const base = old === undefined ? null : packageIn(blobs.get(old));
-    return {
-      head: head.scripts,
-      base: base?.scripts,
-      setup: { head: head.setup, base: base?.setup },
-    };
-  };
-  return (path) => {
-    if (cache.has(path)) return cache.get(path);
-    const scripts = read(path);
-    cache.set(path, scripts);
-    return scripts;
-  };
+  found: readonly TaggedHit[],
+): RunView {
+  // Links and submodules too: one a change puts in a folder a hook runs is run.
+  const touchedFiles = [...changed].map(([path, c]): RunView['touchedFiles'][number] => [
+    path,
+    c.status === 'A' ? 'new' : 'changed',
+    tree.get(path)?.mode,
+  ]);
+  if (!found.some(isRunEntry)) return { touchedFiles };
+  const packageFolders = new Set<string>();
+  for (const path of [...sorted, ...changed.keys()]) {
+    const slash = path.lastIndexOf('/');
+    if (foldName(path.slice(slash + 1)) === 'package.json')
+      packageFolders.add(slash === -1 ? '' : path.slice(0, slash));
+  }
+  const all = sorted.filter((p) => tree.get(p)?.mode === SYMLINK);
+  const texts = new Map(view.targets);
+  const missing = all.filter((p) => !texts.has(p));
+  const wanted = missing.slice(0, MAX_RUN_LINKS);
+  const small = wanted.map((p) => entryAt(tree, p)).filter((e) => e.size <= MAX_LINK_BYTES);
+  const blobs = readBlobs(top, small);
+  for (const p of wanted) {
+    const text = blobs.get(entryAt(tree, p).oid);
+    if (text !== undefined && !text.includes(REPLACEMENT)) texts.set(p, text);
+  }
+  const links = new Map<string, string>();
+  let linksUnread = 0;
+  for (const link of all) {
+    const text = texts.get(link);
+    if (text === undefined) {
+      linksUnread += 1;
+      continue;
+    }
+    const target = linkTarget(link, text);
+    if (target !== null) links.set(link, target);
+  }
+  return { touchedFiles, links, linksUnread, packageFolders, hooksPaths: hooksPaths(top) };
 }
 
 function submoduleHits(

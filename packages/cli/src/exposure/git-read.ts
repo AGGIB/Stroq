@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { hardeningEnv } from './git-hardening.js';
 
 /**
@@ -47,9 +47,16 @@ function checkoutOf(dir: string): string {
   }
 }
 
-const inside = (folder: string, path: string): boolean => {
+/**
+ * Whether `path` is `folder` or inside it. A child folder may be named `..x`: only `..` itself, or
+ * `..` followed by a separator, leads out.
+ */
+export const inside = (folder: string, path: string): boolean => {
   const rel = relative(folder, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith('../') && !isAbsolute(rel))
+  );
 };
 
 const isProgram = (path: string): boolean => {
@@ -263,6 +270,30 @@ export function changedPaths(top: string, base: string, head: string): Map<strin
     changed.set(path, { status: status.charAt(0), oldMode, oldOid });
   }
   return changed;
+}
+
+/**
+ * The folders `core.hooksPath` names for the repository at `top`, relative to it: git runs its
+ * hooks from there. None when it is not set or names a folder outside; `unknown` when git could
+ * not say. Reading a setting runs nothing.
+ */
+export function hooksPaths(top: string): string[] | 'unknown' {
+  let out: Buffer;
+  try {
+    out = run(top, ['config', '--get-all', 'core.hooksPath'], 64 * 1024);
+  } catch (err) {
+    return (err as { status?: unknown }).status === 1 ? [] : 'unknown';
+  }
+  return out
+    .toString('utf8')
+    .split('\n')
+    .map((value) => value.trim())
+    .filter((value) => value !== '' && !value.startsWith('~'))
+    .flatMap((value) => {
+      const path = isAbsolute(value) ? value : join(top, value);
+      if (!inside(top, path)) return [];
+      return [relative(top, path).split(sep).join('/')];
+    });
 }
 
 /** `git cat-file --batch-check` over `oids`: the size of each object that is there. */

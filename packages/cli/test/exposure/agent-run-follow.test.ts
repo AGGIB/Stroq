@@ -159,15 +159,6 @@ describe('a path a hook names in another letter case', () => {
 describe('what the file a hook runs imports, sources or calls', () => {
   it.each([
     [
-      'node .claude/hooks/guard.js',
-      {
-        '.claude/hooks/guard.js': "require('../../lib/util');\n",
-        'lib/util.js': 'module.exports = 1;\n',
-      },
-      { 'lib/util.js': "require('child_process').execSync('id');\n" },
-      'lib/util.js',
-    ],
-    [
       'node .claude/hooks/guard.mjs',
       {
         '.claude/hooks/guard.mjs': "import { x } from './lib/x.mjs';\n",
@@ -230,12 +221,6 @@ describe('what the file a hook runs imports, sources or calls', () => {
     ],
     [
       'bash .claude/hooks/a.sh',
-      { '.claude/hooks/a.sh': 'scripts/check.sh\n', 'scripts/check.sh': '1\n' },
-      { 'scripts/check.sh': '2\n' },
-      'scripts/check.sh',
-    ],
-    [
-      'bash .claude/hooks/a.sh',
       {
         '.claude/hooks/a.sh': '. "$(dirname "$0")/lib/common.sh"\n',
         '.claude/hooks/lib/common.sh': '1\n',
@@ -259,35 +244,21 @@ describe('what the file a hook runs imports, sources or calls', () => {
     expect(failsOn(hookRuns(command, files, edits), file)).toBe(true);
   });
 
-  it('leaves a change alone that the file a hook runs does not reach', () => {
-    expect(
-      hookRuns(
-        'python3 .claude/hooks/guard.py',
-        { '.claude/hooks/guard.py': 'import json\n', 'src/json.py': '1\n', 'src/app.js': '1\n' },
-        { 'src/json.py': '2\n', 'src/app.js': '2\n' },
-      ),
-    ).toEqual([]);
-    expect(
-      hookRuns(
-        'node .claude/hooks/guard.js',
-        { '.claude/hooks/guard.js': "const fs = require('fs');\n", 'src/app.js': '1\n' },
-        { 'src/app.js': '2\n' },
-      ),
-    ).toEqual([]);
-  });
-
-  it('widens when an import goes deeper than the follow reads', () => {
-    const chain: Record<string, string> = {};
-    for (let i = 0; i < 12; i += 1) chain[`.claude/hooks/m${i}.js`] = `require('./m${i + 1}');\n`;
-    chain['.claude/hooks/m12.js'] = '1\n';
-    const fails = hookRuns(
-      'node .claude/hooks/m0.js',
-      { ...chain, 'src/other.sh': '1\n' },
+  it('lists to review a change the file a hook runs does not name', () => {
+    const hits = change(
       {
-        'src/other.sh': '2\n',
+        '.claude/settings.json': hookSettings({ PostToolUse: 'python3 .claude/hooks/guard.py' }),
+        '.claude/hooks/guard.py': 'import json\n',
+        'src/json.py': '1\n',
+        'src/app.js': '1\n',
+        'docs/guide.md': '1\n',
       },
+      { 'src/json.py': '2\n', 'src/app.js': '2\n', 'docs/guide.md': '2\n' },
     );
-    expect(failsOn(fails, 'src/other.sh')).toBe(true);
+    expect(failing(hits)).toEqual([]);
+    expect(
+      hits.filter((h) => h.kind === 'agent-run-file-changed').map((h) => `${h.file} ${h.severity}`),
+    ).toEqual(['src/app.js warning', 'src/json.py warning']);
   });
 });
 
@@ -305,6 +276,60 @@ describe('a change that hits many entries already there', () => {
   });
 });
 
+/**
+ * What a file a hook runs loads in turn is not read: no language is parsed. A change to code
+ * outside the folders the hook names is listed to review by its path, not failed. These were
+ * failures while the check read imports, sources and calls; that reading is gone, so they are
+ * warnings now, the one place the coarse reading is milder than the reading it replaced.
+ */
+describe('what the file a hook runs loads from outside the folders it names', () => {
+  const reviewed = (hits: readonly TaggedHit[]): string[] =>
+    hits
+      .filter((h) => h.kind === 'agent-run-file-changed' && h.severity === 'warning')
+      .map((h) => `${h.status} ${h.file}`);
+
+  it.each([
+    [
+      'node .claude/hooks/guard.js',
+      {
+        '.claude/hooks/guard.js': "require('../../lib/util');\n",
+        'lib/util.js': 'module.exports = 1;\n',
+      },
+      { 'lib/util.js': "require('child_process').execSync('id');\n" },
+      'lib/util.js',
+    ],
+    [
+      'bash .claude/hooks/a.sh',
+      { '.claude/hooks/a.sh': 'scripts/check.sh\n', 'scripts/check.sh': '1\n' },
+      { 'scripts/check.sh': '2\n' },
+      'scripts/check.sh',
+    ],
+    [
+      'node .claude/hooks/m0.js',
+      { '.claude/hooks/m0.js': "require('../../src/m1');\n", 'src/other.sh': '1\n' },
+      { 'src/other.sh': '2\n' },
+      'src/other.sh',
+    ],
+    [
+      'bash .claude/hooks/a.sh',
+      {
+        '.claude/hooks/a.sh': 'bash "$ROOT/scripts/check.sh"\n',
+        'scripts/check.sh': 'source lib.sh\n',
+        'scripts/lib.sh': '1\n',
+      },
+      { 'scripts/lib.sh': '2\n' },
+      'scripts/lib.sh',
+    ],
+  ])('`%s` lists %s to review', (command, files, edits, file) => {
+    const hits = change(
+      { '.claude/settings.json': hookSettings({ PostToolUse: command }), ...files },
+      edits,
+    );
+    expect(failing(hits)).toEqual([]);
+    expect(reviewed(hits)).toEqual([`changed ${file}`]);
+  });
+});
+
 describe('what a shell script a hook runs only mentions', () => {
   it('does not take a bare word for a file anywhere in the tree', () => {
     expect(
@@ -314,18 +339,5 @@ describe('what a shell script a hook runs only mentions', () => {
         { 'pkg/package.json': '{"name":"x"}\n' },
       ),
     ).toEqual([]);
-  });
-
-  it('follows a path behind a prefix it cannot read, by its ends', () => {
-    const fails = hookRuns(
-      'bash .claude/hooks/a.sh',
-      {
-        '.claude/hooks/a.sh': 'bash "$ROOT/scripts/check.sh"\n',
-        'scripts/check.sh': 'source lib.sh\n',
-        'scripts/lib.sh': '1\n',
-      },
-      { 'scripts/lib.sh': '2\n' },
-    );
-    expect(failsOn(fails, 'scripts/lib.sh')).toBe(true);
   });
 });

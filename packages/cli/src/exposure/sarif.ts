@@ -63,7 +63,7 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
   'config-submodule':
     'An agent folder or config is a submodule: what it holds comes from another repository when the submodule is checked out, and was not read.',
   'agent-run-file-changed':
-    'An entry that runs by itself starts this file, and the change edits it, so what runs changes though the entry does not.',
+    'An entry that runs by itself may start or load this file, and the change edits it, so what runs may change though the entry does not.',
 };
 
 const ruleId = (kind: string): string => `stroq/${kind}`;

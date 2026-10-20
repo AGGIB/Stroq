@@ -1,26 +1,13 @@
+import { OPEN_RUNNERS, RUNNER_WORDS, TEST_RUNNERS } from './run-tables.js';
+
 /**
- * Which program one command of a hook's command line starts, and how much of what that program
- * runs the follow in `agent-run-files.ts` can model. Not a shell parser: what this does not
- * understand is said so (`coarse`), and the caller then flags more rather than less.
+ * What the programs of a command line tell about how far it reaches: whether what it runs is
+ * written on the line at all. Not a shell parser: a command it does not read to the end, a
+ * program it does not know, a quote left open, is one that could run anything, and the caller
+ * flags more rather than less.
  *
  * Every function here is one pass over its text, so the work is linear in the command's length.
  */
-
-/** How much of what a command runs is known. */
-export type Reach =
-  /** Nothing of the repository beyond the paths its words name, which are looked up anyway. */
-  | 'paths'
-  /**
-   * A package or task runner it cannot follow to the end: every change to package scripts,
-   * workspace and runner configs, Makefiles, justfiles and Taskfiles counts.
-   */
-  | 'runner'
-  /** Not known at all: every changed file in an agent folder and every script counts too. */
-  | 'any';
-
-/** The more cautious of two reaches. */
-export const wider = (a: Reach, b: Reach): Reach =>
-  a === 'any' || b === 'any' ? 'any' : a === 'runner' || b === 'runner' ? 'runner' : 'paths';
 
 /**
  * Whether a command line holds a shell feature that decides at run time what runs: a variable or
@@ -104,6 +91,38 @@ function expansionEnd(command: string, at: number): number {
   return j;
 }
 
+/** Characters that end one command of a line and start the next, outside quotes. */
+const SEPARATORS = new Set([';', '&', '|', '\n', '(', ')', '`']);
+
+/** The commands of a line, split where a shell would end one, outside quotes. */
+export function segments(command: string): string[] {
+  const out: string[] = [];
+  let quote = '';
+  let start = 0;
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i] as string;
+    if (quote !== '') {
+      if (c === '\\' && quote === '"') i += 1;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (SEPARATORS.has(c)) {
+      out.push(command.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(command.slice(start));
+  return out;
+}
+
 /** The words of one command as a shell would split them, with the quotes taken off. */
 export function shellTokens(part: string): string[] {
   const tokens: string[] = [];
@@ -152,8 +171,6 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   'do',
   '!',
   '{',
-  '(',
-  'time',
 ]);
 /** Words of the shell's own grammar that end a command or start one that runs nothing. */
 const NO_PROGRAM: ReadonlySet<string> = new Set([
@@ -164,10 +181,9 @@ const NO_PROGRAM: ReadonlySet<string> = new Set([
   'fi',
   'esac',
   '}',
-  ')',
   'in',
 ]);
-/** Programs that run the command after them, and take no option of their own here. */
+/** Programs that run the command after them: their options are skipped to find it. */
 const WRAPPERS: ReadonlySet<string> = new Set([
   'sudo',
   'doas',
@@ -179,55 +195,44 @@ const WRAPPERS: ReadonlySet<string> = new Set([
   'setsid',
   'caffeinate',
   'unbuffer',
+  'time',
+  'timeout',
+  'nice',
+  'ionice',
+  'stdbuf',
+  'chrt',
+  'taskset',
 ]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const DURATION = /^\d+(?:\.\d+)?[smhd]?$/;
+/** A label in front of a command, as the values of tasks and dev containers have them. */
+const LABEL = /^[^\s:]+:$/;
 
 /**
- * The program a command starts, with its arguments: past keywords, variable assignments and
- * wrappers (`sudo`, `env A=1`, `nohup`, `timeout 10`, `nice -n 5`). `coarse` when a wrapper has
- * an option this does not know, since its value could be taken for the program.
+ * The program a command starts and its arguments: past keywords, assignments, labels and
+ * wrappers with whatever options or numbers follow them (`sudo -E`, `timeout 10`, `nice -n 5`). A
+ * word taken for the program that is an option's value is a program not known, which errs toward
+ * more. `then <label>: ` in front, as a task's value names a task it depends on, is skipped too.
  */
-export function programOf(
-  tokens: readonly string[],
-): { readonly program: string; readonly args: readonly string[] } | 'none' | 'coarse' {
+export function programOf(tokens: readonly string[]): { program: string; args: string[] } | null {
   let i = 0;
-  while (i < tokens.length) {
-    // A subshell or a group is read for the command inside it: `(cd x && ./y.sh)`.
-    const word = (tokens[i] as string).replace(/^[({]+/, '').replace(/[)}]+$/, '');
-    const name = baseOf(word);
-    if (word === '') {
-      i += 1;
-      continue;
-    }
-    if (NO_PROGRAM.has(word)) return 'none';
-    // A label in front of a command, as the values of tasks and dev containers have them:
-    // `osx: ./mac.sh`, `then fetch: curl ...`, `postCreate: npm ci`.
-    if (KEYWORDS.has(word) || ASSIGNMENT.test(word) || /^[^\s:]+:$/.test(word)) {
-      i += 1;
-      continue;
-    }
-    if (WRAPPERS.has(name)) {
-      i += 1;
-      if (tokens[i]?.startsWith('-') === true && tokens[i] !== '--') return 'coarse';
-      if (tokens[i] === '--') i += 1;
-      continue;
-    }
-    if (name === 'timeout') {
-      if (tokens[i + 1]?.startsWith('-') === true || !DURATION.test(tokens[i + 1] ?? ''))
-        return 'coarse';
-      i += 2;
-      continue;
-    }
-    if (name === 'nice') {
-      if (tokens[i + 1] === '-n') i += 3;
-      else if (tokens[i + 1]?.startsWith('-') === true) return 'coarse';
-      else i += 1;
-      continue;
-    }
-    return { program: word, args: tokens.slice(i + 1) };
+  if (tokens[0] === 'then') {
+    const label = tokens.findIndex((t, at) => at > 0 && t.endsWith(':'));
+    if (label !== -1) i = label + 1;
   }
-  return 'none';
+  let wrapped = false;
+  for (; i < tokens.length; i += 1) {
+    const word = tokens[i] as string;
+    if (word === '') continue;
+    if (NO_PROGRAM.has(word)) return null;
+    if (KEYWORDS.has(word) || ASSIGNMENT.test(word) || LABEL.test(word)) continue;
+    if (wrapped && (word.startsWith('-') || /^\d/.test(word))) continue;
+    if (WRAPPERS.has(baseOf(word))) {
+      wrapped = true;
+      continue;
+    }
+    return { program: word, args: tokens.slice(i + 1) as string[] };
+  }
+  return null;
 }
 
 /** The name a shell finds a program by, in lower case, without a Windows extension. */
@@ -237,12 +242,24 @@ export const baseOf = (word: string): string =>
     .toLowerCase()
     .replace(/\.(?:exe|cmd|bat|com)$/, '');
 
-/** Shells: what they run is the file they are given, or the command after `-c`. */
-export const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+/** Shells: what they run is the file they are given, or the command after `-c`, or what they read. */
+export const SHELLS: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'mksh',
+  'fish',
+  'csh',
+  'tcsh',
+  'source',
+  '.',
+]);
 
 /**
- * Interpreters: what they run is the file they are given (looked up as a path), unless they are
- * given code on their command line, which is not read.
+ * Interpreters: what they run is the file they are given, unless they are given code on their
+ * command line or read it, which is not on the line to see.
  */
 const INTERPRETERS: ReadonlySet<string> = new Set([
   'node',
@@ -251,69 +268,34 @@ const INTERPRETERS: ReadonlySet<string> = new Set([
   'tsx',
   'ts-node',
   'python',
+  'python2',
   'python3',
   'py',
+  'pypy',
+  'pypy3',
   'ruby',
   'perl',
   'php',
   'pwsh',
   'powershell',
   'lua',
+  'luajit',
   'rscript',
   'osascript',
-  'open',
-  'source',
-  '.',
 ]);
-/** Options that hand an interpreter code on its command line. */
+/** Options that hand an interpreter code on its command line, or a module to load first. */
 const INLINE_CODE =
-  /^(?:-e|-c|-p|-r|--eval|--print|--import|--require|-command|-c[a-z]*|-encodedcommand|-ec|-enc)$/i;
+  /^(?:-[lnpaw]{0,3}e|-c[a-z]*|-p|-r|-ec|-enc|-encodedcommand|--(?:eval|print|import|require|loader|experimental-loader)(?:=.*)?)$/i;
+/** Interpreters whose first word is their program, written on the line, unless `-f` names a file. */
+const AWKS: ReadonlySet<string> = new Set(['awk', 'gawk', 'mawk']);
+/** Options that hand a shell its command on its command line, or have it read one. */
+const SHELL_INLINE = /^-[a-z]*[cs][a-z]*$/i;
+/** Subcommands of an interpreter that run no file it is given, or code from elsewhere. */
+const INTERPRETER_OPEN: ReadonlySet<string> = new Set(['task', 'test', 'bench', 'eval', 'repl']);
 
-/** Package runners that start a package's program: which one, and its code, is not followed. */
-const PACKAGE_EXEC: ReadonlySet<string> = new Set(['npx', 'pnpx', 'bunx', 'uvx', 'pipx']);
-/**
- * Task runners whose recipes are not read: what a recipe runs is not known, so a change to their
- * own files and to any script counts.
- */
-const TASK_RUNNERS: ReadonlySet<string> = new Set([
-  'make',
-  'gmake',
-  'just',
-  'task',
-  'rake',
-  'invoke',
-  'inv',
-  'nox',
-  'tox',
-  'gradle',
-  'gradlew',
-  'mvn',
-  'mvnw',
-  'ant',
-  'cargo',
-  'go',
-  'composer',
-  'bundle',
-  'poetry',
-  'uv',
-  'pipenv',
-  'hatch',
-  'pdm',
-  'rye',
-  'turbo',
-  'nx',
-  'lerna',
-  'pre-commit',
-  'lefthook',
-  'husky',
-  'docker',
-  'docker-compose',
-  'podman',
-  'corepack',
-]);
 /**
  * Programs that run no file of the repository and load no code from it: they print, notify, move
- * text or files about, or talk to the network. A program not in any list here is not known, and
+ * text or files about, or talk to the network. A program on no list here is not known, and
  * counts as one that could run anything.
  */
 const RUNS_NOTHING: ReadonlySet<string> = new Set([
@@ -361,9 +343,13 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'cmp',
   'true',
   'false',
+  ':',
   'test',
   '[',
   '[[',
+  ']',
+  ']]',
+  'read',
   'exit',
   'return',
   'export',
@@ -393,10 +379,6 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'shasum',
   'sha256sum',
   'base64',
-  'tsc',
-  'black',
-  'isort',
-  'ruff',
   'gofmt',
   'goimports',
   'rustfmt',
@@ -405,8 +387,9 @@ const RUNS_NOTHING: ReadonlySet<string> = new Set([
   'clang-format',
   'taplo',
   'yamllint',
+  'gh',
 ]);
-/** Git commands that run the repository's hooks (husky, `.githooks`), which are not followed. */
+/** Git commands that run the repository's hooks, which can run anything. */
 const GIT_RUNS_HOOKS: ReadonlySet<string> = new Set([
   'commit',
   'merge',
@@ -423,115 +406,26 @@ const GIT_RUNS_HOOKS: ReadonlySet<string> = new Set([
   'submodule',
   'gc',
 ]);
-
-/** How much of what one program, given these arguments, runs is known (npm and the like apart). */
-export function reachOf(program: string, args: readonly string[]): Reach | 'npm' | 'shell' {
-  const name = baseOf(program);
-  if (/[\\/]/.test(program) && !program.startsWith('/')) return 'paths';
-  if (SHELLS.has(name)) return 'shell';
-  if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') return 'npm';
-  const first = args.find((a) => !a.startsWith('-'));
-  if (name === 'deno' && (first === 'task' || first === 'test' || first === 'bench')) return 'any';
-  // A test runner runs every test file it finds, and what they import.
-  if (TEST_RUNNERS.has(name) || (name === 'node' && args.includes('--test'))) return 'any';
-  if (INTERPRETERS.has(name)) return args.some((a) => INLINE_CODE.test(a)) ? 'any' : 'paths';
-  if (PACKAGE_EXEC.has(name)) return 'runner';
-  if (TASK_RUNNERS.has(name)) return 'any';
-  if (name === 'git') {
-    const sub = args.find((a) => !a.startsWith('-'));
-    return sub !== undefined && GIT_RUNS_HOOKS.has(sub) ? 'any' : 'paths';
-  }
-  if (RUNS_NOTHING.has(name) || LOADS_CODE_TOOLS.has(name)) return 'paths';
-  return 'any';
-}
-
-/** Test runners: what they run is every test file they find, which is not followed. */
-const TEST_RUNNERS: ReadonlySet<string> = new Set([
-  'jest',
-  'vitest',
-  'mocha',
-  'pytest',
-  'py.test',
-  'ava',
-  'tap',
-  'jasmine',
-  'karma',
-  'playwright',
-  'cypress',
-  'rspec',
-  'phpunit',
-  'pest',
-  'nyc',
-  'c8',
-]);
-
-/** Tools whose config is code, followed to that config (see `LOADS_CODE` in agent-run-files.ts). */
-export const LOADS_CODE_TOOLS: ReadonlySet<string> = new Set([
-  'eslint',
-  'prettier',
-  'stylelint',
-  'lint-staged',
-  'jest',
-  'vitest',
-  'vite',
-  'mocha',
-  'pytest',
-  'py.test',
-]);
-
-/** The npm scripts one call of npm, pnpm, yarn or bun runs, as far as it is known. */
-export interface NpmPlan {
-  /** The scripts it runs; `orBin` when a name that is not a script runs a package's program. */
-  readonly names: readonly string[];
-  readonly orBin: boolean;
-  /** Something past what is followed: an install, a workspace, an option not known. */
-  readonly runner: boolean;
-}
-
-const RUN_SCRIPT: ReadonlySet<string> = new Set(['run', 'run-script', 'rs', 'urn']);
-const LIFECYCLE: Readonly<Record<string, readonly string[]>> = {
-  test: ['test'],
-  t: ['test'],
-  tst: ['test'],
-  start: ['start'],
-  stop: ['stop'],
-  restart: ['restart', 'stop', 'start'],
-};
-export const INSTALL_SCRIPTS: readonly string[] = [
-  'preinstall',
-  'install',
-  'postinstall',
-  'prepublish',
-  'preprepare',
-  'prepare',
-  'postprepare',
-];
-const INSTALLS: ReadonlySet<string> = new Set([
-  'install',
-  'i',
-  'ci',
-  'add',
-  'rebuild',
-  'rb',
-  'link',
-  'ln',
-  'update',
-  'up',
-  'upgrade',
-  'dedupe',
-]);
-/** Subcommands that run no script and no program of a package. */
+/** Package managers that run the scripts of package.json by name. */
+const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+/**
+ * Their subcommands that run no script of package.json: they list, show or ask, or run a package's
+ * own program, which comes from `node_modules` or the registry, whose files count as a runner's.
+ */
 const NO_SCRIPT: ReadonlySet<string> = new Set([
+  'exec',
+  'x',
+  'dlx',
   'help',
   'ls',
   'list',
   'why',
   'outdated',
+  'audit',
   'info',
   'view',
+  'show',
   'whoami',
-  'login',
-  'logout',
   'ping',
   'search',
   'docs',
@@ -540,42 +434,70 @@ const NO_SCRIPT: ReadonlySet<string> = new Set([
   'prefix',
   'root',
   'bin',
+  'licenses',
 ]);
-/** Options of the runners that change nothing but what they print. */
-const QUIET: RegExp =
-  /^(?:--silent|-s|--quiet|-q|--if-present|--loglevel=[a-z]+|--color(?:=\w+)?|--no-color|--reporter=\w+)$/;
-/** Options that name the folder whose package.json is read, as `cd` would. */
-export const FOLDER_OPTIONS: ReadonlySet<string> = new Set(['--prefix', '-C', '--dir', '--cwd']);
+/** A word that asks a runner for its tests: `test`, `tests`, `test:unit`, `--test`. */
+const TEST_WORD = /^(?:--)?(?:tests?|t|tst)(?:[:._-]|$)/;
 
-/** What one call of npm, pnpm, yarn or bun runs, by its arguments. */
-export function npmPlan(runner: string, args: readonly string[]): NpmPlan {
-  const name = baseOf(runner);
-  const positional: string[] = [];
-  let runnerOnly = false;
-  for (let i = 0; i < args.length; i += 1) {
-    const word = args[i] as string;
-    if (word === '--') break;
-    if (FOLDER_OPTIONS.has(word)) {
-      i += 1;
-      continue;
-    }
-    if ([...FOLDER_OPTIONS].some((o) => word.startsWith(`${o}=`)) || QUIET.test(word)) continue;
-    if (word.startsWith('-')) runnerOnly = true;
-    else positional.push(word);
+/** How far one command of a line reaches, by the program it starts. */
+export type Reach =
+  /** A file of the repository, or a shell or an interpreter given one: what it names is read. */
+  | 'runs'
+  /** A runner or a tool that loads the repository's config: its configs count too. */
+  | 'runner'
+  /** Nothing of the repository: it prints, moves files, talks to the network. */
+  | 'nothing'
+  /** Not written on the line: inline code, a recipe, a test runner, a program not known. */
+  | 'open';
+
+const firstPlain = (args: readonly string[]): string | undefined =>
+  args.find((a) => !a.startsWith('-'));
+
+/** How far one program, given these arguments, reaches. */
+function reachOf(program: string, args: readonly string[]): Reach {
+  if (program.includes('://')) return 'nothing';
+  const absolute = program.startsWith('/') || /^[A-Za-z]:[\\/]/.test(program);
+  // A file of the repository, named relative to a folder or behind a variable that is a prefix.
+  if (/[\\/]/.test(program) && !absolute && !program.startsWith('~')) return 'runs';
+  const name = baseOf(program);
+  if (args.some((a) => TEST_RUNNERS.has(baseOf(a)))) return 'open';
+  if (TEST_RUNNERS.has(name)) return 'open';
+  if (SHELLS.has(name))
+    return args.some((a) => SHELL_INLINE.test(a)) || firstPlain(args) === undefined
+      ? 'open'
+      : 'runs';
+  if (AWKS.has(name)) return args.includes('-f') ? 'runs' : 'open';
+  if (INTERPRETERS.has(name)) {
+    const first = firstPlain(args);
+    if (args.some((a) => INLINE_CODE.test(a) || a === '--test')) return 'open';
+    if (first === undefined || first === '.' || first === './') return 'open';
+    if (INTERPRETER_OPEN.has(first.toLowerCase())) return 'open';
+    return RUNNER_WORDS.has(name) ? 'runner' : 'runs';
   }
-  const plan = (names: readonly string[], orBin = false, runner = runnerOnly): NpmPlan => ({
-    names,
-    orBin,
-    runner,
-  });
-  const [first, second] = positional;
-  if (first === undefined) return name === 'yarn' ? plan(INSTALL_SCRIPTS, false, true) : plan([]);
-  if (RUN_SCRIPT.has(first)) return second === undefined ? plan([]) : plan([second]);
-  const lifecycle = LIFECYCLE[first];
-  if (lifecycle !== undefined) return plan(lifecycle);
-  if (INSTALLS.has(first)) return plan(INSTALL_SCRIPTS, false, true);
-  if (NO_SCRIPT.has(first)) return plan([]);
-  if (name === 'npm') return plan([], false, true);
-  if (name === 'bun' && /[\\/.]/.test(first)) return plan([]);
-  return plan([first], true);
+  if (name === 'git')
+    return args.some((a) => GIT_RUNS_HOOKS.has(a.toLowerCase())) ? 'open' : 'runner';
+  if (OPEN_RUNNERS.has(name)) return 'open';
+  if (PACKAGE_MANAGERS.has(name)) {
+    // A script of package.json is not read: what it runs is not on this line.
+    const first = firstPlain(args)?.toLowerCase();
+    if (first === undefined) return name === 'yarn' ? 'open' : 'runner';
+    // `bun x.ts` runs the file it is given, which is read by its name; `bun -e` runs inline code.
+    if (name === 'bun' && args.some((a) => INLINE_CODE.test(a))) return 'open';
+    if (name === 'bun' && /[\\/.]/.test(first)) return 'runner';
+    return NO_SCRIPT.has(first) ? 'runner' : 'open';
+  }
+  if (RUNNER_WORDS.has(name))
+    return args.some((a) => TEST_WORD.test(a.toLowerCase())) ? 'open' : 'runner';
+  if (RUNS_NOTHING.has(name)) return 'nothing';
+  return 'open';
+}
+
+/** What the commands of a line reach, each one by the program it starts. */
+export function reachesOf(command: string): Reach[] {
+  const reaches: Reach[] = [];
+  for (const part of segments(command)) {
+    const started = programOf(shellTokens(part));
+    if (started !== null) reaches.push(reachOf(started.program, started.args));
+  }
+  return reaches;
 }
