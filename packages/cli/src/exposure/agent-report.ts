@@ -209,7 +209,9 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
     case 'package-script':
       return `npm runs the ${name} script on install${shapeNote(h)}: ${value}`;
     case 'nested-bare-repo':
-      return 'a bare git repository is committed here as plain files';
+      return h.name === 'bare repository file'
+        ? `is a file of the bare git repository ${value}, committed as plain files, which git reads when it runs there`
+        : 'a bare git repository is committed here as plain files';
     case 'unreadable-config':
       if (unparsed)
         return "could not be read, and a host's own reader may still find what it runs in it";

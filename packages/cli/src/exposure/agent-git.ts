@@ -19,6 +19,7 @@ import {
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
   agentOnlyWhenFolded,
+  foldPath,
   hitsForRead,
   holdsGuards,
   readTier,
@@ -783,10 +784,34 @@ function bareChanges(
     ...[...changed].filter(([, c]) => c.status === 'D').map(([p]) => p),
   ];
   const before = new Set(bareRepositories(basePaths));
-  return bareRepositories(headPaths).map((dir) =>
+  const dirs = bareRepositories(headPaths);
+  const repos = dirs.map((dir) =>
     tagged(
       hit('nested-bare-repo', dir, 1, 'bare repository', 'HEAD, objects, refs'),
       before.has(dir) ? 'present' : 'new',
     ),
   );
+  // Git reads the files of a bare repository when it runs there (its config, its hooks, `info`,
+  // `HEAD`, `commondir`): any one the change adds or edits fails, matched with each part folded.
+  // One the change brings whole fails already, as a repository.
+  const folded = dirs
+    .filter((dir) => before.has(dir))
+    .map((dir) => [dir, `${foldPath(dir)}/`] as const);
+  const files = [...changed].flatMap(([path, c]): TaggedHit[] => {
+    if (c.status === 'D') return [];
+    const f = foldPath(path);
+    const inside = folded.find(([, prefix]) => f.startsWith(prefix));
+    return inside === undefined
+      ? []
+      : [
+          tagged(
+            hit('nested-bare-repo', path, 1, BARE_FILE, inside[0]),
+            c.status === 'A' ? 'new' : 'changed',
+          ),
+        ];
+  });
+  return [...repos, ...files];
 }
+
+/** What a hit for a file of a bare repository committed as files is named. */
+export const BARE_FILE = 'bare repository file';
