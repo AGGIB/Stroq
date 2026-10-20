@@ -63,8 +63,6 @@ export interface RunView {
   readonly links?: ReadonlyMap<string, string>;
   /** How many links of the head tree were not read. */
   readonly linksUnread?: number;
-  /** Folders that hold a package.json, at the head or the base; `''` for the top. */
-  readonly packageFolders?: ReadonlySet<string>;
   /** The folders `core.hooksPath` names, or `unknown` when git could not say. */
   readonly hooksPaths?: readonly string[] | 'unknown';
 }
@@ -181,10 +179,7 @@ function aliasesOf(path: string, through: Through | undefined): string[] | null 
 }
 
 function indexTouched(view: RunView): Index {
-  const ctx: RunnerContext = {
-    packageFolders: view.packageFolders ?? new Set(),
-    hooksPaths: view.hooksPaths ?? [],
-  };
+  const ctx: RunnerContext = { hooksPaths: view.hooksPaths ?? [], isAgentFolder: inAgentFolder };
   const through = view.links === undefined ? undefined : throughOf(view.links);
   const matcher = new NameMatcher();
   const byName: number[][] = [];
@@ -202,9 +197,7 @@ function indexTouched(view: RunView): Index {
       const folded = parts.map((part) => foldName(part)).join('/');
       forms.add(normalText(p));
       forms.add(normalText(folded));
-      runner ||=
-        isRunnerFile(p.toLowerCase(), ctx, parts.slice(0, -1).join('/')) ||
-        isRunnerFile(folded, ctx, parts.slice(0, -1).join('/'));
+      runner ||= isRunnerFile(p.toLowerCase(), ctx) || isRunnerFile(folded, ctx);
       parts.forEach((part, i) => {
         const names = nameForms(part);
         const all = i === parts.length - 1 ? [...names, ...names.map(stemOf)] : names;

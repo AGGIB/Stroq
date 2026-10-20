@@ -88,7 +88,11 @@ describe('Claude Code settings that approve or run code', () => {
       }),
     });
     const hits = agentChanges(approved, before).hits;
-    expect(failing(hits)).toEqual(['new mcp-server .mcp.json evil']);
+    // `.mcp.json` is a dot file, which node, the program of the server already there, may read.
+    expect(failing(hits)).toEqual([
+      'new mcp-server .mcp.json evil',
+      'changed agent-run-file-changed .mcp.json docs MCP server in .mcp.json',
+    ]);
     const evil = hits.find((h) => h.name === 'evil') as TaggedHit;
     expect(sentence(evil, plainQuote)).toBe(
       'new: MCP server evil starts without asking, since the settings approve it: npx -y evil-pkg@latest',

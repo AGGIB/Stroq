@@ -214,41 +214,43 @@ const RUNNER_NAMES: ReadonlySet<string> = new Set([
 
 /**
  * Files by the shape of their name, folded: lock files, Taskfiles, Gradle scripts, Makefile parts,
- * and the configs of the tools that load code, in any format and at any depth.
+ * compose files, and the configs of the tools that load code, in any format and at any depth.
  */
 const RUNNER_NAME =
-  /^(?:\.yarnrc.*|taskfile.*|(?:build|settings)\.gradle.*|.*\.mk|\.?pnpmfile\.[cm]?js|requirements.*\.txt|.*\.lockb?|.*-lock\.(?:json|ya?ml)|(?:eslint|prettier|stylelint|lint-staged|jest|vitest|vite|webpack|rollup|babel|postcss|tailwind|svelte|astro|next|nuxt|playwright|cypress|tsup|esbuild|biome)\.(?:config|workspace)\..*|\.(?:eslint|prettier|stylelint|lintstaged|mocha|babel|swc|c8|nyc)rc.*|dockerfile.*|.*\.dockerfile)$/;
+  /^(?:\.yarnrc.*|taskfile.*|(?:build|settings)\.gradle.*|makefile\..*|.*\.(?:mk|mak|make)|\.?pnpmfile\.[cm]?js|requirements.*\.txt|.*\.lockb?|.*-lock\.(?:json|ya?ml)|(?:docker-)?compose(?:[.-].*)?\.ya?ml|(?:eslint|prettier|stylelint|lint-staged|jest|vitest|vite|webpack|rollup|babel|postcss|tailwind|svelte|astro|next|nuxt|playwright|cypress|tsup|esbuild|biome)\.(?:config|workspace)\..*|.*rc|dockerfile.*|.*\.dockerfile)$/;
 
 /** Folders whose files a runner, git or a package manager loads: hook folders, packages, wrappers. */
 const RUNNER_FOLDER =
   /(?:^|\/)(?:\.husky|\.githooks|node_modules|\.yarn|\.mvn|gradle\/wrapper|buildsrc)\//;
 
-/** A config by the loosest shape, at the top or next to a package.json: `*config.*`, `.*rc*`. */
-const looksLikeConfig = (base: string): boolean =>
-  base.includes('config.') || (base.startsWith('.') && base.includes('rc'));
+/**
+ * A config by the loosest shape, at any depth: `config` anywhere in the path (`.cargo/config.toml`,
+ * `config/database.yml`), a name that starts with a dot (`.rubocop.yml`), or the extension of a
+ * settings file (`uv.toml`, `mypy.ini`, `setup.cfg`).
+ */
+const CONFIG_LIKE = /config|(?:^|\/)\.[^/]*$|\.(?:toml|ini|cfg|conf|properties)$/;
+
+/** A folder whose name starts with a dot: where a tool keeps its own files (`.cargo`, `.bundle`). */
+const DOT_FOLDER = /(?<=^|\/)\.[^/]+(?=\/)/g;
 
 export interface RunnerContext {
-  /** Folders that hold a package.json, at the head or the base; `''` for the top. */
-  readonly packageFolders: ReadonlySet<string>;
   /** The folders `core.hooksPath` names, or `unknown` when git could not say. */
   readonly hooksPaths: readonly string[] | 'unknown';
+  /** Whether a folder name is one an agent or an editor loads from: no runner reads those. */
+  readonly isAgentFolder: (name: string) => boolean;
 }
 
-const folderOf = (path: string): string => {
-  const slash = path.lastIndexOf('/');
-  return slash === -1 ? '' : path.slice(0, slash);
-};
-
 /**
- * Whether a runner or a tool reads this file before it runs anything: a package or build file, a
- * lock file, the config of a package manager or of a tool whose config is code, a git hook, a file
- * in `node_modules`. `path` is in lower case and folded; `folder` is the same path's folder as the
- * tree has it, to look up next to which package.json it is.
+ * Whether a runner or a tool may read this file before it runs anything: a package or build file, a
+ * lock file, anything shaped like a config at any depth, any file in a folder whose name starts
+ * with a dot but an agent's own, a git hook, a file in `node_modules`. `path` is in lower case and
+ * folded. Coarse on purpose: which tool reads which file is not worked out.
  */
-export function isRunnerFile(path: string, ctx: RunnerContext, folder = folderOf(path)): boolean {
+export function isRunnerFile(path: string, ctx: RunnerContext): boolean {
   const base = path.slice(path.lastIndexOf('/') + 1);
   if (RUNNER_NAMES.has(base) || RUNNER_NAME.test(base) || RUNNER_FOLDER.test(path)) return true;
-  if (looksLikeConfig(base) && (folder === '' || ctx.packageFolders.has(folder))) return true;
+  if (CONFIG_LIKE.test(path)) return true;
+  for (const [folder] of path.matchAll(DOT_FOLDER)) if (!ctx.isAgentFolder(folder)) return true;
   if (ctx.hooksPaths === 'unknown') return /(?:^|\/)[^/]*hooks?\//.test(path);
   return ctx.hooksPaths.some((dir) => dir === '' || path.startsWith(`${dir.toLowerCase()}/`));
 }

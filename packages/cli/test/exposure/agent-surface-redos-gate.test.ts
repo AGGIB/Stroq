@@ -334,7 +334,6 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
             [`${text.slice(0, 200)}/x.sh`, 'new', '100755'],
           ],
           links: new Map([['.claude/hooks', 'a/a']]),
-          packageFolders: new Set(['']),
           hooksPaths: ['.husky'],
         },
       ),

@@ -459,8 +459,8 @@ const MAX_RUN_LINKS = 4_096;
 
 /**
  * What the reading of the entries already there needs of the change: each path it touched, deleted
- * ones too, and, when some entry already there runs a command, the links of the tree, the folders
- * that hold a package.json, and the folders `core.hooksPath` names.
+ * ones too, and, when some entry already there runs a command, the links of the tree and the
+ * folders `core.hooksPath` names.
  */
 function runView(
   top: string,
@@ -477,12 +477,6 @@ function runView(
     tree.get(path)?.mode,
   ]);
   if (!found.some(isRunEntry)) return { touchedFiles };
-  const packageFolders = new Set<string>();
-  for (const path of [...sorted, ...changed.keys()]) {
-    const slash = path.lastIndexOf('/');
-    if (foldName(path.slice(slash + 1)) === 'package.json')
-      packageFolders.add(slash === -1 ? '' : path.slice(0, slash));
-  }
   const all = sorted.filter((p) => tree.get(p)?.mode === SYMLINK);
   const texts = new Map(view.targets);
   const missing = all.filter((p) => !texts.has(p));
@@ -504,7 +498,7 @@ function runView(
     const target = linkTarget(link, text);
     if (target !== null) links.set(link, target);
   }
-  return { touchedFiles, links, linksUnread, packageFolders, hooksPaths: hooksPaths(top) };
+  return { touchedFiles, links, linksUnread, hooksPaths: hooksPaths(top) };
 }
 
 function submoduleHits(

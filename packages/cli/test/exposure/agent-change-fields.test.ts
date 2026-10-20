@@ -159,8 +159,10 @@ describe('an entry already there whose other fields change', () => {
   it('reads the order of keys as no change', () => {
     const a = json({ mcpServers: { d: { command: 'n', env: { A: '1', B: '2' }, cwd: 'x' } } });
     const b = json({ mcpServers: { d: { cwd: 'x', env: { B: '2', A: '1' }, command: 'n' } } });
+    // The server is the same; the file it is in is a dot file, which a program not known may read.
     expect(brief(change({ '.mcp.json': a }, { '.mcp.json': b }))).toEqual([
       'present mcp-server-runs-code .mcp.json d passes',
+      'changed agent-run-file-changed .mcp.json d MCP server in .mcp.json FAILS',
     ]);
   });
 

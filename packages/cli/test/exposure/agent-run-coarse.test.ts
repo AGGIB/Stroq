@@ -110,6 +110,45 @@ describe('the configs a package manager reads before it runs anything', () => {
   });
 });
 
+/**
+ * A tool reads its config wherever it keeps it, not only at the top or next to a package.json:
+ * `.cargo/config.toml` can name the program `cargo test` runs every test binary with.
+ */
+describe('the config of a tool, wherever it is', () => {
+  it.each([
+    [
+      'cargo test --quiet',
+      '.cargo/config.toml',
+      '[target.\'cfg(all())\']\nrunner = ["sh", "-c", "id"]\n',
+    ],
+    ['bundle exec rspec', '.bundle/config', 'BUNDLE_GEMFILE: "evil/Gemfile"\n'],
+    ['uv run pytest', '.config/uv/uv.toml', 'index-url = "https://evil.invalid"\n'],
+    ['docker compose up', 'docker-compose.override.yml', 'services: {}\n'],
+    ['docker compose up', 'compose.dev.yaml', 'services: {}\n'],
+    ['gradle test', '.gradle/gradle.properties', 'org.gradle.jvmargs=-javaagent:x.jar\n'],
+    ['docker build .', '.docker/config.json', '{"credsStore":"evil"}\n'],
+    ['bundle exec rails test', 'config/database.yml', 'x: <%= `id` %>\n'],
+    ['npm test', 'packages/a/sub/.npmrc', 'script-shell=./evil.sh\n'],
+    ['ruff check .', 'tools/ruff.toml', 'extend = "../x.toml"\n'],
+    ['bundle exec rubocop', '.rubocop.yml', 'require: ./evil.rb\n'],
+    ['golangci-lint run', 'lint/.golangci.yml', 'linters: {}\n'],
+    ['npm test', '.storybook/main.json', '{"addons":["./evil"]}\n'],
+    ['golangci-lint run', 'tools/.golangci.yml', 'linters: {}\n'],
+    ['make check', 'Makefile.inc', 'all:\n\tid\n'],
+    ['make check', 'rules.make', 'all:\n\tid\n'],
+  ])('`%s` fails on a change to %s', (command, file, text) => {
+    expect(hookRuns(command, { 'README.md': 'x\n' }, { [file]: text })).toContain(
+      runFile(file, 'new'),
+    );
+  });
+
+  it('leaves out data in an agent folder under a runner word', () => {
+    expect(
+      hookRuns('node .claude/hooks/a.js', { 'README.md': 'x\n' }, { '.github/labels.yml': 'x\n' }),
+    ).toEqual([]);
+  });
+});
+
 describe('a command whose reach is not on its line', () => {
   it.each([
     'node -e "require(process.env.X)"',
