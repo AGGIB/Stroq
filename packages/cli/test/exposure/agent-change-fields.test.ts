@@ -182,7 +182,7 @@ describe('an entry already there whose other fields change', () => {
     });
     // Its arguments are never shown, only how many, and a digest of what runs.
     expect(
-      scanFile('.mcp.json', text).map((h) => h.value.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')),
+      scanFile('.mcp.json', text).map((h) => h.shown.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')),
     ).toEqual(['node [1 args] with {"cwd":"x"} (keyed:K, 26 chars)']);
   });
 });

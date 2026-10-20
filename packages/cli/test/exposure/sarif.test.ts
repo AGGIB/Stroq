@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TaggedHit } from '../../src/exposure/agent-change.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { repoSurface } from '../../src/exposure/repo-surface.js';
@@ -157,6 +157,36 @@ describe('inspectSarif with what an agent or editor runs by itself', () => {
     ]);
     expect(a!.partialFingerprints).toEqual(b!.partialFingerprints);
     expect(a!.partialFingerprints).not.toEqual(c!.partialFingerprints);
+  });
+
+  // A value shown scrubbed never goes into a fingerprint: its scrubbed text without the run's
+  // digest and its place among the same entries of its file do. So two entries that differ only in
+  // a secret are two alerts, and each keeps its fingerprint in every run, whatever key it made.
+  it('tells apart two scrubbed values and keeps them stable across runs', async () => {
+    const marker = ['FAKE', 'SECRET', String(7 * 1301)].join('_');
+    const command = (key: string): string => `npx s --url https://u:${key}@h.invalid/`;
+    const twoOf = (make: typeof hit): TaggedHit[] =>
+      [`${marker}a`, `${marker}b`].map((key) => ({
+        ...make('mcp-server', '.mcp.json', 2, 's', command(key)),
+        status: 'new',
+      }));
+    const first = results(twoOf(hit));
+    expect(first[0]!.partialFingerprints).not.toEqual(first[1]!.partialFingerprints);
+    for (const r of first) expect(JSON.stringify(r)).not.toContain(marker);
+
+    vi.resetModules();
+    const kinds = await import('../../src/exposure/agent-kinds.js');
+    const sarif = await import('../../src/exposure/sarif.js');
+    const second = (
+      sarif.inspectSarif(empty, '1.0.0', twoOf(kinds.hit)) as {
+        runs: Array<{ results: AgentResult[] }>;
+      }
+    ).runs[0]!.results;
+    // Another run's key shows the values otherwise, and the fingerprints do not move.
+    expect(second[0]!.message.text).not.toBe(first[0]!.message.text);
+    expect(second.map((r) => r.partialFingerprints)).toEqual(
+      first.map((r) => r.partialFingerprints),
+    );
   });
 
   it('gives a warning and a notice their own levels, and leaves out notices nothing changed', () => {

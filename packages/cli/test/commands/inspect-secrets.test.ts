@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runInspect } from '../../src/commands/inspect.js';
+import { agentChanges } from '../../src/exposure/agent-git.js';
 import { commitFiles, scratchRepo } from '../helpers/scratch-repo.js';
 
 /**
@@ -95,6 +97,33 @@ describe('a secret in a repository config, in every output', () => {
     const output = run([dir, '--changed-from', base, '--format', format]);
     expect(output.length).toBeGreaterThan(100);
     expect(output).not.toContain(SECRET);
+  });
+
+  // Nor a hash of it: a fingerprint of a public repository's code scanning would let anyone test
+  // guesses at a weak secret. No SARIF string holds a digest of any text that holds the secret.
+  it('never writes a hash of it into SARIF', () => {
+    const dir = scratchRepo(dirs);
+    const base = commitFiles(dir, { 'README.md': 'x\n' });
+    commitFiles(dir, FILES);
+    const output = run([dir, '--changed-from', base, '--format', 'sarif']);
+    const raw = agentChanges(dir, base)
+      .hits.filter((h) => h.value.includes(SECRET))
+      .flatMap((h) => [h.value, [h.kind, h.file, h.name, h.value].join('\u0000')]);
+    expect(raw.length).toBeGreaterThan(5);
+    const digests = [SECRET, ...raw].map((t) => createHash('sha256').update(t).digest('hex'));
+    const strings: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === 'string') strings.push(v);
+      else if (typeof v === 'object' && v !== null) Object.values(v).forEach(walk);
+    };
+    walk(JSON.parse(output));
+    for (const text of strings) {
+      expect(text).not.toContain(SECRET);
+      for (const d of digests) {
+        expect(text).not.toContain(d.slice(0, 32));
+        expect(d).not.toContain(text.length >= 16 ? text : '\u0000');
+      }
+    }
   });
 
   it.each(FORMATS)('never writes it from the folder on disk, as %s', (format) => {

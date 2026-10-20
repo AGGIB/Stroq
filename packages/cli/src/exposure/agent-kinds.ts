@@ -52,8 +52,16 @@ export interface AgentHit {
   readonly line: number;
   /** Which entry of the file this is: the hook's event, the server's name, the task's label. */
   readonly name: string;
-  /** What runs, or what decides what runs. Two revisions are compared by this. */
+  /**
+   * What runs, or what decides what runs, as the repository holds it. Every decision reads this,
+   * and two revisions are compared by it. Never written out: the outputs write `shown`.
+   */
   readonly value: string;
+  /**
+   * `value` as an output may write it (see `shownValue`): when that differs from `value`, it ends
+   * in a digest under this run's key and a length of `value`. Only the outputs read it.
+   */
+  readonly shown: string;
   /**
    * What the reading of run files takes for the command, when it is not `value`: the strings a
    * hook manager's value holds, without its keys. Never shown: every output leaves it out.
@@ -63,9 +71,9 @@ export interface AgentHit {
 }
 
 /**
- * A finding whose value is read as `raw` and shown as `shown`, as `shownValue` lets it be shown:
- * when that differs from `raw`, the value ends in a digest and a length of `raw`, and `raw` is kept
- * in `runs` for the readings that need it, which no output writes.
+ * A finding whose value is `raw`, which every decision reads, and which is written out as `shown`
+ * as far as `shownValue` lets it be: when that differs from `raw`, with a digest and a length of
+ * `raw`.
  */
 export function shownHit(
   kind: AgentKind,
@@ -75,9 +83,16 @@ export function shownHit(
   raw: string,
   shown: string,
 ): AgentHit {
-  const base = { kind, file, line, name, value: raw, severity: KIND_SEVERITY[kind] };
   const safe = shownValue(shown);
-  return safe === raw ? base : { ...base, value: withDigest(safe, raw), runs: raw };
+  return {
+    kind,
+    file,
+    line,
+    name,
+    value: raw,
+    shown: safe === raw ? raw : withDigest(safe, raw),
+    severity: KIND_SEVERITY[kind],
+  };
 }
 
 export const hit = (
@@ -215,6 +230,7 @@ export function removedProtections(
       line: 1,
       name: h.name,
       value: REMOVED_PROTECTION,
+      shown: REMOVED_PROTECTION,
       severity: 'error' as const,
     }));
 }

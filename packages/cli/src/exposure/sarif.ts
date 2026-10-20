@@ -75,13 +75,32 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
 const ruleId = (kind: string): string => `stroq/${kind}`;
 const isPreTrust = (kind: string): boolean => (PRE_TRUST as ReadonlySet<string>).has(kind);
 
-const fingerprint = (h: TaggedHit): string =>
-  createHash('sha256')
-    // A value shown with a digest under this run's key would change every run: such a finding is
-    // known by where it is instead.
-    .update([h.kind, h.file, h.name, h.runs === undefined ? h.value : ''].join('\u0000'))
-    .digest('hex')
-    .slice(0, 32);
+/** The part of a shown value that comes from this run's key, which changes every run. */
+const RUN_DIGEST = /keyed:[0-9a-f]{16}/g;
+
+/**
+ * Each finding's fingerprint. One whose value is shown whole hashes its kind, file, name and
+ * value, so two entries that differ only in what they run are two alerts. One whose value is
+ * scrubbed never puts that value in a hash: a hash of it, public in a public repository's code
+ * scanning, would let anyone test guesses at a weak secret. It hashes the scrubbed text without
+ * this run's digest, and its place among the entries of its file with the same kind, name and
+ * scrubbed text, so two that differ only in a secret are two alerts while the file keeps its order.
+ *
+ * Whether `--changed-from` passes is decided by the exit code, never by these: a fingerprint that
+ * stays the same when a scrubbed value changes only changes how code scanning lists the alert.
+ */
+function fingerprints(hits: readonly TaggedHit[]): string[] {
+  const seen = new Map<string, number>();
+  const hash = (text: string): string =>
+    createHash('sha256').update(text).digest('hex').slice(0, 32);
+  return hits.map((h) => {
+    if (h.shown === h.value) return hash([h.kind, h.file, h.name, h.value].join('\u0000'));
+    const key = [h.kind, h.file, h.name, h.shown.replace(RUN_DIGEST, 'keyed')].join('\u0000');
+    const place = seen.get(key) ?? 0;
+    seen.set(key, place + 1);
+    return hash(`${key}\u0000scrubbed\u0000${place}`);
+  });
+}
 
 function rule(kind: string): object {
   if (isPreTrust(kind))
@@ -151,24 +170,24 @@ export function inspectSarif(
       ],
     };
   });
-  const agentResults = agent
-    .filter((h) => !(h.severity === 'notice' && h.status === 'present'))
-    .map((h) => ({
-      ruleId: ruleId(h.kind),
-      ruleIndex: kinds.indexOf(h.kind),
-      level: LEVEL[h.severity],
-      message: { text: describe(h, plainQuote) },
-      locations: [
-        {
-          physicalLocation: {
-            artifactLocation: { uri: h.file, uriBaseId: '%SRCROOT%' },
-            region: { startLine: h.line },
-          },
+  const shown = agent.filter((h) => !(h.severity === 'notice' && h.status === 'present'));
+  const prints = fingerprints(shown);
+  const agentResults = shown.map((h, i) => ({
+    ruleId: ruleId(h.kind),
+    ruleIndex: kinds.indexOf(h.kind),
+    level: LEVEL[h.severity],
+    message: { text: describe(h, plainQuote) },
+    locations: [
+      {
+        physicalLocation: {
+          artifactLocation: { uri: h.file, uriBaseId: '%SRCROOT%' },
+          region: { startLine: h.line },
         },
-      ],
-      partialFingerprints: { [FINGERPRINT]: fingerprint(h) },
-      properties: { change: h.status },
-    }));
+      },
+    ],
+    partialFingerprints: { [FINGERPRINT]: prints[i] as string },
+    properties: { change: h.status },
+  }));
   return {
     $schema: SCHEMA,
     version: '2.1.0',

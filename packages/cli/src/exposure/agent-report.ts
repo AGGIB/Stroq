@@ -97,7 +97,7 @@ const isMode = (name: string): boolean =>
 
 function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): string {
   const name = q(h.name);
-  const value = q(h.value);
+  const value = q(h.shown);
   const unparsed = h.name === 'unparsed';
   switch (h.kind) {
     case 'agent-hook':

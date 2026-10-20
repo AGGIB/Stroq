@@ -164,7 +164,7 @@ describe('env variables in Claude Code settings', () => {
     const hits = of(scanFile('.claude/settings.json', text), 'agent-env');
     // A debug switch, a token budget or a timeout is not on the benign list: reported all the same.
     // A variable's value is never shown: a digest and a length are.
-    expect(hits.map((h) => [h.name, h.value.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')])).toEqual([
+    expect(hits.map((h) => [h.name, h.shown.replace(/keyed:[0-9a-f]{16}/, 'keyed:K')])).toEqual([
       ['DEBUG', '(keyed:K, 1 chars)'],
       ['MAX_THINKING_TOKENS', '(keyed:K, 4 chars)'],
       ['BASH_DEFAULT_TIMEOUT_MS', '(keyed:K, 5 chars)'],

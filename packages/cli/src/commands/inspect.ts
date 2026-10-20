@@ -207,9 +207,21 @@ const tryRealpath = (path: string): string => {
     return path;
   }
 };
-/** The findings as JSON: `runs`, the text a hook manager's value holds, is never written out. */
+/**
+ * The findings as JSON, each value as it may be shown: a value as the repository holds it, and
+ * `runs`, the text a hook manager's value holds, are never written out.
+ */
 const withFailing = (hits: readonly TaggedHit[], failOn: FailOn) =>
-  hits.map(({ runs: _runs, ...h }) => ({ ...h, failing: isFailing(h, failOn) }));
+  hits.map((h) => ({
+    kind: h.kind,
+    file: h.file,
+    line: h.line,
+    name: h.name,
+    value: h.shown,
+    severity: h.severity,
+    status: h.status,
+    failing: isFailing(h, failOn),
+  }));
 const EMPTY_SURFACE: RepoSurface = { isRepo: true, preTrust: [], onOpen: [], capped: false };
 
 interface Output {
