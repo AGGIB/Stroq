@@ -309,13 +309,23 @@ export function devcontainer(f: JsonFile): AgentHit[] {
 // ---------------------------------------------------------------------------------------------
 // package.json.
 
-const INSTALL_SCRIPTS: ReadonlySet<string> = new Set([
+/**
+ * The scripts a package manager runs by itself on an install with no arguments, in the order npm
+ * runs them: the install trio, `prepublish`, `prepare` with its own pre and post scripts, npm's
+ * `dependencies` after node_modules changes, and pnpm's `pnpm:devPreinstall`.
+ */
+export const INSTALL_SCRIPT_NAMES = [
+  'pnpm:devPreinstall',
   'preinstall',
   'install',
   'postinstall',
-  'prepare',
   'prepublish',
-]);
+  'preprepare',
+  'prepare',
+  'postprepare',
+  'dependencies',
+] as const;
+const INSTALL_SCRIPTS: ReadonlySet<string> = new Set(INSTALL_SCRIPT_NAMES);
 const EDITOR_CONFIG_PATH = /\.vscode[/\\]+(?:tasks|settings|mcp)\.json/i;
 
 /** Whether a script's text names a file an agent or an editor loads by itself. */

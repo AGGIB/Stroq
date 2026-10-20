@@ -6,6 +6,7 @@ import { agentChanges } from '../../src/exposure/agent-git.js';
 import { agentSurface } from '../../src/exposure/agent-tree.js';
 import { hit } from '../../src/exposure/agent-kinds.js';
 import { runsFetchedOrHiddenCode } from '../../src/exposure/fetch-shapes.js';
+import { repoSurface } from '../../src/exposure/repo-surface.js';
 import { commitFiles, git, scratchRepo, stageLink } from '../helpers/scratch-repo.js';
 
 /**
@@ -52,6 +53,34 @@ describe('the shapes of code that is downloaded and run, or decoded and run', ()
     'pip install -e .',
   ])('not %s', (text) => {
     expect(runsFetchedOrHiddenCode(text)).toBe(false);
+  });
+});
+
+/**
+ * `npm install` with no arguments runs the whole install lifecycle of the package it is in:
+ * `preprepare` and `postprepare` around `prepare`, and `dependencies` after node_modules changes.
+ */
+describe('every script npm runs on install', () => {
+  it.each(['preprepare', 'postprepare', 'dependencies', 'pnpm:devPreinstall', 'prepublish'])(
+    'reads %s, and fails it when it fetches and runs code',
+    (name) => {
+      const dir = scratchRepo(dirs);
+      const base = commitFiles(dir, { 'package.json': json({ name: 'x', version: '1.0.0' }) });
+      commitFiles(dir, {
+        'package.json': json({ name: 'x', version: '1.0.0', scripts: { [name]: FETCH } }),
+      });
+      expect(failing(agentChanges(dir, base).hits)).toEqual([
+        `new package-script package.json ${name}`,
+      ]);
+    },
+  );
+
+  it('lists them in the reading of the folder too', () => {
+    const dir = scratchRepo(dirs);
+    commitFiles(dir, {
+      'package.json': json({ scripts: { preprepare: 'echo hi', postprepare: 'touch m' } }),
+    });
+    expect(repoSurface(dir).onOpen.map((h) => h.what)).toEqual(['preprepare', 'postprepare']);
   });
 });
 

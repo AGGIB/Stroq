@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
+import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
 import type { Finding } from './findings.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
@@ -447,8 +448,6 @@ function devcontainerHits(root: string): RepoExecHit[] {
   return hits;
 }
 
-const INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish'] as const;
-
 function packageScriptHits(root: string): RepoExecHit[] {
   const text = readTextOr(join(root, 'package.json'));
   if (text === '') return [];
@@ -459,7 +458,7 @@ function packageScriptHits(root: string): RepoExecHit[] {
     return [];
   }
   if (typeof scripts !== 'object' || scripts === null) return [];
-  return INSTALL_SCRIPTS.filter((name) => name in (scripts as Record<string, unknown>)).map(
+  return INSTALL_SCRIPT_NAMES.filter((name) => name in (scripts as Record<string, unknown>)).map(
     (what) => ({ kind: 'package-install-script' as const, file: 'package.json', what }),
   );
 }
