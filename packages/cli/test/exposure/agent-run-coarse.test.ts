@@ -136,6 +136,43 @@ describe('a command whose reach is not on its line', () => {
   });
 });
 
+/**
+ * What counts as code is every file but a short list of data: a hook's interpreter loads bytecode
+ * (`__pycache__/*.pyc` written with UNCHECKED_HASH is loaded without reading the `.py`), native
+ * modules, class archives and a file with no extension that a shell sources.
+ */
+describe('code that is not named as a script', () => {
+  const hook = {
+    'guard.py': 'import helper\nhelper.check()\n',
+    'helper.py': 'def check():\n    pass\n',
+  };
+
+  it.each([
+    '__pycache__/helper.cpython-314.pyc',
+    'json.cpython-314-darwin.so',
+    'mod.pyd',
+    'lib/addon.node',
+    'mod.wasm',
+    'x.jar',
+    'Foo.class',
+    'libz.dylib',
+    'z.dll',
+    'sourced_lib',
+    '.env',
+    'page.html',
+    'icon.svg',
+  ])('fails %s under a hook that runs python', (file) => {
+    expect(hookRuns('python3 guard.py', hook, { [file]: 'x\n' })).toContain(runFile(file, 'new'));
+  });
+
+  it.each(['notes.md', 'data.json', 'cfg.yaml', 'logo.png', 'style.css', 'list.txt'])(
+    'leaves out %s, a kind of data',
+    (file) => {
+      expect(hookRuns('python3 guard.py', hook, { [file]: 'x\n' })).toEqual([]);
+    },
+  );
+});
+
 describe('a command that cannot be read', () => {
   it('fails, whatever the change touched, when it is longer than is read', () => {
     const long = `echo ${'a'.repeat(MAX_COMMAND_CHARS)}`;

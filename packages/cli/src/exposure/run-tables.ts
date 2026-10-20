@@ -254,8 +254,11 @@ export function isRunnerFile(path: string, ctx: RunnerContext, folder = folderOf
 }
 
 /**
- * A file a shell, an interpreter or a toolchain runs or builds into what it runs: scripts, and
- * the sources of compiled languages, which `go test` or `cargo test` build and run.
+ * Files known to be data: text, documents, pictures that run no script, fonts, sound and video,
+ * style sheets. Every other file is code, whatever its name: a script, the source of a compiled
+ * language, bytecode (`.pyc`), a native module (`.so`, `.node`, `.dll`), a class archive, a page
+ * or a picture that can hold a script (`.html`, `.svg`), and a file with no extension, which a
+ * shell can source.
  */
-export const SCRIPT_FILE =
-  /\.(?:sh|bash|zsh|fish|ksh|ps1|psm1|bat|cmd|[cm]?[jt]sx?|vue|svelte|astro|coffee|py|pyw|pyx|pth|rb|pl|pm|php|lua|r|go|rs|java|kt|kts|scala|groovy|gradle|clj|cljs|cs|fs|vb|c|h|cc|cpp|cxx|hh|hpp|m|mm|swift|ex|exs|erl|hrl|hs|ml|dart|zig|nim|jl|tcl|awk)$/i;
+export const DATA_FILE =
+  /\.(?:md|markdown|txt|text|rst|adoc|json|jsonc|json5|ya?ml|toml|csv|tsv|png|jpe?g|gif|webp|bmp|ico|icns|tiff?|avif|pdf|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|webm|mov|css|scss|sass|less)$/i;

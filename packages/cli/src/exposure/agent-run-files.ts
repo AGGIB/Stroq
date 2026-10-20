@@ -5,7 +5,7 @@ import { foldName } from './git-dir-names.js';
 import { byPath } from './git-tree.js';
 import { NameMatcher, nameForms, normalText, stemOf } from './run-names.js';
 import { computesWhatRuns, reachesOf } from './run-programs.js';
-import { RUNNER_WORDS, SCRIPT_FILE, isRunnerFile, type RunnerContext } from './run-tables.js';
+import { DATA_FILE, RUNNER_WORDS, isRunnerFile, type RunnerContext } from './run-tables.js';
 
 /**
  * A hook, a server or a task that was already there can start a file of the repository, and a
@@ -103,6 +103,7 @@ interface Touched {
   readonly status: ChangeStatus;
   /** Every spelling of every path it is reached by, folded and in lower case. */
   readonly forms: readonly string[];
+  /** Any file but data by its name, and any file that is executable, a link or a submodule. */
   readonly code: boolean;
   readonly agent: boolean;
   readonly runner: boolean;
@@ -223,7 +224,7 @@ function indexTouched(view: RunView): Index {
       path,
       status,
       forms: [...forms],
-      code: SCRIPT_FILE.test(base) || mode === EXECUTABLE || mode === SYMLINK || mode === GITLINK,
+      code: !DATA_FILE.test(base) || mode === EXECUTABLE || mode === SYMLINK || mode === GITLINK,
       agent: paths.some((p) => inAgentFolder(p)),
       runner,
       everywhere: aliases === null,

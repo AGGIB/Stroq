@@ -103,6 +103,7 @@ describe('the spellings a hook names its script by', () => {
       'changed .claude/x.sh .claude/x.sh',
       'changed .claude/x.sh .claude/x.sh',
       'new tools/bin/git tools/bin/git',
+      'new tools/bin/git tools/bin/git',
     ]);
   });
 
