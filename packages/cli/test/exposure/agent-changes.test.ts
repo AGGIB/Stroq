@@ -102,45 +102,49 @@ describe('tagChanges', () => {
     expect(tagChanges([a, c], null).map((h) => h.status)).toEqual(['present', 'present']);
   });
 
-  // PATH, an editor, a pager, a proxy or a certificate is common in honest settings, so one that
-  // was already there is a warning. One a change adds or changes is still an error: it decides
-  // what every session runs, or where its traffic goes.
-  it('makes a common env variable that was already there a warning, and keeps a new one an error', () => {
+  // Only a short list of benign names (in any letter case) is a warning when it was already
+  // there. PATH, an editor, a proxy, a certificate or a name nobody knows stays an error: plain
+  // `stroq inspect` on a clone sees everything as already there.
+  it('makes only a benign env variable that was already there a warning', () => {
     const env = (name: string, value: string) =>
       hit('agent-env', '.claude/settings.json', 2, name, value);
     const base = [
       env('PATH', '/usr/bin'),
       env('HTTPS_PROXY', 'http://p'),
       env('NODE_OPTIONS', '-r x'),
+      env('DO_NOT_TRACK', '1'),
     ];
     const head = [
       env('PATH', '/usr/bin'),
       env('HTTPS_PROXY', 'http://evil.invalid'),
       env('NODE_OPTIONS', '-r x'),
+      env('DO_NOT_TRACK', '1'),
       env('EDITOR', 'vim'),
       env('NODE_EXTRA_CA_CERTS', './ca.pem'),
     ];
     expect(tagChanges(head, base).map((h) => `${h.status} ${h.name} ${h.severity}`)).toEqual([
-      'present PATH warning',
+      'present PATH error',
       'changed HTTPS_PROXY error',
       'present NODE_OPTIONS error',
+      'present DO_NOT_TRACK warning',
       'new EDITOR error',
       'new NODE_EXTRA_CA_CERTS error',
     ]);
     expect(tagChanges(head, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
-      'PATH warning',
-      'HTTPS_PROXY warning',
+      'PATH error',
+      'HTTPS_PROXY error',
       'NODE_OPTIONS error',
-      'EDITOR warning',
-      'NODE_EXTRA_CA_CERTS warning',
+      'DO_NOT_TRACK warning',
+      'EDITOR error',
+      'NODE_EXTRA_CA_CERTS error',
     ]);
   });
 
-  // A name already there that is neither harmless nor known to load code is a warning without a
-  // base. A known one stays an error in any letter case, since Windows reads `node_options` as
-  // NODE_OPTIONS, and so does the same name under Codex's `shell_environment_policy.set`. A change
-  // that adds or changes any name outside the harmless list fails.
-  it('makes a name nobody knows that was already there a warning, and keeps the known ones errors', () => {
+  // A name nobody knows is an error with or without a base, and so is a known one in any letter
+  // case, since Windows reads `node_options` as NODE_OPTIONS, and the same name under Codex's
+  // `shell_environment_policy.set`. The benign names are a warning in any letter case. A change
+  // that adds or changes any name outside the harmless list fails, a benign one too.
+  it('keeps a name nobody knows an error, and a benign one a warning in any letter case', () => {
     const names = [
       'SOMETHING_NEW',
       'GIT_DIR',
@@ -154,10 +158,14 @@ describe('tagChanges', () => {
       'Path',
       'shell_environment_policy.set.SOMETHING',
       'shell_environment_policy.set.BASH_ENV',
+      'node_env',
+      'Ci',
+      'claude_code_enable_telemetry',
+      'shell_environment_policy.set.TZ',
     ];
     const env = names.map((name) => hit('agent-env', '.claude/settings.json', 2, name, 'x'));
     expect(tagChanges(env, null).map((h) => `${h.name} ${h.severity}`)).toEqual([
-      'SOMETHING_NEW warning',
+      'SOMETHING_NEW error',
       'GIT_DIR error',
       'GIT_PAGER error',
       'CLAUDE_CODE_SHELL_PREFIX error',
@@ -166,9 +174,13 @@ describe('tagChanges', () => {
       'node_options error',
       'Ld_Preload error',
       'Bash_Env error',
-      'Path warning',
-      'shell_environment_policy.set.SOMETHING warning',
+      'Path error',
+      'shell_environment_policy.set.SOMETHING error',
       'shell_environment_policy.set.BASH_ENV error',
+      'node_env warning',
+      'Ci warning',
+      'claude_code_enable_telemetry warning',
+      'shell_environment_policy.set.TZ warning',
     ]);
     const added = tagChanges(env, []);
     expect(added.filter((h) => !isFailing(h, 'new')).map((h) => h.name)).toEqual([]);

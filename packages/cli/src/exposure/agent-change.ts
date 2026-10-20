@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import { envLoadsCode, envNameOf } from './agent-json.js';
+import { envNameOf } from './agent-json.js';
 import type { AgentHit, AgentKind } from './agent-kinds.js';
 import { runsFetchedOrHiddenCode } from './fetch-shapes.js';
 
@@ -35,23 +35,29 @@ const takeOne = (counts: Map<string, number>, key: string): boolean => {
 };
 
 /**
- * Env variables that honest settings often set: PATH, a shell, an editor or pager, a proxy, a
- * certificate. One that was already there is a warning. One a change adds or changes stays an
- * error, since it decides what every session runs, or where its traffic goes. Read in capitals:
- * Windows reads `Path` as `PATH`.
+ * The few env variables that are only a warning when they were already there: common in honest
+ * settings, and they change no program a session starts, what it loads, or where it sends
+ * anything. Matched in any letter case, so `node_env`, which the harmless list does not pass, is
+ * one. Every other name an env sets stays an error, there before or not: plain `stroq inspect` on
+ * a clone sees everything as there before, and that is the moment it matters most. What a name is
+ * known to do only words the report; it never makes one milder.
  */
-const COMMON_ENV =
-  /^(?:PATH|SHELL|EDITOR|VISUAL|PAGER|HTTPS?_PROXY|ALL_PROXY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/;
+const BENIGN_ENV: ReadonlySet<string> = new Set([
+  'NODE_ENV',
+  'TZ',
+  'LANG',
+  'LC_ALL',
+  'DISABLE_TELEMETRY',
+  'DO_NOT_TRACK',
+  'CLAUDE_CODE_ENABLE_TELEMETRY',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'FORCE_COLOR',
+  'NO_COLOR',
+  'CI',
+]);
 
-/**
- * Whether an env variable that was already there is only a warning: a common one, or one that is
- * neither harmless nor known to load code (an honest setting names many such). A known one in any
- * letter case stays an error.
- */
-const warnsWhenPresent = (name: string): boolean => {
-  const variable = envNameOf(name);
-  return COMMON_ENV.test(variable.toUpperCase()) || !envLoadsCode(variable);
-};
+/** Whether an env variable that was already there is only a warning: one of the few benign names. */
+const warnsWhenPresent = (name: string): boolean => BENIGN_ENV.has(envNameOf(name).toUpperCase());
 
 /** Kinds that are ordinary in an honest repository, and an attack in some shapes. */
 const FAILS_IN_SHAPE: ReadonlySet<AgentKind> = new Set([
@@ -99,7 +105,7 @@ export const inSharedFolder = (target: string): boolean =>
 
 /**
  * A hit's severity once it is known whether the change brought it. One that was already there
- * keeps its own, but for a common env variable or one nobody knows, which is a warning. One the
+ * keeps its own, but for one of the few benign env variables, which is a warning. One the
  * change brought fails
  * when it is a whole-shell allow rule or a link out of the repository, and when it is an install
  * script, a dev container command or a server that downloads and runs code, or decodes and runs
