@@ -15,7 +15,7 @@ import {
   type JsonFile,
   type Obj,
 } from './agent-json.js';
-import { boundedJson, byLine, hit, otherFields, type AgentHit } from './agent-kinds.js';
+import { boundedJson, byLine, digestOf, hit, otherFields, type AgentHit } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
 import { autoApproves } from './privilege-surface.js';
 
@@ -528,7 +528,37 @@ export const HOOK_MANAGER_KEYS = [
   'gitHooks',
   'ghooks',
   'git-hooks',
+  'yorkie',
 ] as const;
+/** What a key of package.json that may set git hooks, though it is on no list, is named. */
+export const POSSIBLE_HOOKS = 'possible git hook manager key';
+/** A key whose name says it may set git hooks: it holds `hook`, `commit` or `push`. */
+const HOOKISH_KEY = /hook|commit|push/i;
+/** The most characters of what a hook manager runs that are read; a longer one is not read. */
+const MAX_HOOK_VALUE = 64 * 1024;
+
+/**
+ * A hit for what a hook manager key holds, read whole or not at all: a value cut at its bound is
+ * a failing entry that it was not read, never part of a command followed as if it were whole.
+ */
+function hookManagerHit(
+  f: JsonFile,
+  keys: readonly string[],
+  name: string,
+  value: unknown,
+): AgentHit {
+  const line = lineOf(f.text, keys.map(quoted));
+  const text = boundedJson(value, MAX_HOOK_VALUE, true);
+  if (text.length > MAX_HOOK_VALUE)
+    return hit(
+      'unreadable-config',
+      f.path,
+      line,
+      name,
+      `too long to read whole (${digestOf(text)})`,
+    );
+  return { ...hit('git-hook-file', f.path, line, name, text), severity: 'warning' };
+}
 
 export function packageScripts(f: JsonFile): AgentHit[] {
   const scripts = ownObject(f.value, 'scripts');
@@ -538,15 +568,15 @@ export function packageScripts(f: JsonFile): AgentHit[] {
     return [hit(kind, f.path, lineOf(f.text, ['"scripts"', quoted(name)]), name, script)];
   });
   // What a hook manager runs on a commit: listed, and a change that adds or edits it fails.
-  const hooks = HOOK_MANAGER_KEYS.filter((key) => Object.hasOwn(f.value, key)).map((key) => ({
-    ...hit(
-      'git-hook-file',
-      f.path,
-      lineOf(f.text, [quoted(key)]),
-      key,
-      boundedJson(f.value[key], undefined, true),
-    ),
-    severity: 'warning' as const,
-  }));
+  const known: ReadonlySet<string> = new Set(HOOK_MANAGER_KEYS);
+  const hooks: AgentHit[] = [];
+  for (const [key, value] of Object.entries(f.value))
+    if (known.has(key)) hooks.push(hookManagerHit(f, [key], key, value));
+    else if (HOOKISH_KEY.test(key))
+      hooks.push(hookManagerHit(f, [key], `${POSSIBLE_HOOKS} ${key}`, value));
+  const config = ownObject(f.value, 'config');
+  for (const [key, value] of Object.entries(config ?? {}))
+    if (known.has(key) || HOOKISH_KEY.test(key))
+      hooks.push(hookManagerHit(f, ['config', key], `${POSSIBLE_HOOKS} config.${key}`, value));
   return byLine([...installs, ...hooks]);
 }

@@ -1,10 +1,13 @@
-import { chmodSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isFailing, type TaggedHit } from '../../src/exposure/agent-change.js';
 import { agentChanges } from '../../src/exposure/agent-git.js';
 import { describe as sentenceOf, plainQuote } from '../../src/exposure/agent-report.js';
 import { repoSurface } from '../../src/exposure/repo-surface.js';
+import { scanFile } from '../../src/exposure/agent-surface.js';
+import { hit } from '../../src/exposure/agent-kinds.js';
+import { runFileChanges } from '../../src/exposure/agent-run-files.js';
 import { commitFiles, scratchRepo, writeFiles } from '../helpers/scratch-repo.js';
 
 /**
@@ -254,6 +257,72 @@ describe('a git hook already there, read as what it runs', () => {
         {
           'package.json': JSON.stringify({ name: 'x', 'simple-git-hooks': { 'pre-commit': 'x' } }),
         },
+      ),
+    ).toContain('new git-hook-file package.json');
+  });
+});
+
+/**
+ * What a hook manager runs is read only when it is read whole: a value cut at its bound is not
+ * followed as if it were the command, it fails. A link or a submodule in a folder of hooks is not
+ * followed, it fails. Beside the names known to be hook manager configs, a file at the top whose
+ * name holds `hook`, and a key of package.json (at the top or under `config`) whose name holds
+ * `hook`, `commit` or `push`, fail when a change adds or edits them.
+ */
+describe('hook managers read only as far as they are known', () => {
+  const posixOnly = it.skipIf(process.platform === 'win32');
+
+  it('fails a hook manager value too long to read whole, in both modes', () => {
+    const value = { 'pre-commit': `npx x ${'a'.repeat(70 * 1024)}` };
+    const hits = scanFile('package.json', JSON.stringify({ 'simple-git-hooks': value }));
+    expect(hits.map((h) => `${h.kind} ${h.severity}`)).toEqual(['unreadable-config error']);
+  });
+
+  it('fails a command already there that was cut, rather than follow part of it', () => {
+    const cut = {
+      ...hit(
+        'agent-hook',
+        '.claude/settings.json',
+        1,
+        'Stop',
+        'node a.js... (sha256:0123456789abcdef)',
+      ),
+      status: 'present' as const,
+    };
+    const found = runFileChanges([cut], { touchedFiles: [['docs/a.md', 'changed']] });
+    expect(found.map((h) => `${h.kind} ${h.severity}`)).toEqual(['unreadable-config error']);
+  });
+
+  posixOnly('fails a link in a folder of hooks, which it does not follow', () => {
+    const dir = scratchRepo(dirs);
+    writeFiles(dir, { 'tools/pre-commit': 'echo\n', 'README.md': 'x\n' });
+    mkdirSync(join(dir, '.husky'));
+    symlinkSync('../tools/pre-commit', join(dir, '.husky', 'pre-commit'));
+    const base = commitFiles(dir);
+    commitFiles(dir, { 'README.md': 'y\n' });
+    expect(failing(agentChanges(dir, base).hits)).toContain(
+      'new unreadable-config .husky/pre-commit',
+    );
+  });
+
+  it.each(['husky.config.js', 'husky.config.mjs', '.lefthook.jsonc', 'my-hooks.sh', 'GITHOOK.cfg'])(
+    'fails %s at the top, which a change adds',
+    (path) => {
+      expect(changedIn({}, { [path]: 'x\n' })).toContain(`new git-hook-file ${path}`);
+    },
+  );
+
+  it.each([
+    [{ config: { ghooks: { 'pre-commit': 'x' } } }],
+    [{ precommit: 'x' }],
+    [{ 'pre-push': 'x' }],
+    [{ prepush: 'x' }],
+    [{ yorkie: { hooks: {} } }],
+  ])('fails package.json %j a change adds', (added) => {
+    expect(
+      changedIn(
+        { 'package.json': JSON.stringify({ name: 'x' }) },
+        { 'package.json': JSON.stringify({ name: 'x', ...added }) },
       ),
     ).toContain('new git-hook-file package.json');
   });

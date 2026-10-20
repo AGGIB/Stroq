@@ -67,7 +67,7 @@ const HOOKISH: ReadonlySet<string> = new Set([
 const EXECUTABLE = '100755';
 /** The configs of git hook managers, by their folded name: what they name runs on a commit. */
 const HOOK_MANAGER =
-  /^(?:\.pre-commit-config\.ya?ml|\.?lefthook(?:-local)?\.(?:ya?ml|toml|json)|\.lintstagedrc.*|lint-staged\.config\..*|\.huskyrc.*|\.?simple-git-hooks\..*|\.overcommit\.ya?ml)$/;
+  /^(?:\.pre-commit-config\.ya?ml|\.?lefthook(?:-local)?\.(?:ya?ml|toml|jsonc?)|\.lintstagedrc.*|lint-staged\.config\..*|\.huskyrc.*|husky\.config\..*|\.?simple-git-hooks\..*|\.overcommit\.ya?ml)$/;
 /** Whether a path is a git hook manager's config. */
 export const isHookManagerConfig = (path: string): boolean =>
   HOOK_MANAGER.test(foldName(path.slice(path.lastIndexOf('/') + 1)));
@@ -201,6 +201,9 @@ export function gitHookFileChanges(
   }
   for (const t of touched) {
     if (isHookManagerConfig(t.path)) fails(t.path, t.c, 'a git hook manager config');
+    // On no list, but at the top and named for hooks: a hook manager this does not know may read it.
+    else if (!t.path.includes('/') && t.folded.includes('hook'))
+      fails(t.path, t.c, 'a possible git hook manager config');
     const parts = t.folded.split('/');
     const parent = parts[parts.length - 2] ?? '';
     if (HOOK_NAMES.has(parts[parts.length - 1] as string) && parent.includes('hook'))
@@ -216,9 +219,10 @@ export function gitHookFileChanges(
 /**
  * The files of the head tree git runs as hooks, or a hook manager reads: everything under a folder
  * of hooks, found also through the links of the tree, and every hook manager's config. Their text
- * is read as what an entry already there runs.
+ * is read as what an entry already there runs. `odd` are the links, submodules and other entries
+ * that are not plain files under a folder of hooks: not followed, each fails.
  */
-export function hookFilesAt(ctx: HookContext): string[] {
+export function hookFilesAt(ctx: HookContext): { files: string[]; odd: string[] } {
   const { named } = hookFolders(ctx);
   const prefixes = new Set<string>();
   for (const [folder] of named) {
@@ -226,11 +230,16 @@ export function hookFilesAt(ctx: HookContext): string[] {
     const at = resolve(folder === '.' ? '' : folder, ctx.view);
     if (at.kind === 'folder') prefixes.add(foldPath(at.path));
   }
-  return ctx.view.sorted.filter((path) => {
+  const files: string[] = [];
+  const odd: string[] = [];
+  for (const path of ctx.view.sorted) {
     const entry = ctx.view.tree.get(path);
-    if (entry === undefined || (entry.mode !== '100644' && entry.mode !== EXECUTABLE)) return false;
-    if (isHookManagerConfig(path)) return true;
+    if (entry === undefined) continue;
+    const plain = entry.mode === '100644' || entry.mode === EXECUTABLE;
     const folded = foldPath(path);
-    return [...prefixes].some((p) => p === '.' || p === '' || folded.startsWith(`${p}/`));
-  });
+    const inFolder = [...prefixes].some((p) => p === '.' || p === '' || folded.startsWith(`${p}/`));
+    if (inFolder && !plain) odd.push(path);
+    else if (plain && (inFolder || isHookManagerConfig(path))) files.push(path);
+  }
+  return { files, odd };
 }

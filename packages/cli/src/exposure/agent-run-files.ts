@@ -1,5 +1,5 @@
 import type { ChangeStatus, TaggedHit } from './agent-change.js';
-import { DEVCONTAINER_ENV_KEYS, settingRuns } from './agent-editor.js';
+import { DEVCONTAINER_ENV_KEYS, POSSIBLE_HOOKS, settingRuns } from './agent-editor.js';
 import { hit, type AgentKind } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
@@ -74,7 +74,8 @@ const commandOf = (h: TaggedHit): string =>
 export const isRunEntry = (h: TaggedHit): boolean =>
   RUNS[h.kind] !== undefined &&
   h.status === 'present' &&
-  (h.kind !== 'devcontainer-setting' || settingRuns(h.name));
+  (h.kind !== 'devcontainer-setting' || settingRuns(h.name)) &&
+  !(h.kind === 'git-hook-file' && h.name.startsWith(POSSIBLE_HOOKS));
 
 export interface RunView {
   /**
@@ -121,6 +122,9 @@ const GITLINK = '160000';
  */
 const NOT_TEXT =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** What a value cut at its bound ends in (see `boundedJson`). */
+const CUT = /\.\.\. \(sha256:[0-9a-f]{16}\)/;
 
 /** A touched file, with what the reading needs of it. */
 interface Touched {
@@ -300,6 +304,10 @@ function judge(command: string, reading: Reading, index: Index, left: number): J
       work: 0,
     };
   if (NOT_TEXT.test(command)) return { unread: 'it holds bytes that are not text', fails, work: 0 };
+  // A value cut at its bound ends in a digest: what follows the cut is not read, so nothing is
+  // followed as if the part were the whole.
+  if (CUT.test(command))
+    return { unread: 'it was cut at its bound and is not read whole', fails, work: 0 };
   const text = normalText(command);
   let work = command.length * 4;
   const name = (id: number): void => {

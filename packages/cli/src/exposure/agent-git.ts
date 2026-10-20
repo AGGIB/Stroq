@@ -624,7 +624,13 @@ function hookFiles(
   };
   out.push(...gitHookFileChanges(changed, ctx));
   // The hooks already there, their text read as the command of an entry, for the files they run.
-  const present = hookFilesAt(ctx).filter((p) => !changed.has(p));
+  const at = hookFilesAt(ctx);
+  for (const path of at.odd)
+    unread(
+      path,
+      'a link, a submodule or another entry that is not a file, in a folder of git hooks: not followed',
+    );
+  const present = at.files.filter((p) => !changed.has(p));
   const texts = readTexts(top, tree, present.slice(0, MAX_HOOK_FILES));
   const left = present.filter((p) => !texts.has(p));
   if (left[0] !== undefined)
