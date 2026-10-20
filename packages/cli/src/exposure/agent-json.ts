@@ -508,11 +508,10 @@ const SERVER_ENV_KEYS = ['env', 'environment'] as const;
 const SERVER_ENV_FILE_KEYS = ['envFile', 'env_file', 'envfile'] as const;
 /** Keys that name the folder the server starts in. */
 const SERVER_CWD_KEYS = ['cwd', 'workingDirectory', 'working_directory'] as const;
-/** A folder that is the one the host starts in anyway. */
-const TOP_FOLDER: ReadonlySet<string> = new Set([
-  '',
-  '.',
-  './',
+/** A folder that is the one the host starts in anyway, written exactly so: a blank around it is a move. */
+const TOP_FOLDER: ReadonlySet<string> = new Set(['', '.', './']);
+/** The workspace folder in VS Code's own spelling, which only its `.vscode/mcp.json` expands. */
+const WORKSPACE_FOLDER: ReadonlySet<string> = new Set([
   '${workspaceFolder}',
   '${workspaceFolder}/',
   '${workspaceRoot}',
@@ -521,6 +520,13 @@ const TOP_FOLDER: ReadonlySet<string> = new Set([
 
 const isAbsolutePath = (word: string): boolean =>
   word.startsWith('/') || word.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(word);
+/** An option that takes no value written onto it: `-y`, `--stdio`, never `-r./x` or `--opt=./x`. */
+const VALUELESS_FLAG = /^(?:-[A-Za-z]|--[A-Za-z][A-Za-z0-9-]*)$/;
+
+const isVscodeServerList = (file: string): boolean => {
+  const lower = file.toLowerCase();
+  return lower === '.vscode/mcp.json' || lower.endsWith('/.vscode/mcp.json');
+};
 
 /**
  * Whether a server's own variables can make the program it starts run other code. Read through
@@ -538,18 +544,29 @@ function envRunsOther(entry: Obj): boolean {
 }
 
 /**
- * Whether a server starts in a folder other than the top, with a command or a script named
- * relative to it: the same entry in another folder runs another file. A bare program name counts
- * too: Windows looks for it in that folder first, and `npx` or `python -m` load from it.
+ * Whether a server starts in a folder other than the top, and its command or any argument could
+ * name a file relative to it: the same entry in another folder runs another file. Only a command
+ * and arguments that are all absolute paths, or options that take no value, pass: a bare program
+ * name counts too, since Windows looks for it in that folder first, and `npx` or `python -m` load
+ * from it. The folder is compared as it is written; `${workspaceFolder}` is the top only in VS
+ * Code's own server list, the one host known to expand it.
  */
-function folderRunsOther(command: string, args: readonly string[], entry: Obj): boolean {
+function folderRunsOther(
+  command: string,
+  args: readonly string[],
+  entry: Obj,
+  file: string,
+): boolean {
   const moved = SERVER_CWD_KEYS.some((key) => {
     if (!Object.hasOwn(entry, key)) return false;
     const cwd = entry[key];
-    return typeof cwd !== 'string' || !TOP_FOLDER.has(cwd.trim());
+    if (typeof cwd !== 'string') return true;
+    return !(TOP_FOLDER.has(cwd) || (isVscodeServerList(file) && WORKSPACE_FOLDER.has(cwd)));
   });
   if (!moved) return false;
-  return !isAbsolutePath(command) || args.some((a) => !a.startsWith('-') && !isAbsolutePath(a));
+  return !(
+    isAbsolutePath(command) && args.every((a) => isAbsolutePath(a) || VALUELESS_FLAG.test(a))
+  );
 }
 
 /**
@@ -560,9 +577,10 @@ export function serverKind(
   command: string,
   args: readonly string[],
   entry: Obj,
+  file: string,
 ): 'mcp-server-runs-code' | 'mcp-server' {
   if (mcpServerRunsCode(command, args)) return 'mcp-server-runs-code';
-  return envRunsOther(entry) || folderRunsOther(command, args, entry)
+  return envRunsOther(entry) || folderRunsOther(command, args, entry, file)
     ? 'mcp-server-runs-code'
     : 'mcp-server';
 }
@@ -589,7 +607,7 @@ export function mcpServerHits(
     if (command !== undefined) {
       const args = strings(own(entry, 'args'));
       const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
-      hits.push(hit(serverKind(command, args, entry), f.path, line, name, value));
+      hits.push(hit(serverKind(command, args, entry, f.path), f.path, line, name, value));
     } else if (url !== undefined) {
       hits.push(hit('mcp-server', f.path, line, name, `${url}${serverFields(entry)}`));
     }

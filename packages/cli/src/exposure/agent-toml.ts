@@ -51,7 +51,7 @@ function serverHits(path: string, text: string, toml: Toml): AgentHit[] {
       if (typeof command === 'string') {
         const line = serverLine(toml, text, entry, name, 'command');
         const value = `${[command, ...args].join(' ')}${serverFields(entry)}`;
-        return [hit(serverKind(command, args, entry), path, line, name, value)];
+        return [hit(serverKind(command, args, entry, path), path, line, name, value)];
       }
       if (command !== undefined)
         return [hit('unreadable-config', path, 1, `mcp_servers.${name}`, boundedJson(command))];

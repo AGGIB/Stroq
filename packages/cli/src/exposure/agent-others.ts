@@ -24,7 +24,7 @@ import { lineOf } from './jsonc.js';
 function serverHit(f: JsonFile, line: number, name: string, parts: readonly string[], entry: Obj) {
   const [command = '', ...args] = parts;
   const value = `${parts.join(' ')}${serverFields(entry)}`;
-  return hit(serverKind(command, args, entry), f.path, line, name, value);
+  return hit(serverKind(command, args, entry, f.path), f.path, line, name, value);
 }
 
 /** opencode's `mcp` servers (a local one's `command` is an array) and its `plugin` list. */

@@ -198,6 +198,10 @@ describe('what makes an MCP server run other code than its command', () => {
     { cwd: '/' },
     { cwd: ['tools'] },
     { working_directory: 'tools' },
+    // The folder is compared as it is written, and `${workspaceFolder}` is the top only for VS Code.
+    { cwd: ' .' },
+    { cwd: './ ' },
+    { cwd: '${workspaceFolder}' },
   ])('fails one with %j', (entry) => {
     expect(server('.mcp.json', entry)).toEqual(['mcp-server-runs-code s error']);
   });
@@ -216,6 +220,29 @@ describe('what makes an MCP server run other code than its command', () => {
         json({ mcpServers: { s: { command: '/usr/bin/node', args: ['/opt/s.js'], cwd: 'x' } } }),
       ),
     ).toEqual(['mcp-server s warning']);
+    expect(
+      brief(
+        '.mcp.json',
+        json({
+          mcpServers: {
+            s: { command: '/usr/bin/node', args: ['--stdio', '-y', '/opt/s.js'], cwd: 'x' },
+          },
+        }),
+      ),
+    ).toEqual(['mcp-server s warning']);
+  });
+
+  // An option can carry a relative path written onto it, or take the next word as its value.
+  it.each([
+    ['--require=./x.js', '/opt/s.js'],
+    ['-r./x.js', '/opt/s.js'],
+    ['-r', './x.js'],
+    ['--config', 'conf.json'],
+    ['-abc', '/opt/s.js'],
+  ])('fails an absolute command started elsewhere with %j', (...args) => {
+    expect(
+      brief('.mcp.json', json({ mcpServers: { s: { command: '/usr/bin/node', args, cwd: 'x' } } })),
+    ).toEqual(['mcp-server-runs-code s error']);
   });
 
   it('reads the same in the other server lists', () => {
