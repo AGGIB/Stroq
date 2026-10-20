@@ -178,6 +178,15 @@ describe('a git hook in plain stroq inspect', () => {
       ]);
     }
   });
+
+  // A key the shell builds at run time names a folder nobody can place.
+  it.each(['git config "core.$X" .h', 'git -c core.hooks${P} commit', 'git config core.`k` .h'])(
+    'fails a git config key the shell fills in: %s',
+    (script) => {
+      const pkg = JSON.stringify({ scripts: { prepare: script } });
+      expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+    },
+  );
 });
 
 /**

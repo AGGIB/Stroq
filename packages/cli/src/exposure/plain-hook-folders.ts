@@ -12,7 +12,8 @@ import type { RepoExecHit } from './repo-surface.js';
  * or sends a secret out, fails before anyone commits, and so does one that is a link, cannot be
  * read, or comes past the files read. Any other is listed. A script that mentions
  * `core.hooksPath`, its quotes and backslashes taken off, and points it at no folder this can
- * place (a `$`, a quote around a blank, `~`, an absolute path, a key spelled with quotes) fails.
+ * place (a `$`, a quote around a blank, `~`, an absolute path, a key spelled with quotes) fails,
+ * and so does one whose `git config` or `git -c` key the shell fills in (`$`, a backquote).
  */
 
 /** What sets `core.hooksPath` in a script: `git config core.hooksPath <folder>`. */
@@ -21,6 +22,37 @@ const SETS_HOOKS_PATH = /core\.hookspath["']?(?:\s*=\s*|\s+)([^\s;&|)]+)/gi;
 const HUSKY_FOLDER = /(?:^|[\s;&|(])husky(?:\s+install)?\s+([^\s;&|)]+)/gi;
 /** A mention of the key, however it is spelled, once quotes and backslashes are taken off. */
 const MENTIONS_HOOKS_PATH = /hookspath/g;
+/** The parts of a script a shell runs one after another, or in a subshell. */
+const COMMANDS = /[;&|\n\r()]/;
+/** What a shell fills in at run time: a variable, a substitution. */
+const FILLED_IN = /[$`]/;
+
+/** A script as the shell may read it, for coarse matching: lower case, quotes and `\` taken off. */
+const stripped = (script: string): string => script.toLowerCase().replace(/["'\\]/g, '');
+
+/**
+ * Whether a `git` command of the (stripped) script sets a config key the shell fills in at run
+ * time: `git config "core.$X" .h`, `git -c core.hooks${P} commit`. Such a key may be
+ * `core.hooksPath`, pointing git at hooks in a folder nobody can place.
+ */
+function fillsInGitKey(text: string): boolean {
+  for (const part of text.split(COMMANDS)) {
+    const words = part.split(/\s+/).filter((w) => w !== '');
+    const git = words.findIndex((w) => posix.basename(w).replace(/\.exe$/, '') === 'git');
+    if (git === -1) continue;
+    for (let i = git + 1; i < words.length; i += 1) {
+      const key =
+        words[i] === '-c'
+          ? words[i + 1]
+          : words[i] === 'config'
+            ? words.slice(i + 1).find((w) => !w.startsWith('-'))
+            : undefined;
+      if (key !== undefined && FILLED_IN.test(key)) return true;
+    }
+  }
+  return false;
+}
+
 /** A plain relative path: no quote, blank, `$`, backquote or `~`, and not absolute. */
 const PLAIN_PATH = /^[A-Za-z0-9._@+-]+(?:\/[A-Za-z0-9._@+-]+)*\/?$/;
 /** The most bytes of one hook read; a longer one is not read, and fails. */
@@ -112,10 +144,8 @@ export function plainHookHits(
   };
   for (const script of scripts) {
     // Every mention must be one the exact reading placed; a spelling it cannot read fails.
-    const mentions = script
-      .toLowerCase()
-      .replace(/["'\\]/g, '')
-      .match(MENTIONS_HOOKS_PATH);
+    const text = stripped(script);
+    const mentions = text.match(MENTIONS_HOOKS_PATH);
     let placedCount = 0;
     let failed = false;
     for (const match of script.matchAll(SETS_HOOKS_PATH)) {
@@ -128,8 +158,11 @@ export function plainHookHits(
         placedCount += 1;
       }
     }
-    if (!failed && (mentions?.length ?? 0) > placedCount)
+    if (!failed && (mentions?.length ?? 0) > placedCount) {
       unplaced('a core.hooksPath this does not read');
+      failed = true;
+    }
+    if (!failed && fillsInGitKey(text)) unplaced('a git config key the shell fills in');
     for (const match of script.matchAll(HUSKY_FOLDER)) {
       const value = match[1] as string;
       if (value.startsWith('-')) continue;
