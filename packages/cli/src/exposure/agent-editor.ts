@@ -572,14 +572,24 @@ function hookManagerHit(
     );
   const found = { ...hit('git-hook-file', f.path, line, name, text), severity: 'warning' as const };
   if (!known) return found;
-  // A known manager runs the strings it holds; its keys (lint-staged's patterns) are not commands,
-  // but for a command that runs the files it is given, its pattern names what runs.
-  const patterns = name.endsWith('lint-staged') ? filesRunBy(value) : [];
-  // A pattern this does not read (a brace list, a class, a negation) could match any file: the
-  // entry's command is then one that cannot be read, which any change at all fails.
-  if (patterns.some((p) => /[{}[\]!()\\]/.test(p) || p === '*'))
-    return { ...found, runs: UNREAD_PATTERN };
-  return { ...found, runs: [...stringsOf(value), ...patterns].join('\n') };
+  // A known manager runs the strings it holds; its keys (lint-staged's patterns) are not commands.
+  return {
+    ...found,
+    runs: name.endsWith('lint-staged') ? lintStagedRuns(value) : stringsOf(value).join('\n'),
+  };
+}
+
+/**
+ * What a lint-staged config runs, as the reading of run files takes it: the strings it holds, and,
+ * for a command that runs the files it is given, its pattern, which names what runs. A pattern
+ * this does not read (a brace list, a class, a negation) could match any file: the command is then
+ * one that cannot be read, which any change at all fails. For the `lint-staged` key of
+ * package.json and for a `.lintstagedrc` alike.
+ */
+export function lintStagedRuns(value: unknown): string {
+  const patterns = filesRunBy(value);
+  if (patterns.some((p) => /[{}[\]!()\\]/.test(p) || p === '*')) return UNREAD_PATTERN;
+  return [...stringsOf(value), ...patterns].join('\n');
 }
 
 /** What a lint-staged entry runs when one of its patterns is not read: no command at all. */

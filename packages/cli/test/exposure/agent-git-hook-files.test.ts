@@ -286,6 +286,49 @@ describe('a git hook in plain stroq inspect', () => {
 });
 
 /**
+ * lint-staged's own config files are read as its key of package.json is: the JSON and YAML forms
+ * for what they run, wherever they are; one written as code is not read, so while one is there any
+ * change at all fails.
+ */
+describe('a lint-staged config file already there', () => {
+  const edit = (config: Record<string, string>, path: string): string[] =>
+    changedIn({ ...config, [path]: '1\n' }, { [path]: '2\n' });
+
+  it.each([
+    ['.lintstagedrc.json', '{"*.md": "node"}'],
+    ['.lintstagedrc', '"*.md": node\n'],
+    ['.lintstagedrc.yml', '"*.md":\n  - ./run.sh\n'],
+    ['.lintstagedrc.yaml', '"*.md": yarn run custom\n'],
+    ['packages/a/.lintstagedrc.json', '{"*.md": ["sh"]}'],
+  ])('fails a change to a file %s runs', (config, text) => {
+    expect(edit({ [config]: text }, 'docs/a.md')).toContain(
+      'changed agent-run-file-changed docs/a.md',
+    );
+  });
+
+  it('follows a tool on the list by its own words, as in package.json', () => {
+    expect(edit({ '.lintstagedrc.json': '{"*.md": "prettier --write"}' }, 'docs/a.md')).toEqual([]);
+  });
+
+  it.each([
+    'lint-staged.config.js',
+    'lint-staged.config.mjs',
+    '.lintstagedrc.cjs',
+    'tools/lint-staged.config.ts',
+  ])('fails any change while %s, a config in code, is there', (config) => {
+    expect(edit({ [config]: 'export default {};\n' }, 'README.md')).toContain(
+      `new unreadable-config ${config}`,
+    );
+  });
+
+  it('fails any change while a data config cannot be read', () => {
+    expect(edit({ '.lintstagedrc.json': '{"*.md": ' }, 'README.md')).toContain(
+      'new unreadable-config .lintstagedrc.json',
+    );
+  });
+});
+
+/**
  * One table says which hooks run only on a commit, for `.git/hooks` and for the folders a commit
  * runs hooks from: the same hook file is never milder in a hooks folder than in `.git/hooks`.
  */
