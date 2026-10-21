@@ -243,6 +243,40 @@ describe('a git hook in plain stroq inspect', () => {
     }
   });
 
+  // Other ways a script can point git at hooks than `core.hooksPath` in a git command: each fails.
+  it.each([
+    '/usr/lib/git-core/git-config core.hooksPath x',
+    'git --exec-path=./bin status',
+    'cp tools/hooks.cfg .git/config',
+    'cp tools\\hooks.cfg .git\\config',
+    'GIT_CONFIG_GLOBAL=./g git status',
+    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=x git commit',
+    'git --config-env=core.hooksPath=H commit',
+    'git config include.path ../shared.cfg',
+    'echo x > .git/hooks/pre-commit',
+    'echo x >> .git/info/exclude',
+    'echo x | tee -a .git/hooks/pre-commit',
+    'cp scripts/pre-commit .git/hooks/',
+    'cp scripts\\pre-commit .git\\hooks\\pre-commit',
+  ])('fails a script that may set where git hooks run: %s', (script) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
+
+  it('passes ordinary scripts', () => {
+    for (const script of [
+      'git status',
+      'git log > out.txt',
+      'npm test > log.txt 2>&1',
+      'cat .gitignore | wc -l',
+      'git config core.hooksPath .githooks',
+    ])
+      expect(
+        surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
+        script,
+      ).toEqual([]);
+  });
+
   it('passes husky with no folder, or with a flag that takes none', () => {
     for (const script of ['husky', 'husky || true', 'husky install', 'husky --help'])
       expect(

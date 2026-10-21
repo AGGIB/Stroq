@@ -45,6 +45,35 @@ const FILLED_IN = /[$`]/;
 const endsAWord = (text: string, at: number): boolean =>
   /^(?:@[^\s;&|()]*)?(?:[\s;&|()]|$)/.test(text.slice(at, at + 256));
 
+/**
+ * Other ways a script can point git at hooks than a git command's `core.hooksPath`: git's own
+ * program by another path or name (`git-config`, `--exec-path`), a config git reads that the
+ * script writes or names (`.git/config`, a `.gitconfig`, `include.path`, any `GIT_CONFIG*`
+ * variable, `--config-env`), or the hooks folder itself (`.git/hooks`). Case-blind.
+ */
+const GIT_ROUTES =
+  /git-config|--exec-path|\.git\/(?:config|hooks)|\.gitconfig|git_config|--config-env|include\.path/i;
+/** A redirection whose target holds `.git`: `> .git/hooks/pre-commit`, `>> .git/info/x`. */
+const WRITES_TO_GIT = />[ \t]*[^\s;&|()<>]*\.git/i;
+
+/** Whether a command of `text` runs `tee` with a path that holds `.git`. */
+const teesToGit = (text: string): boolean =>
+  text.split(COMMANDS).some((part) => {
+    const words = part.split(/\s+/).filter((w) => w !== '');
+    const tee = words.findIndex((w) => posix.basename(w.toLowerCase()) === 'tee');
+    return tee !== -1 && words.slice(tee + 1).some((w) => w.toLowerCase().includes('.git'));
+  });
+
+/**
+ * Whether a script may set where git hooks run some other way than this reads: see `GIT_ROUTES`,
+ * or a write to a path that holds `.git`. Read twice, with backslashes taken off and with them
+ * read as `/`, since `.git\hooks` is a Windows path. Coarse: such a script fails.
+ */
+const mayRouteHooks = (script: string): boolean =>
+  [unquoted(script), script.replace(/["']/g, '').replace(/\\/g, '/')].some(
+    (text) => GIT_ROUTES.test(text) || WRITES_TO_GIT.test(text) || teesToGit(text),
+  );
+
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
 
@@ -185,8 +214,16 @@ export function plainHookHits(
       unplaced('a core.hooksPath this does not read');
       failed = true;
     }
-    if (!failed && mayBuildGitConfig(text))
+    if (!failed && mayBuildGitConfig(text)) {
       unplaced('a folder git config may build from what the shell fills in');
+      failed = true;
+    }
+    if (!failed && mayRouteHooks(script))
+      out.push({
+        kind: 'git-hook-routine',
+        file: 'package.json',
+        what: 'a script may set where git hooks run, in a way this does not read, so those hooks were not read',
+      });
     // One reading of husky: each folder it names is placed, or the script fails. A script over
     // more than one line may join them with a backslash, which no reading of one line sees.
     const huskyUnread = !/husky/i.test(text)
