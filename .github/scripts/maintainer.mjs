@@ -32,7 +32,9 @@ const KNOWN_RULES = new Set([
 const KINDS = [
   ['[Bug]:', 'bug', 'What happened?', 'Steps to reproduce'],
   ['[Docs]:', 'documentation', 'Where', 'What is wrong, unclear or missing?'],
+  ['[False positive]:', 'false-positive', 'What you expected', 'Output of `stroq why`'],
   ['[False positive]:', 'false-positive', 'Rule id(s) and decision line', 'Expected behavior'],
+  ['[False negative]:', 'false-negative', 'The tool call or command', 'What you expected'],
   ['[Feature]:', 'enhancement', 'What problem would it solve?', 'What would you like Stroq to do?'],
   ['[Question]:', 'question', 'What happened, or what do you want to know?'],
   ['[Gap]:', 'classification-gap', 'The gap', "Why this isn't an active bypass"],

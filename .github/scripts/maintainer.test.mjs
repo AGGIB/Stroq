@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   GitHub,
@@ -589,6 +590,61 @@ test('form classification requires prefix and headings and never overwrites a ca
   assert.equal(issueLabel({ ...issue, labels: [{ name: 'question' }] }, new Set(['bug'])), null);
   assert.equal(issueLabel(issue, new Set()), null);
   assert.equal(issueLabel({ ...issue, pull_request: {} }, new Set(['bug'])), null);
+});
+
+test('form classification knows the false-positive and false-negative forms by their headings', () => {
+  const issue = (title, body) => ({ state: 'open', title, body, labels: [] });
+  const labels = new Set(['false-positive', 'false-negative']);
+  const positive = '### What you expected\ntext\n### Output of `stroq why`\ntext';
+  const older = '### Rule id(s) and decision line\ntext\n### Expected behavior\ntext';
+  const negative = '### The tool call or command\ntext\n### What you expected\ntext';
+  assert.equal(issueLabel(issue('[False positive]: x', positive), labels), 'false-positive');
+  assert.equal(issueLabel(issue('[False positive]: x', older), labels), 'false-positive');
+  assert.equal(issueLabel(issue('[False negative]: x', negative), labels), 'false-negative');
+  assert.equal(issueLabel(issue('[False negative]: x', positive), labels), null);
+});
+
+test('every label an issue form sets is listed in CONTRIBUTING.md and in the triage skill', () => {
+  const root = new URL('../../', import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), 'utf8');
+  const forms = readdirSync(new URL('.github/ISSUE_TEMPLATE/', root)).filter(
+    (name) => name.endsWith('.yml') && name !== 'config.yml',
+  );
+  const labels = forms.flatMap((name) =>
+    [...read(`.github/ISSUE_TEMPLATE/${name}`).matchAll(/^labels: \['([a-z-]+)'\]$/gm)].map(
+      (m) => m[1],
+    ),
+  );
+  assert.equal(labels.length, forms.length, 'every form sets exactly one kind label');
+  const issues = read('CONTRIBUTING.md').split('## Issues')[1]?.split('\n## ')[0] ?? '';
+  const triage = read('.claude/skills/triage-issues/SKILL.md')
+    .split('\n')
+    .filter((line) => line.startsWith('8. **Labels**'))
+    .join('\n');
+  for (const label of labels) {
+    assert.ok(issues.includes(`\`${label}\``), `CONTRIBUTING.md does not list ${label}`);
+    assert.ok(triage.includes(`\`${label}\``), `the triage skill does not list ${label}`);
+  }
+});
+
+test('the forms for a missed risky action send a way around a protection to SECURITY.md', () => {
+  const root = new URL('../../', import.meta.url);
+  const read = (path) => readFileSync(new URL(path, root), 'utf8');
+  for (const name of ['false_negative.yml', 'bypass_report.yml']) {
+    const form = read(`.github/ISSUE_TEMPLATE/${name}`);
+    const intro = form.split('\n  - type: ')[1] ?? '';
+    assert.ok(intro.startsWith('markdown'), `${name} does not open with a note`);
+    assert.ok(
+      intro.includes('[SECURITY.md](../../SECURITY.md)'),
+      `${name} does not link SECURITY.md`,
+    );
+    assert.match(
+      intro,
+      /do not file it here|do NOT file it here/,
+      `${name} does not say "not here"`,
+    );
+    assert.match(intro, /privately|private security advisory/, `${name} does not say "privately"`);
+  }
 });
 
 test('pagination retrieves a second page instead of silently dropping issues', async () => {

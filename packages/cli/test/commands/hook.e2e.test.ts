@@ -166,6 +166,6 @@ describe('stroq hook claude-code (end to end)', () => {
     const res = await runCli(['bogus'], '', mkdtempSync(join(tmpdir(), 'stroq-e2e-')));
     expect(res.code).toBe(1);
     expect(res.stderr).toContain('unknown command "bogus"');
-    expect(res.stderr).toContain('stroq --help');
+    expect(res.stderr).toContain('stroq help --all');
   }, 60_000);
 });

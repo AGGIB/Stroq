@@ -1,7 +1,10 @@
-// The one place a command's usage is written down. The top-level `stroq --help`,
-// `stroq <command> --help`, `stroq help <command>` and the unknown-option check are
-// all read from `COMMANDS`, so a flag a command parses but this table omits fails
-// `test/help.test.ts` rather than going missing from the help.
+// The one place a command's usage is written down. `stroq <command> --help`,
+// `stroq help <command>` and the unknown-option check are all read from `COMMANDS`, so a
+// flag a command parses but this table omits fails `test/help.test.ts` rather than going
+// missing from the help. The short lists, `stroq --help` and `stroq help --all`, and the
+// tier of each command are in help-listing.ts.
+
+export { tierOf, usage, usageAll, type Tier } from './help-listing.js';
 
 /** One flag: how it is written, and what it does. */
 type Flag = readonly [spelling: string, meaning: string];
@@ -23,13 +26,17 @@ export const COMMANDS: readonly CommandHelp[] = [
     synopsis:
       'add <local-source|installed-name> [--user] [--restore] [--rollback] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
     about: [
-      'read a local skill directory or tar archive, show its passport and require a person',
-      'to type the first 12 hex digits of its digest before installing the inspected bytes.',
-      'An installed name updates from its recorded source. A passport is not a security certificate.',
-      'With --kind mcp, a local Node server folder is stored by digest and its entry in the client',
-      'config is written to start only those bytes (--pin); only node servers are supported.',
-      'Add --strict to confirm a wrapper that withholds unread server messages; changing the',
-      'confirmed launch requires the typed digest. Updates keep its recorded strict arguments.',
+      'install a skill from a local folder or tar archive, after a check. Stroq reads',
+      'the files and shows a report with a sha256 fingerprint. To install, you type',
+      'the first 12 characters of its fingerprint. Stroq then installs exactly the',
+      'files it showed you, even if the folder changes while you read.',
+      'Give the name of something you installed to update it from the same place.',
+      'The report says what Stroq saw. It does not prove the files are safe.',
+      'With --kind mcp, it adds a local Node MCP server the same way: Stroq keeps a',
+      "copy, and the client's config starts only that copy. Only Node servers work.",
+      'With --strict, Stroq holds back any message from the server that it could not',
+      'fully read and scan. Changing that later needs the typed fingerprint again;',
+      'an update keeps it.',
     ],
     flags: [
       ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
@@ -70,14 +77,11 @@ export const COMMANDS: readonly CommandHelp[] = [
     name: 'init',
     synopsis: 'init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]',
     about: [
-      'install hooks for an agent, in this project by default,',
-      "or wrap an MCP client's stdio servers in Stroq's proxy (--agent mcp).",
-      'On a terminal it shows what it will change, asks first and, for Claude',
-      'Code, Codex, Cursor and Antigravity, checks that the hook it wrote starts',
-      'and judges. On Windows it writes the hook line of Antigravity, Cursor and',
-      'Codex without quotes (a host that escapes each quote cannot start a line',
-      'that has one) and starts it through cmd.exe, as such a host does, before',
-      'it keeps it.',
+      "install Stroq's hooks into an agent, in this project by default. The agent then",
+      'calls Stroq on its tool calls, and Stroq can block one or ask you first.',
+      'With --agent mcp, it routes the MCP servers a client starts through Stroq instead.',
+      'On a terminal it shows what it will change and asks first. For Claude Code, Codex,',
+      'Cursor and Antigravity it then checks that the hook it wrote starts and answers.',
     ],
     flags: [
       [
@@ -218,11 +222,12 @@ export const COMMANDS: readonly CommandHelp[] = [
     name: 'prove',
     synopsis: 'prove [--agent <id>] [--yes] [--dry-run] [--json] [--max-requests <n>]',
     about: [
-      'run the live protection check: ask the real host to run three harmless commands with',
-      "Stroq's hook in place, and show from evidence the model does not write that a command",
-      'your policy denies did not happen, and that the same command runs when the hook is out',
-      'of the way. It makes up to 3 short requests on your own login (subscription usage, never',
-      'an API key), says so, and asks first. Exit 0 verified, 1 failed, 3 anything else',
+      'check that blocking really works on this machine. Your agent runs 3 harmless',
+      'commands with the hook in place. Stroq checks that the ones your policy blocks did',
+      'not run, and that they do run with the hook out of the way. It checks the files the',
+      "commands leave and its own log, not the agent's reply.",
+      'It makes up to 3 short requests on your own login (your subscription, never an API',
+      'key). It says so and asks first. Exit 0: it works. 1: it failed. 3: anything else.',
     ],
     flags: [
       [
@@ -539,45 +544,8 @@ export const COMMANDS: readonly CommandHelp[] = [
 
 const byName = new Map(COMMANDS.map((c) => [c.name, c]));
 
-/** The name of every command, in the order the help lists them. */
+/** The name of every command, hidden ones included. */
 export const commandNames = (): readonly string[] => COMMANDS.map((c) => c.name);
-const INDENT = 37;
-
-const START_INDENT = 22;
-
-/** What a newcomer runs, in order: the rest of the list is for later. */
-const START_HERE: readonly (readonly [string, string])[] = [
-  ['stroq init', 'guard the agents on this machine (it asks first)'],
-  ['stroq sent --last', 'which of your keys did your agent already see?'],
-  ['stroq doctor', 'are the hooks in place, and was Stroq called?'],
-];
-
-/** `stroq --help`: every command, one block each. */
-export function usage(): string {
-  const blocks = COMMANDS.map((c) => {
-    const head = `  ${c.synopsis}`;
-    const [first = '', ...more] = c.about;
-    const lines =
-      head.length < INDENT - 1
-        ? [`${head.padEnd(INDENT)}${first}`, ...more.map((l) => `${' '.repeat(INDENT)}${l}`)]
-        : [head, ...c.about.map((l) => `${' '.repeat(INDENT)}${l}`)];
-    return lines.join('\n');
-  });
-  return [
-    'stroq <command>',
-    '',
-    'Start here:',
-    ...START_HERE.map(([command, meaning]) => `${`  ${command}`.padEnd(START_INDENT)}${meaning}`),
-    '',
-    'Commands:',
-    ...blocks,
-    `${'  help [<command>]'.padEnd(INDENT)}this list, or one command's options`,
-    `${'  --version'.padEnd(INDENT)}print the CLI version`,
-    '',
-    'Run "stroq <command> --help" for its options.',
-    '',
-  ].join('\n');
-}
 
 /** `stroq <command> --help`, or null for a name that is not a command. */
 export function commandHelp(name: string): string | null {

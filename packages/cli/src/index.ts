@@ -36,6 +36,7 @@ import {
   suggestCommand,
   unknownOption,
   usage,
+  usageAll,
   usageError,
   wantsHelp,
 } from './help.js';
@@ -126,7 +127,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
 async function report(command: string | undefined, rest: readonly string[]): Promise<number> {
   if (command === undefined || command === '--help' || command === '-h') {
-    process.stdout.write(usage());
+    process.stdout.write(rest[0] === '--all' ? usageAll() : usage());
     return 0;
   }
   if (command === '--version' || command === '-v' || command === 'version') {
@@ -134,7 +135,8 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
     return 0;
   }
   if (command === 'help') {
-    const help = rest[0] === undefined ? usage() : commandHelp(rest[0]);
+    const help =
+      rest[0] === undefined ? usage() : rest[0] === '--all' ? usageAll() : commandHelp(rest[0]);
     if (help === null) return unknownCommand(rest[0] ?? '');
     process.stdout.write(help);
     return 0;
@@ -170,7 +172,7 @@ function unknownCommand(typed: string): number {
   const suggestion = suggestCommand(typed);
   process.stderr.write(
     `stroq: unknown command "${typed}".${suggestion === null ? '' : ` Did you mean "${suggestion}"?`}\n` +
-      'Run "stroq --help" for the list of commands.\n',
+      'Run "stroq help --all" for the list of commands.\n',
   );
   return 1;
 }

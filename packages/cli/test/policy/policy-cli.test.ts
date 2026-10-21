@@ -65,13 +65,13 @@ describe('stroq policy, as a command', () => {
     expect(option.err).not.toMatch(/TypeError|ERR_PARSE_ARGS/);
   });
 
-  it('prints its usage for --help, and lists itself in the top-level help', () => {
+  it('prints its usage for --help, and lists itself in stroq help --all', () => {
     const help = stroq('--help');
     expect(help.code).toBe(0);
     expect(help.out).toMatch(/^stroq policy check/);
     expect(help.out).toContain('--max-new-interruptions');
-    const top = spawnSync(process.execPath, [CLI_ENTRY, '--help'], { encoding: 'utf8' });
-    expect(top.stdout).toContain('policy check [<file>]');
+    const all = spawnSync(process.execPath, [CLI_ENTRY, 'help', '--all'], { encoding: 'utf8' });
+    expect(all.stdout).toMatch(/^ {2}stroq policy check\b/m);
   });
 
   it('writes no raw control character to the terminal for a hostile file', () => {
