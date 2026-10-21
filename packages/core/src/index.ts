@@ -10,6 +10,14 @@ export * from './scan/scanner.js';
 export * from './actions/classify-bash.js';
 export * from './actions/classify-tool.js';
 export * from './actions/git-exec.js';
+export { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './actions/self-config.js';
+export {
+  agentDefinitionHasHooks,
+  isAgentDefinitionPath,
+  isMcpConfigPath,
+  mcpConfigRunsCode,
+  mcpServerRunsCode,
+} from './actions/agent-config.js';
 export * from './actions/limit-signals.js';
 export * from './actions/shell-tools.js';
 // The lexer and the word reader the classifier cuts a command with, for `stroq sent`, which places

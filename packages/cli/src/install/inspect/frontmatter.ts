@@ -85,8 +85,8 @@ function keyLinesOf(block: string, firstLine: number): Map<string, number> {
   return lines;
 }
 
-/** The front matter of a Markdown file. */
-export function readFrontmatter(file: TextFile): Frontmatter {
+/** The front matter of a Markdown file. Only its text is read. */
+export function readFrontmatter(file: Pick<TextFile, 'text'>): Frontmatter {
   const text = file.text.startsWith(BYTE_ORDER_MARK) ? file.text.slice(1) : file.text;
   const firstLineEnd = text.indexOf('\n');
   const opening = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd);

@@ -1,0 +1,968 @@
+import { realpathSync } from 'node:fs';
+import { posix } from 'node:path';
+import { settle, tagChanges, type TaggedHit } from './agent-change.js';
+import {
+  baseGuardsOfText,
+  guardsUnknown,
+  headGuardsOfText,
+  removedGuards,
+} from './agent-guards.js';
+import { buildInputChanges } from './agent-build-inputs.js';
+import { isBuildInput } from './agent-editor.js';
+import { escalateApproved } from './agent-json.js';
+import { hit, removedProtections, type AgentHit } from './agent-kinds.js';
+import { isRunEntry, runFileChanges, type RunView } from './agent-run-files.js';
+import { isLineFile, isPackageConfig, lineHits } from './agent-lines.js';
+import {
+  MAX_CONFIGS_READ,
+  changedLinkHits,
+  packageConfigChanges,
+  withAllLinks,
+} from './package-configs.js';
+import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
+import { hiddenTextChanges } from './hidden-text-changes.js';
+import {
+  protectionsUnknown,
+  protectiveChanges,
+  protectiveKeys,
+  type ProtectiveValue,
+} from './protective-keys.js';
+import {
+  MAX_FILE_BYTES,
+  MAX_TOTAL_BYTES,
+  agentOnlyWhenFolded,
+  foldPath,
+  hitsForRead,
+  holdsGuards,
+  holdsProtections,
+  holdsSettingKeys,
+  scanFile,
+  readTier,
+  type SourceRead,
+} from './agent-surface.js';
+import {
+  GitError,
+  changedPaths,
+  hooksPaths,
+  isGitFailure,
+  listTree,
+  objectSizes,
+  readBlobs,
+  reason,
+  revision,
+  topLevel,
+  type Changed,
+  type TreeEntry,
+} from './git-read.js';
+import {
+  GITLINK,
+  MAX_LINK_HOPS,
+  SYMLINK,
+  byPath,
+  isBlob,
+  linkMatters,
+  linkTarget,
+  linksOnTheWay,
+  openedPaths,
+  resolve,
+  type Resolved,
+  type TreeView,
+} from './git-tree.js';
+
+import {
+  FILE_NAMES,
+  foldName,
+  gitDirName,
+  looksLikeGitDir,
+  windowsAlias,
+} from './git-dir-names.js';
+
+export { GitError } from './git-read.js';
+
+/**
+ * What a change brings that an agent or an editor runs by itself: the values at HEAD compared
+ * with the values at a base revision. Both sides are read from git's objects, never from the
+ * working tree, and `.git` is never read: a change cannot alter it, and what `actions/checkout`
+ * writes there is not the change's doing.
+ *
+ * The author of the change chooses its size, so no limit here may pass it quietly. The configs
+ * at a fixed place are read first, then the files the change touched, then the rest; whatever a
+ * limit keeps from being read is a failing entry, and so is a link whose target was not read.
+ * The one exception is an instruction file the change did not touch: it runs nothing.
+ */
+
+export const GIT_CAPS = {
+  /** The most agent files one check reads. */
+  candidates: 5_000,
+  /** The most links whose target one check reads. */
+  links: 2_000,
+  /** The most entries one check walks through links to folders. */
+  steps: 50_000,
+} as const;
+/** What a byte that is not UTF-8 decodes to. */
+const REPLACEMENT = '\uFFFD';
+/** A link's target is a path; one longer than a path can be is not a link a checkout makes. */
+const MAX_LINK_BYTES = 4096;
+
+export interface AgentChanges {
+  /** The commit the base revision named. */
+  readonly base: string;
+  /** The top of the repository compared: the whole of it, whichever folder of it was given. */
+  readonly root: string;
+  readonly hits: readonly TaggedHit[];
+  /** True when a limit kept the check from reading every agent file or link. */
+  readonly capped: boolean;
+}
+
+/** What changed between `rev` and HEAD of the repository that holds `dir`. */
+export function agentChanges(dir: string, rev: string): AgentChanges {
+  const root = topLevel(dir);
+  const base = revision(root, rev);
+  const head = revision(root, 'HEAD');
+  try {
+    return { root, ...compare(root, base, head) };
+  } catch (err) {
+    if (!isGitFailure(err)) throw err;
+    throw new GitError(`git could not compare ${rev} with HEAD: ${reason(err)}`);
+  }
+}
+
+const tagged = settle;
+const unique = <T>(items: Iterable<T>): T[] => [...new Set(items)];
+const entryAt = (tree: ReadonlyMap<string, TreeEntry>, path: string): TreeEntry =>
+  tree.get(path) as TreeEntry;
+
+/** The targets of the links a host follows to an agent file, read round by round. */
+function readLinks(top: string, tree: ReadonlyMap<string, TreeEntry>, sorted: readonly string[]) {
+  const targets = new Map<string, string>();
+  const view: TreeView = { tree, sorted, targets };
+  const tried = new Set<string>();
+  const cut: string[] = [];
+  let next = sorted.filter((p) => tree.get(p)?.mode === SYMLINK && linkMatters(p));
+  for (let round = 0; round <= MAX_LINK_HOPS && next.length > 0; round += 1) {
+    const ordered = [...next].sort((a, b) => readTier(a) - readTier(b) || byPath(a, b));
+    const room = Math.max(0, GIT_CAPS.links - tried.size);
+    const now = ordered.slice(0, room);
+    cut.push(...ordered.slice(room));
+    for (const p of now) tried.add(p);
+    const small = now.map((p) => entryAt(tree, p)).filter((e) => e.size <= MAX_LINK_BYTES);
+    const blobs = readBlobs(top, small);
+    for (const p of now) {
+      const text = blobs.get(entryAt(tree, p).oid);
+      // A target that is not UTF-8 names a file the check cannot tell from another: left unread,
+      // which fails (a stray replacement character errs the same way).
+      if (text !== undefined && !text.includes(REPLACEMENT)) targets.set(p, text);
+    }
+    next = [...linksOnTheWay(view, now)].filter((p) => !tried.has(p));
+  }
+  return { view, cut: unique([...cut, ...next]) };
+}
+
+interface Planned {
+  readonly path: string;
+  readonly at: Resolved;
+  readonly tier: 0 | 1 | 2;
+  /** Whether the change touched it: the path a host opens, a link on the way, or the file behind. */
+  readonly touched: boolean;
+}
+
+const linksOf = (at: Resolved): readonly string[] => (at.kind === 'none' ? [] : at.links);
+/** The path of the tree a host ends up at, there or not: a change to it is a change here. */
+const behind = (at: Resolved): string | undefined =>
+  at.kind === 'blob' || at.kind === 'submodule' || at.kind === 'folder'
+    ? at.path
+    : at.kind === 'dangling'
+      ? at.missing
+      : undefined;
+const linkChanged = (at: Resolved, changed: ReadonlyMap<string, Changed>): boolean =>
+  linksOf(at).some((l) => changed.has(l));
+
+function plan(view: TreeView, changed: ReadonlyMap<string, Changed>) {
+  const opened = openedPaths(view, GIT_CAPS.steps);
+  const all = opened.paths.map((path): Planned => {
+    const at = resolve(path, view);
+    const file = behind(at);
+    const touched =
+      changed.has(path) || (file !== undefined && changed.has(file)) || linkChanged(at, changed);
+    return { path, at, tier: readTier(path), touched };
+  });
+  // The configs at a fixed place first, then what the change touched, then the rest.
+  const rank = (p: Planned): number => (p.tier === 0 ? 0 : p.touched ? 1 : 2);
+  const ordered = [...all].sort(
+    (a, b) => rank(a) - rank(b) || a.tier - b.tier || byPath(a.path, b.path),
+  );
+  return {
+    kept: ordered.slice(0, GIT_CAPS.candidates),
+    dropped: ordered.slice(GIT_CAPS.candidates),
+    stoppedAt: opened.stoppedAt,
+  };
+}
+
+/** The blobs to read, in order, until what is `left` of the budget is spent. */
+function budget(wanted: readonly TreeEntry[], left: { bytes: number }, known: ReadonlySet<string>) {
+  const read = new Map<string, TreeEntry>();
+  const over = new Set<string>();
+  for (const entry of wanted) {
+    if (entry.size > MAX_FILE_BYTES || read.has(entry.oid) || known.has(entry.oid)) continue;
+    if (entry.size > left.bytes) {
+      over.add(entry.oid);
+      continue;
+    }
+    left.bytes -= entry.size;
+    read.set(entry.oid, entry);
+  }
+  return { read: [...read.values()], over };
+}
+
+/** What a source found for one blob: its text, or why it was not read. */
+function sourceOf(
+  entry: TreeEntry,
+  over: ReadonlySet<string>,
+  blobs: ReadonlyMap<string, string>,
+): SourceRead {
+  if (entry.size > MAX_FILE_BYTES) return { kind: 'too-large', size: entry.size };
+  if (over.has(entry.oid)) return { kind: 'over-budget', budget: MAX_TOTAL_BYTES };
+  return { kind: 'text', text: blobs.get(entry.oid) ?? '' };
+}
+
+/** The base blob of a file the change edited in place; undefined when there is none to read. */
+function baseOid(p: Planned, changed: ReadonlyMap<string, Changed>): string | undefined {
+  if (p.at.kind !== 'blob' || linkChanged(p.at, changed)) return undefined;
+  const c = changed.get(p.at.path);
+  return c !== undefined && (c.oldMode === '100644' || c.oldMode === '100755')
+    ? c.oldOid
+    : undefined;
+}
+
+/** Reads every blob the plan wants, head first, both sides charged to one budget of bytes. */
+function readPlan(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  kept: readonly Planned[],
+  changed: ReadonlyMap<string, Changed>,
+) {
+  const left = { bytes: MAX_TOTAL_BYTES };
+  const heads = kept.flatMap((p) => (p.at.kind === 'blob' ? [entryAt(tree, p.at.path)] : []));
+  const head = budget(heads, left, new Set());
+  const oids = unique(kept.flatMap((p) => baseOid(p, changed) ?? []));
+  const sizes = objectSizes(top, oids);
+  const olds = oids.map((oid): TreeEntry => ({ mode: '100644', oid, size: sizes.get(oid) ?? -1 }));
+  const base = budget(olds, left, new Set(head.read.map((e) => e.oid)));
+  const blobs = readBlobs(top, [...head.read, ...base.read]);
+  return {
+    overBudget: head.over.size + base.over.size > 0,
+    headSource: (entry: TreeEntry) => sourceOf(entry, head.over, blobs),
+    baseSource: (oid: string) => {
+      const size = sizes.get(oid);
+      // An id git did not size is not there to read: everything in the file counts as new.
+      return size === undefined
+        ? undefined
+        : sourceOf({ mode: '100644', oid, size }, base.over, blobs);
+    },
+  };
+}
+
+function compare(top: string, base: string, head: string) {
+  const { entries: tree, lossy, collisions } = listTree(top, head);
+  const sorted = [...tree.keys()].sort(byPath);
+  const changed = changedPaths(top, base, head);
+  const links = readLinks(top, tree, sorted);
+  const { kept, dropped, stoppedAt } = plan(links.view, changed);
+  const read = readPlan(top, tree, kept, changed);
+
+  const hitsOf = (p: Planned): TaggedHit[] => {
+    const moved = linkChanged(p.at, changed);
+    switch (p.at.kind) {
+      case 'none':
+      case 'folder':
+        return [];
+      case 'outside':
+        // Whatever it reads was not in the change to review, there before it or not: an error.
+        return [
+          {
+            ...tagged(
+              hit('config-link-outside', p.path, 1, 'link', p.at.target),
+              moved ? 'new' : 'present',
+            ),
+            severity: 'error',
+          },
+        ];
+      case 'unread': {
+        // What is behind a link left unread is not known, changed or not: this always fails.
+        const why = `a link on the way was not read: ${p.at.link}`;
+        return [tagged(hit('unreadable-config', p.path, 1, 'link', why), 'new')];
+      }
+      case 'dangling':
+        return hitsForRead(p.path, { kind: 'dangling', target: p.at.missing }).map((h) =>
+          tagged(h, p.touched ? 'new' : 'present'),
+        );
+      case 'submodule':
+        return submoduleHits(p.path, p.at, changed, moved);
+      case 'blob': {
+        const headRead = read.headSource(entryAt(tree, p.at.path));
+        const now = hitsForRead(p.path, headRead);
+        // A file not read cannot be compared with its base. It fails unless it is an instruction
+        // file the change did not touch, which runs nothing and so hides nothing the change brought.
+        if (headRead.kind !== 'text')
+          return now.map((h) => tagged(h, !p.touched && p.tier === 2 ? 'present' : 'new'));
+        if (!p.touched) return tagChanges(now, now);
+        const oid = baseOid(p, changed);
+        const source = oid === undefined ? undefined : read.baseSource(oid);
+        const before = source === undefined ? [] : hitsForRead(p.path, source);
+        return [
+          ...tagChanges(now, before),
+          ...removedProtections(now, before).map((h) => tagged(h, 'changed')),
+          ...protectionChanges(p, headRead.text, source),
+          ...guardChanges(p, headRead.text, source),
+        ];
+      }
+    }
+  };
+
+  /**
+   * With no base to read, a file the change adds, through links it adds, held nothing before. A
+   * file it replaces shows as deleted there, and is read as one. Any other is not known.
+   */
+  const added = (p: Planned): boolean =>
+    [p.path, ...linksOf(p.at), behind(p.at) ?? p.path].every(
+      (path) => (changed.get(path)?.status ?? 'A') === 'A',
+    );
+
+  /** The deny rules and disabled servers a touched settings file no longer has. */
+  const guardChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
+    if (!holdsGuards(p.path)) return [];
+    const head = headGuardsOfText(headText);
+    if (source !== undefined)
+      return source.kind === 'text'
+        ? removedGuards(p.path, head, baseGuardsOfText(source.text))
+        : [guardsUnknown(p.path, 'its base was not read')];
+    return added(p) ? [] : [guardsUnknown(p.path, 'its base was not read')];
+  };
+
+  /**
+   * What kept the agent from things in a touched file that can hold it: a base that is not read
+   * fails, and so does any key of a settings file whose path holds a protective word and that the
+   * change adds, edits or takes away (see `protectiveKeys`).
+   */
+  const protectionChanges = (p: Planned, headText: string, source: SourceRead | undefined) => {
+    if (!holdsProtections(p.path)) return [];
+    const unread = [
+      protectionsUnknown(p.path, 'protections in the base unknown: its base was not read'),
+    ];
+    if (source === undefined ? !added(p) : source.kind !== 'text') return unread;
+    if (!holdsSettingKeys(p.path)) return [];
+    const base =
+      source?.kind === 'text'
+        ? protectiveKeys(p.path, source.text)
+        : new Map<string, ProtectiveValue>();
+    if (base === undefined)
+      return [protectionsUnknown(p.path, 'protections in the base unknown: not read whole')];
+    // A head not read whole, past the walk or not parsed, fails whatever its readers made of it.
+    const head = protectiveKeys(p.path, headText);
+    return head === undefined
+      ? [protectionsUnknown(p.path, 'protections in the head unknown: not read whole')]
+      : protectiveChanges(p.path, head, base);
+  };
+
+  const found = escalateApproved(kept.flatMap(hitsOf));
+  // Every link of the tree, read once and only when a reading below needs them all.
+  let all: ReturnType<typeof withAllLinks> | undefined;
+  const linked = () => (all ??= withAllLinks(top, tree, links.view, MAX_RUN_LINKS));
+  const hooks = hookFiles(top, tree, linked().view, changed, found);
+  const entries = [...found, ...hooks.entries];
+  const runs = runView(top, tree, sorted, changed, links.view, entries);
+  const limits = limitHits(dropped, links.cut, stoppedAt);
+  const hits = [
+    ...found,
+    ...runFileChanges(entries, runs),
+    ...buildInputs(top, tree, () => linked().view, found, changed),
+    ...limits,
+    ...unnamed(new Set(lossy), new Set(collisions), changed, [...kept, ...dropped]),
+    ...aliases(sorted, changed),
+    ...lineChanges(top, tree, changed),
+    // A file its readers already failed for hidden text, or as not read, is not failed twice.
+    ...hiddenTextChanges(
+      top,
+      tree,
+      changed,
+      new Set(
+        found
+          .filter((h) => h.kind === 'instruction-hidden-text' || h.kind === 'unreadable-config')
+          .map((h) => h.file),
+      ),
+    ),
+    ...packageConfigs(top, tree, sorted, changed, linked()),
+    ...bareChanges(tree, changed),
+    ...deletedGuards(top, changed),
+    ...deletedProtections(top, changed),
+    ...hooks.hits,
+  ];
+  // Any other link the change brought that leads out, to nothing, or was not read.
+  const reported = new Set(
+    hits
+      .filter((h) => h.kind === 'config-link-outside' || h.kind === 'unreadable-config')
+      .map((h) => h.file),
+  );
+  hits.push(...changedLinkHits(tree, linked().view, changed, reported));
+  // A stable sort: each file's hits keep the order of their lines.
+  const byFile = hits.sort((a, b) => byPath(a.file, b.file));
+  return { base, hits: byFile, capped: limits.length > 0 || read.overBudget };
+}
+
+/**
+ * What the dev containers of `found` are built from, followed through the change (see
+ * `agent-build-inputs.ts`), with every link of the tree read, up to a bound: a link on the way that
+ * was not read leaves its input unresolved, which fails.
+ */
+function buildInputs(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: () => TreeView,
+  found: readonly TaggedHit[],
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  if (!found.some((h) => h.kind === 'devcontainer-setting' && isBuildInput(h.name))) return [];
+  // The compose files a dev container names, read to find the paths they name.
+  const readText = (paths: readonly string[]): ReadonlyMap<string, string> => {
+    const entries = paths.flatMap((p) => {
+      const e = tree.get(p);
+      return e !== undefined && isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
+    });
+    const texts = readBlobs(
+      top,
+      entries.map(([, e]) => e),
+    );
+    return new Map(
+      entries.flatMap(([p, e]) => {
+        const text = texts.get(e.oid);
+        return text === undefined || text.includes(REPLACEMENT) ? [] : [[p, text] as const];
+      }),
+    );
+  };
+  return buildInputChanges(found, changed, view(), readText);
+}
+
+/**
+ * A path of an agent folder, or of a config, whose name is not UTF-8, by its own name or by where
+ * a host ends up through links (`.claude/skills -> ../tools`, and a skill in `tools`). It decodes
+ * to the same text as another path that differs only in those bytes, so one of them could hide
+ * the other from the check, while a host that reads names as bytes loads both. It fails.
+ */
+function unnamed(
+  lossy: ReadonlySet<string>,
+  collisions: ReadonlySet<string>,
+  changed: ReadonlyMap<string, Changed>,
+  planned: readonly Planned[],
+): TaggedHit[] {
+  const found = new Map<string, TaggedHit>();
+  const add = (path: string, why: string, isNew: boolean): void => {
+    if (!found.has(path))
+      found.set(
+        path,
+        tagged(hit('unreadable-config', path, 1, 'path', why), isNew ? 'new' : 'present'),
+      );
+  };
+  // Wherever they are: what the check read under the name may not be what a host reads.
+  for (const path of collisions) add(path, TWO_PATHS, true);
+  for (const path of lossy) if (linkMatters(path)) add(path, NOT_UTF8, changed.has(path));
+  for (const p of planned) {
+    const file = behind(p.at);
+    const through = [p.path, ...linksOf(p.at), ...(file === undefined ? [] : [file])];
+    if (through.some((path) => lossy.has(path) || collisions.has(path)))
+      add(p.path, NOT_UTF8, p.touched);
+  }
+  return [...found.values()];
+}
+
+/**
+ * A path a disk may open as another name: a part Windows reads as another (a dot or blank at its
+ * end, a `:` stream, the shape of a short 8.3 name), wherever it is, since it can stand for the
+ * file a hook runs as well as for a config; or a path that is an agent config or in an agent
+ * folder only once folded (`.cla​ude`). What was checked under its name is not what such a
+ * disk opens. It fails when the change brought it.
+ */
+function aliases(paths: readonly string[], changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const out: TaggedHit[] = [];
+  for (const path of paths) {
+    const why = path.split('/').some(windowsAlias)
+      ? WINDOWS_ALIAS
+      : agentOnlyWhenFolded(path)
+        ? FOLDED_ALIAS
+        : undefined;
+    if (why !== undefined)
+      out.push(
+        tagged(
+          hit('unreadable-config', path, 1, 'path', why),
+          changed.has(path) ? 'new' : 'present',
+        ),
+      );
+  }
+  return out;
+}
+
+const WINDOWS_ALIAS =
+  'Windows opens this name as another one (a dot or blank at the end of a part, a : stream, a short 8.3 name), so what the check read here may not be what a host opens';
+const FOLDED_ALIAS =
+  'only with its invisible characters, accents or letter case folded is this an agent config, as some disks open it, so what the check read here may not be what a host opens';
+
+/** The most files whose lines `lineChanges` reads in one check. */
+const MAX_LINE_FILES = 64;
+
+/**
+ * The lines a change adds to a `.gitattributes` that make a checkout write other text than git
+ * holds (`agent-lines.ts`). Read at the head and at the base, a few files and none past the size
+ * cap; what is not read fails.
+ */
+function lineChanges(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  const files = [...changed]
+    .filter(
+      ([path, c]) =>
+        (c.status === 'A' || c.status === 'M' || c.status === 'T') &&
+        isLineFile(path) &&
+        !isPackageConfig(path),
+    )
+    .map(([path]) => path)
+    .sort(byPath);
+  const out: TaggedHit[] = [];
+  const unread = (path: string, why: string): void => {
+    out.push(tagged(hit('unreadable-config', path, 1, 'lines', why), 'new'));
+  };
+  const now = files.slice(0, MAX_LINE_FILES);
+  const cut = files[MAX_LINE_FILES];
+  if (cut !== undefined)
+    unread(
+      cut,
+      `${files.length - MAX_LINE_FILES} more such files were not read: one check reads ${MAX_LINE_FILES}`,
+    );
+  const wanted: { path: string; head: TreeEntry; base: string | undefined }[] = [];
+  for (const path of now) {
+    const head = tree.get(path);
+    const c = changed.get(path) as Changed;
+    if (head === undefined || !isBlob(head) || head.size > MAX_FILE_BYTES) {
+      unread(path, 'not a file within the size the check reads');
+      continue;
+    }
+    const base = c.oldMode === '100644' || c.oldMode === '100755' ? c.oldOid : undefined;
+    wanted.push({ path, head, base });
+  }
+  const bases = unique(wanted.flatMap((w) => w.base ?? []));
+  const sizes = objectSizes(top, bases);
+  const blobs = readBlobs(top, [
+    ...wanted.map((w) => w.head),
+    ...bases.flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  ]);
+  for (const w of wanted) {
+    const headText = blobs.get(w.head.oid) ?? '';
+    const baseText = w.base === undefined ? undefined : blobs.get(w.base);
+    out.push(
+      ...tagChanges(
+        lineHits(w.path, headText),
+        baseText === undefined ? [] : lineHits(w.path, baseText),
+      ),
+    );
+  }
+  return out;
+}
+
+/** The most git hook files already there whose text is read; past it, one finding fails. */
+const MAX_HOOK_FILES = 200;
+/** The most committed git configs read for `core.hooksPath`; past it, one finding fails. */
+const MAX_GIT_CONFIGS = 64;
+
+/** The texts of the files at `paths` of the tree that can be read, by their path. */
+function readTexts(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  paths: readonly string[],
+): Map<string, string> {
+  const wanted = paths.flatMap((p) => {
+    const e = tree.get(p);
+    return e !== undefined && isBlob(e) && e.size <= MAX_FILE_BYTES ? [[p, e] as const] : [];
+  });
+  const blobs = readBlobs(
+    top,
+    wanted.map(([, e]) => e),
+  );
+  return new Map(
+    wanted.flatMap(([p, e]) => {
+      const text = blobs.get(e.oid);
+      return text === undefined ? [] : [[p, text] as const];
+    }),
+  );
+}
+
+const realOr = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * The package manager configs a change reaches (see `package-configs.ts`), each config of the tree
+ * read for the paths it names, up to a bound: one that is a link, too large or past the bound is
+ * counted as not read, and fails.
+ */
+function packageConfigs(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  sorted: readonly string[],
+  changed: ReadonlyMap<string, Changed>,
+  linked: ReturnType<typeof withAllLinks>,
+): TaggedHit[] {
+  const all = sorted.filter((p) => isPackageConfig(p));
+  const readable = all.filter((p) => {
+    const e = entryAt(tree, p);
+    return isBlob(e) && e.size <= MAX_FILE_BYTES;
+  });
+  const texts = readTexts(top, tree, readable.slice(0, MAX_CONFIGS_READ));
+  const unread = all.filter((p) => !texts.has(p));
+  return packageConfigChanges(tree, linked, changed, GIT_CAPS.steps, texts, unread);
+}
+
+/** The files of the change that git runs as hooks (see `git-hook-files.ts`). */
+function hookFiles(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  view: TreeView,
+  changed: ReadonlyMap<string, Changed>,
+  found: readonly TaggedHit[],
+): { hits: TaggedHit[]; entries: TaggedHit[] } {
+  const out: TaggedHit[] = [];
+  const unread = (path: string, why: string): void => {
+    out.push(tagged(hit('unreadable-config', path, 1, 'core.hooksPath', why), 'new'));
+  };
+  const named = view.sorted.filter((p) => isGitConfigName(p) && tree.has(p));
+  const configs = readTexts(top, tree, named.slice(0, MAX_GIT_CONFIGS));
+  const first = named.find((p) => !configs.has(p));
+  if (first !== undefined)
+    unread(
+      first,
+      `${named.filter((p) => !configs.has(p)).length} git configs of the tree were not read, so a folder of git hooks they name is not known`,
+    );
+  const bareRepos = bareRepositories(view.sorted);
+  const bareConfigs = new Map<string, string>();
+  for (const bare of bareRepos) {
+    const files = view.sorted.filter(
+      (p) =>
+        posix.dirname(p) === bare &&
+        ['config', 'config.worktree'].includes(foldName(posix.basename(p))),
+    );
+    const texts = readTexts(top, tree, files);
+    for (const file of files)
+      if (!texts.has(file))
+        unread(
+          file,
+          'the config of a bare repository committed here was not read, so the folder of its git hooks is not known',
+        );
+    bareConfigs.set(bare, [...texts.values()].join('\n'));
+  }
+  const scripts = found
+    .filter((h) => h.kind === 'package-script' || h.kind === 'package-script-agent-path')
+    .map((h) => h.runs ?? h.value);
+  const ctx = {
+    hooksPaths: hooksPaths(top),
+    tops: [...new Set([top, realOr(top)])],
+    configs,
+    bareConfigs,
+    bareRepos,
+    scripts,
+    view,
+  };
+  out.push(...gitHookFileChanges(changed, ctx));
+  // The hooks already there, their text read as the command of an entry, for the files they run.
+  const at = hookFilesAt(ctx);
+  for (const path of at.odd)
+    unread(
+      path,
+      'a link, a submodule or another entry that is not a file, in a folder of git hooks: not followed',
+    );
+  const present = at.files.filter((p) => !changed.has(p));
+  const texts = readTexts(top, tree, present.slice(0, MAX_HOOK_FILES));
+  const left = present.filter((p) => !texts.has(p));
+  if (left[0] !== undefined)
+    unread(left[0], `${left.length} git hook files were not read, so what they run is not known`);
+  const entries = [...texts].map(([path, text]): TaggedHit => ({
+    ...hit('git-hook-file', path, 1, posix.basename(path), text),
+    severity: 'warning',
+    status: 'present',
+  }));
+  return { hits: out, entries };
+}
+
+/**
+ * What kept the agent from things in each agent config the change deletes: all of it is taken
+ * away. A few files and none past the size cap are read; what is not read fails: past the files
+ * one check reads, a path that was not a file at the base, a base too big to read.
+ */
+function deletedProtections(top: string, changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const gone = [...changed]
+    .filter(([path, c]) => c.status === 'D' && holdsProtections(path))
+    .sort(([a], [b]) => byPath(a, b));
+  const out: TaggedHit[] = [];
+  const cut = gone[MAX_LINE_FILES];
+  if (cut !== undefined)
+    out.push(
+      protectionsUnknown(
+        cut[0],
+        `too many deleted agent files to read: ${gone.length - MAX_LINE_FILES} more were not read`,
+      ),
+    );
+  const files = gone.slice(0, MAX_LINE_FILES).flatMap(([path, c]) => {
+    if (c.oldMode === '100644' || c.oldMode === '100755') return [{ path, oid: c.oldOid }];
+    out.push(protectionsUnknown(path, 'protections in the base not read: it was not a file there'));
+    return [];
+  });
+  const sizes = objectSizes(top, unique(files.map((f) => f.oid)));
+  const blobs = readBlobs(
+    top,
+    unique(files.map((f) => f.oid)).flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  );
+  for (const f of files) {
+    const text = blobs.get(f.oid);
+    if (text === undefined) {
+      out.push(protectionsUnknown(f.path, 'protections in the base not read'));
+      continue;
+    }
+    out.push(...removedProtections([], scanFile(f.path, text)).map((h) => tagged(h, 'changed')));
+    if (!holdsSettingKeys(f.path)) continue;
+    const base = protectiveKeys(f.path, text);
+    out.push(
+      ...(base === undefined
+        ? [protectionsUnknown(f.path, 'protections in the base unknown: not read whole')]
+        : protectiveChanges(f.path, new Map(), base)),
+    );
+  }
+  return out;
+}
+
+/**
+ * The deny rules and disabled servers of each Claude Code settings file the change deletes: all of
+ * them are taken away. A few files and none past the size cap are read; what is not read fails.
+ */
+function deletedGuards(top: string, changed: ReadonlyMap<string, Changed>): TaggedHit[] {
+  const gone = [...changed]
+    .filter(([path, c]) => c.status === 'D' && holdsGuards(path))
+    .sort(([a], [b]) => byPath(a, b));
+  const out: TaggedHit[] = [];
+  const cut = gone[MAX_LINE_FILES];
+  if (cut !== undefined)
+    out.push(
+      guardsUnknown(
+        cut[0],
+        `${gone.length - MAX_LINE_FILES} more deleted settings files were not read`,
+      ),
+    );
+  const files = gone.slice(0, MAX_LINE_FILES).flatMap(([path, c]) => {
+    if (c.oldMode === '100644' || c.oldMode === '100755') return [{ path, oid: c.oldOid }];
+    out.push(guardsUnknown(path, 'it was not a file at the base'));
+    return [];
+  });
+  const sizes = objectSizes(top, unique(files.map((f) => f.oid)));
+  const blobs = readBlobs(
+    top,
+    unique(files.map((f) => f.oid)).flatMap((oid) => {
+      const size = sizes.get(oid);
+      return size === undefined || size > MAX_FILE_BYTES ? [] : [{ oid, size }];
+    }),
+  );
+  for (const f of files) {
+    const text = blobs.get(f.oid);
+    if (text === undefined) out.push(guardsUnknown(f.path, 'its base was not read'));
+    else out.push(...removedGuards(f.path, [], baseGuardsOfText(text)));
+  }
+  return out;
+}
+
+const NOT_UTF8 =
+  'its name is not UTF-8, so the check cannot tell it from another name that reads the same';
+const TWO_PATHS = 'two paths of the tree read as this one name, so the check saw only one of them';
+
+/** The most links of the tree whose targets are read to find what reaches a touched file. */
+const MAX_RUN_LINKS = 4_096;
+
+/**
+ * What the reading of the entries already there needs of the change: each path it touched, deleted
+ * ones too, and, when some entry already there runs a command, the links of the tree and the
+ * folders `core.hooksPath` names.
+ */
+function runView(
+  top: string,
+  tree: ReadonlyMap<string, TreeEntry>,
+  sorted: readonly string[],
+  changed: ReadonlyMap<string, Changed>,
+  view: TreeView,
+  found: readonly TaggedHit[],
+): RunView {
+  // Links and submodules too: one a change puts in a folder a hook runs is run.
+  const touchedFiles = [...changed].map(([path, c]): RunView['touchedFiles'][number] => [
+    path,
+    c.status === 'A' ? 'new' : 'changed',
+    tree.get(path)?.mode,
+  ]);
+  if (!found.some(isRunEntry)) return { touchedFiles };
+  const all = sorted.filter((p) => tree.get(p)?.mode === SYMLINK);
+  const texts = new Map(view.targets);
+  const missing = all.filter((p) => !texts.has(p));
+  const wanted = missing.slice(0, MAX_RUN_LINKS);
+  const small = wanted.map((p) => entryAt(tree, p)).filter((e) => e.size <= MAX_LINK_BYTES);
+  const blobs = readBlobs(top, small);
+  for (const p of wanted) {
+    const text = blobs.get(entryAt(tree, p).oid);
+    if (text !== undefined && !text.includes(REPLACEMENT)) texts.set(p, text);
+  }
+  const links = new Map<string, string>();
+  let linksUnread = 0;
+  for (const link of all) {
+    const text = texts.get(link);
+    if (text === undefined) {
+      linksUnread += 1;
+      continue;
+    }
+    const target = linkTarget(link, text);
+    if (target !== null) links.set(link, target);
+  }
+  return { touchedFiles, links, linksUnread, hooksPaths: hooksPaths(top) };
+}
+
+function submoduleHits(
+  path: string,
+  at: { readonly path: string; readonly oid: string },
+  changed: ReadonlyMap<string, Changed>,
+  moved: boolean,
+): TaggedHit[] {
+  const now = [hit('config-submodule', path, 1, 'submodule', at.oid)];
+  const c = changed.get(at.path);
+  if (moved || c?.status === 'A') return tagChanges(now, []);
+  if (c === undefined) return tagChanges(now, now);
+  const old =
+    c.oldMode === GITLINK ? [hit('config-submodule', path, 1, 'submodule', c.oldOid)] : [];
+  return tagChanges(now, old);
+}
+
+/** A failing entry for each limit that kept something from being read. */
+function limitHits(
+  dropped: readonly Planned[],
+  cutLinks: readonly string[],
+  stoppedAt: string | undefined,
+): TaggedHit[] {
+  const hits: TaggedHit[] = [];
+  const first = dropped[0];
+  if (first !== undefined) {
+    // Even files the change did not touch: a config left out could run a file the change edits.
+    const why = `${dropped.length} more agent files were not read: one check reads ${GIT_CAPS.candidates}`;
+    hits.push(tagged(hit('unreadable-config', first.path, 1, 'file list', why), 'new'));
+  }
+  const link = cutLinks[0];
+  if (link !== undefined) {
+    // A link left unread hides the files behind it, changed or not: this one always fails.
+    const why = `${cutLinks.length} links to agent files were not read: one check reads ${GIT_CAPS.links}`;
+    hits.push(tagged(hit('unreadable-config', link, 1, 'links', why), 'new'));
+  }
+  if (stoppedAt !== undefined) {
+    const why = `the walk through links to folders stopped here, after ${GIT_CAPS.steps} entries`;
+    hits.push(tagged(hit('unreadable-config', stoppedAt, 1, 'links', why), 'new'));
+  }
+  return hits;
+}
+
+/**
+ * Folders that git takes for a bare repository (see `git-dir-names.ts`): one committed as files.
+ * Every part of a path is a name in the folder before it, whether a file, a link or a folder. A
+ * folder is known by a number, given to each (folder, folded name) pair the first time it comes,
+ * so a path of a thousand parts named `HEAD` costs its length and not its length times its depth,
+ * and two folders are never taken for one by chance. Names are folded as the most forgiving disk
+ * folds them: `Evil/HEAD`, `evil/objects` and `EVIL/refs` are one folder on macOS or Windows.
+ */
+export function bareRepositories(paths: Iterable<string>): string[] {
+  /** The number of each folder, by the number of the folder it is in and its folded name. */
+  const ids = new Map<string, number>();
+  /** The first path each folder was seen by, and the names git looks for that it holds. */
+  const folders: string[] = [''];
+  const names: (Set<string> | undefined)[] = [undefined];
+  for (const path of paths) {
+    let parent = 0;
+    let start = 0;
+    for (;;) {
+      const end = path.indexOf('/', start);
+      const part = path.slice(start, end === -1 ? undefined : end);
+      const name = parent === 0 ? undefined : gitDirName(part);
+      // `HEAD` and `commondir` are files: one that has paths under it is a folder.
+      if (name !== undefined && !(end !== -1 && FILE_NAMES.has(name))) {
+        const found = names[parent];
+        if (found === undefined) names[parent] = new Set([name]);
+        else found.add(name);
+      }
+      if (end === -1) break;
+      const key = `${parent}/${foldName(part)}`;
+      let id = ids.get(key);
+      if (id === undefined) {
+        id = folders.length;
+        ids.set(key, id);
+        folders.push(path.slice(0, end));
+        names.push(undefined);
+      }
+      parent = id;
+      start = end + 1;
+    }
+  }
+  return folders
+    .filter((_, id) => {
+      const found = names[id];
+      return found !== undefined && looksLikeGitDir(found);
+    })
+    .sort();
+}
+
+function bareChanges(
+  tree: ReadonlyMap<string, TreeEntry>,
+  changed: ReadonlyMap<string, Changed>,
+): TaggedHit[] {
+  const headPaths = [...tree.keys()];
+  const basePaths = [
+    ...headPaths.filter((p) => changed.get(p)?.status !== 'A'),
+    ...[...changed].filter(([, c]) => c.status === 'D').map(([p]) => p),
+  ];
+  const before = new Set(bareRepositories(basePaths));
+  const dirs = bareRepositories(headPaths);
+  const repos = dirs.map((dir) =>
+    tagged(
+      hit('nested-bare-repo', dir, 1, 'bare repository', 'HEAD, objects, refs'),
+      before.has(dir) ? 'present' : 'new',
+    ),
+  );
+  // Git reads the files of a bare repository when it runs there (its config, its hooks, `info`,
+  // `HEAD`, `commondir`): any one the change adds or edits fails, matched with each part folded.
+  // One the change brings whole fails already, as a repository.
+  const folded = dirs
+    .filter((dir) => before.has(dir))
+    .map((dir) => [dir, `${foldPath(dir)}/`] as const);
+  const files = [...changed].flatMap(([path, c]): TaggedHit[] => {
+    if (c.status === 'D') return [];
+    const f = foldPath(path);
+    const inside = folded.find(([, prefix]) => f.startsWith(prefix));
+    return inside === undefined
+      ? []
+      : [
+          tagged(
+            hit('nested-bare-repo', path, 1, BARE_FILE, inside[0]),
+            c.status === 'A' ? 'new' : 'changed',
+          ),
+        ];
+  });
+  return [...repos, ...files];
+}
+
+/** What a hit for a file of a bare repository committed as files is named. */
+export const BARE_FILE = 'bare repository file';

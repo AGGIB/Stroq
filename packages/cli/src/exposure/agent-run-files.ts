@@ -1,0 +1,455 @@
+import type { ChangeStatus, TaggedHit } from './agent-change.js';
+import {
+  DEVCONTAINER_ENV_KEYS,
+  POSSIBLE_HOOKS,
+  UNREAD_PATTERN,
+  settingRuns,
+} from './agent-editor.js';
+import { hit, type AgentKind } from './agent-kinds.js';
+import { inAgentFolder } from './agent-surface.js';
+import { foldName } from './git-dir-names.js';
+import { byPath } from './git-tree.js';
+import { NameMatcher, nameForms, normalText, stemOf } from './run-names.js';
+import { computesWhatRuns, reachesOf } from './run-programs.js';
+import { DATA_FILE, RUNNER_WORDS, isRunnerFile, type RunnerContext } from './run-tables.js';
+
+/**
+ * A hook, a server or a task that was already there can start a file of the repository, and a
+ * change can edit that file without touching the entry. The entry's value stays the same, so the
+ * comparison of values calls it present, while what it runs is new. This reads each such entry's
+ * command line coarsely, as text, and follows nothing past it:
+ *
+ * - a changed file whose name, or the name of a folder it is in, is anywhere in the command fails,
+ *   however the command spells the rest of the path (quotes, backslashes and braces are taken out
+ *   of both first), and so does one a pattern in the command matches (`*.sh`, `gu{ar,}d.sh`);
+ * - a command that names a package manager, a runner or a tool whose config is code fails on a
+ *   change to any package file, lock file, runner or tool config, git hook or `node_modules`;
+ * - a command whose reach is not written on its line (a variable, inline code, a test runner, a
+ *   recipe of make, a program not known) fails on a change to any code, agent or runner file;
+ * - a command that cannot be read (too long, not text) fails;
+ * - any other code the change edits, while an entry runs code of the repository, fails as well: a
+ *   file the command runs may load it, and what a file loads is not read.
+ *
+ * Every such finding is an error, whatever the entry: a server of `.mcp.json` was approved by its
+ * name, and npm runs an install script without asking, so what they run is as serious as what a
+ * hook runs. The author of the change writes both the commands and the paths, so the work is
+ * bounded, and a check that stops at the bound fails rather than passes.
+ */
+
+/** The kinds whose value is a command line, or names code the host loads, and what to call one. */
+const RUNS: Readonly<Partial<Record<AgentKind, string>>> = {
+  'agent-hook': 'hook',
+  'agent-helper-command': 'command',
+  'agent-env': 'variable',
+  'mcp-server': 'MCP server',
+  'mcp-server-runs-code': 'MCP server',
+  'editor-autorun-task': 'task',
+  'agent-definition-hook': 'hook',
+  'devcontainer-host-command': 'command',
+  'devcontainer-command': 'command',
+  'devcontainer-setting': 'dev container setting',
+  'package-script': 'script',
+  'package-script-agent-path': 'script',
+  'agent-plugin': 'entry',
+  'git-hook-file': 'git hook',
+};
+
+/**
+ * How an entry's value is read: a command line, the value of a variable, or code the host loads
+ * (a plugin), which imports anything and so reaches every code, agent and runner file.
+ */
+type Reading = 'command' | 'variable' | 'code';
+
+const readingOf = (h: TaggedHit): Reading =>
+  h.kind === 'agent-env' || (h.kind === 'devcontainer-setting' && DEVCONTAINER_ENV_KEYS.has(h.name))
+    ? 'variable'
+    : h.kind === 'agent-plugin'
+      ? 'code'
+      : 'command';
+
+/** What is read as an entry's command: plugin code by its own path, any other by its value. */
+const commandOf = (h: TaggedHit): string =>
+  h.kind === 'agent-plugin' && h.name === 'plugin code' ? h.file : (h.runs ?? h.value);
+
+/**
+ * Whether an entry already there holds a command line that the reading below follows. A dev
+ * container setting that holds no command (an image, ports, a user) is not one, and what it is
+ * built from is followed on its own (`agent-build-inputs.ts`).
+ */
+export const isRunEntry = (h: TaggedHit): boolean =>
+  RUNS[h.kind] !== undefined &&
+  h.status === 'present' &&
+  (h.kind !== 'devcontainer-setting' || settingRuns(h.name)) &&
+  !(h.kind === 'git-hook-file' && h.name.startsWith(POSSIBLE_HOOKS));
+
+export interface RunView {
+  /**
+   * Each path the change added, edited, retyped or deleted, how, and its mode at the head when it
+   * is still there. A deleted path is `changed`.
+   */
+  readonly touchedFiles: readonly (readonly [
+    path: string,
+    status: 'new' | 'changed',
+    mode?: string | undefined,
+  ])[];
+  /** The links of the head tree whose targets were read: the path in the tree each leads to. */
+  readonly links?: ReadonlyMap<string, string>;
+  /** How many links of the head tree were not read. */
+  readonly linksUnread?: number;
+  /** The folders `core.hooksPath` names, or `unknown` when git could not say. */
+  readonly hooksPaths?: readonly string[] | 'unknown';
+}
+
+/** The longest command line read. A real one is a line or two; longer cannot be read, and fails. */
+export const MAX_COMMAND_CHARS = 64 * 1024;
+/** The most files one entry is reported for; past it, one more finding says how many more. */
+export const MAX_FILES_PER_ENTRY = 20;
+/** The most findings the reading makes in one check; past it, one failing finding says so. */
+export const MAX_RUN_HITS = 2_000;
+/** The most work, in characters looked at, that one check spends on command lines. */
+export const RUN_LOOKUP_BUDGET = 64 * 1024 * 1024;
+/** The most characters of names looked for in all; a change with more fails as not compared. */
+export const MAX_NAME_CHARS_TOTAL = 4 * 1024 * 1024;
+/** The most patterns in one command that are matched; a command with more counts as open. */
+const MAX_PATTERNS = 32;
+/** The most other paths one file is reached by through links; past it, every command names it. */
+const MAX_ALIASES = 64;
+/** As many links on one path as a host follows. */
+const MAX_LINK_HOPS = 16;
+
+const EXECUTABLE = '100755';
+const SYMLINK = '120000';
+const GITLINK = '160000';
+
+/**
+ * What is in a command line that is not text: a control character, a byte that was not UTF-8, half
+ * of a pair of UTF-16 units.
+ */
+const NOT_TEXT =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** What a value cut at its bound ends in (see `boundedJson`). */
+const CUT = /\.\.\. \(sha256:[0-9a-f]{16}\)/;
+
+/** A touched file, with what the reading needs of it. */
+interface Touched {
+  readonly path: string;
+  readonly status: ChangeStatus;
+  /** Every spelling of every path it is reached by, folded and in lower case. */
+  readonly forms: readonly string[];
+  /** Any file but data by its name, and any file that is executable, a link or a submodule. */
+  readonly code: boolean;
+  readonly agent: boolean;
+  readonly runner: boolean;
+  /** Reached through more links than are worked out: every command counts as naming it. */
+  readonly everywhere: boolean;
+}
+
+interface Index {
+  readonly files: readonly Touched[];
+  readonly matcher: NameMatcher;
+  /** The files each name stands for, by the name's id. */
+  readonly byName: readonly (readonly number[])[];
+  readonly overNames: boolean;
+}
+
+/** A trie of the folders links lead to, to find the links a path is reached through. */
+interface Through {
+  readonly links: string[];
+  readonly under: Map<string, Through>;
+}
+
+function throughOf(links: ReadonlyMap<string, string>): Through {
+  const root: Through = { links: [], under: new Map() };
+  for (const [link, target] of links) {
+    let node = root;
+    if (target !== '')
+      for (const part of target.split('/')) {
+        let next = node.under.get(part);
+        if (next === undefined) {
+          next = { links: [], under: new Map() };
+          node.under.set(part, next);
+        }
+        node = next;
+      }
+    node.links.push(link);
+  }
+  return root;
+}
+
+/**
+ * The paths a host reaches `path` by, itself first: through each link whose target is the path or
+ * a folder above it, round by round. `null` when there are more than `MAX_ALIASES`.
+ */
+function aliasesOf(path: string, through: Through | undefined): string[] | null {
+  if (through === undefined) return [path];
+  const found = [path];
+  const seen = new Set(found);
+  let round = [path];
+  for (let hop = 0; hop < MAX_LINK_HOPS && round.length > 0; hop += 1) {
+    const next: string[] = [];
+    for (const at of round) {
+      const parts = at.split('/');
+      let node: Through | undefined = through;
+      let offset = 0;
+      for (let i = 0; node !== undefined; i += 1) {
+        for (const link of node.links) {
+          // A link to a folder above itself nests without end (`l/l/l/x`): once through it is all
+          // the names it adds.
+          if (at === link || at.startsWith(`${link}/`)) continue;
+          const alias = offset === 0 ? `${link}/${at}` : `${link}${at.slice(offset - 1)}`;
+          if (seen.has(alias)) continue;
+          if (found.length >= MAX_ALIASES) return null;
+          seen.add(alias);
+          found.push(alias);
+          next.push(alias);
+        }
+        if (i >= parts.length) break;
+        node = node.under.get(parts[i] as string);
+        offset += (parts[i] as string).length + 1;
+      }
+    }
+    round = next;
+  }
+  return found;
+}
+
+function indexTouched(view: RunView): Index {
+  const ctx: RunnerContext = { hooksPaths: view.hooksPaths ?? [], isAgentFolder: inAgentFolder };
+  const through = view.links === undefined ? undefined : throughOf(view.links);
+  const matcher = new NameMatcher();
+  const byName: number[][] = [];
+  const files: Touched[] = [];
+  let overNames = false;
+  const sorted = [...view.touchedFiles].sort(([a], [b]) => byPath(a, b));
+  for (const [path, status, mode] of sorted) {
+    const at = files.length;
+    const aliases = aliasesOf(path, through);
+    const paths = aliases ?? [path];
+    const forms = new Set<string>();
+    let runner = false;
+    for (const p of paths) {
+      const parts = p.split('/');
+      const folded = parts.map((part) => foldName(part)).join('/');
+      forms.add(normalText(p));
+      forms.add(normalText(folded));
+      runner ||= isRunnerFile(p.toLowerCase(), ctx) || isRunnerFile(folded, ctx);
+      parts.forEach((part, i) => {
+        const names = nameForms(part);
+        const all = i === parts.length - 1 ? [...names, ...names.map(stemOf)] : names;
+        for (const name of new Set(all)) {
+          if (matcher.size + name.length > MAX_NAME_CHARS_TOTAL && !matcher.has(name)) {
+            overNames = true;
+            continue;
+          }
+          const id = matcher.add(name);
+          const list = byName[id] ?? (byName[id] = []);
+          if (list[list.length - 1] !== at) list.push(at);
+        }
+      });
+    }
+    const base = path.slice(path.lastIndexOf('/') + 1);
+    files.push({
+      path,
+      status,
+      forms: [...forms],
+      code: !DATA_FILE.test(base) || mode === EXECUTABLE || mode === SYMLINK || mode === GITLINK,
+      agent: paths.some((p) => inAgentFolder(p)),
+      runner,
+      everywhere: aliases === null,
+    });
+  }
+  matcher.build();
+  return { files, matcher, byName, overNames };
+}
+
+/** The words of a command that are patterns: `*`, `?`, a brace list, a bracket in a path. */
+const BRACE_LIST = /\{[^{}:]*(?:,|\.\.)[^{}:]*\}/;
+const WILDCARD = /\*+|\?|\{[^{}:]*\}|\[[^[\]]*\]|\$\{[^{}]*\}|\$\([^()]*\)|\$[a-z_][a-z0-9_]*/;
+const isPattern = (word: string): boolean =>
+  /[*?]/.test(word) || BRACE_LIST.test(word) || (word.includes('[') && /[./]/.test(word));
+
+/** The literal parts of a pattern, in order, that a path it matches holds; empty when there are none. */
+const fragmentsOf = (word: string): string[] =>
+  word
+    .split(new RegExp(WILDCARD.source, 'g'))
+    .map(normalText)
+    .filter((part) => !/^[./]*$/.test(part));
+
+/** Whether `text` holds each of `parts`, in order. */
+function holdsInOrder(text: string, parts: readonly string[]): boolean {
+  let at = 0;
+  for (const part of parts) {
+    const found = text.indexOf(part, at);
+    if (found === -1) return false;
+    at = found + part.length;
+  }
+  return true;
+}
+
+/** What one command line reaches among the touched files. */
+interface Judged {
+  /** Why the command could not be read, when it could not. */
+  readonly unread?: string;
+  /** The touched files it fails on, by index. */
+  readonly fails: ReadonlySet<number>;
+  readonly work: number;
+  /** True when the budget ran out before the command was compared with every file. */
+  readonly over?: boolean;
+}
+
+/** Reads one command line against the touched files. */
+function judge(command: string, reading: Reading, index: Index, left: number): Judged {
+  const isEnv = reading === 'variable';
+  const fails = new Set<number>();
+  if (command.length > MAX_COMMAND_CHARS)
+    return {
+      unread: `it is ${command.length} characters long, past the ${MAX_COMMAND_CHARS} read`,
+      fails,
+      work: 0,
+    };
+  if (command === UNREAD_PATTERN)
+    return {
+      unread: 'it runs the files a pattern matches, and the pattern is not read',
+      fails,
+      work: 0,
+    };
+  if (NOT_TEXT.test(command)) return { unread: 'it holds bytes that are not text', fails, work: 0 };
+  // A value cut at its bound ends in a digest: what follows the cut is not read, so nothing is
+  // followed as if the part were the whole.
+  if (CUT.test(command))
+    return { unread: 'it was cut at its bound and is not read whole', fails, work: 0 };
+  const text = normalText(command);
+  let work = command.length * 4;
+  const name = (id: number): void => {
+    for (const file of index.byName[id] ?? []) fails.add(file);
+  };
+  work += index.matcher.scan(text, name);
+  // A brace list names each of its words: `{guard,x}.sh` holds `guard`, `gu{ar,}d.sh` `guard.sh`.
+  if (text.includes(',')) work += index.matcher.scan(text.replace(/,/g, ''), name);
+  index.files.forEach((f, i) => {
+    if (f.everywhere) fails.add(i);
+  });
+
+  const words = command
+    .toLowerCase()
+    .replace(/["'\\]/g, '')
+    .split(/[\s;&|()<>`]+/);
+  const patterns = words.filter(isPattern);
+  let open = patterns.length > MAX_PATTERNS;
+  for (const pattern of open ? [] : patterns) {
+    const parts = fragmentsOf(pattern);
+    if (parts.length === 0) {
+      open = true;
+      continue;
+    }
+    for (let i = 0; i < index.files.length; i += 1) {
+      // Past what is left of the budget, the rest is not compared, and the check fails.
+      if (work > left) return { fails, work, over: true };
+      for (const form of (index.files[i] as Touched).forms) {
+        work += form.length + pattern.length;
+        if (holdsInOrder(form, parts)) {
+          fails.add(i);
+          break;
+        }
+      }
+    }
+  }
+
+  const tokens = text.split(/[^a-z0-9_-]+/);
+  const runner = tokens.some((t) => RUNNER_WORDS.has(t));
+  const reaches = isEnv ? [] : reachesOf(command);
+  open ||= reading === 'code' || computesWhatRuns(command, isEnv) || reaches.includes('open');
+  const pathLike = text
+    .split(/[\s;&|()<>=,]+/)
+    .some(
+      (t) =>
+        t.includes('/') || (t.startsWith('.') && t.length > 1) || /\.[a-z][\w-]{0,15}$/.test(t),
+    );
+  // What a file of the repository loads is not read, so code it runs reaches every code file.
+  const runsRepoCode =
+    isEnv || runner || open || pathLike || reaches.some((r) => r === 'runs' || r === 'runner');
+  index.files.forEach((f, i) => {
+    if (
+      (runner && f.runner) ||
+      (open && (f.code || f.agent || f.runner)) ||
+      (runsRepoCode && f.code)
+    )
+      fails.add(i);
+  });
+  return { fails, work: work + index.files.length };
+}
+
+/**
+ * One failing finding per changed file that a present entry may run, whatever the entry, and one
+ * per entry whose command could not be read.
+ */
+export function runFileChanges(hits: readonly TaggedHit[], view: RunView): TaggedHit[] {
+  const entries = hits.filter(isRunEntry);
+  if (entries.length === 0 || view.touchedFiles.length === 0) return [];
+  const index = indexTouched(view);
+  const out = new Map<string, TaggedHit>();
+  const unreadable = (file: string, name: string, why: string): void => {
+    out.set(`\0unread\0${file}\0${name}\0${why}`, {
+      ...hit('unreadable-config', file, 1, name, why),
+      status: 'new',
+    });
+  };
+  if (index.overNames)
+    unreadable(
+      entries[0]?.file ?? '',
+      'run files',
+      `the change touched more names than one check compares, past ${MAX_NAME_CHARS_TOTAL} characters, so what the entries already there run was not worked out`,
+    );
+  if ((view.linksUnread ?? 0) > 0)
+    unreadable(
+      entries[0]?.file ?? '',
+      'run files',
+      `${view.linksUnread} links of the tree were not read, so a file an entry already there names could be behind one`,
+    );
+  let spent = 0;
+  for (const h of entries) {
+    const name = `${h.name} ${RUNS[h.kind] as string} in ${h.file}`;
+    const judged = judge(commandOf(h), readingOf(h), index, RUN_LOOKUP_BUDGET - spent);
+    spent += judged.work;
+    if (judged.over === true) spent = RUN_LOOKUP_BUDGET + 1;
+    if (judged.unread !== undefined) {
+      unreadable(
+        h.file,
+        name,
+        `the command of the ${name} could not be read (${judged.unread}), so any file the change touched could be what it runs`,
+      );
+      continue;
+    }
+    const fails = [...judged.fails].sort((a, b) => a - b);
+    for (const i of fails.slice(0, MAX_FILES_PER_ENTRY)) {
+      const f = index.files[i] as Touched;
+      out.set(`${f.path}\0${name}`, {
+        ...hit('agent-run-file-changed', f.path, 1, name, f.path),
+        status: f.status,
+      });
+    }
+    if (fails.length > MAX_FILES_PER_ENTRY)
+      out.set(`\0more\0${name}`, {
+        ...hit(
+          'agent-run-file-changed',
+          h.file,
+          1,
+          name,
+          `${fails.length - MAX_FILES_PER_ENTRY} more files the change touched`,
+        ),
+        status: 'new',
+      });
+    if (out.size > MAX_RUN_HITS) {
+      const why = `the entries already there run more than ${MAX_RUN_HITS} files the change touched, so not all are listed`;
+      unreadable(h.file, 'run files', why);
+      break;
+    }
+    if (spent > RUN_LOOKUP_BUDGET) {
+      const why = `the commands of the entries already there were too long to compare with what the change touched, past ${RUN_LOOKUP_BUDGET} characters`;
+      unreadable(h.file, 'run files', why);
+      break;
+    }
+  }
+  return [...out.values()];
+}

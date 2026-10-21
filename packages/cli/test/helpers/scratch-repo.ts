@@ -1,0 +1,144 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+/**
+ * Scratch git repositories for the tests of `stroq inspect --changed-from`. Each lives in a
+ * temporary folder of its own, with HOME and the global git config pointed inside it, so no
+ * setting of the machine running the tests reaches it.
+ */
+
+/**
+ * An empty folder given to every git command of the tests as `core.hooksPath`: a fixture that
+ * sets its own `core.hooksPath`, or commits a hook, never has it run while the test builds the
+ * repository, on any system. A `-c` on the command line wins over the repository's config.
+ */
+export const NO_HOOKS = mkdtempSync(join(tmpdir(), 'stroq-test-no-hooks-'));
+/** The arguments every git command of the tests starts with: a test identity and no hooks. */
+export const TEST_GIT_ARGS: readonly string[] = [
+  '-c',
+  'user.name=t',
+  '-c',
+  'user.email=t@example.invalid',
+  '-c',
+  `core.hooksPath=${NO_HOOKS}`,
+];
+
+export function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', [...TEST_GIT_ARGS, ...args], {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    env: {
+      ...process.env,
+      HOME: cwd,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(cwd, '.none'),
+    },
+  });
+}
+
+/** A new repository on `main`; its folder is added to `dirs` for the caller to remove. */
+export function scratchRepo(dirs: string[], prefix = 'stroq-scratch-repo-'): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  git(dir, 'init', '-q', '-b', 'main', '.');
+  return dir;
+}
+
+export function writeFiles(dir: string, files: Readonly<Record<string, string>>): void {
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), text);
+  }
+}
+
+/** Writes `files`, commits everything in the folder, and returns the commit. */
+export function commitFiles(dir: string, files: Readonly<Record<string, string>> = {}): string {
+  writeFiles(dir, files);
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'c');
+  return git(dir, 'rev-parse', 'HEAD').trim();
+}
+
+/**
+ * Stages a link at `path` whose target is `target`, written straight into git's objects: no
+ * file system has to be able to make it, so a target too long for one, or one that is a whole
+ * JSON file, can be committed too. Commit it with `git commit`, not `commitFiles`, whose
+ * `add -A` would stage the missing file as deleted.
+ */
+export function stageLink(dir: string, path: string, target: string): void {
+  git(dir, 'update-index', '--add', '--cacheinfo', `120000,${hashText(dir, target)},${path}`);
+}
+
+/** Writes `text` into the repository's objects, as is, and returns its id. */
+function hashText(dir: string, text: string): string {
+  return execFileSync('git', [...TEST_GIT_ARGS, 'hash-object', '-w', '--stdin'], {
+    cwd: dir,
+    input: text,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: dir,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(dir, '.none'),
+    },
+  }).trim();
+}
+
+/**
+ * Commits `files` through git's index alone, never on disk, and returns the commit: for a name a
+ * Windows disk cannot hold (a part that ends in a dot or a blank, a `:` stream), which a file
+ * cannot be written as there, so `git add` cannot stage it. Git for Windows may refuse such a
+ * name in its index too (core.protectNTFS): there, and only there, this returns undefined, for
+ * the test to skip that case; on any other system a refusal is an error. What is already staged
+ * is committed with it.
+ */
+export function commitIndexed(
+  dir: string,
+  files: Readonly<Record<string, string>>,
+): string | undefined {
+  for (const [path, text] of Object.entries(files)) {
+    const oid = hashText(dir, text);
+    try {
+      git(dir, 'update-index', '--add', '--cacheinfo', `100644,${oid},${path}`);
+    } catch (err) {
+      if (process.platform === 'win32') return undefined;
+      throw err;
+    }
+  }
+  git(dir, 'commit', '-q', '--allow-empty', '-m', 'c');
+  return git(dir, 'rev-parse', 'HEAD').trim();
+}
+
+/**
+ * Stages `text` at every one of `paths` through git's index: one blob, one call, no file on disk.
+ * For a test that needs thousands of files, which writing and hashing one by one makes slow.
+ * Commit with `git commit`, not `commitFiles`, whose `add -A` would stage them as deleted.
+ */
+export function stageSameText(dir: string, paths: readonly string[], text: string): void {
+  const oid = hashText(dir, text);
+  execFileSync('git', [...TEST_GIT_ARGS, 'update-index', '--add', '-z', '--index-info'], {
+    cwd: dir,
+    input: paths.map((path) => `100644 ${oid}\t${path}\0`).join(''),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      HOME: dir,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(dir, '.none'),
+    },
+  });
+}
+
+/** A `.claude/settings.json` with one command hook per event. */
+export const hookSettings = (hooks: Readonly<Record<string, string>>): string =>
+  JSON.stringify({
+    hooks: Object.fromEntries(
+      Object.entries(hooks).map(([event, command]) => [
+        event,
+        [{ hooks: [{ type: 'command', command }] }],
+      ]),
+    ),
+  });

@@ -102,7 +102,7 @@ function claudeHits(
  * approves. An empty object approves nothing and is not a widening, so the check is
  * "approves at least one thing" rather than plain truthiness.
  */
-const autoApproves = (value: unknown): boolean =>
+export const autoApproves = (value: unknown): boolean =>
   value === true || (isPlainObject(value) && Object.keys(value).length > 0);
 
 export function privilegeSurface(cwd: string, home: string = homedir()): readonly PrivilegeHit[] {

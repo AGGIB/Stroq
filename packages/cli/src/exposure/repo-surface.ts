@@ -1,7 +1,11 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey, readRegularFile } from '@stroq/core';
+import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
+import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
+import { plainHookHits } from './plain-hook-folders.js';
+import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 
 /**
  * What a repository can make run on the machine that opens it.
@@ -33,6 +37,7 @@ export type RepoExecKind =
   | 'nested-bare-repo'
   | 'gitattributes-driver'
   | 'devcontainer-host-command'
+  | 'git-hook-routine'
   | 'git-hook'
   | 'husky-hook'
   | 'devcontainer-command'
@@ -45,6 +50,7 @@ export const PRE_TRUST: ReadonlySet<RepoExecKind> = new Set([
   'nested-bare-repo',
   'gitattributes-driver',
   'devcontainer-host-command',
+  'git-hook-routine',
 ]);
 
 export interface RepoSurface {
@@ -58,7 +64,8 @@ export interface RepoSurface {
 /** A repository is a working tree, not a corpus; this is generous for one. */
 const MAX_DIRS = 4_000;
 const MAX_CONFIG_BYTES = 256 * 1024;
-const SKIP_DIRS = new Set(['node_modules', '.venv', 'venv', 'vendor', 'target', 'dist', 'build']);
+/** Only `node_modules` is skipped: a bare repository under `vendor` or `build` runs as well. */
+const SKIP_DIRS = new Set(['node_modules']);
 
 const readTextOr = (file: string, fallback = ''): string => {
   try {
@@ -70,36 +77,177 @@ const readTextOr = (file: string, fallback = ''): string => {
 };
 
 /**
- * Parses git's INI into dotted keys. Git's own parser accepts more than this — line
- * continuations, quoting rules — but a key this misses is a key `.git/config` sets in
- * a shape no tool writes, and the alternative is shelling out to `git config`, which
- * would execute the repository's configuration to read it.
+ * Parses git's INI into dotted keys, the way git reads it (see `parseGitConfig`): no tool's view of
+ * the file but git's, and no shelling out to `git config`, which would read the repository's
+ * configuration to read it.
  */
 export function gitConfigEntries(text: string): readonly { key: string; value: string }[] {
-  const out: { key: string; value: string }[] = [];
-  let section = '';
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (line === '' || line.startsWith('#') || line.startsWith(';')) continue;
-    const header = /^\[([^\]]+)\]$/.exec(line);
-    if (header) {
-      const inner = header[1] ?? '';
-      const named = /^(\S+)\s+"(.*)"$/.exec(inner);
-      section = named ? `${named[1]}.${named[2]}` : inner.replace(/\s+/g, '.');
+  return parseGitConfig(text).entries;
+}
+
+const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+const isAlpha = (c: string): boolean => /^[A-Za-z]$/.test(c);
+/** A character of a key or a section name as git takes it: a letter, a digit or `-`. */
+const isKeyChar = (c: string): boolean => /^[A-Za-z0-9-]$/.test(c);
+
+/** The escapes git takes in a value; any other one makes the file one git refuses. */
+const VALUE_ESCAPES: Readonly<Record<string, string>> = {
+  t: '\t',
+  b: '\b',
+  n: '\n',
+  '\\': '\\',
+  '"': '"',
+};
+
+/** A git config read one character at a time, with the line each one is on. */
+class ConfigReader {
+  private at: number;
+  private line = 1;
+  /** The line of the last character read. */
+  lineOfLast = 1;
+  constructor(private readonly text: string) {
+    this.at = text.startsWith('\uFEFF') ? 1 : 0;
+  }
+
+  get done(): boolean {
+    return this.at >= this.text.length;
+  }
+
+  /** The next character; `\r\n` and the end of the file read as a newline, as git reads them. */
+  next(): string {
+    this.lineOfLast = this.line;
+    if (this.done) return '\n';
+    let c = this.text[this.at] as string;
+    this.at += 1;
+    if (c === '\r' && this.text[this.at] === '\n') {
+      c = '\n';
+      this.at += 1;
+    }
+    if (c === '\n') this.line += 1;
+    return c;
+  }
+}
+
+/** A section header after its `[`: `[core]`, `[remote "a\"b"]`, `[a.b]`; undefined when git refuses it. */
+function readSection(r: ConfigReader): string | undefined {
+  let name = '';
+  for (;;) {
+    if (r.done) return undefined;
+    let c = r.next();
+    if (c === ']') return name === '' ? undefined : name;
+    if (isSpace(c)) {
+      // `[name "subsection"]`: blanks, a quoted name whose `\` takes the next character, then `]`.
+      for (; isSpace(c); c = r.next()) if (c === '\n' || r.done) return undefined;
+      if (c !== '"' || name === '') return undefined;
+      let sub = '';
+      for (;;) {
+        c = r.next();
+        if (c === '\n') return undefined;
+        if (c === '"') break;
+        if (c === '\\') {
+          c = r.next();
+          if (c === '\n') return undefined;
+        }
+        sub += c;
+      }
+      return r.next() === ']' ? `${name}.${sub}` : undefined;
+    }
+    if (!isKeyChar(c) && c !== '.') return undefined;
+    name += c.toLowerCase();
+  }
+}
+
+/** A value after its `=`, to the end of its line, as git reads it; undefined when git refuses it. */
+function readValue(r: ConfigReader): string | undefined {
+  let value = '';
+  let quote = false;
+  let comment = false;
+  let blanks = 0;
+  for (;;) {
+    let c = r.next();
+    if (c === '\n') return quote ? undefined : value;
+    if (comment) continue;
+    if (isSpace(c) && !quote) {
+      if (value !== '') blanks += 1;
       continue;
     }
-    const eq = line.indexOf('=');
-    if (eq === -1 || section === '') continue;
-    out.push({
-      key: `${section}.${line.slice(0, eq).trim()}`,
-      value: line
-        .slice(eq + 1)
-        .trim()
-        .replace(/^"(.*)"$/, '$1'),
-    });
+    if (!quote && (c === ';' || c === '#')) {
+      comment = true;
+      continue;
+    }
+    value += ' '.repeat(blanks);
+    blanks = 0;
+    if (c === '\\') {
+      c = r.next();
+      // A value goes on past the end of its line only here, never from a comment.
+      if (c === '\n') continue;
+      const escaped = VALUE_ESCAPES[c];
+      if (escaped === undefined) return undefined;
+      value += escaped;
+      continue;
+    }
+    if (c === '"') {
+      quote = !quote;
+      continue;
+    }
+    value += c;
   }
-  return out;
 }
+
+/**
+ * The entries of a git config, read as git reads them: comments and blanks between entries, a
+ * section header with a quoted subsection whose `\` takes the next character, a key on the line of
+ * its section, a value with quotes, comments and escapes, continued past the end of its line only
+ * by a `\` inside the value. Keys and plain section names are in lower case, as git takes them.
+ *
+ * Git refuses a whole file it cannot read, and runs none of it; a reader that is wrong about a line
+ * would skip a key git runs. So the first line git would refuse ends the reading and is reported in
+ * `unplaced`, with what was read before it.
+ */
+export function parseGitConfig(text: string): {
+  readonly entries: readonly { key: string; value: string }[];
+  readonly unplaced: readonly number[];
+} {
+  const entries: { key: string; value: string }[] = [];
+  const r = new ConfigReader(text);
+  const refused = () => ({ entries, unplaced: [r.lineOfLast] });
+  let section: string | undefined;
+  let comment = false;
+  while (!r.done) {
+    const c = r.next();
+    if (c === '\n') {
+      comment = false;
+      continue;
+    }
+    if (comment || isSpace(c)) continue;
+    if (c === '#' || c === ';') {
+      comment = true;
+      continue;
+    }
+    if (c === '[') {
+      section = readSection(r);
+      if (section === undefined) return refused();
+      continue;
+    }
+    if (!isAlpha(c) || section === undefined) return refused();
+    let name = c.toLowerCase();
+    let d = r.next();
+    for (; isKeyChar(d); d = r.next()) name += d.toLowerCase();
+    while (d === ' ' || d === '\t') d = r.next();
+    if (d === '\n') {
+      entries.push({ key: `${section}.${name}`, value: 'true' });
+      continue;
+    }
+    if (d !== '=') return refused();
+    const value = readValue(r);
+    if (value === undefined) return refused();
+    entries.push({ key: `${section}.${name}`, value });
+  }
+  return { entries, unplaced: [] };
+}
+
+/** What a hit names for a line of a git config that could not be read. */
+export const UNREAD_CONFIG_LINE = 'a line the check could not read';
 
 /**
  * `core.fsmonitor = true` is git's own built-in file monitor and runs no command;
@@ -108,37 +256,72 @@ export function gitConfigEntries(text: string): readonly { key: string; value: s
  */
 const isBoolean = (value: string): boolean => /^(true|false|yes|no|on|off|1|0)$/i.test(value);
 
-function gitConfigHits(root: string): RepoExecHit[] {
-  const file = join(root, '.git', 'config');
+/** A git config's text; `missing` when there is none, `unread` when it is there and was not read. */
+function configText(file: string): string | 'missing' | 'unread' {
+  try {
+    const read = readRegularFile(file, MAX_CONFIG_BYTES);
+    return read.kind === 'text' ? read.text : 'unread';
+  } catch (err) {
+    return (err as { code?: unknown }).code === 'ENOENT' ? 'missing' : 'unread';
+  }
+}
+
+/** The keys of a git config that run something, `label` being how the report names the file. */
+function gitConfigHits(file: string, label: string): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  for (const { key, value } of gitConfigEntries(readTextOr(file))) {
+  const text = configText(file);
+  if (text === 'missing') return hits;
+  // Too large, not a file, or not readable: what git reads from it is not known.
+  if (text === 'unread')
+    return [{ kind: 'git-config-exec', file: label, what: `${UNREAD_CONFIG_LINE} (the file)` }];
+  const config = parseGitConfig(text);
+  // At most one: each says the same, that the file must be read by eye.
+  const line = config.unplaced[0];
+  if (line !== undefined)
+    hits.push({
+      kind: 'git-config-exec',
+      file: label,
+      what: `${UNREAD_CONFIG_LINE} (line ${line})`,
+    });
+  for (const { key, value } of config.entries) {
     if (!isGitExecKey(key)) continue;
     if (/^core\.fsmonitor$/i.test(key) && isBoolean(value)) continue;
     const include = /^include(if)?\./i.test(key);
     hits.push({
       kind: include ? 'git-config-include' : 'git-config-exec',
-      file: '.git/config',
+      file: label,
       what: key,
     });
   }
   return hits;
 }
 
-/** A driver named here is only executable because `.git/config` defines its command. */
-function gitAttributesHits(root: string): RepoExecHit[] {
-  const text = readTextOr(join(root, '.gitattributes'));
-  const drivers = new Set<string>();
-  for (const m of text.matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
-    drivers.add(`${m[1]}.${m[2]}`);
-  }
+/**
+ * A driver named in an attributes file is only executable because a git config defines its
+ * command: `.git/config` in a repository, the folder's own `config` when it is a bare one.
+ */
+function gitAttributesHits(
+  root: string,
+  configs: readonly string[],
+  attributes: readonly string[],
+): RepoExecHit[] {
   const defined = new Set(
-    gitConfigEntries(readTextOr(join(root, '.git', 'config')))
+    configs
+      .flatMap((file) => gitConfigEntries(readTextOr(file)))
       .map((e) => e.key.replace(/\.(clean|smudge|process|textconv|command|driver)$/i, ''))
       .filter((k) => /^(filter|diff|merge)\./i.test(k)),
   );
-  return [...drivers]
-    .filter((d) => defined.has(d))
-    .map((what) => ({ kind: 'gitattributes-driver' as const, file: '.gitattributes', what }));
+  const hits: RepoExecHit[] = [];
+  for (const file of attributes) {
+    const drivers = new Set<string>();
+    for (const m of readTextOr(file).matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
+      drivers.add(`${m[1]}.${m[2]}`);
+    }
+    const label = relative(root, file).split(sep).join('/');
+    for (const what of drivers)
+      if (defined.has(what)) hits.push({ kind: 'gitattributes-driver', file: label, what });
+  }
+  return hits;
 }
 
 /**
@@ -164,6 +347,27 @@ function runsAsGitHook(file: string, plat: NodeJS.Platform): boolean {
   }
 }
 
+/** What a hook file that could not be read as text holds: not known, so not ordinary either. */
+const UNREAD_HOOK = '\u0000';
+
+/**
+ * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
+ * opens it, and its text was read and does not download and run code.
+ */
+function gitHookHit(dir: string, name: string): RepoExecHit {
+  const file = `.git/hooks/${name}`;
+  const text = readTextOr(join(dir, name), UNREAD_HOOK);
+  const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
+  if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
+  if (outcome === 'unsafe')
+    return {
+      kind: 'git-hook-routine',
+      file,
+      what: `${name}, whose text downloads and runs code, sends a secret out, or could not be read`,
+    };
+  return { kind: 'git-hook', file, what: name };
+}
+
 function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
   const dir = join(root, '.git', 'hooks');
   if (!existsSync(dir)) return [];
@@ -171,26 +375,7 @@ function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
     return readdirSync(dir)
       .filter((name) => !name.endsWith('.sample'))
       .filter((name) => runsAsGitHook(join(dir, name), plat))
-      .map((what) => ({ kind: 'git-hook' as const, file: `.git/hooks/${what}`, what }));
-  } catch {
-    return [];
-  }
-}
-
-function huskyHits(root: string): RepoExecHit[] {
-  const dir = join(root, '.husky');
-  if (!existsSync(dir)) return [];
-  try {
-    return readdirSync(dir)
-      .filter((name) => !name.startsWith('_') && !name.startsWith('.'))
-      .filter((name) => {
-        try {
-          return statSync(join(dir, name)).isFile();
-        } catch {
-          return false;
-        }
-      })
-      .map((what) => ({ kind: 'husky-hook' as const, file: `.husky/${what}`, what }));
+      .map((name) => gitHookHit(dir, name));
   } catch {
     return [];
   }
@@ -219,7 +404,8 @@ function devcontainerHits(root: string): RepoExecHit[] {
   for (const file of candidates) {
     const text = readTextOr(file);
     if (text === '') continue;
-    const rel = relative(root, file);
+    // With `/` between the parts on every system, as every path this reports.
+    const rel = labelOf(root, file);
     // Read as text rather than JSON: devcontainer.json is jsonc, comments and all,
     // and a parse failure must not hide the key it was looking for.
     for (const key of DEVCONTAINER_HOST_KEYS) {
@@ -234,21 +420,27 @@ function devcontainerHits(root: string): RepoExecHit[] {
   return hits;
 }
 
-const INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish'] as const;
+/** The scripts of the folder's package.json, by name; none when it has none or does not parse. */
+function packageScripts(root: string): Readonly<Record<string, unknown>> {
+  const text = readTextOr(join(root, 'package.json'));
+  if (text === '') return {};
+  try {
+    const scripts: unknown = (JSON.parse(text) as Record<string, unknown>)['scripts'];
+    return typeof scripts === 'object' && scripts !== null
+      ? (scripts as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 function packageScriptHits(root: string): RepoExecHit[] {
-  const text = readTextOr(join(root, 'package.json'));
-  if (text === '') return [];
-  let scripts: unknown;
-  try {
-    scripts = (JSON.parse(text) as Record<string, unknown>)['scripts'];
-  } catch {
-    return [];
-  }
-  if (typeof scripts !== 'object' || scripts === null) return [];
-  return INSTALL_SCRIPTS.filter((name) => name in (scripts as Record<string, unknown>)).map(
-    (what) => ({ kind: 'package-install-script' as const, file: 'package.json', what }),
-  );
+  const scripts = packageScripts(root);
+  return INSTALL_SCRIPT_NAMES.filter((name) => Object.hasOwn(scripts, name)).map((what) => ({
+    kind: 'package-install-script' as const,
+    file: 'package.json',
+    what,
+  }));
 }
 
 function envrcHits(root: string): RepoExecHit[] {
@@ -257,43 +449,176 @@ function envrcHits(root: string): RepoExecHit[] {
     : [];
 }
 
+/** Why a file that only points git elsewhere is reported. */
+const POINTS_ELSEWHERE = 'which points git at the folder of another repository';
+
+/** A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. */
+const labelOf = (root: string, abs: string): string =>
+  relative(root, abs).split(sep).join('/') || '.';
+
 /**
- * A bare repository committed into an ordinary one as plain files. Git refuses to
- * check out a path named `.git`, but a bare repository needs only `HEAD`, `objects/`
- * and `refs/`, so it survives a clone — the vector behind CVE-2026-45033, and the one
- * that makes this class of attack deliverable by pull request rather than by zip.
+ * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
+ * when a `commondir` file names another folder, that folder's two as well. Git reads the config of
+ * the folder `commondir` names; one that points out of `root` is reported, not read. Each is read
+ * under every name it has on disk: `config` and `CONFIG` are two files on a disk that keeps case,
+ * and the one a disk that folds case opens is not known.
  */
-function nestedBareRepos(root: string): { hits: RepoExecHit[]; capped: boolean } {
+function gitDirConfigHits(
+  root: string,
+  dir: string,
+  names: ReadonlyMap<string, readonly string[]>,
+): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  const queue: string[] = [root];
-  let visited = 0;
-  while (queue.length > 0) {
-    if (visited >= MAX_DIRS) return { hits, capped: true };
-    const dir = queue.shift() as string;
-    visited += 1;
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
+  const read = (folder: string, found: ReadonlyMap<string, readonly string[]>) => {
+    for (const name of [...(found.get('config') ?? []), ...(found.get('config.worktree') ?? [])]) {
+      const file = join(folder, name);
+      hits.push(...gitConfigHits(file, labelOf(root, file)));
     }
-    const names = new Set(entries.map((e) => e.name));
-    if (dir !== root && names.has('HEAD') && names.has('objects') && names.has('refs')) {
+  };
+  read(dir, names);
+  for (const commondir of names.get('commondir') ?? []) {
+    const target = readTextOr(join(dir, commondir)).trim();
+    if (target === '') continue;
+    const common = resolve(dir, target);
+    if (!isWithin(common, root)) {
       hits.push({
         kind: 'nested-bare-repo',
-        file: relative(root, dir),
-        what: 'HEAD, objects, refs',
+        file: labelOf(root, dir),
+        what: 'its commondir file points out of this folder, at a config that was not read',
       });
       continue;
     }
+    read(common, namesIn(common));
+  }
+  return hits;
+}
+
+/** Whether `path` is `root` or inside it: a child folder named `..x` is inside. */
+const isWithin = (path: string, root: string): boolean => {
+  const rel = relative(root, path);
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${sep}`) && !rel.startsWith('../') && !isAbsolute(rel))
+  );
+};
+
+/**
+ * The names git looks for in a folder, folded as the most forgiving disk opens them, each with every
+ * name it has on disk. A folder named `HEAD` or `commondir` is not what git looks for.
+ */
+function namesOf(entries: readonly Dirent[]): Map<string, string[]> {
+  const names = new Map<string, string[]>();
+  for (const e of entries) {
+    const name =
+      gitDirName(e.name) ??
+      (foldName(e.name) === 'config.worktree' ? 'config.worktree' : undefined);
+    if (name === undefined || (e.isDirectory() && FILE_NAMES.has(name))) continue;
+    const list = names.get(name);
+    if (list === undefined) names.set(name, [e.name]);
+    else list.push(e.name);
+  }
+  return names;
+}
+
+function namesIn(dir: string): Map<string, string[]> {
+  try {
+    return namesOf(readdirSync(dir, { withFileTypes: true }));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * A bare repository committed into an ordinary one as plain files. Git refuses to check out a path
+ * named `.git`, but a bare repository needs only `HEAD`, `objects/` and `refs/`, or `HEAD` and a
+ * `commondir` file, so it survives a clone — the vector behind CVE-2026-45033, and the one that
+ * makes this class of attack deliverable by pull request rather than by zip. Each one is reported
+ * with the commands its config runs, and so is a lone `commondir` or `gitdir` file, which only
+ * points git elsewhere. In a folder with no `.git` (`folder`), a `.git` folder or file deeper in
+ * came with the folder too, and is read and reported the same way.
+ */
+function nestedBareRepos(
+  root: string,
+  withRoot = false,
+  folder = false,
+): { hits: RepoExecHit[]; capped: boolean } {
+  const hits: RepoExecHit[] = [];
+  const queue: string[] = [root];
+  let visited = 0;
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    if (visited >= MAX_DIRS) return { hits, capped: true };
+    const dir = next;
+    visited += 1;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+      );
+    } catch {
+      continue;
+    }
+    // Links and other letter cases too: git opens `Objects` as `objects` on a disk that ignores case.
+    const names = namesOf(entries);
+    const isBare = looksLikeGitDir(new Set(names.keys()));
+    if (isBare && (dir !== root || withRoot)) {
+      hits.push({
+        kind: 'nested-bare-repo',
+        file: labelOf(root, dir),
+        what: 'HEAD, objects, refs',
+      });
+      hits.push(...gitDirConfigHits(root, dir, names));
+      // The root is walked on: what is under it is all this check reads.
+      if (dir !== root) continue;
+    }
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      if (entry.name === '.git' || SKIP_DIRS.has(entry.name)) continue;
+      const folded = foldName(entry.name);
+      const isDir = entry.isDirectory() && !entry.isSymbolicLink();
+      if (!isBare && !isDir && (folded === 'commondir' || folded === 'gitdir'))
+        hits.push({
+          kind: 'nested-bare-repo',
+          file: labelOf(root, join(dir, entry.name)),
+          what: `a ${folded} file, ${POINTS_ELSEWHERE}`,
+        });
+      // The repository's own is not read here; in a folder with no `.git`, one deeper in came with it.
+      if (entry.name === '.git' && !folder) continue;
+      if (folder && folded === '.git') {
+        if (!isDir)
+          hits.push({
+            kind: 'nested-bare-repo',
+            file: labelOf(root, join(dir, entry.name)),
+            what: `a .git file, ${POINTS_ELSEWHERE}`,
+          });
+        else queue.push(join(dir, entry.name));
+        continue;
+      }
+      if (!isDir || SKIP_DIRS.has(entry.name)) continue;
       queue.push(join(dir, entry.name));
     }
   }
   return { hits, capped: false };
 }
+
+const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): RepoSurface => ({
+  isRepo,
+  preTrust: all.filter((h) => PRE_TRUST.has(h.kind)),
+  onOpen: all.filter((h) => !PRE_TRUST.has(h.kind)),
+  capped,
+});
+
+/**
+ * What the files of a folder make run whether or not it is a repository: husky hooks, dev
+ * container commands, a `.envrc`, install scripts. Both a repository and a plain folder read these.
+ */
+const workingTreeHits = (root: string, hooksPaths: readonly string[] = []): RepoExecHit[] => [
+  ...plainHookHits(
+    root,
+    hooksPaths,
+    Object.values(packageScripts(root)).filter((s): s is string => typeof s === 'string'),
+  ),
+  ...devcontainerHits(root),
+  ...envrcHits(root),
+  ...packageScriptHits(root),
+];
 
 /**
  * `plat` defaults to the real platform, so every caller keeps working unchanged; a
@@ -304,22 +629,45 @@ export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platfor
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
   }
   const bare = nestedBareRepos(cwd);
+  const config = join(cwd, '.git', 'config');
   const all = [
-    ...gitConfigHits(cwd),
-    ...gitAttributesHits(cwd),
+    ...gitConfigHits(config, '.git/config'),
+    ...gitAttributesHits(
+      cwd,
+      [config],
+      [join(cwd, '.gitattributes'), join(cwd, '.git', 'info', 'attributes')],
+    ),
     ...bare.hits,
     ...gitHookHits(cwd, plat),
-    ...huskyHits(cwd),
-    ...devcontainerHits(cwd),
-    ...envrcHits(cwd),
-    ...packageScriptHits(cwd),
+    ...workingTreeHits(
+      cwd,
+      parseGitConfig(readTextOr(config))
+        .entries.filter((e) => e.key === 'core.hookspath')
+        .map((e) => e.value),
+    ),
   ];
-  return {
-    isRepo: true,
-    preTrust: all.filter((h) => PRE_TRUST.has(h.kind)),
-    onOpen: all.filter((h) => !PRE_TRUST.has(h.kind)),
-    capped: bare.capped,
-  };
+  return split(all, bare.capped, true);
+}
+
+/**
+ * A folder with no `.git`: a zip download, an unpacked tarball. Git still runs in it. When the
+ * folder itself holds `HEAD` with `objects` and `refs`, or with a `commondir` file, git takes it
+ * for a bare repository and reads its config, so the first `git status` there runs what that
+ * config names, and routes paths through the drivers its attributes name; a bare repository or a
+ * `.git` deeper in does the same for a git command run inside it. The rest is read as it is in a
+ * repository.
+ */
+export function folderSurface(cwd: string): RepoSurface {
+  const bare = nestedBareRepos(cwd, true, true);
+  const rootIsBare = bare.hits.some((h) => h.file === '.' && h.what === 'HEAD, objects, refs');
+  const attributes = rootIsBare
+    ? gitAttributesHits(
+        cwd,
+        [join(cwd, 'config'), join(cwd, 'config.worktree')],
+        [join(cwd, '.gitattributes'), join(cwd, 'info', 'attributes')],
+      )
+    : [];
+  return split([...bare.hits, ...attributes, ...workingTreeHits(cwd)], bare.capped, false);
 }
 
 /** Why each kind of pre-trust execution is a finding; also the SARIF rule text. */
@@ -334,6 +682,8 @@ export const WHY: Readonly<Record<string, string>> = {
     'a path in this repository is routed through a driver whose command is defined in its own git configuration',
   'devcontainer-host-command':
     'initializeCommand runs on this machine before the container exists, so the container gives it no isolation',
+  'git-hook-routine':
+    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources',
 };
 
 export function repoFindings(surface: RepoSurface): readonly Finding[] {
@@ -341,9 +691,14 @@ export function repoFindings(surface: RepoSurface): readonly Finding[] {
     class: 'repo-exec-surface' as const,
     severity: 'critical' as const,
     detail: `${hit.file} — ${hit.what}: ${WHY[hit.kind] ?? 'repository-supplied execution'}`,
-    fix:
-      hit.kind === 'nested-bare-repo'
-        ? `inspect and remove ${hit.file} before opening this repository with an agent`
-        : `git config --get ${hit.what} — and remove it if you did not set it`,
+    fix: hit.what.startsWith(UNREAD_CONFIG_LINE)
+      ? `read ${hit.file} in a text editor, not with git, which may run what it names, and remove that line if you did not write it`
+      : hit.kind === 'git-hook-routine'
+        ? `read ${hit.file} in a text editor and delete it if you did not install it, before you run any git command here`
+        : hit.kind !== 'nested-bare-repo'
+          ? `git config --get ${hit.what} — and remove it if you did not set it`
+          : hit.file === '.'
+            ? 'this folder is itself a bare repository: clone it into a new folder and open the clone, which leaves its config behind'
+            : `inspect and remove ${hit.file} before opening this repository with an agent`,
   }));
 }
