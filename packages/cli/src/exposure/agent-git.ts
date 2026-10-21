@@ -23,6 +23,7 @@ import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-fil
 import { hiddenTextChanges } from './hidden-text-changes.js';
 import { isLintStagedConfig, lintStagedConfigs } from './lint-staged-configs.js';
 import {
+  growthOnly,
   protectionsUnknown,
   protectiveChanges,
   protectiveKeys,
@@ -311,7 +312,7 @@ function compare(top: string, base: string, head: string) {
         const source = oid === undefined ? undefined : read.baseSource(oid);
         const before = source === undefined ? [] : hitsForRead(p.path, source);
         return [
-          ...tagChanges(now, before),
+          ...growthOnly(now, before, tagChanges(now, before)),
           ...removedProtections(now, before).map((h) => tagged(h, 'changed')),
           ...protectionChanges(p, headRead.text, source),
           ...guardChanges(p, headRead.text, source),

@@ -1,5 +1,5 @@
-import type { TaggedHit } from './agent-change.js';
-import { boundedJson, hit } from './agent-kinds.js';
+import { settle, type TaggedHit } from './agent-change.js';
+import { boundedJson, hit, isProtection, type AgentHit } from './agent-kinds.js';
 import { settingsOf } from './agent-surface.js';
 
 /**
@@ -146,6 +146,48 @@ export function protectiveChanges(
   for (const [key, now] of head)
     if (!base.has(key) && !grows(key, undefined, now.value)) out.push(finding(key, 'added'));
   return out;
+}
+
+/** The readers' findings for a list whose growth only adds protection, by their name. */
+const GROWING_FINDINGS: ReadonlySet<string> = new Set([
+  'permissions.ask',
+  'permissions.deny',
+  'tools.exclude',
+  'excludeTools',
+]);
+
+/** A finding's value as a list of plain strings, or undefined when it is not one, or was cut. */
+function stringList(value: string): string[] | undefined {
+  try {
+    const list: unknown = JSON.parse(value);
+    return isStrings(list) ? list : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `tagged` (the readers' findings of `head`, tagged against `base` in order) with each new or
+ * changed finding for a list of `GROWING_FINDINGS` that only grew put back as there before: the
+ * base had none, or every element it had is still there, all plain strings. Anything else, a
+ * value cut for its length included, stays as it was.
+ */
+export function growthOnly(
+  head: readonly AgentHit[],
+  base: readonly AgentHit[],
+  tagged: readonly TaggedHit[],
+): TaggedHit[] {
+  return tagged.map((t, i) => {
+    const h = head[i];
+    if (h === undefined || t.status === 'present' || !isProtection(h)) return t;
+    if (!GROWING_FINDINGS.has(h.name)) return t;
+    const now = stringList(h.value);
+    const was = base.find((b) => b.file === h.file && b.name === h.name && isProtection(b));
+    const before = was === undefined ? [] : stringList(was.value);
+    if (now === undefined || before === undefined) return t;
+    const kept = new Set(now);
+    return before.every((x) => kept.has(x)) ? settle(h, 'present') : t;
+  });
 }
 
 /** A failing finding that what kept the agent from things in `path` before the change is not known. */

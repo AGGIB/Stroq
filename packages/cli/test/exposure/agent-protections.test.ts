@@ -306,3 +306,45 @@ describe('a protective list a change only adds to', () => {
     expect(net(G, server(['a', 'b']), server(['a']))).toEqual(['mcpServers.s.excludeTools']);
   });
 });
+
+/**
+ * The readers of these lists fail no change that only adds to one either: every element the base
+ * had still there, all plain strings. The whole check then passes; a removal or a swap fails.
+ */
+describe('a protective list its reader sees only grow', () => {
+  const CLAUDE = '.claude/settings.json';
+  const G = '.gemini/settings.json';
+
+  it.each([
+    [
+      CLAUDE,
+      { permissions: { ask: ['Bash(git push:*)'] } },
+      { permissions: { ask: ['Bash(git push:*)', 'Bash(rm:*)'] } },
+    ],
+    [CLAUDE, {}, { permissions: { ask: ['Bash(rm:*)'] } }],
+    [
+      CLAUDE,
+      { permissions: { deny: ['Read(.env)'] } },
+      { permissions: { deny: ['Read(.env)', 'Bash(curl:*)'] } },
+    ],
+    [
+      G,
+      { tools: { exclude: ['run_shell_command'] } },
+      { tools: { exclude: ['run_shell_command', 'web_fetch'] } },
+    ],
+    [G, { excludeTools: ['a'] }, { excludeTools: ['b', 'a'] }],
+  ])('passes the whole check: %s from %j to %j', (path, before, after) => {
+    expect(changed(path, json(before), json(after))).toEqual([]);
+  });
+
+  it.each([
+    [CLAUDE, { permissions: { ask: ['a', 'b'] } }, { permissions: { ask: ['a'] } }],
+    [CLAUDE, { permissions: { ask: ['a'] } }, { permissions: { ask: ['b'] } }],
+    [CLAUDE, { permissions: { ask: ['a'] } }, { permissions: { ask: ['a', 1] } }],
+    [CLAUDE, { permissions: { deny: ['a', 'b'] } }, { permissions: { deny: ['a'] } }],
+    [G, { tools: { exclude: ['a', 'b'] } }, { tools: { exclude: ['a'] } }],
+    [G, { excludeTools: ['a'] }, { excludeTools: 'a' }],
+  ])('fails %s from %j to %j', (path, before, after) => {
+    expect(changed(path, json(before), json(after)).length).toBeGreaterThan(0);
+  });
+});
