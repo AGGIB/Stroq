@@ -296,7 +296,7 @@ jobs:
           node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
           node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format github . >> "$GITHUB_STEP_SUMMARY" || [ $? -eq 1 ]
 
-      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: stroq-inspect.sarif
           category: stroq-inspect
