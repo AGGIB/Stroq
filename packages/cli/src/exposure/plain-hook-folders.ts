@@ -129,10 +129,13 @@ const KNOWN_LIFECYCLE: ReadonlySet<string> = new Set([
   'is-ci || husky',
 ]);
 
-/** Whether a lifecycle script is one of `KNOWN_LIFECYCLE`, or `tsc -p <word>`. */
+/**
+ * Whether a lifecycle script is one of `KNOWN_LIFECYCLE`, or `tsc -p` with a plain path: letters,
+ * digits, `.`, `_`, `/` and `-` only, so no `;&|(){}<>$` or backquote can follow it.
+ */
 function isKnownLifecycle(script: string): boolean {
   const text = script.trim().replace(/\s+/g, ' ').toLowerCase();
-  return KNOWN_LIFECYCLE.has(text) || /^tsc -p \S+$/.test(text);
+  return KNOWN_LIFECYCLE.has(text) || /^tsc -p [a-z0-9._/-]+$/.test(text);
 }
 
 /** A line break, which a backslash before it may join to the next line. */

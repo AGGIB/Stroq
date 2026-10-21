@@ -322,6 +322,9 @@ describe('a git hook in plain stroq inspect', () => {
     [{ prepare: 'concurrently "a" "b"', a: 'cp x .git/hooks/' }],
     [{ prepare: 'gulp', build: 'echo $X' }],
     [{ postinstall: 'bunx x', b: 'echo $X' }],
+    // `tsc -p` takes a plain path only: anything after it is not the known command.
+    [{ prepare: 'tsc -p x;cp${IFS}a${IFS}.git/hooks/' }],
+    [{ prepare: 'tsc -p x;make', b: 'echo $X' }],
   ])('reads every script coarsely beside %j', (scripts) => {
     expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([
       'git-hook-routine package.json',
