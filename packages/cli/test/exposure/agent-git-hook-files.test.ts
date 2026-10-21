@@ -216,6 +216,10 @@ describe('a git hook in plain stroq inspect', () => {
     'git config set core.hookspath $D',
     'echo $X && git --file x config core.hookspath .h',
     'git config --get user.name && echo `date`',
+    // A Mac and Windows run git in any letter case, and Windows by its .exe name.
+    'GIT config core.$X .h',
+    'Git.EXE CONFIG core.$X .h',
+    'C:\\Program Files\\Git\\bin\\git.exe config core.$X .h',
   ])('fails %s', (script) => {
     const pkg = JSON.stringify({ scripts: { prepare: script } });
     expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);

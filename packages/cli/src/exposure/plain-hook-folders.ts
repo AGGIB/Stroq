@@ -45,16 +45,25 @@ const unquoted = (script: string): string => script.replace(/["'\\]/g, '');
 
 /**
  * Whether a script may set a git config key, or the folder it names, from what the shell fills in:
- * it holds `config` or `-c` as a word, a `$` or a backquote anywhere, and `git` as a word or a
- * command the shell fills in. A coarse reading: such a script fails whatever its words say.
+ * it holds `config` or `-c` as a word, a `$` or a backquote anywhere, and a word that ends in
+ * `git` (any letter case, a `.exe` aside) or a command the shell fills in. A coarse reading: such a
+ * script fails whatever its words say.
  */
 function mayBuildGitConfig(text: string): boolean {
   if (!FILLED_IN.test(text)) return false;
-  const parts = text.split(COMMANDS).map((part) => part.split(/\s+/).filter((w) => w !== ''));
+  // In lower case and without a Windows program suffix: a Mac and Windows run `GIT` and
+  // `Git.EXE` as git. A word that ends in `git` counts, since a Windows path loses its
+  // backslashes when unquoted (`C:\Program Files\Git\bin\git.exe` reads `...bingit.exe`).
+  const parts = text.split(COMMANDS).map((part) =>
+    part
+      .split(/\s+/)
+      .filter((w) => w !== '')
+      .map((w) => w.toLowerCase().replace(/\.(?:exe|cmd|bat)$/, '')),
+  );
   const words = parts.flat();
   if (!words.some((w) => w === 'config' || w === '-c')) return false;
   return (
-    words.some((w) => posix.basename(w).replace(/\.exe$/, '') === 'git') ||
+    words.some((w) => w.endsWith('git')) ||
     parts.some((p) => p[0] !== undefined && FILLED_IN.test(p[0]))
   );
 }
