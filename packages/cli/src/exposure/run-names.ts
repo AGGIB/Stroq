@@ -137,3 +137,16 @@ export class NameMatcher {
     return work;
   }
 }
+
+/** The words of a command that are patterns: `*`, `?`, a brace list, a bracket in a path. */
+const BRACE_LIST = /\{[^{}:]*(?:,|\.\.)[^{}:]*\}/;
+const WILDCARD = /\*+|\?|\{[^{}:]*\}|\[[^[\]]*\]|\$\{[^{}]*\}|\$\([^()]*\)|\$[a-z_][a-z0-9_]*/;
+export const isPattern = (word: string): boolean =>
+  /[*?]/.test(word) || BRACE_LIST.test(word) || (word.includes('[') && /[./]/.test(word));
+
+/** The literal parts of a pattern, in order, that a path it matches holds; empty when there are none. */
+export const fragmentsOf = (word: string): string[] =>
+  word
+    .split(new RegExp(WILDCARD.source, 'g'))
+    .map(normalText)
+    .filter((part) => !/^[./]*$/.test(part));

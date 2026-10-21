@@ -9,7 +9,7 @@ import { hit, type AgentKind } from './agent-kinds.js';
 import { inAgentFolder } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
 import { byPath } from './git-tree.js';
-import { NameMatcher, nameForms, normalText, stemOf } from './run-names.js';
+import { NameMatcher, fragmentsOf, isPattern, nameForms, normalText, stemOf } from './run-names.js';
 import { computesWhatRuns, reachesOf } from './run-programs.js';
 import { DATA_FILE, RUNNER_WORDS, isRunnerFile, type RunnerContext } from './run-tables.js';
 
@@ -262,19 +262,6 @@ function indexTouched(view: RunView): Index {
   matcher.build();
   return { files, matcher, byName, overNames };
 }
-
-/** The words of a command that are patterns: `*`, `?`, a brace list, a bracket in a path. */
-const BRACE_LIST = /\{[^{}:]*(?:,|\.\.)[^{}:]*\}/;
-const WILDCARD = /\*+|\?|\{[^{}:]*\}|\[[^[\]]*\]|\$\{[^{}]*\}|\$\([^()]*\)|\$[a-z_][a-z0-9_]*/;
-const isPattern = (word: string): boolean =>
-  /[*?]/.test(word) || BRACE_LIST.test(word) || (word.includes('[') && /[./]/.test(word));
-
-/** The literal parts of a pattern, in order, that a path it matches holds; empty when there are none. */
-const fragmentsOf = (word: string): string[] =>
-  word
-    .split(new RegExp(WILDCARD.source, 'g'))
-    .map(normalText)
-    .filter((part) => !/^[./]*$/.test(part));
 
 /** Whether `text` holds each of `parts`, in order. */
 function holdsInOrder(text: string, parts: readonly string[]): boolean {

@@ -25,6 +25,7 @@ import {
   type AgentHit,
 } from './agent-kinds.js';
 import { lineOf } from './jsonc.js';
+import { fragmentsOf } from './run-names.js';
 import { autoApproves } from './privilege-surface.js';
 
 /**
@@ -588,7 +589,10 @@ function hookManagerHit(
  */
 export function lintStagedRuns(value: unknown): string {
   const patterns = filesRunBy(value);
-  if (patterns.some((p) => /[{}[\]!()\\]/.test(p) || p === '*')) return UNREAD_PATTERN;
+  // A pattern with no literal piece left once its wildcards, dots and slashes are off (`**`,
+  // `**/*`, `*.*`) names no file the reading could follow, and matches any.
+  if (patterns.some((p) => /[{}[\]!()\\]/.test(p) || fragmentsOf(p.toLowerCase()).length === 0))
+    return UNREAD_PATTERN;
   return [...stringsOf(value), ...patterns].join('\n');
 }
 

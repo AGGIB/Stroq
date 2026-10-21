@@ -709,6 +709,19 @@ describe('a lint-staged command that runs the files it is given', () => {
     expect(runs({ '*.{js,ts}': ['prettier --write', 'eslint'] })).not.toContain('*.{js,ts}');
   });
 
+  // A pattern with no literal piece left once its wildcards, dots and slashes are taken off names
+  // no file it could be followed by: it matches any, so any change fails.
+  it.each([
+    [{ '**': 'node' }, 'src/a.js'],
+    [{ '**/*': 'node' }, 'src/a.js'],
+    [{ '*.*': 'sh' }, 'src/a.js'],
+    [{ '**': 'node' }, 'notes/a.txt'],
+    [{ '*.*': 'sh' }, 'notes/a.txt'],
+    [{ '?*': 'sh' }, 'notes/a.txt'],
+  ])('fails %j when a change edits %s', (staged, path) => {
+    expect(edit(staged, path)).toEqual(['new unreadable-config package.json']);
+  });
+
   it('fails one under a pattern it does not read, whatever the change', () => {
     expect(edit({ '*.{md,txt}': 'sh' }, 'notes/a.txt')).toEqual([
       'new unreadable-config package.json',
