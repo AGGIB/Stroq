@@ -202,13 +202,22 @@ describe('a git hook in plain stroq inspect', () => {
     ]);
   });
 
-  it.each(['husky --weird x', 'husky\n.h', 'husky \\\n.h'])(
-    'fails a husky folder it cannot place: %j',
-    (script) => {
-      const pkg = JSON.stringify({ scripts: { prepare: script } });
-      expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
-    },
-  );
+  it.each([
+    'husky --weird x',
+    'husky\n.h',
+    'husky \\\n.h',
+    // The shell may fill in the folder, or husky itself: either way it is not placed.
+    'husky $DIR',
+    'npx husky `cat dir`',
+    'HUSKY_DIR=x; husky .h $X',
+    // Something other than a blank, the end or a separator after the name.
+    'husky:.h',
+    'node node_modules/husky/bin.js .config/h',
+    'husky,x',
+  ])('fails a husky folder it cannot place: %j', (script) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
 
   // A script that runs git config and lets the shell fill anything in may build the key or the
   // folder: it fails, whatever the words around it.

@@ -37,6 +37,14 @@ const MENTIONS_HOOKS_PATH = /hookspath/g;
 const COMMANDS = /[;&|\n\r()]/;
 /** What a shell fills in at run time: a variable, a substitution. */
 const FILLED_IN = /[$`]/;
+/**
+ * Whether the name that ends at `at` is a word of its own: what follows it, past a version
+ * (`husky@9`), is a blank, the end, or what separates commands. Anything else (`husky/bin.js`,
+ * `husky:x`, `HUSKY_DIR`) is husky run or named in a way this does not read.
+ */
+const endsAWord = (text: string, at: number): boolean =>
+  /^(?:@[^\s;&|()]*)?(?:[\s;&|()]|$)/.test(text.slice(at, at + 256));
+
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
 
@@ -181,13 +189,23 @@ export function plainHookHits(
       unplaced('a folder git config may build from what the shell fills in');
     // One reading of husky: each folder it names is placed, or the script fails. A script over
     // more than one line may join them with a backslash, which no reading of one line sees.
-    if (LINE_BREAK.test(script) && /husky/i.test(text)) unplaced('a husky folder on another line');
+    const huskyUnread = !/husky/i.test(text)
+      ? undefined
+      : LINE_BREAK.test(script)
+        ? 'a husky folder on another line'
+        : FILLED_IN.test(text)
+          ? 'a husky folder the shell may fill in'
+          : [...text.matchAll(/husky/gi)].some((m) => !endsAWord(text, m.index + 5))
+            ? 'husky run in a way this does not read'
+            : undefined;
+    if (huskyUnread !== undefined) unplaced(huskyUnread);
     for (const match of text.matchAll(HUSKY_FOLDER)) {
       const value = match[1] as string;
       if (HUSKY_FLAGS.has(value.toLowerCase())) continue;
       const folder = value.startsWith('-') ? undefined : placed(value);
-      if (folder === undefined) unplaced(value);
-      else folders.add(folder);
+      // One finding a script: what fails it already is said above.
+      if (folder !== undefined) folders.add(folder);
+      else if (huskyUnread === undefined) unplaced(value);
     }
   }
   return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder))];
