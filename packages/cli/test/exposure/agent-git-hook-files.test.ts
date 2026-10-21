@@ -311,8 +311,21 @@ describe('a git hook in plain stroq inspect', () => {
   it('reads a script npm does not run by itself as before', () => {
     const scripts = { test: 'jest $FLAGS', lint: 'prettier --check "**/*.{js,ts}"' };
     expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([]);
-    const unrelated = { prepare: 'tsc', dev: 'echo $PORT' };
-    expect(surface({ 'package.json': JSON.stringify({ scripts: unrelated }) }).failing).toEqual([]);
+    for (const prepare of ['tsc', 'husky', 'tsc -p  tsconfig.build.json', 'is-ci || husky']) {
+      const scripts = { prepare, dev: 'echo $PORT' };
+      expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing, prepare).toEqual([]);
+    }
+  });
+
+  // Any lifecycle script not on a short list of known commands may start another script.
+  it.each([
+    [{ prepare: 'concurrently "a" "b"', a: 'cp x .git/hooks/' }],
+    [{ prepare: 'gulp', build: 'echo $X' }],
+    [{ postinstall: 'bunx x', b: 'echo $X' }],
+  ])('reads every script coarsely beside %j', (scripts) => {
+    expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([
+      'git-hook-routine package.json',
+    ]);
   });
 
   it.each(['npm run setup', 'yarn setup', 'pnpm -s setup', 'run-s setup', 'make setup'])(

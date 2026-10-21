@@ -112,29 +112,28 @@ function mayWriteHooks(script: string): boolean {
 
 /** The scripts npm runs by itself on install, read coarsely. */
 const LIFECYCLE: ReadonlySet<string> = new Set(INSTALL_SCRIPT_NAMES);
-/** Programs that run other scripts or tasks: one in a lifecycle script can start any script. */
-const RUNNERS: ReadonlySet<string> = new Set([
-  'run',
-  'npm',
-  'yarn',
-  'pnpm',
-  'bun',
-  'npx',
-  'run-s',
-  'run-p',
-  'npm-run-all',
-  'turbo',
-  'nx',
-  'make',
-  'just',
-  'task',
+/**
+ * Lifecycle scripts known to start no other script, compared trimmed, with blanks collapsed and in
+ * lower case. Any other lifecycle script may run a runner (npm, a task runner, a script by name),
+ * so then every script of the package.json is read coarsely.
+ */
+const KNOWN_LIFECYCLE: ReadonlySet<string> = new Set([
+  'husky',
+  'husky install',
+  'tsc',
+  'tsc -b',
+  'node-gyp rebuild',
+  'patch-package',
+  'simple-git-hooks',
+  'lefthook install',
+  'is-ci || husky',
 ]);
 
-/** Whether a script, unquoted and in lower case, has a runner as a word (see `RUNNERS`). */
-const runsRunner = (script: string): boolean =>
-  wordsOf(unquoted(script).toLowerCase()).some((w) =>
-    RUNNERS.has(posix.basename(w).replace(/\.(?:exe|cmd|bat)$/, '')),
-  );
+/** Whether a lifecycle script is one of `KNOWN_LIFECYCLE`, or `tsc -p <word>`. */
+function isKnownLifecycle(script: string): boolean {
+  const text = script.trim().replace(/\s+/g, ' ').toLowerCase();
+  return KNOWN_LIFECYCLE.has(text) || /^tsc -p \S+$/.test(text);
+}
 
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
@@ -258,9 +257,11 @@ export function plainHookHits(
       what: `a script points git at hooks in ${value}, a folder this cannot place, so its hooks were not read`,
     });
   };
-  // A lifecycle script that runs a runner can start any script: then every one is read coarsely.
+  // A lifecycle script not known to start nothing else may start any script: then every one is
+  // read coarsely.
   const everyCoarse = Object.entries(scripts).some(
-    ([name, script]) => LIFECYCLE.has(name) && typeof script === 'string' && runsRunner(script),
+    ([name, script]) =>
+      LIFECYCLE.has(name) && (typeof script !== 'string' || !isKnownLifecycle(script)),
   );
   const coarse = (name: string): boolean => LIFECYCLE.has(name) || everyCoarse;
   for (const [name, script] of Object.entries(scripts)) {
