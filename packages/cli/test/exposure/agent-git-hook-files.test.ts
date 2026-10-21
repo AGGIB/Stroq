@@ -243,9 +243,9 @@ describe('a git hook in plain stroq inspect', () => {
     }
   });
 
-  // A script that names `.git` as a path, a git setting that says where git or its config is, a
-  // glob that can spell `.git`, or that writes or copies through what the shell fills in, may set
-  // or write where git hooks run: it fails.
+  // A lifecycle script that names `.git` as a path, a git setting that says where git, its config
+  // or its templates are, a glob or brace after a dot, an archive extract, a backslash next to `.g`,
+  // or that uses a variable or a backquote at all, may set or write where git hooks run: it fails.
   it.each([
     '/usr/lib/git-core/git-config core.hooksPath x',
     'git --exec-path=./bin status',
@@ -271,6 +271,16 @@ describe('a git hook in plain stroq inspect', () => {
     'D=.git; cp x $D/hooks/',
     'install -m 755 x `echo .gi`t/hooks/pre-commit',
     'printf x > $H',
+    'cp x .g\\it/hooks/',
+    'cp x x.git/hooks/',
+    'cp x .{g,h}it/hooks/',
+    'echo $X anything',
+    'tar -xf hooks.tar -C .',
+    'tar xzf hooks.tgz',
+    'unzip hooks.zip',
+    'git init --template=t',
+    'GIT_TEMPLATE_DIR=t git init',
+    'git config init.templateDir t',
   ])('fails a script that may set or write where git hooks run: %s', (script) => {
     const pkg = JSON.stringify({ scripts: { prepare: script } });
     expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
@@ -286,12 +296,20 @@ describe('a git hook in plain stroq inspect', () => {
       'cp -r .github dist/',
       'git add .gitattributes .gitmodules .gitkeep',
       'git config core.hooksPath .githooks',
-      'echo $npm_package_version',
+      'husky',
+      'tsc -p .',
+      'tar -czf out.tgz dist',
     ])
       expect(
         surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
         script,
       ).toEqual([]);
+  });
+
+  // Only what npm runs by itself on install is read this coarsely: a script run by name is not.
+  it('reads a script npm does not run by itself as before', () => {
+    const scripts = { test: 'jest $FLAGS', lint: 'prettier --check "**/*.{js,ts}"' };
+    expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([]);
   });
 
   it('passes husky with no folder, or with a flag that takes none', () => {
