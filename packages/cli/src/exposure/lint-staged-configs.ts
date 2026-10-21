@@ -13,10 +13,15 @@ import { foldName } from './git-dir-names.js';
  * which only running it would tell: while one of those is there, any change at all fails.
  */
 
-/** Every lint-staged config, by its folded base name. */
-const CONFIG = /^(?:\.lintstagedrc(?:\..*)?|lint-staged\.config\..*)$/;
+/**
+ * Every lint-staged config, by its folded base name: its own files, and the `package.yaml` pnpm
+ * reads in place of package.json, whose `lint-staged` key is read as package.json's is.
+ */
+const CONFIG = /^(?:\.lintstagedrc(?:\..*)?|lint-staged\.config\..*|package\.ya?ml)$/;
 /** The forms read as data: JSON, YAML, and the bare name, which lint-staged reads as YAML. */
-const DATA = /^\.lintstagedrc(?:\.json|\.ya?ml)?$/;
+const DATA = /^(?:\.lintstagedrc(?:\.json|\.ya?ml)?|package\.ya?ml)$/;
+/** pnpm's package manifest in YAML. */
+const PACKAGE_YAML = /^package\.ya?ml$/;
 /** The most lint-staged configs one check reads; past them, one finding fails. */
 const MAX_CONFIGS = 64;
 
@@ -24,8 +29,11 @@ const MAX_CONFIGS = 64;
 export const isLintStagedConfig = (path: string): boolean =>
   CONFIG.test(foldName(posix.basename(path)));
 
-/** The value of a data config's text, or undefined when it does not parse. */
-function valueOf(name: string, text: string): { readonly value: unknown } | undefined {
+/**
+ * The lint-staged config a data file holds: `{ value }`, `null` for a `package.yaml` with no
+ * `lint-staged` key, or undefined when the file does not parse.
+ */
+function valueOf(name: string, text: string): { readonly value: unknown } | null | undefined {
   if (name.endsWith('.json')) {
     try {
       return { value: JSON.parse(text) as unknown };
@@ -34,7 +42,14 @@ function valueOf(name: string, text: string): { readonly value: unknown } | unde
     }
   }
   const read = readYaml(text);
-  return read.ok ? { value: read.value } : undefined;
+  if (!read.ok) return undefined;
+  if (!PACKAGE_YAML.test(name)) return { value: read.value };
+  const doc = read.value;
+  if (doc === null || doc === undefined) return null;
+  if (typeof doc !== 'object' || Array.isArray(doc)) return undefined;
+  return Object.hasOwn(doc, 'lint-staged')
+    ? { value: (doc as Record<string, unknown>)['lint-staged'] }
+    : null;
 }
 
 /**
@@ -65,6 +80,7 @@ export function lintStagedConfigs(
     }
     const text = texts.get(path);
     const parsed = text === undefined ? undefined : valueOf(name, text);
+    if (parsed === null) continue;
     if (parsed === undefined) {
       unread(path, 'lint-staged config not read, so what a commit runs is not known');
       continue;

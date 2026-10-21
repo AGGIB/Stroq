@@ -67,7 +67,7 @@ const HOOKISH: ReadonlySet<string> = new Set([
 const EXECUTABLE = '100755';
 /** The configs of git hook managers, by their folded name: what they name runs on a commit. */
 const HOOK_MANAGER =
-  /^(?:\.pre-commit-config\.ya?ml|\.?lefthook(?:-local)?\.(?:ya?ml|toml|jsonc?)|\.lintstagedrc.*|lint-staged\.config\..*|\.huskyrc.*|husky\.config\..*|\.?simple-git-hooks\..*|\.overcommit\.ya?ml)$/;
+  /^(?:\.pre-commit-config\.ya?ml|\.?lefthook(?:-local)?\.(?:ya?ml|toml|jsonc?)|\.lintstagedrc.*|lint-staged\.config\..*|package\.ya?ml|\.huskyrc.*|husky\.config\..*|\.?simple-git-hooks\..*|\.overcommit\.ya?ml)$/;
 /** Whether a path is a git hook manager's config. */
 export const isHookManagerConfig = (path: string): boolean =>
   HOOK_MANAGER.test(foldName(path.slice(path.lastIndexOf('/') + 1)));

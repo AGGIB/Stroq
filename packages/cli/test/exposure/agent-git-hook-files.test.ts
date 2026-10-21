@@ -356,6 +356,27 @@ describe('a lint-staged config file already there', () => {
     );
   });
 
+  // pnpm reads package.yaml in place of package.json: its lint-staged key is read the same way.
+  it.each(['package.yaml', 'package.yml', 'packages/a/package.yaml'])(
+    'reads the lint-staged key of %s',
+    (manifest) => {
+      const config = { [manifest]: 'name: x\nlint-staged:\n  "*.md": node\n' };
+      expect(edit(config, 'docs/a.md')).toContain('changed agent-run-file-changed docs/a.md');
+      // As a hook manager's config its text is read as a command too, so the file edited here
+      // has a name that text does not hold.
+      expect(edit({ [manifest]: 'name: x\n' }, 'docs/qq.md')).toEqual([]);
+      expect(edit({ [manifest]: 'name: [x\n' }, 'README.md')).toContain(
+        `new unreadable-config ${manifest}`,
+      );
+    },
+  );
+
+  it('fails an edit to package.yaml, as to any hook manager config', () => {
+    expect(changedIn({ 'package.yaml': 'name: x\n' }, { 'package.yaml': 'name: y\n' })).toContain(
+      'changed git-hook-file package.yaml',
+    );
+  });
+
   it('fails any change while a data config cannot be read', () => {
     expect(edit({ '.lintstagedrc.json': '{"*.md": ' }, 'README.md')).toContain(
       'new unreadable-config .lintstagedrc.json',
