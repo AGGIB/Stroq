@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-21
+
 ### Added
 
 - **`stroq inspect --changed-from <rev>` fails a pull request that adds something an AI agent or an editor runs by itself.** That covers agent hooks and the scripts they run, MCP servers, editor tasks that run when a folder opens, agent settings that change what runs or where traffic goes, new permission rules, dev container settings, install scripts, package manager config files, git hooks, hidden characters in instruction files, committed bare repositories, and links that lead out of the repository. It compares each entry with the base and fails on what is new or changed. Anything it cannot read, or has to cut short, fails the check too. `--format github` writes a job summary and annotations, `--fail-on new|any|none` picks what fails, exit 3 means the check could not run, and a folder that does not exist is now exit 2 (it was 1). Plain `stroq inspect` reads the same entries in a folder, with or without `.git`. The check errs toward failing: an honest change to one of these files fails it too, and docs/GUIDE.md lists each such case and what the check does not read yet.

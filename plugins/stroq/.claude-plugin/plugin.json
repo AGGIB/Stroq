@@ -1,7 +1,7 @@
 {
   "name": "stroq",
   "description": "Checks each Claude Code tool call before it runs. Blocks a command that would send one of your keys out, and asks before the agent runs a package or script it copied from something it just read. Runs on your machine. No telemetry.",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "author": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
   "homepage": "https://stroq.dev",
   "repository": "https://github.com/AGGIB/Stroq",

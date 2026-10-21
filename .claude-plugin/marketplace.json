@@ -3,14 +3,14 @@
   "owner": { "name": "AGGIB", "url": "https://github.com/AGGIB" },
   "metadata": {
     "description": "Stroq: checks what your AI coding agent sends and runs, on your machine",
-    "version": "0.27.0"
+    "version": "0.28.0"
   },
   "plugins": [
     {
       "name": "stroq",
       "source": "./plugins/stroq",
       "description": "Checks each Claude Code tool call before it runs. Blocks a command that would send one of your keys out, and asks before the agent runs a package or script it copied from something it just read. Runs on your machine. No telemetry.",
-      "version": "0.27.0",
+      "version": "0.28.0",
       "homepage": "https://stroq.dev",
       "license": "Apache-2.0",
       "keywords": ["security", "firewall", "prompt-injection", "secrets", "provenance", "audit"],
