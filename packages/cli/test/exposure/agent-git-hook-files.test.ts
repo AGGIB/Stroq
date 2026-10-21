@@ -306,11 +306,24 @@ describe('a git hook in plain stroq inspect', () => {
       ).toEqual([]);
   });
 
-  // Only what npm runs by itself on install is read this coarsely: a script run by name is not.
+  // Only what npm runs by itself on install is read this coarsely: a script run by name is not,
+  // unless a lifecycle script runs a runner, which can start any script.
   it('reads a script npm does not run by itself as before', () => {
     const scripts = { test: 'jest $FLAGS', lint: 'prettier --check "**/*.{js,ts}"' };
     expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([]);
+    const unrelated = { prepare: 'tsc', dev: 'echo $PORT' };
+    expect(surface({ 'package.json': JSON.stringify({ scripts: unrelated }) }).failing).toEqual([]);
   });
+
+  it.each(['npm run setup', 'yarn setup', 'pnpm -s setup', 'run-s setup', 'make setup'])(
+    'reads every script coarsely when a lifecycle script runs %s',
+    (prepare) => {
+      const scripts = { prepare, setup: 'cp x .git/hooks/' };
+      expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([
+        'git-hook-routine package.json',
+      ]);
+    },
+  );
 
   it('passes husky with no folder, or with a flag that takes none', () => {
     for (const script of ['husky', 'husky || true', 'husky install', 'husky --help'])

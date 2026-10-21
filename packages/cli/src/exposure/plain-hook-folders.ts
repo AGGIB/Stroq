@@ -112,6 +112,29 @@ function mayWriteHooks(script: string): boolean {
 
 /** The scripts npm runs by itself on install, read coarsely. */
 const LIFECYCLE: ReadonlySet<string> = new Set(INSTALL_SCRIPT_NAMES);
+/** Programs that run other scripts or tasks: one in a lifecycle script can start any script. */
+const RUNNERS: ReadonlySet<string> = new Set([
+  'run',
+  'npm',
+  'yarn',
+  'pnpm',
+  'bun',
+  'npx',
+  'run-s',
+  'run-p',
+  'npm-run-all',
+  'turbo',
+  'nx',
+  'make',
+  'just',
+  'task',
+]);
+
+/** Whether a script, unquoted and in lower case, has a runner as a word (see `RUNNERS`). */
+const runsRunner = (script: string): boolean =>
+  wordsOf(unquoted(script).toLowerCase()).some((w) =>
+    RUNNERS.has(posix.basename(w).replace(/\.(?:exe|cmd|bat)$/, '')),
+  );
 
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
@@ -235,6 +258,11 @@ export function plainHookHits(
       what: `a script points git at hooks in ${value}, a folder this cannot place, so its hooks were not read`,
     });
   };
+  // A lifecycle script that runs a runner can start any script: then every one is read coarsely.
+  const everyCoarse = Object.entries(scripts).some(
+    ([name, script]) => LIFECYCLE.has(name) && typeof script === 'string' && runsRunner(script),
+  );
+  const coarse = (name: string): boolean => LIFECYCLE.has(name) || everyCoarse;
   for (const [name, script] of Object.entries(scripts)) {
     if (typeof script !== 'string') continue;
     const before = out.length;
@@ -282,7 +310,7 @@ export function plainHookHits(
       else if (huskyUnread === undefined) unplaced(value);
     }
     // One finding a script: the coarse reading only when nothing above failed it.
-    if (out.length === before && LIFECYCLE.has(name) && mayWriteHooks(script))
+    if (out.length === before && coarse(name) && mayWriteHooks(script))
       out.push({
         kind: 'git-hook-routine',
         file: 'package.json',
