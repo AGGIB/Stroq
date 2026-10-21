@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`stroq inspect` reads more of what a git hook or lint-staged can run, and lets a list of agent protections grow.** A pull request that adds a rule to `permissions.deny` or `permissions.ask`, or a tool to Gemini's `tools.exclude`, no longer fails, as long as every rule it adds is well formed. A `.lintstagedrc` file and the `lint-staged` key of `package.yaml` are read like the one in `package.json`. Plain `stroq inspect` reads lifecycle scripts more coarsely. A script that uses a variable, names a `.git` path, unpacks an archive or sets a git template now fails it, and so does every other script when a lifecycle script does more than a short list of known commands. docs/GUIDE.md lists each case.
+
 ## [0.28.0] - 2026-10-21
 
 ### Added
