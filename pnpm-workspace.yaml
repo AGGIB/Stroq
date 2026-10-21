@@ -7,3 +7,7 @@ overrides:
   # offsets. Dev only (postcss, magicast under tsup and vitest); 1.2.2 is inside every
   # parent's range, this only lifts the floor until magicast asks for it itself.
   source-map-js: ^1.2.2
+  # GHSA alerts 3, 4 and 5: vite 8.2.0 to 8.2.3 bundle a launch-editor that can run a command
+  # from a crafted file path, mostly on Windows. Dev only (vitest); the code is in vite's dev
+  # server, which this repository never starts. 8.2.4 is inside vitest's range.
+  vite: ^8.2.4
