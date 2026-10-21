@@ -64,9 +64,9 @@
 #   acts as its firewall (Stroq takes the project's directory from the hook event, not
 #   from where it runs).
 set -u
-STROQ_PIN="@stroq/cli@0.27.0"
+STROQ_PIN="@stroq/cli@0.28.0"
 # The release before the pin: run only while npm does not have the pin yet (see above).
-STROQ_FALLBACK_PIN="@stroq/cli@0.26.1"
+STROQ_FALLBACK_PIN="@stroq/cli@0.27.0"
 
 input="$(cat)"
 
