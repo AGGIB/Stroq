@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { readRegularFile } from '@stroq/core';
+import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { RepoExecHit } from './repo-surface.js';
 
@@ -37,6 +38,106 @@ const MENTIONS_HOOKS_PATH = /hookspath/g;
 const COMMANDS = /[;&|\n\r()]/;
 /** What a shell fills in at run time: a variable, a substitution. */
 const FILLED_IN = /[$`]/;
+/**
+ * Whether the name that ends at `at` is a word of its own: what follows it, past a version
+ * (`husky@9`), is a blank, the end, or what separates commands. Anything else (`husky/bin.js`,
+ * `husky:x`, `HUSKY_DIR`) is husky run or named in a way this does not read.
+ */
+const endsAWord = (text: string, at: number): boolean =>
+  /^(?:@[^\s;&|()]*)?(?:[\s;&|()]|$)/.test(text.slice(at, at + 256));
+
+/**
+ * `.git` followed by a `/`, a blank, a separator, a quote, a brace, a comma or the end, anywhere:
+ * `x.git/hooks` counts. `.gitignore`, `.github` or `.gitkeep` are other names.
+ */
+const GIT_PATH = /\.git(?=$|[/\s;&|()<>'"{},])/;
+/**
+ * Settings that say where git, its config, its folder or its templates are, which can point it at
+ * other hooks or bring hooks in: `GIT_DIR`, `--git-dir`, `GIT_WORK_TREE`, any `GIT_CONFIG*`
+ * variable, `git-config`, `--exec-path`, `--config-env`, `include.path`, a `.gitconfig`,
+ * `--template`, `GIT_TEMPLATE_DIR`, `init.templateDir`. `core.hooksPath` is read on its own above.
+ */
+const GIT_SETTINGS =
+  /git_dir|--git-dir|git_work_tree|git_config|git-config|--exec-path|--config-env|include\.path|\.gitconfig|--template|git_template_dir|init\.templatedir/;
+/** A backslash inside or next to `.g`, which hides `.git` from a reading of either kind. */
+const BACKSLASH_NEAR_G = /\\\.g|\.\\+g|\.g\\/;
+/** Programs that unpack an archive, whose files can land in `.git/hooks`. */
+const EXTRACTORS: ReadonlySet<string> = new Set(['tar', 'bsdtar', 'gtar', 'unzip', '7z']);
+/** A word that is only option letters, one of them `x`: `-xf`, `xzf`, `--extract` is not one. */
+const EXTRACT_FLAG = /^-{0,2}[a-z]*x[a-z]*$/;
+
+/** The words of a command line, split at blanks and at what separates commands. */
+const wordsOf = (text: string): string[] => text.split(/[\s;&|()<>]+/).filter((w) => w !== '');
+
+/** Whether a word has a dot followed, later in it, by a glob or brace character. */
+function globsAfterDot(word: string): boolean {
+  const dot = word.indexOf('.');
+  return dot !== -1 && /[*?[{]/.test(word.slice(dot + 1));
+}
+
+/** Whether a command of `text` unpacks an archive: `unzip`, `7z`, or `tar` given an `x`. */
+const extracts = (text: string): boolean =>
+  text.split(/[;&|()\n\r]/).some((part) => {
+    const words = wordsOf(part);
+    return words.some((w, i) => {
+      const program = posix.basename(w).replace(/\.(?:exe|cmd|bat)$/, '');
+      if (!EXTRACTORS.has(program)) return false;
+      return (
+        program !== 'tar' ||
+        words.slice(i + 1).some((f) => EXTRACT_FLAG.test(f) || f === '--extract' || f === '--get')
+      );
+    });
+  });
+
+/**
+ * Whether a lifecycle script may set or write where git hooks run in a way this does not read.
+ * Coarse, so such a script fails: a `$` or a backquote anywhere; a backslash next to `.g`; and, read
+ * twice in lower case, unquoted, once with backslashes taken off and once with them as `/`, a
+ * `.git` path (`GIT_PATH`), a setting of `GIT_SETTINGS`, a word with a glob or brace after a dot,
+ * or an archive unpacked.
+ */
+function mayWriteHooks(script: string): boolean {
+  if (FILLED_IN.test(script)) return true;
+  const lower = script.toLowerCase();
+  if (BACKSLASH_NEAR_G.test(lower) || BACKSLASH_NEAR_G.test(lower.replace(/["']/g, '')))
+    return true;
+  return [lower.replace(/["'\\]/g, ''), lower.replace(/["']/g, '').replace(/\\/g, '/')].some(
+    (text) =>
+      GIT_PATH.test(text) ||
+      GIT_SETTINGS.test(text) ||
+      wordsOf(text).some(globsAfterDot) ||
+      extracts(text),
+  );
+}
+
+/** The scripts npm runs by itself on install, read coarsely. */
+const LIFECYCLE: ReadonlySet<string> = new Set(INSTALL_SCRIPT_NAMES);
+/**
+ * Lifecycle scripts known to start no other script, compared trimmed, with blanks collapsed and in
+ * lower case. Any other lifecycle script may run a runner (npm, a task runner, a script by name),
+ * so then every script of the package.json is read coarsely.
+ */
+const KNOWN_LIFECYCLE: ReadonlySet<string> = new Set([
+  'husky',
+  'husky install',
+  'tsc',
+  'tsc -b',
+  'node-gyp rebuild',
+  'patch-package',
+  'simple-git-hooks',
+  'lefthook install',
+  'is-ci || husky',
+]);
+
+/**
+ * Whether a lifecycle script is one of `KNOWN_LIFECYCLE`, or `tsc -p` with a plain path: letters,
+ * digits, `.`, `_`, `/` and `-` only, so no `;&|(){}<>$` or backquote can follow it.
+ */
+function isKnownLifecycle(script: string): boolean {
+  const text = script.trim().replace(/\s+/g, ' ').toLowerCase();
+  return KNOWN_LIFECYCLE.has(text) || /^tsc -p [a-z0-9._/-]+$/.test(text);
+}
+
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
 
@@ -45,16 +146,25 @@ const unquoted = (script: string): string => script.replace(/["'\\]/g, '');
 
 /**
  * Whether a script may set a git config key, or the folder it names, from what the shell fills in:
- * it holds `config` or `-c` as a word, a `$` or a backquote anywhere, and `git` as a word or a
- * command the shell fills in. A coarse reading: such a script fails whatever its words say.
+ * it holds `config` or `-c` as a word, a `$` or a backquote anywhere, and a word that ends in
+ * `git` (any letter case, a `.exe` aside) or a command the shell fills in. A coarse reading: such a
+ * script fails whatever its words say.
  */
 function mayBuildGitConfig(text: string): boolean {
   if (!FILLED_IN.test(text)) return false;
-  const parts = text.split(COMMANDS).map((part) => part.split(/\s+/).filter((w) => w !== ''));
+  // In lower case and without a Windows program suffix: a Mac and Windows run `GIT` and
+  // `Git.EXE` as git. A word that ends in `git` counts, since a Windows path loses its
+  // backslashes when unquoted (`C:\Program Files\Git\bin\git.exe` reads `...bingit.exe`).
+  const parts = text.split(COMMANDS).map((part) =>
+    part
+      .split(/\s+/)
+      .filter((w) => w !== '')
+      .map((w) => w.toLowerCase().replace(/\.(?:exe|cmd|bat)$/, '')),
+  );
   const words = parts.flat();
   if (!words.some((w) => w === 'config' || w === '-c')) return false;
   return (
-    words.some((w) => posix.basename(w).replace(/\.exe$/, '') === 'git') ||
+    words.some((w) => w.endsWith('git')) ||
     parts.some((p) => p[0] !== undefined && FILLED_IN.test(p[0]))
   );
 }
@@ -128,12 +238,14 @@ function folderHits(root: string, folder: string): RepoExecHit[] {
 
 /**
  * The hooks of every folder a commit may run them from. `hooksPaths` are the values git's own
- * config gives `core.hooksPath`; `scripts` the commands of package.json.
+ * config gives `core.hooksPath`; `scripts` the scripts of package.json, by name. Every script is
+ * read for the folders it names; a lifecycle script, which npm runs by itself on install, is also
+ * read coarsely (see `mayWriteHooks`).
  */
 export function plainHookHits(
   root: string,
   hooksPaths: readonly string[],
-  scripts: readonly string[],
+  scripts: Readonly<Record<string, unknown>>,
 ): RepoExecHit[] {
   const folders = new Set(['.husky', '.githooks']);
   const out: RepoExecHit[] = [];
@@ -148,7 +260,16 @@ export function plainHookHits(
       what: `a script points git at hooks in ${value}, a folder this cannot place, so its hooks were not read`,
     });
   };
-  for (const script of scripts) {
+  // A lifecycle script not known to start nothing else may start any script: then every one is
+  // read coarsely.
+  const everyCoarse = Object.entries(scripts).some(
+    ([name, script]) =>
+      LIFECYCLE.has(name) && (typeof script !== 'string' || !isKnownLifecycle(script)),
+  );
+  const coarse = (name: string): boolean => LIFECYCLE.has(name) || everyCoarse;
+  for (const [name, script] of Object.entries(scripts)) {
+    if (typeof script !== 'string') continue;
+    const before = out.length;
     // Every mention must be one the exact reading placed; a spelling it cannot read fails.
     const text = unquoted(script);
     const mentions = text.toLowerCase().match(MENTIONS_HOOKS_PATH);
@@ -168,18 +289,37 @@ export function plainHookHits(
       unplaced('a core.hooksPath this does not read');
       failed = true;
     }
-    if (!failed && mayBuildGitConfig(text))
+    if (!failed && mayBuildGitConfig(text)) {
       unplaced('a folder git config may build from what the shell fills in');
+      failed = true;
+    }
     // One reading of husky: each folder it names is placed, or the script fails. A script over
     // more than one line may join them with a backslash, which no reading of one line sees.
-    if (LINE_BREAK.test(script) && /husky/i.test(text)) unplaced('a husky folder on another line');
+    const huskyUnread = !/husky/i.test(text)
+      ? undefined
+      : LINE_BREAK.test(script)
+        ? 'a husky folder on another line'
+        : FILLED_IN.test(text)
+          ? 'a husky folder the shell may fill in'
+          : [...text.matchAll(/husky/gi)].some((m) => !endsAWord(text, m.index + 5))
+            ? 'husky run in a way this does not read'
+            : undefined;
+    if (huskyUnread !== undefined) unplaced(huskyUnread);
     for (const match of text.matchAll(HUSKY_FOLDER)) {
       const value = match[1] as string;
       if (HUSKY_FLAGS.has(value.toLowerCase())) continue;
       const folder = value.startsWith('-') ? undefined : placed(value);
-      if (folder === undefined) unplaced(value);
-      else folders.add(folder);
+      // One finding a script: what fails it already is said above.
+      if (folder !== undefined) folders.add(folder);
+      else if (huskyUnread === undefined) unplaced(value);
     }
+    // One finding a script: the coarse reading only when nothing above failed it.
+    if (out.length === before && coarse(name) && mayWriteHooks(script))
+      out.push({
+        kind: 'git-hook-routine',
+        file: 'package.json',
+        what: `the ${name} script may set or write where git hooks run, in a way this does not read, so those hooks were not read`,
+      });
   }
   return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder))];
 }

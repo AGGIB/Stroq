@@ -21,7 +21,9 @@ import {
 } from './package-configs.js';
 import { gitHookFileChanges, hookFilesAt, isGitConfigName } from './git-hook-files.js';
 import { hiddenTextChanges } from './hidden-text-changes.js';
+import { isLintStagedConfig, lintStagedConfigs } from './lint-staged-configs.js';
 import {
+  growthOnly,
   protectionsUnknown,
   protectiveChanges,
   protectiveKeys,
@@ -310,7 +312,7 @@ function compare(top: string, base: string, head: string) {
         const source = oid === undefined ? undefined : read.baseSource(oid);
         const before = source === undefined ? [] : hitsForRead(p.path, source);
         return [
-          ...tagChanges(now, before),
+          ...growthOnly(now, before, tagChanges(now, before)),
           ...removedProtections(now, before).map((h) => tagged(h, 'changed')),
           ...protectionChanges(p, headRead.text, source),
           ...guardChanges(p, headRead.text, source),
@@ -369,7 +371,12 @@ function compare(top: string, base: string, head: string) {
   let all: ReturnType<typeof withAllLinks> | undefined;
   const linked = () => (all ??= withAllLinks(top, tree, links.view, MAX_RUN_LINKS));
   const hooks = hookFiles(top, tree, linked().view, changed, found);
-  const entries = [...found, ...hooks.entries];
+  const lintStaged = lintStagedConfigs(
+    sorted.filter((p) => isLintStagedConfig(p)),
+    (paths) => readTexts(top, tree, paths),
+    changed.size > 0,
+  );
+  const entries = [...found, ...hooks.entries, ...lintStaged.entries];
   const runs = runView(top, tree, sorted, changed, links.view, entries);
   const limits = limitHits(dropped, links.cut, stoppedAt);
   const hits = [
@@ -396,6 +403,7 @@ function compare(top: string, base: string, head: string) {
     ...deletedGuards(top, changed),
     ...deletedProtections(top, changed),
     ...hooks.hits,
+    ...lintStaged.hits,
   ];
   // Any other link the change brought that leads out, to nothing, or was not read.
   const reported = new Set(

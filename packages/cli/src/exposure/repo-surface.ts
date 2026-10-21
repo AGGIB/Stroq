@@ -610,11 +610,7 @@ const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): R
  * container commands, a `.envrc`, install scripts. Both a repository and a plain folder read these.
  */
 const workingTreeHits = (root: string, hooksPaths: readonly string[] = []): RepoExecHit[] => [
-  ...plainHookHits(
-    root,
-    hooksPaths,
-    Object.values(packageScripts(root)).filter((s): s is string => typeof s === 'string'),
-  ),
+  ...plainHookHits(root, hooksPaths, packageScripts(root)),
   ...devcontainerHits(root),
   ...envrcHits(root),
   ...packageScriptHits(root),

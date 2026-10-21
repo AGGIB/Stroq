@@ -306,3 +306,90 @@ describe('a protective list a change only adds to', () => {
     expect(net(G, server(['a', 'b']), server(['a']))).toEqual(['mcpServers.s.excludeTools']);
   });
 });
+
+/**
+ * The readers of these lists fail no change that only adds to one either: every element the base
+ * had still there, all plain strings. The whole check then passes; a removal or a swap fails.
+ */
+describe('a protective list its reader sees only grow', () => {
+  const CLAUDE = '.claude/settings.json';
+  const G = '.gemini/settings.json';
+
+  it.each([
+    [
+      CLAUDE,
+      { permissions: { ask: ['Bash(git push:*)'] } },
+      { permissions: { ask: ['Bash(git push:*)', 'Bash(rm:*)'] } },
+    ],
+    [CLAUDE, {}, { permissions: { ask: ['Bash(rm:*)'] } }],
+    [
+      CLAUDE,
+      { permissions: { deny: ['Read(.env)'] } },
+      { permissions: { deny: ['Read(.env)', 'Bash(curl:*)'] } },
+    ],
+    [
+      G,
+      { tools: { exclude: ['run_shell_command'] } },
+      { tools: { exclude: ['run_shell_command', 'web_fetch'] } },
+    ],
+    [G, { excludeTools: ['a'] }, { excludeTools: ['b', 'a'] }],
+  ])('passes the whole check: %s from %j to %j', (path, before, after) => {
+    expect(changed(path, json(before), json(after))).toEqual([]);
+  });
+
+  it.each([
+    [CLAUDE, { permissions: { ask: ['a', 'b'] } }, { permissions: { ask: ['a'] } }],
+    [CLAUDE, { permissions: { ask: ['a'] } }, { permissions: { ask: ['b'] } }],
+    [CLAUDE, { permissions: { ask: ['a'] } }, { permissions: { ask: ['a', 1] } }],
+    [CLAUDE, { permissions: { deny: ['a', 'b'] } }, { permissions: { deny: ['a'] } }],
+    [G, { tools: { exclude: ['a', 'b'] } }, { tools: { exclude: ['a'] } }],
+    [G, { excludeTools: ['a'] }, { excludeTools: 'a' }],
+  ])('fails %s from %j to %j', (path, before, after) => {
+    expect(changed(path, json(before), json(after)).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A list counts as only grown when every element it gained is a well-formed rule: a malformed one
+ * can make the agent refuse the whole settings file or permissions block, and with it every rule
+ * that was there. So an added element must be `Tool` or `Tool(...)` (or `mcp__server__tool`), at
+ * most 512 characters, and not a copy of one already there; anything else still fails.
+ */
+describe('what a protective list may gain', () => {
+  const CLAUDE = '.claude/settings.json';
+  const G = '.gemini/settings.json';
+  const ask = (rules: unknown[]) => json({ permissions: { ask: rules } });
+  const deny = (rules: unknown[]) => json({ permissions: { deny: rules } });
+
+  it('passes a well-formed rule added', () => {
+    expect(changed(CLAUDE, deny(['Read(.env)']), deny(['Read(.env)', 'Bash(curl:*)']))).toEqual([]);
+    expect(changed(CLAUDE, ask([]), ask(['mcp__github__create_issue']))).toEqual([]);
+    expect(
+      changed(
+        G,
+        json({ excludeTools: ['a'] }),
+        json({ excludeTools: ['a', 'run_shell_command(rm)'] }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['an unbalanced rule', 'Bash(curl:*'],
+    ['an empty one', ''],
+    ['one 600 characters long', `Bash(${'x'.repeat(594)})`],
+    ['one with an odd character', 'Bash curl'],
+    ['a copy of one already there', 'Read(.env)'],
+  ])('fails %s added to a deny or ask list', (_, rule) => {
+    expect(
+      changed(CLAUDE, deny(['Read(.env)']), deny(['Read(.env)', rule])).length,
+    ).toBeGreaterThan(0);
+    expect(changed(CLAUDE, ask(['Read(.env)']), ask(['Read(.env)', rule])).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('fails an odd tool added to a Gemini exclude list', () => {
+    const exclude = (tools: string[]) => json({ tools: { exclude: tools } });
+    expect(changed(G, exclude(['a']), exclude(['a', 'b c'])).length).toBeGreaterThan(0);
+  });
+});

@@ -202,13 +202,22 @@ describe('a git hook in plain stroq inspect', () => {
     ]);
   });
 
-  it.each(['husky --weird x', 'husky\n.h', 'husky \\\n.h'])(
-    'fails a husky folder it cannot place: %j',
-    (script) => {
-      const pkg = JSON.stringify({ scripts: { prepare: script } });
-      expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
-    },
-  );
+  it.each([
+    'husky --weird x',
+    'husky\n.h',
+    'husky \\\n.h',
+    // The shell may fill in the folder, or husky itself: either way it is not placed.
+    'husky $DIR',
+    'npx husky `cat dir`',
+    'HUSKY_DIR=x; husky .h $X',
+    // Something other than a blank, the end or a separator after the name.
+    'husky:.h',
+    'node node_modules/husky/bin.js .config/h',
+    'husky,x',
+  ])('fails a husky folder it cannot place: %j', (script) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
 
   // A script that runs git config and lets the shell fill anything in may build the key or the
   // folder: it fails, whatever the words around it.
@@ -216,6 +225,10 @@ describe('a git hook in plain stroq inspect', () => {
     'git config set core.hookspath $D',
     'echo $X && git --file x config core.hookspath .h',
     'git config --get user.name && echo `date`',
+    // A Mac and Windows run git in any letter case, and Windows by its .exe name.
+    'GIT config core.$X .h',
+    'Git.EXE CONFIG core.$X .h',
+    'C:\\Program Files\\Git\\bin\\git.exe config core.$X .h',
   ])('fails %s', (script) => {
     const pkg = JSON.stringify({ scripts: { prepare: script } });
     expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
@@ -230,11 +243,173 @@ describe('a git hook in plain stroq inspect', () => {
     }
   });
 
+  // A lifecycle script that names `.git` as a path, a git setting that says where git, its config
+  // or its templates are, a glob or brace after a dot, an archive extract, a backslash next to `.g`,
+  // or that uses a variable or a backquote at all, may set or write where git hooks run: it fails.
+  it.each([
+    '/usr/lib/git-core/git-config core.hooksPath x',
+    'git --exec-path=./bin status',
+    'cp tools/hooks.cfg .git/config',
+    'cp tools\\hooks.cfg .git\\config',
+    'GIT_CONFIG_GLOBAL=./g git status',
+    'GIT_DIR=x git status',
+    'git --git-dir=x status',
+    'GIT_WORK_TREE=x git status',
+    'git --config-env=core.hooksPath=H commit',
+    'git config include.path ../shared.cfg',
+    'echo x > .git/hooks/pre-commit',
+    'echo x >> .git/info/exclude',
+    'echo x | tee -a .git/hooks/pre-commit',
+    'cp scripts\\pre-commit .git\\hooks\\pre-commit',
+    'cd .git && cp x hooks/pre-commit',
+    'cp x .git/hooks/',
+    'ln -s ../x .git/hooks/pre-commit',
+    'rsync -a x/ .GIT/hooks/',
+    'cp x .g?t/hooks/',
+    'cp x ./.g*/hooks/',
+    'cp x {.git,y}/hooks/',
+    'D=.git; cp x $D/hooks/',
+    'install -m 755 x `echo .gi`t/hooks/pre-commit',
+    'printf x > $H',
+    'cp x .g\\it/hooks/',
+    'cp x x.git/hooks/',
+    'cp x .{g,h}it/hooks/',
+    'echo $X anything',
+    'tar -xf hooks.tar -C .',
+    'tar xzf hooks.tgz',
+    'unzip hooks.zip',
+    'git init --template=t',
+    'GIT_TEMPLATE_DIR=t git init',
+    'git config init.templateDir t',
+  ])('fails a script that may set or write where git hooks run: %s', (script) => {
+    const pkg = JSON.stringify({ scripts: { prepare: script } });
+    expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
+  });
+
+  it('passes ordinary scripts', () => {
+    for (const script of [
+      'git status',
+      'git log > out.txt',
+      'npm test > log.txt 2>&1',
+      'cat .gitignore',
+      'cat .gitignore | wc -l',
+      'cp -r .github dist/',
+      'git add .gitattributes .gitmodules .gitkeep',
+      'git config core.hooksPath .githooks',
+      'husky',
+      'tsc -p .',
+      'tar -czf out.tgz dist',
+    ])
+      expect(
+        surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
+        script,
+      ).toEqual([]);
+  });
+
+  // Only what npm runs by itself on install is read this coarsely: a script run by name is not,
+  // unless a lifecycle script runs a runner, which can start any script.
+  it('reads a script npm does not run by itself as before', () => {
+    const scripts = { test: 'jest $FLAGS', lint: 'prettier --check "**/*.{js,ts}"' };
+    expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([]);
+    for (const prepare of ['tsc', 'husky', 'tsc -p  tsconfig.build.json', 'is-ci || husky']) {
+      const scripts = { prepare, dev: 'echo $PORT' };
+      expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing, prepare).toEqual([]);
+    }
+  });
+
+  // Any lifecycle script not on a short list of known commands may start another script.
+  it.each([
+    [{ prepare: 'concurrently "a" "b"', a: 'cp x .git/hooks/' }],
+    [{ prepare: 'gulp', build: 'echo $X' }],
+    [{ postinstall: 'bunx x', b: 'echo $X' }],
+    // `tsc -p` takes a plain path only: anything after it is not the known command.
+    [{ prepare: 'tsc -p x;cp${IFS}a${IFS}.git/hooks/' }],
+    [{ prepare: 'tsc -p x;make', b: 'echo $X' }],
+  ])('reads every script coarsely beside %j', (scripts) => {
+    expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([
+      'git-hook-routine package.json',
+    ]);
+  });
+
+  it.each(['npm run setup', 'yarn setup', 'pnpm -s setup', 'run-s setup', 'make setup'])(
+    'reads every script coarsely when a lifecycle script runs %s',
+    (prepare) => {
+      const scripts = { prepare, setup: 'cp x .git/hooks/' };
+      expect(surface({ 'package.json': JSON.stringify({ scripts }) }).failing).toEqual([
+        'git-hook-routine package.json',
+      ]);
+    },
+  );
+
   it('passes husky with no folder, or with a flag that takes none', () => {
     for (const script of ['husky', 'husky || true', 'husky install', 'husky --help'])
       expect(
         surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
       ).toEqual([]);
+  });
+});
+
+/**
+ * lint-staged's own config files are read as its key of package.json is: the JSON and YAML forms
+ * for what they run, wherever they are; one written as code is not read, so while one is there any
+ * change at all fails.
+ */
+describe('a lint-staged config file already there', () => {
+  const edit = (config: Record<string, string>, path: string): string[] =>
+    changedIn({ ...config, [path]: '1\n' }, { [path]: '2\n' });
+
+  it.each([
+    ['.lintstagedrc.json', '{"*.md": "node"}'],
+    ['.lintstagedrc', '"*.md": node\n'],
+    ['.lintstagedrc.yml', '"*.md":\n  - ./run.sh\n'],
+    ['.lintstagedrc.yaml', '"*.md": yarn run custom\n'],
+    ['packages/a/.lintstagedrc.json', '{"*.md": ["sh"]}'],
+  ])('fails a change to a file %s runs', (config, text) => {
+    expect(edit({ [config]: text }, 'docs/a.md')).toContain(
+      'changed agent-run-file-changed docs/a.md',
+    );
+  });
+
+  it('follows a tool on the list by its own words, as in package.json', () => {
+    expect(edit({ '.lintstagedrc.json': '{"*.md": "prettier --write"}' }, 'docs/a.md')).toEqual([]);
+  });
+
+  it.each([
+    'lint-staged.config.js',
+    'lint-staged.config.mjs',
+    '.lintstagedrc.cjs',
+    'tools/lint-staged.config.ts',
+  ])('fails any change while %s, a config in code, is there', (config) => {
+    expect(edit({ [config]: 'export default {};\n' }, 'README.md')).toContain(
+      `new unreadable-config ${config}`,
+    );
+  });
+
+  // pnpm reads package.yaml in place of package.json: its lint-staged key is read the same way.
+  it.each(['package.yaml', 'package.yml', 'packages/a/package.yaml'])(
+    'reads the lint-staged key of %s',
+    (manifest) => {
+      const config = { [manifest]: 'name: x\nlint-staged:\n  "*.md": node\n' };
+      expect(edit(config, 'docs/a.md')).toContain('changed agent-run-file-changed docs/a.md');
+      // As a hook manager's config its text is read as a command too, so the file edited here
+      // has a name that text does not hold.
+      expect(edit({ [manifest]: 'name: x\n' }, 'docs/qq.md')).toEqual([]);
+      expect(edit({ [manifest]: 'name: [x\n' }, 'README.md')).toContain(
+        `new unreadable-config ${manifest}`,
+      );
+    },
+  );
+
+  it('fails an edit to package.yaml, as to any hook manager config', () => {
+    expect(changedIn({ 'package.yaml': 'name: x\n' }, { 'package.yaml': 'name: y\n' })).toContain(
+      'changed git-hook-file package.yaml',
+    );
+  });
+
+  it('fails any change while a data config cannot be read', () => {
+    expect(edit({ '.lintstagedrc.json': '{"*.md": ' }, 'README.md')).toContain(
+      'new unreadable-config .lintstagedrc.json',
+    );
   });
 });
 
@@ -582,6 +757,19 @@ describe('a lint-staged command that runs the files it is given', () => {
     expect(edit({ '*.{js,ts}': ['prettier --write', 'eslint'] }, 'notes/a.txt')).toEqual([]);
     expect(runs({ '*.js': 'npx --yes eslint --fix' })).not.toContain('*.js');
     expect(runs({ '*.{js,ts}': ['prettier --write', 'eslint'] })).not.toContain('*.{js,ts}');
+  });
+
+  // A pattern with no literal piece left once its wildcards, dots and slashes are taken off names
+  // no file it could be followed by: it matches any, so any change fails.
+  it.each([
+    [{ '**': 'node' }, 'src/a.js'],
+    [{ '**/*': 'node' }, 'src/a.js'],
+    [{ '*.*': 'sh' }, 'src/a.js'],
+    [{ '**': 'node' }, 'notes/a.txt'],
+    [{ '*.*': 'sh' }, 'notes/a.txt'],
+    [{ '?*': 'sh' }, 'notes/a.txt'],
+  ])('fails %j when a change edits %s', (staged, path) => {
+    expect(edit(staged, path)).toEqual(['new unreadable-config package.json']);
   });
 
   it('fails one under a pattern it does not read, whatever the change', () => {
