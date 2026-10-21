@@ -26,8 +26,11 @@
 //     contain `-` itself (`project-0-smart-smm-flutter-supabase` in the measured
 //     store), so the label cannot be split back into the pair. `params.tools[0]`
 //     states both, and that is what the name is composed from.
+import { lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { collectStringsDeep } from '@stroq/core';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
 import { isRecord, toolInputRecord } from '../adapters/tool-input.js';
 import type {
@@ -120,9 +123,15 @@ function callOf(name: string, params: unknown): Call {
     (value): value is string => typeof value === 'string' && value.startsWith('/'),
   );
   const mapped = TOOL_NAMES[name] ?? name;
+  // Every field is kept beside the ones read by name: a key in a field no reader names (a working
+  // folder, the text of an edit) is still in the call, and placed from there.
   if (mapped === 'Bash') {
     const command = record['command'];
-    return { tool: mapped, input: { command: typeof command === 'string' ? command : '' }, paths };
+    return {
+      tool: mapped,
+      input: { ...record, command: typeof command === 'string' ? command : '' },
+      paths,
+    };
   }
   if (mapped === 'Read' || mapped === 'Write') {
     // `relativeWorkspacePath` is what every measured edit carries — there is no
@@ -130,14 +139,30 @@ function callOf(name: string, params: unknown): Call {
     // workspace root would put a path in the report that the record never held.
     const file =
       record['targetFile'] ?? record['relativeWorkspacePath'] ?? record['path'] ?? record['uri'];
-    return {
-      tool: mapped,
-      input: { file_path: typeof file === 'string' ? file : '' },
-      paths,
-    };
+    const filePath = typeof file === 'string' ? file : '';
+    if (mapped === 'Read')
+      return { tool: mapped, input: { ...record, file_path: filePath }, paths };
+    // What an edit writes is in a field of its own (`streamingContent`, `code_edit`, …): every
+    // text it carries but the file's name is read as what it wrote.
+    const content = Object.entries(record)
+      .filter(([field]) => !EDIT_NAME_FIELDS.has(field))
+      .flatMap(([, value]) => collectStringsDeep(value))
+      .join('\n');
+    return { tool: mapped, input: { ...record, file_path: filePath, content }, paths };
   }
   return { tool: mapped, input: record, paths };
 }
+
+/** The fields of an edit that name its file, not what it writes there. */
+const EDIT_NAME_FIELDS: ReadonlySet<string> = new Set([
+  'targetFile',
+  'relativeWorkspacePath',
+  'path',
+  'uri',
+  'effectiveUri',
+  'absolutePath',
+  'targetDirectory',
+]);
 
 /**
  * The text a tool returned. A recognised field is taken parsed, so the result reads
@@ -229,6 +254,15 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
 }
 
 /**
+ * The events of one stored row of a session, read as `parseCursorStore` reads it: for reading a
+ * session one row at a time, so what a row holds can be told from what was read from it.
+ */
+export function cursorRowEvents(session: string, n: number, value: string): TranscriptEvent[] {
+  const [one] = parseCursorStore([{ key: `bubbleId:${session}:${n}`, value }]);
+  return one === undefined ? [] : [...one.transcript.events];
+}
+
+/**
  * Cursor's global store. `plat`/`env`/`home` default to the real process and are
  * overridable for the same reason `claudeDesktopPath` makes them overridable: a test
  * can exercise one platform branch without touching the real one.
@@ -308,18 +342,47 @@ export async function cursorUnavailable(): Promise<string | null> {
 }
 
 /**
+ * The store's address as SQLite opens it with `immutable=1`: read as a plain file, with no lock
+ * taken and nothing created beside it.
+ *
+ * Cursor's store is in WAL mode. Opened read-only the usual way with no other connection (Cursor
+ * not running), SQLite still creates `state.vscdb-shm` and `state.vscdb-wal` beside it, and a
+ * read-only connection cannot remove them again: the check would write while saying it wrote
+ * nothing. The cost of `immutable` is that changes Cursor has not yet moved from its write-ahead
+ * file into the store are not read. `cursorChangesPending` says when there are any, and the
+ * report names them as not checked.
+ */
+function storeUrl(db: string): URL {
+  const url = pathToFileURL(db);
+  url.search = '?immutable=1';
+  return url;
+}
+
+/**
+ * Whether Cursor holds changes in its write-ahead file (`state.vscdb-wal`) that a read of the
+ * store does not see: written while Cursor runs, until it moves them into the store.
+ */
+export function cursorChangesPending(db: string): boolean {
+  try {
+    const wal = lstatSync(`${db}-wal`);
+    return wal.isFile() && wal.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Rows from the store, read-only and never held longer than the parse.
  *
- * `readOnly` is not a precaution about intent but about the file: this is the
- * user's live Cursor store, and opening it for writing would create a `-wal`
- * beside it and take a lock the running editor is entitled to.
+ * Read-only and immutable (`storeUrl`): this is the user's live Cursor store, and nothing is
+ * created beside it, and no lock the running editor is entitled to is taken.
  */
-async function storeRows(db: string, session: string | null): Promise<CursorRow[]> {
+export async function storeRows(db: string, session: string | null): Promise<CursorRow[]> {
   const mod = await sqlite();
   if (mod === null) return [];
   let handle;
   try {
-    handle = new mod.DatabaseSync(db, { readOnly: true });
+    handle = new mod.DatabaseSync(storeUrl(db), { readOnly: true });
   } catch {
     return [];
   }

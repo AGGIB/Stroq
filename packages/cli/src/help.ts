@@ -297,26 +297,26 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'sent',
     synopsis:
-      'sent [<session>] [--last] [--transcript <path>] [--try] [--json] [--card [--html] [--out <file>]] [--fail-on-finding]',
+      'sent [<session>] [--here] [--last] [--transcript <path>] [--try] [--json] [--counts] [--card [--html] [--out <file>]] [--fail-if third-party|any]',
     about: [
-      'which credentials appear in a recorded agent session, and in which tool result',
-      'or call. Reads names and sources only, never a value',
+      'did your AI agent pass your keys on? Checks every session on this machine and says',
+      'where each key went. Prints names, never a value, and writes nothing',
     ],
     flags: [
+      ['--here', 'only the sessions of this project'],
       [
         '--last',
-        'the newest session recorded for this project (this directory, or the folder above it)',
+        'only the newest session of this project (this directory, or the folder above it)',
       ],
-      ['--transcript <path>', 'a specific transcript or rollout'],
-      ['--try', 'scan a built-in sample session with a made-up key in a temporary folder'],
-      ['--json', 'machine-readable output'],
-      [
-        '--card',
-        'a card to share instead of the report: counts, providers and the limits of the check, no value, name, path, command or hash',
-      ],
+      ['--transcript <path>', 'one transcript or rollout'],
+      ['--try', 'run the check on a built-in sample with a made-up key; reads nothing'],
+      ['--json', 'the full report as JSON, never a value'],
+      ['--counts', 'numbers only, as JSON: no names, paths or hosts'],
+      ['--card', 'a card to share: counts and services only'],
       ['--html', 'with --card: one HTML file with no script and no external resource'],
       ['--out <file>', 'with --card: write it to a file that does not exist yet'],
-      ['--fail-on-finding', 'exit 1 when a credential is found'],
+      ['--fail-if <level>', 'exit 1 when a key was found: third-party or any'],
+      ['--fail-on-finding', 'the same as --fail-if any'],
     ],
   },
   {

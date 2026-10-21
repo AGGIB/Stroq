@@ -1,194 +1,160 @@
 // A card that says what `stroq sent` found without saying anything that was found.
 //
-// `stroq sent` names the credentials a session carried and the calls that carried them, which is
-// the point of the report and the reason it cannot be pasted into a post. The card is the part
-// that can be: counts, the providers the credentials belong to, and what the check could and could
-// not see. It is built from the report by taking numbers and by choosing labels out of tables in
-// this file. Nothing the report holds as text (a credential's name, a path, a command, the session's
-// id, a hash) is copied into it, so there is nothing for an escape to miss: the only strings that
-// are not constants here are numbers.
-import type { SentReport } from './report.js';
+// The report names keys, files, hosts and folders, which is the point of it and the reason it
+// cannot be pasted into a post. The card can be: it is built from `--counts` (`counts.ts`),
+// which holds only numbers, dates and labels chosen from tables in the code. Every string in it
+// that is not a constant here is a number or a date.
+import type { SentCounts } from './counts.js';
+import { countParts, SEND_LIMIT } from './phrases.js';
+import { TIERS, type Tier } from './place.js';
 
-/** The providers a credential can be filed under. The labels are ours; a credential's own name is never used. */
-const PROVIDERS: readonly (readonly [RegExp, string])[] = [
-  [/aws|amazon|boto|(?:^|[_-])s3(?:[_-]|$)/i, 'AWS'],
-  [/github|(?:^|[_-])gh[_-]|ghp_|ghs_/i, 'GitHub'],
-  [/gitlab/i, 'GitLab'],
-  [/openai/i, 'OpenAI'],
-  [/anthropic|claude/i, 'Anthropic'],
-  [/stripe/i, 'Stripe'],
-  [/google|gcp|gcloud|firebase|gemini/i, 'Google'],
-  [/azure/i, 'Azure'],
-  [/(?:^|[_-])npm(?:[_-]|$)/i, 'npm'],
-  [/docker/i, 'Docker'],
-  [/slack/i, 'Slack'],
-  [/twilio|sendgrid/i, 'Twilio'],
-  [/supabase/i, 'Supabase'],
-  [/vercel|netlify|cloudflare|heroku|digitalocean/i, 'Hosting'],
-  [/sentry|datadog|newrelic/i, 'Monitoring'],
-  [/postgres|mysql|mongo|redis|database|(?:^|[_-])db[_-]/i, 'Database'],
-  [/ssh|private[_-]?key|\.pem|rsa|ed25519/i, 'SSH or a private key'],
-];
-const OTHER_PROVIDER = 'Other';
-const CANARY_PROVIDER = 'Canary';
-
-/** The agents a card can name, by the label a reader gives them. */
-const AGENTS: Readonly<Record<string, string>> = {
+/** The agents a card can name, by fixed label. */
+const AGENT_LABELS: Readonly<Record<string, string>> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   cursor: 'Cursor',
-  copilot: 'Copilot CLI',
-  windsurf: 'Windsurf',
-  antigravity: 'Antigravity',
-  openclaw: 'OpenClaw',
+};
+
+const TIER_LABELS: Readonly<Record<Tier, string>> = {
+  third_party: 'Sent to another company',
+  maybe: 'Maybe sent',
+  seen: 'Seen by the AI',
+  own_service: 'Used with its own service',
+  blocked: 'Blocked before it ran',
 };
 
 export interface SentCardProvider {
-  /** A label from the table above: never taken from the credential. */
   readonly label: string;
   readonly count: number;
 }
 
-/** Everything a card says. Numbers, and labels chosen from constants. */
+/** Everything a card says. Numbers, dates, and labels chosen from constants. */
 export interface SentCard {
-  readonly version: 1;
-  /** True only for the built-in sample, whose counts describe invented credentials. */
-  readonly synthetic?: boolean;
-  /** The agent whose record was read, as a label from `AGENTS`, or null. */
-  readonly agent: string | null;
+  readonly version: 2;
+  /** True only for the built-in sample, whose counts describe a made-up key. */
+  readonly synthetic?: true;
   readonly stroq: string;
-  /** The day the check was made, `YYYY-MM-DD`. */
   readonly checked: string;
-  /** Distinct credentials the record carried, and every sighting of them. */
-  readonly credentials: number;
-  readonly sightings: number;
+  readonly sessions: number;
+  readonly agents: readonly string[];
+  readonly keys: number;
+  readonly found: Readonly<Record<Tier, number>>;
   readonly providers: readonly SentCardProvider[];
-  /** Credential files a read or a command touched, not their paths. */
-  readonly files: number;
-  readonly calls: number;
-  readonly results: number;
-  readonly toolResultsRead: boolean;
-  /** Credentials this machine holds that the record was checked against. */
-  readonly indexed: number;
-  readonly sessionsInProject: number | null;
-  readonly fromAuditLog: boolean;
+  /** Nothing in the run was left unchecked (`--counts`' `complete`). */
+  readonly complete: boolean;
+  /** Session and key files that could not be read. */
+  readonly filesNotRead: number;
 }
 
-/** Which provider a credential belongs to, by its name and where it was read from. */
-export function providerOf(name: string, source: string, canary: boolean): string {
-  if (canary) return CANARY_PROVIDER;
-  const text = `${name} ${source}`;
-  for (const [pattern, label] of PROVIDERS) if (pattern.test(text)) return label;
-  return OTHER_PROVIDER;
-}
-
-const count = (n: number): number => (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
-
-/** The card for a report. Nothing is copied from it but counts. */
-export function buildCard(report: SentReport, stroq: string, now: Date = new Date()): SentCard {
-  const byProvider = new Map<string, number>();
-  for (const credential of report.credentials) {
-    const label = providerOf(credential.name, credential.source, credential.canary);
-    byProvider.set(label, (byProvider.get(label) ?? 0) + 1);
-  }
-  const providers = [...byProvider.entries()]
-    .map(([label, n]) => ({ label, count: n }))
+export function buildCard(counts: SentCounts): SentCard {
+  const sessions = Object.values(counts.agents).reduce(
+    (sum, a) => sum + ('sessions' in a ? a.sessions : 0),
+    0,
+  );
+  const agents = Object.entries(counts.agents)
+    .filter(([, a]) => 'sessions' in a && a.sessions > 0)
+    .map(([agent]) => AGENT_LABELS[agent] ?? 'Other');
+  const providers = Object.entries(counts.providers)
+    .map(([label, count]) => ({ label, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   return {
-    version: 1,
-    ...(report.synthetic === true ? { synthetic: true } : {}),
-    agent: report.agent !== null ? (AGENTS[report.agent] ?? null) : null,
-    stroq: /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(stroq) ? stroq : 'unknown',
-    checked: now.toISOString().slice(0, 10),
-    credentials: report.credentials.length,
-    sightings: report.credentials.reduce((sum, c) => sum + count(c.count), 0),
+    version: 2,
+    ...(counts.synthetic === true ? { synthetic: true as const } : {}),
+    stroq: counts.version,
+    checked: counts.checked,
+    sessions,
+    agents,
+    keys: counts.keys_compared,
+    found: Object.fromEntries(TIERS.map((t) => [t, counts.found[t]])) as Record<Tier, number>,
     providers,
-    files: report.files.length,
-    calls: count(report.coverage.calls),
-    results: count(report.coverage.results),
-    toolResultsRead: report.coverage.toolResultsRead,
-    indexed: count(report.coverage.indexedSecrets),
-    sessionsInProject: report.coverage.sessionsInProject ?? null,
-    fromAuditLog: report.origin === 'audit-log',
+    complete: counts.complete,
+    filesNotRead: counts.unreadable_files,
   };
 }
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+const total = (card: SentCard): number => TIERS.reduce((sum, t) => sum + card.found[t], 0);
 
-/** `AWS 1 · GitHub 2`: the providers, most first. */
-function providerList(card: SentCard): string {
-  return card.providers.map((p) => `${p.label} ${p.count}`).join(' · ');
-}
-
-/** The headline: what the record holds, in a sentence that claims no more than a record does. */
+/**
+ * The headline: what was found, as counts. It never says a key did not go somewhere, and it says
+ * no value appears only for a check that read sessions and left nothing unchecked.
+ */
 export function headline(card: SentCard): string {
-  if (card.synthetic)
-    return `The built-in synthetic sample holds ${plural(card.credentials, 'invented credential', 'invented credentials')}. No real local credentials were scanned.`;
-  if (card.indexed === 0)
-    return 'Nothing to check against: Stroq found no credential files or project .env files on this machine.';
-  if (card.credentials === 0)
-    return `No credential from this machine appears in the record of the session (checked against ${plural(card.indexed, 'value', 'values')}).`;
-  return `The record of the session holds ${plural(card.credentials, 'credential', 'credentials')} from this machine.`;
+  if (card.synthetic === true)
+    return 'The built-in sample holds 1 made-up key. Nothing on this machine was read.';
+  if (card.keys === 0) return 'Nothing to check against: Stroq found no keys on this machine.';
+  if (card.sessions === 0) return 'No sessions were read.';
+  const n = total(card);
+  if (n === 0 && !card.complete) return 'Incomplete: see the full report.';
+  if (n === 0)
+    return `None of ${plural(card.keys, "key's value", "keys' values")} from this machine appear in these AI agent sessions.`;
+  return `${n} of ${plural(card.keys, 'key', 'keys')} from this machine ${n === 1 ? 'appears' : 'appear'} in AI agent sessions: ${countParts(card.found).join(', ')}.`;
 }
 
-/** A line for a post. It says what was checked and how, and holds no value. */
+/** What the check read, and what it did not. */
+export function coverageLine(card: SentCard): string {
+  const read = `${plural(card.sessions, 'session', 'sessions')} read, ${plural(card.filesNotRead, 'file', 'files')} not read`;
+  return card.complete
+    ? `Coverage: ${read}.`
+    : `Coverage: ${read}, and more not checked: see the full report.`;
+}
+
+/** A line for a post. It says what was checked and how, and holds no key. */
 export function postLine(card: SentCard): string {
-  if (card.synthetic)
-    return `Tried Stroq's built-in synthetic sample session with ${plural(card.credentials, 'invented credential', 'invented credentials')}. No real local credentials were scanned. Run with \`npx @stroq/cli sent --try\`.`;
-  const subject = card.agent ?? 'my AI coding agent';
-  if (card.credentials === 0)
-    return `Checked ${subject}'s last session against ${plural(card.indexed, 'credential', 'credentials')} on my machine: none of them appears in its record of ${plural(card.calls, 'tool call', 'tool calls')}. Done locally with \`npx @stroq/cli sent --last\`.`;
-  return `${subject}'s last session carried ${plural(card.credentials, 'credential', 'credentials')} from my machine (${providerList(card)}) in ${plural(card.calls, 'tool call', 'tool calls')}. Checked locally with \`npx @stroq/cli sent --last\`.`;
+  if (card.synthetic === true)
+    return "Tried Stroq's built-in sample with a made-up key. Run it with `npx @stroq/cli sent --try`.";
+  if (card.sessions === 0)
+    return 'Ran a key check on my machine with `npx @stroq/cli sent`: it found no AI agent sessions to read.';
+  const n = total(card);
+  const found =
+    n > 0
+      ? [`${n} appear`, ...countParts(card.found)].join(', ')
+      : card.complete
+        ? 'none of their values appear'
+        : 'the check was incomplete';
+  return `Checked ${plural(card.sessions, 'AI agent session', 'AI agent sessions')} on my machine against ${plural(card.keys, 'key', 'keys')}: ${found}. Done locally with \`npx @stroq/cli sent\`.`;
 }
 
-const LIMITS =
-  'A credential in the record shows that its value appeared in a local transcript. It does not show a later request to a model provider, or delivery. A value that was rotated or deleted since the session is not in the index, so it cannot be found.';
-
+const LIMITS = `A key counts as sent when a recorded call carried it to a host. The record does not show what the host kept. ${SEND_LIMIT} A key rotated or deleted since the session is not compared.`;
 const SAMPLE_LIMITS =
-  'This is a built-in synthetic demonstration with invented credentials. No real local credential files or environment variables were read.';
+  'This is a built-in sample with a made-up key. No file on this machine was read.';
+
+function rows(card: SentCard): [string, string][] {
+  return [
+    ['Sessions read', String(card.sessions)],
+    ['Keys compared', String(card.keys)],
+    ...TIERS.map((t): [string, string] => [TIER_LABELS[t], String(card.found[t])]),
+    ...(card.agents.length > 0 ? [['Agents', card.agents.join(', ')] as [string, string]] : []),
+  ];
+}
+
+const footer = (card: SentCard): string =>
+  `Checked on ${card.checked} with Stroq ${card.stroq}. The check ran on this machine. This card holds counts only: no keys, names, paths, hosts, commands or hashes.`;
+
+const providerList = (card: SentCard): string =>
+  card.providers.map((p) => `${p.label} ${p.count}`).join(' · ');
 
 /** The card as Markdown. */
 export function cardMarkdown(card: SentCard): string {
-  const rows: [string, string][] = [
-    [
-      'Credentials in the record',
-      card.credentials === 0
-        ? '0'
-        : `${card.credentials} (${plural(card.sightings, 'sighting', 'sightings')})`,
-    ],
-    ['Tool calls read', String(card.calls)],
-    [
-      'Tool results read',
-      card.toolResultsRead ? String(card.results) : 'none (an audit log holds no results)',
-    ],
-    ['Credential files touched', String(card.files)],
-    ['Checked against', plural(card.indexed, 'value', 'values')],
-  ];
-  if (card.agent !== null) rows.push(['Agent', card.agent]);
-  if (card.sessionsInProject !== null)
-    rows.push(['Sessions in this project', String(card.sessionsInProject)]);
   const lines = [
-    '# Stroq session check',
+    '# Stroq key check',
     '',
     `**${headline(card)}**`,
     ...(card.providers.length > 0 ? ['', providerList(card)] : []),
     '',
     '| | |',
     '|---|---|',
-    ...rows.map(([name, value]) => `| ${name} | ${value} |`),
+    ...rows(card).map(([name, value]) => `| ${name} | ${value} |`),
     '',
-    card.synthetic ? SAMPLE_LIMITS : LIMITS,
+    ...(card.synthetic === true ? [] : [coverageLine(card), '']),
+    card.synthetic === true ? SAMPLE_LIMITS : LIMITS,
     '',
-    `Checked on ${card.checked} with Stroq ${card.stroq}. The check ran on this machine, and this card holds counts only: no values, names, paths, commands or hashes.`,
+    footer(card),
     '',
     `> ${postLine(card)}`,
   ];
   return `${lines.join('\n')}\n`;
 }
-
-// -------------------------------------------------------------------------------------------
-// HTML
-// -------------------------------------------------------------------------------------------
 
 /** Escapes text for HTML. Every string that is not a constant goes through it, though none is free text. */
 export function escapeHtml(text: string): string {
@@ -199,15 +165,16 @@ const CSP =
   "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; script-src 'none'; form-action 'none'; base-uri 'none'";
 
 const STYLE = `
-:root{--paper:#f4f1ea;--ink:#16140f;--mute:#6b665b;--rule:#d9d3c4;--hot:#d2420f;--ok:#2f6b3a}
-@media (prefers-color-scheme:dark){:root{--paper:#14120e;--ink:#f1ede2;--mute:#9a947f;--rule:#2e2a21;--hot:#ff6a3a;--ok:#7fc58b}}
+:root{--paper:#f4f1ea;--ink:#16140f;--mute:#6b665b;--rule:#d9d3c4;--hot:#d2420f}
+@media (prefers-color-scheme:dark){:root{--paper:#14120e;--ink:#f1ede2;--mute:#9a947f;--rule:#2e2a21;--hot:#ff6a3a}}
 *{box-sizing:border-box}
 html{background:var(--paper)}
 body{margin:0;padding:clamp(20px,5vw,56px);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:640px;margin:0 auto}
 .kicker{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--mute)}
 .big{margin:20px 0 4px;font:700 clamp(72px,22vw,148px)/.9 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.04em}
-.big.hot{color:var(--hot)}.big.ok{color:var(--ok)}
+.big.hot{color:var(--hot)}
+.big-label{margin:0 0 12px;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--hot)}
 h1{margin:0;font-size:clamp(20px,4.6vw,26px);line-height:1.25;font-weight:650}
 .providers{margin:14px 0 0;display:flex;flex-wrap:wrap;gap:8px;padding:0;list-style:none}
 .providers li{border:1px solid var(--ink);padding:3px 10px;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -222,24 +189,18 @@ footer{margin-top:32px;color:var(--mute);font:12px/1.5 ui-monospace,SFMono-Regul
 
 /** The card as one HTML file: no script, no external resource, a policy that allows neither. */
 export function cardHtml(card: SentCard): string {
-  const tone = card.indexed === 0 ? '' : card.credentials === 0 ? 'ok' : 'hot';
-  const rows: [string, string][] = [
-    [
-      'Credentials in the record',
-      card.credentials === 0 ? '0' : `${card.credentials} · ${card.sightings} sightings`,
-    ],
-    ['Tool calls read', String(card.calls)],
-    ['Tool results read', card.toolResultsRead ? String(card.results) : 'none'],
-    ['Credential files touched', String(card.files)],
-    ['Checked against', plural(card.indexed, 'value', 'values')],
-  ];
-  if (card.agent !== null) rows.push(['Agent', card.agent]);
-  if (card.sessionsInProject !== null)
-    rows.push(['Sessions in this project', String(card.sessionsInProject)]);
+  const sent = card.found.third_party;
+  // A number only with what it counts, and only when there is one to count: no "0" says "safe".
+  const big =
+    sent > 0
+      ? `<div class="big hot" aria-hidden="true">${sent}</div>\n<div class="big-label">sent to another company</div>\n`
+      : '';
+  const coverage =
+    card.synthetic === true ? '' : `<p class="coverage">${escapeHtml(coverageLine(card))}</p>\n`;
   const list =
     card.providers.length === 0
       ? ''
-      : `<ul class="providers" aria-label="Providers">${card.providers
+      : `<ul class="providers" aria-label="Services">${card.providers
           .map((p) => `<li>${escapeHtml(p.label)} <b>${p.count}</b></li>`)
           .join('')}</ul>`;
   return `<!doctype html>
@@ -249,21 +210,20 @@ export function cardHtml(card: SentCard): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${CSP}">
 <meta name="referrer" content="no-referrer">
-<title>Stroq session check</title>
+<title>Stroq key check</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <main>
-<div class="kicker">Stroq session check</div>
-<div class="big ${tone}" aria-hidden="true">${card.credentials}</div>
-<h1>${escapeHtml(headline(card))}</h1>
+<div class="kicker">Stroq key check</div>
+${big}<h1>${escapeHtml(headline(card))}</h1>
 ${list}
-<dl>${rows
+<dl>${rows(card)
     .map(([name, value]) => `<div><dt>${escapeHtml(name)}</dt><dd>${escapeHtml(value)}</dd></div>`)
     .join('')}</dl>
-<p class="limits">${escapeHtml(card.synthetic ? SAMPLE_LIMITS : LIMITS)}</p>
+${coverage}<p class="limits">${escapeHtml(card.synthetic === true ? SAMPLE_LIMITS : LIMITS)}</p>
 <p class="post">${escapeHtml(postLine(card).replace(/`/g, ''))}</p>
-<footer>Checked on ${escapeHtml(card.checked)} with Stroq ${escapeHtml(card.stroq)}. The check ran on this machine; this card holds counts only, no values, names, paths, commands or hashes.</footer>
+<footer>${escapeHtml(footer(card))}</footer>
 </main>
 </body>
 </html>

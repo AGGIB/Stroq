@@ -18,35 +18,44 @@
 Stroq scans recorded Claude Code, Codex CLI and Cursor sessions for values matching credentials on your machine. It names the credential and the tool call without printing the value, then helps guard supported actions in future sessions. A local transcript match does not by itself prove delivery to a model provider.
 
 ```bash
-npx @stroq/cli sent --last   # scan the latest recorded session; no hook setup needed
+npx @stroq/cli sent          # every recorded session on this machine; no hook setup needed
+npx @stroq/cli sent --last   # only the newest session of this project
 npx @stroq/cli init          # hook into your agent and guard the next session
 ```
 
 Needs Node.js 22 or newer.
 
-What a finding looks like (a synthetic session, trimmed):
+What a finding looks like (made-up keys, the built CLI's output, trimmed):
 
 ```text
-stroq sent — credential evidence in recorded agent sessions
+stroq sent: did your AI agent pass your keys on?
 
-✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+6 of your 6 keys appear in your agent sessions: 2 sent to another company, 1 maybe sent, 1 seen by the AI, 1 used with its own service, 1 blocked before it ran.
 
-CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+Checked 3 sessions (Claude Code 2, Codex 1), 2026-10-02 to 2026-10-19.
+Compared with 6 keys: ~/.aws/credentials, ~/.npmrc, ~/work/shop/.env, ~/work/api/.env.
 
-  ● aws_secret_access_key — ~/.aws/credentials
-      seen once, first at 2026-09-28T10:00:01Z
-      └─ in the result of    Read       ~/.aws/credentials
+SENT TO ANOTHER COMPANY: rotate these today (2)
+ 1. STRIPE_SECRET_KEY  from ~/work/shop/.env
+    went to  collector.example, in a curl command
+    when     2026-10-11 14:02 UTC · Claude Code · ~/work/shop
+    do       revoke it at https://dashboard.stripe.com/apikeys, then update ~/work/shop/.env
 
-NEXT
-  Rotate each credential named above that is still live.
-    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials
+SEEN BY THE AI: your agent's model saw these keys (1)
+ 4. aws_secret_access_key  from ~/.aws/credentials
+    seen in  the output of a Read of ~/.aws/credentials
+    when     2026-10-02 09:42 UTC · Claude Code · ~/work/api
+    note     Not ruled out: 2 later commands in that session could reach the network.
+    do       your agent's model saw it; rotate it if that matters: https://console.aws.amazon.com/iam/home#/security_credentials
+
+Stroq names a send only when it sees the key in the command that sent it. A script, a file or a variable can carry a key out without showing it.
 ```
 
 <img src="docs/assets/case-study.gif" alt="An agent fixing a bug runs a helper package named in a GitHub issue, reads .env, and POSTs an AWS secret key to an unknown collector. stroq replay --last traces both commands back to that issue, and with Stroq installed the request is denied by deny-secret-egress, naming the variable, the file and the issue it came from." width="820">
 
 <img src="docs/assets/demo.gif" alt="stroq replay --last on a recorded session: a poisoned README scores SUSPECT and the curl | sh it dictated is denied 12 seconds later; an npx command copied from an MCP result is asked about and traced back to it; an unrelated pnpm test is allowed" width="800">
 
-- **Looks back.** `stroq sent` reads local Claude Code, Codex CLI and Cursor records, including sessions from before Stroq was installed. It matches known values in available tool arguments and results, and reports names and sources, not values. It reads local credential files to build the comparison index; old, rotated or unknown values may be missed.
+- **Looks back.** `stroq sent` reads local Claude Code, Codex CLI and Cursor records, including sessions from before Stroq was installed. It matches known values in available tool arguments and results, and reports names and sources, not values. It reads local credential files to know what to compare and keeps the values in memory only; it writes no file but a card you ask for with `--card --out`. Old, rotated or unknown values may be missed. It says only what it saw: a key it did not see leave may still have left in a script, a file or a variable.
 - **Guards what's next.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties some later actions to earlier tool output. Coverage depends on the host, version and channel.
 - **Local.** No outbound network calls from the hooks; Task Lock hooks speak only to their local parent controller. No telemetry. Apache-2.0.
 

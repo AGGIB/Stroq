@@ -61,69 +61,79 @@
       <div class="docs-lead">
         <span class="docs-kicker">Past-session check</span>
         <h1>Find known credentials in past AI coding agent sessions.</h1>
-        <p>Stroq checks a saved Claude Code, Codex CLI or Cursor session for credential values known on your machine. It names the source, tool call and time without printing the value. You can inspect sessions recorded before installing Stroq hooks.</p>
+        <p>Stroq checks the Claude Code, Codex CLI and Cursor sessions on your machine for credential values known on your machine. For each key it finds, it says what it saw: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked before it ran. It names the source, the call and the time, never the value. You can check sessions recorded before installing Stroq hooks.</p>
       </div>
 
       <section class="docs-section" id="what-it-checks" aria-labelledby="what-it-checks-title">
         <h2 id="what-it-checks-title">What does <code>stroq sent</code> check?</h2>
-        <p>For one selected session, Stroq reads recorded tool calls and results and compares their text with the current values it can index from the working directory's <code>.env*</code> files, common credential files in your home directory and credential-named environment variables. A match is reported as a credential name and source, with the call where it appeared. It also records when a tool read or named a credential file; naming a path in a shell command is weaker evidence than a file-read result.</p>
-        <p>The report includes coverage: how many values were indexed, which files supplied them, how many calls were read and whether tool results were available. This matters when a scan returns no findings.</p>
+        <p>With no option, Stroq reads every session the agents still keep; <code>--here</code> reads this project's, <code>--last</code> the newest one. It compares their calls, results, prompts and replies with the current values of your keys: <code>~/.aws/credentials</code>, <code>~/.npmrc</code>, <code>~/.netrc</code>, <code>~/.docker/config.json</code>, the env files of each folder a session ran in and of the folders above it up to its repository's root, and credential-named environment variables. A key is reported once, by name and source, under the most external place a call put it, with that call.</p>
+        <p>The report says what it read: how many sessions, which key files supplied the keys, and, under "Not checked", what it could not read or compare. This matters most when no key value is found.</p>
       </section>
 
       <section class="docs-section" id="run-the-scan" aria-labelledby="run-the-scan-title">
         <h2 id="run-the-scan-title">How to run it</h2>
-        <p>Run the first command from the project directory you want to inspect. <code>--last</code> selects its newest available session across the three supported readers. A transcript path lets you choose a Claude Code or Codex CLI session explicitly.</p>
-        <pre class="code" tabindex="0" role="region" aria-label="Commands for scanning a past agent session"><code>npx @stroq/cli sent --last
+        <p>The first command reads every session on the machine. Run the others from the project directory you want to inspect. A transcript path lets you choose one session explicitly.</p>
+        <pre class="code" tabindex="0" role="region" aria-label="Commands for scanning past agent sessions"><code>npx @stroq/cli sent
+npx @stroq/cli sent --here
+npx @stroq/cli sent --last
 npx @stroq/cli sent --transcript /path/to/session.jsonl
-npx @stroq/cli sent --last --json</code></pre>
-        <p>No prior Stroq hook installation is needed for the transcript scan. For repeat use, <code>npm install -g @stroq/cli</code> avoids an <code>npx</code> package fetch at invocation time. See the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md">full guide</a> for the audit-log form, Cursor session addressing and <code>--fail-on-finding</code>.</p>
+npx @stroq/cli sent --json</code></pre>
+        <p>No prior Stroq hook installation is needed for the transcript scan. For repeat use, <code>npm install -g @stroq/cli</code> avoids an <code>npx</code> package fetch at invocation time. See the <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md">full guide</a> for the audit-log form, Cursor session addressing, <code>--counts</code>, <code>--card</code> and <code>--fail-if</code>.</p>
       </section>
 
       <section class="docs-section" id="try-it" aria-labelledby="try-it-title">
         <h2 id="try-it-title">No session to scan yet? Try it with a made-up key.</h2>
-        <p>Run the built-in sample session check. It scans a synthetic agent session with an invented key in an isolated temporary folder, without touching any real credential files or environment variables on your machine:</p>
+        <p>Run the built-in sample. It runs the whole check, in memory, on a made-up session with a made-up key: it reads no file on your machine and writes nothing.</p>
         <pre class="code" tabindex="0" role="region" aria-label="Try stroq sent with a made-up key"><code>npx @stroq/cli sent --try</code></pre>
-        <p>The report demonstrates what finding a recorded credential looks like, names <code>STRIPE_SECRET_KEY</code> without printing its value, and cleans up the temporary directory immediately.</p>
+        <p>The report shows what a key sent to another company looks like, and names <code>STRIPE_SECRET_KEY</code> without printing its value.</p>
       </section>
 
       <section class="docs-section" id="read-the-result" aria-labelledby="read-the-result-title">
         <h2 id="read-the-result-title">What a finding means</h2>
-        <p>A synthetic session, trimmed:</p>
-        <pre class="code" tabindex="0" role="region" aria-label="Example stroq sent output"><code>stroq sent — credential evidence in recorded agent sessions
+        <p>The built CLI's output for made-up keys, trimmed:</p>
+        <pre class="code" tabindex="0" role="region" aria-label="Example stroq sent output"><code>stroq sent: did your AI agent pass your keys on?
 
-✗ 1 known credential value(s) in this session's recorded tool calls: aws_secret_access_key
+6 of your 6 keys appear in your agent sessions: 2 sent to another company, 1 maybe sent, 1 seen by the AI, 1 used with its own service, 1 blocked before it ran.
 
-CREDENTIAL VALUES FOUND IN THIS SESSION RECORD (1)
+Checked 3 sessions (Claude Code 2, Codex 1), 2026-10-02 to 2026-10-19.
+Compared with 6 keys: ~/.aws/credentials, ~/.npmrc, ~/work/shop/.env, ~/work/api/.env.
 
-  ● aws_secret_access_key — ~/.aws/credentials
-      seen once, first at 2026-09-28T10:00:01Z
-      └─ in the result of    Read       ~/.aws/credentials
+SENT TO ANOTHER COMPANY: rotate these today (2)
+ 1. STRIPE_SECRET_KEY  from ~/work/shop/.env
+    went to  collector.example, in a curl command
+    when     2026-10-11 14:02 UTC · Claude Code · ~/work/shop
+    do       revoke it at https://dashboard.stripe.com/apikeys, then update ~/work/shop/.env
 
-NEXT
-  Rotate each credential named above that is still live.
-    aws_secret_access_key: https://console.aws.amazon.com/iam/home#/security_credentials</code></pre>
-        <p>A value found in a saved tool result or tool argument is evidence that the recorded session contained that known credential. The output distinguishes these two locations and identifies the relevant call. A credential-file row distinguishes a file read from a path merely named in a shell command.</p>
+SEEN BY THE AI: your agent's model saw these keys (1)
+ 4. aws_secret_access_key  from ~/.aws/credentials
+    seen in  the output of a Read of ~/.aws/credentials
+    when     2026-10-02 09:42 UTC · Claude Code · ~/work/api
+    note     Not ruled out: 2 later commands in that session could reach the network.
+    do       your agent's model saw it; rotate it if that matters: https://console.aws.amazon.com/iam/home#/security_credentials
+
+Stroq names a send only when it sees the key in the command that sent it. A script, a file or a variable can carry a key out without showing it.</code></pre>
+        <p>The first line counts what was seen, by place. Sent to another company: a call carried the key to a host that is not the key's own service. Maybe sent: a program ran with it, a file it was written to was later sent or run, or Stroq could not read all of what carried it. Seen by the AI: your agent's model saw it, in an output, a prompt, a reply or a command that only reads. Used with its own service: only by a strict proof, such as an OpenAI key in the auth header of one plain request to <code>api.openai.com</code>. Blocked before it ran: Claude Code records the call as refused or blocked; a Codex or Cursor log that says a call was stopped proves nothing, and the call keeps its place with that note.</p>
         <div class="docs-note">
           <p><strong>Provider delivery is not verified.</strong> A local transcript cannot prove which bytes a model provider received, whether a result was truncated before transmission, what the provider retained or whether anyone used the credential. Treat a finding as a reason to investigate and rotate a sensitive credential, not as proof of an external breach.</p>
         </div>
-        <p>A finding does not change the command's default exit status: a produced report exits <code>0</code> even with findings. Use <code>--fail-on-finding</code> when a scheduled check should return <code>1</code> on a finding. A missing session or one with no recorded tool calls also returns <code>1</code>.</p>
+        <p>A finding does not change the command's default exit status: a produced report exits <code>0</code> even with findings. Use <code>--fail-if third-party</code> or <code>--fail-if any</code> when a scheduled check should return <code>1</code>. With no session to read, the text report says so and exits <code>1</code>.</p>
       </section>
 
       <section class="docs-section" id="privacy" aria-labelledby="privacy-title">
         <h2 id="privacy-title">What stays on your machine?</h2>
-        <p>The scan runs locally. It reads the chosen local session and credential sources to perform exact-value matching; it does not upload their contents for analysis. Stroq refreshes a local index of salted hashes and writes names and source paths, never matched values, to the human-readable or JSON report. Review that report before sharing it, because names, paths and command summaries can still be sensitive.</p>
+        <p>The check runs locally. It reads the sessions and your key files to compare exact values, holds the values in memory only, and sends nothing. It writes nothing either: no index, no temporary copy. The one exception is a card you ask for with <code>--card --out &lt;file&gt;</code>, which it writes to that new file only. The report prints names and source paths, never a value. Review it before sharing, because names, paths and hosts can still be sensitive; <code>--card</code> holds counts only.</p>
         <p>On a first <code>npx</code> invocation, npm may download the CLI package. Install the package ahead of time if you need the check to run without a package download.</p>
       </section>
 
       <section class="docs-section" id="limits" aria-labelledby="limits-title">
         <h2 id="limits-title">Coverage and limits</h2>
         <ul>
-          <li><strong>Known values only.</strong> A credential rotated or deleted since the session is absent from the current index and cannot match. Split, encoded or otherwise transformed values may also be missed.</li>
-          <li><strong>One saved session at a time.</strong> <code>--last</code> chooses the newest session associated with the current directory; it does not certify every prior session or every agent on the machine.</li>
+          <li><strong>Known values only.</strong> A credential rotated or deleted since the session is no longer in your key files and cannot match. Split, encoded or otherwise transformed values may also be missed.</li>
+          <li><strong>Only what it saw.</strong> Stroq names a send only when it sees the key in the command that sent it. A script, a file or a variable can carry a key out without showing it, so a milder place means no send was seen, not that none happened.</li>
           <li><strong>Three transcript readers.</strong> Claude Code, Codex CLI and Cursor are supported. Cursor uses a SQLite store and needs a Node version with <code>node:sqlite</code>; Stroq reports when that reader is unavailable. Windsurf, Copilot CLI and Antigravity histories are not claimed here.</li>
           <li><strong>Audit logs are narrower.</strong> When scanning Stroq's own audit log instead of an agent transcript, tool-result text is unavailable; only call arguments and credential-file evidence can be checked.</li>
         </ul>
-        <p>No findings means no indexed value was found in the material this run could read. Check the report's coverage section before drawing a conclusion about the session.</p>
+        <p>When no value is found, the report says only that your keys' values do not appear in the session logs, and lists what it did not check. A run that could not read everything says so on its first lines.</p>
       </section>
 
       <section class="docs-section" id="next-steps" aria-labelledby="next-steps-title">
