@@ -46,33 +46,44 @@ const endsAWord = (text: string, at: number): boolean =>
   /^(?:@[^\s;&|()]*)?(?:[\s;&|()]|$)/.test(text.slice(at, at + 256));
 
 /**
- * Other ways a script can point git at hooks than a git command's `core.hooksPath`: git's own
- * program by another path or name (`git-config`, `--exec-path`), a config git reads that the
- * script writes or names (`.git/config`, a `.gitconfig`, `include.path`, any `GIT_CONFIG*`
- * variable, `--config-env`), or the hooks folder itself (`.git/hooks`). Case-blind.
+ * `.git` as a whole part of a path: after the start, a `/`, a blank, `=`, a separator, a brace or a
+ * comma, and before a `/`, a blank, a separator, a brace, a comma, a quote or the end. `.gitignore`,
+ * `.github` or `.gitkeep` are other names.
  */
-const GIT_ROUTES =
-  /git-config|--exec-path|\.git\/(?:config|hooks)|\.gitconfig|git_config|--config-env|include\.path/i;
-/** A redirection whose target holds `.git`: `> .git/hooks/pre-commit`, `>> .git/info/x`. */
-const WRITES_TO_GIT = />[ \t]*[^\s;&|()<>]*\.git/i;
-
-/** Whether a command of `text` runs `tee` with a path that holds `.git`. */
-const teesToGit = (text: string): boolean =>
-  text.split(COMMANDS).some((part) => {
-    const words = part.split(/\s+/).filter((w) => w !== '');
-    const tee = words.findIndex((w) => posix.basename(w.toLowerCase()) === 'tee');
-    return tee !== -1 && words.slice(tee + 1).some((w) => w.toLowerCase().includes('.git'));
-  });
+const GIT_PART = /(?:^|[/\s=;&|()<>{},])\.git(?=$|[/\s;&|()<>{},'"])/;
+/**
+ * Settings that say where git, its config or its folder is, which point it at other hooks:
+ * `GIT_DIR`, `--git-dir`, `GIT_WORK_TREE`, any `GIT_CONFIG*` variable, `git-config`, `--exec-path`,
+ * `--config-env`, `include.path`, and a `.gitconfig`. `core.hooksPath` is read on its own above.
+ */
+const GIT_SETTINGS =
+  /git_dir|--git-dir|git_work_tree|git_config|git-config|--exec-path|--config-env|include\.path|\.gitconfig/;
+/** A glob character, which can spell `.git` (`.g?t`, `.g*`). */
+const GLOB = /[*?[]/;
+/** Programs that write or copy a file, and a redirection, which `>` holds. */
+const WRITES: ReadonlySet<string> = new Set(['cp', 'mv', 'rsync', 'ln', 'install', 'tee', 'dd']);
 
 /**
- * Whether a script may set where git hooks run some other way than this reads: see `GIT_ROUTES`,
- * or a write to a path that holds `.git`. Read twice, with backslashes taken off and with them
- * read as `/`, since `.git\hooks` is a Windows path. Coarse: such a script fails.
+ * Whether a script may set or write where git hooks run in a way this does not read. Read once,
+ * unquoted, with `\` as `/` and in lower case; coarse, so such a script fails:
+ * (a) it names `.git` as a path (see `GIT_PART`);
+ * (b) it names a setting of `GIT_SETTINGS`;
+ * (c) a word of it that starts with `.g`, or holds `/.g`, `{.g` or `,.g`, holds a glob character;
+ * (d) it holds a `$` or a backquote anywhere, and writes or copies (`WRITES`, or a `>`).
  */
-const mayRouteHooks = (script: string): boolean =>
-  [unquoted(script), script.replace(/["']/g, '').replace(/\\/g, '/')].some(
-    (text) => GIT_ROUTES.test(text) || WRITES_TO_GIT.test(text) || teesToGit(text),
+function mayWriteHooks(script: string): boolean {
+  const text = script.replace(/["']/g, '').replace(/\\/g, '/').toLowerCase();
+  if (GIT_PART.test(text) || GIT_SETTINGS.test(text)) return true;
+  const words = text.split(/[\s;&|()<>]+/).filter((w) => w !== '');
+  const spellsGit = (w: string): boolean =>
+    (w.startsWith('.g') || /[/{,]\.g/.test(w)) && GLOB.test(w);
+  if (words.some(spellsGit)) return true;
+  if (!FILLED_IN.test(text)) return false;
+  return (
+    text.includes('>') ||
+    words.some((w) => WRITES.has(posix.basename(w).replace(/\.(?:exe|cmd|bat)$/, '')))
   );
+}
 
 /** A line break, which a backslash before it may join to the next line. */
 const LINE_BREAK = /[\n\r]/;
@@ -218,11 +229,11 @@ export function plainHookHits(
       unplaced('a folder git config may build from what the shell fills in');
       failed = true;
     }
-    if (!failed && mayRouteHooks(script))
+    if (!failed && mayWriteHooks(script))
       out.push({
         kind: 'git-hook-routine',
         file: 'package.json',
-        what: 'a script may set where git hooks run, in a way this does not read, so those hooks were not read',
+        what: 'a script may set or write where git hooks run, in a way this does not read, so those hooks were not read',
       });
     // One reading of husky: each folder it names is placed, or the script fails. A script over
     // more than one line may join them with a backslash, which no reading of one line sees.

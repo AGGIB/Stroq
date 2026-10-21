@@ -243,22 +243,35 @@ describe('a git hook in plain stroq inspect', () => {
     }
   });
 
-  // Other ways a script can point git at hooks than `core.hooksPath` in a git command: each fails.
+  // A script that names `.git` as a path, a git setting that says where git or its config is, a
+  // glob that can spell `.git`, or that writes or copies through what the shell fills in, may set
+  // or write where git hooks run: it fails.
   it.each([
     '/usr/lib/git-core/git-config core.hooksPath x',
     'git --exec-path=./bin status',
     'cp tools/hooks.cfg .git/config',
     'cp tools\\hooks.cfg .git\\config',
     'GIT_CONFIG_GLOBAL=./g git status',
-    'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=x git commit',
+    'GIT_DIR=x git status',
+    'git --git-dir=x status',
+    'GIT_WORK_TREE=x git status',
     'git --config-env=core.hooksPath=H commit',
     'git config include.path ../shared.cfg',
     'echo x > .git/hooks/pre-commit',
     'echo x >> .git/info/exclude',
     'echo x | tee -a .git/hooks/pre-commit',
-    'cp scripts/pre-commit .git/hooks/',
     'cp scripts\\pre-commit .git\\hooks\\pre-commit',
-  ])('fails a script that may set where git hooks run: %s', (script) => {
+    'cd .git && cp x hooks/pre-commit',
+    'cp x .git/hooks/',
+    'ln -s ../x .git/hooks/pre-commit',
+    'rsync -a x/ .GIT/hooks/',
+    'cp x .g?t/hooks/',
+    'cp x ./.g*/hooks/',
+    'cp x {.git,y}/hooks/',
+    'D=.git; cp x $D/hooks/',
+    'install -m 755 x `echo .gi`t/hooks/pre-commit',
+    'printf x > $H',
+  ])('fails a script that may set or write where git hooks run: %s', (script) => {
     const pkg = JSON.stringify({ scripts: { prepare: script } });
     expect(surface({ 'package.json': pkg }).failing).toEqual(['git-hook-routine package.json']);
   });
@@ -268,8 +281,12 @@ describe('a git hook in plain stroq inspect', () => {
       'git status',
       'git log > out.txt',
       'npm test > log.txt 2>&1',
+      'cat .gitignore',
       'cat .gitignore | wc -l',
+      'cp -r .github dist/',
+      'git add .gitattributes .gitmodules .gitkeep',
       'git config core.hooksPath .githooks',
+      'echo $npm_package_version',
     ])
       expect(
         surface({ 'package.json': JSON.stringify({ scripts: { prepare: script } }) }).failing,
