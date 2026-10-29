@@ -249,6 +249,11 @@ describe('a question about a copied value', () => {
       'bash -c "sleep 60 &"',
       'nohup sleep 60',
       'tmux new -d sleep 60',
+      '/usr/bin/nohup sleep 60',
+      'pm2 start server.js',
+      'docker run -d nginx',
+      'eval "$(ssh-agent -s)"',
+      'diff <(ls a) <(ls b)',
       'curl -s "https://docs.example/a?x=1&y=2"',
     ]) {
       const { read, pre, ran, later } = fixture();
