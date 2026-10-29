@@ -1,3 +1,5 @@
+import type { McpIdentity } from './mcp/identity.js';
+
 export type ActionClass =
   | 'shell.exec_encoded'
   | 'shell.network'
@@ -101,10 +103,47 @@ export interface Taint {
   readonly sources: readonly TaintSource[];
 }
 
+/**
+ * Flags on the developer's own text (see `isOwnText`): they taint nothing, and after one a call
+ * that reads secrets and sends something out is asked about. The first time, how many, and the
+ * last of them.
+ */
+export interface OwnTextFlag {
+  readonly since: string;
+  readonly count: number;
+  readonly last: TaintSource;
+}
+
 export interface SessionState {
   readonly sessionId: string;
   readonly taint: Taint | null;
   readonly updatedAt: string;
+  /** Absent in a session that has none, and in files written before it existed. */
+  readonly flagged?: OwnTextFlag;
+  /**
+   * Files the session's commands downloaded and folders they cloned into, as absolute paths, the
+   * newest last: read back, what they hold is somebody else's text (see `fetchedPaths`).
+   */
+  readonly fetched?: readonly string[];
+  /**
+   * Questions about values copied from text the agent read (`ask-origin-untrusted`) that wait for
+   * their call to run, the newest last.
+   */
+  readonly askedCopies?: readonly AskedCopy[];
+  /**
+   * The values (`atomHash`) of questions whose call then ran: the user let them through, and they
+   * are not asked about again in the session. Any new flag, on anyone's text, forgets them.
+   */
+  readonly allowedCopies?: readonly string[];
+}
+
+/** A question about copied values, waiting for its call: the call's id, tool and input, and the values. */
+export interface AskedCopy {
+  readonly callId: string;
+  readonly tool: string;
+  /** A hash of the call's input: a result of another call under the same id is not its answer. */
+  readonly input: string;
+  readonly atoms: readonly string[];
 }
 
 export type VariantKind = 'raw' | 'normalized' | 'base64' | 'hex' | 'url';
@@ -130,6 +169,8 @@ export interface PreToolEvent {
   readonly toolName: string;
   readonly toolInput: Readonly<Record<string, unknown>>;
   readonly cwd: string;
+  /** Exact producer-reported MCP server witness, independent of lossy classification names. */
+  readonly mcpIdentity?: McpIdentity;
   /**
    * What the audit log records for this call, when that must differ from what is
    * judged. The MCP cloak judges the RESTORED arguments, because a restored value can
@@ -244,6 +285,12 @@ export interface ProvenanceRecord {
   readonly excerpt: string;
   /** Whether the scan of that output was `suspect`. */
   readonly suspect: boolean;
+  /**
+   * The scan was `suspect`, and the output was the developer's own text (see `isOwnText`), so it
+   * tainted nothing and `suspect` is false: a copy is asked about, as from any output. Absent
+   * otherwise, and in records written before it existed.
+   */
+  readonly flaggedOwn?: boolean;
 }
 
 export interface ProvenanceHit {
@@ -259,6 +306,8 @@ export interface ProvenanceEvidence {
   readonly source: string;
   readonly at: string;
   readonly suspect: boolean;
+  /** See `ProvenanceRecord.flaggedOwn`. */
+  readonly flaggedOwn?: boolean;
 }
 
 /**

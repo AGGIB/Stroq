@@ -1,33 +1,5 @@
-import { runAttackCommand } from './commands/attack.js';
-import { runBenchCommand } from './commands/bench.js';
-import { runCanary } from './commands/canary.js';
-import { runCoverageCommand } from './commands/coverage.js';
-import { runDoctor } from './commands/doctor.js';
-import { runExposure } from './commands/exposure.js';
-import { runHarden } from './commands/harden.js';
-import { runHookCommand } from './commands/hook.js';
-import { runInitCommand } from './commands/init-agent.js';
-import { runInspect } from './commands/inspect.js';
-import { runLog } from './commands/log.js';
-import { runMcp } from './commands/mcp.js';
-import { runPolicy } from './commands/policy.js';
-import { runProve } from './commands/prove.js';
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { handleStdoutError } from './stdout-errors.js';
-import { runReplay } from './commands/replay.js';
-import { runRun } from './commands/run.js';
-import { runTask } from './commands/task.js';
-import { runPermit } from './commands/permit.js';
-import { runTaskHookCommand } from './task/broker.js';
-import { runSent } from './commands/sent.js';
-import { runTrust } from './commands/trust.js';
-import { runUninstall } from './commands/uninstall.js';
-import { runUntaint } from './commands/untaint.js';
-import { runVerify } from './commands/verify.js';
-import { runVet } from './commands/vet.js';
-import { runAdd } from './commands/add.js';
-import { runRemove } from './commands/remove.js';
-import { runWhy } from './commands/why.js';
 import { stroqVersion } from './version.js';
 import {
   commandHelp,
@@ -43,39 +15,51 @@ import {
 
 type Runner = (args: readonly string[]) => number | Promise<number>;
 
-/** Every command that prints for a person, by name. */
-const COMMANDS: Readonly<Record<string, Runner>> = {
-  inspect: runInspect,
-  init: runInitCommand,
-  uninstall: runUninstall,
-  run: runRun,
-  task: runTask,
-  permit: runPermit,
-  doctor: runDoctor,
-  prove: runProve,
-  log: runLog,
-  verify: () => runVerify(),
-  trust: runTrust,
-  untaint: runUntaint,
-  replay: runReplay,
-  why: runWhy,
-  sent: runSent,
-  canary: runCanary,
-  attack: runAttackCommand,
-  policy: runPolicy,
-  exposure: runExposure,
-  bench: runBenchCommand,
-  coverage: runCoverageCommand,
-  harden: runHarden,
-  vet: runVet,
-  add: runAdd,
-  remove: runRemove,
+/**
+ * Every command that prints for a person, by name, each loaded only when it is the one run.
+ *
+ * A hook call is a new process for every tool call an agent makes, and it runs none of these:
+ * loaded up front, their code was read, compiled and run on every one of those calls before the
+ * hook could start. Each entry imports its own module, so `stroq hook` loads the hook and what the
+ * hook needs, and nothing else.
+ */
+const COMMANDS: Readonly<Record<string, () => Promise<Runner>>> = {
+  console: async () => (await import('./commands/console.js')).runConsole,
+  inspect: async () => (await import('./commands/inspect.js')).runInspect,
+  init: async () => (await import('./commands/init-agent.js')).runInitCommand,
+  uninstall: async () => (await import('./commands/uninstall.js')).runUninstall,
+  run: async () => (await import('./commands/run.js')).runRun,
+  task: async () => (await import('./commands/task.js')).runTask,
+  permit: async () => (await import('./commands/permit.js')).runPermit,
+  doctor: async () => (await import('./commands/doctor.js')).runDoctor,
+  prove: async () => (await import('./commands/prove.js')).runProve,
+  log: async () => (await import('./commands/log.js')).runLog,
+  verify: async () => {
+    const { runVerify } = await import('./commands/verify.js');
+    return () => runVerify();
+  },
+  trust: async () => (await import('./commands/trust.js')).runTrust,
+  untaint: async () => (await import('./commands/untaint.js')).runUntaint,
+  replay: async () => (await import('./commands/replay.js')).runReplay,
+  why: async () => (await import('./commands/why.js')).runWhy,
+  sent: async () => (await import('./commands/sent.js')).runSent,
+  canary: async () => (await import('./commands/canary.js')).runCanary,
+  attack: async () => (await import('./commands/attack.js')).runAttackCommand,
+  policy: async () => (await import('./commands/policy.js')).runPolicy,
+  exposure: async () => (await import('./commands/exposure.js')).runExposure,
+  bench: async () => (await import('./commands/bench.js')).runBenchCommand,
+  coverage: async () => (await import('./commands/coverage.js')).runCoverageCommand,
+  harden: async () => (await import('./commands/harden.js')).runHarden,
+  vet: async () => (await import('./commands/vet.js')).runVet,
+  add: async () => (await import('./commands/add.js')).runAdd,
+  remove: async () => (await import('./commands/remove.js')).runRemove,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
     case 'task-hook': {
+      const { runTaskHookCommand } = await import('./task/broker.js');
       const out = await runTaskHookCommand();
       process.stdout.write(out.stdout);
       return out.exitCode;
@@ -93,6 +77,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       // past it, and Copilot denies on any non-zero exit from a `preToolUse` but
       // prints the reason only for exit 2 (on its other events, exit 1 fails open).
       // `rest[1]` is Copilot's and OpenClaw's phase argument; the other agents ignore it.
+      const { runHookCommand } = await import('./commands/hook.js');
       const out = await runHookCommand(rest[0] ?? '', rest[1] ?? '');
       if (out.stdout) process.stdout.write(out.stdout);
       // Codex, Copilot, OpenClaw and Windsurf all read the block reason from stderr
@@ -116,7 +101,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         return 0;
       }
       // A protocol stream: what the proxy does not judge it forwards byte for byte.
-      return runMcp(rest);
+      return (await import('./commands/mcp.js')).runMcp(rest);
     default:
       // Everything else prints for a person, and much of what it prints — recorded
       // commands, audit summaries, file names from a cloned repository — was written
@@ -141,8 +126,8 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
     process.stdout.write(help);
     return 0;
   }
-  const runner = COMMANDS[command];
-  if (runner === undefined) return unknownCommand(command);
+  const load = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
+  if (load === undefined) return unknownCommand(command);
   // `sent` writes its own, longer help.
   if (command !== 'sent' && wantsHelp(command, rest)) {
     process.stdout.write(commandHelp(command) ?? '');
@@ -153,6 +138,7 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
     process.stderr.write(usageError(command, `unknown option ${unknown}`));
     return 2;
   }
+  const runner = await load();
   try {
     return await runner(rest);
   } catch (err) {

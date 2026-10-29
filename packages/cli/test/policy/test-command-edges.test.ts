@@ -120,7 +120,7 @@ describe('stroq policy test: the command line', () => {
   });
 
   it('refuses a baseline that does not load, too', async () => {
-    const file = ws.write('broken-baseline.yaml', 'version: 2\nrules: []\n');
+    const file = ws.write('broken-baseline.yaml', 'version: 999\nrules: []\n');
     const ran = await test('--baseline', file);
     expect(ran.code).toBe(2);
     expect(ran.stderr).toContain('"version"');

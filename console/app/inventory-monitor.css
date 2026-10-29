@@ -1,0 +1,53 @@
+.inventory-monitor-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: var(--text-secondary);
+  line-height: 1.55;
+}
+.inventory-observation-versions {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-block: 4px 16px;
+  margin-bottom: 16px;
+}
+.inventory-observation-versions > .button {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  white-space: normal;
+}
+.inventory-observation-versions > .is-active {
+  border-color: var(--brand);
+}
+.inventory-observation-versions .button > span {
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+}
+.inventory-observation-title {
+  margin-block: 24px 16px;
+  font-weight: 550;
+}
+.inventory-observation-change {
+  display: grid;
+  gap: 12px;
+  padding-block: 20px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.inventory-observation-change > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+.inventory-observation-change .artifact-section {
+  margin-block: 0;
+}
+.inventory-observation-change .inventory-digest {
+  margin-block: 10px;
+}

@@ -26,6 +26,15 @@ const USERS_OWN_HOME = /^(?:~|\$HOME|\$\{HOME\})$/;
 
 const unquoted = (value: string): string => value.replace(/^["']|["']$/g, '');
 
+/**
+ * The startup file a segment names itself (`BASH_ENV=x.sh`, `ENV=x.sh`): unlike the files a shell
+ * looks for in a directory, it is the one that runs, and missing it is no file the shell skips.
+ */
+export function namedStartupFile(segment: string): string | undefined {
+  const file = FILE_VARIABLE.exec(segment)?.[1];
+  return file === undefined ? undefined : unquoted(file);
+}
+
 /** The names of the startup files a segment points a shell at, as written. */
 export function startupFileNames(segment: string): string[] {
   const names: string[] = [];

@@ -129,14 +129,16 @@ describe('stroq run --dry-run', () => {
     expect(out.lines.join('')).toContain('claude');
   });
 
-  it('says the sandbox is not in force when srt is not installed', async () => {
+  it('refuses a sandbox dry run when srt is not installed, even with force', async () => {
     const dir = repo();
     const out = capture();
-    await runRun(['--dry-run', '--force', '--sandbox', '--', 'claude'], dir, {
+    const code = await runRun(['--dry-run', '--force', '--sandbox', '--', 'claude'], dir, {
       srt: () => null,
     });
     out.restore();
-    expect(out.lines.join('')).toMatch(/not.*in force|no sandbox|srt/i);
+    expect(code).toBe(1);
+    expect(out.lines.join('')).toContain('--sandbox requires');
+    expect(out.lines.join('')).not.toContain('would run:');
   });
 
   // Measured against srt 0.0.77: its Seatbelt profile denies `tcsetattr`, so a

@@ -51,4 +51,22 @@ describe('binOnPath', () => {
     const dir = dirWith('srt.cmd');
     expect(binOnPath('srt', { PATH: dir }, 'win32')).toBe(join(dir, 'srt.cmd'));
   });
+
+  it.skipIf(CANNOT_CHMOD)(
+    'ignores a PATH entry that is not an absolute folder, so a repository cannot stand in for a program',
+    () => {
+      const dir = dirWith('srt');
+      const previous = process.cwd();
+      process.chdir(dir);
+      try {
+        expect(binOnPath('srt', { PATH: ['.', delimiter].join('') }, 'linux')).toBeNull();
+        expect(binOnPath('srt', { PATH: 'node_modules/.bin' }, 'linux')).toBeNull();
+        expect(binOnPath('srt', { PATH: ['', '.', dir].join(delimiter) }, 'linux')).toBe(
+          join(dir, 'srt'),
+        );
+      } finally {
+        process.chdir(previous);
+      }
+    },
+  );
 });

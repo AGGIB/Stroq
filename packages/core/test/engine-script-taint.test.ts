@@ -36,8 +36,8 @@ async function tainted(): Promise<StroqEngine> {
   const e = engine();
   const scanned = await e.post({
     sessionId: 's1',
-    toolName: 'Read',
-    toolInput: { file_path: 'README.md' },
+    toolName: 'WebFetch',
+    toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
     toolResultText: POISON,
     cwd: project,
   });

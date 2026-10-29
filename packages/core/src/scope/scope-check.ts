@@ -4,7 +4,7 @@ import type { ActionClass, ToolResources } from '../types.js';
 import { neutralizeControls } from '../util/controls.js';
 import { fileTarget, fingerprintOf, genericTarget, mcpTarget, shellTarget } from './fingerprint.js';
 import { type PathOptions, evaluatePath } from './paths.js';
-import type { ScopeGateInput, TaskScope } from './types.js';
+import type { ScopeGateInput, TaskScope, TaskAccessFingerprint } from './types.js';
 
 /**
  * What a task's scope refuses (step 3 of the gate), and the name of each operation refused,
@@ -104,6 +104,22 @@ export const wholeCallFingerprint = (input: ScopeGateInput): string => {
   }
   return fingerprintOf(toolName, 'tool', boundTarget(genericTarget(toolInput)));
 };
+
+/** Resolve the selected gate fingerprint, never infer its family from a tool name alone. */
+export function describeEscalationFingerprint(
+  input: ScopeGateInput,
+  fingerprint: string,
+): TaskAccessFingerprint | null {
+  if (wholeCallFingerprint(input) === fingerprint)
+    return { fingerprint, fingerprintKind: 'whole-call' };
+  if (input.event.toolName !== 'Read') return null;
+  const target = input.classification.resources?.paths.find(
+    (entry) => pathFingerprint('Read', entry) === fingerprint,
+  );
+  return target === undefined
+    ? null
+    : { fingerprint, fingerprintKind: 'read-target', target: { ...target } };
+}
 
 /** A host as it should be compared: lower case, no port, no trailing dot, plain DNS characters. */
 function hostName(raw: string): string | null {

@@ -276,6 +276,14 @@ describe('batchHasToolCall', () => {
     expect(batchHasToolCall([])).toBe(false);
     expect(batchHasToolCall(['nonsense'])).toBe(false);
   });
+
+  it('reads the method the way a single request is read, whatever its case', () => {
+    // A single request is matched case-insensitively, so a batch that spelled it `Tools/Call`
+    // must not be the way round the judge, the pause or the approval gate.
+    expect(batchHasToolCall([{ method: 'Tools/Call', id: 1 }])).toBe(true);
+    expect(batchHasToolCall([{ method: 'TOOLS/CALL' }])).toBe(true);
+    expect(batchHasToolCall([{ method: 42 }, { method: null }])).toBe(false);
+  });
 });
 
 describe('the text a result contributes to the scanner', () => {

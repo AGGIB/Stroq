@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { loadRulesFromDir, type SkippedRule } from '../../packages/core/src/rules/atr-loader.js';
 import { compileRules, type CompiledRule } from '../../packages/core/src/rules/compile.js';
-import type { AtrRule } from '../../packages/core/src/rules/atr-types.js';
+import { SCAN_TARGETS, type AtrRule } from '../../packages/core/src/rules/atr-types.js';
 import {
   canFire,
   readsContent,
@@ -59,13 +59,44 @@ export interface OverrideCondition {
   readonly index: number;
   /** The value as currently parsed from the vendored rule. A mismatch fails the build. */
   readonly from: string;
-  readonly to: string;
+  /** The condition's new pattern on every surface. */
+  readonly to?: string;
+  /**
+   * A narrower pattern for the developer's own files and program output (`repo_content`,
+   * `command_output`); the condition (`to`, or the vendored pattern) then reads only text
+   * somebody else wrote and instruction files. `off` drops the condition on those two surfaces,
+   * for a condition whose rule catches its own true positives there by its other conditions.
+   */
+  readonly local?: string;
+  /**
+   * The only surfaces the condition reads from now on (`stroq_surfaces`): for a condition that is right
+   * on one surface and noise on the others, such as a credential file named in a tool's description,
+   * which is the same words as a credential file named in a command's output. With `local`, these are
+   * the surfaces that keep the broad pattern, and `local` is read on every other one.
+   */
+  readonly surfaces?: readonly string[];
 }
+
+/** Where the broad pattern of a `local:` condition stays unless it names `surfaces`; `local` is read elsewhere. */
+export const OTHERS_SURFACES: readonly string[] = [
+  'tool_description',
+  'tool_result',
+  'instruction_file',
+  'web_content',
+];
 
 export interface RuleOverride {
   readonly reason: string;
   readonly conditions: readonly OverrideCondition[];
+  /**
+   * The only surfaces the rule reads from now on (`tags.stroq_surfaces`): for a rule that is right
+   * about text somebody else wrote and fires on the developer's own code and command output.
+   */
+  readonly surfaces?: readonly string[];
 }
+
+/** Surfaces an override may name: every scan target but `any`, which would scope nothing. */
+const OVERRIDE_SURFACES: readonly string[] = SCAN_TARGETS.filter((t) => t !== 'any');
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -97,9 +128,12 @@ export function loadRuleOverrides(file: string): ReadonlyMap<string, RuleOverrid
     if (!isNonEmptyString(raw['reason'])) {
       throw new RulesBuildError(`${where}: "reason" must be a non-empty string`);
     }
-    const conditions = raw['conditions'];
-    if (!Array.isArray(conditions) || conditions.length === 0) {
-      throw new RulesBuildError(`${where}: "conditions" must be a non-empty list`);
+    const surfaces = parseSurfaces(where, raw['surfaces']);
+    const conditions = raw['conditions'] ?? (surfaces === undefined ? undefined : []);
+    if (!Array.isArray(conditions) || (conditions.length === 0 && surfaces === undefined)) {
+      throw new RulesBuildError(
+        `${where}: "conditions" must be a non-empty list (or the entry must name "surfaces")`,
+      );
     }
     const parsed = conditions.map((c, i) => {
       const at = `${where}.conditions[${i}]`;
@@ -110,19 +144,62 @@ export function loadRuleOverrides(file: string): ReadonlyMap<string, RuleOverrid
       }
       if (!isNonEmptyString(c['from']))
         throw new RulesBuildError(`${at}: "from" must be a non-empty string`);
-      if (!isNonEmptyString(c['to']))
+      const to: unknown = c['to'];
+      const local: unknown = c['local'];
+      const scoped = parseSurfaces(at, c['surfaces']);
+      if (to !== undefined && !isNonEmptyString(to))
         throw new RulesBuildError(`${at}: "to" must be a non-empty string`);
-      const unknown = Object.keys(c).filter((k) => !['index', 'from', 'to'].includes(k));
+      if (local !== undefined && !isNonEmptyString(local))
+        throw new RulesBuildError(`${at}: "local" must be a pattern or "off"`);
+      if (to === undefined && local === undefined && scoped === undefined)
+        throw new RulesBuildError(
+          `${at}: "to" must be a non-empty string (or name "local" or "surfaces")`,
+        );
+      if (local === 'off' && scoped !== undefined)
+        throw new RulesBuildError(`${at}: "local: off" with "surfaces" is "surfaces" alone`);
+      const unknown = Object.keys(c).filter(
+        (k) => !['index', 'from', 'to', 'local', 'surfaces'].includes(k),
+      );
       if (unknown.length > 0)
         throw new RulesBuildError(`${at}: unknown field(s): ${unknown.join(', ')}`);
-      return { index, from: c['from'], to: c['to'] } satisfies OverrideCondition;
+      return {
+        index,
+        from: c['from'],
+        ...(to === undefined ? {} : { to: to as string }),
+        ...(local === undefined ? {} : { local: local as string }),
+        ...(scoped === undefined ? {} : { surfaces: scoped }),
+      } satisfies OverrideCondition;
     });
-    const unknown = Object.keys(raw).filter((k) => !['reason', 'conditions'].includes(k));
+    const unknown = Object.keys(raw).filter(
+      (k) => !['reason', 'conditions', 'surfaces'].includes(k),
+    );
     if (unknown.length > 0)
       throw new RulesBuildError(`${where}: unknown field(s): ${unknown.join(', ')}`);
-    out.set(id, { reason: raw['reason'], conditions: parsed });
+    out.set(id, {
+      reason: raw['reason'],
+      conditions: parsed,
+      ...(surfaces === undefined ? {} : { surfaces }),
+    });
   }
   return out;
+}
+
+/** An entry's `surfaces`: absent, or a non-empty list of named surfaces; anything else stops the build. */
+function parseSurfaces(where: string, raw: unknown): readonly string[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new RulesBuildError(
+      `${where}: "surfaces" must be a non-empty list of: ${OVERRIDE_SURFACES.join(', ')}`,
+    );
+  }
+  for (const surface of raw) {
+    if (typeof surface !== 'string' || !OVERRIDE_SURFACES.includes(surface)) {
+      throw new RulesBuildError(
+        `${where}: unknown surface "${String(surface)}" — expected one of ${OVERRIDE_SURFACES.join(', ')}`,
+      );
+    }
+  }
+  return raw as string[];
 }
 
 /**
@@ -157,7 +234,8 @@ export function applyRuleOverrides(
   const out = rules.map((rule) => {
     const override = overrides.get(rule.id);
     if (!override) return rule;
-    const conditions = [...rule.detection.conditions];
+    const conditions: AtrRule['detection']['conditions'][number][] = [...rule.detection.conditions];
+    const appended: AtrRule['detection']['conditions'][number][] = [];
     for (const c of override.conditions) {
       const current = conditions[c.index];
       if (!current) {
@@ -178,10 +256,40 @@ export function applyRuleOverrides(
           `rule override for ${rule.id} condition ${c.index}: "to" is identical to "from", so the entry changes nothing`,
         );
       }
-      conditions[c.index] = { ...current, value: c.to };
+      const value = c.to ?? current.value;
+      if (c.surfaces !== undefined && c.local === undefined) {
+        conditions[c.index] = { ...current, value, stroq_surfaces: [...c.surfaces] };
+        continue;
+      }
+      if (c.local === undefined) {
+        conditions[c.index] = { ...current, value };
+        continue;
+      }
+      if (rule.detection.condition === 'all') {
+        throw new RulesBuildError(
+          `rule override for ${rule.id} condition ${c.index}: "local" needs an "any" rule`,
+        );
+      }
+      // The broad pattern stays where it is evidence: the surfaces named, or by default text somebody
+      // else wrote and instruction files; the narrow one is read everywhere else.
+      const broad = c.surfaces ?? OTHERS_SURFACES;
+      conditions[c.index] = { ...current, value, stroq_surfaces: [...broad] };
+      if (c.local !== 'off') {
+        const narrow = OVERRIDE_SURFACES.filter((surface) => !broad.includes(surface));
+        appended.push({ ...current, value: c.local, stroq_surfaces: narrow });
+      }
     }
+    conditions.push(...appended);
     applied.push(rule.id);
-    return { ...rule, detection: { ...rule.detection, conditions } };
+    const tags =
+      override.surfaces === undefined
+        ? rule.tags
+        : { ...(rule.tags ?? {}), stroq_surfaces: [...override.surfaces] };
+    return {
+      ...rule,
+      ...(tags === undefined ? {} : { tags }),
+      detection: { ...rule.detection, conditions },
+    };
   });
   return { rules: out, applied };
 }
@@ -270,6 +378,10 @@ export const DEFAULT_BLOBS: readonly BlobSpec[] = [
   { name: 'backslashes', build: (size) => '\\'.repeat(size) },
   { name: 'double-quotes', build: (size) => '"'.repeat(size) },
   { name: 'link-starts', build: (size) => repeatTo('[a](http://x', size) },
+  // A template's braces left open before a long chain of attributes: what a pattern for template
+  // injection that scans to the closing brace is slow on.
+  { name: 'dunder-chain', build: (size) => `{${repeatTo('.__class__', size - 1)}` },
+  { name: 'double-brace-dunders', build: (size) => `{{${repeatTo(' __class__', size - 2)}` },
 ];
 
 /**

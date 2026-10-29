@@ -19,6 +19,8 @@ const STATE = ['stroq-state-change'];
 
 /** One call of each kind of rule that changes state, the commands that are listed ahead of their code among them. */
 const CALLS: ReadonlyArray<readonly string[]> = [
+  ['console'],
+  ['console', '--workspace', '/work', '--port', '0'],
   ['untaint', '--all'],
   ['init'],
   ['uninstall'],
@@ -95,7 +97,7 @@ describe('a command behind a launcher is held to the same covers', () => {
   it('denies a flag of the operand wherever it stands, as a word of its own as well', () => {
     for (const flag of ['--help', '-h', '--dry-run'])
       for (const [launcher, wrap] of LAUNCHERS)
-        for (const words of [['prove'], ['untaint', '--all'], ['trust', 'x.md']])
+        for (const words of [['console'], ['prove'], ['untaint', '--all'], ['trust', 'x.md']])
           expect(
             stroqStateSignals(wrap(`stroq ${joined(words)} ${flag}`)),
             `${launcher}: ${flag}`,

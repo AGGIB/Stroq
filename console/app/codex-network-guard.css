@@ -1,0 +1,218 @@
+.codex-network-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 16px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-secondary);
+}
+.codex-network-entry > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.codex-network-entry .control-meta {
+  margin: 0;
+}
+.dialog-content.codex-network-dialog {
+  width: min(720px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.codex-network-dialog .dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 24px;
+  margin: 0;
+}
+.codex-network-dialog .dialog-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 28px;
+}
+.codex-network-dialog .dialog-header .agent-glyph {
+  flex: 0 0 auto;
+}
+.codex-network-body {
+  padding: 0 24px 24px;
+}
+.codex-network-body,
+.codex-network-body section,
+.codex-network-body article,
+.codex-network-body code {
+  min-width: 0;
+}
+.codex-network-dialog h3 {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 550;
+}
+.codex-network-dialog .control-meta {
+  margin: 0;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+.codex-network-dialog .control-error {
+  margin-block: 12px;
+}
+.codex-network-dialog strong,
+.codex-network-dialog code {
+  overflow-wrap: anywhere;
+}
+.codex-network-views,
+.codex-network-heading,
+.codex-network-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+}
+.codex-network-views {
+  margin-bottom: 22px;
+}
+.codex-network-views .button[aria-pressed='true'] {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+.codex-network-heading {
+  justify-content: space-between;
+}
+.codex-network-default,
+.codex-network-check,
+.codex-network-history,
+.codex-network-review,
+.codex-network-record,
+.codex-network-notice {
+  display: grid;
+  gap: 14px;
+}
+.codex-network-check,
+.codex-network-history {
+  margin-top: 22px;
+}
+.codex-network-review,
+.codex-network-record,
+.codex-network-notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.codex-network-review {
+  background: var(--muted);
+}
+.codex-network-record[data-selected] {
+  border-color: var(--foreground);
+  scroll-margin-block: 144px 24px;
+}
+.codex-network-dialog .codex-network-facts {
+  margin: 0;
+}
+.codex-network-facts > div {
+  align-items: baseline;
+}
+.codex-network-review > p,
+.codex-network-notice > p {
+  margin: 0;
+}
+.codex-network-consent {
+  display: grid;
+  gap: 14px;
+}
+.codex-network-consent label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.codex-network-consent input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  accent-color: var(--foreground);
+}
+.codex-network-consent span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.codex-network-evidence {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.codex-network-evidence > summary {
+  cursor: pointer;
+  color: var(--foreground);
+}
+.codex-network-evidence[open] > summary {
+  margin-bottom: 12px;
+}
+.codex-network-evidence > code,
+.codex-network-evidence > span {
+  display: block;
+  margin-block: 8px;
+}
+.codex-network-evidence > code {
+  font-family: var(--font-mono);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  user-select: all;
+}
+.codex-network-evidence > p {
+  margin-block: 12px;
+}
+.codex-network-history-check {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.codex-network-history-check > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .codex-network-dialog .dialog-header {
+    padding: 20px;
+  }
+  .codex-network-body {
+    padding: 0 20px 20px;
+  }
+  .codex-network-review,
+  .codex-network-record,
+  .codex-network-notice {
+    padding: 14px;
+  }
+  .codex-network-actions .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .codex-network-facts > div {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .codex-network-facts dd {
+    text-align: left;
+    max-width: none;
+  }
+  .codex-network-history-check {
+    flex-wrap: wrap;
+  }
+}

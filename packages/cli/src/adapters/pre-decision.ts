@@ -3,6 +3,7 @@ import {
   taintSource,
   warningFor,
   type Decision,
+  type McpIdentity,
   type PostReadings,
   type ProvenanceHit,
   type SecretHit,
@@ -18,6 +19,7 @@ export interface EngineEvent {
   readonly toolName: string;
   readonly toolInput: Record<string, unknown>;
   readonly cwd: string;
+  readonly mcpIdentity?: McpIdentity;
   /** What the audit records instead of `toolInput`; see core's `PreToolEvent`. */
   readonly auditInput?: Record<string, unknown>;
 }
@@ -233,7 +235,12 @@ export async function scanPostResult(
   return {
     scanned: true,
     verdict: 'suspect',
-    warning: warningFor(result.scan, event.toolName, taintSource(result)),
+    warning: warningFor(
+      result.scan,
+      event.toolName,
+      taintSource(result),
+      result.flaggedOwn !== undefined,
+    ),
     ...timedOut,
   };
 }

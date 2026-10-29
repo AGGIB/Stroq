@@ -22,6 +22,20 @@ interface CommandHelp {
 
 export const COMMANDS: readonly CommandHelp[] = [
   {
+    name: 'console',
+    synopsis: 'console [--workspace <directory>] [--port <number>]',
+    about: [
+      'start the local security platform for the selected workspace and OS user.',
+      'Binds only to 127.0.0.1 and prints a private URL; keep its fragment token private.',
+      'Reading credential values, changing configuration and live provider checks',
+      'require their own explicit confirmation in the platform.',
+    ],
+    flags: [
+      ['--workspace <directory>', 'existing project directory (default: current directory)'],
+      ['--port <number>', 'loopback port (default: 47815; 0 selects an available port)'],
+    ],
+  },
+  {
     name: 'add',
     synopsis:
       'add <local-source|installed-name> [--user] [--restore] [--rollback] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
@@ -144,13 +158,10 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
     flags: [
       ['--agent <id>', 'the agent whose hooks to check, when the command does not say'],
-      [
-        '--sandbox',
-        "also wrap the launch in Anthropic's srt, with this machine's credential files unreadable",
-      ],
+      ['--sandbox', "require Anthropic's srt; refuse before launch when it is missing"],
       ['--allow-domain <host>', 'with --sandbox: a host the agent may reach; repeat for more'],
       ['--no-inspect', 'skip reading what the repository runs'],
-      ['--force', 'launch even after printing a refusal'],
+      ['--force', 'override repository/hook preflight refusals; --sandbox still requires srt'],
       ['--dry-run', 'print what would run and start nothing'],
     ],
     passThrough: true,
@@ -180,7 +191,8 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'mcp',
-    synopsis: 'mcp --server <name> [--pin sha256:<digest>] [--cloak] [--strict] -- <command> …',
+    synopsis:
+      'mcp --server <name> [--call-control <uuid>] [--pin sha256:<digest>] [--cloak] [--strict [--tool-approval]] -- <command> …',
     about: [
       'the stdio MCP proxy `init --agent mcp` writes into a client config: judges every',
       'tools/call against your policy and scans every result on its way back.',
@@ -193,6 +205,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--cwd <dir>', 'the project directory decisions are made for'],
       ['--session <id>', 'the session id; default mcp:<client>'],
       ['--pass-env <names>', 'comma-separated variables the server is started with'],
+      [
+        '--call-control <uuid>',
+        'with explicit --pass-env: use the stable UUID from local platform setup to pause new tool calls; restart the client after setup',
+      ],
       ['--pin sha256:<digest>', 'run only locally confirmed server bytes from a private copy'],
       ['--cloak', 'replace detected values in results before the model reads them'],
       [
@@ -202,6 +218,10 @@ export const COMMANDS: readonly CommandHelp[] = [
       [
         '--strict-max-withheld <n>',
         'with --strict: end a server with more than n malformed or hostile messages withheld (default 20); log lines, progress messages and the like have their own cap of 1000',
+      ],
+      [
+        '--tool-approval',
+        'with --strict and explicit --pass-env, not with --cloak: withhold each tool version until its exact contract is approved in the local platform',
       ],
     ],
     passThrough: true,
@@ -276,11 +296,11 @@ export const COMMANDS: readonly CommandHelp[] = [
   {
     name: 'replay',
     synopsis:
-      'replay [<session>] [--last] [--transcript <path>] [--json] [--list] [--html] [--out <file>]',
+      'replay [<session>] [--last] [--transcript <path>] [--all [--days <n>]] [--json] [--list] [--html] [--out <file>]',
     about: [
       'rebuild the recorded sequence: which content the agent read, and which later',
       "actions matched it. --last reads the agent's own transcript, so it works on",
-      'sessions that ran before you installed',
+      'sessions that ran before you installed; --all replays every recent one',
     ],
     flags: [
       [
@@ -288,6 +308,11 @@ export const COMMANDS: readonly CommandHelp[] = [
         'the newest session recorded for this project (this directory, or the folder above it)',
       ],
       ['--transcript <path>', 'a specific transcript'],
+      [
+        '--all',
+        "every agent session on this machine from the last 30 days, against today's policy: what would have been denied or asked about, and which sessions to open",
+      ],
+      ['--days <n>', 'with --all: how many days back (1 to 365)'],
       ['--json', 'machine-readable output'],
       ['--list', 'list the sessions in the audit log'],
       ['--html', 'one HTML file with the chain drawn (no script, no link, no external resource)'],

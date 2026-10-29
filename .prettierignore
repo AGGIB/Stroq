@@ -3,6 +3,12 @@ pnpm-lock.yaml
 node_modules/
 dist/
 coverage/
+.next/
+out/
+.local-engine/
+/console/next-env.d.ts
+/packages/cli/platform/
+/packages/cli/.platform-stage-*/
 .superpowers/
 rules/fixtures/
 rules/atr/

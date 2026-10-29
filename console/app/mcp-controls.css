@@ -1,0 +1,139 @@
+.mcp-containment-action {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 21px;
+}
+.mcp-containment-action h3 {
+  font-size: 19px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.mcp-containment-action > .control-meta {
+  line-height: 1.65;
+}
+.mcp-operation-notice {
+  margin: 18px 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--st-amber) 50%, var(--border));
+  background: color-mix(in srgb, var(--st-amber) 5%, var(--card));
+  font-size: var(--text-ui);
+  line-height: 1.65;
+}
+.mcp-operation-notice > p + p {
+  margin-top: 8px;
+}
+.mcp-fingerprints {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+}
+.mcp-fingerprints dt {
+  margin-bottom: 7px;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+}
+.mcp-fingerprints dd {
+  min-width: 0;
+}
+.mcp-acknowledgements {
+  display: grid;
+  gap: 16px;
+  margin: 22px 0;
+}
+.mcp-acknowledgements label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  font-size: var(--text-ui);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.mcp-acknowledgements input {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  accent-color: var(--brand);
+}
+.mcp-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.mcp-action-buttons .button {
+  min-height: 43px;
+}
+.mcp-proxy-details {
+  display: grid;
+  gap: 10px;
+  padding-left: 21px;
+  margin: 14px 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  line-height: 1.65;
+}
+.mcp-history-table {
+  min-width: 780px;
+}
+.mcp-history-table .inventory-name {
+  min-width: 190px;
+}
+.mcp-history-outcome {
+  padding: 18px 20px;
+  border: 1px solid color-mix(in srgb, var(--brand) 50%, var(--border));
+  border-radius: 6px;
+  background: var(--card);
+  line-height: 1.65;
+}
+.mcp-history-outcome p {
+  margin: 6px 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+}
+.dialog-content.mcp-containment-dialog {
+  padding: 0;
+  width: min(740px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.mcp-containment-dialog .dialog-header {
+  padding: 24px;
+  margin: 0;
+}
+.mcp-containment-dialog .dialog-header h2 {
+  padding-right: 34px;
+  overflow-wrap: anywhere;
+}
+.mcp-containment-dialog .inventory-review-body {
+  padding: 0 24px 24px;
+}
+.mcp-containment-dialog .control-meta {
+  line-height: 1.65;
+}
+.mcp-source-caption {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+@media (max-width: 650px) {
+  .dialog-content.mcp-containment-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 24px);
+  }
+  .mcp-containment-dialog .dialog-header {
+    padding: 20px;
+  }
+  .mcp-containment-dialog .inventory-review-body {
+    padding: 0 20px 20px;
+  }
+  .mcp-operation-notice {
+    padding: 12px 14px;
+  }
+  .mcp-action-buttons > .button {
+    flex: 1 1 160px;
+  }
+}

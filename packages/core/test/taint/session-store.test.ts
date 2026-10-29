@@ -78,6 +78,65 @@ describe('FileSessionStore', () => {
     );
     await expect(new FileSessionStore(dir).get('s1')).rejects.toThrow(/corrupt session state/);
   });
+  it('notes flags on own text apart from the taint, counting them and keeping the last', async () => {
+    const store = fresh();
+    const first = await store.markFlagged('s1', src('Read'));
+    expect(first.taint).toBeNull();
+    expect(first.flagged).toMatchObject({ count: 1, last: { tool: 'Read' } });
+    const second = await store.markFlagged('s1', src('Bash'));
+    expect(second.flagged).toMatchObject({ since: first.flagged?.since, count: 2 });
+    expect(second.flagged?.last.tool).toBe('Bash');
+    expect(await store.get('s1')).toEqual(second);
+  });
+  it('keeps the note when the session is tainted, and clears both together', async () => {
+    const store = fresh();
+    await store.markFlagged('s1', src('Read'));
+    const tainted = await store.markSuspect('s1', src('WebFetch'));
+    expect(tainted.flagged?.count).toBe(1);
+    expect(tainted.taint?.level).toBe('suspect');
+    await store.clear('s1');
+    const cleared = await store.get('s1');
+    expect(cleared.flagged).toBeUndefined();
+    expect(cleared.taint).toBeNull();
+  });
+  it.each([
+    ['a count that is not a number', { since: 'x', count: '1', last: src('Read') }],
+    ['a count of zero', { since: 'x', count: 0, last: src('Read') }],
+    ['a last flag with no tool', { since: 'x', count: 1, last: { ruleIds: [], at: 'x' } }],
+    ['a note that is a list', [src('Read')]],
+  ])('rejects a note with %s instead of reading past it', async (_name, flagged) => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `${sessionKey('s1')}.json`),
+      JSON.stringify({ sessionId: 's1', taint: null, updatedAt: 'x', flagged }),
+    );
+    await expect(new FileSessionStore(dir).get('s1')).rejects.toThrow(/corrupt session state/);
+  });
+  it('notes downloaded files once each, the newest last, and keeps at most 64', async () => {
+    const store = fresh();
+    await store.markFetched('s1', ['/p/a.html', '/p/b.html']);
+    const again = await store.markFetched('s1', ['/p/a.html']);
+    expect(again.fetched).toEqual(['/p/b.html', '/p/a.html']);
+    const many = Array.from({ length: 70 }, (_, i) => `/p/f${i}.html`);
+    const capped = await store.markFetched('s1', many);
+    expect(capped.fetched).toHaveLength(64);
+    expect(capped.fetched?.at(-1)).toBe('/p/f69.html');
+    expect(await store.get('s1')).toEqual(capped);
+  });
+  it.each([
+    ['a list that is not of paths', [1, 2]],
+    ['an empty path', ['']],
+    ['too many', Array.from({ length: 65 }, (_, i) => `/p/${i}`)],
+  ])('rejects downloaded files with %s', async (_name, fetched) => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `${sessionKey('s1')}.json`),
+      JSON.stringify({ sessionId: 's1', taint: null, updatedAt: 'x', fetched }),
+    );
+    await expect(new FileSessionStore(dir).get('s1')).rejects.toThrow(/corrupt session state/);
+  });
   it('never uses the raw session id as a file name', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'stroq-sess-')), 'sessions');
     await new FileSessionStore(dir).markSuspect('../../etc/passwd', src('Read'));

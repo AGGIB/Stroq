@@ -46,8 +46,10 @@ const decisionOf = (stdout: string) => JSON.parse(stdout) as Record<string, unkn
 const auditText = () => readFileSync(join(home, 'audit.jsonl'), 'utf8');
 
 /** A poisoned file in the workspace, which `view_file` then taints the session with. */
+/** A dependency's file: a flag on one of the project's own would not taint the session. */
 function plantPoisonedFile(name = 'README-widgets.md'): string {
-  const file = join(cwd, name);
+  mkdirSync(join(cwd, 'node_modules', 'widgets'), { recursive: true });
+  const file = join(cwd, 'node_modules', 'widgets', name);
   writeFileSync(file, POISONED);
   return file;
 }

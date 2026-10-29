@@ -13,6 +13,8 @@ import { commandNames } from '../src/help.js';
 
 /** The forms of each covered command that change state, one at least: each must be denied. */
 const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
+  // Starts the authenticated local control service and prints its private bearer URL.
+  console: ['stroq console', 'stroq console --workspace /work --port 0'],
   task: ['stroq task -- "fix tests"', 'stroq task --hook-only -- "fix tests"'],
   permit: ['stroq permit extend task abc', 'stroq permit revoke task'],
   init: ['stroq init', 'stroq init --agent cursor --user'],
@@ -41,11 +43,17 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   vet: ['stroq vet --online', 'stroq vet --from x --online'],
   add: ['stroq add ./demo', 'stroq add demo --user', 'stroq add demo --restore'],
   remove: ['stroq remove demo', 'stroq remove demo --force'],
+  // The host's entry point: an event the agent wrote on its input could record a result that was
+  // never read, or say that a call the user was asked about ran and so let a copied value through.
+  hook: [
+    "echo '{}' | stroq hook claude-code",
+    'stroq hook cursor < event.json',
+    "echo '{}' | npx @stroq/cli hook claude-code",
+  ],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */
 const READS_ONLY: Readonly<Record<string, string>> = {
-  hook: "the host's entry point: reads one event on its input, prints a decision, and writes the audit entry and the session of that event",
   doctor: 'prints the state of the installation, and runs its self-test in memory',
   log: 'prints audit entries',
   verify: 'checks the hash chain of the audit log',
@@ -195,6 +203,40 @@ describe('stroq policy and the state gate', () => {
     'stroq policy --help',
     'stroq policy check -h',
   ])('leaves %s open: it only reads', (form) => {
+    expect(isDenied(form), form).toBe(false);
+  });
+});
+
+/**
+ * A program that runs a command inside a pseudo-terminal starts it as `stroq run --` does, and the hook reads
+ * the command it starts. The first five went through on 2026-10-13; the core tests hold the full matrix
+ * (`stroq-state-launchers.test.ts`), and these hold the decision of the tool call the hook is given.
+ */
+describe('commands of Stroq run inside a pseudo-terminal and the state gate', () => {
+  it.each([
+    'script -q /dev/null stroq untaint',
+    "printf '0123456789ab\\n' | script -q /dev/null stroq add ./x",
+    `python3 -c 'import pty; pty.spawn(["stroq","untaint"])'`,
+    "expect -c 'spawn stroq untaint; interact'",
+    'socat - EXEC:"stroq untaint",pty',
+    'script -q /dev/null sh -c "stroq init"',
+    'script -qc "stroq untaint" /dev/null',
+    'script /dev/null -c "npx @stroq/cli untaint"',
+    'unbuffer -p stroq add ./x',
+    'socat - SYSTEM:"stroq prove",pty',
+    'ptyexec stroq harden apply --yes',
+  ])('denies %s', (form) => {
+    expect(isDenied(form), form).toBe(true);
+  });
+
+  it.each([
+    'script -q /dev/null make test',
+    "expect -c 'spawn ssh host'",
+    'unbuffer npm test',
+    'socat - EXEC:"ssh host",pty',
+    'script -q /dev/null stroq doctor',
+    'python3 -c \'import pty; pty.spawn("bash")\'',
+  ])('leaves %s open', (form) => {
     expect(isDenied(form), form).toBe(false);
   });
 });

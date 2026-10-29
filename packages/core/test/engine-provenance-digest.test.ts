@@ -46,8 +46,8 @@ function fixture() {
   const post = (text: string, session = 's1') =>
     engine.post({
       sessionId: session,
-      toolName: 'Read',
-      toolInput: { file_path: 'README.md' },
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
       toolResultText: text,
       cwd,
     });
@@ -63,7 +63,8 @@ const BARE_COMMANDS: ReadonlyArray<readonly [string, string]> = [
   ],
   ['perl', `perl -MCompress::Zlib -MMIME::Base64 -e 'eval uncompress(decode_base64("${TOKEN}"))'`],
   ['php', `php -r 'eval(gzinflate(base64_decode("${TOKEN}")));'`],
-  ['shell', `echo ${TOKEN} | base64 -d > f && chmod +x f && ./f`],
+  // Decoded and not run: run, the line is denied as encoded execution before provenance is asked.
+  ['shell', `echo ${TOKEN} | base64 -d > f && chmod +x f`],
 ];
 
 describe('a flagged page that labels a payload as an integrity hash', () => {

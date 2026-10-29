@@ -81,8 +81,14 @@ export const STROQ_ENTRY =
  * Subcommands that change state whatever follows them. `canary` is not one that is still to come: with a
  * `--file` it creates the file it is given, with a first line it chooses, wherever it chooses (an arbitrary
  * write, into `~/.zprofile` for one), and with none it adds a canary to the secret index.
+ * `console` starts the authenticated local control service and prints its private bearer URL, so
+ * launching it belongs to the owner outside the agent, before any individual control is used.
+ * `hook` takes an event on its input as the host's hook does: an event the agent wrote there could
+ * record a result that was never read, or say that a call the user was asked about ran.
  */
 export const STATE_COMMANDS: ReadonlySet<string> = new Set([
+  'console',
+  'hook',
   'untaint',
   'init',
   'uninstall',

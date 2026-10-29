@@ -123,3 +123,37 @@ describe.skipIf(process.platform === 'win32')('the config file srt is given', ()
     expect(readFileSync(join(decoy, 'settings.json'), 'utf8')).toBe('not the config');
   });
 });
+
+// The compile cache holds code that the hooks run (`compile-cache.ts`). Off macOS srt denies only a name
+// that exists, so a folder an agent could make first inside the sandbox would be one it could fill.
+describe.skipIf(process.platform === 'win32')('the compile cache folder, at a launch', () => {
+  for (const plat of ['linux', 'darwin'] as const)
+    it(`is made, 0700, before the config, and denied in it on ${plat}`, async () => {
+      const w = world();
+      const folder = join(w.home, 'compile-cache');
+      expect(existsSync(folder)).toBe(false);
+      let denied: readonly string[] = [];
+      await sandboxRun(
+        w,
+        {
+          plat,
+          launch: async ({ args }) => {
+            expect(statSync(folder).isDirectory()).toBe(true);
+            expect(statSync(folder).mode & 0o777).toBe(0o700);
+            const settings = JSON.parse(readFileSync(args[1] as string, 'utf8'));
+            denied = settings.filesystem.denyWrite;
+            return 0;
+          },
+        },
+        [],
+      );
+      expect(denied).toContain(folder);
+    });
+
+  it('is listed, and not made, on a dry run', async () => {
+    const w = world();
+    const out = await sandboxRun(w, { plat: 'linux' });
+    expect(existsSync(join(w.home, 'compile-cache'))).toBe(false);
+    expect(out).toContain(join(w.home, 'compile-cache'));
+  });
+});

@@ -1,0 +1,31 @@
+export const POLICY_HISTORY_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  'policy-history-unavailable': 'Recorded policy changes could not be read safely.',
+  'policy-history-stale': 'This recovery record changed. Refresh and prepare a new preview.',
+  'policy-backup-unavailable': 'The retained policy bytes could not be verified.',
+  'policy-unavailable': 'The current policy could not be read safely.',
+  'policy-invalid': 'The current or retained policy cannot be tested. Inspect it before restoring.',
+  'stale-policy': 'The current policy changed. Refresh and prepare a new preview.',
+  'stale-runtime': 'The local engine changed. Reconnect and prepare a new preview.',
+  'policy-restore-unknown':
+    'Restoration could not be confirmed. Recheck the current policy before another change.',
+  'shared-scope-ack-required':
+    'Confirm that restoration affects every agent using this Stroq home.',
+  'reduced-protection-ack-required': 'Acknowledge that prior settings may reduce protection.',
+  'backup-ack-required': 'Acknowledge the private, unencrypted recovery copy.',
+  'interruption-ack-required': 'Acknowledge the new ordinary-work interruptions.',
+  'checks-failed': 'The retained version did not pass the required checks.',
+  'no-changes': 'This policy version is already active.',
+  'preview-expired': 'This preview expired. Prepare a fresh preview.',
+  'preview-mismatch': 'This request no longer matches its preview. Prepare a fresh preview.',
+  'policy-cases-stale': 'Saved policy checks changed. Refresh and prepare a new preview.',
+  'policy-cases-unavailable': 'Saved policy checks could not be read safely.',
+  'policy-cases-invalid':
+    'Saved policy checks could not be verified. Their contents were preserved.',
+  'policy-cases-busy': 'Another policy or saved-check change is running. Wait, then recheck.',
+  busy: 'Another policy change is running. Wait, then recheck.',
+  'backup-unavailable': 'The private recovery copy could not be retained safely.',
+  'write-failed': 'The policy write was not confirmed. Recheck before another change.',
+  'engine-unavailable': 'The policy recovery engine is unavailable. Reconnect after the build.',
+  'engine-failed': 'The local engine could not verify this recovery operation.',
+  'deadline-exceeded': 'The policy check reached its time limit. Prepare a fresh preview.',
+};

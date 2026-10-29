@@ -52,7 +52,7 @@ const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = 
   ['03-token-in-mcp-comment', 'blocked', 'deny-secret-egress'],
   ['04-s1ngularity-public-repo', 'blocked', 'deny-push-external-when-tainted'],
   ['05-roguepilot-schema-url', 'blocked', 'deny-secret-egress'],
-  ['06-env-dump-exfil', 'blocked', 'deny-origin-suspect'],
+  ['06-env-dump-exfil', 'asked', 'ask-origin-untrusted'],
   ['07-settings-hook-removal', 'blocked', 'deny-self-tamper'],
   ['08-rm-rf-home', 'asked', 'ask-destructive'],
   ['09-drizzle-force-push', 'asked', 'ask-destructive'],
@@ -82,7 +82,7 @@ const EXPECTED: ReadonlyArray<readonly [string, 'blocked' | 'asked', string]> = 
   ['33-lftp-mirror-delete', 'asked', 'ask-destructive'],
   ['34-cmd-rmdir-quote-collapse', 'asked', 'ask-destructive'],
   ['35-force-push-open-pr', 'asked', 'ask-destructive'],
-  ['36-script-launders-taint-upload', 'blocked', 'deny-network-when-tainted'],
+  ['36-script-launders-taint-upload', 'asked', 'ask-origin-untrusted'],
 ];
 
 const OPEN_POLICY: Policy = { ...DEFAULT_POLICY, rules: [] };
@@ -104,8 +104,8 @@ describe('runAttack with the default policy', () => {
     expect(report.policy).toBe('default');
     expect(report.ok).toBe(true);
     expect(report.totals).toEqual({
-      blocked: 17,
-      asked: 19,
+      blocked: 15,
+      asked: 21,
       askedByLimit: 0,
       passed: 0,
       timeout: 0,

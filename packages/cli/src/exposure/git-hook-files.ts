@@ -4,7 +4,7 @@ import { hit } from './agent-kinds.js';
 import { foldPath } from './agent-surface.js';
 import { foldName } from './git-dir-names.js';
 import type { Changed } from './git-read.js';
-import { resolve, type TreeView } from './git-tree.js';
+import { createTreeResolver, type TreeView } from './git-tree.js';
 import { parseGitConfig } from './repo-surface.js';
 
 /**
@@ -163,6 +163,7 @@ export function gitHookFileChanges(
   changed: ReadonlyMap<string, Changed>,
   ctx: HookContext,
 ): TaggedHit[] {
+  const resolvePath = createTreeResolver(ctx.view);
   const { named, unknown } = hookFolders(ctx);
   const touched = [...changed]
     .filter(([, c]) => c.status !== 'D')
@@ -183,7 +184,7 @@ export function gitHookFileChanges(
   // Each folder by its name, by the name a disk folds it to, and where the links on its way lead.
   for (const [folder, why] of named) {
     under(folder, why);
-    const at = resolve(folder === '.' ? '' : folder, ctx.view);
+    const at = resolvePath(folder === '.' ? '' : folder);
     if (at.kind === 'none') continue;
     for (const link of at.links) if (changed.has(link)) fails(link, changed.get(link), why);
     if (at.kind === 'folder') under(at.path, why);
@@ -223,11 +224,12 @@ export function gitHookFileChanges(
  * that are not plain files under a folder of hooks: not followed, each fails.
  */
 export function hookFilesAt(ctx: HookContext): { files: string[]; odd: string[] } {
+  const resolvePath = createTreeResolver(ctx.view);
   const { named } = hookFolders(ctx);
   const prefixes = new Set<string>();
   for (const [folder] of named) {
     prefixes.add(foldPath(folder));
-    const at = resolve(folder === '.' ? '' : folder, ctx.view);
+    const at = resolvePath(folder === '.' ? '' : folder);
     if (at.kind === 'folder') prefixes.add(foldPath(at.path));
   }
   const files: string[] = [];

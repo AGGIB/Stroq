@@ -150,10 +150,11 @@ export function runBench(dir: string): BenchReport {
   for (const file of files) {
     const size = statSync(file).size;
     bytes += size;
-    // `repo_content`: the corpus is third-party documentation, and naming that surface
-    // is what makes the reported rate a rate *for documentation* rather than for every
-    // rule the bundle ships regardless of where it was written to read. It also changes
-    // what the number means — see docs/BENCH.md's Method section.
+    // `web_content`: the corpus is third-party documentation, read the way an agent meets a page
+    // somebody else wrote (a fetched page, or one printed by `curl`), where every rule that reads
+    // the web applies. Naming that surface is what makes the reported rate a rate *for
+    // documentation*; a rule scoped away from the developer's own code (rules/atr-overrides.yaml,
+    // `surfaces`) still reads it here, so the scoping does not lower this number. See docs/BENCH.md.
     const startedAt = performance.now();
     const text = readPrefix(file, MAX_READ_BYTES);
     // A page fetched from the web is what the engine reads as a tool's response too, and the rules
@@ -162,7 +163,7 @@ export function runBench(dir: string): BenchReport {
       rules,
       text,
       { budgetMs: BENCH_BUDGET_MS },
-      { target: 'repo_content', ...scanFieldsForTool('WebFetch', text) },
+      { target: 'web_content', ...scanFieldsForTool('WebFetch', text) },
     );
     /* Timed against the PRODUCTION budget, which this run deliberately does not use.
        The two numbers were recorded in different files and never compared: this

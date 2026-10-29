@@ -61,6 +61,32 @@ Stroq names a send only when it sees the key in the command that sent it. A scri
 
 Start with the [session secret scan walkthrough](https://stroq.dev/session-secret-scan/) (no session yet? [try it with a made-up key](https://stroq.dev/session-secret-scan/#try-it)) or read [integration limits](docs/AGENTS.md) before relying on a live hook.
 
+## Local console
+
+```sh
+npx @stroq/cli console                            # a private page on 127.0.0.1
+npx @stroq/cli console --workspace /path/to/repo  # the project it should look at
+```
+
+Open the whole link it prints: it carries a key that is new each time the console starts. The console reads what Stroq already records on this machine. It changes an agent's settings or Stroq's policy only after you confirm a preview of that change; checks you run are saved under `~/.stroq`.
+
+- **Protection** answers first: which agents are asking Stroq before they act, which are connected but not seen yet, and which are not connected. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them; **Test hook** and **Live** show that.
+- **Live** follows recorded decisions as they happen; **Activity** keeps them.
+- **Agents & coverage** adds or removes Stroq's hooks for Claude Code, Cursor and Codex CLI, showing the exact file change first and keeping a copy of the old file.
+- **Settings check** lists agent settings that switch off or loosen protection, and says which files it could not read. **Try an action** shows what your policy would decide for a command, read, write or fetch without running it.
+- Skills & MCP, investigations, sessions and secret exposure are under **When you need it**; the **Guide** page says what each page is for and what its words mean.
+
+It listens only on 127.0.0.1, needs no account and has no telemetry. With the optional threat feed turned on in Settings, it downloads [pwn.watch](https://pwn.watch/)'s public list of incidents; nothing about your project is sent. One action starts your real agent: **Test in agent** runs it against a throwaway project, with a cap on requests, and uses your agent's own subscription. Adding hooks from the console needs macOS or Linux; on Windows use `stroq init`. Details and limits: [console guide](console/README.md).
+
+From a source checkout:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --dir console install --ignore-workspace --frozen-lockfile
+pnpm platform:build
+pnpm platform --workspace /path/to/repo
+```
+
 ## Docs
 
 - **[Guide](docs/GUIDE.md)**: everything, section by section. [Install](docs/GUIDE.md#install) · [Commands](docs/GUIDE.md#commands) · [How it works](docs/GUIDE.md#how-it-works) · [Guarantees and limits](docs/GUIDE.md#guarantees-and-limits)

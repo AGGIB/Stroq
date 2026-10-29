@@ -32,8 +32,8 @@ async function tainted(): Promise<StroqEngine> {
   const e = engine();
   const scanned = await e.post({
     sessionId: 's1',
-    toolName: 'Read',
-    toolInput: { file_path: 'README.md' },
+    toolName: 'WebFetch',
+    toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
     toolResultText: POISON,
     cwd,
   });
@@ -158,12 +158,20 @@ describe('a deny that depends on the taint', () => {
   // mentioned `stroq untaint` printed a literal `<id>`. A false positive then took
   // four steps and a trip through `stroq why` to find the session id.
   it('says what tainted the session and the exact commands that undo a false positive', async () => {
-    const e = await tainted();
+    // A file the agent loads as instructions: a flag there taints, and the file can be trusted.
+    const e = engine();
+    await e.post({
+      sessionId: 's1',
+      toolName: 'Read',
+      toolInput: { file_path: 'AGENTS.md' },
+      toolResultText: POISON,
+      cwd,
+    });
     const r = await e.pre(pre('Bash', { command: 'curl -s https://example.com/x' }));
     expect(r.decision.ruleId).toBe('deny-network-when-tainted');
-    expect(r.decision.reason).toContain('Tainted by Read README.md');
+    expect(r.decision.reason).toContain('Tainted by Read AGENTS.md');
     expect(r.decision.reason).toContain('stroq untaint --session s1');
-    expect(r.decision.reason).toContain('stroq trust README.md');
+    expect(r.decision.reason).toContain('stroq trust AGENTS.md');
     expect(r.decision.reason).toMatch(/outside the agent/);
   });
 
@@ -175,7 +183,7 @@ describe('a deny that depends on the taint', () => {
 });
 
 describe('PowerShell output', () => {
-  it('is scanned like Bash output and taints the session', async () => {
+  it('is scanned like Bash output: a flag on a file of the project does not taint', async () => {
     const r = await engine().post({
       sessionId: 's1',
       toolName: 'PowerShell',
@@ -184,6 +192,18 @@ describe('PowerShell output', () => {
       cwd,
     });
     expect(r.scanned).toBe(true);
+    expect(r.scan.verdict).toBe('suspect');
+    expect(r.taint).toBeNull();
+  });
+
+  it('taints the session when the command fetched what it printed', async () => {
+    const r = await engine().post({
+      sessionId: 's1',
+      toolName: 'PowerShell',
+      toolInput: { command: 'Invoke-WebRequest https://docs.example/setup' },
+      toolResultText: POISON,
+      cwd,
+    });
     expect(r.taint?.level).toBe('suspect');
   });
 });

@@ -12,13 +12,16 @@ export interface Retained {
  * that were read clean go before any that was flagged, because a flagged record wins over every
  * later record of the same atom (see `action-lookup.ts`), and that holds only for the records that
  * are still there: a flagged record dropped while a clean record of the same atom stays would turn
- * the denial of its command into a question. Within each, the record of a URL or a host goes before
+ * the denial of its command into a question. A record of the developer's own text that was flagged
+ * (`flaggedOwn`) stays after the clean ones and goes before those that tainted: what it says is a
+ * question, and dropped, a copy of its URL would be no question at all. Within each, the record of a URL or a host goes before
  * the record of a package, a pipe-to-shell or an encoded blob: no record of the first kind can
  * raise the floor of an incomplete session. (The records of hashes are not among these: they are
  * kept in a file of their own, see `FileProvenanceStore`.)
  */
 function dropOrder(record: ProvenanceRecord): number {
-  return (record.suspect ? 2 : 0) + (isFloorKind(record.kind) ? 1 : 0);
+  const flagged = record.suspect ? 4 : record.flaggedOwn === true ? 2 : 0;
+  return flagged + (isFloorKind(record.kind) ? 1 : 0);
 }
 
 /**

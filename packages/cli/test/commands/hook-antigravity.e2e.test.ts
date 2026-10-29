@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -70,7 +70,9 @@ describe('stroq hook antigravity (end to end)', () => {
   it('taints from a file it reads back itself, then denies the command that file dictated', async () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-antigravity-e2e-'));
     const project = mkdtempSync(join(tmpdir(), 'stroq-antigravity-e2e-cwd-'));
-    const poisoned = join(project, 'README-widgets.md');
+    // A dependency's file: a flag on one of the project's own would not taint the session.
+    mkdirSync(join(project, 'node_modules', 'widgets'), { recursive: true });
+    const poisoned = join(project, 'node_modules', 'widgets', 'README-widgets.md');
     writeFileSync(poisoned, POISONED);
 
     // PostToolUse carries no result at all, so the taint depends entirely on Stroq

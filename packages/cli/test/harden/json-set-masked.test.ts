@@ -191,7 +191,7 @@ describe('the manifest and a json-set that replaced a credential', () => {
         },
       ],
     });
-    await writeManifest(env, { version: 1, files: { [file]: [masked] } });
+    await writeManifest(env, { version: 2, files: { [file]: [masked] } });
     expect(readManifest(env).files[file]).toEqual([masked]);
 
     for (const previous of [

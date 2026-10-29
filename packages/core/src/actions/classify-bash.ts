@@ -59,6 +59,8 @@ import {
 import { READING_DEADLINE_MS, withDeadline } from './deadline.js';
 import { scpRemotes } from './scp-remotes.js';
 import { jobStages, persistenceSignals } from './persistence.js';
+import { readPythonStages, type PythonStages } from './python-stages.js';
+import { INLINE_PAYLOAD } from './inline-payload.js';
 
 const SHELLS = new Set([
   'sh',
@@ -142,12 +144,6 @@ const DECODE = /\b(base64\s+(-d|--decode|-D)|openssl\s+(base64|enc)\s+-d|xxd\s+-
 // Not the tail of a longer name (`spynex-eval run`, `node --eval`, `lib/eval`): that is not `eval`.
 export const EVAL_DYNAMIC = followedBy(/(?<![\w./-])eval\b/, /(\$\(|`|\$\{?\w)/);
 const INLINE_INTERP = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
-// `Buffer.from(x, 'base64')` needs no alternative of its own: it contains `base64`,
-// which is matched anywhere in the segment already. A `Buffer\.from\([^)]*base64`
-// alternative used to sit here, adding no match and only cost: from every
-// `Buffer.from(` with no `)` or `base64` after it, `[^)]*` rescanned the rest of the
-// segment, so 262,144 characters of them took 2.1 s in this pattern alone.
-const INLINE_PAYLOAD = /(exec\(|base64|__import__|atob\(|child_process|subprocess|os\.system)/;
 // Not at the end of a snake-case name, where it is a word of it and not the library: a table
 // `organization_join_requests` in the SQL that an inline program is given is not `requests`. A name that
 // begins with an underscore is the library under another name (`_socket`, `_http.request`).
@@ -274,11 +270,19 @@ export const SECRET_PATTERNS: readonly PatternTest[] = [
   /(^|[\s"'/\\=])~?[/\\]?\.ssh([/\\]|\b)/,
   /\bid_(rsa|ed25519|ecdsa|dsa)\b/,
   /\.aws[/\\](credentials|config)\b/,
+  // The whole folder, as `scp -r ~/.aws` and `tar c ~/.aws` take it.
+  /(^|[\s"'/\\=@])~?[/\\]?\.aws([/\\]|\s|$)/,
+  /\.docker[/\\]config\.json\b/,
+  /\.azure[/\\]/,
+  /(^|[\s"'/\\=@])~?[/\\]?\.gnupg([/\\]|\s|$)/,
+  /\bcredentials\.json\b/,
+  /\bservice[-_]?account[\w.-]*\.json\b/i,
+  /\.tfstate\b/,
   // `@` is included so `-f body=@.env` / `-d @.env` (a file-upload argument,
   // not a literal path segment) is also recognised.
-  /(^|[\s"'/\\=@])\.env(\.[\w-]+)?\b/,
+  /(^|[\s"'/\\=@<])\.env(\.[\w-]+)?\b/,
   /\.(pem|p12|pfx|key)\b/,
-  /\.(npmrc|netrc|pgpass|git-credentials)\b/,
+  /\.(npmrc|netrc|pgpass|git-credentials|pypirc)\b/,
   /\.kube[/\\]config\b/,
   /\.config[/\\]gcloud\b/,
   /\.config[/\\]gh[/\\]hosts\.yml\b/i,
@@ -493,6 +497,8 @@ function encodedExecSignals(
   segments: readonly string[],
   pipelines: readonly (readonly string[])[],
   texts: readonly string[],
+  lexedTexts: () => ReturnType<typeof readEachText>,
+  python: PythonReading,
 ): { readonly encoded: string[]; readonly unparsed: string[] } {
   const encoded: string[] = [];
   const unparsed: string[] = [];
@@ -501,9 +507,6 @@ function encodedExecSignals(
   // nothing. Where those are not sure of themselves, an interpreter is as it always was, a shell,
   // and a command that is not known to read is a question.
   const wantsRead = texts.some((text) => READ_PIPELINES_FOR.test(text) || carriesPipedData(text));
-  // Read once, for whoever asks first: it costs a pass over the text.
-  let lexed: ReturnType<typeof readEachText> | undefined;
-  const lexedTexts = (): ReturnType<typeof readEachText> => (lexed ??= readEachText(texts));
   const read = wantsRead ? (lexedTexts()?.flat() ?? null) : null;
   const context = wantsRead ? consumerContext(texts, segments, read ?? []) : {};
   const consumerOf = (stage: string): PipeConsumer => {
@@ -557,14 +560,62 @@ function encodedExecSignals(
     encoded.push(...fetched.encoded);
     unparsed.push(...fetched.unparsed);
   }
+  // A Python program that was read in full answers for itself (`python-stages.ts`): the pattern is
+  // asked of the command with it put out of the way, and of the command as it is where there is none.
+  const answered = segments.some(inlinePayload) && python.readsAll();
   for (const seg of segments) {
     if (EVAL_DYNAMIC.test(seg) && !evalsInitTool(seg)) encoded.push('eval-dynamic');
-    if (INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg))
-      encoded.push('inline-interpreter-payload');
+    if (!answered && inlinePayload(seg)) encoded.push('inline-interpreter-payload');
     if (SHELL_C_REMOTE.test(seg)) encoded.push('shell-c-remote');
     if (SHELL_PROC_SUB_REMOTE.test(seg)) encoded.push('shell-proc-sub-remote');
   }
+  encoded.push(...python.stages.signals);
   return { encoded, unparsed };
+}
+
+/** An interpreter given a program on its command line whose text names a way to run code. */
+const inlinePayload = (seg: string): boolean => INLINE_INTERP.test(seg) && INLINE_PAYLOAD.test(seg);
+
+/** What the Python programs of a command were read to start, and whether the pattern is answered without them. */
+interface PythonReading {
+  readonly stages: PythonStages;
+  /** The command with each program read in full put out of the way holds nothing the pattern reads. */
+  readonly readsAll: () => boolean;
+}
+
+/** A Python, by any name, however its command word is quoted: where the stages are read for one. */
+const MAY_BE_PYTHON = /python|pypy/i;
+const NO_PYTHON: PythonStages = { signals: [], unparsed: [], masked: null, started: [] };
+
+/** The Python programs of a command (`python-stages.ts`), read where a text of it may name a Python. */
+function pythonReading(
+  split: SplitCommand,
+  lexedTexts: () => ReturnType<typeof readEachText>,
+  depth: number,
+): PythonReading {
+  const stages = split.texts.some((text) => MAY_BE_PYTHON.test(text.replace(/['"\\]/g, '')))
+    ? lexedTexts()
+    : null;
+  const read =
+    stages === null
+      ? NO_PYTHON
+      : readPythonStages({
+          texts: split.texts,
+          stages,
+          depth,
+          consumer: (command) => pipeConsumer(command, commandWord(command), isShell(command)),
+          payload: (text) => INLINE_PAYLOAD.test(text),
+        });
+  return {
+    stages: read,
+    // The command without the programs read in full, and each command they start as a line of its own.
+    readsAll: () =>
+      read.masked !== null &&
+      !splitCommand(read.masked, split.functions).segments.some(inlinePayload) &&
+      !read.started.some((command) =>
+        splitCommand(command, split.functions).segments.some(inlinePayload),
+      ),
+  };
 }
 
 /** `eval "$(ssh-agent -s)"`: a tool that prints its own setup, which is what `eval` is for. */
@@ -1039,7 +1090,11 @@ function readCommandGroups(
   // name a Windows twin of it as well. `shell.unparsed` is the one class that IS
   // new, because "I could not read what this runs" is not any of the four.
   const ps = powershellSignals(segments, pipelines, cwd);
-  const exec = encodedExecSignals(segments, pipelines, split.texts);
+  // Read once, for whoever asks first: it costs a pass over each text.
+  let lexes: ReturnType<typeof readEachText> | undefined;
+  const lexedTexts = (): ReturnType<typeof readEachText> => (lexes ??= readEachText(split.texts));
+  const python = pythonReading(split, lexedTexts, depth);
+  const exec = encodedExecSignals(segments, pipelines, split.texts, lexedTexts, python);
   const groups: ReadonlyArray<readonly [ActionClass, readonly string[]]> = [
     ['shell.exec_encoded', [...exec.encoded, ...ps.encoded]],
     ['shell.network', [...segments.filter(isNetwork).map(() => 'network-command'), ...ps.network]],
@@ -1063,6 +1118,7 @@ function readCommandGroups(
       'shell.unparsed',
       [
         ...exec.unparsed,
+        ...python.stages.unparsed,
         ...ps.unparsed,
         ...gitUnparsedSignals(segments),
         ...(truncated ? ['nested-commands-too-large'] : []),

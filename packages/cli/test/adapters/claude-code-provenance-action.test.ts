@@ -23,8 +23,8 @@ const post = (session: string, text: string) =>
   handleClaudeHook(createEngine(), {
     session_id: session,
     hook_event_name: 'PostToolUse',
-    tool_name: 'Read',
-    tool_input: { file_path: `${cwd}/README.md` },
+    tool_name: 'WebFetch',
+    tool_input: { url: 'https://docs.example/README.md', prompt: 'setup' },
     cwd,
     tool_response: text,
   });

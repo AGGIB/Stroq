@@ -63,13 +63,16 @@ export function withWayOut(
  * longer than Stroq reads, whose unread part it cannot match against what the session read.
  */
 /** What Stroq cannot rule out about a call, and so asks about. */
-export type DoubtCause = 'lost-records' | 'unscanned-result' | 'unread-command' | 'doubtful-name';
+export type DoubtCause =
+  'lost-records' | 'unscanned-result' | 'flagged-own-text' | 'unread-command' | 'doubtful-name';
 
 const DOUBT_SENTENCE: Readonly<Record<DoubtCause, string>> = {
   'lost-records':
     "Stroq's provenance for this session is incomplete (some of what it read is no longer on record), so it cannot rule out that this came from content the agent read.",
   'unscanned-result':
     'A tool result in this session could not be scanned (the hook that reads it did not finish), so Stroq cannot rule out that it holds instructions for this call.',
+  'flagged-own-text':
+    'Earlier in this session Stroq flagged text in your files or in a command output, and this call reads secrets and sends something out, so it cannot rule out that the flagged text asked for it.',
   'unread-command':
     'This command is longer than Stroq reads, so it cannot rule out that the part it did not read names something the agent read.',
   'doubtful-name':
@@ -77,7 +80,11 @@ const DOUBT_SENTENCE: Readonly<Record<DoubtCause, string>> = {
 };
 
 /** The causes that are about the session, which clearing it ends. */
-const CLEARED_BY_UNTAINT: ReadonlySet<DoubtCause> = new Set(['lost-records', 'unscanned-result']);
+const CLEARED_BY_UNTAINT: ReadonlySet<DoubtCause> = new Set([
+  'lost-records',
+  'unscanned-result',
+  'flagged-own-text',
+]);
 
 export function withIncompleteNote(
   decision: Decision,
@@ -90,7 +97,12 @@ export function withIncompleteNote(
   const rule = policy.rules.find((r) => r.id === decision.ruleId);
   if (rule === undefined || !rule.when.classes.includes('origin.untrusted' satisfies ActionClass))
     return decision;
-  const incomplete = `${decision.reason.replace(/\.$/, '')}. ${DOUBT_SENTENCE[why]}`;
+  // The rule's own reason says the action was copied; after a flag on the own text nothing was, so
+  // that question is put in its own words only.
+  const incomplete =
+    why === 'flagged-own-text'
+      ? `${DOUBT_SENTENCE[why].replace(/\.$/, '')}; confirm.`
+      : `${decision.reason.replace(/\.$/, '')}. ${DOUBT_SENTENCE[why]}`;
   // `stroq untaint` wipes the whole trace of the session: it is the way out of a doubt about the
   // session, and not of one about this one call, for which approving it is the right size.
   const wayOut =

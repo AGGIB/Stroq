@@ -1,0 +1,14 @@
+CSS source: https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap
+Local files retain the original official Google Fonts WOFF2 bytes.
+shadcn Geist preset: https://ui.shadcn.com/create?font=geist
+shadcn font configuration: https://ui.shadcn.com/docs/registry/api-reference
+Geist-cyrillic-ext.woff2: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwRGFWNOITddY4.woff2
+Geist-cyrillic.woff2: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwYGFWNOITddY4.woff2
+Geist-latin-ext.woff2: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwSGFWNOITddY4.woff2
+Geist-latin.woff2: https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFWNOITd.woff2
+GeistMono-cyrillic-ext.woff2: https://fonts.gstatic.com/s/geistmono/v6/or3nQ6H-1_WfwkMZI_qYFrodmhHkjkotbA.woff2
+GeistMono-cyrillic.woff2: https://fonts.gstatic.com/s/geistmono/v6/or3nQ6H-1_WfwkMZI_qYFrMdmhHkjkotbA.woff2
+GeistMono-latin-ext.woff2: https://fonts.gstatic.com/s/geistmono/v6/or3nQ6H-1_WfwkMZI_qYFrkdmhHkjkotbA.woff2
+GeistMono-latin.woff2: https://fonts.gstatic.com/s/geistmono/v6/or3nQ6H-1_WfwkMZI_qYFrcdmhHkjko.woff2
+Geist-OFL.txt: https://raw.githubusercontent.com/google/fonts/main/ofl/geist/OFL.txt
+GeistMono-OFL.txt: https://raw.githubusercontent.com/google/fonts/main/ofl/geistmono/OFL.txt

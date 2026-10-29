@@ -1,6 +1,6 @@
-import { readdirSync, readlinkSync, realpathSync, statSync, type Dirent } from 'node:fs';
+import type { Dirent } from 'node:fs';
+import { LEGACY_SURFACE_IO, type SurfaceReadContext } from './surface-io.js';
 import { dirname, join, posix, resolve as resolvePath, sep } from 'node:path';
-import { readRegularFile } from '@stroq/core';
 import { within } from '../commands/config-file.js';
 import { inSharedFolder } from './agent-change.js';
 import { escalateApproved } from './agent-json.js';
@@ -49,9 +49,9 @@ interface Dir {
   readonly parent: Dir | undefined;
 }
 
-const tryRealpath = (path: string): string | undefined => {
+const tryRealpath = (path: string, io: SurfaceReadContext): string | undefined => {
   try {
-    return realpathSync(path);
+    return io.realpath(path);
   } catch {
     return undefined;
   }
@@ -60,9 +60,9 @@ const tryRealpath = (path: string): string | undefined => {
 /** A file the walk reads: an agent or editor config, or the config of a package manager. */
 const isWanted = (rel: string): boolean => isSurfacePath(rel) || isPackageConfig(rel);
 
-const readlinkOrUndefined = (path: string): string | undefined => {
+const readlinkOrUndefined = (path: string, io: SurfaceReadContext): string | undefined => {
   try {
-    return readlinkSync(path);
+    return io.readlink(path);
   } catch {
     return undefined;
   }
@@ -73,8 +73,8 @@ const readlinkOrUndefined = (path: string): string | undefined => {
  * anyone can write however it is spelled (`../../../../tmp/x`), where it leads, so that the shared
  * folder is seen. `real` is where it was found to lead, when it does lead somewhere.
  */
-function outsideText(abs: string, real?: string): string {
-  const text = readlinkOrUndefined(abs);
+function outsideText(abs: string, real: string | undefined, io: SurfaceReadContext): string {
+  const text = readlinkOrUndefined(abs, io);
   if (text === undefined) return 'outside the repository';
   const where = posix.normalize(resolvePath(dirname(abs), text).split(sep).join('/'));
   for (const target of [where, real])
@@ -82,17 +82,17 @@ function outsideText(abs: string, real?: string): string {
   return text;
 }
 
-const isDirectory = (path: string): boolean => {
+const isDirectory = (path: string, io: SurfaceReadContext): boolean => {
   try {
-    return statSync(path).isDirectory();
+    return io.stat(path).isDirectory();
   } catch {
     return false;
   }
 };
 
-const entriesOf = (path: string): Dirent[] => {
+const entriesOf = (path: string, io: SurfaceReadContext): Dirent[] => {
   try {
-    return readdirSync(path, { withFileTypes: true });
+    return io.entries(path);
   } catch {
     return [];
   }
@@ -139,8 +139,8 @@ interface Walked {
 }
 
 /** The files the readers want, the agent folders first, until a cap stops the walk. */
-function walk(root: string): Walked {
-  const realRoot = tryRealpath(root) ?? root;
+function walk(root: string, io: SurfaceReadContext): Walked {
+  const realRoot = tryRealpath(root, io) ?? root;
   const found: Candidate[] = [];
   const queue = new Queue();
   queue.add({ abs: root, rel: '', real: realRoot, parent: undefined });
@@ -149,24 +149,30 @@ function walk(root: string): Walked {
     dirs += 1;
     if (dirs > WALK_CAPS.dirs) return { found, stoppedAt: next.rel || '.' };
     const skip = inAgentFolder(next.rel) ? new Set<string>() : SKIP_DIRS;
-    for (const entry of entriesOf(next.abs)) {
+    for (const entry of entriesOf(next.abs, io)) {
       if (entry.name === '.git' || skip.has(entry.name)) continue;
+      if (io.skipDirectory?.(join(next.abs, entry.name))) continue;
       const rel = next.rel === '' ? entry.name : `${next.rel}/${entry.name}`;
       if (found.length >= WALK_CAPS.files) return { found, stoppedAt: rel };
       const abs = join(next.abs, entry.name);
       const isLink = entry.isSymbolicLink();
-      const real = isLink ? tryRealpath(abs) : join(next.real, entry.name);
+      const real = isLink ? tryRealpath(abs, io) : join(next.real, entry.name);
+      if (real !== undefined && io.skipDirectory?.(real)) {
+        if (isLink && (isWanted(rel) || isAgentDir(rel)))
+          found.push({ rel, real: outsideText(abs, real, io), kind: 'outside' });
+        continue;
+      }
       if (real === undefined) {
-        const broken = isLink ? brokenLink(abs, rel, [root, realRoot]) : undefined;
+        const broken = isLink ? brokenLink(abs, rel, [root, realRoot], io) : undefined;
         if (broken !== undefined) found.push(broken);
         continue;
       }
       if (isLink && !within(real, realRoot)) {
         if (isWanted(rel) || isAgentDir(rel))
-          found.push({ rel, real: outsideText(abs, real), kind: 'outside' });
+          found.push({ rel, real: outsideText(abs, real, io), kind: 'outside' });
         continue;
       }
-      if (isLink ? isDirectory(real) : entry.isDirectory())
+      if (isLink ? isDirectory(real, io) : entry.isDirectory())
         queue.add({ abs, rel, real, parent: next });
       else if (isWanted(rel)) found.push({ rel, real, kind: 'file' });
     }
@@ -178,8 +184,13 @@ function walk(root: string): Walked {
  * A link that leads to nothing, as a candidate when a host would go through it: one inside the
  * folder is reported as not read, one that leads out of it as a link out. Undefined otherwise.
  */
-function brokenLink(abs: string, rel: string, roots: readonly string[]): Candidate | undefined {
-  const text = readlinkOrUndefined(abs);
+function brokenLink(
+  abs: string,
+  rel: string,
+  roots: readonly string[],
+  io: SurfaceReadContext,
+): Candidate | undefined {
+  const text = readlinkOrUndefined(abs, io);
   if (text === undefined) return undefined;
   const where = resolvePath(dirname(abs), text);
   if (roots.some((root) => within(where, root)))
@@ -187,19 +198,23 @@ function brokenLink(abs: string, rel: string, roots: readonly string[]): Candida
       ? { rel, real: text, kind: 'dangling' }
       : undefined;
   return isWanted(rel) || isAgentDir(rel)
-    ? { rel, real: outsideText(abs), kind: 'outside' }
+    ? { rel, real: outsideText(abs, undefined, io), kind: 'outside' }
     : undefined;
 }
 
 /** Reads one file, charging its size to what is `left` of the budget. */
-function readCandidate(candidate: Candidate, left: { bytes: number }): SourceRead {
+function readCandidate(
+  candidate: Candidate,
+  left: { bytes: number },
+  io: SurfaceReadContext,
+): SourceRead {
   if (candidate.kind === 'outside') return { kind: 'outside', target: candidate.real };
   if (candidate.kind === 'dangling') return { kind: 'dangling', target: candidate.real };
   try {
-    const size = statSync(candidate.real).size;
+    const size = io.stat(candidate.real).size;
     if (size <= MAX_FILE_BYTES && size > left.bytes)
       return { kind: 'over-budget', budget: MAX_TOTAL_BYTES };
-    const read = readRegularFile(candidate.real, MAX_FILE_BYTES);
+    const read = io.read(candidate.real, MAX_FILE_BYTES);
     if (read.kind === 'too-large') return { kind: 'too-large', size: read.size };
     if (read.kind !== 'text') return { kind: 'unreadable' };
     left.bytes -= Buffer.byteLength(read.text);
@@ -215,20 +230,30 @@ const byRel = (a: Candidate, b: Candidate): number => (a.rel < b.rel ? -1 : a.re
  * The hits of one file read from disk. The config of npm, yarn or bun is read line by line: each
  * line but a comment fails, by its file and line, and none of its text is shown.
  */
-function hitsOfRead(rel: string, read: SourceRead): readonly AgentHit[] {
+function hitsOfRead(
+  rel: string,
+  read: SourceRead,
+  io: SurfaceReadContext,
+  path: string,
+): readonly AgentHit[] {
   return isPackageConfig(rel) && read.kind === 'text'
-    ? lineHits(rel, read.text)
-    : hitsForRead(rel, read);
+    ? lineHits(rel, read.text, io.stableDigest)
+    : hitsForRead(rel, read, io.parseGap === undefined ? undefined : () => io.parseGap?.(path));
 }
 
 /** What the working tree at `root` runs by itself, file by file in the order of their paths. */
-export function agentSurface(root: string): AgentSurface {
-  const { found, stoppedAt } = walk(root);
+export function agentSurface(
+  root: string,
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
+): AgentSurface {
+  const { found, stoppedAt } = walk(root, io);
   const left = { bytes: MAX_TOTAL_BYTES };
   const hits = escalateApproved(
     [...found]
       .sort(byRel)
-      .flatMap((candidate) => hitsOfRead(candidate.rel, readCandidate(candidate, left))),
+      .flatMap((candidate) =>
+        hitsOfRead(candidate.rel, readCandidate(candidate, left, io), io, candidate.real),
+      ),
   );
   if (stoppedAt === undefined) return { hits, capped: false };
   const why = `the walk stopped here, after ${WALK_CAPS.dirs} folders or ${WALK_CAPS.files} agent files`;

@@ -120,15 +120,16 @@ describe('runBench', () => {
     BENCH_BUDGET_MS * 2,
   );
 
-  // `runBench` passes `{ target: 'repo_content' }` to `scanContent` (packages/cli/src/
-  // bench/run.ts). Nothing else in this file exercises that argument: 599 of 599
-  // shipped rules resolve to `any`, which applies on every surface regardless, so a
-  // rule scoped away from `repo_content` is the only kind of probe that can tell the
+  // `runBench` passes `{ target: 'web_content' }` to `scanContent` (packages/cli/src/
+  // bench/run.ts): the corpus is documentation somebody else wrote, read as a fetched page.
+  // Nothing else in this file exercises that argument: most shipped rules resolve to `any`,
+  // which applies on every surface regardless, so a rule scoped away from `web_content` (or
+  // one scoped to the developer's own `repo_content`) is the only kind of probe that can tell the
   // argument was actually passed from one that was silently dropped. Removing the
   // 4th argument at the call site — or replacing it with `'any'` — makes both files
   // below flag, since `appliesTo` applies every rule when the caller names no surface
   // (or `any`); this test was confirmed to fail that way before being kept.
-  it("pins the target argument runBench passes to scanContent — 'repo_content', not dropped or widened", () => {
+  it("pins the target argument runBench passes to scanContent — 'web_content', not dropped or widened", () => {
     const probe = (id: string, target: string, phrase: string): AtrRule =>
       ({
         id,
@@ -142,8 +143,8 @@ describe('runBench', () => {
       }) as unknown as AtrRule;
 
     probeRuleState.rules = compileRules([
-      probe('PROBE-BENCH-00001', 'repo_content', 'STROQ_PROBE_REPO_CONTENT_9f31'),
-      probe('PROBE-BENCH-00002', 'command_output', 'STROQ_PROBE_COMMAND_OUTPUT_2c7e'),
+      probe('PROBE-BENCH-00001', 'web_content', 'STROQ_PROBE_REPO_CONTENT_9f31'),
+      probe('PROBE-BENCH-00002', 'repo_content', 'STROQ_PROBE_COMMAND_OUTPUT_2c7e'),
     ]).compiled;
 
     const dir = fixture();

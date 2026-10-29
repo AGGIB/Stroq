@@ -1,0 +1,36 @@
+# MCP call control
+
+Call control holds new `tools/call` dispatch through an explicitly configured Stroq stdio proxy. Removing a server registration only changes future launches: it does not stop an existing connection. Pause is a separate native decision shared with the proxy at physical dispatch.
+
+The compatible wrapper carries `--call-control <lowercase-UUID>` and an explicit `--pass-env` declaration. A wrapper without that flag retains its previous behavior. Configuration and control history are separate; adding the flag by hand does not create authority.
+
+## Configure and use
+
+1. Open **Skills & MCP**, select the exact MCP registration and open **Call control**.
+2. For an eligible registration, review **Configure paused**. This preserves the upstream launch and existing ordinary, strict, cloak or tool-approval mode. It initializes a paused slot before publishing the wrapper flag. Review the selected workspace/profile, shared user scope where applicable, and unencrypted configuration retention before applying.
+3. Reconnect the client to load the new wrapper. Configuration success does not prove an existing client adopted it. A new tool-approval binding still needs its own exact contract review.
+4. **Resume calls** explicitly permits new dispatch through that binding. **Pause calls** holds later dispatch after its native decision is confirmed. These actions do not rewrite the registration or copy its configuration again. Other policy, taint, installation-pin and approval gates remain independent.
+
+Initial Setup of a pinned wrapper is unsupported: adding the control flag changes the independently confirmed complete launch, and this workflow cannot reconfirm it. It does not edit that registration. Already controlled legal pin modes retain their independent gate; call control never grants a pin confirmation.
+
+Desired state and a last matching recorded refusal are shown separately. A refusal belongs to the exact control, event and invocation. It is finite local evidence rather than process liveness or a native-client attestation. A confirmed intentional pause is normal; drift, ambiguous registrations, incomplete Setup and unavailable authority need attention.
+
+The existing **MCP recovery** page retains the stronger Pause operation through a verified Setup record even when its registration is no longer visible. A selected home may contain controls for another workspace: “registration not in this view” does not claim global deletion. The fixed proxy workspace can differ from the workspace currently open in the console. Resume and rebind require a current supported exact registration.
+
+## Unknown completion and recovery
+
+Previews are one-use and expire after two minutes. Source identity, selected profile, runtime and native revision are checked again before publication. An uncertain response keeps its exact candidate; the browser never automatically retries it or treats an ordinary refresh as success. Explicit **Recheck** verifies the native operation ID and, for Setup, the retained original and candidate configuration. A recorded older operation and the latest desired state are separate facts.
+
+Absence is only a point-in-time observation. An absent or unavailable exact event does not clear an uncertain write or prove that another writer cannot publish later. A changed profile cannot resolve a candidate from another profile. Unfinished Setup has a durable exact recheck candidate in MCP recovery after a browser restart; opening that page neither resumes calls nor rewrites a recovery record.
+
+## Storage and boundaries
+
+- Native authority is `<selected-stroq-home>/mcp-call-controls/history.json`: at most 64 controls, 512 events and 384 KiB live data, within a 1 MiB physical budget including reserve and bounded staging. New Setup, Resume and Rebind decisions reserve one future Pause event for every resulting enabled control. An emergency Pause can improve a previously readable ledger with insufficient reserve, within the hard event cap. It retains opaque IDs, invocation digests and decisions, never raw commands, paths, environment values or configuration text. There is no eviction or automatic expiry.
+- The history's integrity field is an HMAC-SHA256 under the home's state key, `<home>/keys/state-mac.key` (32 random bytes, mode 0600, made by the first writer). A history rewritten by anything that does not hold the key, including one that recomputes a plain digest, does not parse and every call through a configured control is refused. A history found with no key is refused the same way. This is tamper-evident, not a boundary: a process running as the same user that can read the key, or write a key of its own into `keys/` (it does not need to read anything) and sign again, gets through. Stroq's hooks deny an agent's writes under `~/.stroq`; `stroq run --sandbox` write-protects `keys/` and `mcp-call-controls/`. The same key, under a label of its own for each file, signs the [tool-contract records](mcp-tool-contracts.md#review-and-retention) and the `harden` manifest.
+- The signature does not stop a rollback. A writer that kept an older history this home signed (from before a Pause, say) can put it back before a proxy starts, and it verifies: that proxy resumes calls. Nothing a process of the same user cannot write records which history is the newest. What holds is narrower: the history only grows, so its event count, inside the signed body, is its sequence, and a running proxy connection refuses a history shorter than, or no longer starting with, the one it has already accepted. That refusal is a verification loss like any other, latched until restart. `stroq run --sandbox` write-protects `mcp-call-controls/` against an agent inside it.
+- Initial Setup additionally retains complete before/candidate configuration files under `<selected-user-home>/.stroq/console/mcp-call-control-setup/`. These may contain credentials and unrelated settings. Retention is unencrypted, private, at most 32 records / 17 MiB including recovery and staging, with no automatic expiry, cleanup or read-time repair. This location is independent of a custom Stroq home.
+- Native readers verify private file metadata, physical home identity, bounded strict JSON and the ledger checksum. Writers and physical dispatch share a selected-home lease. A pause waits for previously admitted dispatch work to leave that lease; a busy result does not mean Pause was recorded. The lease is released before stream drain.
+- Missing, malformed or mismatching authority withholds calls. Verification loss on a running connection stays latched until restart; editing the file back does not implicitly resume that connection. A normal verified Pause → Resume works on the same compatible proxy.
+- Pause does not terminate an upstream process, cancel a dispatched call, undo side effects, sandbox the server, control other MCP methods, or affect clients that did not load this wrapper. A policy refusal or a configuration digest alone does not prove native-client enforcement.
+
+Opening or refreshing the console launches no upstream, model or native client. Call control has been tested only with disposable, inert local MCP servers. It has not been measured with a native client or a provider, so native-client adoption is not established.

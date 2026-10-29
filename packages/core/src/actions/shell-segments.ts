@@ -41,6 +41,7 @@ import {
   nestedBudget,
   type Budget,
 } from './nested-extractors.js';
+import { pythonCommandTexts } from './python-stages.js';
 import { lex, withBackgroundEnded, type Lexed, type Nested } from './shell-lex.js';
 import { globbedCommands, plainText } from './shell-plain.js';
 import { bodyRanges, isFileWork, withoutRanges } from './text-heredocs.js';
@@ -392,6 +393,8 @@ function nestedOnce(command: string, budget: Budget, lexed: Lexed): string[] {
   return [
     ...extractSubstitutions(command, lexed),
     ...extractShCStrings(command),
+    // What a `python -c` program writes out to run (`os.system('git init')`) is a command of the line.
+    ...pythonCommandTexts(lexed),
     ...extractFindExecCommands(command),
     ...extractArguments(command, EVAL_ARG, budget),
     ...extractArguments(command, GIT_FOREACH_OR_BISECT_RUN, budget),

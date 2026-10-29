@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommand, commandUrls } from '../../src/actions/classify-bash.js';
+import { isOwnText } from '../../src/scan/own-text.js';
 import { cpuNow } from '../cpu-time.js';
 
 /**
@@ -114,6 +115,42 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['stroq launchers under wrappers', (r) => r('sudo stroq run -- env -i ')],
   ['stroq launchers and shell strings', (r) => r("stroq run -- sh -c 'stroq run -- ")],
   ['stroq task prompts', (r) => `stroq task -- ${r('fix --help ')}`],
+  // Programs that run a command in a pseudo-terminal (`pty-launchers.ts`, `pty-programs.ts`): the command they run
+  // is read again as a command line, to a depth, and the text they hand to what is not read is looked at for Stroq.
+  ['pty launchers', (r) => r('script -q /dev/null ')],
+  ['pty launchers, then a command of Stroq', (r) => `${r('script -q /dev/null ')}stroq untaint`],
+  ['script options', (r) => `script ${r('-t ')}/dev/null stroq untaint`],
+  ['script -c values', (r) => `script ${r('-c x ')}/dev/null`],
+  ['script --command values', (r) => `script ${r('--command=stroq ')}`],
+  ['unbuffer options', (r) => `unbuffer ${r('-p ')}stroq untaint`],
+  ['rlwrap options with values', (r) => `rlwrap ${r('-f x ')}stroq untaint`],
+  ['terminal markers', (r) => `xterm ${r('-e ')}stroq untaint`],
+  ['dtach sockets', (r) => `dtach ${r('-n s ')}stroq untaint`],
+  ['zpty writes', (r) => r("zpty -w x 'stroq' ")],
+  ['expect spawns', (r) => `expect -c '${r('spawn stroq x; ')}'`],
+  ['expect substitutions', (r) => `expect -c '${r('[')}stroq'`],
+  ['expect quotes that never close', (r) => `expect -c '${r('spawn "a ')}stroq'`],
+  ['expect options', (r) => `expect ${r('-c x ')}stroq`],
+  ['socat exec addresses', (r) => `socat - ${r('EXEC:stroq x,')}`],
+  ['socat dual addresses', (r) => `socat - EXEC:${r('!!EXEC:')}stroq`],
+  ['socat words', (r) => r('socat - EXEC:stroq ')],
+  ['socat keyword blanks', (r) => `socat - EXEC${r(' ')}:stroq`],
+  ['python pty programs', (r) => `python3 -c '${r('import pty; ')}stroq'`],
+  ['python flag clusters', (r) => `python3 ${r('-I')}c 'stroq'`],
+  ['perl run words', (r) => `perl -e '${r('system ')}stroq'`],
+  ['ruby run words', (r) => `ruby -e '${r('%x ')}stroq'`],
+  ['interpreters fed on their input', (r) => `${r('echo stroq | ')}python3`],
+  ['interpreter options with values', (r) => `python3 ${r('-W x ')}-c 'stroq'`],
+  ['versioned interpreter names', (r) => r('python3.12.1 -c stroq ')],
+  ['Stroq named in interpreter code', (r) => `python3 -c '${r('"stroq",')}'`],
+  ['variables in interpreter code', (r) => `S=stroq; python3 -c '${r('$S ${S} ')}'`],
+  ['paths in interpreter code', (r) => `node -e '${r('a/b/')}stroq'`],
+  ['interpreters fed on a document', (r) => `python3 - <<'EOF'\n${r('os.system("stroq") ')}\nEOF`],
+  ['socat parts that mention a run', (r) => `socat - '${r('x exec !!')}stroq'`],
+  ['expect statements', (r) => `expect -c '${r('system stroq; ')}'`],
+  ['expect scripts glued to the flag', (r) => `expect ${r('-cspawn ')}stroq`],
+  ['launchers typed into', (r) => `${r('echo stroq | ')}script -q /dev/null`],
+  ['here-strings to launchers', (r) => r('script -q /dev/null <<< stroq ')],
   // What says whether a flag asks for help, and what `joinText` skips: comments, the targets of redirects, quoted
   // words, here-strings, and a quote or a `<<` inside a comment.
   ['stroq state command, comments', (r) => `stroq untaint ${r('# --help ')}`],
@@ -479,6 +516,38 @@ describe('commandUrls stays linear on commands built to be slow', () => {
   const timedUrls = timedBy((command) => commandUrls(command, 256));
   it.each(URL_SHAPES)('%s', (_name, build) => {
     holdsLinear(build, timedUrls);
+  });
+});
+
+/**
+ * `isOwnText` (whether a flag on what a command printed taints the session) reads the command for the folders
+ * of dependencies and for package installs. Its shapes are the words those patterns start at, run on or repeated.
+ */
+const OWN_TEXT_SHAPES: ReadonlyArray<readonly [string, Build]> = [
+  ['npm, then spaces', (r) => `npm${r(' ')}x`],
+  ['npm over and over', (r) => r('npm ')],
+  ['yarn, then spaces', (r) => `yarn${r(' ')}x`],
+  ['yarn over and over', (r) => r('yarn ')],
+  ['uv, then spaces', (r) => `uv${r(' ')}pip${r(' ')}x`],
+  ['pip, then spaces', (r) => `pip${r(' ')}x`],
+  ['installs that never finish', (r) => r('npm i')],
+  ['folders of dependencies', (r) => r('node_modules')],
+  ['folders of dependencies between slashes', (r) => r('/node_modules')],
+  ['names that are almost a folder', (r) => r(' node_module')],
+  ['folders of instructions', (r) => r(' .claude/')],
+  ['working copies of the project', (r) => r('/.claude/worktrees/')],
+  ['names that are almost an instruction file', (r) => r(' CLAUDE.m')],
+  ['patterns', (r) => r('*')],
+  ['words of patterns', (r) => r(' *a')],
+  ['brackets', (r) => r('[')],
+  ['searches', (r) => r('grep ')],
+  ['segments of a local program', (r) => r('cat a; ')],
+];
+
+describe('isOwnText stays linear on commands built to be slow', () => {
+  const timedOwn = timedBy((command) => isOwnText('Bash', { command }, 'command_output'));
+  it.each(OWN_TEXT_SHAPES)('%s', (_name, build) => {
+    holdsLinear(build, timedOwn);
   });
 });
 

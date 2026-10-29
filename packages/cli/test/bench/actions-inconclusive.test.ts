@@ -21,7 +21,9 @@ const read: ActionStep = {
     ...base,
     hook_event_name: 'PostToolUse',
     tool_name: 'Read',
-    tool_input: { file_path: '__CWD__/README.md' },
+    // A dependency's file, where a scan that ran out of time taints as a flag does; on a file of
+    // the project it would not taint at all.
+    tool_input: { file_path: '__CWD__/node_modules/helper/README.md' },
     tool_response: { stdout: 'An ordinary paragraph of documentation.' },
   },
 };

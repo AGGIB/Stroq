@@ -343,7 +343,7 @@ npx @stroq/cli doctor                <span class="tt-dim"># check the installati
 <section class="docs-section" id="attack" aria-labelledby="attack-title">
   <h2 id="attack-title">Attack corpus</h2>
   <p><code>stroq attack</code> replays hook events written from twenty-six public incident reports and ten synthetic matrix cells — Sentry agentjacking, s1ngularity, RoguePilot, Comment-and-Control, ToxicSkills, the <code>rm -rf ~</code> horror story and more — through the engine with <em>your</em> policy in throwaway directories, and reports which of them would get through.</p>
-  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>36 scenarios: 17 blocked, 19 asked, 0 passed through — each was blocked or put to you as a question.</code></pre>
+  <pre class="code" tabindex="0" role="region" aria-label="Attack corpus result"><code>36 scenarios: 15 blocked, 21 asked, 0 passed through — each was blocked or put to you as a question.</code></pre>
   <p>The exit code is 1 when any scenario doesn't behave as expected, so a weakened <code>policy.yaml</code> fails CI. <code>stroq attack --fuzz</code> crosses every scenario that carries untrusted text with every evasion mutation in the set (invisible characters, homoglyphs, base64, bidi overrides, padding) and reports the variants that reach <code>allow</code> — the escape list is the deliverable, and the exit code is 1 whenever anything escapes. Full scenario list: <a href="https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-thirty-six-attacks-from-public-reports-and-synthetic-cells">the guide on GitHub</a>.</p>
 </section>
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ToolClassification } from '../actions/classify-tool.js';
-import type { ActionClass, Decision, PreToolEvent } from '../types.js';
+import type { ActionClass, Decision, PreToolEvent, ToolResources } from '../types.js';
 
 /**
  * The shapes of a task permit: a contract a person confirmed outside the agent, which
@@ -163,7 +163,23 @@ export interface ScopeVerdict {
   readonly decision: Decision;
   readonly taskId: string;
   readonly evidence: ScopeEvidence;
+  /** Transient trusted producer data; raw target context is never copied into scope audit evidence. */
+  readonly access?: TaskAccessBinding;
 }
+
+export type TaskAccessFingerprint =
+  | { readonly fingerprint: string; readonly fingerprintKind: 'whole-call' }
+  | {
+      readonly fingerprint: string;
+      readonly fingerprintKind: 'read-target';
+      readonly target: ToolResources['paths'][number];
+    };
+export type TaskAccessBinding = TaskAccessFingerprint & {
+  readonly permitBodySha256: string;
+  readonly keyId: string;
+  readonly permitExpiresAt: string;
+  readonly requiredFingerprints: readonly string[];
+};
 
 export interface ScopeGateInput {
   readonly event: PreToolEvent;

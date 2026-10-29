@@ -33,8 +33,8 @@ function fixture() {
   const post = (text: string) =>
     engine.post({
       sessionId: 's1',
-      toolName: 'Read',
-      toolInput: { file_path: 'README.md' },
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
       toolResultText: text,
       cwd,
     });

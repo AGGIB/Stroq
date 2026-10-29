@@ -90,7 +90,7 @@ describe('readManifest: a manifest nested far deeper than Stroq writes one', () 
     const { env, file } = setup();
     const value = nested(64);
     const manifest: Manifest = {
-      version: 1,
+      version: 2,
       files: {
         [file]: [
           {
@@ -120,7 +120,7 @@ describe('writeManifest: a manifest nested far deeper than Stroq writes one', ()
     const { env, file } = setup();
     await writeManifest(env, emptyManifest());
     const manifest: Manifest = {
-      version: 1,
+      version: 2,
       files: {
         [file]: [
           {
@@ -152,7 +152,7 @@ describe('writeManifest: a manifest nested far deeper than Stroq writes one', ()
     looping['edits'] = [looping];
 
     const error = await writeManifest(env, {
-      version: 1,
+      version: 2,
       files: { [file]: [looping as unknown as ManifestEntry] },
     }).catch((err: unknown) => err);
 

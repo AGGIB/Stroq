@@ -15,12 +15,60 @@ const HEX = /^[0-9a-fA-F]+$/;
  * stay long, while a path is short word segments between separators. Requiring at
  * least two separators keeps that distinction from firing on a base64 token that
  * merely happens to contain one slash.
+ *
+ * A folder name can be long too (`/workspace/OpenSourceEconomics`), and then the
+ * segment length alone calls the path a blob. Such a token is read as a path only when
+ * it looks like one in every way a smuggled blob does not: it starts at a folder an
+ * absolute path starts at (`/workspace`, `/Users`, `/home`…), it has no empty segment
+ * (`//`) and no `+`, every segment is mostly letters, and it does not decode to text.
+ * xz data (`/Td6WFo…`) and UTF-16 with a byte-order mark (`//5…`) also start with `/`
+ * and decode to non-text, which is why a leading `/` alone is not enough.
  */
 const PATH_SEGMENT_MAX = 16;
+/** First folders of an absolute path on the systems agents run on. */
+const PATH_ROOTS: ReadonlySet<string> = new Set([
+  'workspace',
+  'workspaces',
+  'Users',
+  'home',
+  'tmp',
+  'var',
+  'opt',
+  'usr',
+  'private',
+  'mnt',
+  'srv',
+  'root',
+  'Volumes',
+  'app',
+  'data',
+  'src',
+  'code',
+  'builds',
+  'github',
+  'runner',
+]);
+/** Share of letters a path segment has at least (`OpenSourceEconomics`, `estimagic`). */
+const LETTER_SHARE = 0.6;
+
+function mostlyLetters(segment: string): boolean {
+  if (segment.length === 0) return false;
+  let letters = 0;
+  for (const c of segment) if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) letters += 1;
+  return letters >= segment.length * LETTER_SHARE;
+}
 
 function looksLikePath(body: string): boolean {
   const parts = body.split('/');
-  return parts.length >= 3 && parts.every((part) => part.length <= PATH_SEGMENT_MAX);
+  if (parts.length < 3) return false;
+  if (parts.every((part) => part.length <= PATH_SEGMENT_MAX)) return true;
+  return (
+    parts[0] === '' &&
+    PATH_ROOTS.has(parts[1] ?? '') &&
+    !body.includes('+') &&
+    parts.slice(1).every(mostlyLetters) &&
+    !decodesToText(Buffer.from(body, 'base64'))
+  );
 }
 
 /** `token` without its trailing `=` padding, in one pass (a `=+$` regex is quadratic on a long run of `=`). */

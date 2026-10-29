@@ -1,11 +1,15 @@
 import { resolve } from 'node:path';
-import { createEngine } from '../engine-factory.js';
+import { homedir } from 'node:os';
+import { createEngineAt } from '../engine-factory.js';
+import { stroqHome } from '../paths.js';
+import { captureMcpPolicy } from '../mcp/policy-continuity.js';
 import { runMcpProxy } from '../mcp/proxy.js';
 import { MCP_PIN } from '../mcp/pin-argument.js';
 import { MAX_STRICT_MAX_WITHHELD } from '../mcp/strict-limits.js';
+import { callControlUuid } from '../mcp/call-control-types.js';
 
 export const MCP_USAGE =
-  'usage: stroq mcp --server <name> [--client <name>] [--pin sha256:<digest>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--cloak] [--strict [--strict-max-withheld <n>]] -- <command> [args...]\n';
+  'usage: stroq mcp --server <name> [--client <name>] [--pin sha256:<digest>] [--cwd <dir>] [--session <id>] [--pass-env <names>] [--call-control <uuid>] [--cloak] [--strict [--strict-max-withheld <n>] [--tool-approval]] -- <command> [args...]\n';
 
 /** What `--client` becomes when the flag is absent; `init` always writes it. */
 export const DEFAULT_MCP_CLIENT = 'unknown';
@@ -33,9 +37,12 @@ export interface McpInvocation {
    * keeps exactly the shape it always had.
    */
   readonly strict?: true;
+  /** Exact advertised interfaces require a fresh, complete listing and explicit approval. */
+  readonly toolApproval?: true;
   /** `--strict-max-withheld`: how many withheld messages end a strict server; absent for the default. */
   readonly strictMaxWithheld?: number;
   readonly pin?: string;
+  readonly callControlId?: string;
   readonly command: string;
   readonly args: readonly string[];
 }
@@ -52,9 +59,10 @@ const OPTIONS = new Set([
   '--pass-env',
   '--pin',
   '--strict-max-withheld',
+  '--call-control',
 ]);
 /** Flags that take no value; kept separate so the "needs a value" check stays exact. */
-const FLAGS = new Set(['--cloak', '--strict']);
+const FLAGS = new Set(['--cloak', '--strict', '--tool-approval']);
 
 /** A whole number written without a sign, a fraction or a leading zero, from 1 to the largest accepted. */
 const parseWithheldLimit = (value: string): number | null => {
@@ -90,8 +98,10 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   let passEnv: readonly string[] | null = null;
   let cloak = false;
   let strict = false;
+  let toolApproval = false;
   let strictMaxWithheld: number | undefined;
   let pin: string | undefined;
+  let callControlId: string | undefined;
   let rest: readonly string[] | null = null;
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i] ?? '';
@@ -102,6 +112,7 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     if (FLAGS.has(token)) {
       if (token === '--cloak') cloak = true;
       if (token === '--strict') strict = true;
+      if (token === '--tool-approval') toolApproval = true;
       continue;
     }
     if (!OPTIONS.has(token)) return { ok: false, error: `unknown option "${token}"` };
@@ -117,6 +128,13 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
     if (token === '--cwd') cwd = value;
     if (token === '--session') session = value;
     if (token === '--pass-env') passEnv = parsePassEnv(value);
+    if (token === '--call-control') {
+      if (callControlId !== undefined)
+        return { ok: false, error: '--call-control may be supplied only once' };
+      if (!callControlUuid(value))
+        return { ok: false, error: '--call-control needs a lowercase UUID' };
+      callControlId = value;
+    }
     if (token === '--strict-max-withheld') {
       const limit = parseWithheldLimit(value);
       if (limit === null)
@@ -136,6 +154,13 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
   }
   if (strictMaxWithheld !== undefined && !strict)
     return { ok: false, error: '--strict-max-withheld needs --strict' };
+  if (toolApproval && !strict) return { ok: false, error: '--tool-approval needs --strict' };
+  if (toolApproval && cloak)
+    return { ok: false, error: '--tool-approval cannot be combined with --cloak' };
+  if (toolApproval && passEnv === null)
+    return { ok: false, error: '--tool-approval needs explicit --pass-env' };
+  if (callControlId !== undefined && passEnv === null)
+    return { ok: false, error: '--call-control needs explicit --pass-env' };
   if (server === '') return { ok: false, error: '--server is required' };
   if (rest === null) return { ok: false, error: 'the server command must follow "--"' };
   const [command, ...args] = rest;
@@ -153,8 +178,10 @@ export function parseMcpArgv(argv: readonly string[]): McpArgvResult {
       command,
       args,
       ...(strict ? { strict: true as const } : {}),
+      ...(toolApproval ? { toolApproval: true as const } : {}),
       ...(strictMaxWithheld === undefined ? {} : { strictMaxWithheld }),
       ...(pin === undefined ? {} : { pin }),
+      ...(callControlId === undefined ? {} : { callControlId }),
     },
   };
 }
@@ -197,24 +224,39 @@ export async function runMcp(argv: readonly string[]): Promise<number> {
   const { invocation } = parsed;
   if (invocation.passEnv === null && invocation.pin === undefined)
     process.stderr.write(LEGACY_ENV_WARNING);
+  const home = resolve(stroqHome());
+  let captured;
+  try {
+    captured = captureMcpPolicy(home);
+  } catch {
+    process.stderr.write('stroq mcp: selected policy is unavailable; refusing to start\n');
+    return 1;
+  }
   return runMcpProxy({
-    engine: createEngine(),
+    engine: createEngineAt({ home, userHome: homedir(), policy: captured.policy }),
+    home,
+    policyContinuity: captured.continuity,
     // One session per CLIENT, not per server: a poisoned result from server A must
     // taint the calls that go to server B.
     sessionId: invocation.session ?? `mcp:${invocation.client}`,
     server: invocation.server,
+    client: invocation.client,
     // Claude Desktop launches its servers from `/`, so the project directory has to
     // be recorded at install time; nothing on the wire can change it.
     cwd: resolveMcpCwd(invocation.cwd),
     passEnv: invocation.passEnv,
     cloak: invocation.cloak,
     ...(invocation.strict === true ? { strict: true } : {}),
+    ...(invocation.toolApproval === true
+      ? { toolApproval: true, runtimeEntry: process.argv[1] ?? '' }
+      : {}),
     ...(invocation.strictMaxWithheld === undefined
       ? {}
       : { strictMaxWithheld: invocation.strictMaxWithheld }),
     command: invocation.command,
     args: invocation.args,
     ...(invocation.pin === undefined ? {} : { pin: invocation.pin }),
+    ...(invocation.callControlId === undefined ? {} : { callControlId: invocation.callControlId }),
     // Whole, as the client started it: node, its own flags, the Stroq entry, `mcp` and what follows.
     launch: { command: process.execPath, argv: [...process.execArgv, ...process.argv.slice(1)] },
     stdin: process.stdin,

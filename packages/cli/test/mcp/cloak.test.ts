@@ -10,6 +10,7 @@ import {
 } from '@stroq/core';
 import { describe, expect, it } from 'vitest';
 import { McpCloak } from '../../src/mcp/cloak.js';
+import { auditReport } from '../../src/sent/audit.js';
 
 /**
  * The façade the proxy talks to, exercised with a hand-written detector so the cases
@@ -110,6 +111,35 @@ describe('McpCloak.cloakResult', () => {
 });
 
 describe('McpCloak round trip', () => {
+  it('records a pre-dispatch preparation without claiming the server received it', async () => {
+    const { cloak, audit } = fixture();
+    await cloak.cloakResult({ a: 'peter@bugle.example' });
+    const params = {
+      name: 'send',
+      arguments: { to: '[STROQ_EMAIL_1]', unknown: '[STROQ_EMAIL_9]' },
+    };
+    const plan = await cloak.planUncloak(params);
+    const restored = cloak.applyUncloak(params, plan);
+    await cloak.auditUncloak('mcp__fixture__send', plan, restored.replacements);
+    const entry = (await audit.readAll()).at(-1)!;
+    expect(entry.phase).toBe('pre');
+    expect(entry.decision).toBeUndefined();
+    expect(entry.classes).toBeUndefined();
+    expect(entry.summary).toContain('prepared for dispatch');
+    expect(entry.summary).toContain('delivery is not recorded');
+    expect(entry.summary).not.toContain('forwarded');
+    expect(JSON.stringify(entry)).not.toContain('peter@bugle.example');
+    const sent = auditReport([entry], 'mcp:test', {
+      now: new Date(),
+      logPath: '/fixture/audit.jsonl',
+      cwd: null,
+      mcp: { known: new Map(), lookup: () => null },
+      gitRemote: () => null,
+    });
+    expect(sent?.findings).toEqual([]);
+    expect(sent?.keys.compared).toBe(0);
+  });
+
   it('restores a placeholder the model echoes back into a tools/call', async () => {
     const { cloak } = fixture();
     await cloak.cloakResult({ a: 'peter@bugle.example' });

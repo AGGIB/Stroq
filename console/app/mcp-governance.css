@@ -1,0 +1,281 @@
+.dialog-content.mcp-governance-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.mcp-governance-dialog .dialog-header {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  margin: 0;
+}
+.mcp-governance-dialog .dialog-header > div {
+  min-width: 0;
+  flex: 1;
+}
+.mcp-governance-dialog .dialog-header h2 {
+  margin: 0;
+  padding: 0;
+  line-height: 1.2;
+}
+.mcp-governance-dialog .dialog-header > .icon-button {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.mcp-governance-body {
+  padding: 16px 24px 24px;
+}
+.mcp-governance-dialog h3,
+.mcp-governance-diff h3 {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 550;
+}
+.mcp-governance-dialog p,
+.mcp-governance-diff p {
+  margin: 0;
+}
+.mcp-governance-dialog .control-meta,
+.mcp-governance-diff .control-meta {
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+.mcp-governance-body,
+.mcp-governance-body section,
+.mcp-governance-body article,
+.mcp-governance-diff {
+  min-width: 0;
+}
+.mcp-governance-views,
+.mcp-governance-heading,
+.mcp-governance-actions,
+.mcp-governance-diff-counts,
+.mcp-governance-selection-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.mcp-governance-heading,
+.mcp-governance-selection-heading {
+  justify-content: space-between;
+}
+.mcp-governance-heading > div {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.mcp-governance-views {
+  margin-bottom: 20px;
+}
+.mcp-governance-views .button[aria-pressed='true'] {
+  border-color: var(--foreground);
+  color: var(--foreground);
+}
+.mcp-governance-dialog .button,
+.mcp-governance-dialog .inline-link {
+  min-height: 44px;
+  min-width: 0;
+  white-space: normal;
+}
+.mcp-governance-dialog .inline-link {
+  display: inline-flex;
+  align-items: center;
+}
+.mcp-governance-select,
+.mcp-governance-review,
+.mcp-governance-history,
+.mcp-governance-record,
+.mcp-governance-notice,
+.mcp-governance-diff {
+  display: grid;
+  gap: 16px;
+}
+.mcp-governance-record,
+.mcp-governance-notice {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.mcp-governance-record[data-selected] {
+  border-color: var(--foreground);
+  scroll-margin-block: 144px 24px;
+}
+.mcp-governance-notice {
+  border: 1px solid color-mix(in srgb, var(--orange) 50%, var(--border));
+  margin-bottom: 16px;
+}
+.mcp-governance-selection-heading {
+  font-size: var(--text-secondary);
+}
+.mcp-governance-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+.mcp-governance-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-height: 76px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  min-width: 0;
+}
+.mcp-governance-choice > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.mcp-governance-choice:has(input:disabled) {
+  cursor: default;
+}
+.mcp-governance-choice:has(input:checked) {
+  border-top-color: var(--foreground);
+}
+.mcp-governance-dialog input[type='checkbox'] {
+  accent-color: var(--foreground);
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin: 4px 0 0;
+}
+.mcp-governance-identity {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-governance-identity > span {
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.mcp-governance-identity .agent-glyph {
+  width: 20px;
+  height: 20px;
+  align-self: center;
+  flex: 0 0 20px;
+}
+.mcp-governance-identity strong {
+  font-weight: 550;
+}
+.mcp-governance-dialog .control-error,
+.mcp-governance-diff .control-error {
+  font-size: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.mcp-governance-evidence {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  font-size: var(--text-secondary);
+  min-width: 0;
+}
+.mcp-governance-evidence summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: list-item;
+  align-content: center;
+}
+.mcp-governance-evidence[open] > :not(summary) {
+  margin-block: 8px;
+}
+.mcp-governance-evidence code {
+  display: block;
+  font-size: var(--text-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.mcp-governance-evidence ul {
+  padding-left: 22px;
+  margin: 8px 0;
+  display: grid;
+  gap: 8px;
+}
+.mcp-governance-evidence h4 {
+  margin: 12px 0 4px;
+  font-size: var(--text-secondary);
+  font-weight: 550;
+}
+.mcp-governance-evidence li {
+  overflow-wrap: anywhere;
+}
+.mcp-governance-diff {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.mcp-governance-diff-counts {
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.mcp-governance-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  font-size: var(--text-secondary);
+}
+.mcp-governance-consents {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.mcp-governance-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  min-height: 44px;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+.mcp-governance-completion {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 600px) {
+  .dialog-content.mcp-governance-dialog {
+    width: calc(100% - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+  .mcp-governance-dialog .dialog-header {
+    padding: 16px;
+  }
+  .mcp-governance-body {
+    padding: 16px;
+  }
+  .mcp-governance-choices,
+  .mcp-governance-checks {
+    grid-template-columns: 1fr;
+  }
+  .mcp-governance-heading > div {
+    flex-basis: 100%;
+  }
+  .mcp-governance-actions > .button {
+    flex: 1 1 180px;
+  }
+  .mcp-governance-record,
+  .mcp-governance-notice {
+    padding: 14px;
+  }
+  .mcp-governance-dialog .dialog-header h2 {
+    font-size: 24px;
+  }
+  .mcp-governance-record[data-selected] {
+    scroll-margin-top: 160px;
+  }
+}

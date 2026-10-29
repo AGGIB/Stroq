@@ -17,6 +17,7 @@ import { readManifest } from '../../src/harden/manifest.js';
 import type { Fs } from '../../src/harden/types.js';
 import { addDeny, applied, engine, jsonText, owner, setSandbox, undo } from './engine-setup.js';
 import { removeTempDirs, tempDir } from './helpers.js';
+import { signedText } from './manifest-fixtures.js';
 
 afterEach(removeTempDirs);
 
@@ -161,10 +162,8 @@ describe('undoFile: a record that is not about the path it is under', () => {
     const manifest = JSON.parse(readFileSync(manifestFile, 'utf8')) as {
       files: Record<string, unknown>;
     };
-    writeFileSync(
-      manifestFile,
-      JSON.stringify({ ...manifest, files: { [other]: manifest.files[real] } }),
-    );
+    // Signed by this home, so that what is refused is the record, not its signature.
+    writeFileSync(manifestFile, signedText(e.home, { [other]: manifest.files[real] }));
 
     await expect(undo(e, other)).rejects.toMatchObject({ code: 'manifest-invalid' });
 
@@ -192,7 +191,7 @@ describe('undoFile: a record that mixes JSON edits and text edits', () => {
       closesLastLine: false,
       suffix: '\n',
     });
-    writeFileSync(manifestFile, JSON.stringify(manifest));
+    writeFileSync(manifestFile, signedText(e.home, manifest.files));
     // Not what Stroq left, so that the copy is not simply put back.
     owner(path, (doc) => ({ ...doc, theirs: 1 }));
 

@@ -129,17 +129,23 @@ export async function findTranscriptsScoped(cwd: string): Promise<SessionList> {
       return { files: found.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: true, depth };
   }
 
+  return { files: await listAllTranscripts(), scoped: false, depth: 0 };
+}
+
+/** Every Claude Code session on this machine, of every project, newest first. */
+export async function listAllTranscripts(): Promise<TranscriptFile[]> {
+  const root = transcriptRoot();
   let dirs: string[];
   try {
     dirs = (await readdir(root, { withFileTypes: true }))
       .filter((d) => d.isDirectory())
       .map((d) => join(root, d.name));
   } catch {
-    return { files: [], scoped: false, depth: 0 };
+    return [];
   }
   const all: TranscriptFile[] = [];
   for (const dir of dirs) all.push(...((await listJsonl(dir)) ?? []));
-  return { files: all.sort((a, b) => b.mtimeMs - a.mtimeMs), scoped: false, depth: 0 };
+  return all.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 async function listJsonl(dir: string): Promise<TranscriptFile[] | null> {

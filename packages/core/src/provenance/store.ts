@@ -159,7 +159,8 @@ function isProvenanceRecord(
     kinds.has(record['kind']) &&
     typeof record['hash'] === 'string' &&
     typeof record['excerpt'] === 'string' &&
-    typeof record['suspect'] === 'boolean'
+    typeof record['suspect'] === 'boolean' &&
+    (record['flaggedOwn'] === undefined || typeof record['flaggedOwn'] === 'boolean')
   );
 }
 

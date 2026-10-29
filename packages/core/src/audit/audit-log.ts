@@ -9,6 +9,7 @@ import type {
   SecretHit,
 } from '../types.js';
 import type { ScopeEvidence } from '../scope/types.js';
+import type { SignedTaskAccessRequest } from '../scope/access-request.js';
 import { withLock } from '../util/lock.js';
 
 /**
@@ -30,6 +31,39 @@ export interface CloakEvent {
   readonly count: number;
 }
 
+/** Observational evidence for the exact native MCP call-control binding; never authority. */
+export interface McpCallControlAudit {
+  readonly controlId: string;
+  readonly eventId: string | null;
+  readonly invocationSha256: string;
+  readonly authoritySha256: string | null;
+  readonly reason: 'paused' | 'unavailable' | 'busy';
+}
+
+function finiteCallControl(value: unknown): McpCallControlAudit | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  const uuid = (x: unknown): x is string =>
+    typeof x === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(x);
+  const sha = (x: unknown): x is string => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x);
+  if (
+    !uuid(v.controlId) ||
+    !sha(v.invocationSha256) ||
+    (v.eventId !== null && !uuid(v.eventId)) ||
+    (v.authoritySha256 !== null && !sha(v.authoritySha256)) ||
+    (v.reason !== 'paused' && v.reason !== 'unavailable' && v.reason !== 'busy') ||
+    (v.reason === 'paused' && (v.eventId === null || v.authoritySha256 === null))
+  )
+    return undefined;
+  return {
+    controlId: v.controlId,
+    eventId: v.eventId as string | null,
+    invocationSha256: v.invocationSha256,
+    authoritySha256: v.authoritySha256 as string | null,
+    reason: v.reason as McpCallControlAudit['reason'],
+  };
+}
+
 export interface AuditEntryInput {
   readonly sessionId: string;
   readonly phase: 'pre' | 'post';
@@ -37,7 +71,11 @@ export interface AuditEntryInput {
   readonly summary: string;
   /** Complete redacted input for an extendable task refusal; never a clipped approval screen. */
   readonly operation?: string;
+  /** Complete redacted review bytes, authenticated by the task parent for this refusal only. */
+  readonly approvalReview?: string;
+  readonly approvalRequest?: SignedTaskAccessRequest;
   readonly outcome?: 'failed';
+  readonly mcpCallControl?: McpCallControlAudit;
   readonly classes?: readonly ActionClass[];
   readonly decision?: Decision;
   readonly scan?: {
@@ -262,8 +300,21 @@ export class AuditLog {
           ? cached.last
           : (await this.readAll()).at(-1);
       const summary = redact(input.summary).slice(0, MAX_SUMMARY);
+      const { approvalReview, approvalRequest, mcpCallControl, ...ordinary } = input;
+      const callControl = finiteCallControl(mcpCallControl);
+      // Do not retain a signature over review text changed by the audit's final
+      // structural redaction. An unsafe direct producer cannot bypass that layer.
+      const approval =
+        approvalRequest !== undefined &&
+        typeof approvalReview === 'string' &&
+        Buffer.byteLength(approvalReview) <= 64 * 1024 &&
+        redact(approvalReview) === approvalReview
+          ? { approvalReview, approvalRequest }
+          : {};
       const unhashed: Omit<AuditEntry, 'hash'> = {
-        ...input,
+        ...ordinary,
+        ...approval,
+        ...(callControl === undefined ? {} : { mcpCallControl: callControl }),
         summary,
         ...(input.operation === undefined ? {} : { operation: redact(input.operation) }),
         seq: (last?.seq ?? 0) + 1,

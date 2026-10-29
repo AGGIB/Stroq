@@ -32,7 +32,7 @@ const incidents: Incident[] = [...html.matchAll(ROW)].map((m) => ({
 
 const EFFECTS: Record<string, [blocked: number, asked: number]> = {
   'code execution': [7, 3],
-  'credential theft': [7, 2],
+  'credential theft': [5, 4],
   'data loss': [0, 10],
   persistence: [1, 3],
   'guard removal': [2, 0],
@@ -53,12 +53,12 @@ describe('the 36 incidents', () => {
     );
   });
 
-  it('blocks 17 and asks 19, which is what the headline and the bar print', () => {
+  it('blocks 15 and asks 21, which is what the headline and the bar print', () => {
     const tally = countBy((i) => i.verdict);
-    expect(tally).toEqual({ deny: 17, ask: 19 });
+    expect(tally).toEqual({ deny: 15, ask: 21 });
     expect(html).toMatch(/<h2 id="score-title">36 attacks replayed\./);
-    expect(html).toContain('<span class="hi-deny">17 blocked</span>');
-    expect(html).toContain('<span class="hi-ask">19 asked</span>');
+    expect(html).toContain('<span class="hi-deny">15 blocked</span>');
+    expect(html).toContain('<span class="hi-ask">21 asked</span>');
   });
 
   it('groups them by effect with the counts the chart claims', () => {

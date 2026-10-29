@@ -213,6 +213,46 @@ jobs:
         working-directory: packages/cli
         run: npm pack --dry-run
 
+  # The local console (`stroq console`): its own dependencies, the engine bundle it
+  # runs, its unit tests and the loopback-server tests. Linux only: adding hooks from
+  # the console needs POSIX, and the server tests use POSIX modes.
+  console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir console install --ignore-workspace --frozen-lockfile
+
+      - name: Build the CLI the console starts
+        run: pnpm build
+
+      - name: Type check
+        working-directory: console
+        run: pnpm exec tsc --noEmit
+
+      - name: Build the engine bundle
+        working-directory: console
+        run: pnpm build:engine
+
+      - name: Unit tests
+        working-directory: console
+        run: pnpm test
+
+      - name: Server tests
+        working-directory: console
+        run: pnpm test:local
+
   # The suite on the other two operating systems Stroq claims; both must pass. The
   # tests that exercise POSIX-only behaviour (mode bits, signals, the bash plugin
   # wrapper, srt) skip on Windows and say why; SECURITY.md lists what that leaves

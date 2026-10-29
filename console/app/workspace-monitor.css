@@ -1,0 +1,89 @@
+.workspace-monitor {
+  border-block: 1px solid var(--border);
+  padding: 20px 0;
+}
+.workspace-monitor-heading,
+.workspace-monitor-heading-main,
+.workspace-monitor-controls,
+.workspace-monitor-facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.workspace-monitor-heading {
+  justify-content: space-between;
+  gap: 16px 24px;
+}
+.workspace-monitor-heading-main > svg {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.workspace-monitor-heading h2 {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 550;
+}
+.workspace-monitor-heading p {
+  margin: 3px 0 0;
+  font-size: var(--text-secondary);
+  color: var(--ink-3);
+}
+.workspace-monitor-facts {
+  margin-top: 14px;
+  gap: 8px 24px;
+  color: var(--ink-3);
+  font-size: var(--text-secondary);
+}
+.workspace-monitor-facts > span {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.workspace-monitor-facts time {
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+.workspace-monitor-limits {
+  margin-top: 16px;
+  color: var(--ink-3);
+  font-size: var(--text-secondary);
+}
+.workspace-monitor-limits summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.workspace-monitor-limits ul {
+  max-width: 76ch;
+  padding-left: 20px;
+  margin: 12px 0 0;
+}
+.workspace-monitor-limits li + li {
+  margin-top: 8px;
+}
+.workspace-monitor-dialog {
+  width: min(600px, calc(100% - 32px));
+}
+.workspace-monitor-dialog .policy-ack {
+  margin-block: 14px;
+}
+.workspace-monitor-dialog .control-meta {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .workspace-monitor-heading-main {
+    gap: 10px;
+  }
+  .workspace-monitor-controls {
+    width: 100%;
+  }
+  .workspace-monitor-controls > .button {
+    flex: 1;
+  }
+  .workspace-monitor-facts {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+}

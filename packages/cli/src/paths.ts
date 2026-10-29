@@ -43,6 +43,11 @@ export const policyFileIn = (home: string): string => join(home, 'policy.yaml');
 export const cliDirIn = (home: string): string => join(home, 'cli');
 export const pluginCliDirIn = (home: string): string => join(home, 'plugin-cli');
 export const openclawPluginDirIn = (home: string): string => join(home, 'openclaw-plugin');
+/**
+ * Node's cache of the compiled CLI (`compile-cache.ts`), one folder per Stroq version. What is in it
+ * runs as the firewall, as the copies above do, so it is protected as they are.
+ */
+export const compileCacheDirIn = (home: string): string => join(home, 'compile-cache');
 
 /**
  * Where features still to come keep their state: signing keys, the live check, what `harden` backs
@@ -54,6 +59,12 @@ export const liveDirIn = (home: string): string => join(home, 'live');
 export const hardenDirIn = (home: string): string => join(home, 'harden');
 export const backupsDirIn = (home: string): string => join(home, 'backups');
 export const storeDirIn = (home: string): string => join(home, 'store');
+/**
+ * The per-tool pause and approval state the MCP proxy reads on every call (`mcp/call-control-files.ts`).
+ * It is listed with the protected state so that a writer inside `stroq run --sandbox` cannot resume a
+ * paused tool, and named here so that a rename cannot leave it out.
+ */
+export const mcpCallControlsDirIn = (home: string): string => join(home, 'mcp-call-controls');
 /**
  * Where a runtime pin copies the verified files of an MCP server to run them (`mcp/pin.ts`). Node looks a
  * package up in the folders above the file that asks, so whatever is planted in `run/node_modules`

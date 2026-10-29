@@ -46,7 +46,7 @@ describe('stroq attack', () => {
       'stroq attack: 36 scenarios against policy default (26 from public reports, 10 synthetic)',
     );
     expect(text).toContain(
-      '36 scenarios: 17 blocked, 19 asked, 0 passed through — each was blocked or put to you as a question.',
+      '36 scenarios: 15 blocked, 21 asked, 0 passed through — each was blocked or put to you as a question.',
     );
     expect(text.match(/^✔ /gm)).toHaveLength(36);
   }, 60_000);
@@ -66,8 +66,8 @@ describe('stroq attack', () => {
     expect(report.ok).toBe(true);
     expect(report.scenarios).toHaveLength(36);
     expect(report.totals).toEqual({
-      blocked: 17,
-      asked: 19,
+      blocked: 15,
+      asked: 21,
       askedByLimit: 0,
       passed: 0,
       timeout: 0,

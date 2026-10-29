@@ -9,7 +9,7 @@
 // adds no telemetry and works on sessions recorded by earlier versions.
 import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -23,7 +23,13 @@ import {
 import { createEngineAt, loadPolicy } from '../engine-factory.js';
 import { auditFile, auditFileIn } from '../paths.js';
 import { formatReplayHtml } from '../replay/html.js';
-import { findTranscripts, readTranscript, type Transcript } from '../replay/transcript.js';
+import { formatPast, readPastSessions } from '../replay/past.js';
+import {
+  findTranscripts,
+  listAllTranscripts,
+  readTranscript,
+  type Transcript,
+} from '../replay/transcript.js';
 
 /** One action that traced back to something the agent had read. */
 export interface ReplayConsequence {
@@ -39,7 +45,7 @@ export interface ReplaySource {
   readonly tool: string;
   readonly source: string;
   readonly at: string;
-  /** True when the scan of that content was `suspect`. */
+  /** True when the scan of that content was `suspect`, whether or not it tainted the session. */
   readonly suspect: boolean;
   /** The `post` entry that recorded the read, when it is still in the log. */
   readonly read: AuditEntry | null;
@@ -104,7 +110,10 @@ function findRead(entries: readonly AuditEntry[], ev: ProvenanceEvidence): Audit
   ] as AuditEntry;
 }
 
-/** Reads that tainted the session, so they appear even when nothing traced back. */
+/**
+ * Reads that were flagged, so they appear even when nothing traced back: each tainted the session,
+ * unless it was the developer's own text, which a flag does not taint.
+ */
 function taintingReads(entries: readonly AuditEntry[]): AuditEntry[] {
   return entries.filter((e) => e.phase === 'post' && e.scan?.verdict === 'suspect');
 }
@@ -138,8 +147,8 @@ export function buildReplay(allEntries: readonly AuditEntry[], sessionId: string
     return list;
   };
 
-  // Every read that tainted the session is a node even with no consequence: a
-  // session that went suspect and then did nothing is still the thing a user
+  // Every read that was flagged is a node even with no consequence: a session
+  // that read something suspect and then did nothing is still the thing a user
   // wants to see first.
   for (const read of taintingReads(entries)) {
     ensure(read.tool, read.summary, read.ts, true);
@@ -147,7 +156,11 @@ export function buildReplay(allEntries: readonly AuditEntry[], sessionId: string
 
   for (const action of actions) {
     for (const ev of action.provenance ?? []) {
-      ensure(ev.tool, ev.source, ev.at, ev.suspect).push({ action, evidence: ev, alsoCarried: 0 });
+      ensure(ev.tool, ev.source, ev.at, ev.suspect || ev.flaggedOwn === true).push({
+        action,
+        evidence: ev,
+        alsoCarried: 0,
+      });
     }
   }
 
@@ -408,11 +421,19 @@ export async function runReplay(args: readonly string[]): Promise<number> {
       last: { type: 'boolean' },
       html: { type: 'boolean' },
       out: { type: 'string' },
+      all: { type: 'boolean' },
+      days: { type: 'string' },
     },
     allowPositionals: true,
   });
+
   // `--out` is a page, so it implies `--html`; a page and JSON, or a page and a list, are two answers.
   const html = values.html === true || values.out !== undefined;
+  if (values.all === true) return runPast(values.days, values.json === true, html);
+  if (values.days !== undefined) {
+    process.stderr.write('--days goes with --all\n');
+    return 2;
+  }
   if (html && (values.json === true || values.list === true)) {
     process.stderr.write('--html and --out make a page; they do not go with --json or --list\n');
     return 2;
@@ -471,4 +492,25 @@ export async function runReplay(args: readonly string[]): Promise<number> {
   }
   process.stdout.write(formatReplay(model));
   return model.total === 0 ? 1 : 0;
+}
+
+/** `stroq replay --all [--days N] [--json]`: every recent session on this machine, summed up. */
+async function runPast(daysArg: string | undefined, json: boolean, html: boolean): Promise<number> {
+  const days = daysArg === undefined ? 30 : Number(daysArg);
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    process.stderr.write('--days takes a whole number of days from 1 to 365\n');
+    return 2;
+  }
+  if (html) {
+    process.stderr.write('--all writes to the terminal or as --json; open one session as a page\n');
+    return 2;
+  }
+  const report = await readPastSessions(days, {
+    list: listAllTranscripts,
+    read: readTranscript,
+    replay: replayTranscript,
+  });
+  if (json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  else process.stdout.write(`${formatPast(report, homedir())}\n`);
+  return 0;
 }

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FileSecretIndex, SEALED_SOURCES_ENV } from '@stroq/core';
+import { makeCompileCacheRoot } from '../compile-cache.js';
 import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
 import { commandLine, type Piece } from '../shell-quote.js';
 import { pluginCliDirIn, secretsFile, stroqHome } from '../paths.js';
@@ -38,9 +39,8 @@ import { GIT_HARDENING, hardeningEnv } from './inspect.js';
  * - The pre-approval read of the repository has the same deadline, for the same
  *   reason, and `stroq run` refuses rather than warning (see `run/preflight.ts`).
  *
- * `--sandbox` adds OS-level confinement through Anthropic's `srt`, when it is
- * installed. That half is strictly additive: without `srt` everything above still
- * happens, loudly announced, and nothing silently downgrades.
+ * `--sandbox` requires Anthropic's `srt` before preflight or launch preparation.
+ * An explicitly requested boundary cannot fall back to an ordinary agent launch.
  */
 
 export const RUN_USAGE =
@@ -181,7 +181,17 @@ async function buildSandbox(
   plat: NodeJS.Platform,
 ): Promise<GeneratedSandbox> {
   const index = new FileSecretIndex(secretsFile(), userHome);
-  if (refresh) await index.refresh(cwd);
+  if (refresh) {
+    await index.refresh(cwd);
+    // Before the config, so that the folder exists and is denied on every platform (see
+    // `makeCompileCacheRoot`). A home that cannot be written fails the launch further on anyway, and
+    // the config lists the folder either way.
+    try {
+      makeCompileCacheRoot(stroqHome());
+    } catch {
+      // Listed regardless: srt denies it with a stand-in of its own, and the cache stays off.
+    }
+  }
   const state = (agent === null ? [] : (AGENT_STATE_DIRS[agent] ?? [])).map((d) =>
     join(userHome, d),
   );
@@ -327,6 +337,12 @@ export async function runRun(
   }
   const invocation = parsed.invocation;
   const env = deps.env ?? process.env;
+  const findSrt = deps.srt ?? ((e: NodeJS.ProcessEnv) => binOnPath(SRT_BIN, e));
+  const srtPath = invocation.sandbox ? findSrt(env) : null;
+  if (invocation.sandbox && srtPath === null) {
+    process.stderr.write(`${SRT_MISSING}\n`);
+    return 1;
+  }
   const userHome = deps.userHome ?? homedir();
   const workspace = resolve(cwd);
   const agent = invocation.agent ?? agentIdFor(invocation.command);
@@ -351,9 +367,6 @@ export async function runRun(
   );
   for (const note of checks.notes) line(`  note: ${note}`);
 
-  const findSrt = deps.srt ?? ((e: NodeJS.ProcessEnv) => binOnPath(SRT_BIN, e));
-  const srtPath = invocation.sandbox ? findSrt(env) : null;
-  if (invocation.sandbox && srtPath === null) process.stderr.write(`${SRT_MISSING}\n`);
   const plat = deps.plat ?? process.platform;
   const sandbox =
     srtPath === null

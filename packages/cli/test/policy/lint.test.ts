@@ -1,4 +1,10 @@
-import { DEFAULT_POLICY, type ActionClass, type Effect, type Policy } from '@stroq/core';
+import {
+  DEFAULT_POLICY,
+  PolicySchema,
+  type ActionClass,
+  type Effect,
+  type Policy,
+} from '@stroq/core';
 import { describe, expect, it } from 'vitest';
 import { lintPolicy, needsAttention } from '../../src/policy/lint.js';
 import type {
@@ -18,11 +24,12 @@ const rule = (
   taint: Rule['when']['taint'] = 'any',
 ): Rule => ({ id, effect, reason: `reason of ${id}`, when: { classes: [...classes], taint } });
 
-const policyOf = (rules: readonly Rule[], extra: Partial<Policy> = {}): Policy => ({
-  ...DEFAULT_POLICY,
-  rules: [...rules],
-  ...extra,
-});
+const policyOf = (rules: readonly Rule[], extra: Partial<Policy> = {}): Policy =>
+  PolicySchema.parse({
+    ...DEFAULT_POLICY,
+    rules: [...rules],
+    ...extra,
+  });
 
 /** The default policy with the rules of the given ids left out. */
 const withoutRules = (...ids: string[]): Policy =>

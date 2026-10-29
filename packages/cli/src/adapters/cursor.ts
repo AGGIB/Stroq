@@ -1,9 +1,11 @@
 import {
   AuditLog,
   classifyTool,
+  mcpIdentityFromServer,
   taintSource,
   warningFor,
   type Decision,
+  type McpIdentity,
   type ProvenanceHit,
   type ScanResult,
   type SecretHit,
@@ -215,6 +217,7 @@ interface EngineEvent {
   readonly toolName: string;
   readonly toolInput: Record<string, unknown>;
   readonly cwd: string;
+  readonly mcpIdentity?: McpIdentity;
 }
 
 async function scanOutput(engine: StroqEngine, event: EngineEvent, text: string) {
@@ -407,7 +410,14 @@ async function handleAfterMcp(
   const result = await scanOutput(engine, event, text);
   if (!result.scanned || result.scan.verdict !== 'suspect' || result.trusted === true)
     return NO_OUTPUT;
-  return json({ additional_context: warningFor(result.scan, event.toolName, taintSource(result)) });
+  return json({
+    additional_context: warningFor(
+      result.scan,
+      event.toolName,
+      taintSource(result),
+      result.flaggedOwn !== undefined,
+    ),
+  });
 }
 
 /**
@@ -423,6 +433,10 @@ export async function handleCursorHook(engine: StroqEngine, raw: unknown): Promi
     toolName: cursorToolName(input),
     toolInput: cursorToolInput(input),
     cwd: cursorProjectRoot(input),
+    ...(input.hook_event_name === 'beforeMCPExecution' ||
+    input.hook_event_name === 'afterMCPExecution'
+      ? { mcpIdentity: mcpIdentityFromServer('cursor', input.mcp_server_name) }
+      : {}),
   };
   switch (input.hook_event_name) {
     case 'preToolUse':

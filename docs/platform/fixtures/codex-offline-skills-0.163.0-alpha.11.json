@@ -1,0 +1,857 @@
+{
+  "schema": "stroq-codex-offline-skill-characterization/1",
+  "capturedOn": "2026-10-24",
+  "evidence": "native-offline-discovery",
+  "version": "codex-cli 0.163.0-alpha.11",
+  "platform": "macOS 26.3.0 arm64",
+  "binarySha256": "8a6dc3938a2f5d30cc19c50b9ccad83a5aa2ca4a2e3411665430bb78a917220a",
+  "operations": [
+    "initialize",
+    "initialized",
+    "config/read",
+    "skills/list"
+  ],
+  "providerCalls": 0,
+  "inferenceCalls": 0,
+  "isolation": {
+    "freshHomeAndCodexHomePerRow": true,
+    "authenticationFiles": false,
+    "mcpRegistrations": false,
+    "pluginRegistrations": false,
+    "network": "macOS child sandbox deny network*",
+    "bundledSkillsDisabled": true
+  },
+  "rows": [
+    {
+      "name": "baseline",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "project-no-config-files",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "user-document-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": false,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "document",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "user-folder-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "folder",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "user-name-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": false,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "name",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "project-document-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "document",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": [
+              "skills"
+            ]
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "project-name-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "name",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": [
+              "skills"
+            ]
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "untrusted-project",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [],
+        "projectLayers": [
+          {
+            "disabled": true,
+            "keys": []
+          },
+          {
+            "disabled": true,
+            "keys": [
+              "skills"
+            ]
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "user-custom-markers",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-outer",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/.agents/skills/fixture-outer/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".marker"
+        ],
+        "ruleKinds": [],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "project-custom-markers",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".marker"
+        ],
+        "ruleKinds": [],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": [
+              "project_root_markers"
+            ]
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "relative-document-disable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": false,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "document",
+            "enabled": false
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "name-then-document-reenable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "name",
+            "enabled": false
+          },
+          {
+            "selector": "document",
+            "enabled": true
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    },
+    {
+      "name": "document-then-name-reenable",
+      "skills": [
+        {
+          "name": "fixture-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.agents/skills/fixture-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-cwd",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/module/.codex/skills/fixture-legacy-cwd/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.codex/skills/fixture-legacy-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-repo",
+          "enabled": true,
+          "scope": "repo",
+          "relativeFixturePath": "outer/repo/.agents/skills/fixture-repo/SKILL.md"
+        },
+        {
+          "name": "fixture-legacy-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.codex/skills/fixture-legacy-user/SKILL.md"
+        },
+        {
+          "name": "fixture-user",
+          "enabled": true,
+          "scope": "user",
+          "relativeFixturePath": "home/.agents/skills/fixture-user/SKILL.md"
+        }
+      ],
+      "configuration": {
+        "markers": [
+          ".git"
+        ],
+        "ruleKinds": [
+          {
+            "selector": "document",
+            "enabled": false
+          },
+          {
+            "selector": "name",
+            "enabled": true
+          }
+        ],
+        "projectLayers": [
+          {
+            "disabled": false,
+            "keys": []
+          },
+          {
+            "disabled": false,
+            "keys": []
+          }
+        ]
+      },
+      "errorCount": 0
+    }
+  ],
+  "cleanup": {
+    "matrixFixtureRootsAbsent": true,
+    "childrenClosed": true
+  },
+  "logs": {
+    "matrix": "/private/tmp/stroq-codex-offline-skills-matrix.log",
+    "baseline": "/private/tmp/stroq-codex-offline-skills-baseline.log",
+    "helper": "/private/tmp/stroq-codex-offline-skills-probe.mjs"
+  },
+  "limitations": [
+    "Only this measured binary/platform and fresh fixtures.",
+    "skills/list returns discovery/enablement metadata; no thread or model turn was started.",
+    "No active-session skill loading, invocation, host blocking, real-user config, managed policy, plugin or administrator coverage was tested."
+  ],
+  "retainedData": "Sanitized characterization summary; not raw protocol records or evidence of active-session loading."
+}

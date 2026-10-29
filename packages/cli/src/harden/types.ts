@@ -40,6 +40,12 @@ export type HardenErrorCode =
   | 'manifest-too-large'
   /** The manifest is not valid JSON, or not what the engine writes. Never read in part. */
   | 'manifest-invalid'
+  /** The manifest was written before manifests were signed: nothing in it is trusted. */
+  | 'manifest-unsigned'
+  /** The manifest does not match its signature, or the key that checks it is missing or not private. */
+  | 'manifest-unverified'
+  /** A copy undo would put back is there but is not the bytes the manifest recorded for it. */
+  | 'backup-mismatch'
   /** A plan that was refused cannot be applied. */
   | 'plan-refused'
   /** The plan's text after is not what its edits make of its text before: it was not made by a planner. */

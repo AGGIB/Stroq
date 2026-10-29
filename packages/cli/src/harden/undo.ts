@@ -7,12 +7,14 @@ import {
   writeFileAtomic,
   type WriteRules,
 } from './atomic.js';
-import { readBackup } from './backup.js';
+import { readRecordedBackup } from './backup.js';
 import { DIFF_HIDDEN_NOTICE, maskedDiff } from './diff-mask.js';
 import { undoJsonEdits } from './json-edit.js';
 import {
   entriesFor,
   readManifest,
+  readManifestSnapshot,
+  assertManifestSnapshot,
   withManifestLock,
   writeManifest,
   type ManifestEntry,
@@ -29,6 +31,13 @@ import {
   type RecordedJsonEdit,
   type RecordedTextBlockEdit,
 } from './types.js';
+import {
+  assertPreparedBinding,
+  capturePreparedState,
+  stalePrepared,
+  type HardenPreparedBinding,
+  type PreparedOperationOptions,
+} from './prepared-state.js';
 
 /**
  * Undoing what Stroq did to a file.
@@ -143,12 +152,12 @@ function undoEntry(env: HardenEnv, real: string, text: string, entry: ManifestEn
   // Exactly as that apply left it: nothing of the owner's to lose, so the copy goes back whole.
   if (sha === entry.shaAfter) {
     if (entry.created) return { text: null, kept: [], how: 'copy', reformatted: false };
-    const copy = entry.backup === null ? null : readBackup(env, real, entry.backup);
-    // A copy is trusted only if it is the bytes the record says it is. One that is gone (pruned)
-    // or is not those bytes sends this apply down the path of taking its entries out.
-    if (copy !== null && sha256Text(copy) === entry.shaBefore) {
-      return { text: copy, kept: [], how: 'copy', reformatted: false };
-    }
+    // A copy is used only if it is the bytes the signed record says it is. One that is gone
+    // (pruned) sends this apply down the path of taking its entries out; one that is there but is
+    // not those bytes is refused before anything is written (`readRecordedBackup`).
+    const copy =
+      entry.backup === null ? null : readRecordedBackup(env, real, entry.backup, entry.shaBefore);
+    if (copy !== null) return { text: copy, kept: [], how: 'copy', reformatted: false };
   }
   // Exactly as it was before that apply: the record is of a change that was never made.
   if (entry.shaBefore !== null && sha === entry.shaBefore) {
@@ -258,12 +267,146 @@ async function putFileBack(
   text: string | null,
   bytes: Uint8Array | null,
   options: UndoOptions,
+  assertCurrent?: () => void | Promise<void>,
 ): Promise<void> {
   const rules = rulesOf(options.root);
   const fs = env.fs === undefined ? {} : { fs: env.fs };
-  const look = (): void => assertUnchanged(real, real, bytes);
+  const look = async (): Promise<void> => {
+    await assertCurrent?.();
+    assertUnchanged(real, real, bytes);
+  };
   if (text === null) await removeFile(real, { ...rules, ...fs, beforeRemove: look });
   else await writeFileAtomic(real, text, { ...rules, ...fs, beforeRename: look });
+}
+
+export interface PreparedUndo {
+  readonly file: string;
+  readonly root: string | null;
+  readonly binding: HardenPreparedBinding;
+  /** Private result: diff/kept labels are not a public API projection. */
+  readonly result: UndoResult;
+  readonly changed: boolean;
+  readonly removesFile: boolean;
+  readonly applications: number;
+  readonly recipes: readonly string[];
+  readonly candidateSha256: string | null;
+  /** Raw private candidate for fixed-count projections. NEVER return through a public API. */
+  readonly candidateText: string | null;
+}
+
+function undoPrepared(env: HardenEnv, file: string, options: UndoOptions) {
+  const before = capturePreparedState(env, file, options.root ?? null, null);
+  const real = before.binding.real;
+  const entries = entriesFor(before.manifest, real);
+  if (entries.length) assertRecordedPath(real, entries, options);
+  const bytes = readTargetBytes(real);
+  const current = bytes === null ? null : decodeUtf8Strict(bytes, real);
+  const worked = workOut(env, real, current, entries);
+  const changed = worked.blocked === undefined && worked.text !== current;
+  const preview = changed ? previewOf(current, worked.text, real) : { diff: '', notices: [] };
+  const result: UndoResult = {
+    status: worked.blocked
+      ? 'blocked'
+      : !changed && worked.kept.length === 0
+        ? 'already-undone'
+        : worked.usedCopy && !worked.usedEntries && worked.kept.length === 0
+          ? 'restored'
+          : 'surgical',
+    real,
+    diff: preview.diff,
+    kept: worked.kept,
+    reformatted: worked.reformatted && changed,
+    applications: entries.length,
+    notices: preview.notices,
+    ...(worked.blocked ? { blocked: worked.blocked } : {}),
+  };
+  const after = capturePreparedState(env, file, options.root ?? null, null);
+  assertPreparedBinding(before.binding, after.binding);
+  const candidateSha256 = worked.text === null ? null : sha256Text(worked.text);
+  const prepared: PreparedUndo = {
+    file,
+    root: options.root ?? null,
+    binding: { ...after.binding, candidateSha256 },
+    result,
+    changed,
+    removesFile: changed && worked.text === null,
+    applications: entries.length,
+    recipes: [...new Set(entries.map((entry) => entry.recipe))],
+    candidateSha256,
+    candidateText: worked.text,
+  };
+  return { prepared, manifest: before.manifest, entries, current, bytes, worked };
+}
+
+/** Read-only computation of ALL recorded applications to one file, never only one recipe. */
+export function prepareUndo(env: HardenEnv, file: string, options: UndoOptions = {}): PreparedUndo {
+  return undoPrepared(env, file, options).prepared;
+}
+
+/** Caller MUST already hold the actual manifest lock. Recomputes, validates, then uses fresh data. */
+export async function applyPreparedUndoUnderManifestLock(
+  prepared: PreparedUndo,
+  env: HardenEnv,
+  options: PreparedOperationOptions = {},
+): Promise<UndoResult> {
+  const rules = prepared.root === null ? {} : { root: prepared.root };
+  const fresh = undoPrepared(env, prepared.file, rules);
+  assertPreparedBinding(prepared.binding, fresh.prepared.binding);
+  if (
+    JSON.stringify(prepared.result) !== JSON.stringify(fresh.prepared.result) ||
+    prepared.applications !== fresh.prepared.applications ||
+    JSON.stringify(prepared.recipes) !== JSON.stringify(fresh.prepared.recipes) ||
+    prepared.changed !== fresh.prepared.changed ||
+    prepared.removesFile !== fresh.prepared.removesFile ||
+    prepared.candidateSha256 !== fresh.prepared.candidateSha256 ||
+    prepared.candidateText !== fresh.prepared.candidateText
+  )
+    stalePrepared();
+  await options.assertCurrent?.();
+  const recheck = (): void =>
+    assertPreparedBinding(
+      prepared.binding,
+      capturePreparedState(env, prepared.file, prepared.root, prepared.candidateSha256).binding,
+    );
+  recheck();
+  if (fresh.worked.blocked || fresh.entries.length === 0) return fresh.prepared.result;
+  if (fresh.prepared.changed)
+    await putFileBack(
+      env,
+      fresh.prepared.binding.real,
+      fresh.worked.text,
+      fresh.bytes,
+      rules,
+      async () => {
+        await options.assertCurrent?.();
+        recheck();
+      },
+    );
+  // File mutation is complete; do not compare its pre-write identity or roll it back.
+  assertManifestSnapshot(env, prepared.binding.manifest);
+  const nowBytes = readTargetBytes(fresh.prepared.binding.real);
+  if (
+    (nowBytes === null
+      ? null
+      : sha256Text(decodeUtf8Strict(nowBytes, fresh.prepared.binding.real))) !==
+    prepared.candidateSha256
+  )
+    stalePrepared();
+  if (fresh.worked.text === null) {
+    const createdDirs = fresh.entries.flatMap((entry) => entry.createdDirs ?? []);
+    if (createdDirs.length) {
+      const roots = new Set<string>();
+      if (prepared.root !== null) roots.add(prepared.root);
+      for (const entry of fresh.entries) if (entry.root !== null) roots.add(entry.root);
+      await removeEmptyDirs(createdDirs, {
+        ...(roots.size ? { roots: [...roots] } : {}),
+        ...(env.fs ? { fs: env.fs } : {}),
+      });
+    }
+  }
+  const { [fresh.prepared.binding.real]: _removed, ...rest } = fresh.manifest.files;
+  await writeManifest(env, { ...fresh.manifest, files: rest }, prepared.binding.manifest);
+  return fresh.prepared.result;
 }
 
 async function undoLocked(
@@ -343,7 +486,9 @@ async function undoLocked(
  * - `path-changed` for a path that no longer leads to the file Stroq edited;
  * - `not-utf8` for a file that is not valid UTF-8;
  * - `stale-plan` for a file that changed while undo was working it out;
- * - `manifest-invalid` and the other manifest errors for a manifest that cannot be trusted.
+ * - `manifest-invalid` and the other manifest errors for a manifest that cannot be trusted,
+ *   among them `manifest-unsigned` (from before manifests were signed) and `manifest-unverified`;
+ * - `backup-mismatch` for a kept copy that is there but is not the bytes the manifest recorded.
  *
  * Idempotent: when nothing of Stroq's is left to take out, the answer is `already-undone` and the
  * file is not touched. The records are removed only after the file has been written. A diff that

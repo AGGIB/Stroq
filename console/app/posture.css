@@ -1,0 +1,262 @@
+/* Settings check: a verdict line, four counts and a list of settings. Prefix: posture-. */
+.posture-verdict {
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+}
+.posture-counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.posture-count {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--ink-3);
+  border-radius: 8px;
+  background: var(--card);
+}
+.posture-count.critical {
+  border-top-color: var(--st-red);
+}
+.posture-count.high {
+  border-top-color: var(--st-amber);
+}
+.posture-count-number {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.posture-count-label {
+  font-size: var(--text-secondary);
+  color: var(--ink-2);
+}
+.posture-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.posture-item {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-top: 1px solid var(--border);
+}
+.posture-item:first-child {
+  border-top: 0;
+}
+.posture-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.posture-head strong {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.posture-rules {
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.posture-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.posture-why {
+  margin: 0;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 68ch;
+}
+.posture-fix {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+  font-size: var(--text-secondary);
+}
+.posture-fix dt {
+  color: var(--ink-2);
+}
+.posture-fix dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.posture-foot {
+  margin: 0;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.posture-more {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.posture-more > summary {
+  padding: 14px 18px;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  cursor: pointer;
+}
+.posture-more[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.posture-sources,
+.posture-limits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.posture-sources li {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr) 14rem;
+  gap: 14px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-secondary);
+}
+.posture-sources li:first-child {
+  border-top: 0;
+}
+.posture-state {
+  color: var(--ink-2);
+}
+.posture-state.read {
+  color: var(--card-foreground);
+}
+.posture-state.unsafe,
+.posture-state.invalid,
+.posture-state.oversize,
+.posture-state.unreadable {
+  color: var(--st-red);
+}
+.posture-limits li {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+.posture-limits li:first-child {
+  border-top: 0;
+}
+@media (max-width: 760px) {
+  .posture-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .posture-sources li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .posture-fix {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .posture-fix dd {
+    margin-bottom: 6px;
+  }
+}
+.posture-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+}
+.posture-strip.is-serious {
+  border-color: color-mix(in srgb, var(--st-red) 55%, var(--border));
+}
+.posture-strip.is-serious > svg:first-child {
+  color: var(--st-red);
+}
+.posture-strip:active {
+  background: var(--accent);
+}
+.posture-strip:hover,
+.posture-strip:focus-visible {
+  background: color-mix(in srgb, var(--card) 92%, var(--card-foreground));
+}
+.posture-strip-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.posture-strip-text strong {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.posture-strip-text .muted {
+  font-size: var(--text-secondary);
+}
+.posture-new {
+  padding: 1px 8px;
+  border: 1px solid var(--st-amber);
+  border-radius: 4px;
+  color: var(--st-amber-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.posture-since {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.posture-unchecked {
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--st-amber) 55%, var(--border));
+  border-radius: 8px;
+  background: var(--card);
+}
+.posture-unchecked h2 {
+  text-wrap: balance;
+  margin: 0 0 8px;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.posture-unchecked ul {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-secondary);
+}
+.posture-unchecked li {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr) 14rem;
+  gap: 14px;
+}
+.posture-unchecked p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .posture-unchecked li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    margin-bottom: 6px;
+  }
+}

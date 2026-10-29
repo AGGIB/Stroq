@@ -2,6 +2,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ManifestEntry } from '../../src/harden/manifest.js';
+import { signedManifestText } from '../../src/harden/manifest-seal.js';
+import { ensureStateMacKeySync } from '../../src/state-mac.js';
 import { fakeEnv, tempDir } from './helpers.js';
 
 export const FAKE_SECRET = 'stroq_attack_fixture_value_0123456789';
@@ -58,6 +60,10 @@ export function plant(manifestFile: string, content: string | object): void {
   mkdirSync(join(manifestFile, '..'), { recursive: true });
   writeFileSync(manifestFile, typeof content === 'string' ? content : JSON.stringify(content));
 }
+
+/** The text of a version 2 manifest with `files`, signed with the key of `home` (made if need be). */
+export const signedText = (home: string, files: Readonly<Record<string, unknown>>): string =>
+  signedManifestText(files, ensureStateMacKeySync(home));
 
 /** What `fn` throws, or undefined when it does not. */
 export const thrownBy = (fn: () => unknown): unknown => {

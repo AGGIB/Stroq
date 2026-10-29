@@ -1,6 +1,5 @@
-import { lstatSync, readdirSync } from 'node:fs';
+import { LEGACY_SURFACE_IO, type SurfaceReadContext } from './surface-io.js';
 import { join, posix } from 'node:path';
-import { readRegularFile } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { RepoExecHit } from './repo-surface.js';
@@ -190,7 +189,13 @@ function placed(value: string): string | undefined {
 }
 
 /** What a hook file is: listed, or failing with why. */
-function hookHit(root: string, folder: string, name: string, husky: boolean): RepoExecHit {
+function hookHit(
+  root: string,
+  folder: string,
+  name: string,
+  husky: boolean,
+  io: SurfaceReadContext,
+): RepoExecHit {
   const file = `${folder}/${name}`;
   const failing = (why: string): RepoExecHit => ({
     kind: 'git-hook-routine',
@@ -200,8 +205,8 @@ function hookHit(root: string, folder: string, name: string, husky: boolean): Re
   const path = join(root, folder, name);
   let text: string | undefined;
   try {
-    if (lstatSync(path).isSymbolicLink()) return failing('a link, which was not read');
-    const read = readRegularFile(path, MAX_HOOK_BYTES);
+    if (io.lstat(path).isSymbolicLink()) return failing('a link, which was not read');
+    const read = io.read(path, MAX_HOOK_BYTES);
     text = read.kind === 'text' ? read.text : undefined;
   } catch {
     text = undefined;
@@ -214,10 +219,11 @@ function hookHit(root: string, folder: string, name: string, husky: boolean): Re
 }
 
 /** The hook files of one folder: the files in it, but husky's own `_` folder and dot files. */
-function folderHits(root: string, folder: string): RepoExecHit[] {
+function folderHits(root: string, folder: string, io: SurfaceReadContext): RepoExecHit[] {
   let names: string[];
   try {
-    names = readdirSync(join(root, folder), { withFileTypes: true })
+    names = io
+      .entries(join(root, folder))
       .filter((e) => !e.name.startsWith('.') && !e.name.startsWith('_') && !e.isDirectory())
       .map((e) => e.name)
       .sort();
@@ -225,7 +231,7 @@ function folderHits(root: string, folder: string): RepoExecHit[] {
     return [];
   }
   const husky = folder === '.husky';
-  const hits = names.slice(0, MAX_HOOK_FILES).map((name) => hookHit(root, folder, name, husky));
+  const hits = names.slice(0, MAX_HOOK_FILES).map((name) => hookHit(root, folder, name, husky, io));
   const cut = names[MAX_HOOK_FILES];
   if (cut !== undefined)
     hits.push({
@@ -246,6 +252,7 @@ export function plainHookHits(
   root: string,
   hooksPaths: readonly string[],
   scripts: Readonly<Record<string, unknown>>,
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
 ): RepoExecHit[] {
   const folders = new Set(['.husky', '.githooks']);
   const out: RepoExecHit[] = [];
@@ -321,5 +328,5 @@ export function plainHookHits(
         what: `the ${name} script may set or write where git hooks run, in a way this does not read, so those hooks were not read`,
       });
   }
-  return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder))];
+  return [...out, ...[...folders].flatMap((folder) => folderHits(root, folder, io))];
 }

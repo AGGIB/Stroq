@@ -61,6 +61,14 @@ import { configPinStatus } from '../mcp/pin-status.js';
 import { pinnedServers, sandboxPinNote } from '../mcp/pinned-servers.js';
 import { outsideLine } from '../ui/layout.js';
 import {
+  doctorDiagnostic,
+  hookDiagnostic,
+  proxyDiagnostic,
+  secretDiagnostic,
+  type DoctorDiagnostic,
+  type DoctorDiagnosticAgent,
+} from './doctor-diagnostics.js';
+import {
   installDrift,
   installKey,
   readInstallRecord,
@@ -71,9 +79,11 @@ export interface DoctorCheck {
   readonly name: string;
   readonly ok: boolean;
   readonly detail: string;
+  readonly diagnostic: DoctorDiagnostic;
 }
 export interface DoctorReport {
   readonly version: 1;
+  readonly diagnosticsVersion: 1;
   readonly ok: boolean;
   readonly checks: readonly DoctorCheck[];
 }
@@ -390,6 +400,10 @@ interface ScopeStatus {
   readonly unapproved?: boolean;
   /** Installed, but this other file takes the agent's attention first, so it does not run (Windsurf). */
   readonly shadowedBy?: string;
+  /** Source identity and counts are retained as facts, never recovered from display text. */
+  readonly client?: McpClient;
+  readonly proxyCounts?: ReturnType<typeof countWrapped>;
+  readonly proxyScope?: 'project' | 'user';
 }
 
 function agentScopes(
@@ -571,13 +585,25 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
           : '';
       found.push({
         scope,
+        client,
+        proxyCounts: counted,
+        proxyScope:
+          client === 'cursor' && file === mcpConfigPath(client, 'user', cwd) ? 'user' : scope,
         file,
         installed: counted.wrapped > 0,
         error: null,
         detail: `${client}: wrapped ${counted.wrapped}/${counted.stdio} stdio servers${strict}${stale}${unfiltered} (${file})`,
       });
     } catch (err) {
-      found.push({ scope, file, installed: false, error: (err as Error).message });
+      found.push({
+        scope,
+        client,
+        file,
+        installed: false,
+        error: (err as Error).message,
+        proxyScope:
+          client === 'cursor' && file === mcpConfigPath(client, 'user', cwd) ? 'user' : scope,
+      });
     }
   }
   if (found.length > 0) return found;
@@ -603,7 +629,7 @@ function mcpProxyScopes(cwd: string): ScopeStatus[] {
  * all the same, because a caller asking about it deserves the real answer.
  */
 const HOOK_ROWS: readonly {
-  readonly id: string;
+  readonly id: DoctorDiagnosticAgent | 'mcp';
   readonly name: string;
   readonly scopes: (cwd: string) => readonly ScopeStatus[];
 }[] = [
@@ -708,6 +734,7 @@ function scopeDetail(scopes: readonly ScopeStatus[]): string {
 }
 
 function hooksCheck(
+  id: DoctorDiagnosticAgent | 'mcp',
   name: string,
   scopes: readonly ScopeStatus[],
   others: readonly AgentStatus[],
@@ -731,6 +758,7 @@ function hooksCheck(
   const perScope = scopeDetail(scopes);
   return {
     name,
+    diagnostic: id === 'mcp' ? proxyDiagnostic(scopes) : hookDiagnostic(id, scopes),
     ok: !broken && !changed && !dead && !incomplete && (installed || carrying.length > 0),
     detail:
       !broken && !dead && !incomplete && !installed && carrying.length > 0
@@ -761,9 +789,19 @@ async function checkSecrets(): Promise<DoctorCheck> {
   try {
     const stats = await new FileSecretIndex(secretsFile(), homedir()).stats();
     const ok = !stats.corrupt && stats.unreadable === 0 && !stats.truncated;
-    return { name: 'secrets', ok, detail: secretsDetail(stats) };
+    return {
+      name: 'secrets',
+      ok,
+      detail: secretsDetail(stats),
+      diagnostic: secretDiagnostic(stats),
+    };
   } catch (err) {
-    return { name: 'secrets', ok: false, detail: (err as Error).message };
+    return {
+      name: 'secrets',
+      ok: false,
+      detail: (err as Error).message,
+      diagnostic: doctorDiagnostic('secret-index', 'unavailable', 'data'),
+    };
   }
 }
 
@@ -819,6 +857,7 @@ export async function doctorReport(
   const now = opts.now ?? Date.now();
   const perAgentChecks = agents.map((agent, i) => {
     const check = hooksCheck(
+      agent.id,
       agent.name,
       agent.scopes,
       statuses.filter((_, j) => j !== i),
@@ -838,6 +877,7 @@ export async function doctorReport(
   const collapsed: DoctorCheck = {
     name: 'hooks',
     ok: false,
+    diagnostic: doctorDiagnostic('agent-hooks', 'not-configured', 'machine'),
     detail:
       detectedHere.length === 0
         ? 'not installed in any agent, and no agent was detected on this machine; run "stroq init --agent <name>" after installing one'
@@ -861,7 +901,12 @@ export async function doctorReport(
         configPinStatus,
       ),
     )
-  ).flat();
+  )
+    .flat()
+    .map((check) => ({
+      ...check,
+      diagnostic: doctorDiagnostic('mcp-pin', check.ok ? 'ready' : 'review-required'),
+    }));
   const pinned = await pinnedServers(home);
   const pinSandbox: DoctorCheck[] =
     pinned.length === 0
@@ -870,6 +915,7 @@ export async function doctorReport(
           {
             name: 'mcp pins and the sandbox',
             ok: true,
+            diagnostic: doctorDiagnostic('mcp-sandbox', 'sandbox-launch-conflict'),
             detail: sandboxPinNote(
               pinned
                 .slice(0, 5)
@@ -888,33 +934,73 @@ export async function doctorReport(
   });
   const { checkRetainedRevisions } = await import('../install/previous-revisions.js');
   const retainedChecks = await checkRetainedRevisions(home);
+  const dataHomeExists = existsSync(home);
   const checks: readonly DoctorCheck[] = [
-    { name: 'stroq', ok: true, detail: stroqVersion() },
-    { name: 'node', ok: major >= 22, detail: `v${process.versions.node}` },
+    {
+      name: 'stroq',
+      ok: true,
+      detail: stroqVersion(),
+      diagnostic: doctorDiagnostic('engine', 'ready', 'runtime'),
+    },
+    {
+      name: 'node',
+      ok: major >= 22,
+      detail: `v${process.versions.node}`,
+      diagnostic: doctorDiagnostic(
+        'runtime',
+        major >= 22 ? 'ready' : 'platform-unsupported',
+        'runtime',
+      ),
+    },
     {
       name: 'rules',
       ok: rules.length >= 12,
       detail: rulesDetail(rules.length, rules.filter(canFire).length),
+      diagnostic: doctorDiagnostic(
+        'rules',
+        rules.length >= 12 ? 'ready' : 'unavailable',
+        'runtime',
+      ),
     },
     {
       name: 'self-test',
       ok: injectionDetected,
       detail: injectionDetected ? 'injection sample detected' : 'injection sample NOT detected',
+      diagnostic: doctorDiagnostic(
+        'scanner',
+        injectionDetected ? 'ready' : 'unavailable',
+        'runtime',
+      ),
     },
     ...hookChecks,
     ...pinChecks,
     ...pinSandbox,
-    ...skillChecks,
-    ...retainedChecks,
+    ...skillChecks.map((check) => ({
+      ...check,
+      diagnostic: doctorDiagnostic(
+        'skill-integrity',
+        check.status === 'intact'
+          ? 'ready'
+          : check.status === 'changed'
+            ? 'review-required'
+            : 'unavailable',
+      ),
+    })),
+    ...retainedChecks.map((check) => ({
+      ...check,
+      diagnostic: doctorDiagnostic('retained-revisions', check.ok ? 'ready' : 'unavailable'),
+    })),
     {
       name: 'home',
       ok: true,
-      detail: existsSync(home) ? home : `${home} (created on first use)`,
+      detail: dataHomeExists ? home : `${home} (created on first use)`,
+      diagnostic: doctorDiagnostic('data-home', dataHomeExists ? 'ready' : 'not-created', 'data'),
     },
     secrets,
   ];
   return {
     version: 1,
+    diagnosticsVersion: 1,
     ok: checks.every((c) => c.ok),
     checks,
   };

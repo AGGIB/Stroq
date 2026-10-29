@@ -1,0 +1,5 @@
+Inter Variable: https://raw.githubusercontent.com/rsms/inter/master/docs/font-files/InterVariable.woff2
+License: https://raw.githubusercontent.com/rsms/inter/master/LICENSE.txt
+Family: Inter Variable; normal; variable weights 100–900; Latin and Cyrillic included.
+shadcn font reference: https://ui.shadcn.com/docs/registry/examples#custom-font
+Files are self-hosted. No Google Fonts request is made at runtime.

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+/packages/cli/platform/
+/packages/cli/.platform-stage-*/
 # Anchored to the repo root: this is vitest's coverage-report output
 # (pnpm test:coverage), the only place it's ever written (see
 # vitest.config.ts — no reportsDirectory override, no per-package

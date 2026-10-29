@@ -18,6 +18,15 @@ import {
 } from './strict-limits.js';
 import { createQueueGate } from './strict-queue.js';
 import { createBoundedScan } from './strict-scan.js';
+import {
+  createToolApprovalConnection,
+  type ToolApprovalConnection,
+} from './proxy-tool-approval.js';
+import { createMcpToolContractBinding, createMcpToolContractsStore } from './tool-contracts.js';
+import { stroqHome } from '../paths.js';
+import type { McpPolicyContinuity } from './policy-continuity.js';
+import { createMcpCallControlBinding, createMcpCallControlGuard } from './call-control.js';
+import type { McpCallControlGuard } from './call-control-types.js';
 
 /**
  * Spawn, signal handling and shutdown lifecycle for the MCP proxy. The per-line
@@ -32,10 +41,14 @@ export const SHUTDOWN_GRACE_MS = 2000;
 
 export interface McpProxyOptions {
   readonly engine: StroqEngine;
+  /** Explicit trusted launch binding. Injected engines never acquire an ambient policy source. */
+  readonly policyContinuity?: McpPolicyContinuity;
+  readonly home?: string;
   readonly sessionId: string;
   /** The trusted server name, from `--server`. */
   readonly server: string;
-  /** The policy directory, from `--cwd` or the proxy's own. */
+  readonly client?: string;
+  /** Workspace/event context from `--cwd`; it never selects the policy source. */
   readonly cwd: string;
   readonly command: string;
   readonly args: readonly string[];
@@ -69,6 +82,11 @@ export interface McpProxyOptions {
    * `strict-handler.ts`.
    */
   readonly strict?: boolean;
+  readonly toolApproval?: boolean;
+  readonly runtimeEntry?: string;
+  readonly callControlId?: string;
+  /** Private fixture seam; the complete-listing deadline is otherwise 30 seconds. */
+  readonly toolPaginationTimeoutMs?: number;
   /** How many withheld messages end a strict server; `DEFAULT_STRICT_MAX_WITHHELD` when absent. */
   readonly strictMaxWithheld?: number;
   /** Overrides `STRICT_SCAN_DEADLINE_MS`, the hard time bound on scanning one message; tests only. */
@@ -81,7 +99,73 @@ export interface McpProxyOptions {
 }
 
 export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
-  if (options.pin === undefined) return runProxy(options);
+  let callControl: McpCallControlGuard | undefined;
+  if (options.callControlId !== undefined) {
+    try {
+      if (options.home === undefined || options.client === undefined)
+        throw Error('mcp-call-control-unavailable');
+      callControl = createMcpCallControlGuard(
+        await createMcpCallControlBinding({
+          home: options.home,
+          cwd: options.cwd,
+          controlId: options.callControlId,
+          client: options.client,
+          server: options.server,
+          command: options.command,
+          args: options.args,
+          passEnv: options.passEnv,
+          ...(options.strict === undefined ? {} : { strict: options.strict }),
+          ...(options.cloak === undefined ? {} : { cloak: options.cloak }),
+          ...(options.toolApproval === undefined ? {} : { toolApproval: options.toolApproval }),
+          ...(options.strictMaxWithheld === undefined
+            ? {}
+            : { strictMaxWithheld: options.strictMaxWithheld }),
+          ...(options.pin === undefined ? {} : { pin: options.pin }),
+        }),
+      );
+    } catch {
+      options.stderr.write('stroq mcp: call-control binding is unavailable; refusing to start\n');
+      return 1;
+    }
+  }
+  let approval: ToolApprovalConnection | undefined;
+  if (options.toolApproval === true) {
+    if (
+      options.strict !== true ||
+      options.cloak === true ||
+      options.passEnv === null ||
+      options.client === undefined ||
+      options.runtimeEntry === undefined
+    ) {
+      options.stderr.write(
+        'stroq mcp: tool approval requires strict mode, explicit environment and a known runtime; refusing to start\n',
+      );
+      return 1;
+    }
+    try {
+      const binding = await createMcpToolContractBinding({
+        home: options.home ?? stroqHome(),
+        cwd: options.cwd,
+        client: options.client,
+        server: options.server,
+        command: options.command,
+        args: options.args,
+        passEnv: options.passEnv,
+        runtimeEntry: options.runtimeEntry,
+        strictMaxWithheld: options.strictMaxWithheld ?? DEFAULT_STRICT_MAX_WITHHELD,
+        ...(options.pin === undefined ? {} : { pin: options.pin }),
+        ...(options.launch === undefined ? {} : { launch: options.launch }),
+      });
+      approval = createToolApprovalConnection({
+        binding,
+        store: createMcpToolContractsStore({ home: options.home ?? stroqHome() }),
+      });
+    } catch {
+      options.stderr.write('stroq mcp: tool approval binding is unavailable; refusing to start\n');
+      return 1;
+    }
+  }
+  if (options.pin === undefined) return runProxy(options, undefined, approval, callControl);
   let pinned;
   try {
     const { preparePin } = await import('./pin.js');
@@ -94,6 +178,8 @@ export async function runMcpProxy(options: McpProxyOptions): Promise<number> {
     return await runProxy(
       { ...options, command: pinned.command, args: pinned.args, passEnv: options.passEnv ?? [] },
       pinned.cwd,
+      approval,
+      callControl,
     );
   } finally {
     await pinned.cleanup().catch(() => {
@@ -124,7 +210,12 @@ function pinRefusal(error: unknown, server: string): string {
   return 'pinned server cannot be verified';
 }
 
-async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<number> {
+async function runProxy(
+  options: McpProxyOptions,
+  serverCwd?: string,
+  approval?: ToolApprovalConnection,
+  callControl?: McpCallControlGuard,
+): Promise<number> {
   const graceMs = options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS;
   // Unpinned servers keep the client's cwd; pinned servers run in the private copy.
   // `inherit` on fd 2 hands the server the proxy's own stderr, so its logging reaches the client
@@ -181,8 +272,19 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
     serverIn,
     serverOut,
     clientOut: options.stdout,
-    cloak: options.cloak === true ? createMcpCloak(ctx) : null,
+    ...(callControl === undefined ? {} : { callControl }),
+    cloak: options.cloak === true ? createMcpCloak(ctx, options.home) : null,
     strict,
+    ...(options.policyContinuity === undefined
+      ? {}
+      : { policyContinuity: options.policyContinuity }),
+    ...(options.home === undefined ? {} : { home: options.home }),
+    ...(approval === undefined ? {} : { toolApproval: approval }),
+    ...(options.toolPaginationTimeoutMs === undefined
+      ? {}
+      : { toolPaginationTimeoutMs: options.toolPaginationTimeoutMs }),
+    enqueueToServer: (task) => toServer.run(task),
+    enqueueToClient: (task) => toClient.run(task),
   });
   // Strict mode only: the default proxy is bounded by write backpressure, which a
   // withheld (never written) line does not exercise. See `strict-queue.ts`.
@@ -191,6 +293,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
       ? null
       : createQueueGate(serverOut, STRICT_MAX_QUEUED_LINES, STRICT_MAX_QUEUED_CHARS);
   const queueServerLine = (line: SplitLine): void => {
+    pump.onServerIngress?.(line);
     if (gate === null) {
       toClient.run(() => pump.onServerLine(line));
       return;
@@ -213,7 +316,10 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   options.stdin.setEncoding('utf8');
   serverOut.setEncoding('utf8');
   const onStdinData = (chunk: string): void => {
-    for (const line of clientLines.push(chunk)) toServer.run(() => pump.onClientLine(line));
+    for (const line of clientLines.push(chunk)) {
+      pump.onClientIngress?.(line);
+      toServer.run(() => pump.onClientLine(line));
+    }
   };
   options.stdin.on('data', onStdinData);
   serverOut.on('data', (chunk: string) => {
@@ -229,6 +335,7 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   let termTimer: NodeJS.Timeout | null = null;
   let killTimer: NodeJS.Timeout | null = null;
   options.stdin.on('end', () => {
+    void pump.close?.(true);
     toServer.run(async () => {
       for (const line of clientLines.flush()) await pump.onClientLine(line);
       serverIn.end();
@@ -293,6 +400,8 @@ async function runProxy(options: McpProxyOptions, serverCwd?: string): Promise<n
   for (const line of serverLines.flush()) queueServerLine(line);
   await toClient.idle();
   await toServer.idle();
+  await pump.close?.();
+  await toClient.idle();
   // Cleared a second time, now that both queues have drained. The guard above and
   // the arming under it are one synchronous block, so the guard alone is what makes
   // a stale timer impossible — but the clear is a line, and having it here means

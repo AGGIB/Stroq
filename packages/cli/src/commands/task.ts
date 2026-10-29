@@ -1,15 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  DEFAULT_POLICY,
-  FileKeyStore,
-  FilePermitStore,
-  loadPolicyFile,
-  signPermit,
-} from '@stroq/core';
+import { FileKeyStore, FilePermitStore, signPermit } from '@stroq/core';
+import { loadPolicyWithSource } from '../engine-factory.js';
 import { stroqHome } from '../paths.js';
-import { policySha256 } from '../policy/digest.js';
 import type { launch as realLaunch } from '../run/launch.js';
 import { SRT_BIN } from '../run/sandbox.js';
 import { binOnPath } from '../run/which.js';
@@ -77,13 +71,13 @@ export async function runTask(
     return 1;
   }
   const agentPath = realpathSync(agent);
-  const policyFile = join(home, 'policy.yaml');
-  const policy = existsSync(policyFile) ? loadPolicyFile(policyFile) : DEFAULT_POLICY;
+  // The same reading as the hook's: no file is the built-in default, a file it cannot read refuses.
+  const { policy, source } = loadPolicyWithSource(join(home, 'policy.yaml'));
   const { body, screen } = taskContract(args, {
     cwd,
     taskId: (deps.taskId ?? randomUUID)(),
     now: (deps.now ?? (() => new Date()))(),
-    policyDigest: policySha256(policy),
+    policyDigest: source.sha256,
   });
   if (!args.hookOnly)
     validateTaskExecutables(body.projectRoot, process.execPath, agentPath, srt as string);
@@ -96,5 +90,15 @@ export async function runTask(
   const keys = new FileKeyStore({ home }).loadOrCreate();
   const signed = signPermit(body, keys.privateKey);
   new FilePermitStore({ home }).writePermit(body.taskId, JSON.stringify(signed));
-  return launchTask({ signed, home, policy, env, srt, agent: agentPath, task: args.task, deps });
+  return launchTask({
+    signed,
+    privateKey: keys.privateKey,
+    home,
+    policy,
+    env,
+    srt,
+    agent: agentPath,
+    task: args.task,
+    deps,
+  });
 }

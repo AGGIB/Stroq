@@ -3,6 +3,16 @@ import { classifyTool } from '../../src/actions/classify-tool.js';
 import { stroqStateSignals } from '../../src/actions/stroq-state.js';
 import { cpuNow } from '../cpu-time.js';
 import { QUOTED_BEHIND_LAUNCHERS, SPELLINGS, joined, type Spelling } from './stroq-state-matrix.js';
+import {
+  ORDINARY_LINES,
+  PTY_ALREADY_DENIED,
+  PTY_ORDINARY,
+  PTY_READ,
+  PTY_REPORTED,
+  PTY_UNREAD,
+  READING_LINES,
+  STATE_LINES,
+} from './stroq-state-pty-matrix.js';
 
 /**
  * `stroq run -- <command>` and `stroq mcp -- <command>` start whatever program follows the
@@ -23,6 +33,8 @@ const STATE = ['stroq-state-change'];
 
 /** What follows `stroq` in a call that changes state, one of each kind of rule. */
 const CHANGING: ReadonlyArray<readonly string[]> = [
+  ['console'],
+  ['console', '--workspace', '/work', '--port', '0'],
   ['prove'],
   ['add', 'some-server'],
   ['harden', 'apply'],
@@ -306,6 +318,225 @@ describe('the words after "--" are the other program’s, not the ones that open
   });
 });
 
+/**
+ * A program that runs a command inside a pseudo-terminal (`script`, `unbuffer`, `expect`, `socat … EXEC:`, an
+ * interpreter that calls `pty.spawn`) is a launcher as `stroq run --` is. Where the command it runs can be read,
+ * it is read as a command line of its own, behind which no flag asks for help; where it is handed to a program
+ * that is not read (a Tcl script that is not plain, a program of Python, Perl or Ruby, a shell that is typed
+ * into), it is denied when that text names Stroq.
+ */
+const isSelf = (command: string): boolean =>
+  classifyTool('Bash', { command }, '/work').classes.includes('config.self');
+describe('a command of Stroq run inside a pseudo-terminal', () => {
+  it.each(PTY_REPORTED.map((command) => [command]))(
+    'denies %s, which went through on 2026-10-13',
+    (command) => {
+      expect(stroqStateSignals(command), command).toEqual(STATE);
+      expect(isSelf(command), command).toBe(true);
+    },
+  );
+
+  it.each(PTY_ALREADY_DENIED.map((command) => [command]))('still denies %s', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+    expect(isSelf(command), command).toBe(true);
+  });
+
+  it.each(PTY_READ.map(([name, launch]) => [name, launch] as const))(
+    'denies a command that changes state behind %s, in every spelling',
+    (_name, launch) => {
+      for (const line of STATE_LINES)
+        expect(stroqStateSignals(launch(line)), launch(line)).toEqual(STATE);
+    },
+  );
+
+  it.each(PTY_UNREAD.map(([name, launch]) => [name, launch] as const))(
+    'denies a command of Stroq handed to what is not read: %s',
+    (_name, launch) => {
+      for (const line of [...STATE_LINES, ...READING_LINES])
+        expect(stroqStateSignals(launch(line)), launch(line)).toEqual(STATE);
+    },
+  );
+
+  it.each(PTY_READ.map(([name, launch]) => [name, launch] as const))(
+    'leaves a command of Stroq that only reads open behind %s',
+    (_name, launch) => {
+      for (const line of READING_LINES)
+        expect(stroqStateSignals(launch(line)), launch(line)).toEqual([]);
+    },
+  );
+
+  it.each([...PTY_READ, ...PTY_UNREAD].map(([name, launch]) => [name, launch] as const))(
+    'leaves ordinary work open behind %s',
+    (_name, launch) => {
+      for (const line of ORDINARY_LINES) {
+        expect(stroqStateSignals(launch(line)), launch(line)).toEqual([]);
+        expect(isSelf(launch(line)), launch(line)).toBe(false);
+      }
+    },
+  );
+
+  it.each(PTY_ORDINARY.map((command) => [command]))('leaves %s open', (command) => {
+    expect(stroqStateSignals(command), command).toEqual([]);
+    expect(isSelf(command), command).toBe(false);
+  });
+
+  it('reads a name that a variable gives Stroq', () => {
+    for (const command of [
+      'S=stroq; script -q /dev/null $S untaint',
+      'S=stroq; script -qc "$S untaint" /dev/null',
+      'S=stroq; expect -c "spawn $S untaint"',
+      'S=stroq; socat - EXEC:"$S untaint",pty',
+    ])
+      expect(stroqStateSignals(command), command).toEqual(STATE);
+    expect(stroqStateSignals('S=make; script -q /dev/null $S test')).toEqual([]);
+  });
+
+  // The line a pty launcher runs is rebuilt from words whose quotes are gone, so its flags are not
+  // certainly the ones the program is handed: no flag in it opens the command, as behind `stroq run --`.
+  // `unbuffer` is a wrapper read word by word where the command stands, and keeps the command's own flags.
+  it('lets no request for help open a command behind a pty launcher', () => {
+    for (const command of [
+      'script -q /dev/null stroq untaint --help',
+      'script -qc "stroq untaint -h" /dev/null',
+      'ptyexec stroq untaint --version',
+      'pty stroq add x --help',
+      'socat - EXEC:"stroq prove --help",pty',
+      'expect -c "spawn stroq untaint --help"',
+      'stroq run -- script -q /dev/null stroq untaint --help',
+      'stroq run -- stroq untaint --help',
+    ])
+      expect(stroqStateSignals(command), command).toEqual(STATE);
+    expect(stroqStateSignals('unbuffer stroq untaint -h')).toEqual([]);
+  });
+
+  it('is judged by the whole tool call: Bash, PowerShell and Monitor', () => {
+    for (const tool of ['Bash', 'PowerShell', 'Monitor']) {
+      expect(
+        classifyTool(tool, { command: 'script -q /dev/null stroq untaint' }, '/work').classes,
+        tool,
+      ).toContain('config.self');
+      expect(
+        classifyTool(tool, { command: 'script -q /dev/null make test' }, '/work').classes,
+        tool,
+      ).not.toContain('config.self');
+    }
+  });
+
+  // A chain of launchers deeper than it is followed is denied where it names Stroq, and left alone where it
+  // does not: nobody nests `script` five deep, and the end of such a chain is not read.
+  it('denies a chain deeper than it follows only where it names Stroq', () => {
+    const deep = (n: number, last: string): string => `${'script -q /dev/null '.repeat(n)}${last}`;
+    expect(stroqStateSignals(deep(3, 'stroq untaint'))).toEqual(STATE);
+    expect(stroqStateSignals(deep(12, 'stroq doctor'))).toEqual(STATE);
+    expect(stroqStateSignals(deep(12, 'make test'))).toEqual([]);
+    expect(stroqStateSignals(deep(3, 'stroq doctor'))).toEqual([]);
+  });
+});
+
+// Found by a review of the first reading of pty launchers (2026-10-27). An interpreter's program, and an expect
+// script, are not read for the words that start a process: a list of them is never whole (backticks, `%x`,
+// `qx`, `Open3`, `create_subprocess_shell`). Where the program is anything but a file named first, it is text
+// the gate does not read, and it is denied where it names Stroq as a program: the name, a path to it, the
+// package, the entry file, or a variable that holds one of them.
+describe('what a pty launcher or an interpreter is given is denied where it is not read', () => {
+  it.each([
+    'python3.12 -c \'import pty; pty.spawn(["stroq","untaint"])\'',
+    'pypy3 -c \'import os; os.system("stroq untaint")\'',
+    'ruby3.3 -e \'PTY.spawn("stroq untaint")\'',
+    'node22 -e \'require("child_process").execSync("stroq untaint")\'',
+    'php8.2 -r \'shell_exec("stroq untaint");\'',
+    'lua5.4 -e \'os.execute("stroq untaint")\'',
+    "ruby -e '`stroq untaint`'",
+    "ruby -e '%x(stroq untaint)'",
+    "perl -e 'qx(stroq untaint)'",
+    "perl -E 'say `stroq untaint`'",
+    'ruby -ropen3 -e \'Open3.capture2("stroq untaint")\'',
+    'python3 -c \'import asyncio; asyncio.run(asyncio.create_subprocess_shell("stroq untaint"))\'',
+    'node --print \'require("child_process").execSync("stroq untaint")+""\'',
+    'node --eval=\'require("child_process").execSync("npx @stroq/cli untaint")\'',
+    'deno eval \'new Deno.Command("stroq",{args:["untaint"]}).outputSync()\'',
+    'bun eval \'Bun.spawnSync(["/usr/local/bin/stroq","untaint"])\'',
+    'python3 -c \'import os; os.system("node packages/cli/dist/index.js untaint")\'',
+    'S=stroq; python3 -c "import os; os.system(\'$S untaint\')"',
+    'python3 <<< \'import os; os.system("stroq untaint")\'',
+    'node --no-warnings packages/cli/dist/index.js untaint',
+  ])('denies the interpreter program %s', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+    expect(isSelf(command), command).toBe(true);
+  });
+
+  it.each([
+    'echo \'import os; os.system("stroq untaint")\' | python3',
+    'echo \'import os; os.system("stroq untaint")\' | python3 -',
+    'echo \'import os; os.system("stroq untaint")\' | python3 -W ignore',
+    'python3 - <<\'EOF\'\nimport os; os.system("stroq untaint")\nEOF',
+    'node <<\'EOF\'\nrequire("child_process").execSync("stroq untaint")\nEOF',
+    "printf 'spawn stroq untaint\\ninteract\\n' | expect",
+    "printf 'spawn stroq untaint\\n' | expect -",
+    "printf 'spawn stroq untaint\\n' | expect -i",
+    "printf 'spawn stroq untaint\\n' | expect -D 1",
+    "expect -f - <<'EOF'\nspawn stroq untaint\nEOF",
+    "expect <<< 'spawn stroq untaint'",
+  ])('denies a program read from the input of %s', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+    expect(isSelf(command), command).toBe(true);
+  });
+
+  it.each([
+    "expect -c'spawn stroq untaint'",
+    "expect -c'spawn stroq doctor; exec stroq untaint'",
+    'expect -fstroq-script.exp stroq',
+    "expect -d -c 'spawn stroq untaint'",
+    "expect -c 'system stroq untaint'",
+    "expect -c 'eval spawn stroq untaint'",
+    'expect -c \'set f [open "|stroq untaint"]\'',
+    'expect -c \'spawn "stroq" untaint\'',
+  ])('denies the expect invocation %s', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+  });
+
+  it.each([
+    'socat - \'EXEC:"stroq untaint"!!STDOUT\'',
+    "socat 'STDIN!!EXEC:stroq untaint' -",
+    "socat - 'SYSTEM:echo hi!!EXEC:stroq untaint'",
+    "socat - ' EXEC:stroq untaint'",
+    'socat - \'EXEC:"stroq doctor"\'',
+  ])('denies the socat address %s', (command) => {
+    expect(stroqStateSignals(command), command).toEqual(STATE);
+  });
+
+  it.each([
+    'script -q /dev/null make test',
+    "expect -c 'spawn ssh host'",
+    "expect -d -c 'spawn ssh host'",
+    'expect deploy.exp',
+    'unbuffer npm test',
+    "python3 -c 'print(1)'",
+    "python3.12 -c 'import json,sys; print(json.load(sys.stdin))'",
+    'python3 build.py --name stroq',
+    'python3 build.py < stroq-notes.txt',
+    'node scripts/release.js stroq',
+    'node packages/cli/dist/index.js doctor',
+    'node --test /work/stroq/console/scripts/session-taint-worker.test.mjs',
+    'cd ~/Documents/stroq && node --test scripts/a.test.mjs',
+    'grep stroq log.txt | python3 -c \'import sys; print(sys.stdin.read().count("x"))\'',
+    "cat notes | python3 -c 'import sys; print(len(sys.stdin.read()))'",
+    "perl -pi -e 's/stroq@0.1/stroq@0.2/' README.md",
+    'echo hi | python3',
+    'socat - EXEC:"ssh host",pty',
+    'socat TCP-LISTEN:8080,fork TCP:stroq.dev:443',
+    "socat - 'SYSTEM:echo hi!!STDOUT'",
+  ])('leaves %s open', (command) => {
+    expect(stroqStateSignals(command), command).toEqual([]);
+    expect(isSelf(command), command).toBe(false);
+  });
+
+  // The cost of not reading the program: one that only prints the name is denied too.
+  it('denies an inline program that names Stroq as data', () => {
+    expect(stroqStateSignals('python3 -c \'print("stroq")\'')).toEqual(STATE);
+  });
+});
+
 describe('a chain of launchers is read in a time that grows with its length', () => {
   const SMALL = 8 * 1024;
   const LARGE = 64 * 1024;
@@ -327,6 +558,14 @@ describe('a chain of launchers is read in a time that grows with its length', ()
     ['stroq run -- -- ', 'claude'],
     ['stroq run ', ''],
     ['stroq run -- sh -c ', ''],
+    ['script -q /dev/null ', 'stroq untaint'],
+    ['script -q /dev/null ', 'make test'],
+    ['script -qc ', 'stroq untaint'],
+    ['unbuffer -p ', 'stroq untaint'],
+    ['expect -c "spawn ', 'stroq untaint'],
+    ['socat - EXEC:', 'stroq untaint'],
+    ['echo stroq | script -q /dev/null ', ''],
+    ["python3 -c 'import pty; ", 'stroq'],
   ])('%j then %j', (unit, tail) => {
     // Twice: the first call pays for loading what it needs, and a single timing of a few
     // milliseconds is noise.

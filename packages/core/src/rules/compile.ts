@@ -6,6 +6,8 @@ export interface CompiledTest {
   readonly kind: AtrCondition['operator'];
   readonly regex?: RegExp;
   readonly value: string;
+  /** When set, the only surfaces this condition is evaluated on (see `ruleMatches`). */
+  readonly surfaces?: readonly ScanTarget[];
 }
 
 export interface CompiledRule {
@@ -15,6 +17,13 @@ export interface CompiledRule {
   readonly category: string;
   /** The surface this rule reads; `any` means every surface. See `resolveScanTarget`. */
   readonly scanTarget: ScanTarget;
+  /**
+   * When set, the only surfaces the rule reads, and `scanTarget` is not consulted. Set by an
+   * override in `rules/atr-overrides.yaml` for a rule whose patterns are ordinary code or command
+   * output on a developer's own machine (`token = None`, `{x.__class__}`) and an attack only where
+   * somebody else wrote the text. See `resolveSurfaces`.
+   */
+  readonly surfaces?: readonly ScanTarget[];
   readonly condition: 'any' | 'all';
   readonly tests: readonly CompiledTest[];
 }
@@ -141,6 +150,46 @@ function compileTest(c: AtrCondition): CompiledTest {
 }
 
 /**
+ * The surfaces a rule is limited to, from `tags.stroq_surfaces`, or `undefined` when it names
+ * none. Throws unless it is a non-empty list of named surfaces: a typo, `any` or an empty list
+ * would take the rule dark on every surface without a word, which is the failure the closed
+ * vocabulary exists to prevent.
+ */
+export function resolveSurfaces(rule: AtrRule): readonly ScanTarget[] | undefined {
+  return surfaceList(rule.id, rule.tags?.stroq_surfaces);
+}
+
+/** A declared `stroq_surfaces` value, checked: absent, or a non-empty list of named surfaces. */
+function surfaceList(where: string, declared: unknown): readonly ScanTarget[] | undefined {
+  if (declared === undefined) return undefined;
+  const named = SCAN_TARGETS.filter((t) => t !== 'any').join(', ');
+  if (!Array.isArray(declared) || declared.length === 0) {
+    throw new Error(`${where}: stroq_surfaces must be a non-empty list of: ${named}`);
+  }
+  for (const surface of declared) {
+    if (typeof surface !== 'string' || surface === 'any' || !IS_SCAN_TARGET(surface)) {
+      throw new Error(`${where}: unknown surface "${String(surface)}" — expected one of ${named}`);
+    }
+  }
+  return declared as ScanTarget[];
+}
+
+/**
+ * The surfaces of each condition, checked outside the try like the rule's own. A condition limited
+ * to some surfaces only makes sense in an `any` rule: in an `all` rule it would make the rule
+ * unable to fire wherever the condition is not read, which is a silent narrowing.
+ */
+function conditionSurfaces(rule: AtrRule): readonly (readonly ScanTarget[] | undefined)[] {
+  const lists = rule.detection.conditions.map((c, i) =>
+    surfaceList(`${rule.id} condition ${i}`, c.stroq_surfaces),
+  );
+  if (rule.detection.condition === 'all' && lists.some((l) => l !== undefined)) {
+    throw new Error(`${rule.id}: a condition limited to surfaces needs an "any" rule`);
+  }
+  return lists;
+}
+
+/**
  * `resolveScanTarget` runs *outside* the try: an uncompilable regex is a per-rule
  * error the build can absorb (the rule is disabled), but an unknown surface is a
  * mistake in the rule's scoping, and a scoping mistake that only disables the rule
@@ -148,8 +197,14 @@ function compileTest(c: AtrCondition): CompiledTest {
  */
 export function compileRule(rule: AtrRule): { compiled?: CompiledRule; error?: string } {
   const scanTarget = resolveScanTarget(rule);
+  const surfaces = resolveSurfaces(rule);
+  const perCondition = conditionSurfaces(rule);
   try {
-    const tests = rule.detection.conditions.map(compileTest);
+    const tests = rule.detection.conditions.map((c, i) => {
+      const test = compileTest(c);
+      const only = perCondition[i];
+      return only === undefined ? test : { ...test, surfaces: only };
+    });
     return {
       compiled: {
         id: rule.id,
@@ -157,6 +212,7 @@ export function compileRule(rule: AtrRule): { compiled?: CompiledRule; error?: s
         severity: rule.severity,
         category: rule.tags?.category ?? 'uncategorized',
         scanTarget,
+        ...(surfaces === undefined ? {} : { surfaces }),
         condition: rule.detection.condition,
         tests,
       },

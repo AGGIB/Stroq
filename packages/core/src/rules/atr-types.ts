@@ -22,6 +22,9 @@ export const SCAN_TARGETS = [
   'instruction_file',
   'repo_content',
   'command_output',
+  // A page the agent fetched or a web search: written by somebody else, like an MCP result,
+  // and kept apart from the repository so a rule can read one and not the other.
+  'web_content',
   'any',
 ] as const;
 
@@ -32,6 +35,12 @@ export const ConditionSchema = z.object({
   field: z.string().default('content'),
   operator: z.enum(['regex', 'contains', 'exact', 'starts_with']),
   value: z.string().min(1),
+  /**
+   * Stroq's own: the surfaces this condition reads (see `resolveSurfaces` in compile.ts). Set by
+   * an override's `local:` so a rule keeps its broad pattern for text somebody else wrote and a
+   * narrower one for the developer's own files and program output.
+   */
+  stroq_surfaces: z.unknown().optional(),
   description: z.string().optional(),
 });
 
@@ -68,6 +77,8 @@ export const AtrRuleSchema = z.looseObject({
     .looseObject({
       category: z.string().optional(),
       scan_target: z.string().optional(),
+      /** Stroq's own scoping, set by `rules/atr-overrides.yaml`: the surfaces the rule reads. */
+      stroq_surfaces: z.unknown().optional(),
       confidence: z.string().optional(),
     })
     .optional(),

@@ -45,7 +45,8 @@ const AGENT_WHY: Readonly<Record<AgentKind, string>> = {
   'mcp-server-runs-code':
     'This MCP server entry starts a shell or runs code written on its own command line, or sets variables or a folder that can make it run other code.',
   'mcp-server': 'The agent starts this MCP server program when it opens the repository.',
-  'editor-autorun-task': 'The editor runs this task as soon as the folder is opened.',
+  'editor-autorun-task':
+    'The editor configures automatic tasks for folder opening or Agent Session worktree creation.',
   'agent-definition-hook':
     'This skill, subagent or command declares hooks that run commands while it is active.',
   'instruction-hidden-text':

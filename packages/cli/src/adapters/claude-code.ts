@@ -3,6 +3,7 @@ import {
   collectStringsDeep,
   describeEvidence,
   describeSecretHit,
+  mcpIdentityFromEncodedTool,
   toEvidence,
   taintSource,
   warningFor,
@@ -423,11 +424,13 @@ function requestedPath(toolInput: Readonly<Record<string, unknown>>): string | u
 export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = ClaudeHookInputSchema.parse(raw);
   const cwd = input.cwd || process.cwd();
+  const mcpIdentity = mcpIdentityFromEncodedTool('claude-code', input.tool_name);
   const base = {
     sessionId: input.session_id,
     toolName: input.tool_name,
     toolInput: input.tool_input,
     cwd,
+    ...(mcpIdentity === undefined ? {} : { mcpIdentity }),
     ...(input.tool_use_id === undefined ? {} : { callId: input.tool_use_id }),
   };
   if (input.hook_event_name === 'PreToolUse') {
@@ -476,7 +479,12 @@ export async function handleClaudeHook(engine: StroqEngine, raw: unknown): Promi
     ruleIds,
     atoms,
   };
-  const warning = warningFor(result.scan, input.tool_name, taintSource(result));
+  const warning = warningFor(
+    result.scan,
+    input.tool_name,
+    taintSource(result),
+    result.flaggedOwn !== undefined,
+  );
   // The failure event's output carries `additionalContext` and nothing else: the
   // classifier's context is a PostToolUse field, and a hookEventName that does not
   // match the event Claude Code fired is not accepted.

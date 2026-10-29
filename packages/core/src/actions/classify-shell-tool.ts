@@ -8,7 +8,7 @@ import { isTooCostly } from './reading-cost.js';
 import { classifyReferencedScripts } from './script-exec.js';
 import { decodePrograms, newBudget } from './shell-input.js';
 import { splitCommand } from './shell-segments.js';
-import { commandSegments } from './shell-top-level.js';
+import { commandSegments, ownCommandSegments } from './shell-top-level.js';
 
 // A tool that runs a shell command (see `shell-tools.ts`) is judged by what the command
 // does; `classifyCommand` reads PowerShell syntax as well as POSIX.
@@ -87,14 +87,22 @@ function classifyShellCommand(command: string, cwd: string): ToolClassification 
   // Cut where the shell cuts: a segment cut out of a quoted string runs nothing
   // (`grep "x\|PIN=" deploy.sh`), and a quoted `|` does not take a file from its command.
   // The programs decoded from it run commands too, and one of them may name a script.
+  const own = commandSegments(command, split);
   const segments = [
-    ...commandSegments(command, split),
+    ...own,
     ...decoded.texts.flatMap((text) => commandSegments(text, splitCommand(text, null))),
   ];
   // A script the command runs is read as the commands it contains: the hook sees
   // `bash cleanup.sh`, and what that deletes is in the file (see `script-exec.ts`).
   const scriptTexts: string[] = [];
-  const scripts = classifyReferencedScripts(segments, cwd, scriptTexts, decoded.files);
+  const scripts = classifyReferencedScripts(
+    segments,
+    cwd,
+    scriptTexts,
+    decoded.files,
+    own.length,
+    new Set(ownCommandSegments(command)),
+  );
   return mergeClassifications(
     typed,
     ...(scripts === null ? [] : [scripts]),

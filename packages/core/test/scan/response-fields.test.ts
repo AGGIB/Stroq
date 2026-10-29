@@ -32,6 +32,12 @@ describe('which fields the engine supplies', () => {
     expect(scanFieldsForTool('WebSearch', 'x')).toEqual({ tool_response: 'x' });
   });
 
+  it('has a command output that fetched a page as `tool_response`, and no other command output', () => {
+    expect(scanFieldsForTool('Bash', 'x', 'web_content')).toEqual({ tool_response: 'x' });
+    expect(scanFieldsForTool('PowerShell', 'x', 'web_content')).toEqual({ tool_response: 'x' });
+    expect(scanFieldsForTool('Bash', 'x', 'command_output')).toEqual({});
+  });
+
   it('has what an MCP server says its tools are as `tool_description`', () => {
     expect(scanFieldsForTool('mcp__github__tools_list', 'x')).toEqual({ tool_description: 'x' });
   });
