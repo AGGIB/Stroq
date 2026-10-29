@@ -56,6 +56,30 @@ const staged = async (dir: string) => (await readdir(dir)).filter((n) => n.endsW
 // The guarded clear reads a session directory only when it is private (0700, one owner), which Windows
 // cannot express: there it refuses (`session-taint-source-unavailable`), so there is nothing to exercise.
 describe.skipIf(process.platform === 'win32')('guarded native taint-only clear', () => {
+  it('reads and clears a session that kept track of calls and questions, and keeps them', async () => {
+    const home = await realpath(await mkdtemp(join(tmpdir(), 'stroq-taint-clear-calls-'))),
+      dir = join(home, 'sessions');
+    try {
+      await mkdir(dir, { mode: 0o700 });
+      const store = new FileSessionStore(dir);
+      const call = { callId: 'c1', tool: 'Bash', input: 'a'.repeat(64) };
+      await store.noteCallStarted('one', { ...call, callId: 'c0' });
+      await store.noteCallStarted('one', call);
+      await store.allowAskedCopy('one', call);
+      await store.noteBackground('one');
+      await store.markSuspect('one', source);
+      const snap = await captureSessionTaint(dir, 'one');
+      await clearStoredSessionTaint(snap, hooks());
+      const after = await store.get('one');
+      expect(after.taint).toBeNull();
+      expect(after.callsRunning?.map((c) => c.callId)).toEqual(['c0']);
+      expect(after.backgroundSince).toEqual(expect.any(String));
+      expect(after.callsLostAt).toEqual(expect.any(String));
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('reads and clears a session that also holds a note of flags on its own text, and keeps the note', async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), 'stroq-taint-clear-own-'))),
       dir = join(home, 'sessions');

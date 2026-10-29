@@ -49,6 +49,7 @@ export interface SessionStore {
   allowAskedCopy?(
     sessionId: string,
     call: { readonly callId: string; readonly tool: string; readonly input: string },
+    ran?: boolean,
   ): Promise<SessionState>;
   clear(sessionId: string): Promise<void>;
 }
@@ -120,7 +121,12 @@ function addRunning(state: SessionState, call: CallIdentity, now: string): Sessi
  * about (the same id, tool and input), its values are let through for calls of its kinds, unless
  * the session is tainted or another call that started while the question waited still runs.
  */
-function allowAsked(state: SessionState, call: CallIdentity, now: string): SessionState {
+function allowAsked(
+  state: SessionState,
+  call: CallIdentity,
+  now: string,
+  ran = true,
+): SessionState {
   const since = Date.parse(now) - CALL_RUNNING_MS;
   const list = state.callsRunning ?? [];
   // A report ends only the call that started with its id, tool and input: one that names another
@@ -142,7 +148,11 @@ function allowAsked(state: SessionState, call: CallIdentity, now: string): Sessi
   const answered = asked.find(
     (item) => item.callId === call.callId && item.tool === call.tool && item.input === call.input,
   );
-  if (answered === undefined || state.taint !== null || running.length > 0 || lost) return ended;
+  if (answered === undefined) return ended;
+  // A call that failed or was refused says nothing of a yes: its question goes, and nothing is learned.
+  if (!ran)
+    return { ...ended, askedCopies: asked.filter((item) => item !== answered), updatedAt: now };
+  if (state.taint !== null || running.length > 0 || lost) return ended;
   const allowed: AllowedCopy[] = [
     ...(state.allowedCopies ?? []).filter((item) => !answered.atoms.includes(item.atom)),
     ...answered.atoms.map((atom) => ({ atom, classes: answered.classes })),
@@ -227,11 +237,20 @@ function addFetched(state: SessionState, paths: readonly string[], now: string):
   return { ...state, fetched: [...kept, ...paths].slice(-MAX_FETCHED), updatedAt: now };
 }
 
-function isSessionState(value: unknown, sessionId: string): value is SessionState {
-  if (!isRecord(value)) return false;
-  if (value['sessionId'] !== sessionId || typeof value['updatedAt'] !== 'string') return false;
-  if (value['flagged'] !== undefined && !isOwnTextFlag(value['flagged'])) return false;
-  if (value['fetched'] !== undefined && !isFetched(value['fetched'])) return false;
+/** The fields of a session state that ask once keeps, in the order they are written. */
+export const COPY_STATE_KEYS = [
+  'askedCopies',
+  'allowedCopies',
+  'callsRunning',
+  'callsLostAt',
+  'backgroundSince',
+] as const;
+
+/**
+ * Whether the ask-once fields of a session state (`COPY_STATE_KEYS`), where present, are well formed:
+ * the one check the store and the guarded clear of a taint both make.
+ */
+export function copyStateValid(value: Readonly<Record<string, unknown>>): boolean {
   const asked = value['askedCopies'];
   if (
     asked !== undefined &&
@@ -258,6 +277,15 @@ function isSessionState(value: unknown, sessionId: string): value is SessionStat
     const at = value[key];
     if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) return false;
   }
+  return true;
+}
+
+function isSessionState(value: unknown, sessionId: string): value is SessionState {
+  if (!isRecord(value)) return false;
+  if (value['sessionId'] !== sessionId || typeof value['updatedAt'] !== 'string') return false;
+  if (value['flagged'] !== undefined && !isOwnTextFlag(value['flagged'])) return false;
+  if (value['fetched'] !== undefined && !isFetched(value['fetched'])) return false;
+  if (!copyStateValid(value)) return false;
   if (value['taint'] === null) return true;
   if (!isRecord(value['taint'])) return false;
   const taint = value['taint'];
@@ -386,11 +414,12 @@ export class FileSessionStore implements SessionStore {
   async allowAskedCopy(
     sessionId: string,
     call: { readonly callId: string; readonly tool: string; readonly input: string },
+    ran = true,
   ): Promise<SessionState> {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
       const current = await this.read(sessionId);
-      const next = allowAsked(current, call, this.now().toISOString());
+      const next = allowAsked(current, call, this.now().toISOString(), ran);
       if (next !== current) await this.write(next);
       return next;
     });

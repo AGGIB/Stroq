@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { SessionState } from '../types.js';
 import { parseStrictJson } from '../scope/strict-json.js';
 import { withLock } from '../util/lock.js';
-import { sessionKey } from './session-store.js';
+import { COPY_STATE_KEYS, copyStateValid, sessionKey } from './session-store.js';
 
 export const SESSION_TAINT_MAX_BYTES = 256 * 1024;
 export interface SessionTaintPin {
@@ -159,6 +159,9 @@ function state(value: unknown, id: string): value is SessionState {
     value !== null && typeof value === 'object' && Object.hasOwn(value, key);
   const flagged = has('flagged'),
     fetched = has('fetched');
+  // What ask once keeps (questions, answers, the calls that run) is the store's to check, and a clear
+  // of the taint keeps it as it is.
+  const copies = COPY_STATE_KEYS.filter(has);
   if (
     !exact(value, [
       'sessionId',
@@ -166,11 +169,13 @@ function state(value: unknown, id: string): value is SessionState {
       'updatedAt',
       ...(flagged ? ['flagged'] : []),
       ...(fetched ? ['fetched'] : []),
+      ...copies,
     ]) ||
     value.sessionId !== id ||
     !iso(value.updatedAt) ||
     (flagged && !ownFlag(value.flagged)) ||
-    (fetched && !fetchedList(value.fetched))
+    (fetched && !fetchedList(value.fetched)) ||
+    !copyStateValid(value)
   )
     return false;
   if (value.taint === null) return true;

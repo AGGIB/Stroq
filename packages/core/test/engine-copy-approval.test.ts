@@ -293,6 +293,22 @@ describe('a question about a copied value', () => {
     await expect(pre('ls -la', 'c1')).rejects.toThrow('the disk is full');
   });
 
+  it('takes no answer from a call that came back failed', async () => {
+    const { engine, read, pre } = fixture();
+    await read(PAGE);
+    await pre(`npx ${NAME}`, 'c1');
+    await engine.post({
+      sessionId: 's1',
+      toolName: 'Bash',
+      toolInput: { command: `npx ${NAME}` },
+      toolResultText: 'The user doesn’t want to proceed with this tool use.',
+      cwd,
+      callId: 'c1',
+      resultFailed: true,
+    });
+    expect((await pre(`npx ${NAME}`, 'c2')).decision.ruleId).toBe('ask-origin-untrusted');
+  });
+
   it('lets a value through only for calls of the kinds it ran in', async () => {
     const { read, pre, ran } = fixture();
     await read(PAGE);

@@ -371,15 +371,23 @@ export async function replayTranscript(transcript: Transcript): Promise<AuditEnt
     const cwd = transcript.cwd ?? process.cwd();
     for (const ev of transcript.events) {
       if (!Number.isNaN(Date.parse(ev.at))) at = ev.at;
+      // The call's id goes with it, as the host sends it, so a question answered by a call that
+      // ran is asked once here as it is live; a result marked as an error is no yes.
       const base = {
         sessionId: transcript.sessionId,
         toolName: ev.tool,
         toolInput: ev.input,
         cwd,
+        ...(ev.id === '' ? {} : { callId: ev.id }),
       };
       try {
         if (ev.kind === 'pre') await engine.pre(base);
-        else await engine.post({ ...base, toolResultText: ev.resultText });
+        else
+          await engine.post({
+            ...base,
+            toolResultText: ev.resultText,
+            ...(ev.isError === true ? { resultFailed: true as const } : {}),
+          });
       } catch {
         // One malformed recorded call must not abandon the rest of the history.
       }

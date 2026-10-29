@@ -715,12 +715,14 @@ export class StroqEngine {
   private async allowCopyQuestion(event: PostToolEvent): Promise<void> {
     const sessions = this.opts.sessions;
     if (sessions.allowAskedCopy === undefined || event.callId === undefined) return;
+    // A report of a call that failed (or that a host reports when you refused it) ends the call but
+    // is no yes: what it was asked about is asked again.
     await sessions
-      .allowAskedCopy(event.sessionId, {
-        callId: event.callId,
-        tool: event.toolName,
-        input: inputHash(event.toolInput),
-      })
+      .allowAskedCopy(
+        event.sessionId,
+        { callId: event.callId, tool: event.toolName, input: inputHash(event.toolInput) },
+        event.resultFailed !== true,
+      )
       .catch(() => undefined);
   }
 
